@@ -13,12 +13,6 @@ on:
         description: Optional full selected-channel ancestor SHA; blank pins that branch HEAD once
         type: string
         required: false
-      mode:
-        description: Release publishes after approval; rehearsal is structurally non-publishing
-        type: choice
-        options: [release, rehearsal]
-        default: rehearsal
-        required: true
   schedule:
     - cron: '27 9 * * *'
 
@@ -42,7 +36,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run consolidated-release.yml --repo "$GITHUB_REPOSITORY" \
-            --ref development -f channel=insider -f mode=release
+            --ref development -f channel=insider
 
   admit:
     if: github.event_name != 'schedule'
@@ -81,7 +75,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
-          RELEASE_MODE: ${{ inputs.mode }}
+          RELEASE_MODE: release
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: |
           set -euo pipefail
@@ -156,176 +150,37 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-  authorize:
-    name: Reserve and authorize immutable source
-    if: inputs.mode == 'release'
-    needs: [admit, qualification, collect-qualification]
-    runs-on: ubuntu-latest
-    environment: release-${{ needs.admit.outputs.channel }}
-    permissions:
-      contents: read
-      id-token: write
-      actions: read
-      checks: read
-      statuses: read
-      pull-requests: read
-    outputs:
-      public_identity: ${{ steps.authorize.outputs.public_identity }}
-      verified_branch_head: ${{ steps.authorize.outputs.verified_branch_head }}
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(needs.admit.outputs.transaction).workflowCommit }}
-          fetch-depth: 0
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ needs.admit.outputs.source_sha }}
-          path: source
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: release-qualification-${{ github.run_id }}
-          path: .artifacts/release-transaction
-      - name: Check selected source version base
-        working-directory: source
-        run: bash scripts/sync-monorepo-version.sh --check
-      - name: Recover immutable authorization bytes when an earlier attempt reserved identity
-        if: github.run_attempt > 1
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          artifact_name="$(
-            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-              --jq '[.artifacts[] |
-                select(.expired == false and (.name | startswith("release-authorization-")))] |
-                sort_by(.created_at) | .[0].name // empty'
-          )"
-          if [ -n "$artifact_name" ]; then
-            gh run download "$GITHUB_RUN_ID" \
-              --name "$artifact_name" \
-              --dir .artifacts/release-authorization
-          fi
-      - name: Obtain protected publisher app token
-        id: publisher
-        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
-        with:
-          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
-          private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
-          permission-contents: write
-          permission-checks: read
-          permission-statuses: read
-          permission-administration: read
-          permission-actions: read
-      - name: Reserve sequence before source tag
-        id: authorize
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
-          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
-          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-          RELEASE_ADMITTED_APPROVAL_MODE: ${{ needs.admit.outputs.approval_mode }}
-          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
-          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
-          RELEASE_SOURCE_COMMIT: ${{ needs.admit.outputs.source_sha }}
-          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
-        run: node scripts/ci/release-control.mjs authorize
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-      - name: Sign immutable source and App-verified protection attestation
-        run: |
-          set -euo pipefail
-          umask 077
-          cosign sign-blob --yes \
-            --bundle .artifacts/release-authorization/release-identity.bundle.json \
-            .artifacts/release-authorization/release-identity.json
-          cosign sign-blob --yes \
-            --bundle .artifacts/release-authorization/public-identity.bundle.json \
-            .artifacts/release-authorization/public-identity.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: release-authorization-${{ github.run_attempt }}
-          path: |
-            .artifacts/release-authorization/release-identity.json
-            .artifacts/release-authorization/release-identity.bundle.json
-            .artifacts/release-authorization/public-identity.json
-            .artifacts/release-authorization/public-identity.bundle.json
-          include-hidden-files: true
-          if-no-files-found: error
-
-  rehearsal:
-    name: Approve non-publishing rehearsal
-    if: inputs.mode == 'rehearsal'
-    needs: [admit, qualification, collect-qualification]
-    runs-on: ubuntu-latest
-    environment: release-rehearsal-${{ needs.admit.outputs.channel }}
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(needs.admit.outputs.transaction).workflowCommit }}
-          persist-credentials: false
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
-        with:
-          node-version: 24
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: release-qualification-${{ github.run_id }}
-          path: .artifacts/release-transaction
-      - name: Exercise bounded non-publishing controls
-        run: >-
-          node --test
-          scripts/ci/tests/test-release-transaction.mjs
-          scripts/ci/tests/test-release-rehearsal.mjs
-      - name: Create typed non-release receipt after bounded controls pass
-        env:
-          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
-        run: node scripts/ci/release-transaction.mjs rehearse
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: release-rehearsal-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .artifacts/release-transaction/rehearsal-receipt.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-
   publish:
-    needs: [admit, authorize]
-    if: inputs.mode == 'release'
+    name: Approve and publish immutable release
+    needs: [admit, qualification, collect-qualification]
     uses: ./.github/workflows/docker-publish.yml
     permissions:
-      actions: write
+      actions: read
       contents: read
       packages: read
       id-token: write
     with:
-      identity: ${{ needs.authorize.outputs.public_identity }}
       transaction: ${{ needs.admit.outputs.transaction }}
+      source_sha: ${{ needs.admit.outputs.source_sha }}
+      channel: ${{ needs.admit.outputs.channel }}
+      approval_mode: ${{ needs.admit.outputs.approval_mode }}
     secrets: inherit
 
   diagnostics:
     name: Release transaction summary
     if: always() && github.event_name != 'schedule'
-    needs: [admit, qualification, collect-qualification, authorize, rehearsal, publish]
+    needs: [admit, qualification, collect-qualification, publish]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Write bounded result
         env:
-          MODE: ${{ inputs.mode }}
           CHANNEL: ${{ inputs.channel }}
           SOURCE_SHA: ${{ needs.admit.outputs.source_sha }}
           QUALIFICATION: ${{ needs.qualification.result }}
           EVIDENCE: ${{ needs.collect-qualification.result }}
-          AUTHORIZATION: ${{ needs.authorize.result }}
-          REHEARSAL: ${{ needs.rehearsal.result }}
           PUBLICATION: ${{ needs.publish.result }}
-          PUBLIC_IDENTITY: ${{ needs.authorize.outputs.public_identity }}
+          PUBLIC_IDENTITY: ${{ needs.publish.outputs.public_identity }}
           QUALIFICATION_URL: ${{ needs.collect-qualification.outputs.run_url }}
           REVIEW_URL: ${{ needs.collect-qualification.outputs.review_url }}
           QUALIFICATION_EXPIRES: ${{ needs.collect-qualification.outputs.expires_at }}
@@ -333,22 +188,17 @@ jobs:
         run: |
           {
             echo "## Release transaction"
-            echo "- mode: \`$MODE\`"
             echo "- channel: \`$CHANNEL\`"
             echo "- source: \`$SOURCE_SHA\`"
             echo "- qualification: \`$QUALIFICATION\`"
             echo "- evidence: \`$EVIDENCE\`"
-            echo "- authorization: \`$AUTHORIZATION\`"
-            echo "- rehearsal: \`$REHEARSAL\`"
             echo "- publication: \`$PUBLICATION\`"
             echo "- qualification run: ${QUALIFICATION_URL:-unavailable}"
             echo "- review evidence: ${REVIEW_URL:-unavailable}"
             echo "- qualification expires: \`${QUALIFICATION_EXPIRES:-unavailable}\`"
             echo "- canonical identity: \`${PUBLIC_IDENTITY:-not-authorized}\`"
             echo "- published set digest: \`${PUBLISHED_SET_DIGEST:-not-published}\`"
-            if [ "$MODE" = rehearsal ]; then
-              echo "- result: rehearsal-only; publication was not authorized"
-            elif [ "$PUBLICATION" != success ]; then
+            if [ "$PUBLICATION" != success ]; then
               echo "- action: inspect the failed admission, qualification, approval, authorization, or publication job above; no secret values are included here"
             fi
           } >> "$GITHUB_STEP_SUMMARY"

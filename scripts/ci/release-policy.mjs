@@ -313,7 +313,7 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   'Missing or mismatched publisher protection evidence');
   const {
     branchRules: rules, branchRulesets, environment, branchPolicies: policies,
-    publisherEnvironment, publisherBranchPolicies, rulesets,
+    rulesets,
   } = evidence;
   requireThat(Array.isArray(rules) && rules.length > 0 && rules.length < 100 &&
     rules.every(rule => rule && typeof rule.type === 'string' &&
@@ -385,17 +385,6 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
       approved.includes(entry.reviewer.login.toLowerCase())),
     'Owner blocker: publishing environment reviewers must be explicitly owner-approved users');
   }
-  requireThat(publisherEnvironment?.name === `release-publisher-${channel}` &&
-    publisherEnvironment.can_admins_bypass === false &&
-    publisherEnvironment.deployment_branch_policy?.custom_branch_policies === true &&
-    publisherEnvironment.deployment_branch_policy?.protected_branches === false &&
-    Array.isArray(publisherEnvironment.protection_rules) &&
-    publisherEnvironment.protection_rules.length === 0,
-  'Owner blocker: publisher environment must be pre-created, branch-restricted, non-bypassable, and reviewer-free');
-  requireThat(publisherBranchPolicies?.branch_policies?.length === 1 &&
-    publisherBranchPolicies.branch_policies[0].name === 'development' &&
-    publisherBranchPolicies.branch_policies[0].type === 'branch',
-  'Owner blocker: publisher environment must allow only the immutable release-control branch');
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
     const rule = rulesets.find(item => item.name === name && item.enforcement === 'active');

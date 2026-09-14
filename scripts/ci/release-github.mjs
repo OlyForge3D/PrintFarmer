@@ -422,9 +422,6 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   }
   const environment = await readPolicy(`environments/release-${channel}`);
   const branchPolicies = await readPolicy(`environments/release-${channel}/deployment-branch-policies`);
-  const publisherEnvironment = await readPolicy(`environments/release-publisher-${channel}`);
-  const publisherBranchPolicies =
-    await readPolicy(`environments/release-publisher-${channel}/deployment-branch-policies`);
   const allRulesets = await readPolicy('rulesets?per_page=100');
   requireThat(allRulesets.length < 100, 'Ruleset listing may be truncated');
   const rulesets = [];
@@ -438,7 +435,7 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
     verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies,
-    publisherEnvironment, publisherBranchPolicies, rulesets };
+    rulesets };
   const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
   if (sourceCommit !== undefined) {
     const required = branchRules.filter(rule => rule.type === 'required_status_checks')

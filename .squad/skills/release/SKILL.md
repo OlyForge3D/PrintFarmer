@@ -31,7 +31,7 @@ The reusable Docker workflow is an authorized consumer, not a second entry point
 Dispatch `consolidated-release.yml` only from `development` and select the
 matching channel. Leave `source_sha` blank to pin that channel branch HEAD once or enter
 that full SHA or a trusted ancestor. The workflow definition commit remains a
-separate binding. Select `release`; do not provide a version,
+separate binding. Do not provide a mode or version;
 tag, allocator value, CI run ID, comment ID or formatted attestation. Approve
 the single `release-<channel>` transaction environment. The workflow starts
 canonical qualification, collects evidence, allocates identity and publishes
@@ -41,20 +41,7 @@ Qualification receipts are bound to the dispatch run, immutable attempt-one
 transaction, workflow commit, GitHub Actions check suite, namespaced jobs,
 exact source checks, evidence timestamps and live branch policy. They expire
 after 30 minutes and are reverified after approval.
-`release-publisher-<channel>` must already exist with no reviewers, no
-administrator bypass, and only the immutable `development` control branch.
-
-Follow that run through authorization, immutable source/tag/assets and complete
-image-set verification. A successful source-only release is not a managed-update
-candidate. Record the workflow run, source SHA and resulting canonical identity.
-TestFlight remains independent in the `ios/` namespace.
-
-For a safe validation, select `rehearsal` in the same workflow. Its
-`release-rehearsal-<channel>` environment is separate from both approval and
-publisher environments. Rehearsal uses
-the same source and qualification path but has no publisher/registry credential
-references, cannot invoke reservation or publication controls, and emits only
-a `release-rehearsal-only` receipt with `publicationAuthorized: false`.
+`release-stable` and `release-insider` are the only publication environments. The normal dispatch has only channel and optional source SHA, and the selected environment supplies the single approval for the complete protected transaction. Internal diagnostics are hidden, environment-free, read-only, and emit only a `release-rehearsal-only` receipt with `publicationAuthorized: false`.
 
 ## Retired paths and recovery
 

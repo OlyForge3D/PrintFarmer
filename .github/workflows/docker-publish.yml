@@ -1,916 +1,99 @@
-name: Build and Publish Docker Images
-
-# Unified Docker build pipeline — native build on runner + COPY into minimal containers.
-# Monolith uses Dockerfile.multistage (combines API + frontend in one image).
-#
-# Images:
-#   printfarmer-api              (amd64 + arm64) — native build
-#   printfarmer-frontend         (amd64 + arm64) — native build
-#   printfarmer-printer-discovery (amd64 + arm64) — native build
-#   printfarmer-slicer-host      (amd64 + arm64) — native build
-#   printfarmer-orcaslicer-worker (amd64 only)   — native build
-#   printfarmer-monolith         (amd64 + arm64) — multistage Dockerfile
+name: Protected release publication
 
 on:
   workflow_call:
     inputs:
-      identity:
-        description: Redacted public identity and full authorization hash; never authorization JSON
-        type: string
-        required: true
       transaction:
         description: Immutable same-run release transaction binding
         type: string
         required: true
+      source_sha:
+        description: Exact qualified source commit
+        type: string
+        required: true
+      channel:
+        description: Canonical release channel
+        type: string
+        required: true
+      approval_mode:
+        description: Approval policy captured before qualification
+        type: string
+        required: true
     outputs:
+      public_identity:
+        description: Redacted canonical release identity
+        value: ${{ jobs.publish.outputs.public_identity }}
       published_set_digest:
         description: SHA-256 digest of the verified complete release set
-        value: ${{ jobs.promote-images.outputs.set_hash }}
-
-concurrency:
-  group: docker-publish-${{ fromJSON(inputs.identity).channel }}
-  cancel-in-progress: false
-
-env:
-  REGISTRY: ghcr.io
-  IMAGE_OWNER: olyforge3d
-  DOTNET_VERSION: '10.0.x'
-  NODE_VERSION: '24'
-  ORCA_VERSION: '2.4.2'
-  ORCA_SHA256: d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd
-  RELEASE_PUBLIC_IDENTITY: ${{ inputs.identity }}
-  RELEASE_TRANSACTION: ${{ inputs.transaction }}
-  RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.identity).sourceCommit }}
-  RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        value: ${{ jobs.publish.outputs.published_set_digest }}
 
 permissions:
   contents: read
-  actions: read
+
+concurrency:
+  group: release-publication-${{ inputs.channel }}
+  cancel-in-progress: false
 
 jobs:
-  admission:
-    name: Verify signed release authorization
+  publish:
+    name: Authorize and publish immutable release
     runs-on: ubuntu-latest
+    environment: release-${{ inputs.channel }}
+    permissions:
+      contents: read
+      id-token: write
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
+      packages: read
+    outputs:
+      public_identity: ${{ steps.authorize.outputs.public_identity }}
+      published_set_digest: ${{ steps.advance.outputs.set_hash }}
     steps:
-      - name: Reject foreign caller before checkout
-        run: |
-          set -euo pipefail
-          test "$GITHUB_REPOSITORY" = OlyForge3D/PrintFarmer
-          case "$GITHUB_EVENT_NAME" in workflow_dispatch|schedule) ;; *) exit 1 ;; esac
-          case "$GITHUB_WORKFLOW_REF" in
-            OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development) ;;
-            *) exit 1 ;;
-          esac
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Checkout immutable release control
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
-          path: .release-control
+          persist-credentials: false
+      - name: Checkout exact qualified source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ inputs.source_sha }}
+          path: source
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - name: Require validated non-empty release transaction
-        env:
-          RELEASE_TRANSACTION: ${{ inputs.transaction }}
-        run: node .release-control/scripts/ci/release-transaction.mjs validate
-      - name: Verify signed branch-at-authorization evidence
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: ./.release-control/.github/actions/release-authorization
-
-  # ====================
-  # JOB 1: Build .NET projects natively
-  # ====================
-  build-dotnet:
-    name: Build .NET
-    runs-on: ubuntu-latest
-    needs: admission
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
         with:
-          ref: ${{ fromJSON(inputs.identity).sourceCommit }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+          dotnet-version: '10.0.x'
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
-          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
-          path: .release-control
-          persist-credentials: false
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Resolve source metadata
-        id: source
+          name: release-qualification-${{ github.run_id }}
+          path: .artifacts/release-transaction
+      - name: Check selected source version base
+        working-directory: source
+        run: bash scripts/sync-monorepo-version.sh --check
+      - name: Recover immutable authorization bytes for an authorized rerun
+        if: github.run_attempt > 1
         env:
           GH_TOKEN: ${{ github.token }}
-        uses: ./.release-control/.github/actions/release-authorization
-
-      - name: Verify repository version metadata
-        env:
-          RELEASE_VERSION: ${{ steps.source.outputs.version }}
-        run: |
-          bash scripts/sync-monorepo-version.sh --check
-          REQUESTED_BASE="${RELEASE_VERSION#v}"
-          REQUESTED_BASE="${REQUESTED_BASE%%-*}"
-          REPOSITORY_VERSION="$(tr -d '[:space:]' < VERSION)"
-          REPOSITORY_VERSION="${REPOSITORY_VERSION#v}"
-          if [[ "$REQUESTED_BASE" != "$REPOSITORY_VERSION" ]]; then
-            echo "Release version $RELEASE_VERSION does not match repository version $REPOSITORY_VERSION"
-            exit 1
-          fi
-
-      - name: Cache NuGet packages
-        uses: actions/cache@55cc8345863c7cc4c66a329aec7e433d2d1c52a9  # v6
-        with:
-          path: ~/.nuget/packages
-          key: ${{ runner.os }}-nuget-${{ hashFiles('src/**/*.csproj') }}
-          restore-keys: |
-            ${{ runner.os }}-nuget-
-
-      - name: Restore dependencies
-        run: dotnet restore src/farm-web.sln
-
-      - name: Build all projects
-        run: dotnet build src/farm-web.sln -c Release --no-restore
-
-      - name: Validate dependency licenses
-        run: node scripts/compliance/validate-compliance.mjs
-
-      - name: Create reviewed license inventory
-        run: |
-          node scripts/compliance/create-license-inventory.mjs \
-            --output publish/compliance/license-inventory.json \
-            --version "${{ steps.source.outputs.version }}" \
-            --revision "${{ fromJSON(inputs.identity).sourceCommit }}"
-
-      - name: Publish API
-        run: dotnet publish src/api/Farm.Web.Api.csproj -c Release -o ./publish/api --no-build
-
-      - name: Publish OrcaSlicer Worker
-        run: dotnet publish src/orcaslicer-worker/Farm.OrcaSlicer.Worker.csproj -c Release -o ./publish/orcaslicer-worker --no-build
-
-      - name: Publish Printer Discovery
-        run: dotnet publish src/printer-discovery/PrinterDiscoveryService.csproj -c Release -o ./publish/printer-discovery --no-build
-
-      - name: Publish Slicer Host
-        run: >
-          dotnet publish src/slicer/Farm.Slicer.Host/Farm.Slicer.Host.csproj
-          -c Release -o ./publish/slicer-host --no-build
-
-      - name: Package both slicer-host engine plugins
-        run: |
-          dotnet publish src/Slicers/Farm.Slicers.OrcaSlicer.v2_4_0/Farm.Slicers.OrcaSlicer.v2_4_0.csproj \
-            -c Release --no-build -o ./publish/slicer-host/plugins/slicer
-          dotnet publish src/Slicers/Farm.Slicers.OrcaSlicer.v2_3_1/Farm.Slicers.OrcaSlicer.v2_3_1.csproj \
-            -c Release --no-build -o ./publish/slicer-host/plugins/slicer
-
-      - name: Upload Slicer Host artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: slicer-host-publish-${{ github.run_id }}
-          overwrite: true
-          path: ./publish/slicer-host
-          retention-days: 1
-
-      - name: Upload API artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: api-publish-${{ github.run_id }}
-          overwrite: true
-          path: ./publish/api
-          retention-days: 1
-
-      - name: Upload OrcaSlicer Worker artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: orcaslicer-worker-publish-${{ github.run_id }}
-          overwrite: true
-          path: ./publish/orcaslicer-worker
-          retention-days: 1
-
-      - name: Upload Printer Discovery artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: printer-discovery-publish-${{ github.run_id }}
-          overwrite: true
-          path: ./publish/printer-discovery
-          retention-days: 1
-
-      - name: Upload reviewed license inventory
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: license-inventory-${{ github.run_id }}
-          overwrite: true
-          path: ./publish/compliance/license-inventory.json
-          if-no-files-found: error
-          retention-days: 1
-
-  # ====================
-  # JOB 2: Build React frontend natively
-  # ====================
-  build-frontend:
-    name: Build Frontend
-    runs-on: ubuntu-latest
-    needs: admission
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.identity).sourceCommit }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
-          path: .release-control
-          persist-credentials: false
-
-      - name: Consume canonical frontend identity
-        id: frontend_identity
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: ./.release-control/.github/actions/release-authorization
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-          cache-dependency-path: src/Web/ReactApp/package-lock.json
-
-      - name: Install dependencies
-        working-directory: src/Web/ReactApp
-        run: npm ci
-
-      - name: Build React app
-        working-directory: src/Web/ReactApp
-        env:
-          PRINTFARMER_RELEASE_IDENTITY: ${{ steps.frontend_identity.outputs.frontend_identity }}
-        run: |
-          test -n "$PRINTFARMER_RELEASE_IDENTITY"
-          npm run build
-
-      - name: Bundle production npm license texts
-        run: node scripts/compliance/create-npm-notices.mjs
-
-      - name: Upload frontend artifact
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: frontend-build-${{ github.run_id }}
-          overwrite: true
-          path: src/Web/ReactApp/dist
-          retention-days: 1
-
-  # ====================
-  # JOB 3: Ensure OrcaSlicer base image exists
-  # ====================
-  ensure-orca-base:
-    name: Ensure OrcaSlicer Base
-    runs-on: ubuntu-latest
-    needs: admission
-    environment: release-publisher-${{ fromJSON(inputs.identity).channel }}
-    permissions:
-      actions: write
-      contents: read
-      packages: read
-    outputs:
-      base_image: ${{ steps.verify.outputs.base_image }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.identity).sourceCommit }}
-          persist-credentials: false
-
-      - name: Log in to GHCR (for manifest check)
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ github.actor }}
-          password: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Check if OrcaSlicer base image exists
-        id: check
         run: |
           set -euo pipefail
-          source scripts/docker-utils.sh
-          BASE_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}"
-          echo "Checking for base image: $BASE_IMAGE"
-
-          if ! docker pull "$BASE_IMAGE" > /dev/null 2>&1; then
-            echo "Base image not found - will trigger build"
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-            exit 0
+          artifact_name="$(
+            gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
+              --jq '[.artifacts[] |
+                select(.expired == false and (.name | test("^release-authorization-[1-9][0-9]*$")))] |
+                sort_by(.created_at) | .[0].name // empty'
+          )"
+          if [ -n "$artifact_name" ]; then
+            gh run download "$GITHUB_RUN_ID" \
+              --name "$artifact_name" \
+              --dir .artifacts/release-authorization
           fi
-
-          if validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"; then
-            echo "exists=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "::warning::Rejecting cached base image whose attested identity does not match OrcaSlicer ${ORCA_VERSION}"
-            echo "exists=false" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Trigger base image build if needed
-        if: steps.check.outputs.exists != 'true'
-        uses: actions/github-script@373c709c69115d41ff229c7e5df9f8788daa9553  # v9
-        with:
-          script: |
-            console.log('Triggering OrcaSlicer base image workflow...');
-            await github.rest.actions.createWorkflowDispatch({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              workflow_id: 'orcaslicer-base-image.yml',
-              ref: context.ref,
-              inputs: {
-                force_rebuild: 'false'
-              }
-            });
-            console.log('Workflow dispatched - waiting for it to complete...');
-
-            // Wait and poll for completion (max 10 minutes)
-            const maxWait = 10 * 60 * 1000;
-            const startTime = Date.now();
-
-            while (Date.now() - startTime < maxWait) {
-              await new Promise(r => setTimeout(r, 30000)); // Wait 30s
-
-              // Pull and attest the candidate without executing its entrypoint or shell.
-              const { execFileSync } = require('child_process');
-              try {
-                const image = '${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}';
-                execFileSync('docker', ['pull', image], { stdio: 'pipe' });
-                execFileSync(
-                  'bash',
-                  [
-                    '-c',
-                    'set -euo pipefail; source scripts/docker-utils.sh; validate_orcaslicer_binary_image "$1" "$2" "$3"',
-                    '_',
-                    image,
-                    '${{ env.ORCA_VERSION }}',
-                    '${{ env.ORCA_SHA256 }}'
-                  ],
-                  { stdio: 'pipe' }
-                );
-                console.log('Base image is now available with matching metadata!');
-                return;
-              } catch {
-                console.log('Base image is unavailable or its attestation is stale; still waiting...');
-              }
-            }
-
-            core.setFailed('Timed out waiting for base image');
-
-      - name: Verify OrcaSlicer base image metadata
-        id: verify
-        run: |
-          set -euo pipefail
-          source scripts/docker-utils.sh
-          BASE_IMAGE="${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/orcaslicer-base:${{ env.ORCA_VERSION }}"
-          docker pull "$BASE_IMAGE"
-          validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"
-          echo "base_image=$(docker_image_digest_reference "$BASE_IMAGE")" >> "$GITHUB_OUTPUT"
-
-  # ====================
-  # JOB 4: Build native container images (api, frontend, discovery, orcaslicer-worker)
-  # ====================
-  build-containers:
-    name: Build ${{ matrix.image }} container
-    runs-on: ubuntu-latest
-    needs: [build-dotnet, build-frontend, ensure-orca-base]
-    environment: release-publisher-${{ fromJSON(inputs.identity).channel }}
-    permissions:
-      contents: read
-      id-token: write
-      packages: read
-      actions: read
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - image: api
-            artifact: api-publish
-            dockerfile: Dockerfile.api-optimized
-            platforms: linux/amd64,linux/arm64
-          - image: frontend
-            artifact: frontend-build
-            dockerfile: Dockerfile.frontend-optimized
-            platforms: linux/amd64,linux/arm64
-          - image: printer-discovery
-            artifact: printer-discovery-publish
-            dockerfile: Dockerfile.discovery-optimized
-            platforms: linux/amd64,linux/arm64
-          - image: slicer-host
-            artifact: slicer-host-publish
-            dockerfile: Dockerfile.slicer-host-optimized
-            platforms: linux/amd64,linux/arm64
-          - image: orcaslicer-worker
-            artifact: orcaslicer-worker-publish
-            dockerfile: Dockerfile.orcaslicer-worker-optimized
-            platforms: linux/amd64
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.identity).sourceCommit }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
-          path: .release-control
-          persist-credentials: false
-
-      - name: Resolve source metadata
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_COMPONENT: ${{ matrix.image }}
-        uses: ./.release-control/.github/actions/release-authorization
-
-      - name: Download artifact
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: ${{ matrix.artifact }}-${{ github.run_id }}
-          path: ./artifact
-
-      - name: Download reviewed license inventory
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: license-inventory-${{ github.run_id }}
-          path: ./compliance-artifacts
-
-      - name: Set up QEMU
-        if: contains(matrix.platforms, 'arm64')
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ vars.RELEASE_REGISTRY_USER }}
-          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
-
-      - name: Create optimized Dockerfile
-        run: |
-          mkdir -p .github/dockerfiles
-
-          case "${{ matrix.image }}" in
-            api)
-              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
-          FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
-          ARG BUILD_VERSION
-          ARG VCS_REF
-          ARG SOURCE_REPOSITORY
-          ARG SOURCE_ARCHIVE_URL
-          ARG SBOM_URL
-          WORKDIR /app
-          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
-                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-                org.opencontainers.image.revision="${VCS_REF}" \
-                org.opencontainers.image.version="${BUILD_VERSION}" \
-                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-                org.printfarmer.sbom="${SBOM_URL}"
-          COPY artifact/ ./
-          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
-          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
-          ENV ASPNETCORE_URLS=http://+:5245
-          ENV PFARM__SourceInfo__Version=${BUILD_VERSION}
-          ENV PFARM__SourceInfo__Revision=${VCS_REF}
-          ENV PFARM__SourceInfo__RepositoryUrl=${SOURCE_REPOSITORY}
-          ENV PFARM__SourceInfo__SourceArchiveUrl=${SOURCE_ARCHIVE_URL}
-          ENV PFARM__SourceInfo__SbomUrl=${SBOM_URL}
-          EXPOSE 5245
-          ENTRYPOINT ["dotnet", "Farm.Web.Api.dll"]
-          EOF
-              ;;
-
-            frontend)
-              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
-          FROM nginx:alpine
-          ARG BUILD_VERSION
-          ARG VCS_REF
-          ARG SOURCE_REPOSITORY
-          ARG SOURCE_ARCHIVE_URL
-          ARG SBOM_URL
-          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
-                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-                org.opencontainers.image.revision="${VCS_REF}" \
-                org.opencontainers.image.version="${BUILD_VERSION}" \
-                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-                org.printfarmer.sbom="${SBOM_URL}"
-          COPY artifact/ /usr/share/nginx/html
-          COPY deploy/nginx/nginx.conf /etc/nginx/nginx.conf
-          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
-          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
-          COPY artifact/THIRD-PARTY-LICENSES.npm.txt /usr/share/licenses/printfarmer/THIRD-PARTY-LICENSES.npm.txt
-          EXPOSE 80
-          CMD ["nginx", "-g", "daemon off;"]
-          EOF
-              ;;
-
-            printer-discovery|slicer-host)
-              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'EOF'
-          FROM mcr.microsoft.com/dotnet/aspnet:10.0-noble
-          ARG BUILD_VERSION
-          ARG VCS_REF
-          ARG SOURCE_REPOSITORY
-          ARG SOURCE_ARCHIVE_URL
-          ARG SBOM_URL
-          WORKDIR /app
-          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
-                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-                org.opencontainers.image.revision="${VCS_REF}" \
-                org.opencontainers.image.version="${BUILD_VERSION}" \
-                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-                org.printfarmer.sbom="${SBOM_URL}"
-          COPY artifact/ ./
-          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
-          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
-          EXPOSE 8080
-          ENTRYPOINT ["dotnet", "PrinterDiscoveryService.dll"]
-          EOF
-              if [[ "${{ matrix.image }}" == "slicer-host" ]]; then
-                sed -i 's/PrinterDiscoveryService.dll/Farm.Slicer.Host.dll/g; s/EXPOSE 8080/EXPOSE 5246/' \
-                  ".github/dockerfiles/${{ matrix.dockerfile }}"
-                echo 'ENV ASPNETCORE_URLS=http://+:5246' >> ".github/dockerfiles/${{ matrix.dockerfile }}"
-              fi
-              ;;
-
-            orcaslicer-worker)
-              cat > .github/dockerfiles/${{ matrix.dockerfile }} << 'DOCKERFILE'
-          # Use OrcaSlicer base image with pre-extracted binaries
-          FROM ${{ needs.ensure-orca-base.outputs.base_image }}
-          ARG BUILD_VERSION
-          ARG VCS_REF
-          ARG SOURCE_REPOSITORY
-          ARG SOURCE_ARCHIVE_URL
-          ARG SBOM_URL
-          LABEL org.opencontainers.image.licenses="AGPL-3.0-only" \
-                org.opencontainers.image.source="${SOURCE_REPOSITORY}" \
-                org.opencontainers.image.revision="${VCS_REF}" \
-                org.opencontainers.image.version="${BUILD_VERSION}" \
-                orcaslicer.version="${{ env.ORCA_VERSION }}" \
-                orcaslicer.sha256="${{ env.ORCA_SHA256 }}" \
-                orcaslicer.allow_stub="false" \
-                org.printfarmer.source-archive="${SOURCE_ARCHIVE_URL}" \
-                org.printfarmer.sbom="${SBOM_URL}"
-
-          RUN test -s /opt/orcaslicer/orcaslicer.version && \
-              test -s /opt/orcaslicer/orcaslicer.sha256 && \
-              test "$(cat /opt/orcaslicer/orcaslicer.version)" = "${{ env.ORCA_VERSION }}" && \
-              test "$(cat /opt/orcaslicer/orcaslicer.sha256)" = "${{ env.ORCA_SHA256 }}"
-
-          RUN set -e; \
-              test -x /opt/orcaslicer/AppRun; \
-              install -d -m 0755 /etc/printfarmer; \
-              cp /opt/orcaslicer/orcaslicer.version /etc/printfarmer/orcaslicer.version; \
-              cp /opt/orcaslicer/orcaslicer.sha256 /etc/printfarmer/orcaslicer.sha256; \
-              chmod 0644 /etc/printfarmer/orcaslicer.version /etc/printfarmer/orcaslicer.sha256; \
-              ln -sf /opt/orcaslicer/AppRun /usr/local/bin/orcaslicer
-
-          # Install .NET runtime
-          RUN apt-get update && apt-get install -y --no-install-recommends \
-                  wget ca-certificates \
-              && wget https://dot.net/v1/dotnet-install.sh -O dotnet-install.sh \
-              && chmod +x dotnet-install.sh \
-              && ./dotnet-install.sh --channel 10.0 --runtime aspnetcore --install-dir /usr/share/dotnet \
-              && ln -s /usr/share/dotnet/dotnet /usr/bin/dotnet \
-              && rm dotnet-install.sh \
-              && apt-get remove -y wget \
-              && apt-get autoremove -y \
-              && rm -rf /var/lib/apt/lists/*
-
-          WORKDIR /app
-          COPY artifact/ ./
-          COPY LICENSE /usr/share/licenses/printfarmer/LICENSE
-          COPY THIRD-PARTY-NOTICES.md /usr/share/licenses/printfarmer/THIRD-PARTY-NOTICES.md
-
-          ENV ASPNETCORE_URLS=http://+:8080
-          ENV Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer
-          ENV Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256
-          ENV Worker__EngineVersion=${{ env.ORCA_VERSION }}
-          ENV SlicerRegistry__Version=${{ env.ORCA_VERSION }}
-          EXPOSE 8080
-
-          ENTRYPOINT ["dotnet", "Farm.OrcaSlicer.Worker.dll"]
-          DOCKERFILE
-              ;;
-          esac
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}
-          tags: |
-            type=raw,value=${{ fromJSON(inputs.identity).canonicalVersion }}
-          flavor: latest=false
-          labels: |
-            org.opencontainers.image.title=printfarmer-${{ matrix.image }}
-            org.opencontainers.image.description=PrintFarmer - Multi-printer 3D print farm management
-            org.opencontainers.image.vendor=PrintFarmer
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/README.md
-            org.opencontainers.image.licenses=AGPL-3.0-only
-            org.opencontainers.image.revision=${{ fromJSON(inputs.identity).sourceCommit }}
-            org.opencontainers.image.version=${{ fromJSON(inputs.identity).canonicalVersion }}
-            org.opencontainers.image.created=${{ fromJSON(inputs.identity).buildTime }}
-            org.printfarmer.release-channel=${{ steps.source.outputs.channel }}
-            org.printfarmer.release-id=${{ fromJSON(inputs.identity).releaseId }}
-            org.printfarmer.build-id=${{ fromJSON(inputs.identity).buildId }}
-            org.printfarmer.build-attempt=${{ fromJSON(inputs.identity).buildAttempt }}
-            org.printfarmer.workflow=${{ fromJSON(inputs.identity).workflowIdentity }}
-            org.printfarmer.identity-sha256=${{ steps.source.outputs.identity_hash }}
-            org.printfarmer.source-archive=${{ steps.source.outputs.source_archive_url }}
-            org.printfarmer.sbom=${{ steps.source.outputs.sbom_url }}
-
-      - name: Build and push immutable digest
-        id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
-        with:
-          context: .
-          file: .github/dockerfiles/${{ matrix.dockerfile }}
-          platforms: ${{ matrix.platforms }}
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }},push-by-digest=true,name-canonical=true,push=true
-          build-args: |
-            BUILD_VERSION=${{ fromJSON(inputs.identity).canonicalVersion }}
-            VCS_REF=${{ fromJSON(inputs.identity).sourceCommit }}
-            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
-            SOURCE_ARCHIVE_URL=${{ steps.source.outputs.source_archive_url }}
-            SBOM_URL=${{ steps.source.outputs.sbom_url }}
-          sbom: true
-          provenance: mode=max
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-
-      - name: Generate and validate image SPDX SBOM
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}@${{ steps.build.outputs.digest }}
-          SBOM_FILE: release-artifacts/printfarmer-${{ matrix.image }}-${{ steps.source.outputs.version }}.spdx.json
-        run: |
-          mkdir -p release-artifacts
-          syft "registry:$IMAGE" -o "spdx-json=$SBOM_FILE"
-          EXTRA_ARGS=()
-          if [[ "${{ matrix.image }}" == "frontend" ]]; then
-            EXTRA_ARGS+=(--include-npm)
-          fi
-          node scripts/compliance/enrich-sbom.mjs \
-            --sbom "$SBOM_FILE" \
-            --inventory compliance-artifacts/license-inventory.json \
-            --version "${{ steps.source.outputs.version }}" \
-            --revision "${{ fromJSON(inputs.identity).sourceCommit }}" \
-            "${EXTRA_ARGS[@]}"
-
-      - name: Attest SBOM and sign validated image digest
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-${{ matrix.image }}@${{ steps.build.outputs.digest }}
-          SBOM_FILE: release-artifacts/printfarmer-${{ matrix.image }}-${{ steps.source.outputs.version }}.spdx.json
-        run: |
-          cosign attest --yes --type spdxjson --predicate "$SBOM_FILE" "$IMAGE"
-          cosign sign --yes "$IMAGE"
-
-      - name: Record image digest
-        run: |
-          printf '%s\n' '${{ steps.build.outputs.digest }}' \
-            > 'release-artifacts/digest-${{ matrix.image }}.txt'
-
-      - name: Upload image SPDX SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: sbom-${{ matrix.image }}-run-${{ github.run_id }}
-          overwrite: true
-          path: release-artifacts/*.spdx.json
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload image digest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: digest-${{ matrix.image }}-run-${{ github.run_id }}
-          overwrite: true
-          path: release-artifacts/digest-*.txt
-          if-no-files-found: error
-          retention-days: 30
-
-  # ====================
-  # JOB 5: Build monolith via Dockerfile.multistage after the reviewed inventory is ready
-  # ====================
-  build-monolith:
-    name: Build monolith container
-    runs-on: ubuntu-latest
-    needs: build-dotnet
-    environment: release-publisher-${{ fromJSON(inputs.identity).channel }}
-    permissions:
-      contents: read
-      id-token: write
-      packages: read
-      actions: read
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.identity).sourceCommit }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
-          path: .release-control
-          persist-credentials: false
-
-      - name: Compute full SHA
-        id: gitsha
-        run: echo "full=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
-
-      - name: Download reviewed license inventory
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          name: license-inventory-${{ github.run_id }}
-          path: ./compliance-artifacts
-
-      - name: Resolve source metadata
-        id: source
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: ./.release-control/.github/actions/release-authorization
-
-      - name: Set up QEMU for multi-arch builds
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
-        with:
-          platforms: arm64,amd64
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
-        with:
-          driver-opts: |
-            network=host
-
-      - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ vars.RELEASE_REGISTRY_USER }}
-          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
-
-      - name: Extract metadata
-        id: meta
-        uses: docker/metadata-action@dc802804100637a589fabce1cb79ff13a1411302  # v6
-        with:
-          images: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith
-          tags: |
-            type=raw,value=${{ fromJSON(inputs.identity).canonicalVersion }}
-          flavor: latest=false
-          labels: |
-            org.opencontainers.image.title=printfarmer-monolith
-            org.opencontainers.image.description=PrintFarmer - Multi-printer 3D print farm management (monolith)
-            org.opencontainers.image.vendor=PrintFarmer
-            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
-            org.opencontainers.image.documentation=${{ github.server_url }}/${{ github.repository }}/blob/main/README.md
-            org.opencontainers.image.licenses=AGPL-3.0-only
-            org.opencontainers.image.revision=${{ fromJSON(inputs.identity).sourceCommit }}
-            org.opencontainers.image.version=${{ fromJSON(inputs.identity).canonicalVersion }}
-            org.opencontainers.image.created=${{ fromJSON(inputs.identity).buildTime }}
-            org.printfarmer.release-channel=${{ steps.source.outputs.channel }}
-            org.printfarmer.release-id=${{ fromJSON(inputs.identity).releaseId }}
-            org.printfarmer.build-id=${{ fromJSON(inputs.identity).buildId }}
-            org.printfarmer.build-attempt=${{ fromJSON(inputs.identity).buildAttempt }}
-            org.printfarmer.workflow=${{ fromJSON(inputs.identity).workflowIdentity }}
-            org.printfarmer.identity-sha256=${{ steps.source.outputs.identity_hash }}
-            org.printfarmer.source-archive=${{ steps.source.outputs.source_archive_url }}
-            org.printfarmer.sbom=${{ steps.source.outputs.sbom_url }}
-
-      - name: Require canonical monolith frontend identity
-        env:
-          PRINTFARMER_RELEASE_IDENTITY: ${{ steps.source.outputs.frontend_identity }}
-        run: test -n "$PRINTFARMER_RELEASE_IDENTITY"
-
-      - name: Build and push immutable monolith digest
-        id: build
-        uses: docker/build-push-action@53b7df96c91f9c12dcc8a07bcb9ccacbed38856a  # v7
-        with:
-          context: .
-          file: scripts/docker/dockerfiles/Dockerfile.multistage
-          target: monolith-runtime
-          platforms: linux/amd64,linux/arm64
-          labels: ${{ steps.meta.outputs.labels }}
-          outputs: type=image,name=${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith,push-by-digest=true,name-canonical=true,push=true
-          sbom: true
-          provenance: mode=max
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-          build-args: |
-            BUILD_VERBOSITY=quiet
-            ASPNET_TAG=10.0-noble
-            NODE_TAG=24-alpine
-            NGINX_TAG=alpine
-            UBUNTU_TAG=24.04
-            GIT_SHA=${{ steps.gitsha.outputs.full }}
-            VITE_GIT_SHA=${{ steps.gitsha.outputs.full }}
-            PRINTFARMER_RELEASE_IDENTITY=${{ steps.source.outputs.frontend_identity }}
-            BUILD_VERSION=${{ fromJSON(inputs.identity).canonicalVersion }}
-            VCS_REF=${{ fromJSON(inputs.identity).sourceCommit }}
-            SOURCE_REPOSITORY=${{ github.server_url }}/${{ github.repository }}
-            SOURCE_ARCHIVE_URL=${{ steps.source.outputs.source_archive_url }}
-            SBOM_URL=${{ steps.source.outputs.sbom_url }}
-            ORCASLICER_VERSION=${{ env.ORCA_VERSION }}
-            ORCASLICER_SHA256=${{ env.ORCA_SHA256 }}
-
-      - name: Install Syft
-        uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-
-      - name: Generate and validate canonical SPDX SBOM
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith@${{ steps.build.outputs.digest }}
-          SBOM_FILE: release-artifacts/printfarmer-${{ steps.source.outputs.version }}.spdx.json
-        run: |
-          mkdir -p release-artifacts
-          syft "registry:$IMAGE" -o "spdx-json=$SBOM_FILE"
-          node scripts/compliance/enrich-sbom.mjs \
-            --sbom "$SBOM_FILE" \
-            --inventory compliance-artifacts/license-inventory.json \
-            --version "${{ steps.source.outputs.version }}" \
-            --revision "${{ fromJSON(inputs.identity).sourceCommit }}" \
-            --include-npm
-
-      - name: Attest SBOM and sign validated monolith digest
-        env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith@${{ steps.build.outputs.digest }}
-          SBOM_FILE: release-artifacts/printfarmer-${{ steps.source.outputs.version }}.spdx.json
-        run: |
-          cosign attest --yes --type spdxjson --predicate "$SBOM_FILE" "$IMAGE"
-          cosign sign --yes "$IMAGE"
-
-      - name: Record monolith image digest
-        run: |
-          printf '%s\n' '${{ steps.build.outputs.digest }}' \
-            > release-artifacts/digest-monolith.txt
-
-      - name: Upload canonical SPDX SBOM
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: sbom-monolith-run-${{ github.run_id }}
-          overwrite: true
-          path: release-artifacts/*.spdx.json
-          if-no-files-found: error
-          retention-days: 30
-
-      - name: Upload monolith image digest
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: digest-monolith-run-${{ github.run_id }}
-          overwrite: true
-          path: release-artifacts/digest-monolith.txt
-          if-no-files-found: error
-          retention-days: 30
-
-  # ====================
-  # JOB 6: Verify the complete artifact set and promote immutable digests
-  # ====================
-  promote-images:
-    name: Promote validated image set
-    runs-on: ubuntu-latest
-    needs: [build-containers, build-monolith]
-    environment: release-publisher-${{ fromJSON(inputs.identity).channel }}
-    permissions:
-      contents: read
-      packages: read
-      actions: read
-    outputs:
-      smoke_tag: ${{ steps.tags.outputs.smoke_tag }}
-      set_hash: ${{ steps.advance.outputs.set_hash }}
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.identity).sourceCommit }}
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
-        with:
-          ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
-          path: .release-control
-          persist-credentials: false
-
-      - name: Revalidate immutable source tag before publication
-        env:
-          GH_TOKEN: ${{ github.token }}
-        uses: ./.release-control/.github/actions/release-authorization
-
-      - name: Obtain protected publisher app token
+      - name: Obtain protected publisher App token
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
         with:
@@ -921,81 +104,137 @@ jobs:
           permission-statuses: read
           permission-administration: read
           permission-actions: read
-
-      - name: Setup Node.js
-        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-
-      - name: Download image digests
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          pattern: digest-*-run-${{ github.run_id }}
-          path: artifacts
-
-      - name: Download image SPDX SBOMs
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
-        with:
-          pattern: sbom-*-run-${{ github.run_id }}
-          path: artifacts
-
-      - name: Normalize only this attempt's verified artifact paths
-        run: |
-          shopt -s nullglob
-          for directory in artifacts/*-run-"$GITHUB_RUN_ID"; do
-            target="${directory%-run-$GITHUB_RUN_ID}"
-            test ! -e "$target"
-            mv "$directory" "$target"
-          done
-
-      - name: Require and revalidate all image artifacts
+      - name: Reserve identity and create the canonical source tag
+        id: authorize
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_ADMITTED_APPROVAL_MODE: ${{ inputs.approval_mode }}
+          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-control.mjs authorize
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
+      - name: Sign immutable authorization
         run: |
           set -euo pipefail
-          IMAGES=(api frontend slicer-host printer-discovery orcaslicer-worker monolith)
-          for image in "${IMAGES[@]}"; do
-            digest_file="artifacts/digest-${image}/digest-${image}.txt"
-            if [[ ! -s "$digest_file" ]]; then
-              echo "Missing digest artifact for $image"
-              exit 1
-            fi
-            digest="$(tr -d '[:space:]' < "$digest_file")"
-            if [[ ! "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]; then
-              echo "Invalid digest artifact for $image: $digest"
-              exit 1
-            fi
-            mapfile -d '' sboms < <(
-              find "artifacts/sbom-${image}" -maxdepth 1 -type f -name '*.spdx.json' -print0
-            )
-            if [[ "${#sboms[@]}" -ne 1 ]]; then
-              echo "Expected exactly one SPDX SBOM artifact for $image, found ${#sboms[@]}"
-              exit 1
-            fi
-            node scripts/compliance/validate-compliance.mjs \
-              --skip-dependencies \
-              --sbom "${sboms[0]}"
-          done
-
-      - name: Install Cosign
-        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
-
-      - name: Verify image signatures and SPDX attestations
+          umask 077
+          cosign sign-blob --yes \
+            --bundle .artifacts/release-authorization/release-identity.bundle.json \
+            .artifacts/release-authorization/release-identity.json
+          cosign sign-blob --yes \
+            --bundle .artifacts/release-authorization/public-identity.bundle.json \
+            .artifacts/release-authorization/public-identity.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-authorization-${{ github.run_attempt }}
+          path: |
+            .artifacts/release-authorization/release-identity.json
+            .artifacts/release-authorization/release-identity.bundle.json
+            .artifacts/release-authorization/public-identity.json
+            .artifacts/release-authorization/public-identity.bundle.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
+      - name: Consume the signed authorization in this protected job
+        id: consume
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-control.mjs consume
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
+        with:
+          platforms: arm64,amd64
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
+        with:
+          registry: ghcr.io
+          username: ${{ vars.RELEASE_REGISTRY_USER }}
+          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
+      - uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
+      - name: Build, attest and sign the complete immutable image set
+        working-directory: source
+        env:
+          PRINTFARMER_RELEASE_IDENTITY: ${{ steps.consume.outputs.frontend_identity }}
+          RELEASE_IDENTITY_HASH: ${{ steps.consume.outputs.identity_hash }}
+          RELEASE_VERSION: ${{ steps.consume.outputs.version }}
+          RELEASE_CONTAINER_VERSION: ${{ steps.consume.outputs.container_version }}
+          RELEASE_SOURCE_ARCHIVE_URL: ${{ steps.consume.outputs.source_archive_url }}
         run: |
           set -euo pipefail
-          CERTIFICATE_IDENTITY="https://github.com/${GITHUB_REPOSITORY}/.github/workflows/docker-publish.yml@${GITHUB_REF}"
-          IMAGES=(api frontend slicer-host printer-discovery orcaslicer-worker monolith)
-          for image in "${IMAGES[@]}"; do
-            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
-            reference="${REGISTRY}/${IMAGE_OWNER}/printfarmer-${image}@${digest}"
-            cosign verify "$reference" \
-              --certificate-identity "$CERTIFICATE_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-            cosign verify-attestation "$reference" \
-              --type spdxjson \
-              --certificate-identity "$CERTIFICATE_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+          mkdir -p artifacts release-artifacts compliance-artifacts
+          node scripts/compliance/validate-compliance.mjs
+          node scripts/compliance/create-license-inventory.mjs \
+            --output compliance-artifacts/license-inventory.json \
+            --version "$RELEASE_VERSION" \
+            --revision '${{ inputs.source_sha }}'
+          dockerfile="scripts/docker/dockerfiles/Dockerfile.multistage"
+          source_sha='${{ inputs.source_sha }}'
+          build_component() {
+            local image="$1" target="$2" platforms="$3"
+            local repository="ghcr.io/olyforge3d/printfarmer-${image}"
+            local metadata="artifacts/${image}.json"
+            local sbom="release-artifacts/printfarmer-${image}-${RELEASE_VERSION}.spdx.json"
+            docker buildx build . \
+              --file "$dockerfile" \
+              --target "$target" \
+              --platform "$platforms" \
+              --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+              --label "org.opencontainers.image.revision=${source_sha}" \
+              --label "org.opencontainers.image.version=${RELEASE_CONTAINER_VERSION}" \
+              --label "org.printfarmer.release-channel=${{ inputs.channel }}" \
+              --label "org.printfarmer.identity-sha256=${RELEASE_IDENTITY_HASH}" \
+              --build-arg "GIT_SHA=${source_sha}" \
+              --build-arg "VITE_GIT_SHA=${source_sha}" \
+              --build-arg "PRINTFARMER_RELEASE_IDENTITY=${PRINTFARMER_RELEASE_IDENTITY}" \
+              --build-arg "BUILD_VERSION=${RELEASE_CONTAINER_VERSION}" \
+              --build-arg "VCS_REF=${source_sha}" \
+              --build-arg "SOURCE_REPOSITORY=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
+              --build-arg "SOURCE_ARCHIVE_URL=${RELEASE_SOURCE_ARCHIVE_URL}" \
+              --build-arg "SBOM_URL=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${RELEASE_VERSION}/printfarmer-${image}-${RELEASE_VERSION}.spdx.json" \
+              --output "type=image,name=${repository},push-by-digest=true,name-canonical=true,push=true" \
+              --provenance=mode=max \
+              --sbom=true \
+              --metadata-file "$metadata"
+            local digest
+            digest="$(jq -er '."containerimage.digest"' "$metadata")"
+            [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+            printf '%s\n' "$digest" > "release-artifacts/digest-${image}.txt"
+            syft "registry:${repository}@${digest}" -o "spdx-json=${sbom}"
+            extra=()
+            [[ "$image" == frontend || "$image" == monolith ]] && extra+=(--include-npm)
+            node scripts/compliance/enrich-sbom.mjs \
+              --sbom "$sbom" \
+              --inventory compliance-artifacts/license-inventory.json \
+              --version "$RELEASE_VERSION" \
+              --revision "$source_sha" \
+              "${extra[@]}"
+            cosign attest --yes --type spdxjson --predicate "$sbom" "${repository}@${digest}"
+            cosign sign --yes "${repository}@${digest}"
+          }
+          build_component api api-runtime linux/amd64,linux/arm64
+          build_component frontend frontend-runtime linux/amd64,linux/arm64
+          build_component slicer-host slicer-host-runtime linux/amd64,linux/arm64
+          build_component printer-discovery printer-discovery-runtime linux/amd64,linux/arm64
+          build_component orcaslicer-worker orcaslicer-worker linux/amd64
+          build_component monolith monolith-runtime linux/amd64,linux/arm64
+      - name: Normalize immutable image evidence
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts
+          for image in api frontend slicer-host printer-discovery orcaslicer-worker monolith; do
+            mkdir -p "artifacts/digest-${image}" "artifacts/sbom-${image}"
+            cp "source/release-artifacts/digest-${image}.txt" "artifacts/digest-${image}/"
+            cp "source/release-artifacts/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
+              "artifacts/sbom-${image}/"
           done
-
-      - name: Validate complete set and all revocable controls before publication
+      - name: Validate complete set and all revocable controls
         id: preflight
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1004,282 +243,67 @@ jobs:
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
           RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
         run: |
           set -euo pipefail
-          node .release-control/scripts/ci/release-set.mjs inspect
-          node .release-control/scripts/ci/release-control.mjs preflight
-
-      - name: Resolve promotion tags
-        id: tags
-        run: |
-          set -euo pipefail
-          echo "smoke_tag=${{ fromJSON(inputs.identity).canonicalVersion }}" >> "$GITHUB_OUTPUT"
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
-
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
-
-      - name: Log in to GHCR
-        uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
-        with:
-          registry: ${{ env.REGISTRY }}
-          username: ${{ vars.RELEASE_REGISTRY_USER }}
-          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
-
-      - name: Smoke test ARM64 image digests
-        run: |
-          set -euo pipefail
-          api_digest="$(tr -d '[:space:]' < artifacts/digest-api/digest-api.txt)"
-          frontend_digest="$(tr -d '[:space:]' < artifacts/digest-frontend/digest-frontend.txt)"
-          discovery_digest="$(tr -d '[:space:]' < artifacts/digest-printer-discovery/digest-printer-discovery.txt)"
-          monolith_digest="$(tr -d '[:space:]' < artifacts/digest-monolith/digest-monolith.txt)"
-          slicer_digest="$(tr -d '[:space:]' < artifacts/digest-slicer-host/digest-slicer-host.txt)"
-
-          docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
-            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-slicer-host@${slicer_digest}" \
-            -c 'test -f /app/Farm.Slicer.Host.dll && test -d /app/plugins/slicer && dotnet --info >/dev/null'
-
-          docker run --rm --platform linux/arm64 \
-            --entrypoint /bin/sh \
-            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-api@${api_digest}" \
-            -c 'test -f /app/Farm.Web.Api.dll && dotnet --info >/dev/null'
-
-          docker run --rm --platform linux/arm64 -d \
-            --name printfarmer-frontend-smoke \
-            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-frontend@${frontend_digest}"
-          trap 'docker rm -f printfarmer-frontend-smoke >/dev/null 2>&1 || true' EXIT
-          sleep 3
-          docker exec printfarmer-frontend-smoke nginx -t
-          docker rm -f printfarmer-frontend-smoke
-          trap - EXIT
-
-          docker run --rm --platform linux/arm64 \
-            --entrypoint /bin/sh \
-            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-printer-discovery@${discovery_digest}" \
-            -c 'test -f /app/PrinterDiscoveryService.dll && dotnet --info >/dev/null'
-
-          docker run --rm --platform linux/arm64 \
-            --entrypoint /bin/sh \
-            "${REGISTRY}/${IMAGE_OWNER}/printfarmer-monolith@${monolith_digest}" \
-            -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
-
-      - name: Publish and verify public corresponding-source assets
+          node scripts/ci/release-set.mjs inspect
+          node scripts/ci/release-control.mjs preflight
+      - name: Publish corresponding-source release assets
+        working-directory: source
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
-          VERSION: ${{ fromJSON(inputs.identity).sourceTag }}
+          VERSION: ${{ steps.consume.outputs.version }}
         run: |
           set -euo pipefail
           mkdir -p release-assets
           node scripts/compliance/create-source-bundle.mjs \
-            --revision "${{ fromJSON(inputs.identity).sourceCommit }}" \
+            --revision '${{ inputs.source_sha }}' \
             --version "$VERSION" \
             --output release-assets
           cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
-          cmp -s release-assets/release-identity.json .artifacts/release-authorization/public-identity.json
-          cp .artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
-          cosign verify-blob --bundle release-assets/release-identity.bundle.json \
-            --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com release-assets/release-identity.json
-
-          mapfile -d '' sbom_files < <(
-            find artifacts -type f -name '*.spdx.json' -print0 | sort -z
-          )
-          mapfile -d '' digest_files < <(
-            find artifacts -type f -name 'digest-*.txt' -print0 | sort -z
-          )
-          if [[ "${#sbom_files[@]}" -ne 6 || "${#digest_files[@]}" -ne 6 ]]; then
-            echo "Expected six SPDX SBOMs and six digest records before release publication"
-            exit 1
+          cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json
+          cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
+          cp ../.artifacts/release-authorization/release-set.json release-assets/release-set.json
+          cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
+          if ! gh release view "$VERSION" >/dev/null 2>&1; then
+            prerelease=()
+            [[ "$VERSION" == *-* ]] && prerelease+=(--prerelease)
+            gh release create "$VERSION" --draft --verify-tag --title "$VERSION" \
+              --notes "Source-first validated release transaction." "${prerelease[@]}"
           fi
-          cp "${sbom_files[@]}" "${digest_files[@]}" release-assets/
-
-          expected_assets=(
-            "PrintFarmer-${VERSION}-source.tar.gz"
-            "PrintFarmer-${VERSION}-source.json"
-            LICENSE
-            THIRD-PARTY-NOTICES.md
-            release-identity.json
-            release-identity.bundle.json
-            release-set.json
-            "printfarmer-${VERSION}.spdx.json"
-            "printfarmer-api-${VERSION}.spdx.json"
-            "printfarmer-frontend-${VERSION}.spdx.json"
-            "printfarmer-slicer-host-${VERSION}.spdx.json"
-            "printfarmer-printer-discovery-${VERSION}.spdx.json"
-            "printfarmer-orcaslicer-worker-${VERSION}.spdx.json"
-            digest-api.txt
-            digest-frontend.txt
-            digest-slicer-host.txt
-            digest-printer-discovery.txt
-            digest-orcaslicer-worker.txt
-            digest-monolith.txt
-          )
-          for asset_name in "${expected_assets[@]}"; do
-            if [[ ! -s "release-assets/$asset_name" ]]; then
-              echo "Missing required release asset: $asset_name"
-              exit 1
-            fi
-          done
-
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            echo "Release $VERSION already exists; verifying assets before publication"
-          else
-            notes_file="$RUNNER_TEMP/source-first-release-notes.md"
-            printf '%s\n' \
-              "Source-first artifacts for $VERSION; not a managed update candidate without the signed #2660 manifest." \
-              "" \
-              "Validated corresponding source, notices, SPDX SBOMs, and image digest records are published before container tags." \
-              > "$notes_file"
-            create_args=(
-              release create "$VERSION"
-              --draft
-              --verify-tag
-              --title "$VERSION"
-              --notes-file "$notes_file"
-            )
-            if [[ "$VERSION" == *-* ]]; then
-              create_args+=(--prerelease)
-            fi
-            gh "${create_args[@]}"
-          fi
-
-          existing_assets="$(
-            gh release view "$VERSION" --json assets --jq '.assets[].name'
-          )"
-          upload_files=()
-          while IFS= read -r -d '' asset_file; do
-            asset_name="$(basename "$asset_file")"
-            if grep -Fxq "$asset_name" <<< "$existing_assets"; then
-              existing_dir="$RUNNER_TEMP/existing-release-assets/$asset_name"
-              mkdir -p "$existing_dir"
-              gh release download "$VERSION" \
-                --pattern "$asset_name" \
-                --dir "$existing_dir"
-              if ! cmp -s "$asset_file" "$existing_dir/$asset_name"; then
-                echo "Published release asset differs from the validated build: $asset_name"
-                exit 1
-              fi
-            else
-              upload_files+=("$asset_file")
-            fi
-          done < <(find release-assets -maxdepth 1 -type f -print0 | sort -z)
-
-          if [[ "${#upload_files[@]}" -gt 0 ]]; then
-            gh release upload "$VERSION" "${upload_files[@]}"
-          fi
-
-          expected_prerelease=false
-          [[ "$VERSION" == *-* ]] && expected_prerelease=true
-          release_is_draft="$(
-            gh release view "$VERSION" --json isDraft --jq '.isDraft'
-          )"
-          release_is_prerelease="$(
-            gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease'
-          )"
-          if [[ "$release_is_draft" == "true" || "$release_is_prerelease" != "$expected_prerelease" ]]; then
-            gh release edit "$VERSION" \
-              --draft=false \
-              --prerelease="$expected_prerelease"
-          fi
-
-          release_state="$(
-            gh release view "$VERSION" \
-              --json isDraft,isPrerelease \
-              --jq '[.isDraft, .isPrerelease] | @tsv'
-          )"
-          expected_state="$(printf 'false\t%s' "$expected_prerelease")"
-          if [[ "$release_state" != "$expected_state" ]]; then
-            echo "Release visibility or prerelease state is invalid for $VERSION: $release_state"
-            exit 1
-          fi
-          published_assets="$(
-            gh release view "$VERSION" --json assets --jq '.assets[].name'
-          )"
-          for asset_name in "${expected_assets[@]}"; do
-            if ! grep -Fxq "$asset_name" <<< "$published_assets"; then
-              echo "Required public release asset is missing: $asset_name"
-              exit 1
-            fi
-            asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset_name}"
-            curl --fail --silent --show-error --location --head \
-              --retry 6 --retry-delay 5 --retry-all-errors \
-              "$asset_url" >/dev/null
-          done
-
-      - name: Promote validated digests
-        run: node .release-control/scripts/ci/release-set.mjs tag
-
-      - name: Compare-and-set complete channel candidate last
+          gh release upload "$VERSION" release-assets/* --clobber
+          gh release edit "$VERSION" --draft=false
+      - name: Publish immutable tags
+        env:
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+        run: node scripts/ci/release-set.mjs tag
+      - name: Advance the complete channel pointer last
         id: advance
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
-          RELEASE_TRANSACTION: ${{ inputs.transaction }}
-          RELEASE_VERIFIED_BRANCH_HEAD: ${{ steps.preflight.outputs.verified_branch_head }}
-          RELEASE_EXPECTED_POINTER: ${{ steps.preflight.outputs.expected_pointer }}
           RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
           RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
-        run: node .release-control/scripts/ci/release-control.mjs advance
-
-      - name: Export identity prerequisite for signed-manifest consumer
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ inputs.source_sha }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_VERIFIED_BRANCH_HEAD: ${{ steps.preflight.outputs.verified_branch_head }}
+          RELEASE_EXPECTED_POINTER: ${{ steps.preflight.outputs.expected_pointer }}
+        run: node scripts/ci/release-control.mjs advance
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
           name: release-identity-and-complete-set-${{ github.run_id }}
-          overwrite: true
           path: |
             .artifacts/release-authorization/release-identity.json
             .artifacts/release-authorization/release-identity.bundle.json
             .artifacts/release-authorization/release-set.json
           include-hidden-files: true
           if-no-files-found: error
-
-  # ====================
-  # JOB 7: Summary
-  # ====================
-  summary:
-    name: Build Summary
-    runs-on: ubuntu-latest
-    needs: [build-containers, build-monolith, promote-images]
-    if: always()
-    steps:
-      - name: Generate summary
-        run: |
-          echo "## 🐳 Container Build Summary" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-
-          CONTAINERS="${{ needs.build-containers.result }}"
-          MONOLITH="${{ needs.build-monolith.result }}"
-          PROMOTION="${{ needs.promote-images.result }}"
-
-          if [[ "$CONTAINERS" == "success" && "$MONOLITH" == "success" && "$PROMOTION" == "success" ]]; then
-            echo "### ✅ All Images Validated and Promoted" >> $GITHUB_STEP_SUMMARY
-          else
-            echo "### ⚠️ Image Publication Had Issues" >> $GITHUB_STEP_SUMMARY
-          fi
-
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "| Image | Build | Platforms |" >> $GITHUB_STEP_SUMMARY
-          echo "|-------|-------|-----------|" >> $GITHUB_STEP_SUMMARY
-          echo "| API | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
-          echo "| Printer Discovery | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
-          echo "| OrcaSlicer Worker | $( [[ "$CONTAINERS" == "success" ]] && echo '✅' || echo '❌' ) | amd64 only |" >> $GITHUB_STEP_SUMMARY
-          echo "| Monolith | $( [[ "$MONOLITH" == "success" ]] && echo '✅' || echo '❌' ) | amd64, arm64 |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Complete-set validation, signing, ARM64 smoke test, and promotion" >> $GITHUB_STEP_SUMMARY
-          echo "Status: $( [[ "$PROMOTION" == "success" ]] && echo '✅ Passed' || ( [[ "$PROMOTION" == "skipped" ]] && echo '⏭️ Skipped' || echo '❌ Failed' ) )" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Registry" >> $GITHUB_STEP_SUMMARY
-          echo "\`${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}\`" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "### Pull Commands" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`bash" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-api:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-frontend:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-printer-discovery:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-orcaslicer-worker:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "docker pull ${{ env.REGISTRY }}/${{ env.IMAGE_OWNER }}/printfarmer-monolith:${{ needs.promote-images.outputs.smoke_tag }}" >> $GITHUB_STEP_SUMMARY
-          echo "\`\`\`" >> $GITHUB_STEP_SUMMARY
+          retention-days: 30

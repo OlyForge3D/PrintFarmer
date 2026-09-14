@@ -343,61 +343,58 @@ test('qualification and rehearsal receipts are closed transaction-bound variants
 
 test('single authority has direct dependencies, one approval, isolated rehearsal, and diagnostics', () => {
   const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha', 'mode']);
-  assert.deepEqual(workflow.jobs.publish.needs, ['admit', 'authorize']);
-  assert.deepEqual(workflow.jobs.authorize.needs, ['admit', 'qualification', 'collect-qualification']);
-  assert.equal(workflow.jobs.authorize.environment, 'release-${{ needs.admit.outputs.channel }}');
-  assert.doesNotMatch(JSON.stringify(workflow.jobs.authorize), /RELEASE_REGISTRY_TOKEN/);
-  assert.equal(workflow.jobs.rehearsal.environment, 'release-rehearsal-${{ needs.admit.outputs.channel }}');
-  assert.notEqual(workflow.jobs.authorize.environment, workflow.jobs.rehearsal.environment);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha']);
+  assert.deepEqual(workflow.jobs.publish.needs, ['admit', 'qualification', 'collect-qualification']);
+  assert.equal(workflow.jobs.authorize, undefined);
+  assert.equal(workflow.jobs.rehearsal, undefined);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');
+  assert.equal(workflow.jobs.publish.with.source_sha, '${{ needs.admit.outputs.source_sha }}');
+  assert.equal(workflow.jobs.publish.with.channel, '${{ needs.admit.outputs.channel }}');
+  assert.equal(workflow.jobs.publish.with.approval_mode, '${{ needs.admit.outputs.approval_mode }}');
   assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
   assert.match(JSON.stringify(workflow.jobs['schedule-insider']), /--ref development/);
+  assert.doesNotMatch(JSON.stringify(workflow.jobs['schedule-insider']), /mode=/);
   const diagnostics = JSON.stringify(workflow.jobs.diagnostics);
   assert.match(diagnostics, /public_identity|qualification|evidence|publication|source/i);
 });
 
-test('legacy qualifier, recorder, and bounded rehearsal controls remain reachable', () => {
+test('legacy qualifier and recorder remain reachable while diagnostics are hidden', () => {
   const qualify = load(readFileSync('.github/workflows/qualify-canonical-release.yml', 'utf8'));
   const record = load(readFileSync('.github/workflows/record-canonical-qualification.yml', 'utf8'));
   const rehearsal = load(readFileSync('.github/workflows/release-protection-rehearsal.yml', 'utf8'));
   assert.ok(qualify.on.workflow_dispatch);
   assert.ok(record.on.workflow_run);
   assert.notEqual(record.jobs.record.if, false);
-  assert.ok(rehearsal.on.workflow_dispatch);
+  assert.ok(rehearsal.on.workflow_call);
+  assert.equal(rehearsal.on.workflow_dispatch, undefined);
 });
 
-test('publisher admission validates transaction and credential jobs use publisher environments', () => {
+test('publisher has exactly one protected deployment containing every credential and mutation', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
-  assert.match(JSON.stringify(publisher.jobs.admission), /release-transaction\.mjs validate/);
+  assert.deepEqual(Object.keys(publisher.jobs), ['publish']);
   const environments = Object.values(publisher.jobs).filter(job => job.environment).map(job => job.environment);
-  assert.ok(environments.length > 0);
-  assert.ok(environments.every(environment =>
-    environment === 'release-publisher-${{ fromJSON(inputs.identity).channel }}'));
+  assert.deepEqual(environments, ['release-${{ inputs.channel }}']);
+  const job = JSON.stringify(publisher.jobs.publish);
+  assert.match(job, /RELEASE_PUBLISHER_PRIVATE_KEY/);
+  assert.match(job, /RELEASE_REGISTRY_TOKEN/);
+  assert.match(job, /release-control\.mjs authorize/);
+  assert.match(job, /release-set\.mjs tag/);
+  assert.match(job, /release-control\.mjs advance/);
+  assert.doesNotMatch(JSON.stringify(publisher), /release-(?:publisher|rehearsal)-/);
 });
 
 test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
-  const consumers = [];
-  for (const [jobName, job] of Object.entries(publisher.jobs)) {
-    const steps = job.steps ?? [];
-    const checkoutIndexes = steps.flatMap((step, index) =>
-      step.uses?.startsWith('actions/checkout@') &&
-      step.with?.ref === '${{ fromJSON(inputs.transaction).workflowCommit }}' &&
-      step.with?.path === '.release-control' &&
-      step.with?.['persist-credentials'] === false ? [index] : []);
-    const consumerIndexes = steps.flatMap((step, index) =>
-      (typeof step.uses === 'string' && step.uses.startsWith('./.release-control/')) ||
-      (typeof step.run === 'string' && step.run.includes('.release-control/')) ? [index] : []);
-    if (consumerIndexes.length === 0) continue;
-    consumers.push(jobName);
-    assert.equal(checkoutIndexes.length, 1, `${jobName} must have one immutable control checkout`);
-    assert.ok(consumerIndexes.every(index => checkoutIndexes[0] < index),
-      `${jobName} must checkout immutable control before every consumer`);
-  }
-  assert.deepEqual(consumers.sort(), [
-    'admission', 'build-containers', 'build-dotnet', 'build-frontend', 'build-monolith', 'promote-images',
-  ]);
+  const steps = publisher.jobs.publish.steps;
+  const checkout = steps.findIndex(step =>
+    step.uses?.startsWith('actions/checkout@') &&
+    step.with?.ref === '${{ fromJSON(inputs.transaction).workflowCommit }}' &&
+    step.with?.['persist-credentials'] === false);
+  assert.equal(checkout, 0);
+  const consumers = steps.flatMap((step, index) =>
+    typeof step.run === 'string' && /scripts\/ci\/release-(?:control|set)\.mjs/.test(step.run) ? [index] : []);
+  assert.ok(consumers.length >= 5);
+  assert.ok(consumers.every(index => checkout < index));
 });
 
 test('privileged workflow actions are pinned to full commit SHAs with version comments', () => {

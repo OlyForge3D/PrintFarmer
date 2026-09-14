@@ -938,14 +938,16 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   assert.match(docker, /workflow_call:/);
   assert.doesNotMatch(docker, /^\s{2}(push|workflow_dispatch|schedule):/m);
   assert.match(docker, /uses: actions\/download-artifact@[0-9a-f]{40}\s+# v8/);
-  assert.match(docker, /cosign verify-blob/);
+  assert.match(docker, /release-control\.mjs consume/);
   assert.doesNotMatch(docker, /^\s+(?:packages|contents): write$/m);
   assert.match(docker, /password: \$\{\{ secrets\.RELEASE_REGISTRY_TOKEN \}\}/);
-  assert.match(docker, /Publish and verify public corresponding-source assets\n\s+env:\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
+  assert.match(docker, /Publish corresponding-source release assets\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
   for (const step of docker.split(/^\s{6}- /m)) {
     if (!/uses: actions\/(?:upload|download)-artifact@/.test(step)) continue;
     const selector = step.match(/^\s{10}(?:name|pattern): (.+)$/m)?.[1];
-    assert.ok(selector?.includes('github.run_id'), `Artifact is not bound to this run: ${selector}`);
+    assert.ok(selector?.includes('github.run_id') ||
+      selector === 'release-authorization-${{ github.run_attempt }}',
+    `Artifact is not bound to this run or attempt: ${selector}`);
   }
   assert.doesNotMatch(docker, /sort -V|promotion-tags\.txt|release-sha-|manual-\{\{sha\}\}/);
   assert.match(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'),
@@ -957,26 +959,14 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   }
 });
 
-test('standalone and monolith production frontend builds require the verified consumer output for both channels', () => {
+test('single protected publisher requires verified frontend identity for every production build', () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const frontend = docker.split('  build-frontend:')[1].split('\n  ensure-orca-base:')[0];
-  assert.match(frontend, /Consume canonical frontend identity\n\s+id: frontend_identity\n[\s\S]*?uses: \.\/\.release-control\/\.github\/actions\/release-authorization/);
-  assert.match(frontend, /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.frontend_identity\.outputs\.frontend_identity \}\}/);
-  assert.match(frontend, /test -n "\$PRINTFARMER_RELEASE_IDENTITY"\n\s+npm run build/);
-  assert.doesNotMatch(frontend, /^\s+if:/m, 'Neither channel may skip the consumer or build input');
-  const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
-  assert.match(action, /frontend_identity:\r?\n\s+value: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
-  assert.match(action, /node \.release-control\/scripts\/ci\/release-control\.mjs consume/);
-
-  const monolith = docker.split('\n  build-monolith:')[1].split(/\n  [\w-]+:/)[0];
-  assert.match(monolith, /id: source\n[\s\S]*?uses: \.\/\.release-control\/\.github\/actions\/release-authorization/);
-  assert.match(monolith, /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.source\.outputs\.frontend_identity \}\}\n\s+run: test -n "\$PRINTFARMER_RELEASE_IDENTITY"/);
-  assert.ok(monolith.indexOf('Require canonical monolith frontend identity') <
-    monolith.indexOf('uses: docker/build-push-action@'));
-  assert.match(monolith, /file: scripts\/docker\/dockerfiles\/Dockerfile\.multistage\n\s+target: monolith-runtime/);
-  assert.match(monolith, /PRINTFARMER_RELEASE_IDENTITY=\$\{\{ steps\.source\.outputs\.frontend_identity \}\}/);
-  assert.match(monolith, /BUILD_VERSION=\$\{\{ fromJSON\(inputs\.identity\)\.canonicalVersion \}\}/);
-  assert.doesNotMatch(monolith, /^\s+if:/m, 'Neither channel may skip monolith validation');
+  assert.match(docker, /id: consume[\s\S]*?release-control\.mjs consume/);
+  assert.match(docker,
+    /PRINTFARMER_RELEASE_IDENTITY: \$\{\{ steps\.consume\.outputs\.frontend_identity \}\}/);
+  assert.match(docker, /--build-arg "PRINTFARMER_RELEASE_IDENTITY=\$\{PRINTFARMER_RELEASE_IDENTITY\}"/);
+  assert.match(docker, /build_component frontend frontend-runtime linux\/amd64,linux\/arm64/);
+  assert.match(docker, /build_component monolith monolith-runtime linux\/amd64,linux\/arm64/);
 
   const multistage = readFileSync('scripts/docker/dockerfiles/Dockerfile.multistage', 'utf8').replace(/\r\n/g, '\n');
   const stage = multistage.split(' AS frontend-build\n')[1].split('\nFROM ')[0];
@@ -986,16 +976,10 @@ test('standalone and monolith production frontend builds require the verified co
   assert.ok(stage.indexOf('test -n "$PRINTFARMER_RELEASE_IDENTITY"') < stage.indexOf('npm run build'));
   assert.match(multistage.split(' AS monolith-runtime\n')[1], /COPY --from=frontend-build \/app\/dist \.\/wwwroot\//);
   assert.match(stage, /if \[ "\$build_status" -ne 0 \]; then[\s\S]*?exit \$build_status/);
-  assert.equal((docker.match(/npm run build/g) || []).length, 1, 'New native frontend paths need identity coverage');
   assert.equal((multistage.match(/npm run build/g) || []).length, 1, 'New Docker frontend paths need identity coverage');
 });
 
-test('actual native and Docker frontend guards reject missing identity before building published versions', () => {
-  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const native = docker.split('\n  build-frontend:')[1].split('\n  ensure-orca-base:')[0];
-  const nativeGuard = native.match(/test -n "\$PRINTFARMER_RELEASE_IDENTITY"/)?.[0];
-  const monolith = docker.split('\n  build-monolith:')[1].split(/\n  [\w-]+:/)[0];
-  const monolithGuard = monolith.match(/run: (test -n "\$PRINTFARMER_RELEASE_IDENTITY")/)?.[1];
+test('Docker frontend guard rejects missing identity before building published versions', () => {
   const multistage = readFileSync('scripts/docker/dockerfiles/Dockerfile.multistage', 'utf8').replace(/\r\n/g, '\n');
   const dockerGuard = multistage.split(' AS frontend-build\n')[1].match(/^RUN (if .*; fi)$/m)?.[1];
   const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
@@ -1003,7 +987,7 @@ test('actual native and Docker frontend guards reject missing identity before bu
   stableLedger.qualifications[sha] = hotfixQualification();
   const stable = reserve(stableLedger, stableAdmission(), created, undefined, hotfixQualification()).record;
   const insider = reserve(state(), admission(), created).record;
-  for (const guard of [nativeGuard, monolithGuard, dockerGuard]) {
+  for (const guard of [dockerGuard]) {
     assert.ok(guard);
     for (const version of ['1.2.3', '1.2.3-insider.42', '']) {
       for (const identity of ['', buildMetadata(
@@ -1152,14 +1136,13 @@ test('all executable scripts, actions and workflows have only the reviewed relea
     .split('\0').filter(entry => entry.startsWith('100755 ')).map(entry => entry.split('\t')[1]));
   const files = execFileSync('git', ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
     gitOptions).split('\0').filter(file =>
+    existsSync(file) &&
     (executables.has(file) || /\.(?:sh|bash|ps1|py|rb|js|mjs|cjs)$/.test(file) || /(?:^|\/)Fastfile$/.test(file) ||
       /^(?:scripts|tools|mobile\/scripts|\.github\/scripts)\/(?:[^/]+\/)*[^/.]+$/.test(file) ||
       /^\.github\/.*\.ya?ml$/.test(file) || /^(?:scripts|tools|\.github|\.squad)\/.*\.ts$/.test(file)) &&
     !/(?:^|\/)(?:tests?|__tests__|e2e|node_modules)(?:\/|$)|(?:^|\/)test-[^/]+$|\.(?:test|spec)\./.test(file));
   const approved = {
     'scripts/ci/release-github.mjs': ['tag-write'],
-    'scripts/ci/release-rehearsal-probes.mjs': ['tag-write'],
-    'scripts/ci/release-rehearsal-fixture.mjs': ['tag-write'],
     '.github/workflows/docker-publish.yml': ['release-write'],
     '.github/workflows/testflight-beta.yml': ['tag-write', 'release-write'],
     'mobile/scripts/release-beta.sh': ['tag-write'],
@@ -1812,13 +1795,6 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
     environment.protection_rules[0].prevent_self_review = false;
     environment.protection_rules[0].reviewers[0].reviewer.login = 'jpapiez';
   }
-  const publisherEnvironment = {
-    name: `release-publisher-${channel}`,
-    privateMarker: 'raw-publisher-environment-sentinel',
-    can_admins_bypass: false,
-    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
-    protection_rules: [],
-  };
   const branchRules = [
     { type: 'deletion' }, { type: 'non_fast_forward' },
     { type: 'pull_request', parameters: {
@@ -1841,15 +1817,11 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
     if (endpoint === `environments/release-${channel}/deployment-branch-policies`) {
       return { branch_policies: [{ name: 'development', type: 'branch' }] };
     }
-    if (endpoint === `environments/release-publisher-${channel}`) return publisherEnvironment;
-    if (endpoint === `environments/release-publisher-${channel}/deployment-branch-policies`) {
-      return { branch_policies: [{ name: 'development', type: 'branch' }] };
-    }
     if (endpoint === 'rulesets?per_page=100') return rulesets;
     if (endpoint.startsWith('rulesets/')) return rulesets.find(rule => rule.id === Number(endpoint.split('/')[1]));
     throw new Error(endpoint);
   };
-  return { api, environment, publisherEnvironment, rulesets, branchRules, branchRuleset };
+  return { api, environment, rulesets, branchRules, branchRuleset };
 }
 
 test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
@@ -1871,32 +1843,6 @@ test('live protection adapter accepts only scoped reviewer-gated environments an
     ? rulesets.map(rule => ({ ...rule, enforcement: 'active' })) : api(endpoint);
   rulesets[0].enforcement = 'disabled';
   await assert.rejects(verifyProtection(staleListing, 'insider', '123', 'separation-of-duties'), /active release-canonical-tags/);
-});
-
-test('publisher environments are pre-created, canonical-branch-only, non-bypassable and reviewer-free', async () => {
-  for (const mutate of [
-    fixture => { fixture.publisherEnvironment.can_admins_bypass = true; },
-    fixture => { fixture.publisherEnvironment.can_admins_bypass = undefined; },
-    fixture => { fixture.publisherEnvironment.deployment_branch_policy.custom_branch_policies = false; },
-    fixture => { fixture.publisherEnvironment.deployment_branch_policy.protected_branches = true; },
-    fixture => { fixture.publisherEnvironment.protection_rules.push({ type: 'required_reviewers', reviewers: [] }); },
-  ]) {
-    const fixture = protectionFixture();
-    mutate(fixture);
-    await assert.rejects(verifyProtection(fixture.api, 'insider', '123', 'separation-of-duties'),
-      /publisher environment/);
-  }
-  const missing = protectionFixture();
-  const missingApi = async endpoint => {
-    if (endpoint === 'environments/release-publisher-insider') {
-      const error = new Error('missing');
-      error.status = 404;
-      throw error;
-    }
-    return missing.api(endpoint);
-  };
-  await assert.rejects(verifyProtection(missingApi, 'insider', '123', 'separation-of-duties'),
-    /Protection policy read failed: HTTP 404/);
 });
 
 for (const channel of ['stable', 'insider']) {
@@ -2219,21 +2165,18 @@ test('missing or unknown approval mode cannot read policy or admit or authorize 
 });
 
 test('release workflow explicitly wires approval mode and confines reviewer evidence to protected authorization', () => {
-  const text = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
-  const admissionJob = text.split('  admit:')[1].split('  authorize:')[0];
-  const authorizationJob = text.split('  authorize:')[1].split('  publish:')[0];
-  for (const job of [admissionJob, authorizationJob]) {
-    assert.match(job, /RELEASE_APPROVAL_MODE: \$\{\{ vars\.RELEASE_APPROVAL_MODE \}\}/);
-  }
+  const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
+  const publisher = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const admissionJob = authority.split('  admit:')[1].split('  qualification:')[0];
+  assert.match(admissionJob, /RELEASE_APPROVAL_MODE: \$\{\{ vars\.RELEASE_APPROVAL_MODE \}\}/);
   assert.doesNotMatch(admissionJob, /RELEASE_OWNER_APPROVED_REVIEWERS/);
   assert.match(admissionJob, /approval_mode: \$\{\{ steps\.admit\.outputs\.approval_mode \}\}/);
-  assert.match(authorizationJob,
-    /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ needs\.admit\.outputs\.approval_mode \}\}/);
-  assert.match(authorizationJob, /environment: release-\$\{\{ needs\.admit\.outputs\.channel \}\}/);
-  assert.match(authorizationJob,
+  assert.match(publisher, /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ inputs\.approval_mode \}\}/);
+  assert.match(publisher, /environment: release-\$\{\{ inputs\.channel \}\}/);
+  assert.match(publisher,
     /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
   assert.match(admissionJob, /statuses: read/);
-  assert.match(authorizationJob, /permission-statuses: read/);
+  assert.match(publisher, /permission-statuses: read/);
 });
 
 test('authorization fails closed on missing, invalid or divergent admitted approval mode before API access', async () => {
@@ -2298,19 +2241,14 @@ test('every release artifact upload path is explicitly inventoried, including bo
   assert.deepEqual(artifactUploads(authority), [
     ['.artifacts/release-transaction/transaction.json'],
     ['.artifacts/release-transaction/qualification.json'],
+  ]);
+  assert.deepEqual(artifactUploads(docker), [
     [
       authorizationPath, authorizationBundle,
       '.artifacts/release-authorization/public-identity.json',
       '.artifacts/release-authorization/public-identity.bundle.json',
     ],
-    ['.artifacts/release-transaction/rehearsal-receipt.json'],
-  ]);
-  assert.deepEqual(artifactUploads(docker), [
-    ['./publish/slicer-host'], ['./publish/api'], ['./publish/orcaslicer-worker'],
-    ['./publish/printer-discovery'], ['./publish/compliance/license-inventory.json'],
-    ['src/Web/ReactApp/dist'], ['release-artifacts/*.spdx.json'],
-    ['release-artifacts/digest-*.txt'], ['release-artifacts/*.spdx.json'],
-    ['release-artifacts/digest-monolith.txt'], [authorizationPath, authorizationBundle, privateSetPath],
+    [authorizationPath, authorizationBundle, privateSetPath],
   ]);
   // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
   const action = '.github/actions/release-authorization/action.yml';
@@ -3206,49 +3144,29 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   }
 });
 
-test('workflow wiring transports only public outputs and each consumer verifies the normalized artifact', () => {
+test('workflow wiring keeps authorization and every publisher consumer in one protected job', () => {
   const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const action = readFileSync('.github/actions/release-authorization/action.yml', 'utf8');
-  const authorize = authority.split('\n  authorize:')[1].split('\n  publish:')[0];
-  assert.match(authorize, /environment: release-/);
-  assert.ok(authorize.indexOf('uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349') <
-    authorize.indexOf('node scripts/ci/release-control.mjs authorize'));
-  assert.match(authorize, /permission-administration: read/);
-  assert.match(authorize, /GH_TOKEN: \$\{\{ github\.token \}\}\n\s+RELEASE_PUBLISHER_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
-  assert.doesNotMatch(authority.split('\n  admit:')[1].split('\n  authorize:')[0], /permission-administration|RELEASE_PUBLISHER_TOKEN/);
-  const jobs = Object.fromEntries([...docker.matchAll(/^  ([\w-]+):\n([\s\S]*?)(?=^  [\w-]+:\n|(?![\s\S]))/gm)]
-    .map(match => [match[1], match[2]]));
-  const gated = name => name === 'admission' || (jobs[name]?.match(/^    needs: (.+)$/m)?.[1]
-    .replace(/[[\]]/g, '').split(',').map(item => item.trim()).some(gated) ?? false);
-  for (const [name, job] of Object.entries(jobs)) {
-    if (/uses: \.\/\.release-control\/\.github\/actions\/release-authorization|release-control\.mjs (?:preflight|advance)|RELEASE_REGISTRY_TOKEN/.test(job)) {
-      assert.ok(gated(name), `${name} can bypass signature admission`);
-    }
-  }
-  assert.match(authority, /public_identity: \$\{\{ steps\.authorize\.outputs\.public_identity \}\}/);
-  assert.match(authority, /identity: \$\{\{ needs\.authorize\.outputs\.public_identity \}\}/);
-  for (const match of (authority + docker + action).matchAll(/\b([A-Z_]*RELEASE_IDENTITY)\s*[:=]/g)) {
+  const publishJob = docker.split('\n  publish:')[1];
+  assert.match(publishJob, /environment: release-/);
+  assert.ok(publishJob.indexOf('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349') <
+    publishJob.indexOf('release-control.mjs authorize'));
+  assert.ok(publishJob.indexOf('release-control.mjs authorize') <
+    publishJob.indexOf('RELEASE_REGISTRY_TOKEN'));
+  assert.ok(publishJob.indexOf('release-set.mjs tag') <
+    publishJob.indexOf('release-control.mjs advance'));
+  const preApproval = authority.split('\n  admit:')[1].split('\n  publish:')[0];
+  assert.doesNotMatch(preApproval,
+    /RELEASE_PUBLISHER_PRIVATE_KEY|RELEASE_REGISTRY_TOKEN|create-github-app-token|contents: write|packages: write|id-token: write/);
+  for (const match of (authority + docker).matchAll(/\b([A-Z_]*RELEASE_IDENTITY)\s*[:=]/g)) {
     assert.equal(match[1], 'PRINTFARMER_RELEASE_IDENTITY', 'Only the public frontend identity may be transported');
   }
-  assert.doesNotMatch(authority + docker + action, /outputs\.identity\b/);
-  assert.doesNotMatch(docker, /cp (?:release-identity|release-set|\.artifacts\/release-authorization\/release-identity)/);
-  assert.match(docker, /cp \.artifacts\/release-authorization\/public-identity\.bundle\.json release-assets\/release-identity\.bundle\.json/);
-  assert.match(authority, /--bundle \.artifacts\/release-authorization\/public-identity\.bundle\.json \\\n\s+\.artifacts\/release-authorization\/public-identity\.json/);
-  assert.match(docker, /cmp -s release-assets\/release-identity\.json \.artifacts\/release-authorization\/public-identity\.json/);
-  for (const match of docker.matchAll(/fromJSON\(inputs\.identity\)\.(\w+)/g)) {
-    assert.ok([...publicIdentityFields, 'identitySha256', 'buildTime'].includes(match[1]), match[1]);
-  }
-  for (const match of (authority + docker + action).matchAll(/steps\.(?:authorize|consume)\.outputs\.(\w+)/g)) {
+  assert.doesNotMatch(authority + docker, /outputs\.identity\b/);
+  for (const match of (authority + docker).matchAll(/steps\.(?:authorize|consume)\.outputs\.(\w+)/g)) {
     assert.ok(['public_identity', 'verified_branch_head', 'frontend_identity', 'version', 'container_version', 'channel', 'identity_hash',
       'source_archive_url', 'sbom_url'].includes(match[1]), match[1]);
   }
-  assert.match(action, /startsWith\("release-authorization-"\)|release-authorization-\[1-9\]/);
-  assert.match(action, /--dir \.artifacts\/release-authorization/);
-  assert.ok(action.indexOf('gh run download') < action.indexOf('release-control.mjs consume'));
-  assert.ok(action.indexOf('cosign-installer') < action.indexOf('release-control.mjs consume'));
-  assert.equal((docker.match(/uses: \.\/\.release-control\/\.github\/actions\/release-authorization/g) || []).length, 6);
-  assert.doesNotMatch(docker, /run: node scripts\/ci\/release-control\.mjs consume/);
+  assert.match(docker, /run: node scripts\/ci\/release-control\.mjs consume/);
   assert.match(readFileSync('.dockerignore', 'utf8'), /\*\*\/\.artifacts\//);
   assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
 });
@@ -3350,16 +3268,15 @@ test('the shared public field projection rejects wrong types rather than coercin
 });
 
 test('executed signing and asset-copy commands keep normalized authorization separate from public projection', async () => {
-  const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
-  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
-  const signing = authority.split('      - name: Sign immutable source and App-verified protection attestation\n')[1]
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
+  const signing = docker.split('      - name: Sign immutable authorization\n')[1]
     .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
-    /^\s+(cmp -s release-assets\/release-identity|cp \.artifacts\/release-authorization\/public-identity)/.test(line))
+    /^\s+cp \.\.\/\.artifacts\/release-authorization\/public-identity/.test(line))
+    .map(line => line.replace('../', ''))
     .map(line => line.trim()).join('\n');
-  const uploadedAuthorizationFiles = [...artifactUploads('.github/workflows/consolidated-release.yml'),
-    ...artifactUploads('.github/workflows/docker-publish.yml')].flat()
+  const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
   const cwd = process.cwd();

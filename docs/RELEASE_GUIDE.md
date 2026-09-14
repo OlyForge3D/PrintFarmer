@@ -35,18 +35,18 @@ The supported administrator journey is:
 2. Leave **source_sha** blank to pin that branch's current HEAD once, or enter
    a full lowercase 40-character SHA that is either that HEAD or its trusted
    ancestor. The workflow definition remains pinned independently.
-3. Select `release` or the explicitly non-publishing `rehearsal` mode.
-4. Click **Run workflow** on `development` and approve the one
+3. Click **Run workflow** on `development` and approve the one
    pending `release-stable` or `release-insider` transaction environment.
-5. Follow the generated Actions summary. Qualification, evidence collection,
+4. Follow the generated Actions summary. Qualification, evidence collection,
    allocation, ledger/tag work, publication, pointer advancement and bounded
    diagnostics are automatic and fail closed.
 
 The consolidated journey does not require separately dispatching CI,
-qualification, evidence-recorder or rehearsal workflows. Those bounded control
-workflows remain available for their established verification and recovery
-purposes. Do not supply CI run IDs, comment IDs, tags or allocator values to the
-consolidated journey, and do not author formatted commit comments or statuses.
+qualification, evidence-recorder or diagnostic workflows. Internal release
+diagnostics are maintainer-only, non-publishing, and intentionally absent from
+the normal workflow form. Do not supply CI run IDs, comment IDs, tags, fixture
+values, evidence values, or allocator values to the consolidated journey, and
+do not author formatted commit comments or statuses.
 An explicit source outside the selected canonical branch's ancestry is rejected;
 once admitted, later branch movement does not retarget the source commit.
 
@@ -59,19 +59,17 @@ environment approval. Receipts last 30 minutes and underlying evidence must
 predate collection, remain within its own freshness window, and not be future
 dated. Delayed approval beyond the receipt window requires a new dispatch.
 
-`rehearsal` uses the same source selection and qualification path in the
-distinct `release-rehearsal-<channel>` environment, but that job contains no
-publisher App, registry or OIDC credential
-references and cannot call reserve, tag, publish or pointer-advance operations.
-Its `release-rehearsal-only` receipt has `publicationAuthorized: false` and is
-not accepted as release qualification or authorization.
+The hidden internal diagnostic workflow has no production environment,
+publisher App, registry credential, OIDC permission, or write permission. Its
+`release-rehearsal-only` receipt has `publicationAuthorized: false` and is not
+accepted as release qualification or authorization. It is a maintainer
+diagnostic, not an administrator release ceremony.
 
-Each `release-publisher-<channel>` environment must be provisioned before use
-with administrator bypass disabled, exactly one branch policy for the immutable
-`development` control branch, and zero required reviewers. The separate
-`release-<channel>` environment is the single human approval boundary. Missing
-or auto-created publisher environments fail verification before credentials,
-registry writes, release assets, or pointer advancement.
+`release-stable` and `release-insider` are the only publication environments.
+Each real run creates exactly one deployment to the selected environment. The
+same protected job verifies live policy, mints credentials, reserves identity,
+creates the canonical source tag, signs and publishes the complete set, and
+advances the channel pointer last.
 
 | Channel | Base authority | Canonical version | Source tag |
 | --- | --- | --- | --- |
@@ -456,8 +454,8 @@ Read-only live API evidence on 2026-09-12:
 
 - Ruleset **12465886 `Main`** is **disabled**, has an empty include scope, and
   only deletion/non-fast-forward rules. It does not enforce release policy.
-- Only the unprotected `copilot` environment exists.
-  `release-stable`, `release-insider` and `refs/heads/release-ledger` return 404.
+- `release-stable` and `release-insider` are the existing protected publication
+  environments. No additional publisher or rehearsal environment is required.
 - No `RELEASE_*` variables are configured. Repository access reports admin,
   but #2668 retains explicit owner approval of storage/continuity/publisher policy.
   No live ruleset/environment was changed and no publisher app was provisioned.
@@ -805,8 +803,8 @@ Before enabling:
    rules without bypass, conversation resolution and all exact-SHA checks above.
    Do not enable native approval requirements in single-maintainer mode.
    Protect `release-stable`/`release-insider` with
-   manual reviewer approval under the explicit mode above and only their
-   respective branch allowed. Configure the variable and any owner-approved
+   manual reviewer approval under the explicit mode above and allow only the
+   immutable `development` workflow control branch. Configure the variable and any owner-approved
    delegate secret; disable administrator bypass and read back each environment's
    actual reviewer/self-review settings and boolean `can_admins_bypass: false`
    before enabling publication.
@@ -826,13 +824,11 @@ Before enabling:
    alone does not constrain another workflow's `GITHUB_TOKEN`, so this package
    ACL cutover is mandatory owner evidence, not implied by environment setup.
    Infrastructure package ownership is unchanged.
-   The single human gate remains `release-stable` / `release-insider`.
-   Credential-only `release-publisher-stable` /
-   `release-publisher-insider` environments retain the matching canonical
-   branch restriction and hold downstream publisher/registry credentials, but
-   must not configure required reviewers. This prevents internal build/publish
-   jobs from creating additional human approval ceremonies after the approved
-   transaction has produced its signed authorization.
+   Store these credentials only on `release-stable` and `release-insider`.
+   Those are the single human gates and the only publication environments.
+   Their deployment branch policy allows the immutable `development` workflow
+   control ref for both channels; the selected source remains independently
+   pinned to `main` for stable or `development` for insider.
 6. Read the effective policies back and rehearse denied publication before
    first authorized publication, including rejected writes with a generic
    repository workflow token. Release jobs request no repository-token contents
@@ -846,203 +842,20 @@ high water without changing old reservations, and review a continuity checkpoint
 migration. Never reset N after a base/workflow change. An unprovable floor means
 publication remains disabled. No normal workflow has a reset/bypass operation.
 
-### Retired standalone rehearsal history (#2668)
+### Internal diagnostic workflow (#2668)
 
-> The standalone workflow below is retained as internal historical
-> infrastructure and is not an operator entry point. Use `mode: rehearsal` in
-> **Consolidated Release**. That path performs one transaction approval, exposes
-> no production publication credential references, and emits a typed
-> non-authorizing receipt.
+`release-protection-rehearsal.yml` is a hidden `workflow_call` maintenance
+workflow, not a normal administrator entry point. It has no environment,
+secret, package permission, OIDC permission, or write permission. Maintainers
+may invoke it only from reviewed internal automation with an immutable
+non-release transaction.
 
-`release-protection-rehearsal.yml` was the separate manually dispatched verifier
-superseded by the integrated mode. Its receipts have the distinct
-`release-rehearsal-only` kind and are never release identities, signatures,
-reservations or publication authorization. Do not approve a production
-`Reserve and authorize immutable source` job to obtain rehearsal evidence.
-Rejected production run
-[34760943915](https://github.com/OlyForge3D/PrintFarmer/actions/runs/34760943915)
-failed closed: admission succeeded, authorization failed with zero executed
-steps, and publication was skipped. That is zero-publication evidence for
-that run, not App-permission or denied-write proof.
-
-Merge the reviewed harness through the normal high-risk review gate, then obtain
-fresh canonical CI/review/qualification. Run the trusted workflow only from
-`development`; stable selects a pinned `main` source and insider selects a pinned
-`development` source. An unconditional, credential-free admission job checks the
-repository, dispatch event, fixed workflow ref/SHA and recoverable transaction.
-Invalid
-dispatches fail the run rather than skipping every job and appearing green.
-Admission performs no checkout or API requests and has no token permissions or
-environment secrets. All protected jobs depend on admission. Positive verification
-and generic probes use the existing canonical `release-<channel>` owner gate;
-fixture creation uses the separate `release-rehearsal-fixture-<channel>` owner gate.
-Never widen environment branch policies.
-Because GitHub can rerun either protected job without rerunning admission, each
-also repeats the credential-free check as its first step and recovers the
-immutable attempt-one transaction before checkout, third-party actions, App
-token creation or step-level credential exposure.
-Environment approval still precedes job startup; no environment secrets or
-tokens are passed to the pre-check. Artifact uploads require that job's admission to succeed, even on failure paths.
-A partial-job rerun reuses only exact retained run-scoped evidence and otherwise
-fails locally without executing later steps.
-The four embedded JavaScript bodies must match the `rehearsalAdmissionSource`
-constant in `scripts/ci/release-rehearsal-admission.mjs` byte-for-byte; regression
-tests enforce source parity and step ordering. The constant preserves LF line
-endings across checkouts. Embedding avoids fetching code before admission.
-The workflow shares the channel's publication concurrency group and refuses
-active/pending publishers on either channel. Keep production dispatches paused
-throughout the window; any observed
-concurrent drift invalidates the evidence.
-
-The default `denial_probes=false` performs only reads. The protected App token
-is explicitly repository-scoped and downscoped to contents, checks, commit
-statuses, administration and Actions **read**. Token issuance fails if the
-installation has not accepted those permissions. The adapter also enforces GET
-only, rejects redirects and limits requests. Real policy/check/status reads,
-the complete ledger ancestry, and independent canonical qualification must
-succeed. App settings alone, an administrative token, or ordinary admission
-are not equivalent evidence. Token creation/revocation and Actions/environment
-audit records are intended effects.
-
-The receipt's `commitStatusReadObserved` means only that an authenticated App
-request read commit statuses. This public repository's status endpoint can be
-read without a commit-status permission grant, so neither that observation nor
-`appReadsVerified` proves the installation grant. The receipt explicitly sets
-`commitStatusGrantEvidenceRequired: true`. Before accepting the rehearsal, the
-owner must separately retain secret-free evidence of the installation's accepted
-`statuses: read` permission (or stronger, downscoped to read for this token),
-paired with successful issuance using the workflow's explicit
-`permission-statuses: read` request. App settings alone are insufficient.
-The harness does not obtain extra credentials to read installation permissions.
-Never retain the private key or token response as evidence.
-
-For live denial probes, dispatch with `denial_probes=true`, review the exact
-qualified source SHA/run in Actions, and approve the protected environment jobs.
-Fixture authorization is the protected environment approval only: no additional
-owner-formatted record, pre-created tag, or approved-SHA setting is required.
-Admission binds execution to the workflow/source SHA, channel, run ID and first
-attempt; qualification verifies canonical evidence. These checks supplement the
-environment gate, not an independent second approval factor.
-
-One-time owner configuration: create `release-rehearsal-fixture-insider` (and,
-before stable use, `release-rehearsal-fixture-stable`) with only `jpapiez` as
-required reviewer, administrator bypass disabled, and exactly the corresponding
-`development` or `main` branch policy. Set self-review prevention consistently
-with `RELEASE_APPROVAL_MODE`. Store the designated App **4927270** key only in
-that protected environment as `RELEASE_REHEARSAL_FIXTURE_PRIVATE_KEY`; retain
-the existing nonsecret App ID, ledger anchor and approval-mode configuration.
-This change does not configure live environments or grant a ruleset bypass.
-The publisher App private key has an installation permission ceiling broader than
-the token requested here; it is **not** a contents-only credential. GitHub enforces
-the issued token's repository and permission scope. Protected environment approval
-and branch restrictions guard access to the key that can mint those tokens.
-The fixture path rejects the production `RELEASE_PUBLISHER_PRIVATE_KEY` and
-`RELEASE_OWNER_APPROVED_REVIEWERS`, as well as unrelated App/publisher/registry tokens.
-
-After the GET-only positive job, the separate fixture job rechecks qualification,
-live run identity, owner environment policy and the positive inventory digest.
-Only then does it mint a fresh App installation token, explicitly scoped to
-PrintFarmer repository ID `1044049720` and **contents: write** (plus GitHub's
-implicit metadata read). It validates the returned grant and holds the token
-only in memory, never an Actions output, file, artifact or log; every returned
-string token is captured for revocation before format/scope validation. Revocation
-runs in `finally`, including malformed-string rejection. The generic token remains
-read-only in this job.
-
-The only resource mutation allowed is one POST creating the absent lightweight
-`refs/tags/v-rehearsal-2668-<run_id>-1-update` at that inventory's ledger head.
-The ledger may retain application files, so the job walks and hash-verifies all
-workflow blobs at both the ledger target and current default-branch head before
-minting. The repository default branch must be **development**, even for stable
-runs from `main`; repository metadata is verified before minting, immediately
-before the write, and after inventory verification. A different or changed default
-branch fails closed rather than auditing an assumed head.
-
-The namespace must match **zero push/create workflows**, regardless of write
-permissions or publication intent; unknown triggers fail closed. There is no
-workflow/blob exception. **Sync Squad Labels** explicitly ignores
-`v-rehearsal-2668-*` tags, preventing secondary issue/label writes (GitHub ignores
-path filters on tag pushes). The audit also covers the write-capable CodeQL,
-devcontainer, OrcaSlicer base-image, slicer-security and TestFlight push workflows:
-their branch-only or disjoint tag filters cannot consume fixture tags.
-Indirect workflow-run triggers are limited to canonical qualification.
-
-Both audited trees must contain these exclusions. An older ledger tree containing
-the unfiltered label workflow now correctly blocks fixture provisioning; merging
-the fix on development alone does not repair that historical tree. Stop for
-separately reviewed ledger recovery; do not weaken the guard, move the target,
-or mutate the ledger as part of this provisioner.
-The single-use writer enforces the exact route/payload internally and refuses a
-second write, including concurrent attempts and retries after unknown outcomes.
-No downstream workflow or publication is dispatched by the fixture tag.
-The secret-free fixture receipt records its exact name, target, creator App,
-attempt outcome and **retain-no-deletion-bypass** lifecycle. Retain the tag
-permanently; never reuse, move or delete it, or weaken rulesets. A failed or
-ambiguous create stops the chain without retry; inspect its receipt and retain
-any observed tag. A new approved run uses a new run-specific name.
-
-The separate probe job receives only its generic `GITHUB_TOKEN`, requesting
-contents/package write and read-only verification permissions. Review its
-**Set up job → GITHUB_TOKEN Permissions** log for effective contents/package
-write before accepting results; preserve that Actions log with the receipts.
-The runner additionally verifies positive repository push capability, package
-metadata and registry read access. No publisher App token, registry secret,
-signing credential, release creation, manifest PUT, blob completion, package
-tag, alias update or production dispatch is available in this job.
-
-The nine target probes run serially, never retrying a write:
-
-- Create the absent `refs/tags/v-rehearsal-2668-<run_id>-1` at the reviewed
-  source SHA. Both fixture names match protected `v*` but fail canonical
-  SemVer parsing; they cannot trigger server publication.
-- Intentionally create one unreferenced Git commit with the ledger head's
-  **identical tree** and sole parent. Attempt real fast-forwards of the inert
-  update fixture and the ledger ref to that child, always `force:false`.
-  The object is an explicit intended effect even when both updates are denied.
-  No tree/blob, state, counter, allocation, qualification or pointer is authored.
-  If both updates are denied, no ref retains this child: GitHub may garbage-collect
-  the unreferenced object, and later SHA lookup is not guaranteed. The receipt's
-  `retain-never-reset` disposition prohibits harness deletion/reset; it is not
-  a durability guarantee. Preserve the secret-free receipt (child, parent and
-  tree SHAs and verified attempt outcomes) and run logs beyond the artifact's
-  30-day retention window. Do not add a ref or weaken protections to retain it.
-- For every production component in `release-policy.mjs`, authenticate the
-  generic token, prove registry read access, then attempt one zero-body upload
-  initiation. A scope request alone never counts as a write denial.
-
-Only operation-specific Git ruleset denials and authenticated registry
-write/scope denials count. Malformed responses, authentication failures,
-conflicts, non-fast-forwards, throttling, redirects, network errors and unknown
-outcomes fail closed. Any unexpected success stops all subsequent probes.
-Retain unexpectedly created refs or ledger edges: never reset history or delete
-immutable markers. The only automatic cleanup is cancellation of the exact new
-same-host/same-package upload session returned by an accepted upload start,
-followed by confirmation that the session is unknown. Failed/ambiguous cleanup
-requires owner recovery. Successful cleanup **does not turn failure into pass**.
-
-Receipts inventory all paginated historical tags (including `ios/`), canonical
-heads, ledger head/tree/state digest, releases and their assets, and all six
-package version/digest records. The fixture job starts from the positive digest;
-its final inventory must differ by exactly the one intended tag with the exact
-target/type, with no other drift. Only that tag is subtracted for that comparison,
-never a namespace or prefix. The resulting digest becomes the probe baseline,
-which includes the fixture and must match before every probe and after the final
-attempt, including failure paths. Thus moving/deleting it is always drift.
-Incomplete pagination or mismatched package counts fail closed. Passing also
-requires exactly one denied upload result per production package; an empty or
-partial upload list cannot pass. Raw policy, reviewer data, API errors, release
-bodies, credentials and upload-state URLs are not emitted. Preserve all three
-`release-rehearsal-*` artifacts and run logs.
-
-GHCR does not expose a global unfinished-upload listing API. Upload evidence
-therefore accounts for **every initiation attempted by this harness**, including
-unknown outcomes and confirmed cancellation, alongside full package-version
-inventories; it is not a claim to inventory unrelated clients' pending uploads.
-“Zero unintended writes” is an observed passing condition, not a guarantee
-that the controls under test cannot fail or that no external writer exists.
-Package-admin ACL attestation, effective token-permission logs and owner
-acceptance remain required. A passing rehearsal does not close #2668, qualify
-an unqualified stable branch, authorize publication, or unblock #2660.
+The workflow validates the transaction, runs the bounded release-control test
+suite, and emits a `release-rehearsal-only` receipt with
+`publicationAuthorized: false`. Release qualification and authorization reject
+that receipt type. The diagnostic path cannot reserve an identity, create a
+tag, publish a package or GitHub Release, mutate the ledger, or advance a
+channel pointer.
 
 ## Validation
 

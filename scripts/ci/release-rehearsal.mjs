@@ -46,6 +46,8 @@ export function rehearsalContext(env) {
 
 export function rehearsalReadUrl(endpoint) {
   requireThat(typeof endpoint === 'string', 'Invalid rehearsal read route');
+  requireThat(!/^(?:environments|packages)\//.test(endpoint),
+    'Unapproved rehearsal read URL');
   const packages = /^packages\/(printfarmer-[a-z-]+)(\/versions\?per_page=100&page=[1-9][0-9]*)?$/;
   const match = packages.exec(endpoint);
   if (match) {
@@ -53,7 +55,6 @@ export function rehearsalReadUrl(endpoint) {
     return `https://api.github.com/orgs/OlyForge3D/packages/container/${match[1]}${match[2] ?? ''}`;
   }
   const reads = [
-    /^environments\/release-rehearsal-fixture-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^git\/matching-refs\/tags\?per_page=100&page=[1-9][0-9]*$/,
     /^git\/ref\/tags\/v-rehearsal-2668-[1-9][0-9]*-1-update$/,
     /^releases\?per_page=100&page=[1-9][0-9]*$/,
