@@ -76,7 +76,14 @@ export function plannedReleaseAliases(record, set, inspect = () => undefined) {
       ? [
       { value: record.canonicalVersion, mutable: false },
       { value: `stable-${record.canonicalVersion}`, mutable: false, retained: true },
-      { value: `${parsed.major}.${parsed.minor}`, mutable: true },
+      ...(() => {
+        const value = `${parsed.major}.${parsed.minor}`;
+        const existing = inspect(`ghcr.io/olyforge3d/printfarmer-${component}:${value}`);
+        if (!existing || existing.digest === image.digest) return [{ value, mutable: true }];
+        requireThat(parseTag(`v${existing.version}`).channel === 'stable',
+          `Cross-channel alias movement rejected for ${component}:${value}`);
+        return compareVersions(record.canonicalVersion, existing.version) > 0 ? [{ value, mutable: true }] : [];
+      })(),
       ...[parsed.major, 'latest'].flatMap(value => {
         const existing = inspect(`ghcr.io/olyforge3d/printfarmer-${component}:${value}`);
         if (!existing || existing.digest === image.digest) return [{ value, mutable: true }];

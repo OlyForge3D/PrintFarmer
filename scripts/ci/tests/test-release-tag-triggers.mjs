@@ -33,7 +33,7 @@ import {
   validateQualificationReceipt,
 } from '../release-transaction.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
-import { releaseNotes, validateReleaseNotesMetadata } from '../release-notes.mjs';
+import { changelogEntry, releaseNotes, validateReleaseNotesMetadata } from '../release-notes.mjs';
 
 const sha = 'a'.repeat(40);
 const newerSha = 'b'.repeat(40);
@@ -60,6 +60,12 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
     pullRequests: [{ number: 42, title: 'Release-safe change', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42' }],
     changelog: '### Features\n\n- New capability.\n\n### Fixes\n\n- Fixed behavior.\n\n### Breaking changes\n\n- None.',
     metadata,
+  });
+
+  test('changelog release entry parser handles final, multiple, and literal z content', () => {
+    const entry = heading => `### Features\n\n${heading}\n\n### Fixes\n\nNone.\n\n### Breaking changes\n\nN/A`;
+    assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}`, '1.2.3'), entry('z'));
+    assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}\n\n## [1.2.4]\n\n${entry('later')}`, '1.2.3'), entry('z'));
   });
   assert.match(notes, /Release range: v1\.2\.2\.\.\./);
   assert.match(notes, /#42/);

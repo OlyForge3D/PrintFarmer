@@ -27,7 +27,7 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
   validateReleaseNotesMetadata(metadata, version.replace(/-(?:insider|beta|rc)\.\d+$/, ''));
   requireThat(/^[a-f0-9]{40}$/.test(sourceCommit), 'Release notes require the exact source commit');
   requireThat(typeof previousTag === 'string' && /^v\d+\.\d+\.\d+/.test(previousTag),
-    'Release notes require a previous canonical release tag');
+    'Release notes require a previous canonical version tag');
   requireThat(Array.isArray(pullRequests) && pullRequests.length > 0,
     'Release notes require at least one merged pull request in the release range');
   requireThat(typeof changelog === 'string' && changelog.trim().length > 0,
@@ -43,8 +43,8 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
     `### Migration\n\n${metadata.migration}\n\n### Downtime\n\n${metadata.downtime}\n\n### Backup\n\n${metadata.backup}\n\n### Recovery\n\n${metadata.recovery}\n`;
 }
 
-function changelogEntry(changelog, version) {
-  const match = changelog.match(new RegExp(`^## \\[?${version.replace(/[.]/g, '\\.')}\\]?[^\\n]*\\n([\\s\\S]*?)(?=^## |$)`, 'm'));
+export function changelogEntry(changelog, version) {
+  const match = changelog.match(new RegExp(`^## \\[?${version.replace(/[.]/g, '\\.')}\\]?[^\\n]*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm'));
   requireThat(match, `Release notes require a ${version} CHANGELOG entry`);
   const entry = match[1].trim();
   for (const heading of ['Features', 'Fixes', 'Breaking changes']) {

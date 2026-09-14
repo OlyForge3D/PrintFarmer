@@ -283,12 +283,13 @@ jobs:
           SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
         run: |
           set -euo pipefail
-          mkdir -p .artifacts/release-authorization
-          RELEASE_NOTES_OUTPUT=../.artifacts/release-authorization/release-notes.md \
+          release_notes=../.artifacts/release-authorization/release-notes.md
+          mkdir -p "$(dirname "$release_notes")"
+          RELEASE_NOTES_OUTPUT="$release_notes" \
             node ../scripts/ci/release-notes.mjs
-          printf 'RELEASE_NOTES_SHA256=%s\n' \
-            "$(sha256sum .artifacts/release-authorization/release-notes.md | cut -d ' ' -f1)" \
-            >> "$GITHUB_ENV"
+          release_notes_sha256="$(sha256sum "$release_notes" | cut -d ' ' -f1)"
+          [[ "$release_notes_sha256" =~ ^[a-f0-9]{64}$ ]]
+          printf 'RELEASE_NOTES_SHA256=%s\n' "$release_notes_sha256" >> "$GITHUB_ENV"
       - name: Validate complete immutable set
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
@@ -507,11 +508,15 @@ jobs:
           fi
           remote_assets="$RUNNER_TEMP/release-source-assets"
           mkdir -p "$remote_assets"
+          [[ "$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)" == "$(printf '%s\n' "${expected_assets[@]}" | sort)" ]] ||
+            { echo "Validated source asset inventory is incomplete or contains unexpected files"; exit 1; }
           for asset_name in "${expected_assets[@]}"; do
             gh release download "$VERSION" --pattern "$asset_name" --dir "$remote_assets"
             cmp -s "release-assets/$asset_name" "$remote_assets/$asset_name" ||
               { echo "Published release asset differs from the validated build: $asset_name"; exit 1; }
           done
+          [[ "$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)" == "$(printf '%s\n' "${expected_assets[@]}" | sort)" ]] ||
+            { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
 
       - name: Promote validated immutable image tags
         env:
@@ -527,14 +532,16 @@ jobs:
           manifest_dir=../.artifacts/release-authorization
           release_assets=release-assets
           recovered="$RUNNER_TEMP/published-signed-manifest"
+          existing_recovered="$RUNNER_TEMP/existing-signed-manifest"
           mkdir -p "$release_assets"
           mkdir -p "$recovered"
+          mkdir -p "$existing_recovered"
           existing_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
           for asset in release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
             cp "$manifest_dir/$asset" "$release_assets/$asset"
             if grep -Fxq "$asset" <<< "$existing_assets"; then
-              gh release download "$VERSION" --pattern "$asset" --dir "$recovered"
-              cmp -s "$release_assets/$asset" "$recovered/$asset" ||
+              gh release download "$VERSION" --pattern "$asset" --dir "$existing_recovered"
+              cmp -s "$release_assets/$asset" "$existing_recovered/$asset" ||
                 { echo "Published signed manifest asset differs: $asset"; exit 1; }
             else
               gh release upload "$VERSION" "$release_assets/$asset"
