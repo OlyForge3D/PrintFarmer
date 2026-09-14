@@ -1522,6 +1522,45 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         Assert.Equal(terminal.CompletionEvidence, released.CompletionEvidence);
     }
 
+    [Fact]
+    public async Task ReconcileOrphansAsync_AbandonedEmergencyStop_ReplacesInProgressCopyWithUnknownNoReplayReceipt()
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            await service.CommitSendAsync(id, owner, default);
+            PrinterEmergencyStopLease lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
+            Assert.True(await service.CommitEmergencyStopSendAsync(printerId, lease, userId.ToString(), default));
+            PrinterControlOperationDto pending = await service.GetAsync(printerId, id, default);
+            Assert.Equal(PrinterControlState.Recovering, pending.State);
+            Assert.Contains("is stopping", pending.Failure!.Message, StringComparison.Ordinal);
+            DateTime stale = DateTime.UtcNow - PrinterControlOperationService.OwnerLiveness - TimeSpan.FromSeconds(1);
+            (await db.PrinterControlOperations.SingleAsync()).OwnerHeartbeatAtUtc = stale;
+            (await db.PrinterEmergencyStopAttempts.SingleAsync()).CreatedAtUtc = stale;
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ReconcileOrphansAsync(default);
+            Assert.Equal(PrinterEmergencyStopDelivery.Unknown, (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery);
+            Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
+        });
+        PrinterControlOperationDto receipt = await GetAsync(id);
+        Assert.Equal(PrinterControlState.Unknown, receipt.State);
+        Assert.False(receipt.BarrierHeld);
+        Assert.False(receipt.RequiresRecovery);
+        Assert.NotNull(receipt.CompletedAtUtc);
+        Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+        Assert.Equal("emergency_stop_requested", receipt.Failure?.Code);
+        Assert.Equal("Physical outcome is unknown. Check the printer before requesting another move; this command will not be replayed.",
+            receipt.Failure?.Message);
+        Assert.DoesNotContain("is stopping", receipt.Failure!.Message, StringComparison.Ordinal);
+        Assert.Equal(0, channel.SendCount);
+    }
+
     [Theory]
     [InlineData(PrinterEmergencyStopDelivery.Accepted, false)]
     [InlineData(PrinterEmergencyStopDelivery.NotSent, false)]

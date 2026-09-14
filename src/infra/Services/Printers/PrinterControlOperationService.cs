@@ -634,7 +634,7 @@ public sealed class PrinterControlOperationService(
         }
 
         if (operation.State == PrinterControlState.Unknown &&
-            (operation.FailureMessage is null ||
+            (operation.FailureCode == "emergency_stop_requested" || operation.FailureMessage is null ||
              operation.FailureMessage.Contains("recovery", StringComparison.OrdinalIgnoreCase) ||
              operation.FailureMessage.Contains("barrier", StringComparison.OrdinalIgnoreCase)))
         {

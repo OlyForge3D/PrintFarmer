@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { apiClient } from '@/services/api';
+import { isControlOperationResolved } from '@/types/api';
 import type { PrinterControlOperation, PrinterControlOperationState } from '@/types/api';
 
 const http = vi.hoisted(() => ({
@@ -31,12 +32,14 @@ beforeEach(() => {
 });
 
 describe('motion API wire contract without recovery endpoints', () => {
-  it.each([200, 202].flatMap(status => states.map(state => ({ status, state }))))(
-    'enforces HTTP $status for $state (including settled unknown and historical states)', async ({ status, state }) => {
-      const data = operation(state);
+  it.each([200, 202].flatMap(status => states.flatMap(state =>
+    [false, true].map(barrierHeld => ({ status, state, barrierHeld })))))(
+    'enforces HTTP $status for $state with barrierHeld=$barrierHeld', async ({ status, state, barrierHeld }) => {
+      const data = { ...operation(state), barrierHeld };
       http.post.mockResolvedValueOnce({ status, data, headers: { etag: '"opaque+/revision="' } });
       const request = apiClient.createPrinterControlOperation(printerId, operationId, intent);
-      if ((status === 200) === !['Queued', 'Running'].includes(state)) {
+      if ((status === 200 && ['Succeeded', 'Failed', 'Unknown', 'Recovered'].includes(state)) ||
+        (status === 202 && barrierHeld)) {
         const receipt = await request;
         expect(receipt).toEqual({ operation: data, etag: '"opaque+/revision="' });
         expect(receipt).not.toHaveProperty('success');
@@ -46,6 +49,22 @@ describe('motion API wire contract without recovery endpoints', () => {
       expect(http.post).toHaveBeenCalledExactlyOnceWith(`/printers/${printerId}/control-operations`, intent, { headers: { 'Idempotency-Key': operationId } });
       expect(http.get).not.toHaveBeenCalled();
     });
+
+  it.each([
+    { status: 202, state: 'Recovering' as const, completionEvidence: 'None' as const },
+    { status: 200, state: 'Succeeded' as const, completionEvidence: 'MotionQueueDrained' as const },
+    { status: 200, state: 'Succeeded' as const, completionEvidence: 'None' as const },
+  ])('accepts held $state HTTP$status/$completionEvidence without releasing or claiming success', async ({ status, state, completionEvidence }) => {
+    const data = { ...operation(state), barrierHeld: true, completionEvidence };
+    http.post.mockResolvedValueOnce({ status, data, headers: {} });
+    const receipt = await apiClient.createPrinterControlOperation(printerId, operationId, intent);
+    expect(receipt.operation).toEqual(data);
+    expect(receipt.operation.barrierHeld).toBe(true);
+    expect(isControlOperationResolved(receipt.operation)).toBe(false);
+    expect(receipt).not.toHaveProperty('success');
+    expect(http.post).toHaveBeenCalledExactlyOnceWith(`/printers/${printerId}/control-operations`, intent, { headers: { 'Idempotency-Key': operationId } });
+    expect(http.get).not.toHaveBeenCalled();
+  });
 
   it.each([200, 202].flatMap(status => (['x', 'y', 'z', 'f'] as const).map(axis => ({ status, axis }))))(
     'rejects mismatched $axis intent at HTTP $status without retrying', async ({ status, axis }) => {
@@ -62,7 +81,7 @@ describe('motion API wire contract without recovery endpoints', () => {
   });
 
   it.each([
-    { barrierHeld: true }, { operationId: '33333333-3333-4333-8333-333333333333' },
+    { barrierHeld: 'true' }, { operationId: '33333333-3333-4333-8333-333333333333' },
     { printerId: '33333333-3333-4333-8333-333333333333' }, { kind: 'HomeZ' },
     { state: 'UnsupportedState' }, { failure: undefined }, { x: undefined },
   ])('rejects malformed or mismatched settled receipt %j', async invalid => {

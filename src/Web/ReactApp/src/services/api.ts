@@ -2,7 +2,7 @@
 // Get hash for a G-code file (returns string)
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import { isControlOperationResolved, matchesPrinterControlIntent, printerControlOperationSchema } from "@/types/api";
+import { matchesPrinterControlIntent, printerControlOperationSchema } from "@/types/api";
 import type {
   PrinterControlCurrent,
   PrinterControlIntent,
@@ -1004,9 +1004,9 @@ export class ApiClient {
       { headers: { "Idempotency-Key": operationId } }
     );
     const operation = printerControlOperationSchema.parse(response.data);
-    const unresolved = ["Queued", "Running"].includes(operation.state) && operation.barrierHeld;
+    const terminal = ["Succeeded", "Failed", "Unknown", "Recovered"].includes(operation.state);
     if (operation.operationId !== operationId || operation.printerId !== printerId || !matchesPrinterControlIntent(operation, intent) ||
-      !((response.status === 202 && unresolved) || (response.status === 200 && isControlOperationResolved(operation)))) {
+      !((response.status === 200 && terminal) || (response.status === 202 && operation.barrierHeld))) {
       throw new Error("Invalid durable motion admission receipt. Recheck the operation; do not assume admission or completion.");
     }
     return { operation, etag: response.headers.etag ?? null };

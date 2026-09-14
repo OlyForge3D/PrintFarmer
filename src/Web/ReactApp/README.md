@@ -170,9 +170,11 @@ status advertises `physicalControl.supportedOperations`, regardless of the
 printer's backend name. Loading or failed capability reads never imply legacy
 support. A known empty list uses the existing legacy routes; a durable plugin's
 unadvertised operations are rejected without legacy fallback.
-HTTP 202 means admission, not
-completion, and must contain an unresolved operation. HTTP 200 admission replay
-must contain a valid terminal receipt for that same operation ID; mismatched
+HTTP 202 means admission, not completion, and must contain a held barrier,
+including historical `Recovering` receipts. HTTP 200 admission replay must
+contain a terminal state (`Succeeded`, `Failed`, `Unknown`, or `Recovered`);
+its barrier may still be held while release is deferred. Both responses must
+identify the requested operation and intent. Mismatched
 status/state combinations, malformed receipts, and other successful HTTP statuses
 are rejected without confirming admission. Even valid terminal POST receipts
 still require canonical GET/current checks before success or release.
