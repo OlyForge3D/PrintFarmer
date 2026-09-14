@@ -30,6 +30,40 @@ function canonicalJson(value) {
   return value;
 }
 
+function nativeBundle(entry) {
+  return entry?.mediaType === 'application/vnd.dev.sigstore.bundle.v0.3+json' &&
+    entry.verificationMaterial && typeof entry.verificationMaterial === 'object' &&
+    entry.messageSignature && typeof entry.messageSignature === 'object';
+}
+
+function nativeCertificate(entry) {
+  const rawBytes = entry?.verificationMaterial?.certificate?.rawBytes;
+  requireThat(typeof rawBytes === 'string' && rawBytes.length > 0, 'Cosign bundle certificate is malformed');
+  try { return new X509Certificate(Buffer.from(rawBytes, 'base64')); } catch {
+    throw new Error('Cosign bundle certificate is malformed');
+  }
+}
+
+function nativeIntegratedTime(entry) {
+  const entries = entry?.verificationMaterial?.tlogEntries;
+  requireThat(Array.isArray(entries) && entries.length === 1 &&
+    Number.isSafeInteger(Number(entries[0]?.integratedTime)), 'Cosign transparency time is expired or revoked');
+  return Number(entries[0].integratedTime);
+}
+
+function validateNativeSignatureBundle(entry, subject, verification) {
+  requireThat(nativeBundle(entry) && entry.messageSignature?.messageDigest?.algorithm === 'SHA2_256' &&
+    entry.messageSignature?.messageDigest?.digest === Buffer.from(subject.slice(7), 'hex').toString('base64') &&
+    typeof entry.messageSignature?.signature === 'string' && entry.messageSignature.signature.length > 0,
+  'Malformed native Cosign signature bundle');
+  const certificate = nativeCertificate(entry);
+  const verifiedCertificate = verification?.optional?.certificate;
+  if (typeof verifiedCertificate === 'string') {
+    requireThat(certificate.raw.toString('base64') === new X509Certificate(verifiedCertificate).raw.toString('base64'),
+      'Native Cosign certificate differs from verification output');
+  }
+}
+
 function subjects(result, label) {
   const entries = Array.isArray(result) ? result : [result];
   requireThat(entries.length > 0, `Missing ${label} evidence`);
@@ -83,6 +117,18 @@ function validateBundleTrust(bundle, trust) {
     'Invalid or revoked release evidence time');
   const entries = Array.isArray(bundle) ? bundle : [bundle];
   for (const entry of entries) {
+    if (nativeBundle(entry)) {
+      const integratedTime = nativeIntegratedTime(entry);
+      const integratedAt = integratedTime * 1000;
+      const certificate = nativeCertificate(entry);
+      requireThat(createdAt <= integratedAt && integratedAt >= Date.parse(policy.revocationEpoch) &&
+        integratedAt <= trustedAt && trustedAt - integratedAt <= policy.certificateMaxAgeSeconds * 1000 &&
+        Date.parse(certificate.validFrom) <= integratedAt && integratedAt <= Date.parse(certificate.validTo) &&
+        trustedAt <= Date.parse(certificate.validTo),
+      'Cosign transparency time is expired or revoked');
+      continue;
+    }
+    if (!entry?.optional) continue;
     const optional = entry.optional;
     const signer = optional?.Subject;
     const integratedTime = optional?.Bundle?.Payload?.integratedTime;
@@ -108,14 +154,17 @@ function validateBundleTrust(bundle, trust) {
 
 function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   const entries = Array.isArray(bundle) ? bundle : [bundle];
-  requireThat(entries.length > 0 && entries.every(entry => typeof entry?.payload === 'string' &&
-    entry.payload.length > 0 && entry.payloadType === 'application/vnd.in-toto+json' &&
-    Array.isArray(entry.signatures) && entry.signatures.length > 0 &&
-    entry.signatures.every(signature => typeof signature?.sig === 'string' && signature.sig.length > 0)),
+  requireThat(entries.length > 0 && entries.every(entry => {
+    const envelope = entry?.dsseEnvelope ?? entry;
+    return typeof envelope?.payload === 'string' &&
+      envelope.payload.length > 0 && envelope.payloadType === 'application/vnd.in-toto+json' &&
+      Array.isArray(envelope.signatures) && envelope.signatures.length > 0 &&
+      envelope.signatures.every(signature => typeof signature?.sig === 'string' && signature.sig.length > 0);
+  }),
   'Malformed Cosign DSSE attestation bundle');
   const predicate = parseJson(predicateBytes, 'SPDX predicate');
   for (let index = 0; index < entries.length; index++) {
-    const entry = entries[index];
+    const entry = entries[index]?.dsseEnvelope ?? entries[index];
     let statement;
     try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
       throw new Error('Malformed Cosign DSSE payload');
@@ -129,7 +178,7 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   }
 }
 
-function validateSignatureDownload(bundle, verification) {
+function validateSignatureDownload(bundle, verification, subject) {
   const entries = Array.isArray(bundle) ? bundle : [bundle];
   requireThat(entries.length === verification.length && entries.length > 0 && entries.every((entry, index) => {
     const legacy = typeof entry?.Base64Signature === 'string' && entry.Base64Signature.length > 0 &&
@@ -138,6 +187,10 @@ function validateSignatureDownload(bundle, verification) {
     const modern = typeof entry?.SignedPayload === 'string' && entry.SignedPayload.length > 0 &&
       typeof entry?.Cert === 'string' && entry.Cert.length > 0 && entry?.Bundle &&
       typeof entry.Bundle === 'object' && entry.Base64Signature === undefined;
+    if (nativeBundle(entry)) {
+      validateNativeSignatureBundle(entry, subject, verification[index]);
+      return true;
+    }
     if (!legacy && !modern) return false;
     if (legacy) return true;
     const optional = verification[index]?.optional;
@@ -153,11 +206,13 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
   const attestationVerification = verificationEntries(attestationBytes, subject, 'attestation', predicateBytes);
   const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
   const attestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
-  validateSignatureDownload(signatureBundle, signatureVerification);
+  validateSignatureDownload(signatureBundle, signatureVerification, subject);
   validateDsseBundle(attestationBundle, subject, predicateBytes, attestationVerification);
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
     (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
+  validateBundleTrust(signatureBundle, trust);
+  validateBundleTrust(attestationBundle, trust);
   validateBundleTrust(signatureVerification, trust);
   validateBundleTrust(attestationVerification, trust);
   return {
@@ -221,11 +276,13 @@ function validateStored(value, digest, platform, trust) {
   const signatureVerification = verificationEntries(value.signature.bytes, digest, 'signature');
   const attestationVerification = verificationEntries(value.sbom.bytes, digest, 'attestation', value.sbom.predicate);
   const attestationBundle = parseJson(value.sbom.bundle, 'attestation bundle');
-  validateSignatureDownload(signatureBundle, signatureVerification);
+  validateSignatureDownload(signatureBundle, signatureVerification, digest);
   validateDsseBundle(attestationBundle, digest, value.sbom.predicate, attestationVerification);
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
     (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
+  validateBundleTrust(signatureBundle, trust);
+  validateBundleTrust(attestationBundle, trust);
   validateBundleTrust(signatureVerification, trust);
   validateBundleTrust(attestationVerification, trust);
 }

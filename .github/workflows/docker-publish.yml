@@ -744,6 +744,9 @@ jobs:
         run: |
           set -euo pipefail
           public_root="$RUNNER_TEMP/activated-public-release"
+          public_docker_config="$(mktemp -d)"
+          export DOCKER_CONFIG="$public_docker_config"
+          trap 'rm -rf "$public_docker_config"' EXIT
           mkdir -p "$public_root"
           release_json="$public_root/release.json"
           env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --silent --show-error --location \
@@ -783,7 +786,8 @@ jobs:
             references=( "index $digest" )
             while read -r platform platform_digest; do
               references+=( "${platform//\//-} $platform_digest" )
-            done < <(docker buildx imagetools inspect "ghcr.io/olyforge3d/printfarmer-${image}@${digest}" --raw |
+            done < <(env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" \
+              docker buildx imagetools inspect "ghcr.io/olyforge3d/printfarmer-${image}@${digest}" --raw |
               jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest") |
                 select(.platform.os == "linux") | "\(.platform.os)/\(.platform.architecture) \(.digest)"')
             for entry in "${references[@]}"; do
@@ -791,13 +795,13 @@ jobs:
               subject="${entry#* }"
               reference="ghcr.io/olyforge3d/printfarmer-${image}@${subject}"
               evidence=".artifacts/release-authorization/crypto-evidence/$image/$scope"
-              cosign verify "$reference" --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign verify "$reference" --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
-              cosign verify-attestation "$reference" --type spdxjson --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign verify-attestation "$reference" --type spdxjson --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
-              cosign download signature "$reference" | jq -sc . | cmp -s "$evidence/signature.bundle.json" - ||
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download signature "$reference" | jq -sc . | cmp -s "$evidence/signature.bundle.json" - ||
                 { echo "Activated signature bundle differs: $image/$scope"; exit 1; }
-              cosign download attestation "$reference" | jq -sc . | cmp -s "$evidence/attestation.bundle.json" - ||
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download attestation "$reference" | jq -sc . | cmp -s "$evidence/attestation.bundle.json" - ||
                 { echo "Activated attestation bundle differs: $image/$scope"; exit 1; }
             done
           done

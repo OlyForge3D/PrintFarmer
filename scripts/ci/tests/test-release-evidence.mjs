@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { X509Certificate } from 'node:crypto';
 import test from 'node:test';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -94,6 +95,34 @@ test('accepts only versioned Cosign signature download formats and rejects forge
     ...JSON.parse(extra.signatureBundleBytes), JSON.parse(extra.signatureBundleBytes)[0],
   ]);
   assert.throws(() => normalizeEvidence({ subject: digest, ...extra }), /signature download/);
+});
+
+test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => {
+  const evidence = signed();
+  const statement = JSON.parse(Buffer.from(JSON.parse(evidence.attestationBundleBytes)[0].payload, 'base64').toString('utf8'));
+  const nativeSignature = {
+    mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+    verificationMaterial: {
+      certificate: { rawBytes: new X509Certificate(certificate).raw.toString('base64') },
+      tlogEntries: [{ integratedTime: 1789426200 }],
+    },
+    messageSignature: {
+      messageDigest: { algorithm: 'SHA2_256', digest: Buffer.from(digest.slice(7), 'hex').toString('base64') },
+      signature: 'native-signature',
+    },
+  };
+  evidence.signatureBundleBytes = JSON.stringify([nativeSignature]);
+  evidence.attestationBundleBytes = JSON.stringify([{
+    mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+    verificationMaterial: nativeSignature.verificationMaterial,
+    messageSignature: nativeSignature.messageSignature,
+    dsseEnvelope: {
+      payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
+      payloadType: 'application/vnd.in-toto+json',
+      signatures: [{ sig: 'native-dsse-signature' }],
+    },
+  }]);
+  assert.doesNotThrow(() => normalizeEvidence({ subject: digest, ...evidence }));
 });
 
 test('rejects stale, revoked, substituted, and out-of-window bundle trust before staging', () => {
