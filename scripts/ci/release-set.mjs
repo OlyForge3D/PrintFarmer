@@ -54,23 +54,46 @@ export function publishImmutableTags(record, set, inspect, create) {
   }
 }
 
-export function plannedReleaseAliases(record, set) {
+export function registryTagInspection(output) {
+  let inspected;
+  try { inspected = JSON.parse(output); } catch { throw new Error('Registry returned invalid image inspection JSON'); }
+  const digest = inspected?.Manifest?.digest;
+  const version = inspected?.Image?.config?.Labels?.['org.opencontainers.image.version'];
+  requireThat(/^sha256:[a-f0-9]{64}$/.test(digest), 'Registry returned no image manifest digest');
+  requireThat(typeof version === 'string' && /^\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.\d+)?$/.test(version),
+    'Registry returned no canonical image version label');
+  return { digest, version };
+}
+
+export function plannedReleaseAliases(record, set, inspect = () => undefined) {
   validateCompleteSet(record, set);
   const parsed = parseTag(record.sourceTag);
   const aliases = record.channel === 'stable'
-    ? [record.canonicalVersion, parsed.major, `${parsed.major}.${parsed.minor}`, 'latest']
-    : [record.canonicalVersion];
+    ? [
+      { value: record.canonicalVersion, mutable: false },
+      { value: `stable-${record.canonicalVersion}`, mutable: false, retained: true },
+      { value: `${parsed.major}.${parsed.minor}`, mutable: true },
+      ...[parsed.major, 'latest'].flatMap(value => {
+        const existing = inspect(`ghcr.io/olyforge3d/printfarmer-api:${value}`);
+        if (!existing || existing.digest === set.images.api.digest) return [{ value, mutable: true }];
+        requireThat(parseTag(`v${existing.version}`).channel === 'stable',
+          `Cross-channel alias movement rejected: ${value}`);
+        return compareVersions(record.canonicalVersion, existing.version) > 0 ? [{ value, mutable: true }] : [];
+      }),
+    ]
+    : [{ value: record.canonicalVersion, mutable: false }];
   return Object.fromEntries(Object.entries(set.images).map(([component, image]) => [component,
     aliases.map(alias => ({
-      tag: `ghcr.io/olyforge3d/printfarmer-${component}:${alias}`,
+      tag: `ghcr.io/olyforge3d/printfarmer-${component}:${alias.value}`,
       digest: image.digest,
-      mutable: alias !== record.canonicalVersion,
+      mutable: alias.mutable,
+      ...(alias.retained ? { retained: true } : {}),
       channel: record.channel,
     }))]));
 }
 
 export function publishReleaseAliases(record, set, inspect, create) {
-  const plan = plannedReleaseAliases(record, set);
+  const plan = plannedReleaseAliases(record, set, inspect);
   for (const aliases of Object.values(plan)) {
     for (const alias of aliases) {
       const existing = inspect(alias.tag);
@@ -125,13 +148,8 @@ function main() {
     const set = readPrivateJson(privateSetPath);
     publishReleaseAliases(record, set, tag => {
       try {
-        const output = command('docker', ['buildx', 'imagetools', 'inspect', tag, '--format',
-          '{{json .Image}}']);
-        const image = JSON.parse(output);
-        const digest = image?.Manifest?.Digest ?? image?.Digest;
-        const version = image?.Config?.Labels?.['org.opencontainers.image.version'];
-        requireThat(/^sha256:[a-f0-9]{64}$/.test(digest), 'Registry returned no alias digest');
-        return { digest, version };
+        const output = command('docker', ['buildx', 'imagetools', 'inspect', tag, '--format', '{{json .}}']);
+        return registryTagInspection(output);
       } catch (error) {
         if (/\bmanifest unknown\b|\bMANIFEST_UNKNOWN\b/.test(String(error.stderr))) return undefined;
         throw error;

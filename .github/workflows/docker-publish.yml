@@ -240,6 +240,19 @@ jobs:
               "${extra[@]}"
             cosign attest --yes --type spdxjson --predicate "$sbom" "${repository}@${digest}"
             cosign sign --yes "${repository}@${digest}"
+            platform_digests="$(
+              docker buildx imagetools inspect "${repository}@${digest}" --raw |
+                jq -r '.manifests[]
+                  | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")
+                  | select(.platform.os == "linux")
+                  | .digest'
+            )"
+            [[ -n "$platform_digests" ]]
+            while IFS= read -r platform_digest; do
+              [[ "$platform_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+              cosign attest --yes --type spdxjson --predicate "$sbom" "${repository}@${platform_digest}"
+              cosign sign --yes "${repository}@${platform_digest}"
+            done <<< "$platform_digests"
           }
           build_component api api-runtime linux/amd64,linux/arm64
           build_component frontend frontend-runtime linux/amd64,linux/arm64

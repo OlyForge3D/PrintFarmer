@@ -287,6 +287,8 @@ export function writePublicSet(record, set, identitySha256) {
 
 export function releaseManifest(record, set, identitySha256) {
   const completeSet = writePublicSet(record, set, identitySha256);
+  const maximumExclusive = `${BigInt(completeSet.identity.baseVersion.split('.')[0]) + 1n}.0.0`;
+  const expiresAt = new Date(Date.parse(completeSet.identity.buildTime) + 30 * 24 * 60 * 60 * 1000).toISOString();
   const qualification = record.channel === 'stable'
     ? publicLedgerQualification(record.qualification, record.sourceCommit)
     : undefined;
@@ -316,8 +318,8 @@ export function releaseManifest(record, set, identitySha256) {
     completeSet,
     lifecycle: {
       releaseId: completeSet.identity.releaseId, channel: completeSet.identity.channel,
-      publishedAt: completeSet.identity.buildTime, expiresAt: '9999-12-31T23:59:59.999Z',
-      sequence: completeSet.identity.channel === 'insider' ? completeSet.identity.canonicalVersion.split('.').at(-1) : '0',
+      publishedAt: completeSet.identity.buildTime, expiresAt,
+      sequence: completeSet.identity.channel === 'insider' ? parseTag(completeSet.identity.sourceTag).sequence : '0',
       cadence: completeSet.identity.channel === 'insider' ? 'continuous' : 'promoted',
       releaseNotes: { url: `https://github.com/${repository}/releases/tag/${completeSet.identity.sourceTag}`,
         sha256: hash({ releaseId: completeSet.identity.releaseId, sourceCommit: completeSet.identity.sourceCommit }) },
@@ -338,7 +340,7 @@ export function releaseManifest(record, set, identitySha256) {
       services: artifactEvidence,
     },
     compatibility: {
-      schema: 2, managedEligible: true, api: { minimum: completeSet.identity.baseVersion, maximumExclusive: '9999.0.0' },
+      schema: 2, managedEligible: true, api: { minimum: completeSet.identity.baseVersion, maximumExclusive },
       services: Object.fromEntries(Object.keys(components).map(service => [service, { required: true, platforms: components[service] }])),
       storage: { sqlite: 'supported', postgresql: 'supported', sqlserver: 'supported' },
       configuration: { format: 'versioned', templates: 'compatible' },
@@ -368,9 +370,13 @@ export function validateReleaseManifest(manifest) {
     'Release manifest complete set is not canonical');
   const { identity, lifecycle, provenance, evidence, compatibility, migration } = manifest;
   requireKeys(lifecycle, ['releaseId', 'channel', 'publishedAt', 'expiresAt', 'sequence', 'cadence', 'releaseNotes', 'signing'], [], 'release lifecycle');
+  const tag = parseTag(identity.sourceTag);
+  const expectedExpiry = new Date(Date.parse(identity.buildTime) + 30 * 24 * 60 * 60 * 1000).toISOString();
   requireThat(lifecycle.releaseId === identity.releaseId && lifecycle.channel === identity.channel &&
-    lifecycle.publishedAt === identity.buildTime && lifecycle.expiresAt === '9999-12-31T23:59:59.999Z' &&
-    ['continuous', 'promoted'].includes(lifecycle.cadence), 'Invalid release lifecycle binding');
+    lifecycle.publishedAt === identity.buildTime && lifecycle.expiresAt === expectedExpiry &&
+    lifecycle.sequence === (identity.channel === 'insider' ? tag.sequence : '0') &&
+    lifecycle.cadence === (identity.channel === 'insider' ? 'continuous' : 'promoted'),
+  'Invalid release lifecycle binding');
   requireTimestamp(lifecycle.publishedAt, 'release publication time');
   requireTimestamp(lifecycle.expiresAt, 'release expiry time');
   requireKeys(lifecycle.releaseNotes, ['url', 'sha256'], [], 'release notes');
@@ -438,6 +444,9 @@ export function validateReleaseManifest(manifest) {
   requireThat(compatibility.schema === 2 && compatibility.managedEligible === true, 'Release compatibility is not eligible');
   requireKeys(compatibility.api, ['minimum', 'maximumExclusive'], [], 'release API compatibility');
   parseTag(`v${compatibility.api.minimum}`); parseTag(`v${compatibility.api.maximumExclusive}`);
+  requireThat(compatibility.api.minimum === identity.baseVersion &&
+    compatibility.api.maximumExclusive === `${BigInt(identity.baseVersion.split('.')[0]) + 1n}.0.0`,
+  'Invalid release API compatibility range');
   requireKeys(compatibility.services, Object.keys(components), [], 'release service compatibility');
   for (const service of Object.keys(components)) {
     requireKeys(compatibility.services[service], ['required', 'platforms'], [], 'release service compatibility');

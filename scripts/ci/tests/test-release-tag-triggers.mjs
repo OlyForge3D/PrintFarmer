@@ -21,6 +21,7 @@ import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runReleaseControl, output } from '../release-control.mjs';
 import {
   inspectCompleteSet, plannedReleaseAliases, publishImmutableTags, publishReleaseAliases,
+  registryTagInspection,
 } from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, manifestEnvelopeBundle, manifestEnvelopePath, manifestPath, privateSetPath,
@@ -753,11 +754,13 @@ test('stable aliases advance only to a strictly newer stable record while inside
   };
   const plan = publishReleaseAliases(stable, stableSet, inspect, create);
   assert.deepEqual(plan.api.map(value => value.tag.split(':').at(-1)),
-    ['1.2.3', '1', '1.2', 'latest']);
-  assert.equal(writes.length, Object.keys(components).length * 4);
+    ['1.2.3', 'stable-1.2.3', '1.2', '1', 'latest']);
+  assert.equal(writes.length, Object.keys(components).length * 5);
   const oldLatest = 'ghcr.io/olyforge3d/printfarmer-api:latest';
   tags.set(oldLatest, { digest: `sha256:${'f'.repeat(64)}`, version: '1.2.4' });
-  assert.throws(() => publishReleaseAliases(stable, stableSet, inspect, create), /regression/);
+  const before = writes.length;
+  publishReleaseAliases(stable, stableSet, inspect, create);
+  assert.equal(writes.length, before, 'Newer stable aliases remain untouched');
 
   const insider = record();
   const insiderPlan = plannedReleaseAliases(insider, completeSet(insider));
@@ -766,6 +769,38 @@ test('stable aliases advance only to a strictly newer stable record while inside
   assert.throws(() => publishReleaseAliases(insider, completeSet(insider),
     () => ({ digest: `sha256:${'e'.repeat(64)}`, version: '1.2.2' }),
     () => assert.fail('Insider must not overwrite an immutable tag')), /Immutable image tag conflict/);
+});
+
+test('alias registry parser accepts realistic multi-platform and single-platform Buildx JSON', () => {
+  const digest = `sha256:${'d'.repeat(64)}`;
+  const labels = { 'org.opencontainers.image.version': '1.2.3' };
+  for (const image of [
+    { Name: 'ghcr.io/olyforge3d/printfarmer-api:latest', Manifest: { digest, mediaType: 'application/vnd.oci.image.index.v1+json' },
+      Image: { config: { Labels: labels }, manifests: [{ platform: { architecture: 'amd64' } }, { platform: { architecture: 'arm64' } }] } },
+    { Name: 'ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:1.2.3', Manifest: { digest },
+      Image: { config: { Labels: labels }, architecture: 'amd64' } },
+  ]) assert.deepEqual(registryTagInspection(JSON.stringify(image)), { digest, version: '1.2.3' });
+  assert.throws(() => registryTagInspection(JSON.stringify({
+    Manifest: { digest }, Image: { config: { Labels: { 'org.opencontainers.image.version': '1.2' } } },
+  })), /canonical image version/);
+});
+
+test('an older stable line retains its scoped aliases without moving newer global aliases', () => {
+  const ledger = state();
+  ledger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(ledger, stableAdmission('1.2.3'), created, undefined, hotfixQualification()).record;
+  const set = completeSet(stable);
+  const tags = new Map([
+    ['ghcr.io/olyforge3d/printfarmer-api:1', { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
+    ['ghcr.io/olyforge3d/printfarmer-api:latest', { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
+  ]);
+  const writes = [];
+  const plan = publishReleaseAliases(stable, set, tag => tags.get(tag), (tag, digest) => {
+    writes.push([tag, digest]);
+    tags.set(tag, { digest, version: stable.canonicalVersion });
+  });
+  assert.deepEqual(plan.api.map(item => item.tag.split(':').at(-1)), ['1.2.3', 'stable-1.2.3', '1.2']);
+  assert.ok(writes.every(([tag]) => !tag.endsWith(':1') && !tag.endsWith(':latest')));
 });
 
 test('registry inspection executes complete platform/provenance checks rather than accepting flags', () => {
