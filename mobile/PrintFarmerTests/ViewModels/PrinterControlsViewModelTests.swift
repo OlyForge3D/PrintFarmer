@@ -3653,11 +3653,18 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
     private func fixture(
         service: MockPrinterService = MockPrinterService(),
         server: UUID? = nil, user: UUID? = nil,
+        backend: PrinterBackend = .moonraker,
+        advertisedOperations: [PrinterControlOperationKind]? = PrinterControlOperationKind.allCases,
         clock: @escaping @Sendable () -> Date = Date.init,
         access: @escaping @MainActor () -> String? = { nil }
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
-        var printer = try TestData.decodePrinter()
+        var printer = try TestData.decodePrinter(from: TestJSON.printer.replacingOccurrences(
+            of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"\(backend.rawValue)\""
+        ))
         printer.state = "ready"
+        printer.physicalControl = advertisedOperations.map {
+            .init(supportedOperations: $0, barrierHeld: false, requiresRecovery: false)
+        }
         var caps = PrinterBackendCapabilities.allControlsFixture
         caps.supportsAbsoluteMovement = true
         caps.supportsZOffset = true
@@ -3740,6 +3747,132 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         XCTAssertFalse(model.hasUnresolvedMotion)
         XCTAssertNil(model.pendingCommand)
         XCTAssertFalse(model.isExecuting)
+    }
+
+    func test_heldReceiptsRemainCoordinatedRegardlessOfState() async throws {
+        for state in [PrinterControlOperationState.unknown, .recovering, .recovered, .succeeded, .failed] {
+            for exactReceiptOnly in [false, true] {
+                let (model, service) = try await fixture(server: UUID())
+                admitRunning(service)
+                await model.homeAll()
+                let sent = try XCTUnwrap(service.submittedControlOperations.last)
+                let held = PrinterControlOperation.controlsFixture(
+                    printerID: sent.printerID, operationID: sent.operationID,
+                    request: sent.request, state: state, evidence: .motionQueueDrained, held: true
+                )
+                service.controlOperationToReturn = held
+                service.currentControlOperationToReturn = exactReceiptOnly
+                    ? .init(physicalControl: .init(
+                        supportedOperations: PrinterControlOperationKind.allCases,
+                        barrierHeld: false, requiresRecovery: false
+                    ), operation: nil)
+                    : .controlsFixture(held)
+                await model.refreshControlOperation()
+                XCTAssertNil(model.operationReadError)
+                XCTAssertEqual(model.controlOperation?.state, state)
+                XCTAssertTrue(model.hasUnresolvedMotion)
+                XCTAssertTrue(model.hasDurableMotionBarrier)
+                XCTAssertTrue(model.isExecuting)
+                XCTAssertNotNil(model.motionBlockedReason)
+                XCTAssertFalse(model.controlOperation?.hasConfirmedSuccess == true)
+                await model.jog(axis: "X", distanceMm: 1)
+                XCTAssertEqual(service.submittedControlOperations.count, 1)
+                try await finish(model, service, state: .unknown, evidence: .none)
+                XCTAssertFalse(model.isExecuting)
+                model.deactivate()
+            }
+        }
+    }
+
+    func test_successWithoutQueueDrainEvidenceCannotConfirmOrAdvanceCalibration() async throws {
+        let evidenceCases: [PrinterControlCompletionEvidence?] = [
+            nil, .some(.none), .notSent, .backendRejected, .operatorVerifiedRecovery
+        ]
+        for evidence in evidenceCases {
+            let (model, service) = try await fixture(server: UUID())
+            admitRunning(service)
+            await model.startCalibration()
+            model.beginCalibrationHome()
+            await model.homeForCalibration()
+            let sent = try XCTUnwrap(service.submittedControlOperations.last)
+            var unconfirmed = PrinterControlOperation.controlsFixture(
+                printerID: sent.printerID, operationID: sent.operationID,
+                request: sent.request, state: .succeeded, held: false
+            )
+            unconfirmed.completionEvidence = evidence
+            service.controlOperationToReturn = unconfirmed
+            service.currentControlOperationToReturn = .controlsFixture(unconfirmed)
+            await model.refreshControlOperation()
+            XCTAssertFalse(model.hasUnresolvedMotion)
+            XCTAssertNil(model.motionBlockedReason)
+            XCTAssertNil(model.pendingCommand)
+            XCTAssertEqual(model.calibrationStep, .home)
+            XCTAssertTrue(model.motionStatusNeedsAttention)
+            XCTAssertTrue(model.motionStatusMessage?.contains("unconfirmed") == true)
+            XCTAssertFalse(model.commandNotice?.contains("Physical operation succeeded") == true)
+            XCTAssertFalse(model.motionStatusSummary?.contains("Motion completed") == true)
+            XCTAssertFalse(model.controlOperation?.hasConfirmedSuccess == true)
+            model.cancelCalibration()
+            XCTAssertFalse(model.isExecuting)
+            await model.homeZ()
+            XCTAssertEqual(service.submittedControlOperations.count, 2, "No recovery prerequisite for a new action")
+            try await finish(model, service)
+        }
+    }
+
+    func test_advertisedNonMoonrakerProvidersUseDurableEndpointsOnly() async throws {
+        for backend in [PrinterBackend.octoPrint, .prusaLink, .unknown] {
+            let (model, service) = try await fixture(server: UUID(), backend: backend)
+            XCTAssertTrue(model.usesDurableMotion)
+            admitRunning(service)
+            await model.homeAll()
+            try await finish(model, service)
+            await model.jog(axis: "Z", distanceMm: 1)
+            try await finish(model, service)
+            await model.moveTo(x: 20, y: 30, z: 10, feedrateMmMin: nil)
+            XCTAssertEqual(service.submittedControlOperations.map(\.request.kind), [.homeAll, .jog, .moveTo])
+            XCTAssertNil(service.homeCalledWith)
+            XCTAssertNil(service.moveCalledWith)
+            XCTAssertNil(service.moveToCalledWith)
+            try await finish(model, service)
+            model.deactivate()
+        }
+    }
+
+    func test_withoutAdvertisedDurableCapabilityUsesLegacyRouteForAnyBackend() async throws {
+        let advertisements: [[PrinterControlOperationKind]?] = [nil, []]
+        for backend in [PrinterBackend.moonraker, .octoPrint, .unknown] {
+            for operations in advertisements {
+                let (model, service) = try await fixture(
+                    server: UUID(), backend: backend, advertisedOperations: operations
+                )
+                XCTAssertFalse(model.usesDurableMotion)
+                await model.homeAll()
+                XCTAssertNotNil(service.homeCalledWith)
+                XCTAssertTrue(service.submittedControlOperations.isEmpty)
+                XCTAssertEqual(service.currentControlOperationReadCount, 0)
+                model.deactivate()
+            }
+        }
+    }
+
+    func test_newAdvertisementEnablesDurablePluginWithoutBackendChange() async throws {
+        let (model, service) = try await fixture(backend: .octoPrint, advertisedOperations: nil)
+        XCTAssertFalse(model.usesDurableMotion)
+        var updated = model.printer
+        updated.physicalControl = service.currentControlOperationToReturn.physicalControl
+        let refreshed = expectation(description: "Advertised provider status refreshed")
+        let observation = model.$isRefreshingControlOperation
+            .dropFirst().filter { !$0 }.prefix(1).sink { _ in refreshed.fulfill() }
+        defer { observation.cancel() }
+        model.handlePrinterUpdate(updated)
+        await fulfillment(of: [refreshed], timeout: 5)
+        XCTAssertTrue(model.usesDurableMotion)
+        admitRunning(service)
+        await model.homeZ()
+        XCTAssertEqual(service.submittedControlOperations.map(\.request.kind), [.homeZ])
+        XCTAssertNil(service.homeZCalledWith)
+        try await finish(model, service)
     }
 
     func test_allHomeJogAndAbsoluteEntryPointsUseDurableIntentWithoutLegacyFallback() async throws {

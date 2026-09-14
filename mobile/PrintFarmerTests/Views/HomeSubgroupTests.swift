@@ -188,7 +188,7 @@ final class HomeSubgroupTests: XCTestCase {
     }
 
     func test_accessibilityHint_moonrakerActiveBarrier_returnsCoordinationReason() async throws {
-        let printer = try TestData.decodePrinter()
+        var printer = try TestData.decodePrinter()
         let service = MockPrinterService()
         let operationID = UUID()
         let timestamp = Date()
@@ -222,6 +222,7 @@ final class HomeSubgroupTests: XCTestCase {
             ),
             operation: runningOperation
         )
+        printer.physicalControl = service.currentControlOperationToReturn.physicalControl
         let viewModel = PrinterControlsViewModel.configuredForTests(
             printerService: service, printer: printer
         )
@@ -233,7 +234,7 @@ final class HomeSubgroupTests: XCTestCase {
 
         XCTAssertEqual(
             hint,
-            "A motion operation is active. Controls remain unavailable while it is queued or running; leaving this screen does not cancel it."
+            "The server holds a motion operation. Controls remain unavailable until it releases coordination; leaving this screen does not cancel it."
         )
     }
 

@@ -40,6 +40,34 @@ enum ControlOperationTestJSON {
 /// and error propagation. Now includes individual command endpoints.
 final class PrinterServiceTests: XCTestCase {
 
+    func testHeldHistoricalAndTerminalReceiptsAreAcceptedWithoutCompletion() async throws {
+        for state in ["Unknown", "Recovering", "Succeeded", "Failed", "Recovered"] {
+            for status in [200, 202] {
+                mockAPIClient.reset()
+                mockAPIClient.stubResponse(json: ControlOperationTestJSON.operation(
+                    state: state, barrierHeld: true, evidence: "MotionQueueDrained", y: nil, f: nil
+                ), statusCode: status)
+                let operation = try await printerService.submitControlOperation(
+                    printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
+                    request: .init(kind: .homeAll)
+                )
+                XCTAssertTrue(operation.barrierHeld)
+                XCTAssertFalse(operation.isSettled)
+                XCTAssertFalse(operation.hasConfirmedSuccess)
+                XCTAssertEqual(mockAPIClient.capturedRequests.count, 1)
+            }
+            mockAPIClient.reset()
+            mockAPIClient.stubResponse(json: """
+            {"physicalControl":{"supportedOperations":["HomeAll"],"barrierHeld":true,
+             "requiresRecovery":false,"operationId":"\(ControlOperationTestJSON.operationId)","state":"\(state)"},
+             "operation":\(ControlOperationTestJSON.operation(state: state, barrierHeld: true))}
+            """)
+            let current = try await printerService.getCurrentControlOperation(printerId: TestData.testUUID)
+            XCTAssertEqual(current.operation?.state.rawValue, state)
+            XCTAssertTrue(current.physicalControl.barrierHeld)
+        }
+    }
+
     func testControlOperationAllKindsUse202AndCallerNonceWithoutLegacyFallback() async throws {
         for kind in PrinterControlOperationKind.allCases {
             mockAPIClient.reset()

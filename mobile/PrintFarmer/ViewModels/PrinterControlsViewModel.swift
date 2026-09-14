@@ -376,7 +376,7 @@ final class PrinterControlsViewModel: ObservableObject {
         self.printerService = printerService
         self.composition = composition
         self.printer = printer
-        self.durableMotionRequired = printer.backend == .moonraker
+        self.durableMotionRequired = printer.physicalControl?.supportedOperations.isEmpty == false
         self.clock = clock
         leaseObservation = commandLeases.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -1371,13 +1371,13 @@ final class PrinterControlsViewModel: ObservableObject {
         lastError = nil
     }
 
-    // MARK: - Durable Moonraker motion
+    // MARK: - Advertised durable motion
 
     var usesDurableMotion: Bool { durableMotionRequired }
 
     var hasDurableMotionBarrier: Bool {
         guard usesDurableMotion else { return false }
-        return physicalControl?.barrierHeld == true
+        return physicalControl?.barrierHeld == true || controlOperation?.barrierHeld == true
     }
 
     var motionBlockedReason: String? {
@@ -1385,13 +1385,13 @@ final class PrinterControlsViewModel: ObservableObject {
         if validatingMotionAdmission { return nil }
         guard motionUserID != nil else { return "Sign in again before using durable printer controls." }
         if motionSubmissionInFlight || hasUnresolvedMotion || hasDurableMotionBarrier {
-            return "A motion operation is active. Controls remain unavailable while it is queued or running; leaving this screen does not cancel it."
+            return "The server holds a motion operation. Controls remain unavailable until it releases coordination; leaving this screen does not cancel it."
         }
         guard motionCurrentVerified else {
             return operationReadError ?? "Checking durable motion status. Missing telemetry cannot unlock controls."
         }
         guard physicalControl?.supportedOperations.isEmpty == false else {
-            return "Server update required: this Moonraker printer does not advertise durable motion controls. Legacy motion will not be sent."
+            return "Durable motion support is no longer advertised. Refresh printer capabilities before continuing. No legacy motion will be sent."
         }
         return nil
     }
@@ -1405,7 +1405,10 @@ final class PrinterControlsViewModel: ObservableObject {
         if let operationReadError { return operationReadError }
         guard let operation = presentedMotionOperation else { return nil }
         switch operation.state {
-        case .succeeded: return "Motion queue completion confirmed by the server. Check the machine before further setup."
+        case .succeeded:
+            return operation.hasConfirmedSuccess
+                ? "Motion queue completion confirmed by the server. Check the machine before further setup."
+                : "The server reports success without motion queue completion evidence. Physical completion is unconfirmed. Inspect the printer before another action; no command will be replayed."
         case .unknown, .recovering, .recovered:
             return "The physical motion outcome is unknown. Inspect the printer before another action. The command will not be replayed."
         case .failed: return operation.failure?.message ?? "The server reports that the motion operation failed."
@@ -1425,6 +1428,7 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private var hasMotionUncertainty: Bool {
         [.unknown, .recovering, .recovered].contains(presentedMotionOperation?.state)
+            || (presentedMotionOperation?.state == .succeeded && presentedMotionOperation?.hasConfirmedSuccess != true)
             || (pendingMotion != nil && !hasUnresolvedMotion && !motionSubmissionInFlight)
     }
 
@@ -1439,6 +1443,9 @@ final class PrinterControlsViewModel: ObservableObject {
     var motionStatusSummary: String? {
         guard motionStatusMessage != nil else { return nil }
         if hasMotionUncertainty {
+            if hasDurableMotionBarrier {
+                return "Motion outcome unconfirmed. Controls remain unavailable while the server holds the operation. No automatic retry."
+            }
             return "Motion outcome unknown. Inspect the printer before another action. No automatic retry."
         }
         if motionSubmissionInFlight { return "Submitting motion. Controls locked until completion." }
@@ -1651,7 +1658,7 @@ final class PrinterControlsViewModel: ObservableObject {
                             throw NetworkError.invalidResponse
                         }
                     }
-                    if result.isSettled { operation = result }
+                    if result.barrierHeld || result.isSettled { operation = result }
                     else { historyError = "Motion history has not settled. The physical outcome is unknown; no command will be replayed." }
                 } catch {
                     historyError = "Motion history could not be read. The physical outcome is unknown; no command will be replayed."
@@ -1659,6 +1666,13 @@ final class PrinterControlsViewModel: ObservableObject {
             }
             guard canPublishRead(generation), motionReadID == readID, !motionSubmissionInFlight else { return }
             physicalControl = projection
+            if let operation, operation.barrierHeld {
+                controlOperation = operation
+                hasUnresolvedMotion = true
+                motionCurrentVerified = true
+                operationReadError = nil
+                return
+            }
             hasUnresolvedMotion = false
             motionCurrentVerified = true
             operationReadError = historyError
@@ -1685,7 +1699,7 @@ final class PrinterControlsViewModel: ObservableObject {
             if case PrinterControlOperationError.updateRequired = error { updateRequired = true }
             else { updateRequired = false }
             if updateRequired, pendingMotion == nil {
-                operationReadError = "Server update required: durable Moonraker control status is unavailable. No legacy motion will be sent."
+                operationReadError = "Server update required: advertised durable control status is unavailable. No legacy motion will be sent."
             } else {
                 operationReadError = "Motion status could not be verified. Refresh current status before issuing another command. No command will be replayed."
             }
@@ -1695,7 +1709,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private func settleMotion(_ operation: PrinterControlOperation, generation: Int, readID: UUID) async {
         guard let command = pendingCommand, command.id == operation.operationId,
               Self.motionRequest(for: command) != nil else { return }
-        if operation.state == .succeeded {
+        if operation.hasConfirmedSuccess {
             if calibrationCommandID == command.id {
                 await refreshSafetyEvidence()
                 guard canPublishRead(generation), motionReadID == readID else { return }
@@ -1715,7 +1729,7 @@ final class PrinterControlsViewModel: ObservableObject {
             }
             commandNotice = "The server confirmed the motion queue drained. Physical operation succeeded."
         } else {
-            interruptCalibration("The motion did not succeed. Cancel calibration and inspect the machine before starting again.")
+            interruptCalibration("Physical motion completion was not confirmed. Cancel calibration and inspect the machine before starting again.")
             commandNotice = motionStatusMessage
         }
         pendingCommand = nil
@@ -1742,7 +1756,7 @@ final class PrinterControlsViewModel: ObservableObject {
         guard updated.id == printer.id else { return }
         let previous = printer
         printer = updated
-        if updated.backend == .moonraker { durableMotionRequired = true }
+        if updated.physicalControl?.supportedOperations.isEmpty == false { durableMotionRequired = true }
         if previous.configurationRevision != updated.configurationRevision || previous.backend != updated.backend {
             lifecycleGeneration += 1
             invalidateSafety()

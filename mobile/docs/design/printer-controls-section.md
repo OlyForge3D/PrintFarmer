@@ -75,7 +75,7 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   as do acceptance, telemetry confirmation and interrupted-observation notices.
   Request acceptance never implies physical completion, and stopping observation
   never claims to stop the printer.
-  Unresolved durable Moonraker motion does not offer **Stop waiting**. Its
+  Unresolved durable motion does not offer **Stop waiting**. Its
   status and read-only refresh remain
   outside disabled/offline controls. One concise global status replaces repeated
   motion-card notices and the duplicate motion lock reason. Routine progress and
@@ -84,10 +84,16 @@ session `acb48fc8-dd7c-4b5d-b579-74ad4aeda4e7`, not application dependencies.
   touch target and VoiceOver expanded/collapsed state. Success collapses diagnostics;
   uncertain motion keeps refresh accessible. There is no recovery attestation,
   web-recovery link, saved-admission retry, or persisted client motion lock.
-  Current server `barrierHeld` coordinates queued/running commands. Settled
+  Durable routing uses advertised `physicalControl.supportedOperations`, not
+  backend identity. Printers without that capability retain legacy routing.
+  Once advertised, missing telemetry cannot downgrade an existing control owner.
+  Current server `barrierHeld` coordinates commands regardless of state, including
+  Unknown/Recovering or terminal outcomes whose release is deferred. Settled
   `Unknown` outcomes release coordination without claiming success or advancing
-  calibration. Historical recovery states and optional evidence fields do not
-  authorize or prevent new actions. Legacy admission journals are ignored.
+  calibration. Only settled `Succeeded` with `MotionQueueDrained` evidence
+  confirms physical success or advances calibration. Missing or mismatched
+  evidence reports unconfirmed completion without imposing a recovery gate.
+  Legacy admission journals are ignored.
   A failed current-status read still requires refreshing before actuation; a
   failed historical lookup only reports uncertainty. Nothing is auto-replayed.
 

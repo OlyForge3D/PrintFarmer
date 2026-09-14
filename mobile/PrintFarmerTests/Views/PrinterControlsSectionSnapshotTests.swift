@@ -306,10 +306,11 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     }
 
     func test_durableUnknownRemainsVisibleOfflineWithRefreshOnly() async throws {
-        let printer = try makePrinter(backend: .moonraker, isOnline: false)
+        var printer = try makePrinter(backend: .moonraker, isOnline: false)
         let service = makeService(caps: Self.layoutCaps)
         let operation = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .running)
         service.currentControlOperationToReturn = .controlsFixture(operation)
+        printer.physicalControl = service.currentControlOperationToReturn.physicalControl
         let suite = "MotionStatusView-\(UUID())"
         let defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
         defer { defaults.removePersistentDomain(forName: suite) }
@@ -421,6 +422,53 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         XCTAssertEqual(service.submittedControlOperations.count, 1, "Status refresh cannot replay motion")
     }
 
+    func test_successWithoutEvidenceKeepsDiagnosticsAndWarningWithoutRecoveryGate() async throws {
+        let printer = try makePrinter(backend: .octoPrint)
+        let service = makeService(caps: Self.layoutCaps)
+        let model = makeDurableMotionModel(printer: printer, service: service)
+        await model.loadCapabilities()
+        service.submitControlOperationHandler = { [service] printerID, operationID, request in
+            let operation = PrinterControlOperation.controlsFixture(
+                printerID: printerID, operationID: operationID, request: request
+            )
+            service.currentControlOperationToReturn = .controlsFixture(operation)
+            return operation
+        }
+        await model.homeAll()
+        let (window, controller) = install(
+            PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: model)
+        )
+        defer { window.isHidden = true; model.deactivate() }
+        try await settle(controller)
+        let details = try XCTUnwrap(nativeControls(in: controller.view).first {
+            $0.accessibilityIdentifier == "printer.controls.motion.details"
+        })
+        details.sendActions(for: .touchUpInside)
+        try await settle(controller)
+        XCTAssertEqual(details.accessibilityValue, "Expanded")
+        let sent = try XCTUnwrap(service.submittedControlOperations.last)
+        var unconfirmed = PrinterControlOperation.controlsFixture(
+            printerID: sent.printerID, operationID: sent.operationID,
+            request: sent.request, state: .succeeded, held: false
+        )
+        unconfirmed.completionEvidence = nil
+        service.controlOperationToReturn = unconfirmed
+        service.currentControlOperationToReturn = .controlsFixture(unconfirmed)
+        await model.refreshControlOperation()
+        try await settle(controller)
+        XCTAssertEqual(details.accessibilityValue, "Expanded")
+        XCTAssertTrue(model.motionStatusNeedsAttention)
+        XCTAssertNil(model.motionBlockedReason)
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertTrue(model.motionStatusMessage?.contains("unconfirmed") == true)
+        XCTAssertFalse(nativeControls(in: controller.view).contains {
+            $0.accessibilityIdentifier == "printer.controls.motion.recovery"
+                || $0.accessibilityIdentifier == "printer.controls.motion.review-admission"
+        })
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        XCTAssertNil(service.homeCalledWith)
+    }
+
     private static var essentialLayoutCaps: PrinterBackendCapabilities {
         var caps = layoutCaps
         caps.supportsAbsoluteMovement = true
@@ -491,9 +539,8 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
     ) -> PrinterControlsViewModel {
         let serverID = UUID()
         let userID = UUID()
-        // Use the app's writable domain: new suite domains can become inaccessible
-        // during full simulator runs. UUID-scoped keys keep the real disk journal isolated.
-        let key = "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(printer.id.uuidString)"
+        var printer = printer
+        printer.physicalControl = service.currentControlOperationToReturn.physicalControl
         let model = PrinterControlsViewModel(
             composition: .init(identity: .init(serverID: serverID, generation: 0, revision: 0),
                                printerService: service),
@@ -502,8 +549,6 @@ final class PrinterControlsSectionSnapshotTests: XCTestCase {
         model.configureAccess(serverID: serverID, userID: userID) { nil }
         addTeardownBlock { @MainActor in
             model.deactivate()
-            UserDefaults.standard.removeObject(forKey: key)
-            XCTAssertNil(UserDefaults.standard.data(forKey: key))
         }
         return model
     }

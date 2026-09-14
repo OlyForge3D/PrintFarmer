@@ -169,8 +169,8 @@ struct PrinterSetupControlsContent: View {
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("printer.controls.motion.status")
                 .onChange(of: viewModel.motionOperationID) { _, _ in showsDetails = false }
-                .onChange(of: viewModel.controlOperation?.state) { _, state in
-                    if state == .succeeded { showsDetails = false }
+                .onChange(of: viewModel.controlOperation?.hasConfirmedSuccess) { _, confirmed in
+                    if confirmed == true { showsDetails = false }
                 }
             }
         }

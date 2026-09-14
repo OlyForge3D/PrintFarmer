@@ -87,12 +87,16 @@ struct PrinterControlOperation: Codable, Equatable, Sendable {
         !barrierHeld && state.isTerminal
     }
 
+    var hasConfirmedSuccess: Bool {
+        isSettled && state == .succeeded && completionEvidence == .motionQueueDrained
+    }
+
     func validate(printerId: UUID, operationId: UUID? = nil) throws {
         guard self.printerId == printerId,
               operationId == nil || self.operationId == operationId,
               !rowVersion.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               updatedAtUtc >= createdAtUtc,
-              (barrierHeld && !state.isTerminal) || isSettled else {
+              barrierHeld || isSettled else {
             throw PrinterControlOperationError.invalidResponse
         }
     }
