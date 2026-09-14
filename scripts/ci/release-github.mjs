@@ -31,7 +31,8 @@ function publicReservation(entry, key) {
   publicReference(key, hashPattern);
   const record = entry.record;
   const identitySha256 = publicReference(entry.identitySha256 || hash(record), hashPattern);
-  const result = { admission: { ...entry.admission }, record: publicRecord(record, identitySha256), identitySha256 };
+  const result = { admission: { ...entry.admission }, record: publicRecord(record, identitySha256),
+    identitySha256, stableSequence: publicReference(entry.stableSequence, /^(0|[1-9][0-9]*)$/) };
   if (entry.sequence !== undefined) result.sequence = publicReference(entry.sequence, sequencePattern);
   if (entry.tagObject !== undefined) result.tagObject = publicReference(entry.tagObject, shaPattern);
   if (entry.setHash !== undefined) result.setHash = publicReference(entry.setHash, hashPattern);
@@ -67,13 +68,14 @@ export function publicLedger(state) {
         'Invalid public ledger pointer');
       requireThat(Object.keys(pointer).sort().join() ===
         ['releaseId', 'canonicalVersion', 'channel', 'sourceCommit', 'allocationKey',
-          'identitySha256', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'].sort().join(),
+          'identitySha256', 'stableSequence', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'].sort().join(),
       'Unknown public ledger pointer field');
       return {
         releaseId: pointer.releaseId, canonicalVersion: tag.canonicalVersion, channel,
         sourceCommit: publicReference(pointer.sourceCommit, shaPattern),
         allocationKey: publicReference(pointer.allocationKey, hashPattern),
         identitySha256: publicReference(pointer.identitySha256, hashPattern),
+        stableSequence: publicReference(pointer.stableSequence, /^(0|[1-9][0-9]*)$/),
         manifestSha256: publicReference(pointer.manifestSha256, hashPattern),
         envelopeSha256: publicReference(pointer.envelopeSha256, hashPattern),
         manifestEnvelopeSha256: publicReference(pointer.manifestEnvelopeSha256, hashPattern),

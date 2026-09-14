@@ -320,7 +320,8 @@ function recordAdmission(record) {
 export function validateRecord(record, projected = false) {
   const fields = [
     'schema', ...admissionFields, ...channelFields(record), 'releaseId', 'canonicalVersion',
-    'sourceTag', 'allocationKey', 'created', ...(record?.channel === 'insider' ? ['sequence'] : []),
+    'sourceTag', 'allocationKey', 'created', 'stableSequence',
+    ...(record?.channel === 'insider' ? ['sequence'] : []),
     ...(projected ? ['buildTime', 'identitySha256'] : ['protection', ...(record?.channel === 'stable' ? ['qualification'] : [])]),
   ];
   requireKeys(record, fields, [], projected ? 'projected ledger record' : 'authorization');
@@ -331,6 +332,9 @@ export function validateRecord(record, projected = false) {
     record.channel === tag.channel && record.stage === tag.stage && record.sequence === tag.sequence &&
     record.releaseId === `${tag.channel}:${tag.canonicalVersion}` &&
     record.allocationKey === allocationKey(record), 'Invalid canonical record identity');
+  requireString(record.stableSequence, /^(0|[1-9][0-9]*)$/, 'stable release sequence');
+  if (record.channel === 'stable') requireThat(BigInt(record.stableSequence) > 0n,
+    'Stable authorization requires a positive stable sequence');
   requireTimestamp(record.created, 'authorization timestamp');
   if (projected) {
     requireThat(record.buildTime === record.created, 'Invalid projected record timestamp binding');
@@ -371,6 +375,9 @@ export function validatePublicAuthorization(identity) {
   for (const field of ['buildId', 'buildAttempt']) {
     requireString(identity[field], positivePattern, `public authorization ${field}`);
   }
+  requireString(identity.stableSequence, /^(0|[1-9][0-9]*)$/, 'public authorization stable sequence');
+  if (identity.channel === 'stable') requireThat(BigInt(identity.stableSequence) > 0n,
+    'Stable public authorization requires a positive stable sequence');
   requireTimestamp(identity.buildTime, 'authorization timestamp');
   requireString(identity.identitySha256, hashPattern, 'public authorization identity hash');
 }
@@ -485,7 +492,8 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
     lifecycle: {
       releaseId: completeSet.identity.releaseId, channel: completeSet.identity.channel,
       publishedAt: completeSet.identity.buildTime, expiresAt,
-      sequence: completeSet.identity.channel === 'insider' ? parseTag(completeSet.identity.sourceTag).sequence : '0',
+      sequence: completeSet.identity.channel === 'insider'
+        ? parseTag(completeSet.identity.sourceTag).sequence : completeSet.identity.stableSequence,
       cadence: completeSet.identity.channel === 'insider' ? 'continuous' : 'promoted',
       releaseNotes: { url: `https://github.com/${repository}/releases/download/${completeSet.identity.sourceTag}/release-notes.md`,
         sha256: releaseNotesSha256 },
@@ -560,7 +568,7 @@ export function validateReleaseManifest(manifest) {
   const expectedExpiry = new Date(Date.parse(identity.buildTime) + 30 * 24 * 60 * 60 * 1000).toISOString();
   requireThat(lifecycle.releaseId === identity.releaseId && lifecycle.channel === identity.channel &&
     lifecycle.publishedAt === identity.buildTime && lifecycle.expiresAt === expectedExpiry &&
-    lifecycle.sequence === (identity.channel === 'insider' ? tag.sequence : '0') &&
+    lifecycle.sequence === (identity.channel === 'insider' ? tag.sequence : identity.stableSequence) &&
     lifecycle.cadence === (identity.channel === 'insider' ? 'continuous' : 'promoted'),
   'Invalid release lifecycle binding');
   requireTimestamp(lifecycle.publishedAt, 'release publication time');
@@ -933,7 +941,7 @@ export function validateLedger(state, anchor) {
     requireString(key, hashPattern, 'ledger allocation key');
     requireObject(reservation, 'public ledger reservation');
     const projected = Object.hasOwn(reservation, 'identitySha256') || Object.hasOwn(reservation.record ?? {}, 'identitySha256');
-    requireKeys(reservation, ['admission', 'record',
+    requireKeys(reservation, ['admission', 'record', 'stableSequence',
       ...(projected ? ['identitySha256'] : []),
       ...(reservation.record?.channel === 'insider' ? ['sequence'] : [])],
     ['tagObject', 'tagPublished', 'setHash', 'set'], 'public ledger reservation');
@@ -945,7 +953,9 @@ export function validateLedger(state, anchor) {
       'Ledger authorization hash mismatch');
     requireThat(reservation.record.allocationKey === key &&
       state.identities[reservation.record.canonicalVersion] === key &&
-      reservation.sequence === reservation.record.sequence, 'Ledger identity continuity violation');
+      reservation.sequence === reservation.record.sequence &&
+      reservation.stableSequence === reservation.record.stableSequence, 'Ledger identity continuity violation');
+    requireString(reservation.stableSequence, /^(0|[1-9][0-9]*)$/, 'ledger stable sequence');
     if (Object.hasOwn(reservation, 'tagObject')) requireString(reservation.tagObject, shaPattern, 'public ledger tag object');
     if (Object.hasOwn(reservation, 'tagPublished')) requireThat(reservation.tagPublished === true &&
       reservation.tagObject, 'Invalid public ledger tag publication claim');
@@ -967,9 +977,6 @@ export function validateLedger(state, anchor) {
         compareVersions(state.stages[reservation.record.baseVersion], reservation.record.canonicalVersion) >= 0,
       'Ledger stage continuity violation');
     }
-    requireThat(BigInt(state.counter) >= highestInsiderSequence &&
-      BigInt(state.channelSequences.insider) >= highestInsiderSequence,
-    'Ledger sequence continuity violation');
     if (reservation.record.channel === 'stable') {
       const qualification = state.qualifications[reservation.record.sourceCommit];
       publicLedgerQualification(qualification, reservation.record.sourceCommit);
@@ -987,9 +994,12 @@ export function validateLedger(state, anchor) {
     requireThat(tag.channel === 'insider' && tag.baseVersion === base && state.identities[version],
       'Invalid public ledger stage');
   }
+  requireThat(BigInt(state.counter) >= highestInsiderSequence &&
+    BigInt(state.channelSequences.insider) >= highestInsiderSequence,
+  'Ledger sequence continuity violation');
   for (const [channel, pointer] of Object.entries(state.pointers)) {
     requireKeys(pointer, ['releaseId', 'canonicalVersion', 'channel', 'sourceCommit', 'allocationKey',
-      'identitySha256', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'],
+      'identitySha256', 'stableSequence', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'],
       [], 'public ledger pointer');
     requireThat(['stable', 'insider'].includes(channel), 'Invalid public ledger pointer channel');
     const reservation = state.reservations[pointer.allocationKey];
@@ -998,6 +1008,7 @@ export function validateLedger(state, anchor) {
       pointer.releaseId === reservation.record.releaseId &&
       pointer.canonicalVersion === reservation.record.canonicalVersion &&
       pointer.sourceCommit === reservation.record.sourceCommit &&
+      pointer.stableSequence === reservation.stableSequence &&
       [pointer.identitySha256, pointer.manifestSha256, pointer.envelopeSha256, pointer.manifestEnvelopeSha256]
         .every(value => hashPattern.test(value)) &&
       pointer.manifestEnvelopeSha256 === hash({
@@ -1005,8 +1016,11 @@ export function validateLedger(state, anchor) {
         envelopeSha256: pointer.envelopeSha256,
       }), 'Invalid public ledger pointer binding');
     if (channel === 'stable') {
-      requireThat(BigInt(state.channelSequences.stable) > 0n,
-        'Stable pointer requires a positive durable channel sequence');
+      requireThat(pointer.stableSequence === reservation.stableSequence &&
+        pointer.stableSequence === reservation.record.stableSequence &&
+        BigInt(pointer.stableSequence) === BigInt(state.channelSequences.stable) &&
+        BigInt(pointer.stableSequence) > 0n,
+      'Stable pointer sequence replay, regression, or cross-channel substitution');
     } else {
       requireThat(BigInt(reservation.record.sequence) <= BigInt(state.channelSequences.insider),
         'Insider pointer sequence replay, regression, or cross-channel substitution');
@@ -1016,6 +1030,37 @@ export function validateLedger(state, anchor) {
     publicLedgerQualification(qualification, sourceCommit);
     if (qualification.mode === 'promotion') validatePromotionOrigin(state, qualification);
   }
+}
+
+export function migrateLegacyLedger(legacy, anchor) {
+  requireThat(legacy?.schema === 1 && legacy.anchor === anchor && !Object.hasOwn(legacy, 'channelSequences'),
+    'Ledger is not a pre-stable-sequence state');
+  requireKeys(legacy, ['schema', 'anchor', 'counter', 'reservations', 'identities', 'pointers', 'stages', 'qualifications'],
+    ['lastHistoricalStable'], 'legacy public ledger');
+  requireThat(Object.keys(legacy.pointers).length === 0,
+    'Legacy signed pointers require owner recovery; migration cannot replace signed identities');
+  const migrated = structuredClone(legacy);
+  const stableReservations = Object.values(migrated.reservations)
+    .filter(reservation => reservation?.record?.channel === 'stable')
+    .sort((left, right) => compareVersions(left.record.canonicalVersion, right.record.canonicalVersion));
+  for (const [index, reservation] of stableReservations.entries()) {
+    const stableSequence = (BigInt(index) + 1n).toString();
+    requireThat(!Object.hasOwn(reservation, 'identitySha256') && !Object.hasOwn(reservation, 'set'),
+      'Legacy signed reservation requires owner recovery; migration cannot replace signed identities');
+    reservation.stableSequence = stableSequence;
+    reservation.record.stableSequence = stableSequence;
+  }
+  for (const reservation of Object.values(migrated.reservations)) {
+    if (reservation.record.channel !== 'insider') continue;
+    reservation.stableSequence = stableReservations.length.toString();
+    reservation.record.stableSequence = stableReservations.length.toString();
+  }
+  migrated.channelSequences = {
+    insider: migrated.counter,
+    stable: stableReservations.length.toString(),
+  };
+  validateLedger(migrated, anchor);
+  return migrated;
 }
 
 export function publicLedgerQualification(qualification, sourceCommit) {
@@ -1127,6 +1172,9 @@ export function reserve(state, admission, created, protection, verifiedQualifica
     ? ((BigInt(state.counter) > BigInt(state.channelSequences.insider)
       ? BigInt(state.counter) : BigInt(state.channelSequences.insider)) + 1n).toString()
     : undefined;
+  const stableSequence = admission.channel === 'stable'
+    ? (BigInt(state.channelSequences.stable) + 1n).toString()
+    : state.channelSequences.stable;
   const canonicalVersion = admission.baseVersion + (sequence ? `-${admission.stage}.${sequence}` : '');
   requireThat(!state.identities[canonicalVersion], 'Immutable identity already reserved');
   const previousStage = state.stages?.[admission.baseVersion];
@@ -1136,7 +1184,7 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   }
   const record = {
     schema: 1, ...admission, releaseId: `${admission.channel}:${canonicalVersion}`,
-    canonicalVersion, sourceTag: `v${canonicalVersion}`, ...(sequence ? { sequence } : {}),
+    canonicalVersion, sourceTag: `v${canonicalVersion}`, stableSequence, ...(sequence ? { sequence } : {}),
     allocationKey: key, created, protection,
   };
   if (admission.channel === 'stable') {
@@ -1146,7 +1194,7 @@ export function reserve(state, admission, created, protection, verifiedQualifica
     record.qualification = qualification;
   }
   validateRecord(record);
-  const reservation = { admission, record, ...(sequence ? { sequence } : {}) };
+  const reservation = { admission, record, stableSequence, ...(sequence ? { sequence } : {}) };
   state.reservations[key] = reservation;
   state.identities[canonicalVersion] = key;
   if (sequence) {
@@ -1200,6 +1248,7 @@ export function identityLabels(record) {
     'org.printfarmer.build-attempt': record.buildAttempt,
     'org.printfarmer.workflow': record.workflowIdentity,
     'org.printfarmer.identity-sha256': hash(record),
+    'org.printfarmer.stable-sequence': record.stableSequence,
   };
 }
 
@@ -1237,8 +1286,9 @@ export function advance(state, record, set, signed, currentHead, expectedPointer
     requireThat(record.sequence === state.channelSequences.insider && BigInt(record.sequence) > 0n,
       'Insider sequence replay, regression, or cross-channel substitution');
   } else {
-    requireThat(previousSequence >= 0n, 'Stable sequence replay, regression, or cross-channel substitution');
-    state.channelSequences.stable = (previousSequence + 1n).toString();
+    requireThat(record.stableSequence === (previousSequence + 1n).toString(),
+      'Stable sequence replay, regression, or cross-channel substitution');
+    state.channelSequences.stable = record.stableSequence;
   }
   reservation.setHash = setHash;
   reservation.set = set;
@@ -1261,13 +1311,15 @@ export function signedReleasePointer(record, signed) {
     manifest.identity.canonicalVersion === record.canonicalVersion &&
     manifest.identity.channel === record.channel &&
     manifest.identity.sourceCommit === record.sourceCommit &&
-    manifest.identity.identitySha256 === hash(record),
+    manifest.identity.identitySha256 === hash(record) &&
+    manifest.identity.stableSequence === record.stableSequence,
   'Signed release manifest identity does not match authorization');
   const manifestSha256 = releaseManifestSha256(signed.serializedManifest);
   const envelopeSha256 = releaseManifestSha256(signed.serializedEnvelope);
   return {
     releaseId: record.releaseId, canonicalVersion: record.canonicalVersion, channel: record.channel,
     sourceCommit: record.sourceCommit, allocationKey: record.allocationKey, identitySha256: hash(record),
+    stableSequence: record.stableSequence,
     manifestSha256, envelopeSha256, manifestEnvelopeSha256: hash({ manifestSha256, envelopeSha256 }),
   };
 }

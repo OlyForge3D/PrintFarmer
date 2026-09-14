@@ -12,7 +12,7 @@ import {
   admit, advance as advancePolicy, allocationKey, compareVersions, components, hash, identityLabels, signedReleasePointer,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
-  validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
+  validateRecord, migrateLegacyLedger, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
   loadReleaseMetadata, releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
@@ -815,7 +815,7 @@ test('durable pointers are closed, signed-byte-bound, and channel-sequenced', ()
   const pointer = ledger.pointers.insider;
   assert.deepEqual(Object.keys(pointer).sort(), [
     'allocationKey', 'canonicalVersion', 'channel', 'envelopeSha256', 'identitySha256',
-    'manifestEnvelopeSha256', 'manifestSha256', 'releaseId', 'sourceCommit',
+    'manifestEnvelopeSha256', 'manifestSha256', 'releaseId', 'sourceCommit', 'stableSequence',
   ]);
   assert.equal(pointer.channel, 'insider');
   assert.equal(ledger.channelSequences.insider, insider.sequence);
@@ -842,7 +842,23 @@ test('durable pointers are closed, signed-byte-bound, and channel-sequenced', ()
   assert.equal(ledger.channelSequences.stable, '1');
   const replay = structuredClone(ledger);
   replay.channelSequences.stable = '0';
-  assert.throws(() => validateLedger(replay, anchor), /positive durable channel sequence/);
+  assert.throws(() => validateLedger(replay, anchor), /Stable pointer sequence replay/);
+  const conflicting = structuredClone(ledger);
+  conflicting.pointers.stable.stableSequence = '2';
+  assert.throws(() => validateLedger(conflicting, anchor), /pointer binding|Stable pointer sequence replay/);
+});
+
+test('stable-sequence migration is explicit, deterministic, and rejects signed legacy state', () => {
+  const legacy = state();
+  delete legacy.channelSequences;
+  const migrated = migrateLegacyLedger(legacy, anchor);
+  assert.deepEqual(migrated.channelSequences, { insider: '0', stable: '0' });
+  validateLedger(migrated, anchor);
+
+  const malformed = structuredClone(legacy);
+  malformed.pointers.stable = { allocationKey: 'a'.repeat(64) };
+  assert.throws(() => migrateLegacyLedger(malformed, anchor), /owner recovery/);
+  assert.throws(() => migrateLegacyLedger(state(), anchor), /pre-stable-sequence/);
 });
 
 test('two concurrent complete sets cannot both win the same expected pointer', async () => {
@@ -876,7 +892,8 @@ test('emitted public identity excludes private and future fields without alterin
       sourceBranch: identity.sourceBranch, sourceTag: identity.sourceTag,
       sourceCommit: identity.sourceCommit, authorizedBranchHead: identity.authorizedBranchHead,
       buildId: identity.buildId, buildAttempt: identity.buildAttempt,
-      workflowIdentity: identity.workflowIdentity, identitySha256: hash(identity),
+      workflowIdentity: identity.workflowIdentity, stableSequence: identity.stableSequence,
+      identitySha256: hash(identity),
     });
     assert.doesNotMatch(emitted, /protection|ruleset|environment|reviewer|futureAuthorization|private-/);
     assert.deepEqual(JSON.parse(readFileSync(resolve(root, 'release-identity.json'), 'utf8')), publicAuthorization(identity));

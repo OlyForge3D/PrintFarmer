@@ -1,7 +1,7 @@
 export const publicIdentityFields = Object.freeze([
   'releaseId', 'channel', 'canonicalVersion', 'baseVersion', 'sourceBranch',
   'sourceTag', 'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt',
-  'workflowIdentity',
+  'workflowIdentity', 'stableSequence',
 ]);
 
 export function publicIdentity(record) {

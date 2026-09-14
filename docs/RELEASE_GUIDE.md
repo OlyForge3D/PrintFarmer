@@ -162,6 +162,19 @@ and updates the ref with `force: false`. Competing sibling commits cannot both
 fast-forward: the loser rereads and retries. Workflow concurrency is an additional
 serialization measure, not the allocator.
 
+### Ledger schema recovery and migration
+
+`state.json` is a closed schema. A ledger snapshot that predates
+`channelSequences` or the signed manifest/envelope pointer fields is **not**
+silently defaulted, reset, or accepted as current state. Recovery requires an
+owner-reviewed migration commit on the protected ledger branch which preserves
+the pinned anchor, every immutable reservation/identity/tag reference, and the
+historical stable floor, then initializes channel sequences from those retained
+records. The migration must be validated as a single-parent ledger transition
+before any new reservation, pointer, alias, or public-release write. If that
+proof is unavailable, publication remains blocked and the owner must recover
+the ledger from its protected history; creating a fresh ledger is not recovery.
+
 One global decimal counter covers beta, insider and RC, across bases.
 Workflow migration requires an owner-reviewed code/policy change; arbitrary
 replacement workflow identities are rejected. Allocation keys include repository,

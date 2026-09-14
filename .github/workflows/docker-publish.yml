@@ -538,6 +538,8 @@ jobs:
           expected_complete_inventory="$(
             printf '%s\n' "${expected_source_assets[@]}" "${expected_manifest_assets[@]}" | sort
           )"
+          [[ "$(printf '%s\n' "${expected_source_assets[@]}" "${expected_manifest_assets[@]}" | sort | uniq -d)" == "" ]] ||
+            { echo "Expected release asset inventory contains duplicate names"; exit 1; }
           validate_local_source_inventory() {
             local_inventory="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
             [[ -z "$local_inventory" || "$local_inventory" == "$expected_source_inventory" ]] ||
