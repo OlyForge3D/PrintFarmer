@@ -468,6 +468,9 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
   'Release metadata differs from qualified source metadata');
   requireThat(cryptoEvidence?.schema === 1 && typeof cryptoEvidence.sha256 === 'string' &&
     hashPattern.test(cryptoEvidence.sha256) && cryptoEvidence.services, 'Missing immutable crypto evidence');
+  requireTimestamp(cryptoEvidence.verificationTime, 'post-sign evidence verification time');
+  requireThat(Date.parse(record.created) <= Date.parse(cryptoEvidence.verificationTime),
+    'Evidence verification predates authorization');
   validateManifestCryptoEvidence(cryptoEvidence.services, completeSet);
   const directHotfix = qualification?.mode === 'hotfix'
     ? { mode: 'direct-hotfix', reasonSha256: qualification.reasonSha256 }
@@ -500,7 +503,8 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
     evidence: {
       schema: 2, trust: { signer: publisherWorkflowIdentity, issuer: trustPolicy.issuer,
         provenance: 'control-workflow', workflowCommit: record.workflowCommit,
-        policyDigest: record.protection.policyDigest, trustPolicySha256: hash(trustPolicy) },
+        policyDigest: record.protection.policyDigest, trustPolicySha256: hash(trustPolicy),
+        verificationTime: cryptoEvidence.verificationTime },
       releaseMetadata: {
         schema: releaseMetadata.schema, version: releaseMetadata.version, sha256: sha256Bytes(metadataBytes),
         sourceCommit: metadataEvidence?.sourceCommit ?? record.sourceCommit,
@@ -599,12 +603,15 @@ export function validateReleaseManifest(manifest) {
   }
   requireKeys(evidence, ['schema', 'trust', 'releaseMetadata', 'services', 'cryptoEvidence'], [], 'release evidence');
   requireThat(evidence.schema === 2, 'Invalid release evidence schema');
-  requireKeys(evidence.trust, ['signer', 'issuer', 'provenance', 'workflowCommit', 'policyDigest', 'trustPolicySha256'], [], 'release trust evidence');
+  requireKeys(evidence.trust, ['signer', 'issuer', 'provenance', 'workflowCommit', 'policyDigest', 'trustPolicySha256', 'verificationTime'], [], 'release trust evidence');
   requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
     evidence.trust.issuer === 'https://token.actions.githubusercontent.com' &&
     evidence.trust.provenance === 'control-workflow' &&
     shaPattern.test(evidence.trust.workflowCommit), 'Invalid release trust identity');
   requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
+  requireTimestamp(evidence.trust.verificationTime, 'post-sign evidence verification time');
+  requireThat(Date.parse(identity.buildTime) <= Date.parse(evidence.trust.verificationTime),
+    'Evidence verification predates authorization');
   const trustPolicy = loadReleaseTrustPolicy();
   requireThat(!trustPolicy.revokedReleaseIds.includes(identity.releaseId) &&
     !trustPolicy.revokedSignerIdentities.includes(evidence.trust.signer) &&
@@ -624,7 +631,7 @@ export function validateReleaseManifest(manifest) {
     'Invalid immutable crypto evidence binding');
   validateManifestCryptoEvidence(evidence.services, manifest.completeSet);
   requireThat(evidence.cryptoEvidence.sha256 === sha256Bytes(JSON.stringify({
-    schema: 1, services: evidence.services,
+    schema: 1, verificationTime: evidence.trust.verificationTime, services: evidence.services,
   })), 'Immutable crypto evidence digest mismatch');
   requireKeys(compatibility, ['schema', 'managedEligible', 'releaseMetadata', 'api', 'services', 'storage', 'configuration', 'updater'], [], 'release compatibility');
   requireThat(compatibility.schema === 3 && compatibility.managedEligible ===

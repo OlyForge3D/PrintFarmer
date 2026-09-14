@@ -222,7 +222,7 @@ function validateStored(value, digest, platform, trust) {
 }
 
 export function stageEvidence(evidencePath, completeSet, collected, trust) {
-  const set = { schema: 1, services: {} };
+  const set = { schema: 1, ...(trust === undefined ? {} : { verificationTime: trust.trustedTime }), services: {} };
   for (const [service, image] of Object.entries(completeSet.images)) {
     const value = collected[service];
     requireThat(value, `Missing evidence: ${service}`);

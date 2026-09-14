@@ -82,7 +82,8 @@ const cryptoEvidenceFixture = set => {
       ])),
     },
   ]));
-  return { schema: 1, services, sha256: hash({ schema: 1, services }) };
+  const verificationTime = '2099-01-01T00:00:00.000Z';
+  return { schema: 1, verificationTime, services, sha256: hash({ schema: 1, verificationTime, services }) };
 };
 
 const signedManifest = (identity, set) => {
