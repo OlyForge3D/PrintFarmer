@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
 
@@ -43,6 +44,30 @@ export function requireKeys(value, required, optional = [], description = 'relea
   requireThat(required.every(key => Object.hasOwn(value, key)) &&
     Object.keys(value).every(key => [...required, ...optional].includes(key) && value[key] !== undefined),
   `Invalid ${description} fields`);
+}
+
+export function loadReleaseTrustPolicy(path = 'release-trust-policy.json') {
+  let policy;
+  try { policy = JSON.parse(readFileSync(path, 'utf8')); } catch {
+    throw new ReleasePolicyError('Release trust policy is unavailable or malformed');
+  }
+  requireKeys(policy, ['schema', 'rootIdentity', 'issuer', 'signers', 'certificateMaxAgeSeconds',
+    'revocationEpoch', 'revokedReleaseIds', 'revokedSignerIdentities', 'rotationOverlapSeconds'], [],
+  'release trust policy');
+  requireThat(policy.schema === 1 && policy.rootIdentity === repository &&
+    policy.issuer === 'https://token.actions.githubusercontent.com' &&
+    Number.isSafeInteger(policy.certificateMaxAgeSeconds) && policy.certificateMaxAgeSeconds > 0 &&
+    Number.isSafeInteger(policy.rotationOverlapSeconds) && policy.rotationOverlapSeconds >= 0 &&
+    Array.isArray(policy.signers) && policy.signers.length > 0 &&
+    Array.isArray(policy.revokedReleaseIds) && Array.isArray(policy.revokedSignerIdentities),
+  'Invalid release trust policy');
+  for (const signer of policy.signers) {
+    requireKeys(signer, ['identity', 'validFrom', 'validUntil'], [], 'release trust signer');
+    requireThat(signer.identity === publisherWorkflowIdentity && Date.parse(signer.validFrom) < Date.parse(signer.validUntil),
+      'Invalid release trust signer');
+  }
+  requireThat(JSON.stringify(policy) === readFileSync(path, 'utf8').trim(), 'Release trust policy is not canonical');
+  return policy;
 }
 
 export function requireString(value, pattern, description) {
@@ -293,6 +318,7 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
   const qualification = record.channel === 'stable'
     ? publicLedgerQualification(record.qualification, record.sourceCommit)
     : undefined;
+  const trustPolicy = loadReleaseTrustPolicy();
   const artifactEvidence = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
     service, {
       index: {
@@ -334,8 +360,8 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256)
       ...(promotion ?? directHotfix ?? { mode: 'insider' }),
     },
     evidence: {
-      schema: 1, trust: { signer: publisherWorkflowIdentity, issuer: 'https://token.actions.githubusercontent.com',
-        policyDigest: record.protection.policyDigest },
+      schema: 2, trust: { signer: publisherWorkflowIdentity, issuer: trustPolicy.issuer,
+        policyDigest: record.protection.policyDigest, trustPolicySha256: hash(trustPolicy) },
       services: artifactEvidence,
     },
     compatibility: {
@@ -426,11 +452,13 @@ export function validateReleaseManifest(manifest) {
     requireString(provenance.reasonSha256, hashPattern, 'direct hotfix reason');
   }
   requireKeys(evidence, ['schema', 'trust', 'services'], [], 'release evidence');
-  requireThat(evidence.schema === 1, 'Invalid release evidence schema');
-  requireKeys(evidence.trust, ['signer', 'issuer', 'policyDigest'], [], 'release trust evidence');
+  requireThat(evidence.schema === 2, 'Invalid release evidence schema');
+  requireKeys(evidence.trust, ['signer', 'issuer', 'policyDigest', 'trustPolicySha256'], [], 'release trust evidence');
   requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
     evidence.trust.issuer === 'https://token.actions.githubusercontent.com', 'Invalid release trust identity');
   requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
+  requireThat(evidence.trust.trustPolicySha256 === hash(loadReleaseTrustPolicy()),
+    'Release trust policy hash mismatch');
   requireKeys(evidence.services, Object.keys(components), [], 'release service evidence');
   for (const [service, image] of Object.entries(manifest.completeSet.images)) {
     const serviceEvidence = evidence.services[service];

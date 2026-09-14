@@ -3920,6 +3920,7 @@ test('executed signing commands preserve signed subjects and never let verificat
   const cwd = process.cwd();
   mkdirSync(root, { recursive: true });
   symlinkSync(resolve(cwd, 'scripts'), resolve(root, 'scripts'), 'junction');
+  copyFileSync(resolve(cwd, 'release-trust-policy.json'), resolve(root, 'release-trust-policy.json'));
   process.chdir(root);
   try {
     const identity = await authorizedRecord();
