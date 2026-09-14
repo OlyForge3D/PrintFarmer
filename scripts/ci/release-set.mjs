@@ -143,6 +143,18 @@ export function publishReleaseAliases(record, set, inspect, create) {
   return plan;
 }
 
+export function inspectReleaseSet(record, set, evidencePath, releaseNotesSha256, metadataBytes,
+  sourceArtifactBytes, root = '.') {
+  const stagedEvidence = readEvidence(evidencePath, set, {
+    policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, trustedTime: record.created,
+  });
+  const cryptoEvidence = { ...stagedEvidence.set, sha256: stagedEvidence.sha256 };
+  writeAuthorizationSet(record, set);
+  emitPublicReleaseAssets(record, set, root, releaseNotesSha256, metadataBytes, sourceArtifactBytes,
+    cryptoEvidence);
+  return cryptoEvidence;
+}
+
 function main() {
   const record = verifyAuthorization(process.env, command);
   const evidencePathIndex = process.argv.indexOf('--evidence');
@@ -160,18 +172,14 @@ function main() {
     const digests = Object.fromEntries(Object.keys(components).map(name =>
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
-    const cryptoEvidence = readEvidence(evidencePath, set, {
-      policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, trustedTime: record.created,
-    });
-    writeAuthorizationSet(record, set);
     const metadataBytes = readFileSync('.artifacts/release-authorization/source-release-metadata.json', 'utf8');
     const metadata = JSON.parse(metadataBytes);
     const sourceArtifactBytes = Object.fromEntries(Object.values(metadata.schemas).map(schema => [
       schema.artifact,
       readFileSync(`.artifacts/release-authorization/source-artifacts/${schema.artifact}`),
     ]));
-    emitPublicReleaseAssets(record, set, '.', process.env.RELEASE_NOTES_SHA256,
-      metadataBytes, sourceArtifactBytes, cryptoEvidence);
+    inspectReleaseSet(record, set, evidencePath, process.env.RELEASE_NOTES_SHA256,
+      metadataBytes, sourceArtifactBytes);
   } else if (process.argv[2] === 'tag') {
     const set = readPrivateJson(privateSetPath);
     publishImmutableTags(record, set, tag => {

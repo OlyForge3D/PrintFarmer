@@ -51,10 +51,11 @@ function payload(entry) {
   }
 }
 
-function validateVerification(bytes, expectedDigest, type, expectedPredicate) {
+function verificationEntries(bytes, expectedDigest, type, expectedPredicate) {
   requireThat(typeof bytes === 'string' && bytes.length > 0, `Missing ${type} bytes`);
   requireThat(digestPattern.test(expectedDigest), `Invalid ${type} subject`);
-  const entries = subjects(parseJson(bytes, type), type);
+  const parsed = parseJson(bytes, type);
+  const entries = subjects(parsed, type);
   requireThat(entries.every(entry => entry.subject === expectedDigest), `${type} subject mismatch`);
   if (expectedPredicate !== undefined) {
     const parsedPredicate = parseJson(expectedPredicate, 'SPDX predicate');
@@ -62,6 +63,11 @@ function validateVerification(bytes, expectedDigest, type, expectedPredicate) {
       JSON.stringify(canonicalJson(entry.predicate)) === JSON.stringify(canonicalJson(parsedPredicate))),
       'SPDX predicate mismatch');
   }
+  return Array.isArray(parsed) ? parsed : [parsed];
+}
+
+function validateVerification(bytes, expectedDigest, type, expectedPredicate) {
+  verificationEntries(bytes, expectedDigest, type, expectedPredicate);
 }
 
 function validateBundleTrust(bundle, trust) {
@@ -96,25 +102,41 @@ function validateBundleTrust(bundle, trust) {
   }
 }
 
+function validateDsseBundle(bundle, subject, predicateBytes) {
+  const entries = Array.isArray(bundle) ? bundle : [bundle];
+  requireThat(entries.length > 0 && entries.every(entry => typeof entry?.payload === 'string' &&
+    entry.payload.length > 0 && entry.payloadType === 'application/vnd.in-toto+json' &&
+    Array.isArray(entry.signatures) && entry.signatures.length > 0 &&
+    entry.signatures.every(signature => typeof signature?.sig === 'string' && signature.sig.length > 0)),
+  'Malformed Cosign DSSE attestation bundle');
+  const predicate = parseJson(predicateBytes, 'SPDX predicate');
+  for (const entry of entries) {
+    let statement;
+    try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
+      throw new Error('Malformed Cosign DSSE payload');
+    }
+    requireThat(statement?.subject?.[0]?.digest?.sha256 === subject.slice(7) &&
+      JSON.stringify(canonicalJson(statement.predicate)) === JSON.stringify(canonicalJson(predicate)),
+    'Cosign DSSE subject or SPDX predicate mismatch');
+  }
+}
+
 function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
   attestationBundleBytes, platform, trust) {
-  validateVerification(signatureBytes, subject, 'signature');
-  validateVerification(attestationBytes, subject, 'attestation', predicateBytes);
+  const signatureVerification = verificationEntries(signatureBytes, subject, 'signature');
+  const attestationVerification = verificationEntries(attestationBytes, subject, 'attestation', predicateBytes);
   const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
   const attestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
-  requireThat((Array.isArray(signatureBundle) ? signatureBundle : [signatureBundle]).length > 0 &&
-    (Array.isArray(attestationBundle) ? attestationBundle : [attestationBundle]).length > 0,
-  'Missing Cosign bundle material');
-  for (const bundle of [signatureBundle, attestationBundle]) {
-    const entries = Array.isArray(bundle) ? bundle : [bundle];
-    requireThat(entries.every(entry => typeof entry?.payload === 'string' && entry.payload.length > 0 &&
+  const signatureEntries = Array.isArray(signatureBundle) ? signatureBundle : [signatureBundle];
+  requireThat(signatureEntries.length > 0 && signatureEntries.every(entry =>
+    typeof entry?.payload === 'string' && entry.payload.length > 0 &&
       Number.isSafeInteger(entry.optional?.Bundle?.Payload?.integratedTime) &&
       typeof entry.optional?.Bundle?.SignedEntryTimestamp === 'string' &&
       entry.optional.Bundle.SignedEntryTimestamp.length > 0),
-    'Missing Cosign signed transparency material');
-  }
-  validateBundleTrust(signatureBundle, trust);
-  validateBundleTrust(attestationBundle, trust);
+  'Missing Cosign signed signature bundle material');
+  validateDsseBundle(attestationBundle, subject, predicateBytes);
+  validateBundleTrust(signatureVerification, trust);
+  validateBundleTrust(attestationVerification, trust);
   return {
     subject, ...(platform === undefined ? {} : { platform }),
     signature: { sha256: sha256(signatureBytes), bytes: signatureBytes,
@@ -172,8 +194,15 @@ function validateStored(value, digest, platform, trust) {
     value.sbom.bundleSha256 === sha256(value.sbom.bundle), 'Evidence bytes digest mismatch');
   validateVerification(value.signature.bytes, digest, 'signature');
   validateVerification(value.sbom.bytes, digest, 'attestation', value.sbom.predicate);
-  validateBundleTrust(parseJson(value.signature.bundle, 'signature bundle'), trust);
-  validateBundleTrust(parseJson(value.sbom.bundle, 'attestation bundle'), trust);
+  const signatureBundle = parseJson(value.signature.bundle, 'signature bundle');
+  const signatureEntries = Array.isArray(signatureBundle) ? signatureBundle : [signatureBundle];
+  requireThat(signatureEntries.every(entry => typeof entry?.payload === 'string' && entry.payload.length > 0 &&
+    Number.isSafeInteger(entry.optional?.Bundle?.Payload?.integratedTime) &&
+    typeof entry.optional?.Bundle?.SignedEntryTimestamp === 'string' &&
+    entry.optional.Bundle.SignedEntryTimestamp.length > 0), 'Missing Cosign signed signature bundle material');
+  validateDsseBundle(parseJson(value.sbom.bundle, 'attestation bundle'), digest, value.sbom.predicate);
+  validateBundleTrust(verificationEntries(value.signature.bytes, digest, 'signature'), trust);
+  validateBundleTrust(verificationEntries(value.sbom.bytes, digest, 'attestation', value.sbom.predicate), trust);
 }
 
 export function stageEvidence(evidencePath, completeSet, collected, trust) {

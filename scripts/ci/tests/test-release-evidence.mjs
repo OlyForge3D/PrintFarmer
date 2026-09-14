@@ -36,18 +36,22 @@ const trust = (overrides = {}) => ({
   }, releaseId: 'insider:1.2.3-insider.1', trustedTime: '2026-09-14T22:50:00.000Z', ...overrides,
 });
 function signed(subject = digest, predicateValue = predicate) {
+  const verification = {
+    optional: { Subject: signer, Issuer: 'https://token.actions.githubusercontent.com', certificate,
+      Bundle: { Payload: { integratedTime: 1789426200 }, SignedEntryTimestamp: 'proof' } },
+  };
+  const statement = {
+    subject: [{ digest: { sha256: subject.slice(7) } }], predicate: predicateValue,
+  };
   return {
-    signatureBytes: JSON.stringify([{ critical: { image: { 'docker-manifest-digest': subject } } }]),
-    attestationBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify({
-      subject: [{ digest: { sha256: subject.slice(7) } }], predicate: predicateValue,
-    })).toString('base64') }]),
+    signatureBytes: JSON.stringify([{ critical: { image: { 'docker-manifest-digest': subject } }, ...verification }]),
+    attestationBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'), ...verification }]),
     predicateBytes: JSON.stringify(predicateValue),
     signatureBundleBytes: JSON.stringify([{ payload: 'signed-payload', optional: { Subject: signer,
       Issuer: 'https://token.actions.githubusercontent.com', certificate,
       Bundle: { Payload: { integratedTime: 1789426200 }, SignedEntryTimestamp: 'proof' } } }]),
-    attestationBundleBytes: JSON.stringify([{ payload: 'dsse-payload', optional: { Subject: signer,
-      Issuer: 'https://token.actions.githubusercontent.com', certificate,
-      Bundle: { Payload: { integratedTime: 1789426200 }, SignedEntryTimestamp: 'proof' } } }]),
+    attestationBundleBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
+      payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'dsse-signature' }] }]),
   };
 }
 test('stages validated index and platform crypto evidence', () => {
@@ -90,9 +94,9 @@ test('rejects stale, revoked, substituted, and out-of-window bundle trust before
     assert.throws(() => stageEvidence(path, completeSet, collected,
       trust({ policy: { ...trust().policy, revokedSignerIdentities: [signer] } })), /untrusted|revoked/);
     const altered = structuredClone(collected);
-    const alteredBundle = JSON.parse(altered.api.index.signatureBundleBytes);
-    alteredBundle[0].optional.certificate = 'not-a-certificate';
-    altered.api.index.signatureBundleBytes = JSON.stringify(alteredBundle);
+    const alteredVerification = JSON.parse(altered.api.index.signatureBytes);
+    alteredVerification[0].optional.certificate = 'not-a-certificate';
+    altered.api.index.signatureBytes = JSON.stringify(alteredVerification);
     assert.throws(() => stageEvidence(path, completeSet, altered, trust()), /certificate/);
     assert.throws(() => stageEvidence(path, completeSet, collected, trust({
       policy: { ...trust().policy, signers: [{ ...trust().policy.signers[0], validUntil: '2026-09-01T00:00:00.000Z' }] },
@@ -137,4 +141,15 @@ test('rejects staged signature bundle, subject, predicate, and platform substitu
     writeFileSync(evidencePath, JSON.stringify(unknown));
     assert.throws(() => readEvidence(evidencePath, completeSet), /Invalid evidence entry/);
   } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('rejects a raw DSSE bundle with substituted predicate payload', () => {
+  const evidence = signed();
+  evidence.attestationBundleBytes = JSON.stringify([{
+    payload: Buffer.from(JSON.stringify({ subject: [{ digest: { sha256: digest.slice(7) } }],
+      predicate: { SPDXID: 'SPDXRef-SUBSTITUTED' } })).toString('base64'),
+    payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'dsse-signature' }],
+  }]);
+  assert.throws(() => normalizeEvidence({ subject: digest, ...evidence }),
+    /DSSE|predicate/);
 });
