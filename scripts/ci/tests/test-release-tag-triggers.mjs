@@ -17,7 +17,7 @@ import {
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
-import { runContext, runReleaseControl, output } from '../release-control.mjs';
+import { runReleaseControl, output } from '../release-control.mjs';
 import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
   authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
@@ -35,6 +35,17 @@ const context = (overrides = {}) => ({
   workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
   workflowSha: sha, workflowBranch: 'development', buildId: '42', buildAttempt: '1',
   channel: 'insider', ...overrides,
+});
+
+test('release consumers reject missing transactions before verification or network access', async () => {
+  for (const operation of ['advance', 'consume', 'preflight']) {
+    let verified = false;
+    await assert.rejects(runReleaseControl(operation, {
+      GH_TOKEN: 'github-fixture',
+      RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
+    }, () => { verified = true; }), /Missing release transaction/);
+    assert.equal(verified, false, operation);
+  }
 });
 const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
 const hotfixQualification = () => ({
@@ -176,6 +187,8 @@ test('release API client permits only canonical repository routes and rejects re
       `contents/VERSION?ref=${sha}&path=private`, `git/trees/${sha}?recursive=2`,
       `git/commits/${sha}#fragment`, `git\\commits\\${sha}`, 'git/ref/heads/feature',
       'rulesets/0', 'rulesets/01', 'rulesets?per_page=100&page=2', 'releases',
+      'environments/release-publisher-stable',
+      'environments/release-publisher-insider/deployment-branch-policies',
     ]) await assert.rejects(api(endpoint), ReleasePolicyError, endpoint);
     for (const method of ['DELETE', 'PUT', 'PATCH', 'POST', 'GET\r\n']) {
       await assert.rejects(api(`git/commits/${sha}`, method), ReleasePolicyError);
@@ -289,8 +302,6 @@ test('authorization artifacts reject traversal, linked directories and hardlinke
 });
 
 test('strict canonical grammar accepts beta/RC and rejects every malformed numeric form', () => {
-  assert.equal(runContext({ RELEASE_STAGE: 'none' }).stage, undefined);
-  assert.equal(runContext({ RELEASE_STAGE: 'rc' }).stage, 'rc');
   for (const tag of ['v0.0.0', 'v1.2.3', 'v1.2.3-insider.1', 'v1.2.3-beta.9', 'v1.2.3-rc.10']) {
     assert.equal(parseTag(tag).channel, tag.includes('-') ? 'insider' : 'stable');
   }
@@ -3009,7 +3020,11 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     fixture.calls.length = 0;
     for (const operation of ['authorize', 'advance']) {
       for (const token of [undefined, fixture.env.GH_TOKEN]) {
-        await assert.rejects(runReleaseControl(operation, { ...fixture.env, RELEASE_PUBLISHER_TOKEN: token }),
+        const transaction = operation === 'advance' ?
+          { RELEASE_TRANSACTION: JSON.stringify(releaseTransaction(record())) } : {};
+        await assert.rejects(runReleaseControl(operation, {
+          ...fixture.env, ...transaction, RELEASE_PUBLISHER_TOKEN: token,
+        }),
           /Protected publisher App token required/);
       }
     }

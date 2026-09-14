@@ -437,7 +437,8 @@ stable from `main`, explicitly opted-in insider from `development`. Release
 activation requires owner-approved protections and allocator continuity.
 The normal form exposes only the channel and an optional full source SHA; one
 approval on `release-stable` or `release-insider` covers the complete protected
-publication transaction. Internal diagnostics are hidden and cannot publish.
+publication transaction. No rehearsal or alternate live diagnostic path exists;
+validation uses automated tests, static analysis, code review, and fail-closed checks.
 Set an explicit [release approval mode](docs/RELEASE_GUIDE.md#explicit-release-approval-configuration):
 single-maintainer (owner-confirmed/self-attested) or separation-of-duties;
 both require manual environment approval with administrator bypass disabled.

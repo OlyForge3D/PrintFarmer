@@ -44,8 +44,8 @@ after 30 minutes and are reverified after approval.
 `release-stable` and `release-insider` are the only publication environments.
 The dispatch has only channel and optional source SHA, and the selected
 environment supplies the single approval for the complete protected
-transaction. There is no alternate live diagnostic or non-publishing release
-ceremony; validation is automated and fail closed.
+transaction. No rehearsal or alternate live diagnostic path exists; validation
+uses automated tests, static analysis, code review and fail-closed checks.
 
 ## Retired paths and recovery
 

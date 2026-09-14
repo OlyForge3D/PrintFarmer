@@ -21,6 +21,9 @@ const read = path => readFileSync(fileURLToPath(new URL(`../../../${path}`, impo
 const root = fileURLToPath(new URL('../../../', import.meta.url));
 const shell = resolveBash();
 const canonicalDispatch = 'inputs.release_qualification';
+const canonicalManualDispatch = "github.event_name == 'workflow_dispatch' && " +
+  "(github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')";
+const canonicalProducer = `${canonicalDispatch} || ${canonicalManualDispatch}`;
 const forbiddenJobCapabilities = /secrets|\bpackages\b|id-token|create-github-app-token|download-artifact/;
 
 function resolveBash() {
@@ -536,7 +539,7 @@ test('malformed run titles and unknown/native mode combinations fail closed', ()
   assert.throws(() => qualificationTitle('insider', '10', '50', '60', 'single-maintainer'));
 });
 
-test('canonical qualification and recorder remain reachable and separate from publishing', () => {
+test('legacy qualification evidence remains reachable and separate from transaction-only publishing', () => {
   const qualify = load(read('.github/workflows/qualify-canonical-release.yml'));
   const writer = load(read('.github/workflows/record-canonical-qualification.yml'));
   assert.deepEqual(Object.keys(qualify.on), ['workflow_dispatch']);
@@ -557,11 +560,13 @@ test('canonical qualification and recorder remain reachable and separate from pu
   const control = read('scripts/ci/release-control.mjs');
   assert.equal((control.match(/await verifyCanonicalReleaseEvidence/g) ?? []).length, 2);
   assert.match(control, /qualificationClient\(env\.GH_TOKEN\)/);
+  assert.doesNotMatch(control, /sourceCommit: transaction\?\.sourceCommit \?\? env\.RELEASE_SOURCE_COMMIT/);
+  assert.doesNotMatch(control, /if \(env\.RELEASE_TRANSACTION\) \{[\s\S]*?advance\(/);
   assert.match(read('.github/workflows/ci.yml'), /test-canonical-qualification\.mjs/);
   assert.match(read('.github/workflows/ci.yml'), /test-github-evidence-pages\.mjs/);
 });
 
-test('reusable release CI executes equivalent required checks without shadowing PR check names', () => {
+test('trusted release qualification and canonical manual refs exclusively own canonical check names', () => {
   const ci = load(read('.github/workflows/ci.yml'));
   const path = load(read('.github/workflows/enforce-path-casing.yml')).jobs['path-casing'];
   const drift = load(read('.github/workflows/contract-drift.yml')).jobs['contract-drift'];
@@ -574,11 +579,11 @@ test('reusable release CI executes equivalent required checks without shadowing 
   assert.deepEqual(ci.permissions, { contents: 'read' });
   for (const [id, name, original, skippedName] of expected) {
     const job = ci.jobs[id];
-    const producer = `${canonicalDispatch} || github.event_name == 'workflow_dispatch'`;
-    assert.equal(job.if, producer);
+    assert.equal(job.if, canonicalProducer);
     assert.ok(job.name.includes(canonicalDispatch));
-    assert.ok(job.name.includes("github.event_name == 'workflow_dispatch'"));
+    assert.ok(job.name.includes(canonicalManualDispatch));
     assert.ok(job.name.includes(`'${name}'`));
+    assert.ok(job.name.includes('(manual ref not eligible)'));
     assert.ok(job.name.includes(`'${skippedName}'`));
     assert.equal(job['runs-on'], original['runs-on']);
     assert.ok(Number.isInteger(job['timeout-minutes']) && job['timeout-minutes'] > 0 && job['timeout-minutes'] <= 45);
@@ -613,7 +618,7 @@ test('reusable release CI executes equivalent required checks without shadowing 
   assert.deepEqual(iosBuild.defaults, ios.defaults);
   assert.ok(iosBuild.steps.every(step => !step.if && !step['continue-on-error']));
   const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all release qualification checks');
-  assert.equal(summary.if, canonicalDispatch);
+  assert.equal(summary.if, canonicalProducer);
   for (const key of ['PATH_CASING_RESULT', 'CONTRACT_DRIFT_RESULT', 'IOS_BUILD_RESULT']) {
     assert.ok(summary.run.includes(`test "$${key}" = success`));
   }
@@ -626,30 +631,49 @@ test('canonical job privilege matcher detects package permissions in parsed YAML
   }
 });
 
-for (const selected of [false, true]) {
-  test(`release qualification=${selected} exclusively controls canonical check contexts`, () => {
-      const ci = load(read('.github/workflows/ci.yml'));
-      const evaluate = expression => runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
-        { inputs: { release_qualification: selected }, github: { event_name: 'push' } });
-      for (const id of ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build']) {
-        const job = ci.jobs[id];
-        assert.equal(evaluate(job.if), selected, `${id}: execution guard`);
-        const name = evaluate(job.name);
-        assert.equal(canonicalValidationChecks.includes(name), selected, `${id}: emitted check name`);
-        if (!selected) assert.match(name, /^Canonical .+ \(not selected\)$/);
-      }
-      const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all release qualification checks');
-      assert.equal(evaluate(summary.if), selected, 'summary follows the reusable qualification boundary');
-  });
-}
-
-test('manual canonical CI genuinely produces qualification contexts', () => {
+test('canonical check ownership rejects noncanonical manual refs without weakening trusted qualification', () => {
   const ci = load(read('.github/workflows/ci.yml'));
-  const evaluate = expression => runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
-    { inputs: { release_qualification: false }, github: { event_name: 'workflow_dispatch' } });
-  for (const id of ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build']) {
-    assert.equal(evaluate(ci.jobs[id].if), true);
-    assert.ok(canonicalValidationChecks.includes(evaluate(ci.jobs[id].name)));
+  const jobs = ['canonical-path-casing', 'canonical-contract-drift', 'canonical-ios-build'];
+  const summary = ci.jobs.summary.steps.find(step => step.name === 'Require all release qualification checks');
+  const evaluate = (expression, releaseQualification, eventName, ref) =>
+    runInNewContext(expression.replace(/^\$\{\{\s*|\s*\}\}$/g, ''),
+      { inputs: { release_qualification: releaseQualification }, github: { event_name: eventName, ref } });
+  for (const ref of ['refs/heads/main', 'refs/heads/development']) {
+    for (const id of jobs) {
+      assert.equal(evaluate(ci.jobs[id].if, false, 'workflow_dispatch', ref), true, `${id}: ${ref}`);
+      assert.ok(canonicalValidationChecks.includes(
+        evaluate(ci.jobs[id].name, false, 'workflow_dispatch', ref)), `${id}: ${ref}`);
+    }
+    assert.equal(evaluate(summary.if, false, 'workflow_dispatch', ref), true, `summary: ${ref}`);
+  }
+  for (const ref of [
+    'refs/heads/feature/check-shadow',
+    'refs/pull/2705/head',
+    'refs/tags/v1.2.3',
+    'refs/heads/release/1.2.3',
+    'refs/heads/release',
+    'refs/heads/hotfix/urgent',
+  ]) {
+    for (const id of jobs) {
+      assert.equal(evaluate(ci.jobs[id].if, false, 'workflow_dispatch', ref), false, `${id}: ${ref}`);
+      const name = evaluate(ci.jobs[id].name, false, 'workflow_dispatch', ref);
+      assert.equal(canonicalValidationChecks.includes(name), false, `${id}: ${ref}`);
+      assert.match(name, /^Canonical .+ \(manual ref not eligible\)$/);
+    }
+    assert.equal(evaluate(summary.if, false, 'workflow_dispatch', ref), false, `summary: ${ref}`);
+  }
+  for (const ref of ['refs/heads/feature/check-shadow', 'refs/pull/2705/head', 'refs/tags/v1.2.3']) {
+    for (const id of jobs) {
+      assert.equal(evaluate(ci.jobs[id].if, true, 'workflow_call', ref), true, `${id}: trusted ${ref}`);
+      assert.ok(canonicalValidationChecks.includes(
+        evaluate(ci.jobs[id].name, true, 'workflow_call', ref)), `${id}: trusted ${ref}`);
+    }
+    assert.equal(evaluate(summary.if, true, 'workflow_call', ref), true, `summary: trusted ${ref}`);
+  }
+  for (const id of jobs) {
+    assert.equal(evaluate(ci.jobs[id].if, false, 'push', 'refs/heads/development'), false);
+    assert.match(evaluate(ci.jobs[id].name, false, 'push', 'refs/heads/development'),
+      /^Canonical .+ \(not selected\)$/);
   }
 });
 

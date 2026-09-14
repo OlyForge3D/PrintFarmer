@@ -108,7 +108,7 @@ export function githubRequestUrl(endpoint, method) {
     /^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/,
     /^actions\/workflows\/consolidated-release\.yml$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
-    /^environments\/release-(?:publisher-)?(?:stable|insider)(?:\/deployment-branch-policies)?$/,
+    /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
   ];
   requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||

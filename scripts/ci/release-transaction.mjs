@@ -346,7 +346,9 @@ export function readQualificationReceipt(transaction, now = Date.now()) {
 }
 
 export function transactionFromEnvironment(env = process.env) {
-  return validateTransaction(JSON.parse(env.RELEASE_TRANSACTION || '{}'));
+  requireThat(typeof env.RELEASE_TRANSACTION === 'string' && env.RELEASE_TRANSACTION.trim(),
+    'Missing release transaction');
+  return validateTransaction(JSON.parse(env.RELEASE_TRANSACTION));
 }
 
 async function main() {

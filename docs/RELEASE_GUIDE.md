@@ -58,8 +58,9 @@ predate collection, remain within its own freshness window, and not be future
 dated. Delayed approval beyond the receipt window requires a new dispatch.
 
 By owner decision, release validation is limited to automated tests,
-static/fail-closed checks, and code review. There is no alternate live workflow,
-mode, environment, receipt, fixture, probe, or operator ceremony.
+static analysis, code review, and fail-closed checks. No rehearsal or alternate
+live diagnostic workflow, mode, environment, receipt, fixture, probe, or
+operator ceremony exists.
 
 `release-stable` and `release-insider` are the only publication environments.
 Each real run creates exactly one deployment to the selected environment. The

@@ -40,14 +40,20 @@ env:
   CI_SOURCE_BRANCH: ${{ inputs.source_branch || github.head_ref || github.ref_name }}
 
 jobs:
-  # Only exact canonical-branch manual validation owns these check names.
-  # Other refs/events use distinct skipped names so they cannot shadow PR gates.
+  # Trusted reusable release qualification and manual validation dispatched on
+  # main/development own these check names. Other refs/events use distinct
+  # skipped names so they cannot shadow canonical branch or PR gates.
   canonical-path-casing:
     name: >-
       ${{ inputs.release_qualification &&
       'path-casing' || github.event_name == 'workflow_dispatch' &&
-      'path-casing' || 'Canonical path casing (not selected)' }}
-    if: inputs.release_qualification || github.event_name == 'workflow_dispatch'
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'path-casing' || github.event_name == 'workflow_dispatch' &&
+      'Canonical path casing (manual ref not eligible)' ||
+      'Canonical path casing (not selected)' }}
+    if: >-
+      inputs.release_qualification || github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -68,8 +74,13 @@ jobs:
     name: >-
       ${{ inputs.release_qualification &&
       'Contract drift gate' || github.event_name == 'workflow_dispatch' &&
-      'Contract drift gate' || 'Canonical contract drift (not selected)' }}
-    if: inputs.release_qualification || github.event_name == 'workflow_dispatch'
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'Contract drift gate' || github.event_name == 'workflow_dispatch' &&
+      'Canonical contract drift (manual ref not eligible)' ||
+      'Canonical contract drift (not selected)' }}
+    if: >-
+      inputs.release_qualification || github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
@@ -118,8 +129,13 @@ jobs:
     name: >-
       ${{ inputs.release_qualification &&
       'Build (iOS)' || github.event_name == 'workflow_dispatch' &&
-      'Build (iOS)' || 'Canonical iOS build (not selected)' }}
-    if: inputs.release_qualification || github.event_name == 'workflow_dispatch'
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development') &&
+      'Build (iOS)' || github.event_name == 'workflow_dispatch' &&
+      'Canonical iOS build (manual ref not eligible)' ||
+      'Canonical iOS build (not selected)' }}
+    if: >-
+      inputs.release_qualification || github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
     runs-on: macos-latest
     timeout-minutes: 45
     defaults:
@@ -1297,7 +1313,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Require all release qualification checks
-        if: inputs.release_qualification
+        if: >-
+          inputs.release_qualification || github.event_name == 'workflow_dispatch' &&
+          (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/development')
         env:
           PATH_CASING_RESULT: ${{ needs.canonical-path-casing.result }}
           CONTRACT_DRIFT_RESULT: ${{ needs.canonical-contract-drift.result }}
