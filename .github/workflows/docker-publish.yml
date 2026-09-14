@@ -274,6 +274,18 @@ jobs:
             cp "source/release-artifacts/digest-${image}.txt" "artifacts/digest-${image}/"
             cp "source/release-artifacts/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "artifacts/sbom-${image}/"
+      - name: Generate canonical release notes before signing
+        env:
+          VERSION: ${{ steps.consume.outputs.version }}
+          SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
+        run: |
+          set -euo pipefail
+          mkdir -p .artifacts/release-authorization
+          printf 'PrintFarmer %s\n\nSource commit: %s\n' "$VERSION" "$SOURCE_COMMIT" \
+            > .artifacts/release-authorization/release-notes.md
+          printf 'RELEASE_NOTES_SHA256=%s\n' \
+            "$(sha256sum .artifacts/release-authorization/release-notes.md | cut -d ' ' -f1)" \
+            >> "$GITHUB_ENV"
           done
       - name: Validate complete immutable set
         env:
@@ -371,35 +383,26 @@ jobs:
               throw new Error("Manifest identity differs from authorized output");
             }
           '
-          expected_manifest_assets="$(printf '%s\n' \
-            release-manifest.envelope.bundle.json \
-            release-manifest.envelope.json \
-            release-manifest.json | sort)"
-          existing_manifest_assets=""
-          if gh release view "$VERSION" >/dev/null 2>&1; then
-            existing_manifest_assets="$(gh release view "$VERSION" --json assets --jq '
-              [.assets[].name |
-                select(. == "release-manifest.json" or
-                       . == "release-manifest.envelope.json" or
-                       . == "release-manifest.envelope.bundle.json")] | sort | join("\n")'
-            )"
-          fi
-          if [[ -n "$existing_manifest_assets" && "$existing_manifest_assets" != "$expected_manifest_assets" ]]; then
-            echo "Existing release has a partial manifest asset set; delete its partial draft-release manifest assets before retrying"
-            exit 1
-          fi
-          if [[ -n "$existing_manifest_assets" ]]; then
+          if [[ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]]; then
+            artifact_name="$(
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq '
+                [.artifacts[] | select(.expired == false and (.name | test("^release-manifest-[1-9][0-9]*-[1-9][0-9]*$")))] |
+                sort_by(.created_at) | .[0].name // empty'
+            )" || { echo "Signed manifest recovery artifact lookup failed"; exit 1; }
+            [[ -n "$artifact_name" ]] || { echo "Signed manifest recovery artifact is unavailable for this retry"; exit 1; }
             recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
             mkdir -p "$recovery_dir"
-            gh release download "$VERSION" \
-              --pattern release-manifest.json \
-              --pattern release-manifest.envelope.json \
-              --pattern release-manifest.envelope.bundle.json \
-              --dir "$recovery_dir"
-            cmp -s "$manifest_dir/release-manifest.json" "$recovery_dir/release-manifest.json"
-            cmp -s "$manifest_dir/release-manifest.envelope.json" "$recovery_dir/release-manifest.envelope.json"
-            cp "$recovery_dir/release-manifest.envelope.bundle.json" \
-              "$manifest_dir/release-manifest.envelope.bundle.json"
+            gh run download "$GITHUB_RUN_ID" --name "$artifact_name" --dir "$recovery_dir" ||
+              { echo "Signed manifest recovery artifact download failed"; exit 1; }
+            expected_manifest_assets="$(printf '%s\n' release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json | sort)"
+            recovered_manifest_assets="$(find "$recovery_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
+            [[ "$recovered_manifest_assets" == "$expected_manifest_assets" ]] ||
+              { echo "Signed manifest recovery artifact is incomplete or contains unexpected files"; exit 1; }
+            cmp -s "$manifest_dir/release-manifest.json" "$recovery_dir/release-manifest.json" ||
+              { echo "Recovered signed manifest bytes differ from this authorized transaction"; exit 1; }
+            cmp -s "$manifest_dir/release-manifest.envelope.json" "$recovery_dir/release-manifest.envelope.json" ||
+              { echo "Recovered signed manifest envelope differs from this authorized transaction"; exit 1; }
+            cp "$recovery_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.bundle.json"
           else
             cosign sign-blob --yes \
               --bundle "$manifest_dir/release-manifest.envelope.bundle.json" \
@@ -440,6 +443,7 @@ jobs:
           cp ../.artifacts/release-authorization/release-manifest.json release-assets/release-manifest.json
           cp ../.artifacts/release-authorization/release-manifest.envelope.json release-assets/release-manifest.envelope.json
           cp ../.artifacts/release-authorization/release-manifest.envelope.bundle.json release-assets/release-manifest.envelope.bundle.json
+          cp ../.artifacts/release-authorization/release-notes.md release-assets/release-notes.md
           cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
 
           expected_assets=(
@@ -453,6 +457,7 @@ jobs:
             release-manifest.json
             release-manifest.envelope.json
             release-manifest.envelope.bundle.json
+            release-notes.md
             "printfarmer-api-${VERSION}.spdx.json"
             "printfarmer-frontend-${VERSION}.spdx.json"
             "printfarmer-slicer-host-${VERSION}.spdx.json"
@@ -469,6 +474,7 @@ jobs:
           for asset_name in "${expected_assets[@]}"; do
             test -s "release-assets/$asset_name"
           done
+          [[ "$(sha256sum release-assets/release-notes.md | cut -d ' ' -f1)" == "$RELEASE_NOTES_SHA256" ]]
 
           cosign verify-blob \
             --bundle release-assets/release-identity.bundle.json \
@@ -483,20 +489,18 @@ jobs:
           node --input-type=module -e '
             import { readFileSync } from "node:fs";
             import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
-            validateReleaseManifestBytes(
+            const manifest = validateReleaseManifestBytes(
               readFileSync("release-assets/release-manifest.json", "utf8"),
               JSON.parse(readFileSync("release-assets/release-manifest.envelope.json", "utf8")));
+            if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) {
+              throw new Error("Canonical release-notes bytes differ from the signed manifest");
+            }
           '
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
           else
-            notes_file="$RUNNER_TEMP/source-first-release-notes.md"
-            printf '%s\n' \
-              "Source-first validated release transaction." \
-              "Corresponding source, notices, SPDX SBOMs, and image digests precede tag promotion." \
-              > "$notes_file"
-            create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file "$notes_file")
+            create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file release-assets/release-notes.md)
             [[ "$VERSION" == *-* ]] && create_args+=(--prerelease)
             gh "${create_args[@]}"
           fi

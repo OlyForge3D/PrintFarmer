@@ -285,7 +285,7 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
-export function releaseManifest(record, set, identitySha256) {
+export function releaseManifest(record, set, identitySha256, releaseNotesSha256) {
   const completeSet = writePublicSet(record, set, identitySha256);
   const maximumExclusive = `${BigInt(completeSet.identity.baseVersion.split('.')[0]) + 1n}.0.0`;
   const expiresAt = new Date(Date.parse(completeSet.identity.buildTime) + 30 * 24 * 60 * 60 * 1000).toISOString();
@@ -319,8 +319,8 @@ export function releaseManifest(record, set, identitySha256) {
       publishedAt: completeSet.identity.buildTime, expiresAt,
       sequence: completeSet.identity.channel === 'insider' ? parseTag(completeSet.identity.sourceTag).sequence : '0',
       cadence: completeSet.identity.channel === 'insider' ? 'continuous' : 'promoted',
-      releaseNotes: { url: `https://github.com/${repository}/releases/tag/${completeSet.identity.sourceTag}`,
-        sha256: hash({ releaseId: completeSet.identity.releaseId, sourceCommit: completeSet.identity.sourceCommit }) },
+      releaseNotes: { url: `https://github.com/${repository}/releases/download/${completeSet.identity.canonicalVersion}/release-notes.md`,
+        sha256: releaseNotesSha256 ?? hash({ releaseId: completeSet.identity.releaseId, sourceCommit: completeSet.identity.sourceCommit }) },
       signing: { identity: publisherWorkflowIdentity, workflowCommit: record.workflowCommit },
     },
     provenance: {
@@ -378,7 +378,7 @@ export function validateReleaseManifest(manifest) {
   requireTimestamp(lifecycle.publishedAt, 'release publication time');
   requireTimestamp(lifecycle.expiresAt, 'release expiry time');
   requireKeys(lifecycle.releaseNotes, ['url', 'sha256'], [], 'release notes');
-  requireString(lifecycle.releaseNotes.url, /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/releases\/tag\/v[^\s]+$/, 'release notes URL');
+  requireString(lifecycle.releaseNotes.url, /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/releases\/download\/[^\s]+\/release-notes\.md$/, 'release notes URL');
   requireString(lifecycle.releaseNotes.sha256, hashPattern, 'release notes hash');
   requireKeys(lifecycle.signing, ['identity', 'workflowCommit'], [], 'release signing');
   requireThat(lifecycle.signing.identity === publisherWorkflowIdentity, 'Invalid release signing identity');

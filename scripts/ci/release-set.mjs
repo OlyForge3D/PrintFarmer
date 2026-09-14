@@ -135,7 +135,7 @@ function main() {
       [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
     const set = inspectCompleteSet(record, digests);
     writeAuthorizationSet(record, set);
-    emitPublicReleaseAssets(record, set);
+    emitPublicReleaseAssets(record, set, '.', process.env.RELEASE_NOTES_SHA256);
   } else if (process.argv[2] === 'tag') {
     const set = readPrivateJson(privateSetPath);
     publishImmutableTags(record, set, tag => {

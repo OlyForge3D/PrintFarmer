@@ -412,7 +412,10 @@ versioned manifest binds the authorization projection, canonical lifecycle
 and workflow/build provenance, every immutable image/index and platform digest,
 signature and SPDX SBOM subject and verified trust-policy digest, identity labels, complete
 service/platform compatibility, storage/configuration/template/updater steps,
-provider migration heads, downtime/backup requirements, and rollback strategy.
+provider migration heads, downtime/backup requirements, rollback strategy, and
+the SHA-256 of the exact canonical `release-notes.md` asset generated before
+manifest signing. The release is created from that same asset and its uploaded
+bytes are checked against the signed hash before publication proceeds.
 The envelope carries the manifest SHA-256 outside the manifest itself, together
 with release ID, version, channel, source commit, and authorization hash. An
 offline consumer must verify the envelope bundle against the pinned publisher
@@ -437,12 +440,12 @@ bundle; it never re-signs or replaces public release artifacts. The manifest
 schema rejects unknown complete-set, image, platform, and identity-label
 fields rather than silently projecting them away.
 
-A retry accepts either no public manifest assets (a first publication) or the
-complete, exact sorted set of `release-manifest.json`,
-`release-manifest.envelope.json`, and `release-manifest.envelope.bundle.json`.
-Any partial set fails closed before copying or signing. An administrator must
-delete the partial assets from the draft release before retrying; do not upload
-replacement bytes over an incomplete public release.
+The first attempt persists the complete signed triplet as a run-bound Actions
+artifact before any public upload. A retry must recover the earliest unexpired
+triplet from that same run, require its exact sorted inventory and byte-for-byte
+match with the newly authorized manifest/envelope, verify its bundle, and reuse
+it without re-signing. Missing, partial, expired, unexpected, or mismatched
+recovery artifacts fail closed; public release assets are not a recovery source.
 
 Before public assets, tags or version tags are written, publication preflight
 revalidates ancestry, trust protections, version order, complete-set bytes and
