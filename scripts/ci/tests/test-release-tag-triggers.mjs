@@ -3856,7 +3856,7 @@ test('executed signing commands preserve signed subjects and never let verificat
     docker.indexOf('Advance the complete channel pointer last'));
   const canonicalNotes = docker.split('      - name: Generate canonical release notes before signing\n')[1]
     .split('      - name: Validate complete immutable set')[0];
-  assert.match(canonicalNotes, /node scripts\/ci\/release-notes\.mjs/);
+  assert.match(canonicalNotes, /node \.\.\/scripts\/ci\/release-notes\.mjs/);
   const generator = readFileSync('scripts/ci/release-notes.mjs', 'utf8');
   for (const section of ['Features', 'Fixes', 'Breaking changes', 'Compatibility', 'Migration', 'Downtime', 'Backup', 'Recovery']) {
     assert.match(generator, new RegExp(section));
