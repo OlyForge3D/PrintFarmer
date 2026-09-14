@@ -80,7 +80,8 @@ struct PrinterSetupControlsContent: View {
                 if isPrintingOrPaused {
                     lockoutBanner
                         .padding(.bottom, 12)
-                } else if let reason = viewModel.blockedReason {
+                } else if let reason = viewModel.blockedReason,
+                          reason != viewModel.motionBlockedReason || viewModel.motionStatusSummary == nil {
                     Label(reason, systemImage: "lock.fill")
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextPrimary)
@@ -128,28 +129,41 @@ struct PrinterSetupControlsContent: View {
         @State private var showsAdmissionConfirmation = false
         @State private var admissionOperationID: UUID?
         @State private var admissionSummary = ""
+        @State private var showsDetails = false
 
         var body: some View {
-            if let message = viewModel.motionStatusMessage {
+            if let message = viewModel.motionStatusSummary {
                 VStack(alignment: .leading, spacing: 8) {
-                    Label("Motion status", systemImage: viewModel.hasUnresolvedMotion ? "lock.fill" : "info.circle")
-                        .font(.headline)
-                    Text(message).font(.footnote)
+                    Label(message, systemImage: viewModel.motionStatusNeedsAttention
+                          ? "exclamationmark.triangle.fill" : viewModel.hasUnresolvedMotion ? "clock" : "checkmark.circle")
+                        .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
-                    if let operationID = viewModel.motionOperationID {
-                        Text("Operation \(operationID.uuidString)")
-                            .font(.caption)
-                            .textSelection(.enabled)
-                    }
-                    if let error = viewModel.operationReadError {
-                        Text(error).font(.footnote)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
+                        .accessibilityIdentifier("printer.controls.motion.summary")
                     ControlActionButton(
-                        title: "Refresh motion status", identifier: "printer.controls.motion.refresh",
-                        hint: "Reads the saved operation. Never sends or retries motion."
-                    ) { Task { await viewModel.refreshControlOperation() } }
-                    .disabled(viewModel.isRefreshingControlOperation || !viewModel.isActive)
+                        title: "Motion details", identifier: "printer.controls.motion.details",
+                        hint: "Shows operation identifier and diagnostic information.",
+                        compact: true, systemImage: "info.circle",
+                        value: showsDetails ? "Expanded" : "Collapsed", textOnly: true
+                    ) { showsDetails.toggle() }
+                    if showsDetails {
+                        VStack(alignment: .leading, spacing: 8) {
+                            if let detail = viewModel.motionStatusMessage { Text(detail) }
+                            if let operationID = viewModel.motionOperationID {
+                                Text("Operation \(operationID.uuidString)").textSelection(.enabled)
+                            }
+                            if let error = viewModel.operationReadError { Text(error) }
+                        }
+                        .font(.footnote)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .accessibilityIdentifier("printer.controls.motion.diagnostics")
+                    }
+                    if viewModel.hasUnresolvedMotion || viewModel.motionStatusNeedsAttention || showsDetails {
+                        ControlActionButton(
+                            title: "Refresh motion status", identifier: "printer.controls.motion.refresh",
+                            hint: "Reads the saved operation. Never sends or retries motion."
+                        ) { Task { await viewModel.refreshControlOperation() } }
+                        .disabled(viewModel.isRefreshingControlOperation || !viewModel.isActive)
+                    }
                     if let operationID = viewModel.motionAdmissionResubmissionID {
                         ControlActionButton(
                             title: "Review saved admission", identifier: "printer.controls.motion.review-admission",
@@ -164,7 +178,8 @@ struct PrinterSetupControlsContent: View {
                         Text("Checking and resubmitting only the confirmed saved admission…")
                             .font(.footnote)
                     }
-                    if let recoveryURL = viewModel.motionRecoveryURL {
+                    if viewModel.hasUnresolvedMotion || viewModel.motionStatusNeedsAttention,
+                       let recoveryURL = viewModel.motionRecoveryURL {
                         Link("Open printer recovery on web", destination: recoveryURL)
                             .frame(minHeight: 44)
                             .accessibilityHint("An operator with queue:reconcile permission and printer Submit access must verify isolation and inspect the physical machine before releasing recovery.")
@@ -173,9 +188,14 @@ struct PrinterSetupControlsContent: View {
                 }
                 .foregroundStyle(Color.pfTextPrimary)
                 .padding(12)
-                .background(Color.pfWarning.opacity(0.12), in: RoundedRectangle(cornerRadius: 10))
+                .background((viewModel.motionStatusNeedsAttention ? Color.pfWarning : Color.pfBackgroundSecondary)
+                    .opacity(viewModel.motionStatusNeedsAttention ? 0.12 : 1), in: RoundedRectangle(cornerRadius: 10))
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("printer.controls.motion.status")
+                .onChange(of: viewModel.motionOperationID) { _, _ in showsDetails = false }
+                .onChange(of: viewModel.controlOperation?.state) { _, state in
+                    if state == .succeeded { showsDetails = false }
+                }
                 .alert("Resubmit saved motion?", isPresented: $showsAdmissionConfirmation) {
                     Button("Resubmit same operation", role: .destructive) {
                         guard let operationID = admissionOperationID else { return }
@@ -225,7 +245,8 @@ struct PrinterControlCommandFeedback: View {
     let section: ControlCommand.Section
 
     var body: some View {
-        if viewModel.feedbackSection == section {
+        if viewModel.feedbackSection == section,
+           section != .motion || viewModel.motionStatusSummary == nil || viewModel.lastError != nil {
             VStack(alignment: .leading, spacing: 8) {
                 if let error = viewModel.lastError {
                     errorBanner(error)

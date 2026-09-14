@@ -148,8 +148,17 @@ struct JogSubgroup: View {
         @State private var z = ""
         @State private var feedrate = ""
         @State private var inputError: String?
+        @State private var showsCoordinateHelp = false
+        @ScaledMetric(relativeTo: .body) private var goWidth: CGFloat = 80
 
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
+
+        private var isPending: Bool {
+            guard viewModel.isActive,
+                  !viewModel.usesDurableMotion || !viewModel.motionStatusNeedsAttention else { return false }
+            if case .moveTo = viewModel.pendingCommand?.kind { return true }
+            return false
+        }
 
         static func isVisible(_ capabilities: PrinterBackendCapabilities?) -> Bool {
             capabilities?.supportsAbsoluteMovement == true
@@ -187,11 +196,20 @@ struct JogSubgroup: View {
 
         var body: some View {
             VStack(alignment: .leading, spacing: 8) {
-                if viewModel.usesDurableMotion {
-                    Text(ControlNumberInput.durableAbsoluteCoordinatesMessage)
+                ControlActionButton(
+                    title: "Position help", identifier: "printer.controls.absolute.help",
+                    hint: "Explains destination coordinates and precision.",
+                    compact: true, systemImage: "info.circle",
+                    value: showsCoordinateHelp ? "Expanded" : "Collapsed", textOnly: true
+                ) { showsCoordinateHelp.toggle() }
+                if showsCoordinateHelp {
+                    Text((viewModel.usesDurableMotion
+                          ? ControlNumberInput.durableAbsoluteCoordinatesMessage
+                          : ControlNumberInput.absoluteCoordinatesMessage)
+                         + " " + ControlNumberInput.coordinatePrecisionMessage)
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("printer.controls.absolute.complete-target")
+                        .accessibilityIdentifier("printer.controls.absolute.help-text")
                 }
                 rowLayout {
                     ForEach(["X", "Y", "Z"], id: \.self) { axis in
@@ -221,7 +239,9 @@ struct JogSubgroup: View {
                         hint: "Move printer head to specified absolute X, Y, Z position in millimeters.",
                         compact: true,
                         prominent: true,
-                        matchesInputHeight: true
+                        value: isPending ? "Pending" : nil,
+                        matchesInputHeight: true,
+                        isPending: isPending
                     ) {
                         do {
                             let point = try Self.destination(x: x, y: y, z: z)
@@ -238,8 +258,10 @@ struct JogSubgroup: View {
                             inputError = error.localizedDescription
                         }
                     }
+                    .frame(width: dynamicTypeSize.isAccessibilitySize ? nil : goWidth)
                     .disabled(validationMessage != nil || !Self.hasDestinationInput(x: x, y: y, z: z))
                 }
+                .disabled(!viewModel.canControl || viewModel.isExecuting || !Self.isVisible(viewModel.capabilities))
 
                 ControlNumberField(
                     placeholder: "Custom feedrate unavailable",
@@ -252,15 +274,16 @@ struct JogSubgroup: View {
                 .frame(height: 0)
                 .hidden()
 
-                if let message = inputError ?? validationMessage {
+                if !viewModel.isExecuting, let message = inputError ?? validationMessage {
                     Text(message)
                         .font(.footnote)
                         .foregroundStyle(Color.pfError)
                         .accessibilityAddTraits(.isStaticText)
+                        .accessibilityIdentifier("printer.controls.absolute.validation")
                 }
             }
             .foregroundStyle(Color.pfTextPrimary)
-            .disabled(!viewModel.canControl || viewModel.isExecuting || !Self.isVisible(viewModel.capabilities))
+            .onChange(of: [x, y, z, feedrate]) { _, _ in inputError = nil }
         }
 
         private func binding(_ axis: String) -> Binding<String> {
