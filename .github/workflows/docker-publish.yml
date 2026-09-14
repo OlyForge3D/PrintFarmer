@@ -42,6 +42,20 @@ jobs:
       public_identity: ${{ steps.authorize.outputs.public_identity }}
       published_set_digest: ${{ steps.advance.outputs.set_hash }}
     steps:
+      - name: Verify invoked immutable control before checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+        run: |
+          set -euo pipefail
+          workflow_commit="$(node --input-type=module -e '
+            const value = JSON.parse(process.env.RELEASE_TRANSACTION);
+            if (!/^[a-f0-9]{40}$/.test(value.workflowCommit || "")) process.exit(1);
+            process.stdout.write(value.workflowCommit);
+          ')"
+          [[ "$workflow_commit" == "$GITHUB_WORKFLOW_SHA" ]]
+          resolved="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$workflow_commit" --jq .sha)"
+          [[ "$resolved" == "$workflow_commit" ]]
       - name: Checkout immutable release control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -344,17 +358,21 @@ jobs:
               throw new Error("Manifest identity differs from authorized output");
             }
           '
+          expected_manifest_assets="$(printf '%s\n' \
+            release-manifest.envelope.bundle.json \
+            release-manifest.envelope.json \
+            release-manifest.json | sort)"
           existing_manifest_assets=""
           if gh release view "$VERSION" >/dev/null 2>&1; then
             existing_manifest_assets="$(gh release view "$VERSION" --json assets --jq '
               [.assets[].name |
                 select(. == "release-manifest.json" or
                        . == "release-manifest.envelope.json" or
-                       . == "release-manifest.envelope.bundle.json")] | join("\n")'
+                       . == "release-manifest.envelope.bundle.json")] | sort | join("\n")'
             )"
           fi
-          if [[ -n "$existing_manifest_assets" && "$(wc -l <<< "$existing_manifest_assets")" -ne 3 ]]; then
-            echo "Existing release has a partial manifest asset set"
+          if [[ -n "$existing_manifest_assets" && "$existing_manifest_assets" != "$expected_manifest_assets" ]]; then
+            echo "Existing release has a partial manifest asset set; delete its partial draft-release manifest assets before retrying"
             exit 1
           fi
           if [[ -n "$existing_manifest_assets" ]]; then

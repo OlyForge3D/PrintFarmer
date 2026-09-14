@@ -433,6 +433,13 @@ bundle; it never re-signs or replaces public release artifacts. The manifest
 schema rejects unknown complete-set, image, platform, and identity-label
 fields rather than silently projecting them away.
 
+A retry accepts either no public manifest assets (a first publication) or the
+complete, exact sorted set of `release-manifest.json`,
+`release-manifest.envelope.json`, and `release-manifest.envelope.bundle.json`.
+Any partial set fails closed before copying or signing. An administrator must
+delete the partial assets from the draft release before retrying; do not upload
+replacement bytes over an incomplete public release.
+
 Before public assets, tags or version tags are written, publication preflight
 revalidates ancestry, trust protections, version order, complete-set bytes and
 the expected pointer snapshot. The final ledger transaction compares that

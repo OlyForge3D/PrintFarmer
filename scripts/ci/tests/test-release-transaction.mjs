@@ -346,7 +346,7 @@ test('publisher has exactly one protected deployment containing every credential
   ]);
   assert.equal(publisher.concurrency.group,
     "release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}");
-  assert.equal(publisher.jobs.publish.steps[1].with.ref,
+  assert.equal(publisher.jobs.publish.steps[2].with.ref,
     '${{ fromJSON(inputs.transaction).sourceCommit }}');
   const job = JSON.stringify(publisher.jobs.publish);
   assert.doesNotMatch(job, /inputs\.(?:channel|source_sha|approval_mode)/);
@@ -411,7 +411,10 @@ test('every docker publisher release-control consumer follows one immutable work
     step.uses?.startsWith('actions/checkout@') &&
     step.with?.ref === '${{ fromJSON(inputs.transaction).workflowCommit }}' &&
     step.with?.['persist-credentials'] === false);
-  assert.equal(checkout, 0);
+  assert.equal(checkout, 1);
+  assert.match(steps[0].name, /Verify invoked immutable control before checkout/);
+  assert.match(steps[0].run, /GITHUB_WORKFLOW_SHA/);
+  assert.match(steps[0].run, /repos\/\$GITHUB_REPOSITORY\/git\/commits\/\$workflow_commit/);
   const consumers = steps.flatMap((step, index) =>
     typeof step.run === 'string' && /scripts\/ci\/release-(?:control|set)\.mjs/.test(step.run) ? [index] : []);
   assert.ok(consumers.length >= 5);
