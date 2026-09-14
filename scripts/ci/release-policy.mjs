@@ -296,13 +296,13 @@ export function releaseManifest(record, set, identitySha256) {
     service, {
       index: {
         subject: image.digest, signature: { subject: image.digest, signer: publisherWorkflowIdentity },
-        sbom: { subject: image.digest, sha256: hash({ service, subject: image.digest, type: 'spdxjson' }) },
-        provenance: { subject: image.digest, sha256: hash({ service, subject: image.digest, type: 'slsa' }) },
+        sbom: { subject: image.digest, type: 'spdxjson', signer: publisherWorkflowIdentity },
+        provenance: { subject: image.digest, type: 'buildkit', signer: publisherWorkflowIdentity },
       },
       platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [platform, {
         subject: value.digest, signature: { subject: value.digest, signer: publisherWorkflowIdentity },
-        sbom: { subject: value.digest, sha256: hash({ service, platform, subject: value.digest, type: 'spdxjson' }) },
-        provenance: { subject: value.digest, sha256: hash({ service, platform, subject: value.digest, type: 'slsa' }) },
+        sbom: { subject: value.digest, type: 'spdxjson', signer: publisherWorkflowIdentity },
+        provenance: { subject: value.digest, type: 'buildkit', signer: publisherWorkflowIdentity },
       }])),
     },
   ]));
@@ -336,7 +336,7 @@ export function releaseManifest(record, set, identitySha256) {
     },
     evidence: {
       schema: 1, trust: { signer: publisherWorkflowIdentity, issuer: 'https://token.actions.githubusercontent.com',
-        policyDigest: record.protection.policyDigest, aclDigest: hash({ repository, channel: record.channel, publisher: 'github-app' }) },
+        policyDigest: record.protection.policyDigest },
       services: artifactEvidence,
     },
     compatibility: {
@@ -414,10 +414,10 @@ export function validateReleaseManifest(manifest) {
   }
   requireKeys(evidence, ['schema', 'trust', 'services'], [], 'release evidence');
   requireThat(evidence.schema === 1, 'Invalid release evidence schema');
-  requireKeys(evidence.trust, ['signer', 'issuer', 'policyDigest', 'aclDigest'], [], 'release trust evidence');
+  requireKeys(evidence.trust, ['signer', 'issuer', 'policyDigest'], [], 'release trust evidence');
   requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
     evidence.trust.issuer === 'https://token.actions.githubusercontent.com', 'Invalid release trust identity');
-  for (const field of ['policyDigest', 'aclDigest']) requireString(evidence.trust[field], hashPattern, `release trust ${field}`);
+  requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
   requireKeys(evidence.services, Object.keys(components), [], 'release service evidence');
   for (const [service, image] of Object.entries(manifest.completeSet.images)) {
     const serviceEvidence = evidence.services[service];
@@ -431,12 +431,13 @@ export function validateReleaseManifest(manifest) {
       requireThat(platformEvidence.subject === imagePlatform.digest, 'Release platform subject mismatch');
       for (const item of [serviceEvidence.index, platformEvidence]) {
         requireKeys(item.signature, ['subject', 'signer'], [], 'release signature evidence');
-        requireKeys(item.sbom, ['subject', 'sha256'], [], 'release SBOM evidence');
-        requireKeys(item.provenance, ['subject', 'sha256'], [], 'release provenance evidence');
+        requireKeys(item.sbom, ['subject', 'type', 'signer'], [], 'release SBOM evidence');
+        requireKeys(item.provenance, ['subject', 'type', 'signer'], [], 'release provenance evidence');
         requireThat(item.signature.subject === item.subject && item.signature.signer === publisherWorkflowIdentity &&
-          item.sbom.subject === item.subject && item.provenance.subject === item.subject, 'Release evidence subject mismatch');
-        requireString(item.sbom.sha256, hashPattern, 'release SBOM hash');
-        requireString(item.provenance.sha256, hashPattern, 'release provenance hash');
+          item.sbom.subject === item.subject && item.provenance.subject === item.subject &&
+          item.sbom.type === 'spdxjson' && item.provenance.type === 'buildkit' &&
+          item.sbom.signer === publisherWorkflowIdentity && item.provenance.signer === publisherWorkflowIdentity,
+        'Release evidence subject mismatch');
       }
     }
   }

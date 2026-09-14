@@ -57,43 +57,50 @@ export function publishImmutableTags(record, set, inspect, create) {
 export function registryTagInspection(output) {
   let inspected;
   try { inspected = JSON.parse(output); } catch { throw new Error('Registry returned invalid image inspection JSON'); }
-  const digest = inspected?.Manifest?.digest;
-  const version = inspected?.Image?.config?.Labels?.['org.opencontainers.image.version'];
+  const digest = inspected?.manifest?.digest;
+  const image = inspected?.image;
+  const entries = image?.config ? [image] : Object.values(image ?? {});
+  const versions = entries.map(value => value?.config?.Labels?.['org.opencontainers.image.version']);
   requireThat(/^sha256:[a-f0-9]{64}$/.test(digest), 'Registry returned no image manifest digest');
-  requireThat(typeof version === 'string' && /^\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.\d+)?$/.test(version),
-    'Registry returned no canonical image version label');
-  return { digest, version };
+  requireThat(entries.length > 0 && versions.every(version =>
+    typeof version === 'string' && /^\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.\d+)?$/.test(version)) &&
+    new Set(versions).size === 1, 'Registry image platforms lack one canonical version label');
+  return { digest, version: versions[0] };
 }
 
 export function plannedReleaseAliases(record, set, inspect = () => undefined) {
   validateCompleteSet(record, set);
   const parsed = parseTag(record.sourceTag);
-  const aliases = record.channel === 'stable'
-    ? [
+  return Object.fromEntries(Object.entries(set.images).map(([component, image]) => {
+    const aliases = record.channel === 'stable'
+      ? [
       { value: record.canonicalVersion, mutable: false },
       { value: `stable-${record.canonicalVersion}`, mutable: false, retained: true },
       { value: `${parsed.major}.${parsed.minor}`, mutable: true },
       ...[parsed.major, 'latest'].flatMap(value => {
-        const existing = inspect(`ghcr.io/olyforge3d/printfarmer-api:${value}`);
-        if (!existing || existing.digest === set.images.api.digest) return [{ value, mutable: true }];
+        const existing = inspect(`ghcr.io/olyforge3d/printfarmer-${component}:${value}`);
+        if (!existing || existing.digest === image.digest) return [{ value, mutable: true }];
         requireThat(parseTag(`v${existing.version}`).channel === 'stable',
-          `Cross-channel alias movement rejected: ${value}`);
+          `Cross-channel alias movement rejected for ${component}:${value}`);
         return compareVersions(record.canonicalVersion, existing.version) > 0 ? [{ value, mutable: true }] : [];
       }),
     ]
-    : [{ value: record.canonicalVersion, mutable: false }];
-  return Object.fromEntries(Object.entries(set.images).map(([component, image]) => [component,
+      : [{ value: record.canonicalVersion, mutable: false }];
+    return [component,
     aliases.map(alias => ({
       tag: `ghcr.io/olyforge3d/printfarmer-${component}:${alias.value}`,
       digest: image.digest,
       mutable: alias.mutable,
       ...(alias.retained ? { retained: true } : {}),
       channel: record.channel,
-    }))]));
+    }))];
+  }));
 }
 
 export function publishReleaseAliases(record, set, inspect, create) {
   const plan = plannedReleaseAliases(record, set, inspect);
+  requireThat(Object.values(plan).flat().every(alias => !alias.mutable || record.channel === 'stable'),
+    'Only stable aliases may be mutable');
   for (const aliases of Object.values(plan)) {
     for (const alias of aliases) {
       const existing = inspect(alias.tag);
@@ -116,7 +123,6 @@ export function publishReleaseAliases(record, set, inspect, create) {
       const published = inspect(alias.tag);
       requireThat(published?.digest === alias.digest,
         `Alias compare-and-set conflict: ${alias.tag}`);
-      if (alias.mutable) requireThat(record.channel === 'stable', 'Only stable aliases are mutable');
     }
   }
   return plan;

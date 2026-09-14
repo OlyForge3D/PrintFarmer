@@ -775,14 +775,14 @@ test('alias registry parser accepts realistic multi-platform and single-platform
   const digest = `sha256:${'d'.repeat(64)}`;
   const labels = { 'org.opencontainers.image.version': '1.2.3' };
   for (const image of [
-    { Name: 'ghcr.io/olyforge3d/printfarmer-api:latest', Manifest: { digest, mediaType: 'application/vnd.oci.image.index.v1+json' },
-      Image: { config: { Labels: labels }, manifests: [{ platform: { architecture: 'amd64' } }, { platform: { architecture: 'arm64' } }] } },
-    { Name: 'ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:1.2.3', Manifest: { digest },
-      Image: { config: { Labels: labels }, architecture: 'amd64' } },
+    { name: 'ghcr.io/olyforge3d/printfarmer-api:latest', manifest: { digest, mediaType: 'application/vnd.oci.image.index.v1+json' },
+      image: { 'linux/amd64': { config: { Labels: labels } }, 'linux/arm64': { config: { Labels: labels } } } },
+    { name: 'ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:1.2.3', manifest: { digest },
+      image: { config: { Labels: labels }, architecture: 'amd64' } },
   ]) assert.deepEqual(registryTagInspection(JSON.stringify(image)), { digest, version: '1.2.3' });
   assert.throws(() => registryTagInspection(JSON.stringify({
-    Manifest: { digest }, Image: { config: { Labels: { 'org.opencontainers.image.version': '1.2' } } },
-  })), /canonical image version/);
+    manifest: { digest }, image: { config: { Labels: { 'org.opencontainers.image.version': '1.2' } } },
+  })), /canonical version label/);
 });
 
 test('an older stable line retains its scoped aliases without moving newer global aliases', () => {
@@ -790,10 +790,10 @@ test('an older stable line retains its scoped aliases without moving newer globa
   ledger.qualifications[sha] = hotfixQualification();
   const stable = reserve(ledger, stableAdmission('1.2.3'), created, undefined, hotfixQualification()).record;
   const set = completeSet(stable);
-  const tags = new Map([
-    ['ghcr.io/olyforge3d/printfarmer-api:1', { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
-    ['ghcr.io/olyforge3d/printfarmer-api:latest', { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
-  ]);
+  const tags = new Map(Object.keys(components).flatMap(component => [
+    [`ghcr.io/olyforge3d/printfarmer-${component}:1`, { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
+    [`ghcr.io/olyforge3d/printfarmer-${component}:latest`, { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
+  ]));
   const writes = [];
   const plan = publishReleaseAliases(stable, set, tag => tags.get(tag), (tag, digest) => {
     writes.push([tag, digest]);
@@ -3715,7 +3715,7 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
       value => { value.lifecycle.cadence = 'manual'; },
       value => { value.provenance.source.commit = newerSha; },
       value => { value.evidence.services.api.index.signature.subject = newerSha; },
-      value => { value.evidence.services.api.platforms['linux/amd64'].sbom.sha256 = 'forged'; },
+      value => { value.evidence.services.api.platforms['linux/amd64'].sbom.subject = `sha256:${'f'.repeat(64)}`; },
       value => { value.compatibility.managedEligible = false; },
       value => { value.migration.providers.postgresql = 'unknown'; },
       value => { value.compatibility.updater.fixedSteps.pop(); },
