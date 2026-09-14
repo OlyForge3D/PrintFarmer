@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { relative, resolve, sep } from 'node:path';
 import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
@@ -941,7 +941,7 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   assert.match(docker, /release-control\.mjs consume/);
   assert.doesNotMatch(docker, /^\s+(?:packages|contents): write$/m);
   assert.match(docker, /password: \$\{\{ secrets\.RELEASE_REGISTRY_TOKEN \}\}/);
-  assert.match(docker, /Publish corresponding-source release assets\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
+  assert.match(docker, /Publish and verify public corresponding-source assets\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
   for (const step of docker.split(/^\s{6}- /m)) {
     if (!/uses: actions\/(?:upload|download)-artifact@/.test(step)) continue;
     const selector = step.match(/^\s{10}(?:name|pattern): (.+)$/m)?.[1];
@@ -2238,6 +2238,7 @@ function artifactUploads(workflow) {
 test('every release artifact upload path is explicitly inventoried, including both signed handoffs', () => {
   const authority = '.github/workflows/consolidated-release.yml';
   const docker = '.github/workflows/docker-publish.yml';
+  const diagnostics = '.github/workflows/release-protection-rehearsal.yml';
   assert.deepEqual(artifactUploads(authority), [
     ['.artifacts/release-transaction/transaction.json'],
     ['.artifacts/release-transaction/qualification.json'],
@@ -2250,15 +2251,19 @@ test('every release artifact upload path is explicitly inventoried, including bo
     ],
     [authorizationPath, authorizationBundle, privateSetPath],
   ]);
+  assert.deepEqual(artifactUploads(diagnostics), [
+    ['.artifacts/release-transaction/rehearsal-receipt.json'],
+  ]);
   // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
   const action = '.github/actions/release-authorization/action.yml';
-  for (const file of [authority, docker, action]) {
+  for (const file of [authority, docker, diagnostics, action]) {
     const text = readFileSync(file, 'utf8');
     assert.equal(artifactUploads(file).length, (text.match(/uses:\s*actions\/upload-artifact@/g) || []).length);
     for (const [, local] of text.matchAll(/uses: \.\/([^\s]+)/g)) {
       assert.ok([
         '.github/workflows/ci.yml',
         '.github/workflows/docker-publish.yml',
+        '.github/workflows/release-protection-rehearsal.yml',
         '.github/actions/release-authorization',
         '.release-control/.github/actions/release-authorization',
       ].includes(local), local);
@@ -3274,7 +3279,16 @@ test('executed signing and asset-copy commands keep normalized authorization sep
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
     /^\s+cp \.\.\/\.artifacts\/release-authorization\/public-identity/.test(line))
-    .map(line => line.replace('../', ''))
+    .map(line => {
+      const match = /^\s*cp (\.\.\/\S+) (\S+)\s*$/.exec(line);
+      assert.ok(match, 'Expected a simple public-identity copy command');
+      const workspace = resolve('.');
+      const source = resolve('source', match[1]);
+      assert.ok(source.startsWith(`${workspace}${sep}`), 'Copy source escaped the workspace');
+      const normalized = relative(workspace, source).split(sep).join('/');
+      assert.doesNotMatch(normalized, /(^|\/)\.\.(\/|$)/);
+      return `cp ${normalized} ${match[2]}`;
+    })
     .map(line => line.trim()).join('\n');
   const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));

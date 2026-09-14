@@ -119,7 +119,13 @@ export function githubRequestUrl(endpoint, method) {
   const [path, query] = endpoint.split('?');
   const encodedPath = path.split('/').map(encodeURIComponent).join('/');
   const search = query ? `?${new URLSearchParams(query)}` : '';
-  return `https://api.github.com/repos/${repository}/${encodedPath}${search}`;
+  const repositoryRoot = new URL(`https://api.github.com/repos/${repository}/`);
+  const requestUrl = new URL(`${encodedPath}${search}`, repositoryRoot);
+  requireThat(requestUrl.origin === repositoryRoot.origin &&
+    requestUrl.pathname.startsWith(repositoryRoot.pathname) &&
+    requestUrl.username === '' && requestUrl.password === '' && requestUrl.hash === '',
+  'Release API URL escaped the trusted repository origin');
+  return requestUrl.href;
 }
 
 export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {

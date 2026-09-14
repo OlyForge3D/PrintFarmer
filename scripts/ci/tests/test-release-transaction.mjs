@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import test from 'node:test';
 import { load } from 'js-yaml';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import {
-  qualificationJobNamespace, qualificationLifetimeMs, selectTransaction,
-  transactionPath, validateQualificationReceipt, validateTransaction, verifyTransactionQualification,
-  writeRehearsalReceipt,
+  qualificationJobNamespace, qualificationLifetimeMs, qualificationPath, rehearsalReceiptPath,
+  qualifyTransaction, selectTransaction, transactionPath, validateQualificationReceipt, validateTransaction,
+  verifyTransactionQualification, writeRehearsalReceipt,
 } from '../release-transaction.mjs';
 import { admit } from '../release-policy.mjs';
 import { validateTransactionOperation } from '../release-control.mjs';
@@ -132,7 +133,6 @@ function apiFixture(channel = 'insider', head = sourceSha) {
 
 async function transaction(channel = 'insider', requested = '') {
   const f = apiFixture(channel);
-  const branch = channel === 'stable' ? 'main' : 'development';
   return {
     value: await selectTransaction({
       ...base,
@@ -333,6 +333,7 @@ test('qualification and rehearsal receipts are closed transaction-bound variants
     process.chdir(cwd);
     rmSync(scratch, { recursive: true, force: true });
   });
+
   const receipt = writeRehearsalReceipt(value, qualification, now);
   assert.equal(receipt.kind, 'release-rehearsal-only');
   assert.equal(receipt.publicationAuthorized, false);
@@ -341,10 +342,51 @@ test('qualification and rehearsal receipts are closed transaction-bound variants
   assert.throws(() => validateTransaction({ ...value, future: true }));
 });
 
+test('diagnostic CLI consumes same-run release qualification without authorizing publication', async t => {
+  const { value, fixture } = await transaction();
+  const runtimeNow = Date.now();
+  const qualification = await verifyTransactionQualification(value, fixture.api, runtimeNow);
+  const cwd = process.cwd();
+  const script = resolve('scripts/ci/release-transaction.mjs');
+  const scratch = resolve('.artifacts', `release-diagnostic-${randomUUID()}`);
+  mkdirSync(resolve(scratch, '.artifacts/release-transaction'), { recursive: true });
+  writeFileSync(resolve(scratch, qualificationPath), `${JSON.stringify(qualification)}\n`);
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const result = spawnSync(process.execPath, [script, 'diagnose'], {
+    cwd: scratch,
+    encoding: 'utf8',
+    env: { ...process.env, RELEASE_TRANSACTION: JSON.stringify(value) },
+  });
+  assert.equal(result.status, 0, result.stderr);
+  const receipt = JSON.parse(readFileSync(resolve(scratch, rehearsalReceiptPath), 'utf8'));
+  assert.equal(receipt.kind, 'release-rehearsal-only');
+  assert.equal(receipt.publicationAuthorized, false);
+  assert.throws(() => validateQualificationReceipt(receipt, value, 'release', runtimeNow),
+    /cannot authorize release|qualification receipt/);
+  assert.equal(process.cwd(), cwd);
+});
+
+test('qualification writer rejects oversized network evidence before writing', async t => {
+  const { value, fixture } = await transaction();
+  fixture.jobs[0].html_url = `https://github.com/${'x'.repeat(1024 * 1024)}`;
+  const cwd = process.cwd();
+  const scratch = resolve('.artifacts', `release-qualification-size-${randomUUID()}`);
+  mkdirSync(scratch, { recursive: true });
+  process.chdir(scratch);
+  t.after(() => {
+    process.chdir(cwd);
+    rmSync(scratch, { recursive: true, force: true });
+  });
+  await assert.rejects(qualifyTransaction(value, fixture.api, now),
+    /maximum receipt size/);
+  assert.equal(existsSync(qualificationPath), false);
+});
+
 test('single authority has direct dependencies, one approval, isolated rehearsal, and diagnostics', () => {
   const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha']);
-  assert.deepEqual(workflow.jobs.publish.needs, ['admit', 'qualification', 'collect-qualification']);
+  assert.deepEqual(workflow.jobs.publish.needs,
+    ['admit', 'qualification', 'collect-qualification', 'internal-diagnostics']);
   assert.equal(workflow.jobs.authorize, undefined);
   assert.equal(workflow.jobs.rehearsal, undefined);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');

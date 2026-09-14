@@ -186,7 +186,8 @@ jobs:
               --target "$target" \
               --platform "$platforms" \
               --label "org.opencontainers.image.source=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}" \
-              --label "org.opencontainers.image.revision=${source_sha}" \
+              --label "org.opencontainers.image.licenses=AGPL-3.0-only" \
+              --label "org.opencontainers.image.revision=${{ inputs.source_sha }}" \
               --label "org.opencontainers.image.version=${RELEASE_CONTAINER_VERSION}" \
               --label "org.printfarmer.release-channel=${{ inputs.channel }}" \
               --label "org.printfarmer.identity-sha256=${RELEASE_IDENTITY_HASH}" \
@@ -224,6 +225,11 @@ jobs:
           build_component printer-discovery printer-discovery-runtime linux/amd64,linux/arm64
           build_component orcaslicer-worker orcaslicer-worker linux/amd64
           build_component monolith monolith-runtime linux/amd64,linux/arm64
+          IMAGES=(api frontend slicer-host printer-discovery orcaslicer-worker monolith)
+          for image in "${IMAGES[@]}"; do
+            test -s "release-artifacts/digest-${image}.txt"
+            test -s "release-artifacts/printfarmer-${image}-${RELEASE_VERSION}.spdx.json"
+          done
       - name: Normalize immutable image evidence
         run: |
           set -euo pipefail
@@ -250,7 +256,36 @@ jobs:
           set -euo pipefail
           node scripts/ci/release-set.mjs inspect
           node scripts/ci/release-control.mjs preflight
-      - name: Publish corresponding-source release assets
+      - name: Smoke test ARM64 image digests
+        run: |
+          set -euo pipefail
+          api_digest="$(tr -d '[:space:]' < artifacts/digest-api/digest-api.txt)"
+          frontend_digest="$(tr -d '[:space:]' < artifacts/digest-frontend/digest-frontend.txt)"
+          discovery_digest="$(tr -d '[:space:]' < artifacts/digest-printer-discovery/digest-printer-discovery.txt)"
+          monolith_digest="$(tr -d '[:space:]' < artifacts/digest-monolith/digest-monolith.txt)"
+          slicer_digest="$(tr -d '[:space:]' < artifacts/digest-slicer-host/digest-slicer-host.txt)"
+
+          docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
+            "ghcr.io/olyforge3d/printfarmer-slicer-host@${slicer_digest}" \
+            -c 'test -f /app/Farm.Slicer.Host.dll && test -d /app/plugins/slicer && dotnet --info >/dev/null'
+          docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
+            "ghcr.io/olyforge3d/printfarmer-api@${api_digest}" \
+            -c 'test -f /app/Farm.Web.Api.dll && dotnet --info >/dev/null'
+          docker run --rm --platform linux/arm64 -d \
+            --name printfarmer-frontend-smoke \
+            "ghcr.io/olyforge3d/printfarmer-frontend@${frontend_digest}"
+          trap 'docker rm -f printfarmer-frontend-smoke >/dev/null 2>&1 || true' EXIT
+          sleep 3
+          docker exec printfarmer-frontend-smoke nginx -t
+          docker rm -f printfarmer-frontend-smoke
+          trap - EXIT
+          docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
+            "ghcr.io/olyforge3d/printfarmer-printer-discovery@${discovery_digest}" \
+            -c 'test -f /app/PrinterDiscoveryService.dll && dotnet --info >/dev/null'
+          docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
+            "ghcr.io/olyforge3d/printfarmer-monolith@${monolith_digest}" \
+            -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
+      - name: Publish and verify public corresponding-source assets
         working-directory: source
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
@@ -267,15 +302,91 @@ jobs:
           cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
           cp ../.artifacts/release-authorization/release-set.json release-assets/release-set.json
           cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
-          if ! gh release view "$VERSION" >/dev/null 2>&1; then
-            prerelease=()
-            [[ "$VERSION" == *-* ]] && prerelease+=(--prerelease)
-            gh release create "$VERSION" --draft --verify-tag --title "$VERSION" \
-              --notes "Source-first validated release transaction." "${prerelease[@]}"
+
+          expected_assets=(
+            "PrintFarmer-${VERSION}-source.tar.gz"
+            "PrintFarmer-${VERSION}-source.json"
+            LICENSE
+            THIRD-PARTY-NOTICES.md
+            release-identity.json
+            release-identity.bundle.json
+            release-set.json
+            "printfarmer-api-${VERSION}.spdx.json"
+            "printfarmer-frontend-${VERSION}.spdx.json"
+            "printfarmer-slicer-host-${VERSION}.spdx.json"
+            "printfarmer-printer-discovery-${VERSION}.spdx.json"
+            "printfarmer-orcaslicer-worker-${VERSION}.spdx.json"
+            "printfarmer-monolith-${VERSION}.spdx.json"
+            digest-api.txt
+            digest-frontend.txt
+            digest-slicer-host.txt
+            digest-printer-discovery.txt
+            digest-orcaslicer-worker.txt
+            digest-monolith.txt
+          )
+          for asset_name in "${expected_assets[@]}"; do
+            test -s "release-assets/$asset_name"
+          done
+
+          cosign verify-blob \
+            --bundle release-assets/release-identity.bundle.json \
+            --certificate-identity "https://github.com/${GITHUB_WORKFLOW_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            release-assets/release-identity.json
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "Release $VERSION already exists; verifying immutable assets"
+          else
+            notes_file="$RUNNER_TEMP/source-first-release-notes.md"
+            printf '%s\n' \
+              "Source-first validated release transaction." \
+              "Corresponding source, notices, SPDX SBOMs, and image digests precede tag promotion." \
+              > "$notes_file"
+            create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file "$notes_file")
+            [[ "$VERSION" == *-* ]] && create_args+=(--prerelease)
+            gh "${create_args[@]}"
           fi
-          gh release upload "$VERSION" release-assets/* --clobber
-          gh release edit "$VERSION" --draft=false
-      - name: Publish immutable tags
+
+          existing_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
+          upload_files=()
+          while IFS= read -r -d '' asset_file; do
+            asset_name="$(basename "$asset_file")"
+            if grep -Fxq "$asset_name" <<< "$existing_assets"; then
+              existing_dir="$RUNNER_TEMP/existing-release-assets/$asset_name"
+              mkdir -p "$existing_dir"
+              gh release download "$VERSION" --pattern "$asset_name" --dir "$existing_dir"
+              cmp -s "$asset_file" "$existing_dir/$asset_name" || {
+                echo "Published release asset differs from the validated build: $asset_name"
+                exit 1
+              }
+            else
+              upload_files+=("$asset_file")
+            fi
+          done < <(find release-assets -maxdepth 1 -type f -print0 | sort -z)
+          if [[ "${#upload_files[@]}" -gt 0 ]]; then
+            gh release upload "$VERSION" "${upload_files[@]}"
+          fi
+
+          expected_prerelease=false
+          [[ "$VERSION" == *-* ]] && expected_prerelease=true
+          release_is_draft="$(gh release view "$VERSION" --json isDraft --jq '.isDraft')"
+          release_is_prerelease="$(gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease')"
+          if [[ "$release_is_draft" == "true" || "$release_is_prerelease" != "$expected_prerelease" ]]; then
+            gh release edit "$VERSION" --draft=false --prerelease="$expected_prerelease"
+          fi
+          release_state="$(
+            gh release view "$VERSION" --json isDraft,isPrerelease \
+              --jq '[.isDraft, .isPrerelease] | @tsv'
+          )"
+          [[ "$release_state" == "$(printf 'false\t%s' "$expected_prerelease")" ]]
+          published_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
+          for asset_name in "${expected_assets[@]}"; do
+            grep -Fxq "$asset_name" <<< "$published_assets"
+            asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset_name}"
+            curl --fail --silent --show-error --location --head \
+              --retry 6 --retry-delay 5 --retry-all-errors "$asset_url" >/dev/null
+          done
+      - name: Promote validated digests
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}

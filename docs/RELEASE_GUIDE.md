@@ -846,12 +846,12 @@ publication remains disabled. No normal workflow has a reset/bypass operation.
 
 `release-protection-rehearsal.yml` is a hidden `workflow_call` maintenance
 workflow, not a normal administrator entry point. It has no environment,
-secret, package permission, OIDC permission, or write permission. Maintainers
-may invoke it only from reviewed internal automation with an immutable
-non-release transaction.
+secret, package permission, OIDC permission, or write permission. The reviewed
+consolidated release workflow calls it after exact-source qualification and
+passes the same immutable transaction plus the same-run qualification artifact.
 
-The workflow validates the transaction, runs the bounded release-control test
-suite, and emits a `release-rehearsal-only` receipt with
+The workflow validates both inputs, runs the bounded release-control test suite,
+and emits a `release-rehearsal-only` receipt with
 `publicationAuthorized: false`. Release qualification and authorization reject
 that receipt type. The diagnostic path cannot reserve an identity, create a
 tag, publish a package or GitHub Release, mutate the ledger, or advance a

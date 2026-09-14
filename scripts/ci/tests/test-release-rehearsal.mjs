@@ -32,8 +32,30 @@ test('internal diagnostics cannot call publisher or mutation operations', () => 
   assert.doesNotMatch(source,
     /RELEASE_PUBLISHER|RELEASE_REGISTRY|cosign|docker login|gh release|git\/refs|git\/tags/);
   assert.match(source, /release-transaction\.mjs validate/);
-  assert.match(source, /release-transaction\.mjs rehearse/);
+  assert.match(source, /actions\/download-artifact@[0-9a-f]{40}/);
+  assert.match(source, /release-transaction\.mjs diagnose/);
   assert.match(source, /rehearsal-receipt\.json/);
+});
+
+test('trusted release dispatch supplies complete evidence to the hidden diagnostic path', () => {
+  const source = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
+  const workflow = load(source);
+  const diagnostics = workflow.jobs['internal-diagnostics'];
+  assert.equal(diagnostics.uses, './.github/workflows/release-protection-rehearsal.yml');
+  assert.deepEqual(diagnostics.needs, ['admit', 'qualification', 'collect-qualification']);
+  assert.equal(diagnostics.with.transaction, '${{ needs.admit.outputs.transaction }}');
+  assert.equal(diagnostics.with.qualification_artifact,
+    'release-qualification-${{ github.run_id }}');
+  assert.equal(diagnostics.environment, undefined);
+  assert.equal(diagnostics.secrets, undefined);
+  assert.deepEqual(diagnostics.permissions, {
+    contents: 'read',
+    actions: 'read',
+    checks: 'read',
+    statuses: 'read',
+    'pull-requests': 'read',
+  });
+  assert.ok(workflow.jobs.publish.needs.includes('internal-diagnostics'));
 });
 
 test('diagnostic API client accepts only bounded repository reads', async () => {

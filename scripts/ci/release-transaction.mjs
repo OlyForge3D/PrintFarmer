@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, relative, resolve, sep } from 'node:path';
 import { canonicalValidationChecks } from './canonical-qualification.mjs';
 import {
   branchHead, githubClient, parseGithubTimestamp, verifyCanonicalSource, verifyReleaseChecks,
@@ -16,6 +17,7 @@ export const qualificationJobNamespace = 'Automatic exact-source qualification';
 const controlWorkflow = '.github/workflows/consolidated-release.yml';
 const shaPattern = /^[a-f0-9]{40}$/;
 const positivePattern = /^[1-9][0-9]*$/;
+const maximumReceiptBytes = 1024 * 1024;
 const requiredQualificationJobs = [
   ...releaseRequiredChecks.filter(name => name !== 'squad/pre-pr-verdict'),
   ...canonicalValidationChecks,
@@ -43,6 +45,36 @@ function completeList(value, field, description) {
   return value[field];
 }
 
+function artifactFile(path) {
+  const root = resolve('.artifacts/release-transaction');
+  const target = resolve(path);
+  requireThat(target.startsWith(`${root}${sep}`) &&
+    !relative(root, target).split(/[\\/]/).includes('..'),
+  'Release artifact path escaped its trusted directory');
+  return target;
+}
+
+function writeValidatedJson(path, value, validate) {
+  validate(value);
+  const content = `${JSON.stringify(value, undefined, 2)}\n`;
+  requireThat(Buffer.byteLength(content, 'utf8') <= maximumReceiptBytes,
+    'Release artifact exceeds the maximum receipt size');
+  const target = artifactFile(path);
+  mkdirSync(dirname(target), { recursive: true });
+  // codeql[js/http-to-file-access]: The network-derived receipt is schema-validated,
+  // size-bounded, and written only beneath the constant release artifact directory.
+  writeFileSync(target, content, { mode: 0o600 });
+}
+
+function readBoundedJson(path, description) {
+  const target = artifactFile(path);
+  const metadata = lstatSync(target);
+  requireThat(metadata.isFile() && !metadata.isSymbolicLink() &&
+    metadata.size > 0 && metadata.size <= maximumReceiptBytes,
+  `${description} is missing, linked, empty, or oversized`);
+  return JSON.parse(readFileSync(target, 'utf8'));
+}
+
 export async function selectTransaction(env = process.env, api = githubClient(env.GH_TOKEN)) {
   requireThat(env.GITHUB_REPOSITORY === repository &&
     env.GITHUB_EVENT_NAME === 'workflow_dispatch', 'Untrusted release dispatch');
@@ -60,7 +92,7 @@ export async function selectTransaction(env = process.env, api = githubClient(en
   if (env.GITHUB_RUN_ATTEMPT !== '1') {
     let recovered;
     try {
-      recovered = validateTransaction(JSON.parse(readFileSync(transactionPath, 'utf8')));
+      recovered = validateTransaction(readBoundedJson(transactionPath, 'Recovery transaction'));
     } catch {
       throw new Error('Rerun recovery transaction is missing or malformed');
     }
@@ -288,23 +320,23 @@ export function validateQualificationReceipt(value, transaction, requiredMode, n
 export async function qualifyTransaction(transaction, api = githubClient(process.env.GH_TOKEN),
   now = Date.now()) {
   const receipt = await verifyTransactionQualification(transaction, api, now);
-  mkdirSync('.artifacts/release-transaction', { recursive: true });
-  writeFileSync(qualificationPath, `${JSON.stringify(receipt, undefined, 2)}\n`, { mode: 0o600 });
+  writeValidatedJson(qualificationPath, receipt,
+    value => validateQualificationReceipt(value, transaction, transaction.mode, now));
   return receipt;
 }
 
 export function readQualificationReceipt(transaction, requiredMode, now = Date.now()) {
   let value;
   try {
-    value = JSON.parse(readFileSync(qualificationPath, 'utf8'));
+    value = readBoundedJson(qualificationPath, 'Qualification receipt');
   } catch {
     throw new Error('Qualification receipt unavailable or malformed');
   }
   return validateQualificationReceipt(value, transaction, requiredMode, now);
 }
 
-export function writeRehearsalReceipt(transaction, qualification, now = Date.now()) {
-  validateQualificationReceipt(qualification, transaction, 'rehearsal', now);
+export function writeDiagnosticReceipt(transaction, qualification, now = Date.now()) {
+  validateQualificationReceipt(qualification, transaction, transaction.mode, now);
   const receipt = {
     kind: 'release-rehearsal-only',
     schema: 3,
@@ -314,10 +346,24 @@ export function writeRehearsalReceipt(transaction, qualification, now = Date.now
     qualificationExpiresAt: qualification.expiresAt,
     publicationAuthorized: false,
   };
-  mkdirSync('.artifacts/release-transaction', { recursive: true });
-  writeFileSync(rehearsalReceiptPath, `${JSON.stringify(receipt, undefined, 2)}\n`, { mode: 0o600 });
+  writeValidatedJson(rehearsalReceiptPath, receipt, value => {
+    requireKeys(value, [
+      'kind', 'schema', 'passed', 'transaction', 'qualificationCheckedAt',
+      'qualificationExpiresAt', 'publicationAuthorized',
+    ], [], 'diagnostic receipt');
+    requireThat(value.kind === 'release-rehearsal-only' && value.schema === 3 &&
+      value.passed === true && value.publicationAuthorized === false,
+    'Invalid non-authorizing diagnostic receipt');
+    validateTransaction(value.transaction);
+    requireThat(JSON.stringify(value.transaction) === JSON.stringify(transaction) &&
+      value.qualificationCheckedAt === qualification.checkedAt &&
+      value.qualificationExpiresAt === qualification.expiresAt,
+    'Diagnostic receipt evidence mismatch');
+  });
   return receipt;
 }
+
+export const writeRehearsalReceipt = writeDiagnosticReceipt;
 
 export function transactionFromEnvironment(env = process.env) {
   return validateTransaction(JSON.parse(env.RELEASE_TRANSACTION || '{}'));
@@ -325,11 +371,11 @@ export function transactionFromEnvironment(env = process.env) {
 
 async function main() {
   const operation = process.argv[2];
-  requireThat(['select', 'validate', 'qualify', 'rehearse'].includes(operation), 'Unknown release transaction operation');
+  requireThat(['select', 'validate', 'qualify', 'diagnose', 'rehearse'].includes(operation),
+    'Unknown release transaction operation');
   if (operation === 'select') {
     const transaction = await selectTransaction();
-    mkdirSync('.artifacts/release-transaction', { recursive: true });
-    writeFileSync(transactionPath, `${JSON.stringify(transaction, undefined, 2)}\n`, { mode: 0o600 });
+    writeValidatedJson(transactionPath, transaction, validateTransaction);
     process.stdout.write(`${JSON.stringify(transaction)}\n`);
     return;
   }
@@ -342,7 +388,8 @@ async function main() {
     await qualifyTransaction(transaction);
     return;
   }
-  writeRehearsalReceipt(transaction, readQualificationReceipt(transaction, 'rehearsal'));
+  const requiredMode = operation === 'rehearse' ? 'rehearsal' : transaction.mode;
+  writeDiagnosticReceipt(transaction, readQualificationReceipt(transaction, requiredMode));
 }
 
 if (process.argv[1]?.replaceAll('\\', '/').endsWith('/scripts/ci/release-transaction.mjs')) {

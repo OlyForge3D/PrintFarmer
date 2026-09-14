@@ -150,9 +150,23 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  internal-diagnostics:
+    name: Internal read-only release diagnostics
+    needs: [admit, qualification, collect-qualification]
+    uses: ./.github/workflows/release-protection-rehearsal.yml
+    permissions:
+      contents: read
+      actions: read
+      checks: read
+      statuses: read
+      pull-requests: read
+    with:
+      transaction: ${{ needs.admit.outputs.transaction }}
+      qualification_artifact: release-qualification-${{ github.run_id }}
+
   publish:
     name: Approve and publish immutable release
-    needs: [admit, qualification, collect-qualification]
+    needs: [admit, qualification, collect-qualification, internal-diagnostics]
     uses: ./.github/workflows/docker-publish.yml
     permissions:
       actions: read
@@ -169,7 +183,7 @@ jobs:
   diagnostics:
     name: Release transaction summary
     if: always() && github.event_name != 'schedule'
-    needs: [admit, qualification, collect-qualification, publish]
+    needs: [admit, qualification, collect-qualification, internal-diagnostics, publish]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
@@ -179,6 +193,7 @@ jobs:
           SOURCE_SHA: ${{ needs.admit.outputs.source_sha }}
           QUALIFICATION: ${{ needs.qualification.result }}
           EVIDENCE: ${{ needs.collect-qualification.result }}
+          INTERNAL_DIAGNOSTICS: ${{ needs.internal-diagnostics.result }}
           PUBLICATION: ${{ needs.publish.result }}
           PUBLIC_IDENTITY: ${{ needs.publish.outputs.public_identity }}
           QUALIFICATION_URL: ${{ needs.collect-qualification.outputs.run_url }}
@@ -192,6 +207,7 @@ jobs:
             echo "- source: \`$SOURCE_SHA\`"
             echo "- qualification: \`$QUALIFICATION\`"
             echo "- evidence: \`$EVIDENCE\`"
+            echo "- internal diagnostics: \`$INTERNAL_DIAGNOSTICS\`"
             echo "- publication: \`$PUBLICATION\`"
             echo "- qualification run: ${QUALIFICATION_URL:-unavailable}"
             echo "- review evidence: ${REVIEW_URL:-unavailable}"

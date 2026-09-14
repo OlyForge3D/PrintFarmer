@@ -77,8 +77,8 @@
       "path": ".github/workflows/docker-publish.yml",
       "contains": [
         "org.opencontainers.image.licenses=AGPL-3.0-only",
-        "org.opencontainers.image.revision=${{ fromJSON(inputs.identity).sourceCommit }}",
-        "outputs: type=image,name=",
+        "org.opencontainers.image.revision=${{ inputs.source_sha }}",
+        "--output \"type=image,name=",
         "cosign attest --yes --type spdxjson",
         "--include-npm",
         "IMAGES=(api frontend slicer-host printer-discovery orcaslicer-worker monolith)",
@@ -90,12 +90,12 @@
         "Promote validated digests"
       ],
       "orderedContains": [
-        "  build-containers:",
+        "  publish:",
         "    permissions:",
         "      contents: read",
         "      id-token: write",
         "      packages: read",
-        "    strategy:",
+        "Build, attest and sign the complete immutable image set",
         "Smoke test ARM64 image digests",
         "Publish and verify public corresponding-source assets",
         "Promote validated digests"
@@ -109,11 +109,9 @@
     {
       "path": ".github/workflows/consolidated-release.yml",
       "contains": [
-        "bash scripts/sync-monorepo-version.sh --check",
         "node scripts/ci/release-control.mjs admit",
-        "node scripts/ci/release-control.mjs authorize",
-        "cosign sign-blob",
-        "uses: ./.github/workflows/docker-publish.yml"
+        "uses: ./.github/workflows/docker-publish.yml",
+        "uses: ./.github/workflows/release-protection-rehearsal.yml"
       ],
       "notContains": [
         "REPO_PAT",
