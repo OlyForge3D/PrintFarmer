@@ -3648,6 +3648,10 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
       assert.throws(() => validateReleaseManifest({ ...manifest, completeSet }),
         /release manifest (fields|complete set)/);
     }
+    for (const identity of [undefined, null, [], 'forged']) {
+      assert.throws(() => validateReleaseManifest({ ...manifest, identity }),
+        /release manifest (fields|identity)/);
+    }
     let tag;
     const store = memoryStore(ledger);
     await ensureSourceTag(async (endpoint, method, body) => {

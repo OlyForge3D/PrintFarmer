@@ -299,6 +299,7 @@ export function validateReleaseManifest(manifest) {
   requireKeys(manifest, ['schema', 'identity', 'completeSet', 'compatibility', 'migration'],
     [], 'release manifest');
   requireThat(manifest.schema === 1, 'Invalid release manifest schema');
+  requireObject(manifest.identity, 'release manifest identity');
   validatePublicAuthorization(manifest.identity);
   requireObject(manifest.completeSet, 'release manifest complete set');
   requireThat(hash(manifest.completeSet.identity) === hash(manifest.identity),
