@@ -6,6 +6,7 @@ import { transactionFromEnvironment } from './release-transaction.mjs';
 
 const workflowPath = '.github/workflows/consolidated-release.yml';
 const ownerLogin = 'jpapiez';
+const ownerAccountId = 5460061;
 const positivePattern = /^[1-9][0-9]*$/;
 
 function identity(value) {
@@ -23,6 +24,7 @@ function sameIdentity(left, right) {
 export function readDispatchEvent(env = process.env) {
   requireThat(env.RUNNER_TEMP && env.GITHUB_EVENT_PATH,
     'Trusted runner event path is unavailable');
+  // Current hosted Ubuntu runner layout; changes make the audit unavailable, never grant authority.
   const expected = join(realpathSync(env.RUNNER_TEMP), '_github_workflow', 'event.json');
   requireThat(resolve(env.GITHUB_EVENT_PATH) === expected &&
     realpathSync(env.GITHUB_EVENT_PATH) === expected,
@@ -75,7 +77,7 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
     requireKeys(event.inputs, ['channel', 'operation'], ['source_sha', 'reservation_target'],
       'dispatch inputs');
     operation = event.inputs.operation;
-    reservationTarget = event.inputs.reservation_target ?? '';
+    reservationTarget = operation === 'abandon' ? event.inputs.reservation_target ?? '' : '';
     requireThat(['publish', 'abandon'].includes(operation) &&
       ['stable', 'insider'].includes(event.inputs.channel) &&
       transaction.channel === (operation === 'abandon' ? 'insider' : event.inputs.channel) &&
@@ -95,14 +97,15 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
     'Scheduled release cannot inherit manual dispatch inputs');
   }
   requireThat(env.RELEASE_OPERATION === operation &&
-    (env.RELEASE_ABANDONMENT_TARGET ?? '') === reservationTarget,
+    (operation === 'publish' || (env.RELEASE_ABANDONMENT_TARGET ?? '') === reservationTarget),
   'Executing operation differs from the original dispatch');
   await verifyCanonicalSource(api, 'development', transaction.workflowCommit);
   await verifyCanonicalSource(api, transaction.sourceBranch, transaction.sourceCommit);
   let ownerDispatchEligible = false;
   if (!scheduled && operation === 'publish' && env.GITHUB_RUN_ATTEMPT === '1' &&
     transaction.approvalMode === 'single-maintainer' &&
-    actor.login === ownerLogin && actor.type === 'User' && sameIdentity(actor, triggeringActor)) {
+    actor.login === ownerLogin && actor.id === ownerAccountId &&
+    actor.type === 'User' && sameIdentity(actor, triggeringActor)) {
     const permission = await api(`collaborators/${ownerLogin}/permission`);
     requireThat(permission && typeof permission.permission === 'string' &&
       sameIdentity(identity(permission.user), actor),

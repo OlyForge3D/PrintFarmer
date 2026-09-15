@@ -12,7 +12,7 @@ const workflowCommit = 'a'.repeat(40);
 const sourceCommit = 'b'.repeat(40);
 
 function fixture() {
-  const actor = { login: 'jpapiez', id: 7, type: 'User' };
+  const actor = { login: 'jpapiez', id: 5460061, type: 'User' };
   const transaction = {
     kind: 'release-transaction', schema: 2, repository,
     channel: 'stable', sourceBranch: 'main', sourceCommit, observedBranchHead: sourceCommit,
@@ -84,6 +84,25 @@ test('explicit source and fully qualified control ref produce the same bound ass
   f.event.ref = 'refs/heads/development';
   f.event.inputs.source_sha = sourceCommit;
   assert.deepEqual(await f.assess(), expected);
+});
+
+test('publication continues to ignore the abandonment-only target input', async () => {
+  const f = fixture();
+  const expected = await f.assess();
+  for (const target of [' ', 'stray-value', 'c'.repeat(64)]) {
+    f.event.inputs.reservation_target = f.env.RELEASE_ABANDONMENT_TARGET = target;
+    assert.deepEqual(await f.assess(), expected);
+  }
+});
+
+test('a reclaimed owner login does not match the pinned owner account', async () => {
+  const f = fixture();
+  for (const actor of [f.run.actor, f.run.triggering_actor, f.event.sender, f.permission.user]) {
+    actor.id = 8;
+  }
+  f.env.GITHUB_ACTOR_ID = '8';
+  assert.equal((await f.assess()).ownerDispatchEligible, false);
+  assert.ok(!f.requests.includes('collaborators/jpapiez/permission'));
 });
 
 test('schedule, non-owner, reruns, abandonment and separation require the existing approval path', async () => {
@@ -163,7 +182,6 @@ test('actor spoofing, workflow substitution and changed transaction inputs fail 
     f => { f.event.inputs.source_sha = workflowCommit; },
     f => { f.transaction.sourceCommit = workflowCommit; },
     f => { f.transaction.approvalMode = 'separation-of-duties'; },
-    f => { f.event.inputs.reservation_target = 'c'.repeat(64); },
     f => { f.event.inputs.source_sha = {}; },
   ];
   for (const mutate of changes) {
@@ -241,6 +259,15 @@ test('real workflow collects assessment without secrets or bypassing existing en
   assert.doesNotMatch(JSON.stringify(job), /secrets\.|private-key|id-token/);
   assert.equal(assessment.env.RELEASE_TRANSACTION, '${{ steps.select.outputs.transaction }}');
   assert.equal(assessment.env.RELEASE_OPERATION, "${{ inputs.operation || 'publish' }}");
+  assert.equal(assessment['continue-on-error'], true);
+  const upload = job.steps.find(step => step.id === 'dispatch_assessment_artifact');
+  assert.equal(upload.if, "steps.assess_dispatch.outcome == 'success'");
+  assert.equal(upload['continue-on-error'], true);
+  const unavailable = job.steps.find(step => step.name === 'Report unavailable non-authorizing dispatch assessment');
+  assert.match(unavailable.if, /steps\.assess_dispatch\.outcome != 'success'/);
+  assert.match(unavailable.if, /steps\.dispatch_assessment_artifact\.outcome != 'success'/);
+  assert.match(unavailable.run, /::warning::/);
+  assert.match(unavailable.run, /GITHUB_STEP_SUMMARY/);
   assert.ok(job.steps.findIndex(step => step.id === 'select') < job.steps.indexOf(assessment));
   assert.match(publisher.jobs.publish.environment, /release-stable/);
   assert.match(publisher.jobs.publish.environment, /release-insider/);

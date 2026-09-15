@@ -991,6 +991,9 @@ needed to qualify; never put credentials in commit comments, issues or artifacts
 that an authenticated manual release dispatch constitute publication consent
 in single-maintainer mode. This checkout adds a read-only dispatch assessment,
 not activation of that policy: the existing environment review is still required.
+Assessment or audit-upload failures produce an explicit warning and summary, not
+a failed release admission. A failed assessment is never uploaded as evidence.
+This nonblocking behavior must not be reused for an actual authorization gate.
 `release-dispatch-assessment-<run>-<attempt>` records exact transaction hash,
 source, workflow commit, channel, operation, run and current execution attempt.
 It deliberately contains no actor identity or credential and is neither a signed
@@ -998,12 +1001,14 @@ authorization nor permission to access publication secrets.
 
 The assessment checks the live GitHub run's repository, workflow definition,
 original actor and triggering actor against the trusted runner event and context.
-Only initial manual `publish` by user `jpapiez`, still holding the live `admin`
+Only initial manual `publish` by user `jpapiez` (pinned account ID `5460061`),
+still holding the live `admin`
 role, is eligible. Every rerun requires the existing explicit approval, including
 owner reruns: GitHub reruns use the **original actor's privileges**, not the
 rerunner's. Schedules, non-owner dispatch, abandonment and separation-of-duties
 do not inherit dispatch consent. Foreign repositories, control refs, reusable
 callers, changed operation/source/channel/attempt and spoofed actor inputs reject.
+The abandonment-only target remains ignored for `publish`, as before.
 Exact-tree source review and native nonself code-owner review in separation mode
 are unchanged.
 
