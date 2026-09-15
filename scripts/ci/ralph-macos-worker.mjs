@@ -80,6 +80,25 @@ function digest(job) {
   return createHash('sha256').update(JSON.stringify(job)).digest('hex');
 }
 
+// Admission digests predate the worker's full-wire digest. Preserve both formats exactly.
+function admissionDigest(job) {
+  return createHash('sha256').update(JSON.stringify({
+    issue: job.issue, owner: job.owner, baseSha: job.baseSha, expectedHost: job.expectedHost, model: job.model,
+    effort: job.effort, agent: job.agent, acceptanceCriteria: job.acceptanceCriteria, charter: job.charter,
+  })).digest('hex');
+}
+
+function validateLedgerIdentity(job) {
+  if (!job || job.repository !== repository || !jobIdentifier(job.jobId) ||
+      !Number.isSafeInteger(job.fence) || job.fence <= 0 || !Number.isSafeInteger(job.issue) || job.issue <= 0 ||
+      !identifier(job.owner) || !sha(job.baseSha) || job.expectedHost !== expectedHost ||
+      typeof job.requestDigest !== 'string' || !/^[0-9a-f]{64}$/.test(job.requestDigest) ||
+      typeof job.allowNoRecord !== 'boolean' ||
+      (job.sessionId !== undefined && !identifier(job.sessionId))) {
+    fail('Malformed ledger reconciliation identity.');
+  }
+}
+
 function fileFor(jobId) {
   return path.join(stateRoot, `${jobId}.json`);
 }
@@ -654,6 +673,7 @@ async function dispatch(job) {
   const prepared = await withJobLock(job.jobId, async () => {
     const existing = await load(job.jobId);
     if (existing) {
+      if (['reconciled-absent', 'abandoned'].includes(existing.state)) fail('Job identifier was terminally fenced by recovery.');
       if (existing.digest !== jobDigest) fail('Job identifier is fenced to a different request.');
       return { response: await workerResponse(existing) };
     }
@@ -753,12 +773,15 @@ async function terminalResponse(record) {
   return record.terminal;
 }
 
-async function matchingProcessIds(marker) {
+async function matchingProcessIds(marker, { strict = false } = {}) {
   if (testMode) {
     try {
       const pid = Number(await readFile(process.env.RALPH_MAC_WORKER_FAKE_PID_FILE, 'utf8'));
-      return ownerIsAlive(pid) === true ? [pid] : [];
-    } catch {
+      const alive = Number.isInteger(pid) && pid > 0 ? ownerIsAlive(pid) : undefined;
+      if (strict && alive === undefined) fail('Process probe could not establish process identity.');
+      return alive === true ? [pid] : [];
+    } catch (error) {
+      if (strict) throw error;
       return [];
     }
   }
@@ -773,7 +796,11 @@ async function matchingProcessIds(marker) {
     if (error.exitCode === 1) return [];
     throw error;
   }
-  return output.split(/\r?\n/)
+  const lines = output.trim().split(/\r?\n/).filter(Boolean);
+  if (strict && lines.some((line) => !/^\s*[1-9][0-9]*\s*$/.test(line))) {
+    fail('Process probe returned unknown process evidence.');
+  }
+  return lines
     .map((line) => Number(line.trim()))
     .filter((pid) => Number.isInteger(pid) && pid > 0 && pid !== process.pid);
 }
@@ -829,6 +856,54 @@ async function workerResponse(record) {
   return recoverLaunchState(record);
 }
 
+async function abandonIncomplete(record) {
+  if (record.terminal?.state === 'abandoned') return record.terminal;
+  const completedAt = Date.parse(record.processResult?.completedAt);
+  if (record.terminal || record.state !== 'awaiting-terminal-evidence' ||
+      record.processResult?.exitCode !== 0 || record.processResult.signal !== undefined ||
+      !Number.isFinite(completedAt) || completedAt > Date.now() ||
+      !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/i.test(record.launchToken ?? '') ||
+      !Number.isInteger(record.supervisorPid) || record.supervisorPid <= 0) {
+    fail('Abandonment requires an incomplete job with correlated recorded process termination.');
+  }
+  const gitEvidence = await inspectTerminalRepository(record);
+  if (gitEvidence.workingTreeClean && gitEvidence.allCommitsPushed &&
+      gitEvidence.repositoryIdentityVerified && gitEvidence.baseAncestor) {
+    fail('Complete Git evidence must use normal terminal reconciliation, not abandonment.');
+  }
+  const recordedPids = [record.supervisorPid, ...(record.pid === undefined ? [] : [record.pid])];
+  if (recordedPids.some((pid) => !Number.isInteger(pid) || pid <= 0 || ownerIsAlive(pid) !== false)) {
+    fail('Recorded supervisor or child is alive or its cessation is unknown.');
+  }
+  const markers = [
+    `Ralph job ${record.job.jobId}, fence ${record.job.fence}.`,
+    record.launchToken,
+    `${record.job.jobId} ${record.launchToken}`,
+  ];
+  for (const marker of markers) {
+    if ((await matchingProcessIds(marker, { strict: true })).length > 0) {
+      fail('A fenced job, supervisor or child process remains alive.');
+    }
+  }
+  const checkedAt = new Date().toISOString();
+  record.abandonmentEvidence = {
+    previousState: record.state, processResult: { ...record.processResult }, gitEvidence,
+    processChecks: { checkedAt, recordedPids, jobMarkerAbsent: true, launchTokenAbsent: true, supervisorMarkerAbsent: true },
+  };
+  record.state = 'abandoned';
+  record.terminal = {
+    ...correlation(record), ...gitEvidence,
+    version: 1, type: 'abandoned', state: 'abandoned', workerVerified: true,
+    requestDigest: admissionDigest(record.job), dispatchFenced: true, processCessationVerified: true,
+    exitCode: 0, processCompletedAt: record.processResult.completedAt, processCheckedAt: checkedAt,
+    failureCode: 'INCOMPLETE_DELIVERY',
+    validationEvidence: 'Trusted worker verified recorded termination and no fenced processes; Git delivery evidence is incomplete. Artifacts retained; not delivered.',
+    recordedAt: checkedAt,
+  };
+  await persist(record.job.jobId, record);
+  return record.terminal;
+}
+
 async function readRequest() {
   const input = await new Promise((resolve, reject) => {
     let content = '';
@@ -846,7 +921,8 @@ async function readRequest() {
   } catch {
     fail('Worker request must be one JSON object.');
   }
-  if (!request || request.version !== 1 || !['dispatch', 'reconcile', 'terminal'].includes(request.type)) {
+  if (!request || request.version !== 1 ||
+      !['dispatch', 'reconcile', 'terminal', 'reconcile-ledger', 'abandon-incomplete', 'abandon-incomplete-ledger'].includes(request.type)) {
     fail('Malformed worker request.');
   }
   return request;
@@ -860,24 +936,83 @@ async function main() {
   if (process.argv.length !== 2) fail('Worker accepts requests only on stdin.');
   validateConfiguration();
   const request = await readRequest();
+  const abandoning = ['abandon-incomplete', 'abandon-incomplete-ledger'].includes(request.type);
+  if (['reconcile-ledger', 'abandon-incomplete-ledger'].includes(request.type)) {
+    validateLedgerIdentity(request.job);
+    const answer = await withJobLock(request.job.jobId, async () => {
+      const record = await load(request.job.jobId);
+      if (!record) {
+        if (abandoning) fail('Abandonment requires an existing worker termination record.');
+        if (request.job.sessionId || !request.job.allowNoRecord) {
+          fail('Missing worker record cannot prove the known session ended or recover an unknown admitted host.');
+        }
+        return recordAbsence(request.job);
+      }
+      if (record.state === 'reconciled-absent') {
+        if (abandoning) fail('An absence tombstone has no process termination record to abandon.');
+        return replayAbsence(record, request.job);
+      }
+      validateJob(record.job);
+      if (record.digest !== digest(record.job) || admissionDigest(record.job) !== request.job.requestDigest ||
+          ['jobId', 'fence', 'repository', 'issue', 'owner', 'baseSha', 'expectedHost']
+            .some((key) => record.job[key] !== request.job[key]) ||
+          (request.job.sessionId !== undefined && request.job.sessionId !== record.sessionId)) {
+        fail('Worker record does not match the ledger fence and digests.');
+      }
+      return { ...await (abandoning ? abandonIncomplete(record) : workerResponse(record)), requestDigest: request.job.requestDigest };
+    });
+    process.stdout.write(`${JSON.stringify(answer)}\n`);
+    return;
+  }
   validateJob(request.job);
-  const answer = ['reconcile', 'terminal'].includes(request.type)
+  const answer = ['reconcile', 'terminal', 'abandon-incomplete'].includes(request.type)
     ? await withJobLock(request.job.jobId, async () => {
         const record = await load(request.job.jobId);
         if (!record) {
-          const worktreeExists = await stat(path.join(worktreeRoot, request.job.jobId))
-            .then(() => true, (error) => error.code === 'ENOENT' ? false : Promise.reject(error));
-          const matchingProcesses = await matchingProcessIds(`Ralph job ${request.job.jobId}, fence ${request.job.fence}.`);
-          if (worktreeExists || matchingProcesses.length > 0) {
-            fail('Missing worker state has residual worktree or process evidence.');
-          }
-          return absentResponse(request.job);
+          if (abandoning) fail('Abandonment requires an existing worker termination record.');
+          return recordAbsence(request.job);
         }
-        if (record.digest !== digest(request.job)) fail('No matching job to reconcile.');
-        return workerResponse(record);
+        if (record.state === 'reconciled-absent') {
+          if (abandoning) fail('An absence tombstone has no process termination record to abandon.');
+          return replayAbsence(record, request.job);
+        }
+        if (record.digest !== digest(request.job) || record.digest !== digest(record.job)) fail('No matching job to reconcile.');
+        return abandoning ? abandonIncomplete(record) : workerResponse(record);
       })
     : await dispatch(request.job);
   process.stdout.write(`${JSON.stringify(answer)}\n`);
+}
+
+async function assertNoResidualJob(job) {
+  const worktreeExists = await stat(path.join(worktreeRoot, job.jobId))
+    .then(() => true, (error) => error.code === 'ENOENT' ? false : Promise.reject(error));
+  const matchingProcesses = await matchingProcessIds(`Ralph job ${job.jobId}, fence ${job.fence}.`);
+  if (worktreeExists || matchingProcesses.length > 0) {
+    fail('Missing worker state has residual worktree or process evidence.');
+  }
+}
+
+function replayAbsence(record, job) {
+  const expectedDigest = job.requestDigest ?? admissionDigest(job);
+  if (record.digest !== digest(record.job) || record.response?.requestDigest !== expectedDigest ||
+      ['jobId', 'fence', 'repository', 'issue', 'owner', 'baseSha', 'expectedHost']
+        .some((key) => record.job[key] !== job[key])) {
+    fail('Absence tombstone does not match the ledger fence and digest.');
+  }
+  return record.response;
+}
+
+async function recordAbsence(job) {
+  await assertNoResidualJob(job);
+  const response = {
+    ...absentResponse(job), requestDigest: job.requestDigest ?? admissionDigest(job), dispatchFenced: true,
+  };
+  // A delayed original dispatch must not start after the controller releases this slot.
+  await persist(job.jobId, {
+    version: 1, state: 'reconciled-absent', job, digest: digest(job), response,
+    reconciledAt: new Date().toISOString(),
+  });
+  return response;
 }
 
 main().catch((error) => {

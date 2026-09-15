@@ -36,7 +36,7 @@ actionable output using `compactRoundOutput`.
 
 No named non-workflow test entrypoint discovers these helpers: existing CI lists Node tests
 explicitly, and this change must not alter live workflows. Preserve manual targeted validation:
-`node --test scripts/ci/tests/test-ralph-round-cache.mjs scripts/ci/tests/test-ralph-macos-ssh.mjs`.
+`node --test scripts/ci/tests/test-ralph-round-cache.mjs scripts/ci/tests/test-ralph-macos-ssh.mjs scripts/ci/tests/test-ralph-macos-worker.mjs`.
 
 ## First Actions
 
@@ -55,6 +55,11 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
    Classify from labels, paths, acceptance criteria, or Swift/Xcode signals—not owner identity.
    For every configured local or remote dispatch, use the exact admission command sequence in
    `operations.md`; no direct `create_session` or SSH delivery is permitted outside that sequence.
+4. Before admitting new work, apply `operations.md`'s reconciliation policy: establish one writer,
+   reconcile existing remote jobs by ID without new-issue eligibility, verify missing local
+   sessions against archived/terminal history, and account live/resumed handoffs under new fences.
+   Report ledger and effective union counts separately. Unsupported legacy-worker recovery retains
+   uncertainty; never reset slots or ignore live work to make the ledger fit.
 
 ## Conditional Policies
 

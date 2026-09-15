@@ -297,8 +297,12 @@ against the authoritative ledger before being trusted**:
 **Reconciling a lost local session (accepted/running, no terminal result).** When a local
 job's session dies before ever calling the terminal-result path, use
 `recoverLostLocalSession` (CLI: `node scripts/ci/ralph-admission.mjs recover-local-session`)
-with `{ jobId, sessionAbsent: true }` **only after confirming the session is genuinely
-gone** (e.g. it no longer appears via `list_sessions_and_chats`/`get_sessions_status`).
+with `jobId`, `sessionAbsent:true`, and fresh `sessionEvidence` containing `repository`,
+`issue`, `sessionId`, `fence`, `state:"absent"`, `observedAt`, `source`,
+`liveInventoryChecked:true`, `archivedHistoryChecked:true`, and `terminalHistoryChecked:true`.
+Confirm absence against live inventory and archived/terminal history; a missing inventory
+row or idle session alone is insufficient. If correlated terminal proof exists, use
+`terminal-local` instead. Unavailable history remains a blocker.
 This transitions the job to a new terminal `abandoned` state — distinct from `failed` —
 and frees the issue's slot for a fresh `jobId` (an explicit re-admission/fresh
 reproduction). It never deletes the ledger entry, the session's worktree, or any
@@ -330,8 +334,9 @@ to re-dispatch: the issue's claim stays in place and the issue must not be re-ad
 stranded session still exists, or a late-waking session and a fresh one would both work the same
 issue. That is enforced, not merely documented — `reserveJob` rejects the issue with
 `STRANDED_SESSION` until `clearStrandedKickoff` (CLI: `clear-stranded-kickoff`) is called with
-`{ jobId, sessionAbsent: true }`, the same authoritative-absence assertion `recoverLostLocalSession`
-requires. Clearing keeps the audit record and the jobId's fence. The round report names the issue
+`{ jobId, sessionAbsent: true }` after independently verifying authoritative absence.
+This pre-acknowledgment assertion is distinct from the correlated `sessionEvidence` required
+by `recoverLostLocalSession`. Clearing keeps the audit record and the jobId's fence. The round report names the issue
 and its `strandedSessionId`.
 
 **Xcode/CoreSimulator concurrency is per-Mac, not per-slot.** The shared 5-slot ledger

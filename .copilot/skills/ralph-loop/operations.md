@@ -104,11 +104,13 @@ delivery:
 5. For an eligible mobile issue only, run `dispatch-remote` with
    `{"job":...,"eligibility":...,"controllerPid":...}` using the app Ralph controller's own
    process ID instead of local session creation. It reserves, records a PID-and-lease-fenced
-   intent, and sends SSH in one durable operation; lost acknowledgement/timeouts remain reserved
-   and the same job is reconciled on a later invocation. A later round must run `recover-remote`
-   only after the lease expires and the owning controller is demonstrably dead, then re-run
-   `dispatch-remote`. For an
-   accepted remote job, run `status-remote` with the original `{"job":...}`. That command queries
+   intent, and sends SSH in one durable operation; lost acknowledgement/timeouts remain reserved.
+   For a stranded `delivery-intent`, run `recover-remote` only after the lease expires and the
+   owning controller is demonstrably dead. This changes it to `uncertain`, not terminal.
+   For an `accepted`, `running`, or `uncertain` remote job, run `status-remote` with
+   `{"jobId":"the-existing-job"}`. New reservations persist their exact immutable wire job.
+   Status recovery never requires fresh issue eligibility, re-claiming a closed issue, or
+   `dispatch-remote`. That command queries
    the trusted worker and releases the reservation only from its fence-bound process/Git terminal
    attestation, correlated pre-launch failure, or explicit attestation that no durable worker
    record exists for an uncertain delivery. Successful terminal evidence must bind the configured
@@ -118,9 +120,119 @@ delivery:
    only the trusted worker may emit `SUPERVISOR_LOST` after the launch lease and fenced process
    have both ended.
 
-The ledger is authoritative for these cooperating configured Ralph dispatch paths, not arbitrary
-manual app sessions that bypass this policy. Before enabling remote dispatch, drain or account for
-legacy Mac Ralph admission so Windows is the single coordinator.
+## Reconcile Before Admission
+
+Only one round or explicitly designated repair session may own operational reconciliation.
+Check for another active round before writing the shared ledger; agree ownership rather than
+racing it. A user-requested admission repair is maintenance, not a backlog implementation slot.
+Do not launch extra implementation sessions to perform the repair.
+
+The ledger records cooperating Ralph dispatches, but cannot observe arbitrary app sessions.
+Before admitting anything, compare all active ledger entries with fresh live app inventory,
+archived session history and terminal evidence. Report both the ledger count and the distinct
+union of unresolved reservations and live implementation/analysis handoffs. Deduplicate by job
+and session identity, not issue title. Idle alone is not absent or terminal. Count live work
+whose old ledger entry is terminal; never resurrect that completed entry or ignore the session.
+
+Account an existing local handoff using `account-local-session` with `{"job":...,"sessionEvidence":...}`.
+For a coordinated repair, also pass `expectedGeneration` from the freshly inspected ledger:
+the locked write rejects changed generations with `STALE_LEDGER`; refresh all evidence before retrying.
+This does not spawn, claim an issue, or require new-issue eligibility. Supply a new stable job ID,
+the observed repository/issue/owner/base and current non-secret work criteria. Evidence contains
+`repository`, `issue`, `sessionId`, `state:"active"`, `observedAt` and `source` (the exact app
+inventory/history observation reference). Evidence must be at most five minutes old.
+For resumed work in a previously terminal session, also supply `previousJobId` and
+`resumedAfterTerminal:true` in evidence, backed by a turn/work observation after that terminal
+record. The old audit remains unchanged; the new job/fence accounts the resumed work.
+A session can resume on a different issue: use the actual current issue from fresh GitHub and
+session evidence, not the historical session title. Cross-issue linkage still requires the
+exact same session ID as the terminal predecessor and verified later work; it never authorizes
+linking an unrelated session or duplicating an active session/issue.
+The observation must postdate every terminal record for that session, not merely the named
+predecessor; selecting an older predecessor cannot revive activity that subsequently ended.
+Send that new job/fence to the existing session for its terminal report; do not resend its kickoff.
+The operation atomically deduplicates sessions/issues and enforces five slots. If accounting fails
+because the ledger is full, retain the untracked session in union capacity and block new dispatches
+until reconciliation makes room. Never temporarily clear unresolved entries to fit a handoff.
+
+For an accepted/running local job whose claimed session is authoritatively gone, use
+`recover-local-session` with `jobId`, `sessionAbsent:true`, and `sessionEvidence` containing
+`repository`, `issue`, `sessionId`, `fence`, `state:"absent"`, `observedAt`, `source`,
+`liveInventoryChecked:true`, `archivedHistoryChecked:true`, and `terminalHistoryChecked:true`.
+An absent inventory row is insufficient: inspect archived/terminal history and rule out ongoing
+work. If verified terminal proof exists, use `terminal-local` instead. Unavailable history is a
+blocker, not absence. Recovery records `abandoned`/`session-lost` and retains the session, fence,
+digest and evidence; it is never success and does not authorize cleanup.
+
+### Legacy Remote Records
+
+Older reservations stored only a digest. `LEGACY_PAYLOAD_REQUIRED` explicitly retains the slot:
+provide `status-remote` with the exact original `job` from a recorded dispatch artifact or trusted
+worker record. A supplied fence must match; every digest-bound field must match byte-for-byte
+(including criterion order and charter). Verified originals are persisted for future recovery.
+Never guess criteria, substitute current issue text, fabricate fresh eligibility, or clear a slot
+because the issue/PR closed or a Windows controller PID died.
+
+If the original payload is unavailable, `status-remote` accepts
+`{"jobId":"the-existing-job","legacyIdentity":true}` only through a compatible trusted worker.
+This sends the ledger identity, fence and admission digest via `reconcile-ledger`, not a dispatch.
+The worker validates its original full-wire digest, recomputes the admission digest, and binds
+repository, issue, owner, base, host and any known session before inspecting process/Git evidence.
+The response must echo the admission digest. Live or orphaned processes retain the slot.
+No-record failure requires no residual worktree/process and a known admitted host; it cannot
+prove a previously accepted session ended. Missing historical host can be recovered only from
+an existing worker record whose recomputed digest matches. Preserve all other uncertainty.
+Before attesting no-record failure, the worker atomically persists a terminal absence tombstone
+under its job lock. A delayed original dispatch cannot start that job afterward. Require
+`dispatchFenced:true`; older unfenced no-record responses retain the slot.
+
+Old workers reject `reconcile-ledger`; SSH errors, unsupported requests, missing digest responses
+and timeouts are explicit recovery blockers, never absence. Do not fall back to dispatch.
+Deploying the updated `scripts/ci/ralph-macos-worker.mjs` requires separate authorization.
+Identify the standalone JavaScript implementation invoked by the configured worker command;
+preserve any shell wrapper that supplies runtime configuration. Back up the implementation,
+stage and syntax/hash-check the replacement beside it, retain its permissions, and atomically
+replace only that implementation. Preserve existing state/worktrees and runtime configuration.
+No new dependency is required. Until then, exact-original-payload status requests
+can recover existing old-worker records with correlated live/terminal evidence, but an old
+worker's unfenced no-record response is not sufficient to release capacity.
+
+### Stopped But Incomplete Remote Work
+
+Exit zero does not prove delivery: a stopped job can retain dirty files or lack its exact pushed
+branch. Normal `status-remote` continues to require complete success evidence. Do not rerun an
+implementation merely to manufacture that evidence or free a slot.
+
+When explicitly authorized to abandon incomplete work, use `abandon-incomplete-remote` with the
+existing `jobId` (or exact original `job`); `legacyIdentity:true` is available for a missing payload
+only on a compatible worker. This is a separate opt-in operation, never an automatic status fallback.
+The controller rejects unsolicited abandonment on ordinary status or dispatch. If the worker
+persisted abandonment but its reply was lost, retry the explicitly authorized abandonment
+operation; normal status cannot import that outcome. A terminal result already recorded in
+Windows remains readable without contacting the worker.
+The worker must validate the original job/fence/digests and recorded successful process termination,
+then inspect Git evidence and freshly prove the recorded supervisor/child PIDs and all job-fence,
+launch-token and supervisor-token processes are absent, under the existing job lock. Alive, unknown,
+missing or mismatched evidence blocks release. A fully delivered job must use normal status instead.
+
+The worker durably records `abandoned` / `INCOMPLETE_DELIVERY`, with process timestamps, checked
+cessation, incomplete Git evidence and `dispatchFenced:true`. Delayed dispatch and supervisor launch
+are rejected. Preserve the entire prior worker record, process result, logs, dirty files and Git
+state; no cleanup, reset, push, relaunch or issue-success claim is authorized. Windows records the
+correlated attestation, never a caller-authored terminal claim. Repeated calls return the same
+terminal result. This is not completed, delivered, merged or validated work.
+
+Both abandonment request types require the updated standalone worker; unsupported old workers
+retain the reservation. Rollback must retain all worker records and terminal tombstones. An older
+worker/controller may reject new terminal types, but must not be made compatible by deleting
+evidence or redispatching a terminal job. Replacing the worker implementation does not authorize
+restarting existing supervisors or changing their runtime configuration.
+
+Persist only allowlisted job fields and observation references. Never put credentials, SSH
+configuration, environment contents or secrets in criteria, charter, evidence or ledger data.
+Before enabling remote dispatch, drain or account for legacy Mac Ralph admission so Windows is
+the single coordinator. A round may resume filling slots only when the reconciled union is below
+five and every live handoff is accounted; the per-Mac Xcode gate still applies.
 
 ## Round Report
 
@@ -128,4 +240,6 @@ Report triage, every accounting bucket, epic/analysis status, dispatch order and
 cross-platform deferrals, PR gates, active slots, and the cleanup section from `cleanup.md`.
 Name every resent kickoff and every `kickoff-unverified` release with its issue and
 `strandedSessionId` under dispatch order and blockers.
+Include exact before/after ledger and union counts, every recovered/retained job and its evidence
+or blocker, and any resumed handoff's old/new job IDs. Distinguish failed/abandoned from completed.
 Finish the report and exit; do not poll or begin another round.
