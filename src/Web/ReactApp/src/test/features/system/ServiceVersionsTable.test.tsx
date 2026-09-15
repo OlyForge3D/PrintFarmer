@@ -63,7 +63,7 @@ describe('ServiceVersionsTable', () => {
   });
 
   it('displays its own canonical asset record rather than copying API version', () => {
-    buildInfo.releaseIdentity = identity;
+    buildInfo.releaseIdentity = { ...identity, stableSequence: '0' };
     render(<ServiceVersionsTable inventory={inventory()} />);
     expect(screen.getByText(/Frontend canonical version: 1.2.3-insider.10/)).toBeVisible();
     expect(screen.getByText(/Frontend provenance: self-report/)).toBeVisible();

@@ -37,6 +37,7 @@ describe('canonical frontend release identity', () => {
       sourceBranch: branch, sourceTag: `v${version}`, sourceCommit: 'a'.repeat(40),
       authorizedBranchHead: 'a'.repeat(40), buildId: '45', buildAttempt: '2',
       workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
+      stableSequence: channel === 'stable' ? '1' : '0',
       created: '2026-09-12T20:00:00.000Z',
     };
     const allocation = allocationKey(record);
@@ -125,6 +126,7 @@ describe('canonical frontend release identity', () => {
       sourceCommit: 'a'.repeat(40), authorizedBranchHead: 'a'.repeat(40),
       buildId: '45', buildAttempt: '2',
       workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
+      stableSequence: '0',
       identitySha256: 'b'.repeat(64), buildTime: '2026-09-12T20:00:00Z',
     };
     const inventory = { ...identity, allocationIdentity: 'allocation-45', promotionOrigin: null };

@@ -7,6 +7,14 @@ on:
         description: Immutable same-run release transaction binding
         type: string
         required: true
+      operation:
+        description: Immutable protected release operation
+        type: string
+        required: true
+      reservation_target:
+        description: Immutable insider reservation allocation key for abandonment
+        type: string
+        required: false
     outputs:
       public_identity:
         description: Redacted canonical release identity
@@ -19,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}
+  group: release-publication-${{ inputs.operation == 'abandon' && 'insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider') }}
   cancel-in-progress: false
 
 env:
@@ -27,9 +35,9 @@ env:
 
 jobs:
   publish:
-    name: Authorize and publish immutable release
+    name: ${{ inputs.operation == 'abandon' && 'Abandon immutable release reservation' || 'Authorize and publish immutable release' }}
     runs-on: ubuntu-latest
-    environment: ${{ fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider' }}
+    environment: ${{ inputs.operation == 'abandon' && 'release-insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider') }}
     permissions:
       contents: read
       id-token: write
@@ -42,12 +50,27 @@ jobs:
       public_identity: ${{ steps.authorize.outputs.public_identity }}
       published_set_digest: ${{ steps.advance.outputs.set_hash }}
     steps:
+      - name: Verify invoked immutable control before checkout
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+        run: |
+          set -euo pipefail
+          workflow_commit="$(node --input-type=module -e '
+            const value = JSON.parse(process.env.RELEASE_TRANSACTION);
+            if (!/^[a-f0-9]{40}$/.test(value.workflowCommit || "")) process.exit(1);
+            process.stdout.write(value.workflowCommit);
+          ')"
+          [[ "$workflow_commit" == "$GITHUB_WORKFLOW_SHA" ]]
+          resolved="$(gh api "repos/$GITHUB_REPOSITORY/git/commits/$workflow_commit" --jq .sha)"
+          [[ "$resolved" == "$workflow_commit" ]]
       - name: Checkout immutable release control
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.transaction).workflowCommit }}
           persist-credentials: false
       - name: Checkout exact qualified source
+        if: inputs.operation == 'publish'
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
           ref: ${{ fromJSON(inputs.transaction).sourceCommit }}
@@ -57,37 +80,49 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
+      - if: inputs.operation == 'publish'
+        uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
         with:
           dotnet-version: '10.0.x'
-      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
+      - if: inputs.operation == 'publish'
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c  # v8
         with:
           name: release-qualification-${{ github.run_id }}
           path: .artifacts/release-transaction
       - name: Validate immutable release transaction before protected credentials
+        if: inputs.operation == 'publish'
         env:
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
         run: node scripts/ci/release-transaction.mjs validate
       - name: Check selected source version base
+        if: inputs.operation == 'publish'
         working-directory: source
         run: bash scripts/sync-monorepo-version.sh --check
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
       - name: Recover immutable authorization bytes for an authorized rerun
-        if: github.run_attempt > 1
+        if: inputs.operation == 'publish' && github.run_attempt > 1
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          artifact_name="$(
+          mapfile -t authorization_artifacts < <(
             gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" \
-              --jq '[.artifacts[] |
-                select(.expired == false and (.name | test("^release-authorization-[1-9][0-9]*$")))] |
-                sort_by(.created_at) | .[0].name // empty'
-          )"
-          if [ -n "$artifact_name" ]; then
-            gh run download "$GITHUB_RUN_ID" \
-              --name "$artifact_name" \
-              --dir .artifacts/release-authorization
-          fi
+              --jq '[.artifacts[] | select(.expired == false and .name == "release-authorization-1")] | .[].name'
+          ) || { echo "Authorization recovery artifact lookup failed"; exit 1; }
+          [[ "${#authorization_artifacts[@]}" -eq 1 ]] ||
+            { echo "Authorization recovery evidence is absent, ambiguous, or expired"; exit 1; }
+          gh run download "$GITHUB_RUN_ID" \
+            --name "${authorization_artifacts[0]}" \
+            --dir .artifacts/release-authorization
+          expected_authorization_assets="$(printf '%s\n' public-identity.bundle.json public-identity.json release-identity.bundle.json release-identity.json | sort)"
+          [[ "$(find .artifacts/release-authorization -maxdepth 1 -type f -printf '%f\n' | sort)" == "$expected_authorization_assets" ]] ||
+            { echo "Authorization recovery artifact is incomplete or contains unexpected files"; exit 1; }
+          for identity in release-identity public-identity; do
+            cosign verify-blob --bundle ".artifacts/release-authorization/${identity}.bundle.json" \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              ".artifacts/release-authorization/${identity}.json"
+          done
       - name: Obtain protected publisher App token
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
@@ -99,7 +134,47 @@ jobs:
           permission-statuses: read
           permission-administration: read
           permission-actions: read
+      - name: Recover original signed authorization for immutable abandonment
+        if: inputs.operation == 'abandon'
+        id: recover_abandonment
+        env:
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
+        run: node scripts/ci/release-control.mjs recover-abandonment
+      - name: Download and verify original signed abandonment authorization
+        if: inputs.operation == 'abandon'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          AUTHORIZATION_RUN_ID: ${{ steps.recover_abandonment.outputs.authorization_run_id }}
+        run: |
+          set -euo pipefail
+          gh run download "$AUTHORIZATION_RUN_ID" --name release-authorization-1 --dir .artifacts/release-authorization
+          expected_authorization_assets="$(printf '%s\n' public-identity.bundle.json public-identity.json release-identity.bundle.json release-identity.json | sort)"
+          [[ "$(find .artifacts/release-authorization -maxdepth 1 -type f -printf '%f\n' | sort)" == "$expected_authorization_assets" ]] ||
+            { echo "Authorization recovery artifact is incomplete or contains unexpected files"; exit 1; }
+          for identity in release-identity public-identity; do
+            cosign verify-blob --bundle ".artifacts/release-authorization/${identity}.bundle.json" \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              ".artifacts/release-authorization/${identity}.json"
+          done
+      - name: Record approved immutable reservation abandonment
+        if: inputs.operation == 'abandon'
+        env:
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OWNER_APPROVED_REVIEWERS: ${{ secrets.RELEASE_OWNER_APPROVED_REVIEWERS }}
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.recover_abandonment.outputs.public_identity }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_SOURCE_COMMIT: ${{ steps.recover_abandonment.outputs.source_sha }}
+          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
+          RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
+        run: node scripts/ci/release-control.mjs abandon
       - name: Reserve identity and create the canonical source tag
+        if: inputs.operation == 'publish'
         id: authorize
         env:
           GH_TOKEN: ${{ github.token }}
@@ -112,18 +187,19 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs authorize
-      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6  # v4.1.2
       - name: Sign immutable authorization
+        if: inputs.operation == 'publish' && github.run_attempt == 1
         run: |
           set -euo pipefail
           umask 077
-          cosign sign-blob --yes \
+          cosign sign-blob --yes --new-bundle-format \
             --bundle .artifacts/release-authorization/release-identity.bundle.json \
             .artifacts/release-authorization/release-identity.json
-          cosign sign-blob --yes \
+          cosign sign-blob --yes --new-bundle-format \
             --bundle .artifacts/release-authorization/public-identity.bundle.json \
             .artifacts/release-authorization/public-identity.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        if: inputs.operation == 'publish' && github.run_attempt == 1
         with:
           name: release-authorization-${{ github.run_attempt }}
           path: |
@@ -135,6 +211,7 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Consume the signed authorization in this protected job
+        if: inputs.operation == 'publish'
         id: consume
         env:
           GH_TOKEN: ${{ github.token }}
@@ -143,7 +220,39 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
         run: node scripts/ci/release-control.mjs consume
+      - name: Stage qualified source metadata and canonical artifacts
+        if: inputs.operation == 'publish'
+        env:
+          RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
+          RELEASE_VERSION: ${{ steps.consume.outputs.version }}
+        run: |
+          set -euo pipefail
+          RELEASE_BASE_VERSION="${RELEASE_VERSION#v}"
+          RELEASE_BASE_VERSION="${RELEASE_BASE_VERSION%%-*}"
+          export RELEASE_BASE_VERSION
+          metadata="source/release-metadata/${RELEASE_BASE_VERSION}.json"
+          test -s "$metadata"
+          node --input-type=module -e '
+            import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+            import { dirname, join, resolve } from "node:path";
+            import { releaseMetadataEvidence } from "./scripts/ci/release-policy.mjs";
+            const record = { sourceCommit: process.env.RELEASE_SOURCE_COMMIT, baseVersion: process.env.RELEASE_BASE_VERSION };
+            const bytes = readFileSync(process.argv[1], "utf8");
+            const metadata = JSON.parse(bytes);
+            const artifacts = Object.fromEntries(Object.values(metadata.schemas).map(schema =>
+              [schema.artifact, readFileSync(join("source", schema.artifact))]));
+            const target = resolve(".artifacts/release-authorization/source-release-metadata.json");
+            mkdirSync(dirname(target), { recursive: true });
+            writeFileSync(target, bytes, { mode: 0o600 });
+            for (const [path, value] of Object.entries(artifacts)) {
+              const destination = resolve(".artifacts/release-authorization/source-artifacts", path);
+              mkdirSync(dirname(destination), { recursive: true });
+              writeFileSync(destination, value, { mode: 0o600 });
+            }
+            releaseMetadataEvidence(record, bytes, artifacts, process.env.RELEASE_SOURCE_COMMIT);
+          ' "$metadata"
       - name: Validate all revocable controls before publication
+        if: inputs.operation == 'publish'
         id: preflight
         env:
           GH_TOKEN: ${{ github.token }}
@@ -157,16 +266,21 @@ jobs:
           RELEASE_SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
         run: node scripts/ci/release-control.mjs preflight
       - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
+        if: inputs.operation == 'publish'
         with:
           platforms: arm64,amd64
       - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
+        if: inputs.operation == 'publish'
       - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
+        if: inputs.operation == 'publish'
         with:
           registry: ghcr.io
           username: ${{ vars.RELEASE_REGISTRY_USER }}
           password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
       - uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
+        if: inputs.operation == 'publish'
       - name: Build, attest and sign the complete immutable image set
+        if: inputs.operation == 'publish'
         working-directory: source
         env:
           PRINTFARMER_RELEASE_IDENTITY: ${{ steps.consume.outputs.frontend_identity }}
@@ -224,8 +338,31 @@ jobs:
               --version "$RELEASE_VERSION" \
               --revision "$source_sha" \
               "${extra[@]}"
-            cosign attest --yes --type spdxjson --predicate "$sbom" "${repository}@${digest}"
-            cosign sign --yes "${repository}@${digest}"
+            cosign attest --yes --new-bundle-format --type spdxjson --predicate "$sbom" "${repository}@${digest}"
+            cosign sign --yes --new-bundle-format "${repository}@${digest}"
+            platform_digests="$(
+              docker buildx imagetools inspect "${repository}@${digest}" --raw |
+                jq -r '.manifests[]
+                  | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")
+                  | select(.platform.os == "linux")
+                  | .digest'
+            )"
+            [[ -n "$platform_digests" ]]
+            while IFS= read -r platform_digest; do
+              [[ "$platform_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+              platform_suffix="${platform_digest#sha256:}"
+              platform_sbom="crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json"
+              mkdir -p "$(dirname "$platform_sbom")"
+              syft "registry:${repository}@${platform_digest}" -o "spdx-json=${platform_sbom}"
+              node scripts/compliance/enrich-sbom.mjs \
+                --sbom "$platform_sbom" \
+                --inventory compliance-artifacts/license-inventory.json \
+                --version "$RELEASE_VERSION" \
+                --revision "$source_sha" \
+                "${extra[@]}"
+              cosign attest --yes --new-bundle-format --type spdxjson --predicate "$platform_sbom" "${repository}@${platform_digest}"
+              cosign sign --yes --new-bundle-format "${repository}@${platform_digest}"
+            done <<< "$platform_digests"
           }
           build_component api api-runtime linux/amd64,linux/arm64
           build_component frontend frontend-runtime linux/amd64,linux/arm64
@@ -239,6 +376,7 @@ jobs:
             test -s "release-artifacts/printfarmer-${image}-${RELEASE_VERSION}.spdx.json"
           done
       - name: Normalize immutable image evidence
+        if: inputs.operation == 'publish'
         run: |
           set -euo pipefail
           mkdir -p artifacts
@@ -248,13 +386,27 @@ jobs:
             cp "source/release-artifacts/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "artifacts/sbom-${image}/"
           done
-      - name: Validate complete immutable set
+      - name: Generate canonical release notes before signing
+        if: inputs.operation == 'publish'
+        working-directory: source
         env:
-          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
-        run: node scripts/ci/release-set.mjs inspect
-      - name: Verify every pushed digest signature and SPDX attestation
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.consume.outputs.version }}
+          SOURCE_TAG: ${{ steps.consume.outputs.version }}
+          SOURCE_COMMIT: ${{ fromJSON(inputs.transaction).sourceCommit }}
         run: |
           set -euo pipefail
+          release_notes=../.artifacts/release-authorization/release-notes.md
+          mkdir -p "$(dirname "$release_notes")"
+          RELEASE_NOTES_OUTPUT="$release_notes" node ../scripts/ci/release-notes.mjs
+          release_notes_sha256="$(sha256sum "$release_notes" | cut -d ' ' -f1)"
+          [[ "$release_notes_sha256" =~ ^[a-f0-9]{64}$ ]]
+          printf 'RELEASE_NOTES_SHA256=%s\n' "$release_notes_sha256" >> "$GITHUB_ENV"
+      - name: Verify every pushed digest signature and SPDX attestation
+        if: inputs.operation == 'publish'
+        run: |
+          set -euo pipefail
+          evidence_root=.artifacts/release-authorization/crypto-evidence
           for image in api frontend slicer-host printer-discovery orcaslicer-worker monolith; do
             digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
             [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
@@ -264,15 +416,82 @@ jobs:
                 sed -n 's/^Digest:[[:space:]]*//p'
             )"
             [[ "$registry_digest" == "$digest" ]]
-            cosign verify "$reference" \
+            index_evidence="$evidence_root/$image/index"
+            mkdir -p "$index_evidence"
+            cosign verify --output json "$reference" \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
-            cosign verify-attestation "$reference" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/signature.json"
+            date -u +%Y-%m-%dT%H:%M:%S.000Z > "$index_evidence/signature.verification-time"
+            cosign verify-attestation --output json "$reference" \
               --type spdxjson \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-              --certificate-oidc-issuer https://token.actions.githubusercontent.com
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/attestation.json"
+            date -u +%Y-%m-%dT%H:%M:%S.000Z > "$index_evidence/attestation.verification-time"
+            cosign download signature "$reference" > "$index_evidence/signature.ndjson"
+            cosign download attestation "$reference" > "$index_evidence/attestation.ndjson"
+            [[ -s "$index_evidence/signature.ndjson" && -s "$index_evidence/attestation.ndjson" ]]
+            if grep -q $'\r' "$index_evidence/signature.ndjson"; then
+              echo "Cosign signature evidence must use LF line endings: $image/index"
+              exit 1
+            fi
+            [[ "$(tail -c 1 "$index_evidence/signature.ndjson" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
+              printf '\n' >> "$index_evidence/signature.ndjson"
+            cat "$index_evidence/signature.ndjson" "$index_evidence/attestation.ndjson" > "$index_evidence/download.json"
+            cp "$index_evidence/signature.ndjson" "$index_evidence/signature.bundle.json"
+            cp "$index_evidence/attestation.ndjson" "$index_evidence/attestation.bundle.json"
+            cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
+              "$index_evidence/predicate.json"
+            platform_digests="$(
+              docker buildx imagetools inspect "$reference" --raw |
+                jq -r '.manifests[]
+                  | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest")
+                  | select(.platform.os == "linux")
+                  | "\(.platform.os)/\(.platform.architecture) \(.digest)"'
+            )"
+            [[ -n "$platform_digests" ]]
+            while read -r platform platform_digest; do
+              [[ "$platform_digest" =~ ^sha256:[0-9a-f]{64}$ ]]
+              platform_reference="ghcr.io/olyforge3d/printfarmer-${image}@${platform_digest}"
+              platform_evidence="$evidence_root/$image/platforms/${platform//\//-}"
+              platform_suffix="${platform_digest#sha256:}"
+              mkdir -p "$platform_evidence"
+              cosign verify --output json "$platform_reference" \
+                --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/signature.json"
+              date -u +%Y-%m-%dT%H:%M:%S.000Z > "$platform_evidence/signature.verification-time"
+              cosign verify-attestation --output json "$platform_reference" \
+                --type spdxjson \
+                --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/attestation.json"
+              date -u +%Y-%m-%dT%H:%M:%S.000Z > "$platform_evidence/attestation.verification-time"
+              cosign download signature "$platform_reference" > "$platform_evidence/signature.ndjson"
+              cosign download attestation "$platform_reference" > "$platform_evidence/attestation.ndjson"
+              [[ -s "$platform_evidence/signature.ndjson" && -s "$platform_evidence/attestation.ndjson" ]]
+              if grep -q $'\r' "$platform_evidence/signature.ndjson"; then
+                echo "Cosign signature evidence must use LF line endings: $image/$platform"
+                exit 1
+              fi
+              [[ "$(tail -c 1 "$platform_evidence/signature.ndjson" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
+                printf '\n' >> "$platform_evidence/signature.ndjson"
+              cat "$platform_evidence/signature.ndjson" "$platform_evidence/attestation.ndjson" > "$platform_evidence/download.json"
+              cp "$platform_evidence/signature.ndjson" "$platform_evidence/signature.bundle.json"
+              cp "$platform_evidence/attestation.ndjson" "$platform_evidence/attestation.bundle.json"
+              cp "source/crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json" \
+                "$platform_evidence/predicate.json"
+            done <<< "$platform_digests"
           done
+      - name: Validate complete immutable set and stage verifier evidence
+        if: inputs.operation == 'publish'
+        env:
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+        run: |
+          set -euo pipefail
+          evidence_path=.artifacts/release-authorization/release-crypto-evidence.json
+          node scripts/ci/release-set.mjs evidence --evidence "$evidence_path" \
+            .artifacts/release-authorization/crypto-evidence
+          node scripts/ci/release-set.mjs inspect --evidence "$evidence_path"
       - name: Smoke test ARM64 image digests
+        if: inputs.operation == 'publish'
         run: |
           set -euo pipefail
           api_digest="$(tr -d '[:space:]' < artifacts/digest-api/digest-api.txt)"
@@ -301,7 +520,78 @@ jobs:
           docker run --rm --platform linux/arm64 --entrypoint /bin/sh \
             "ghcr.io/olyforge3d/printfarmer-monolith@${monolith_digest}" \
             -c 'test -f /app/Farm.Web.Api.dll && test -f /app/wwwroot/index.html && dotnet --info >/dev/null'
+      - name: Sign externally-digested complete release manifest
+        if: inputs.operation == 'publish'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.consume.outputs.version }}
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+        run: |
+          set -euo pipefail
+          manifest_dir=.artifacts/release-authorization
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import {
+              validatePublicAuthorization, validateReleaseManifestBytes,
+            } from "./scripts/ci/release-policy.mjs";
+            const expected = JSON.parse(process.env.RELEASE_PUBLIC_IDENTITY);
+            validatePublicAuthorization(expected);
+            const envelope = JSON.parse(readFileSync(".artifacts/release-authorization/release-manifest.envelope.json", "utf8"));
+            const manifest = validateReleaseManifestBytes(
+              readFileSync(".artifacts/release-authorization/release-manifest.json", "utf8"), envelope);
+            if (manifest.identity.releaseId !== expected.releaseId ||
+                manifest.identity.canonicalVersion !== expected.canonicalVersion ||
+                manifest.identity.identitySha256 !== expected.identitySha256) {
+              throw new Error("Manifest identity differs from authorized output");
+            }
+          '
+          if [[ "${GITHUB_RUN_ATTEMPT:-1}" -gt 1 ]]; then
+            mapfile -t recovery_artifacts < <(
+              gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/artifacts?per_page=100" --jq "
+                [.artifacts[] | select(.expired == false and
+                  (.name == \"release-manifest-${GITHUB_RUN_ID}-1\"))] | .[].name"
+            ) || { echo "Signed manifest recovery artifact lookup failed"; exit 1; }
+            [[ "${#recovery_artifacts[@]}" -eq 1 ]] ||
+              { echo "Signed manifest recovery evidence is absent, ambiguous, or expired"; exit 1; }
+            recovery_dir="$RUNNER_TEMP/recovered-release-manifest"
+            mkdir -p "$recovery_dir"
+            gh run download "$GITHUB_RUN_ID" --name "${recovery_artifacts[0]}" --dir "$recovery_dir" ||
+              { echo "Signed manifest recovery artifact download failed"; exit 1; }
+            expected_manifest_assets="$(printf '%s\n' release-crypto-evidence.json release-manifest.envelope.bundle.json release-manifest.envelope.json release-manifest.json release-notes.md | sort)"
+            recovered_manifest_assets="$(find "$recovery_dir" -maxdepth 1 -type f -printf '%f\n' | sort)"
+            [[ "$recovered_manifest_assets" == "$expected_manifest_assets" ]] ||
+              { echo "Signed manifest recovery artifact is incomplete or contains unexpected files"; exit 1; }
+            for asset in release-crypto-evidence.json release-manifest.json release-manifest.envelope.json release-notes.md; do
+              cmp -s "$manifest_dir/$asset" "$recovery_dir/$asset" ||
+                { echo "Recovered signed release bytes differ from this authorized transaction: $asset"; exit 1; }
+            done
+            cp "$recovery_dir/release-manifest.envelope.bundle.json" "$manifest_dir/release-manifest.envelope.bundle.json"
+          else
+            cosign sign-blob --yes \
+              --bundle "$manifest_dir/release-manifest.envelope.bundle.json" \
+              "$manifest_dir/release-manifest.envelope.json"
+          fi
+          cosign verify-blob \
+            --bundle "$manifest_dir/release-manifest.envelope.bundle.json" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$manifest_dir/release-manifest.envelope.json"
+      - name: Persist signed manifest triplet before public upload
+        if: inputs.operation == 'publish'
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-manifest-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            .artifacts/release-authorization/release-manifest.json
+            .artifacts/release-authorization/release-manifest.envelope.json
+            .artifacts/release-authorization/release-manifest.envelope.bundle.json
+            .artifacts/release-authorization/release-crypto-evidence.json
+            .artifacts/release-authorization/release-notes.md
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
       - name: Publish and verify public corresponding-source assets
+        if: inputs.operation == 'publish'
         working-directory: source
         env:
           GH_TOKEN: ${{ steps.publisher.outputs.token }}
@@ -309,17 +599,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p release-assets
-          node scripts/compliance/create-source-bundle.mjs \
-            --revision '${{ fromJSON(inputs.transaction).sourceCommit }}' \
-            --version "$VERSION" \
-            --output release-assets
-          cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
-          cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json
-          cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
-          cp ../.artifacts/release-authorization/release-set.json release-assets/release-set.json
-          cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
-
-          expected_assets=(
+          expected_source_assets=(
             "PrintFarmer-${VERSION}-source.tar.gz"
             "PrintFarmer-${VERSION}-source.json"
             LICENSE
@@ -327,6 +607,7 @@ jobs:
             release-identity.json
             release-identity.bundle.json
             release-set.json
+            release-notes.md
             "printfarmer-api-${VERSION}.spdx.json"
             "printfarmer-frontend-${VERSION}.spdx.json"
             "printfarmer-slicer-host-${VERSION}.spdx.json"
@@ -340,9 +621,74 @@ jobs:
             digest-orcaslicer-worker.txt
             digest-monolith.txt
           )
-          for asset_name in "${expected_assets[@]}"; do
+          expected_manifest_assets=(
+            release-manifest.json
+            release-manifest.envelope.json
+            release-manifest.envelope.bundle.json
+          )
+          expected_source_inventory="$(printf '%s\n' "${expected_source_assets[@]}" | sort)"
+          expected_complete_inventory="$(
+            printf '%s\n' "${expected_source_assets[@]}" "${expected_manifest_assets[@]}" | sort
+          )"
+          [[ "$(printf '%s\n' "${expected_source_assets[@]}" "${expected_manifest_assets[@]}" | sort | uniq -d)" == "" ]] ||
+            { echo "Expected release asset inventory contains duplicate names"; exit 1; }
+          validate_local_source_inventory() {
+            local_inventory="$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)"
+            [[ -z "$local_inventory" || "$local_inventory" == "$expected_source_inventory" ]] ||
+              { echo "Local source asset inventory is incomplete or contains unexpected files"; exit 1; }
+          }
+          validate_preexisting_source_inventory() {
+            remote_inventory="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)"
+            [[ "$remote_inventory" == "$expected_source_inventory" ||
+               "$remote_inventory" == "$expected_complete_inventory" ]] ||
+              { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
+          }
+          verify_new_release_is_empty() {
+            remote_inventory="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)"
+            [[ -z "$remote_inventory" ]] ||
+              { echo "New draft release must be empty before source asset upload"; exit 1; }
+          }
+          validate_local_source_inventory
+          verify_complete_retry_assets() {
+            recovery_dir="$RUNNER_TEMP/preexisting-complete-release"
+            mkdir -p "$recovery_dir"
+            for asset_name in release-notes.md "${expected_manifest_assets[@]}"; do
+              gh release download "$VERSION" --pattern "$asset_name" --dir "$recovery_dir"
+            done
+            cmp -s release-assets/release-notes.md "$recovery_dir/release-notes.md" ||
+              { echo "Published release notes differ from the validated build"; exit 1; }
+            for asset_name in "${expected_manifest_assets[@]}"; do
+              cmp -s "../.artifacts/release-authorization/$asset_name" "$recovery_dir/$asset_name" ||
+                { echo "Published signed manifest asset differs: $asset_name"; exit 1; }
+            done
+            cosign verify-blob --bundle "$recovery_dir/release-manifest.envelope.bundle.json" \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              "$recovery_dir/release-manifest.envelope.json"
+            node --input-type=module -e '
+              import { readFileSync } from "node:fs";
+              import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
+              const manifest = validateReleaseManifestBytes(readFileSync(process.argv[1], "utf8"),
+                JSON.parse(readFileSync(process.argv[2], "utf8")));
+              if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) {
+                throw new Error("Release notes hash differs from signed manifest");
+              }
+            ' "$recovery_dir/release-manifest.json" "$recovery_dir/release-manifest.envelope.json"
+          }
+          node scripts/compliance/create-source-bundle.mjs \
+            --revision '${{ fromJSON(inputs.transaction).sourceCommit }}' \
+            --version "$VERSION" \
+            --output release-assets
+          cp LICENSE THIRD-PARTY-NOTICES.md release-assets/
+          cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json
+          cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json
+          cp ../release-assets/release-set.json release-assets/release-set.json
+          cp ../.artifacts/release-authorization/release-notes.md release-assets/release-notes.md
+          cp release-artifacts/*.spdx.json release-artifacts/digest-*.txt release-assets/
+          for asset_name in "${expected_source_assets[@]}"; do
             test -s "release-assets/$asset_name"
           done
+          [[ "$(sha256sum release-assets/release-notes.md | cut -d ' ' -f1)" == "$RELEASE_NOTES_SHA256" ]]
 
           cosign verify-blob \
             --bundle release-assets/release-identity.bundle.json \
@@ -352,15 +698,15 @@ jobs:
 
           if gh release view "$VERSION" >/dev/null 2>&1; then
             echo "Release $VERSION already exists; verifying immutable assets"
+            validate_preexisting_source_inventory
+            [[ "$remote_inventory" != "$expected_complete_inventory" ]] || verify_complete_retry_assets
           else
-            notes_file="$RUNNER_TEMP/source-first-release-notes.md"
-            printf '%s\n' \
-              "Source-first validated release transaction." \
-              "Corresponding source, notices, SPDX SBOMs, and image digests precede tag promotion." \
-              > "$notes_file"
-            create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file "$notes_file")
-            [[ "$VERSION" == *-* ]] && create_args+=(--prerelease)
+            create_args=(release create "$VERSION" --draft --verify-tag --title "$VERSION" --notes-file release-assets/release-notes.md)
+            if [[ "$VERSION" == *-* ]]; then
+              create_args+=(--prerelease)
+            fi
             gh "${create_args[@]}"
+            verify_new_release_is_empty
           fi
 
           existing_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
@@ -382,31 +728,202 @@ jobs:
           if [[ "${#upload_files[@]}" -gt 0 ]]; then
             gh release upload "$VERSION" "${upload_files[@]}"
           fi
+          remote_assets="$RUNNER_TEMP/release-source-assets"
+          mkdir -p "$remote_assets"
+          [[ "$(find release-assets -maxdepth 1 -type f -printf '%f\n' | sort)" == "$expected_source_inventory" ]] ||
+            { echo "Validated source asset inventory is incomplete or contains unexpected files"; exit 1; }
+          for asset_name in "${expected_source_assets[@]}"; do
+            gh release download "$VERSION" --pattern "$asset_name" --dir "$remote_assets"
+            cmp -s "release-assets/$asset_name" "$remote_assets/$asset_name" ||
+              { echo "Published release asset differs from the validated build: $asset_name"; exit 1; }
+          done
+          remote_inventory="$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)"
+          [[ "$remote_inventory" == "$expected_source_inventory" ||
+             "$remote_inventory" == "$expected_complete_inventory" ]] ||
+            { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
 
+      - name: Promote validated immutable image tags
+        if: inputs.operation == 'publish'
+        env:
+          RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
+        run: node scripts/ci/release-set.mjs tag
+      - name: Publish and verify signed manifest before mutable aliases
+        if: inputs.operation == 'publish'
+        working-directory: source
+        env:
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+          VERSION: ${{ steps.consume.outputs.version }}
+        run: |
+          set -euo pipefail
+          manifest_dir=../.artifacts/release-authorization
+          release_assets=release-assets
+          recovered="$RUNNER_TEMP/published-signed-manifest"
+          existing_recovered="$RUNNER_TEMP/existing-signed-manifest"
+          mkdir -p "$release_assets"
+          mkdir -p "$recovered"
+          mkdir -p "$existing_recovered"
+          existing_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
+          for asset in release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
+            cp "$manifest_dir/$asset" "$release_assets/$asset"
+            if grep -Fxq "$asset" <<< "$existing_assets"; then
+              gh release download "$VERSION" --pattern "$asset" --dir "$existing_recovered"
+              cmp -s "$release_assets/$asset" "$existing_recovered/$asset" ||
+                { echo "Published signed manifest asset differs: $asset"; exit 1; }
+            else
+              gh release upload "$VERSION" "$release_assets/$asset"
+            fi
+          done
+          gh release download "$VERSION" --pattern release-manifest.json \
+            --pattern release-manifest.envelope.json \
+            --pattern release-manifest.envelope.bundle.json --dir "$recovered"
+          for asset in release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
+            cmp -s "$release_assets/$asset" "$recovered/$asset" ||
+              { echo "Published signed manifest asset differs: $asset"; exit 1; }
+          done
+          cosign verify-blob --bundle "$recovered/release-manifest.envelope.bundle.json" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$recovered/release-manifest.envelope.json"
+          [[ "$(sha256sum release-assets/release-notes.md | cut -d ' ' -f1)" == "$RELEASE_NOTES_SHA256" ]]
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseManifestBytes } from "../scripts/ci/release-policy.mjs";
+            const manifest = validateReleaseManifestBytes(readFileSync(process.argv[1], "utf8"),
+              JSON.parse(readFileSync(process.argv[2], "utf8")));
+            if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) throw new Error("Release notes hash differs from signed manifest");
+          ' "$recovered/release-manifest.json" "$recovered/release-manifest.envelope.json"
           expected_prerelease=false
-          [[ "$VERSION" == *-* ]] && expected_prerelease=true
-          release_is_draft="$(gh release view "$VERSION" --json isDraft --jq '.isDraft')"
-          release_is_prerelease="$(gh release view "$VERSION" --json isPrerelease --jq '.isPrerelease')"
-          if [[ "$release_is_draft" == "true" || "$release_is_prerelease" != "$expected_prerelease" ]]; then
-            gh release edit "$VERSION" --draft=false --prerelease="$expected_prerelease"
+          if [[ "$VERSION" == *-* ]]; then
+            expected_prerelease=true
           fi
+          expected_final_inventory="$(printf '%s\n' \
+            release-notes.md release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json \
+            PrintFarmer-"${VERSION}"-source.tar.gz PrintFarmer-"${VERSION}"-source.json LICENSE THIRD-PARTY-NOTICES.md \
+            release-identity.json release-identity.bundle.json release-set.json \
+            printfarmer-api-"${VERSION}".spdx.json printfarmer-frontend-"${VERSION}".spdx.json \
+            printfarmer-slicer-host-"${VERSION}".spdx.json printfarmer-printer-discovery-"${VERSION}".spdx.json \
+            printfarmer-orcaslicer-worker-"${VERSION}".spdx.json printfarmer-monolith-"${VERSION}".spdx.json \
+            digest-api.txt digest-frontend.txt digest-slicer-host.txt digest-printer-discovery.txt \
+            digest-orcaslicer-worker.txt digest-monolith.txt | sort)"
+          [[ "$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)" == "$expected_final_inventory" ]] ||
+            { echo "Draft release asset inventory is incomplete or contains unexpected files"; exit 1; }
+          gh release edit "$VERSION" --notes-file release-assets/release-notes.md \
+            --draft=false --prerelease="$expected_prerelease"
+          gh release view "$VERSION" --json body > "$recovered/release-body.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            const canonicalNotes = readFileSync(process.argv[1], "utf8");
+            const releasedBody = JSON.parse(readFileSync(process.argv[2], "utf8")).body;
+            const apiTransportBody = releasedBody.replace(/\r\n/g, "\n");
+            if (apiTransportBody !== canonicalNotes) {
+              throw new Error("Published release body differs from canonical signed notes");
+            }
+          ' release-assets/release-notes.md "$recovered/release-body.json"
           release_state="$(
             gh release view "$VERSION" --json isDraft,isPrerelease \
               --jq '[.isDraft, .isPrerelease] | @tsv'
           )"
           [[ "$release_state" == "$(printf 'false\t%s' "$expected_prerelease")" ]]
-          published_assets="$(gh release view "$VERSION" --json assets --jq '.assets[].name')"
-          for asset_name in "${expected_assets[@]}"; do
-            grep -Fxq "$asset_name" <<< "$published_assets"
-            asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset_name}"
+          [[ "$(gh release view "$VERSION" --json assets --jq '.assets[].name' | sort)" == "$expected_final_inventory" ]] ||
+            { echo "Published release asset inventory is incomplete or contains unexpected files"; exit 1; }
+          for asset in release-notes.md release-manifest.json release-manifest.envelope.json release-manifest.envelope.bundle.json; do
+            asset_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/releases/download/${VERSION}/${asset}"
             curl --fail --silent --show-error --location --head \
               --retry 6 --retry-delay 5 --retry-all-errors "$asset_url" >/dev/null
           done
-      - name: Promote validated digests
+      - name: Reverify the activated public release before aliases
+        if: inputs.operation == 'publish'
+        env:
+          VERSION: ${{ steps.consume.outputs.version }}
+          RELEASE_NOTES_SHA256: ${{ env.RELEASE_NOTES_SHA256 }}
+        run: |
+          set -euo pipefail
+          public_root="$RUNNER_TEMP/activated-public-release"
+          public_docker_config="$(mktemp -d)"
+          export DOCKER_CONFIG="$public_docker_config"
+          trap 'rm -rf "$public_docker_config"' EXIT
+          mkdir -p "$public_root"
+          release_json="$public_root/release.json"
+          env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --silent --show-error --location \
+            --retry 6 --retry-delay 5 --retry-all-errors \
+            "https://api.github.com/repos/${GITHUB_REPOSITORY}/releases/tags/${VERSION}" > "$release_json"
+          [[ "$(jq -r .draft "$release_json")" == false ]] ||
+            { echo "Release remained draft after activation"; exit 1; }
+          mapfile -t public_assets < <(jq -r '.assets[] | [.name, .browser_download_url] | @tsv' "$release_json")
+          expected_inventory="$(find source/release-assets -maxdepth 1 -type f -printf '%f\n' | sort -u)"
+          [[ "$(printf '%s\n' "${public_assets[@]}" | cut -f1 | sort)" == "$expected_inventory" ]] ||
+            { echo "Activated release asset inventory is incomplete or unexpected"; exit 1; }
+          for asset in "${public_assets[@]}"; do
+            name="${asset%%$'\t'*}"
+            url="${asset#*$'\t'}"
+            env -u GH_TOKEN -u GITHUB_TOKEN curl --fail --silent --show-error --location \
+              --retry 6 --retry-delay 5 --retry-all-errors "$url" > "$public_root/$name"
+            local="source/release-assets/$name"
+            [[ -f "$local" ]] || local=".artifacts/release-authorization/$name"
+            cmp -s "$local" "$public_root/$name" ||
+              { echo "Activated release asset differs from signed local bytes: $name"; exit 1; }
+          done
+          cosign verify-blob --bundle "$public_root/release-manifest.envelope.bundle.json" \
+            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            "$public_root/release-manifest.envelope.json"
+          node --input-type=module -e '
+            import { readFileSync } from "node:fs";
+            import { validateReleaseManifestBytes } from "./scripts/ci/release-policy.mjs";
+            const manifest = validateReleaseManifestBytes(readFileSync(process.argv[1], "utf8"),
+              JSON.parse(readFileSync(process.argv[2], "utf8")));
+            if (manifest.lifecycle.releaseNotes.sha256 !== process.env.RELEASE_NOTES_SHA256) {
+              throw new Error("Activated release notes hash differs from manifest");
+            }
+          ' "$public_root/release-manifest.json" "$public_root/release-manifest.envelope.json"
+          for image in api frontend slicer-host printer-discovery orcaslicer-worker monolith; do
+            digest="$(tr -d '[:space:]' < "artifacts/digest-${image}/digest-${image}.txt")"
+            references=( "index $digest" )
+            while read -r platform platform_digest; do
+              references+=( "${platform//\//-} $platform_digest" )
+            done < <(env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" \
+              docker buildx imagetools inspect "ghcr.io/olyforge3d/printfarmer-${image}@${digest}" --raw |
+              jq -r '.manifests[] | select(.annotations["vnd.docker.reference.type"] != "attestation-manifest") |
+                select(.platform.os == "linux") | "\(.platform.os)/\(.platform.architecture) \(.digest)"')
+            for entry in "${references[@]}"; do
+              scope="${entry%% *}"
+              subject="${entry#* }"
+              reference="ghcr.io/olyforge3d/printfarmer-${image}@${subject}"
+              if [[ "$scope" == "index" ]]; then
+                evidence=".artifacts/release-authorization/crypto-evidence/$image/index"
+              else
+                evidence=".artifacts/release-authorization/crypto-evidence/$image/platforms/$scope"
+              fi
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign verify "$reference" --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign verify-attestation "$reference" --type spdxjson --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+                --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
+              signature_download="$(mktemp "$RUNNER_TEMP/activated-signature.XXXXXX")"
+              attestation_download="$(mktemp "$RUNNER_TEMP/activated-attestation.XXXXXX")"
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download signature "$reference" > "$signature_download"
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download attestation "$reference" > "$attestation_download"
+              [[ -s "$signature_download" && -s "$attestation_download" ]] ||
+                { echo "Activated Cosign evidence is empty: $image/$scope"; exit 1; }
+              if grep -q $'\r' "$signature_download"; then
+                echo "Activated Cosign signature evidence must use LF line endings: $image/$scope"
+                exit 1
+              fi
+              [[ "$(tail -c 1 "$signature_download" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
+                printf '\n' >> "$signature_download"
+              cmp -s "$evidence/signature.bundle.json" "$signature_download" ||
+                { echo "Activated signature bundle differs: $image/$scope"; exit 1; }
+              cmp -s "$evidence/attestation.bundle.json" "$attestation_download" ||
+                { echo "Activated attestation bundle differs: $image/$scope"; exit 1; }
+              rm -f "$signature_download" "$attestation_download"
+            done
+          done
+      - name: Publish channel-isolated verified image aliases
+        if: inputs.operation == 'publish'
         env:
           RELEASE_PUBLIC_IDENTITY: ${{ steps.authorize.outputs.public_identity }}
-        run: node scripts/ci/release-set.mjs tag
+        run: node scripts/ci/release-set.mjs alias
       - name: Advance the complete channel pointer last
+        if: inputs.operation == 'publish'
         id: advance
         env:
           GH_TOKEN: ${{ github.token }}
@@ -422,12 +939,16 @@ jobs:
           RELEASE_EXPECTED_POINTER: ${{ steps.preflight.outputs.expected_pointer }}
         run: node scripts/ci/release-control.mjs advance
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        if: inputs.operation == 'publish'
         with:
           name: release-identity-and-complete-set-${{ github.run_id }}
           path: |
             .artifacts/release-authorization/release-identity.json
             .artifacts/release-authorization/release-identity.bundle.json
             .artifacts/release-authorization/release-set.json
+            .artifacts/release-authorization/release-manifest.json
+            .artifacts/release-authorization/release-manifest.envelope.json
+            .artifacts/release-authorization/release-manifest.envelope.bundle.json
           include-hidden-files: true
           if-no-files-found: error
           retention-days: 30

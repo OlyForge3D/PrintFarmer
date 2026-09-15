@@ -82,6 +82,100 @@ Stable is the installation default. Insider requires separate administrator
 opt-in and a reduced-stability warning; running a release workflow does not
 enroll or update any host. Versions and channels do not prove compatibility.
 
+## Signed release-set consumer contract
+
+The signed `release-manifest.json`, its signed envelope and the exact canonical
+`release-notes.md` bytes define one complete immutable release set. Both
+**Manual Update Now** and administrator-enabled **Auto-update** must download,
+verify, and consume that same set before installation; neither may select a
+different channel, tag, image subset, notes file, or unsigned metadata.
+
+The release manifest's closed `consumption` object is metadata for consumers,
+not an authorization grant. It records that Manual Update Now needs a
+one-time host approval and Auto-update needs a bounded administrator standing
+permission governed by #2665/#2666. The one protected publisher approval is
+strictly publication-only: it cannot enable host outbound update checks,
+select a host channel, approve a host update plan, or enroll any installation
+in Auto-update.
+
+The publisher loads one canonical `release-metadata/<base-version>.json` from
+the qualified source. Its signed digest binds explicit source-release/channel
+paths, minimum updater, frontend/mobile/backend/worker requirements, schema
+read/write ranges and hashes, PostgreSQL/SQL Server AppDbContext and
+SlicerDbContext migration heads, ordered backup/pull/verify/migrate/restart
+inputs, and the rollback class. Missing, placeholder, malformed, or
+non-canonical metadata blocks publication. This is a **producer contract**:
+#2666 must enforce it when constructing the one immutable host update plan for
+Manual Update Now and administrator-opt-in Auto-update. #2660 neither checks,
+enrolls, nor updates a host.
+
+The durable channel pointer is the authenticated discovery record for that
+immutable set. It binds release ID, canonical version, channel, source commit,
+allocation key, identity digest, manifest digest, envelope digest, and their
+combined binding; it is written only after the public signed manifest has been
+validated. A pointer cannot be reused for different signed bytes. Insider
+sequences follow the durable ledger counter, while stable publication has its
+own positive durable channel sequence; lower, equal, cross-channel, or
+conflicting pointer sequences fail closed. Stable promotion records the exact
+persisted insider pointer's release, source, and manifest/envelope digests,
+never an unsigned complete-set hash.
+
+The versioned trust policy is also signed by digest into the manifest. It fixes
+the trust root, permitted signer identities and validity windows, certificate
+freshness, revocation epoch/lists, and rotation overlap. #2666 must apply those
+inputs at an explicit trusted verification time; reject expired, revoked,
+unknown, replayed, downgraded, or rotation-invalid release sets; and preserve
+durable per-channel high-water state. Those are consumer obligations, not a
+publisher capability or authority to contact, enroll, or update hosts.
+
+Before manifest signing, the publisher captures and verifies Cosign signature
+and SPDX attestation results plus their downloaded signature/DSSE bundle
+materials for every index and platform digest. The signed manifest binds the
+exact raw verification, bundle, and predicate byte digests; formatted predicate
+JSON is compared semantically, while its original bytes remain tamper-bound.
+Bundle evidence is persisted as the raw Cosign NDJSON stream, never as a
+reconstructed JSON array. The capture normalizes only a missing final newline
+on the signature stream to one LF before concatenating that stream with the
+attestation stream; all entry bytes and other separators remain unchanged.
+Staging partitions that combined stream at the native signature/attestation
+boundary and requires each persisted bundle byte-for-byte equal to its raw
+partition before hashing or storage.
+Retries and the final pre-alias verification must reproduce those exact
+subject/platform-bound artifacts or publication fails closed.
+
+Canonical authenticated release notes are an asset in that same set. The
+single-dispatch pipeline generates them from the bounded previous-release-tag
+to selected-source range, associated merged PRs, the matching `CHANGELOG.md`
+entry, and `release-metadata/<base-version>.json`. They are hashed in the
+signed manifest and presented before either journey installs.
+The `CHANGELOG.md` entry heading must be exactly `## X.Y.Z` or
+`## [X.Y.Z]`, with an optional ` - YYYY-MM-DD` suffix; exactly one canonical
+header may match the release version.
+Every release notes file has Features, Fixes, Breaking changes, Compatibility,
+Migration, Downtime, Backup, and Recovery sections. A release with no
+release-specific change must say `None.` or `N/A` explicitly. Compatibility,
+migration, downtime, backup, and recovery are mandatory non-empty,
+version-controlled metadata: missing data fails publication rather than
+defaulting to a generic safe claim. No routine user notes, signing input, or
+extra approval is accepted.
+
+### Pinned source artifact line endings
+
+The three metadata-hashed source artifacts are intentionally pinned to LF by
+`.gitattributes`; their canonical Git blobs and manifest digests must not be
+rewritten. If a Windows checkout reports CRLF working bytes, first ensure there
+are no local edits to those exact paths, then refresh only them:
+
+```powershell
+git checkout -- scripts/docker/configs/security-config.json `
+  scripts/docker/database-templates/postgres.yml `
+  scripts/docker/compose-templates/docker-compose.common.yml
+```
+
+Confirm each reports `w/lf` with `git ls-files --eol -- <path>`. Do not use
+repository-wide `git add --renormalize .`; it creates unrelated churn and is
+not a release-metadata recovery step.
+
 TestFlight remains independent under `ios/vX.Y-{alpha,beta,rc}.N`. Historical
 `v1.0-beta.*` identities and their `ios/*` aliases retain their original objects.
 No migration rewrites existing source tags, registry tags, or historical evidence.
@@ -95,6 +189,23 @@ and updates the ref with `force: false`. Competing sibling commits cannot both
 fast-forward: the loser rereads and retries. Workflow concurrency is an additional
 serialization measure, not the allocator.
 
+### Ledger schema recovery and migration
+
+`state.json` is a closed schema. A ledger snapshot that predates
+`channelSequences` or the signed manifest/envelope pointer fields is **not**
+silently defaulted, reset, or accepted as current state. Recovery requires an
+owner-reviewed release-control transaction on the protected ledger branch which preserves
+the pinned anchor, every immutable reservation/identity/tag reference, and the
+historical stable floor, then initializes channel sequences from those retained
+records. `release-control` recognizes only the pre-sequence closed schema at
+ledger read time, validates and normalizes it in memory, and persists that
+single-parent transition through the normal compare-and-set on the next protected
+transaction; it has no standalone reset command. The migration must be validated
+as a single-parent ledger transition
+before any new reservation, pointer, alias, or public-release write. If that
+proof is unavailable, publication remains blocked and the owner must recover
+the ledger from its protected history; creating a fresh ledger is not recovery.
+
 One global decimal counter covers beta, insider and RC, across bases.
 Workflow migration requires an owner-reviewed code/policy change; arbitrary
 replacement workflow identities are rejected. Allocation keys include repository,
@@ -106,6 +217,32 @@ or mismatched recovery artifacts fail closed. Failed reservations remain consume
 Stable has no N: a new run cannot rebuild an already reserved stable identity.
 Resume byte-identical transfer in the same run, or qualify a reviewed new base;
 never replace a stable identity with new build bytes.
+An active insider reservation that cannot be completed may be terminally abandoned
+only by selecting `abandon` in the same Consolidated Release dispatch and passing
+its immutable allocation key as `reservation_target`; that dispatch calls the
+existing protected Docker publisher and never invokes publication. The publisher
+recovers the original signed authorization by its original run identity, then uses
+the publisher App token to read the current protected environment approval. The
+immutable abandonment authorization binds the active allocation key, source
+commit, canonical version, channel, original authorization hash, exact current
+workflow run/attempt/job/environment/target, normalized approval time, and a
+current owner-allowlisted approver. The allocation key is the explicit approval
+target and is echoed by the dispatch input; it selects the insider protected
+environment and concurrency lane, never a mutable tag or source ref. Abandonment
+is restricted to attempt 1 because GitHub approval history is run-scoped and
+cannot prove an approval belongs to a later rerun attempt. GitHub's approval-history response has no
+approval timestamp, so the normalized time is the authenticated protected
+publisher job start time for the exact run and attempt, which occurs only after
+environment approval. Missing, forged, stale, mismatched, or
+wrong-environment approval evidence fails closed. The ledger projects only these
+public-safe bindings; raw approval, reviewer, and protection data are never
+projected. Abandonment consumes the original identity and sequence permanently,
+does not publish a pointer or aliases, cannot be reversed, and permits a later
+allocation only as the next identity. A missing, stale, forged, mismatched, or
+already activated authorization fails closed.
+Abandonment verifies the original signed ledger authorization and the current
+protected environment policy, but intentionally does not require the original
+source tag, `VERSION`, branch head, or source qualification to remain available.
 Big integers are compared numerically, not lexically or through floating point.
 No timestamp, run-number concatenation or local tag scan allocates identities.
 
@@ -216,8 +353,11 @@ retaining full-record hashes and publicly reproducible set hashes. Unknown
 authorization fields are rejected, not silently approved. The normalized complete set and original authorization bundle remain
 available to downstream consumers without relying on artifact confidentiality.
 Ledger schema 1 explicitly permits only `schema`, `anchor`, decimal `counter`,
-optional `lastHistoricalStable`, and the `reservations`, `identities`, `pointers`,
-`stages`, and `qualifications` maps. Every transaction validates the complete
+optional `lastHistoricalStable`, `channelSequences`, and the `reservations`,
+`identities`, `pointers`, `stages`, and `qualifications` maps. An
+owner-reviewed schema migration and recovery procedure is required before
+changing an existing durable ledger shape; recovery cannot recreate or weaken
+retained allocation, pointer, or sequence evidence. Every transaction validates the complete
 ledger before mutation and again before persistence. Source tagging additionally
 projects the complete ledger and binds the original signed record before
 **any write**, including `POST git/tags`, then rechecks before creating the public
@@ -279,7 +419,10 @@ Private protection must predate or equal authorization.
 Progress fields are constrained variants: `tagObject` is a 40-hex SHA;
 `tagPublished`, when present, must be `true` and requires `tagObject`.
 `set` and `setHash` must occur together. Pointers bind to an existing matching
-complete reservation; stage high-water entries bind to real insider identities.
+complete reservation through the signed release identity, canonical version,
+channel, source commit, allocation key, identity digest, manifest digest,
+envelope digest, and combined manifest-envelope digest; stage high-water
+entries bind to real insider identities.
 Adjacent ledger commits still forbid loss or alteration of immutable
 reservations, tags, sets and pointer identities. Qualifications are append-only:
 every prior source-SHA entry must remain byte-for-byte identical under
@@ -302,16 +445,19 @@ Unknown fields within sets, images, platforms and label maps are omitted, not
 copied. `setHash` is SHA-256 of UTF-8 `JSON.stringify(writePublicSet(record, set))`,
 using the projector's fixed field/component/platform order. It covers the exact
 public set, not an unavailable private payload; public assets and persisted sets
-can reproduce it. Every ledger read/write recomputes it and verifies pointer
-binding. `identitySha256` continues to cover the original full authorization.
+can reproduce it. Every ledger read/write recomputes it, but the consumer
+discovery pointer binds the signed manifest and envelope rather than this
+unsigned complete-set hash. `identitySha256` continues to cover the original
+full authorization.
 CAS and immutable-tag semantics are unchanged.
 
 Owner-entered qualifications are strict public schema-1 records keyed by the
 exact source commit. They contain `schema: 1`, matching `sourceCommit`, boolean
 `reviewed`, `tests`, `compatibility`, `migrations`, and `recovery` claims (all
-`true`), and `mode`. `mode: promotion` additionally requires `promotionOrigin`
-containing only `allocationKey`, `releaseId`, `sourceCommit`, and public `setHash`
-of the qualified immutable insider set, plus `treeEvidence`:
+`true`), and `mode`. `mode: promotion` additionally requires `promotionOrigin` containing the
+persisted insider pointer's `allocationKey`, `releaseId`, `sourceCommit`,
+`manifestSha256`, and `envelopeSha256` of the qualified immutable insider set,
+plus `treeEvidence`:
 
 - `schema: 1`, `originTree`, `sourceTree`: exact Git tree IDs.
 - `metadataChanges`: either empty or one `{path: "VERSION", before, after}`
@@ -400,9 +546,62 @@ development metadata.
 
 The complete platform set, labels, source tag, signatures and SPDX attestations
 are checked before immutable version-tag publication. Corresponding source,
-notices, SBOMs, identity and digest records are publicly verified first; uploads
-never clobber differing bytes. Existing version tags must resolve to the exact
-candidate digest or publication fails before any version-tag write.
+notices, SBOMs, identity, manifest, and digest records are published and
+externally verified first; uploads never clobber differing bytes. Existing
+version tags must resolve to the exact candidate digest or publication fails
+before any version-tag write.
+
+Each release also publishes a version-addressed `release-manifest.json` and a
+separately signed `release-manifest.envelope.json` with its Cosign bundle. The
+versioned manifest binds the authorization projection, canonical lifecycle
+(publication, expiry, cadence, release-notes and signing identity), source-tag
+and workflow/build provenance, every immutable image/index and platform digest,
+signature and SPDX SBOM subject and verified trust-policy digest, identity labels, complete
+service/platform compatibility, storage/configuration/template/updater steps,
+provider migration heads, downtime/backup requirements, rollback strategy, and
+the SHA-256 of the exact canonical `release-notes.md` asset generated before
+manifest signing. The release is created from that same asset and its uploaded
+bytes are checked against the signed hash before publication proceeds.
+The envelope carries the manifest SHA-256 outside the manifest itself, together
+with release ID, version, channel, source commit, and authorization hash. An
+offline consumer must verify the envelope bundle against the pinned publisher
+workflow identity, recompute the SHA-256 over the exact canonical serialized
+manifest bytes, then validate that every
+manifest identity, lifecycle provenance, evidence subject and platform label
+agrees. Compatibility and migration claims are eligible only when this full
+closed record validates; unknown, partial, mixed-subject, or invalid evidence
+is rejected before signing and cannot become an update candidate.
+
+The protected job signs the manifest envelope only after complete-set inspection
+and pushed image signature/SPDX verification. It verifies published release
+asset bytes on retries, then publishes immutable version tags and advances the
+durable channel pointer last. The ledger pointer is the sole channel pointer;
+stable/insider discovery aliases remain isolated and cannot substitute for the
+signed, immutable manifest. Before promotion, it downloads the public manifest
+and envelope again, verifies the signed envelope, byte-compares all three
+manifest assets (manifest, envelope, bundle), and recomputes the manifest
+digest from the downloaded bytes. If a retry finds an existing release, it
+must recover and byte-compare those original assets and reuse the existing
+bundle; it never re-signs or replaces public release artifacts. The manifest
+schema rejects unknown complete-set, image, platform, and identity-label
+fields rather than silently projecting them away.
+
+Before source construction or upload, a pre-existing draft must have exactly
+the source asset set or that set plus the signed manifest triplet. A new draft
+is re-read and must be empty before its first upload. Empty, partial, duplicate,
+mixed, or unexpected inventories fail before any release mutation. A complete
+retry verifies the downloaded notes, manifest, envelope, and bundle against the
+authorized bytes and Cosign trust identity before immutable tags can move. The
+only authoritative manifest/envelope bytes are the signed
+`release-authorization` artifacts; source-asset preparation does not create a
+second unsigned copy.
+
+The first attempt persists the complete signed triplet as a run-bound Actions
+artifact before any public upload. A retry must recover the earliest unexpired
+triplet from that same run, require its exact sorted inventory and byte-for-byte
+match with the newly authorized manifest/envelope, verify its bundle, and reuse
+it without re-signing. Missing, partial, expired, unexpected, or mismatched
+recovery artifacts fail closed; public release assets are not a recovery source.
 
 Before public assets, tags or version tags are written, publication preflight
 revalidates ancestry, trust protections, version order, complete-set bytes and
@@ -414,13 +613,27 @@ bytes are rejected. A failed build/qualification/set check leaves the previous
 pointer intact.
 The ledger's candidate pointer is **not** authenticated update discovery.
 
-**#2660 owns signed managed eligibility and publication aliases.** These outputs
-say `managedEligible: false`; a source-only public release is not an install
-candidate. This workflow does not move `stable`, `latest`, `insider`, or major/
-minor aliases. Historical aliases remain untouched until #2660 implements
-complete-manifest publication and alias isolation. Installer application defaults
-remain legacy inputs, not a competing authority for managed releases; generating
-digest-pinned installer references belongs to that signed-manifest consumer.
+After complete public-asset verification and immutable version-tag promotion,
+the publisher derives aliases only from the validated signed record. Stable
+releases may advance exact, major, minor, and `latest` aliases only to a
+strictly newer stable SemVer value; an older hotfix line or an insider value
+cannot replace them. Insider, beta, and RC releases publish only their exact
+immutable tag; they never move stable aliases. Every alias is read again after
+publication, so a concurrent conflicting write fails before the durable
+channel pointer advances.
+
+Before aliases or the durable channel pointer can move, the publisher performs
+a fresh unauthenticated version-addressed GitHub release GET after undraft. It
+requires the exact complete inventory, downloads and byte-compares every
+public asset, validates the signed manifest/envelope/notes binding, and
+rechecks every manifest-pinned index and platform Cosign signature,
+attestation, normalized DSSE bundle, and SPDX predicate against the registry.
+Evidence staging rejects a revoked release or signer, an issuer/identity
+mismatch, absent signed transparency material, transparency time outside the
+certificate or signer rotation window, a pre-revocation epoch entry, or a
+certificate older than the control policy maximum. These are publication
+preconditions only; #2666 remains responsible for consumer-side trusted-time,
+replay, rollback, and update execution enforcement.
 
 ## Stable qualification and candidate lifecycle
 
