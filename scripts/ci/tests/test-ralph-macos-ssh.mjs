@@ -83,6 +83,16 @@ const liveResponse = (entry) => ({
   host: 'trusted-mac.local', sessionId: 'session-1',
 });
 
+const abandonmentResponse = (entry) => ({
+  ...liveResponse(entry), type: 'abandoned', state: 'abandoned', workerVerified: true,
+  requestDigest: entry.requestDigest, dispatchFenced: true, processCessationVerified: true,
+  failureCode: 'INCOMPLETE_DELIVERY', exitCode: 0, headSha: 'b'.repeat(40),
+  workingTreeClean: false, allCommitsPushed: false, repositoryIdentityVerified: true, baseAncestor: true,
+  processCompletedAt: new Date(Date.now() - 2000).toISOString(),
+  processCheckedAt: new Date(Date.now() - 1000).toISOString(),
+  validationEvidence: 'Stopped with incomplete Git evidence; artifacts retained, not delivered.',
+});
+
 test('new reservations persist only immutable wire job data and reconcile uncertainty without eligibility', async () => {
   await reset();
   const original = { ...job(), ignoredCredential: 'not-persisted' };
@@ -197,20 +207,34 @@ test('old worker rejection and timeout retain uncertain entries without falling 
   }
 });
 
+test('ordinary status rejects even fully attested unsolicited abandonment without changing modern or legacy ledger records', async () => {
+  for (const legacyIdentity of [false, true]) {
+    for (const accepted of [false, true]) {
+      await reset();
+      let entry;
+      if (legacyIdentity) {
+        entry = await legacyEntry({ accepted });
+      } else {
+        entry = await reserveJob({ job: job(), eligibility }, options());
+        await recordDeliveryIntent(entry.jobId, options());
+        if (accepted) await acknowledgeJob(entry.jobId, liveResponse(entry), options());
+        else await markUncertain(entry.jobId, options());
+      }
+      const before = await readLedger();
+      await assert.rejects(() => reconcileMacJob({ jobId: entry.jobId, legacyIdentity }, {
+        ...options(), spawn: workerReply(abandonmentResponse(entry)),
+      }), (error) => error.code === 'INVALID_TERMINAL_EVIDENCE');
+      assert.deepEqual(await readLedger(), before);
+    }
+  }
+});
+
 test('remote incomplete abandonment requires trusted fenced cessation proof and is never recorded as delivered', async () => {
   await reset();
   const entry = await reserveJob({ job: job(), eligibility }, options());
   await recordDeliveryIntent(entry.jobId, options());
   await acknowledgeJob(entry.jobId, liveResponse(entry), options());
-  const response = {
-    ...liveResponse(entry), type: 'abandoned', state: 'abandoned', workerVerified: true,
-    requestDigest: entry.requestDigest, dispatchFenced: true, processCessationVerified: true,
-    failureCode: 'INCOMPLETE_DELIVERY', exitCode: 0, headSha: 'b'.repeat(40),
-    workingTreeClean: false, allCommitsPushed: false, repositoryIdentityVerified: true, baseAncestor: true,
-    processCompletedAt: new Date(Date.now() - 2000).toISOString(),
-    processCheckedAt: new Date(Date.now() - 1000).toISOString(),
-    validationEvidence: 'Stopped with incomplete Git evidence; artifacts retained, not delivered.',
-  };
+  const response = abandonmentResponse(entry);
   for (const changed of [
     { ...response, processCessationVerified: false }, { ...response, dispatchFenced: false },
     { ...response, fence: 999 }, { ...response, requestDigest: 'c'.repeat(64) },

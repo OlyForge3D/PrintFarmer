@@ -144,7 +144,7 @@ function requestDigest(job) {
   })).digest('hex');
 }
 
-export function parseRemoteWorkerResponse(output, job) {
+export function parseRemoteWorkerResponse(output, job, { allowAbandoned = false } = {}) {
   if (typeof output !== 'string' || output.length > 64 * 1024) {
     throw new RalphMacSshError('Remote worker response is missing or exceeds the protocol limit.', 'MALFORMED_RESPONSE');
   }
@@ -188,6 +188,9 @@ export function parseRemoteWorkerResponse(output, job) {
     return response;
   }
   if (response.type === 'abandoned') {
+    if (allowAbandoned !== true) {
+      throw new RalphMacSshError('Worker returned an unsolicited abandonment.', 'INVALID_TERMINAL_EVIDENCE');
+    }
     const completedAt = Date.parse(response.processCompletedAt);
     const checkedAt = Date.parse(response.processCheckedAt);
     const gitFields = ['workingTreeClean', 'allCommitsPushed', 'repositoryIdentityVerified', 'baseAncestor'];
@@ -329,7 +332,7 @@ async function acquireLock(file, { retries = 40, retryMs = 10, ...options } = {}
   throw new RalphMacSshError('Another Windows Ralph controller owns the admission ledger.', 'LOCK_TIMEOUT');
 }
 
-async function mutateLedger(mutator, options = {}) {
+async function mutateLedger(mutator, options = {}, skipUnchanged = false) {
   const file = ledgerFile(options);
   const backup = `${file}.bak`;
   await mkdir(path.dirname(file), { recursive: true });
@@ -358,7 +361,9 @@ async function mutateLedger(mutator, options = {}) {
         (!Number.isSafeInteger(options.expectedGeneration) || options.expectedGeneration !== ledger.generation)) {
       throw new RalphMacSshError('Ledger changed since the evidence snapshot; refresh before accounting.', 'STALE_LEDGER');
     }
+    const before = skipUnchanged ? JSON.stringify(ledger) : undefined;
     const result = await mutator(ledger);
+    if (skipUnchanged && !recoveredFromBackup && JSON.stringify(ledger) === before) return result;
     ledger.generation += 1;
     const temporary = await open(temp, 'wx');
     try {
@@ -848,7 +853,7 @@ export async function dispatchMacJob({ job, eligibility, controllerPid }, option
       createRemoteRequest(request, reconciling ? 'reconcile' : 'dispatch'),
       options,
     );
-    const response = parseRemoteWorkerResponse(output, request);
+      const response = parseRemoteWorkerResponse(output, request);
     return recordRemoteWorkerResponse(response, options);
   } catch (error) {
     await markUncertain(request.jobId, options);
@@ -888,7 +893,7 @@ export async function reconcileMacJob({ job, jobId = job?.jobId, legacyIdentity 
       throw new RalphMacSshError('Legacy payload is missing. Supply the exact original job or use legacyIdentity with a compatible trusted worker; retain the slot otherwise.', 'LEGACY_PAYLOAD_REQUIRED');
     }
     return entry;
-  }, options);
+  }, options, true);
   if (!activeJobStates.has(reservation.state)) return reservation;
   const request = reservation.job ?? {
     jobId: reservation.jobId, fence: reservation.fence, repository: reservation.repository,
@@ -907,7 +912,7 @@ export async function reconcileMacJob({ job, jobId = job?.jobId, legacyIdentity 
       `${JSON.stringify({ version: 1, type: abandonIncomplete ? 'abandon-incomplete-ledger' : 'reconcile-ledger', job: request })}\n`,
     options,
   );
-  const response = parseRemoteWorkerResponse(output, request);
+  const response = parseRemoteWorkerResponse(output, request, { allowAbandoned: abandonIncomplete });
   if (!reservation.job && response.requestDigest !== reservation.requestDigest) {
     throw new RalphMacSshError('Worker did not attest the ledger digest; legacy recovery requires a compatible worker.', 'LEGACY_WORKER_REQUIRED');
   }

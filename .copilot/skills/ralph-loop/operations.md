@@ -206,6 +206,10 @@ implementation merely to manufacture that evidence or free a slot.
 When explicitly authorized to abandon incomplete work, use `abandon-incomplete-remote` with the
 existing `jobId` (or exact original `job`); `legacyIdentity:true` is available for a missing payload
 only on a compatible worker. This is a separate opt-in operation, never an automatic status fallback.
+The controller rejects unsolicited abandonment on ordinary status or dispatch. If the worker
+persisted abandonment but its reply was lost, retry the explicitly authorized abandonment
+operation; normal status cannot import that outcome. A terminal result already recorded in
+Windows remains readable without contacting the worker.
 The worker must validate the original job/fence/digests and recorded successful process termination,
 then inspect Git evidence and freshly prove the recorded supervisor/child PIDs and all job-fence,
 launch-token and supervisor-token processes are absent, under the existing job lock. Alive, unknown,
