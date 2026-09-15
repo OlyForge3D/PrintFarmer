@@ -159,11 +159,16 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         Assert.NotNull(manual.Lease);
         var reauthorizing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        authorization.SetupSequence(service => service.CanActorAccessPrinterAsync(
+        int checks = 0;
+        authorization.Setup(service => service.CanActorAccessPrinterAsync(
                 userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true)
             .Returns(async () =>
             {
+                if (++checks == 1)
+                {
+                    return true;
+                }
+
                 reauthorizing.TrySetResult();
                 await resume.Task.WaitAsync(TimeSpan.FromSeconds(30));
                 return true;
@@ -215,7 +220,7 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         await using AppDbContext seed = CreateContext();
         await SeedBarrierAsync(seed, "home", DateTime.UtcNow);
         Guid otherId = Guid.NewGuid();
-        seed.Printers.Add(new Printer { Id = otherId, Name = "Other printer" });
+        seed.Printers.Add(new Printer { Id = otherId, Name = "Other printer", ServerUrl = "http://other-printer.invalid" });
         await seed.SaveChangesAsync();
         string before = await ReadDispatchSnapshotAsync();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -257,10 +262,10 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         await using AppDbContext db = CreateContext();
         await SeedBarrierAsync(db, "home", DateTime.UtcNow);
         string before = await ReadDispatchSnapshotAsync();
-        authorization.SetupSequence(service => service.CanActorAccessPrinterAsync(
+        int checks = 0;
+        authorization.Setup(service => service.CanActorAccessPrinterAsync(
                 userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(true)
-            .ReturnsAsync(false);
+            .ReturnsAsync(() => ++checks == 1);
 
         ActionResult<CommandResult> response = await CreateController(db).EmergencyStopAsync(printerId, default);
 

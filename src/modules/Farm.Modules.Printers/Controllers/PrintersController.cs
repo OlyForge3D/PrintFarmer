@@ -2670,6 +2670,7 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        CancellationToken requestCancellation = ct;
         using var timeout = new CancellationTokenSource(
             operation == "emergencystop" ? TimeSpan.FromSeconds(20) :
                 PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
@@ -2689,7 +2690,8 @@ public class PrintersController(
             begin.Lease,
             safetyOperation,
             move,
-            ct);
+            ct,
+            requestCancellation);
         if (validationFailure is not null)
         {
             return validationFailure;
@@ -2730,7 +2732,7 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_cancelled_after_send",
                 CancellationToken.None);
-            if (timeout.IsCancellationRequested)
+            if (timeout.IsCancellationRequested && !requestCancellation.IsCancellationRequested)
             {
                 return StatusCode(503, new CommandResult(false, "The command timed out; its physical outcome is unknown. Check the printer before requesting another command."));
             }
@@ -2766,6 +2768,7 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        CancellationToken requestCancellation = ct;
         using var timeout = new CancellationTokenSource(
             PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
             timeProvider ?? TimeProvider.System);
@@ -2784,7 +2787,8 @@ public class PrintersController(
             begin.Lease,
             safetyOperation,
             move,
-            ct);
+            ct,
+            requestCancellation);
         if (validationFailure is not null)
         {
             return validationFailure;
@@ -2829,7 +2833,7 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_cancelled_after_send",
                 CancellationToken.None);
-            if (timeout.IsCancellationRequested)
+            if (timeout.IsCancellationRequested && !requestCancellation.IsCancellationRequested)
             {
                 return StatusCode(503, new CommandResult(false, "The command timed out; its motion outcome is unknown. Check the printer before requesting another move."));
             }
@@ -3012,7 +3016,8 @@ public class PrintersController(
         PrinterActuationLease lease,
         PrinterSafetyOperation? safetyOperation,
         PrinterSafetyMoveRequest? move,
-        CancellationToken ct)
+        CancellationToken ct,
+        CancellationToken? requestCancellation = null)
     {
         bool dispatchAuthorized = false;
         bool leaseSettled = false;
@@ -3109,7 +3114,7 @@ public class PrintersController(
             return null;
         }
         catch (Exception exception) when (
-            PrinterDirectControl.IsManualMotion(lease.Operation) && !ct.IsCancellationRequested)
+            PrinterDirectControl.IsManualMotion(lease.Operation) && !(requestCancellation ?? ct).IsCancellationRequested)
         {
             _logger.LogWarning(exception, "Unable to validate manual motion for printer {PrinterId}; no command sent", lease.PrinterId);
             return SafetyProblem(PrinterSafetyValidationResult.Reject(
