@@ -7,7 +7,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
-import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
+import { sourceReviewFixture } from './fixtures/release-source-review.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import {
   abandon, abandonmentAuthorization, admit, advance as advancePolicy, allocationKey, compareVersions, components, hash, identityLabels, signedReleasePointer,
@@ -31,7 +31,7 @@ import {
 } from '../release-authorization.mjs';
 import {
   qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
-  validateQualificationReceipt,
+  qualifyTransaction, selectTransaction, validateQualificationReceipt,
 } from '../release-transaction.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
 import { changelogEntry, releaseNotes, validateReleaseNotesMetadata } from '../release-notes.mjs';
@@ -2649,7 +2649,7 @@ test('required review context is the exact status producer, never the successful
   }
 });
 
-test('exact-SHA status and check failures deny admission and authorization before every write in both modes', async () => {
+test('legacy exact-SHA required-check adapter rejects malformed or failing statuses and checks', async () => {
   const previous = globalThis.fetch;
   const mutations = [
     { mutateStatuses: status => { status.sha = newerSha; } },
@@ -2694,14 +2694,13 @@ test('exact-SHA status and check failures deny admission and authorization befor
   ];
   try {
     for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
-      for (const operation of ['admit', 'authorize']) {
         for (const mutation of mutations) {
           const fixture = authorizationFixture(state(), { approvalMode, ...mutation });
           globalThis.fetch = fixture.fetch;
-          await assert.rejects(runFixtureControl(operation, fixture), /Invalid|qualification|evidence|stale/);
+          await assert.rejects(verifyReleaseChecks(githubClient(fixture.env.GH_TOKEN), sha),
+            /Invalid|qualification|evidence|stale/);
           assert.ok(fixture.calls.every(call => call.method === 'GET'));
           assert.deepEqual(fixture.ledgerWrites, []);
-        }
       }
     }
   } finally { globalThis.fetch = previous; }
@@ -2768,18 +2767,17 @@ test('GitHub evidence timestamps accept seconds or milliseconds and reject unsup
   ]) assert.throws(() => parseGithubTimestamp(value), /Invalid GitHub timestamp/);
 });
 
-test('release admission rejects PR-head self-attestation, carried review and owner override as canonical evidence', async () => {
+test('read-only admission does not require a pre-existing canonical qualification status or checks', async () => {
   const previous = globalThis.fetch;
   const previousOutput = process.env.GITHUB_OUTPUT;
   delete process.env.GITHUB_OUTPUT;
   try {
-    for (const verdict of ['REVIEWED (self-attested)', 'REVIEWED (self-attested, carried across sync)', 'APPROVE (owner)']) {
-      const fixture = authorizationFixture(state(), { mutateStatuses: status => {
-        status.statuses[0].description = `${verdict} @ ${sha.slice(0, 12)} by private-reviewer`;
-      } });
+    for (const channel of ['stable', 'insider']) {
+      const fixture = authorizationFixture(state(), { channel });
       globalThis.fetch = fixture.fetch;
-      await assert.rejects(runReleaseControl('admit', fixture.env), /qualification evidence/);
+      await runReleaseControl('admit', fixture.env);
       assert.ok(fixture.calls.every(call => call.method === 'GET'));
+      assert.ok(fixture.calls.every(call => !/actions\/|commits\/.*\/(?:status|check-runs)/.test(call.endpoint)));
     }
   } finally {
     globalThis.fetch = previous;
@@ -2916,7 +2914,7 @@ test('protected release-control abandonment uses App policy verification and Git
       ...wrongRun,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
       RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
-    }, () => {}), /workflow run evidence|Unexpected API host\/path|Missing fixture object/, 'wrong current approval run');
+    }, () => {}), /executing trusted workflow/, 'wrong current approval run');
     await runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
@@ -3178,8 +3176,9 @@ function authorizationFixture(initial = state(), settings = {}) {
   };
   env.RELEASE_TRANSACTION = JSON.stringify(transaction);
   env.RELEASE_SOURCE_COMMIT = sourceCommit;
-  const canonical = canonicalAuthorizationFixture(
-    sourceCommit, channel, env.RELEASE_APPROVAL_MODE, workflowCommit);
+  const reviewedHead = settings.reviewedHead ?? sourceCommit;
+  const canonical = sourceReviewFixture(sourceCommit, branch, Date.now(), reviewedHead);
+  settings.mutateReview?.(canonical);
   const qualificationStartedAt = new Date(Date.now() - 4 * 60_000).toISOString();
   const qualificationCompletedAt = new Date(Date.now() - 2 * 60_000).toISOString();
   const qualificationRunUrl = `https://github.com/${selected.repository}/actions/runs/42`;
@@ -3206,6 +3205,7 @@ function authorizationFixture(initial = state(), settings = {}) {
   }));
   return {
     env, calls, ledgerWrites, environment, branchRules, approvalEvidence, abandonmentJob, abandonmentJobs,
+    transactionJobs, review: canonical,
     deleteTag() { tag = undefined; },
     setCanonicalHead(value) { canonicalHead = value; },
     setCanonicalComparison(value) { canonicalComparison = value; },
@@ -3260,6 +3260,8 @@ function authorizationFixture(initial = state(), settings = {}) {
           html_url: qualificationRunUrl,
           status: 'in_progress',
           conclusion: undefined,
+          actor: { login: 'author' },
+          triggering_actor: { login: 'author' },
           check_suite_id: 100,
           run_started_at: qualificationStartedAt,
           updated_at: qualificationCompletedAt,
@@ -3289,6 +3291,7 @@ function authorizationFixture(initial = state(), settings = {}) {
             url: job.check_run_url,
           })),
         };
+        settings.mutateChecks?.(checks);
         return response(checks);
       }
       if (endpoint.startsWith(`commits/${sourceCommit}/check-runs`)) {
@@ -3316,10 +3319,13 @@ function authorizationFixture(initial = state(), settings = {}) {
         return response(checks);
       }
       if ([`commits/${sourceCommit}/status?per_page=100`, `commits/${sourceCommit}/statuses?per_page=100`].includes(endpoint)) {
-        const statuses = { sha: sourceCommit, total_count: 1,
-          statuses: [structuredClone(canonical.status)] };
+        const statuses = { sha: sourceCommit, total_count: reviewedHead === sourceCommit ? 1 : 0,
+          statuses: reviewedHead === sourceCommit ? [structuredClone(canonical.status)] : [] };
         settings.mutateStatuses?.(statuses);
         return response(endpoint.includes('/statuses?') ? statuses.statuses : statuses);
+      }
+      if (channel === 'stable' && (endpoint === `git/commits/${sha}` || endpoint === `git/commits/${newerSha}`)) {
+        return response(await trees(endpoint));
       }
       if (canonical.values.has(endpoint)) return response(canonical.values.get(endpoint));
       if (endpoint.startsWith('git/ref/tags/')) {
@@ -3448,6 +3454,81 @@ test('executed admission and authorization use identical immutable transaction b
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+for (const channel of ['stable', 'insider']) {
+for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+test(`${channel} ${approvalMode} executes pin, admission, automatic qualification, authorization and consumption without canonical status`, async t => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `automatic-qualification-${process.pid}-${channel}-${approvalMode}`);
+  const savedFetch = globalThis.fetch;
+  const savedOutput = process.env.GITHUB_OUTPUT;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  delete process.env.GITHUB_OUTPUT;
+  t.after(() => {
+    globalThis.fetch = savedFetch;
+    if (savedOutput !== undefined) process.env.GITHUB_OUTPUT = savedOutput;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  });
+  const ledger = state();
+  if (channel === 'stable') ledger.qualifications[sha] = hotfixQualification();
+  const fixture = authorizationFixture(ledger, { channel, approvalMode, reviewedHead: '7'.repeat(40) });
+  globalThis.fetch = fixture.fetch;
+  const api = githubClient(fixture.env.GH_TOKEN);
+  const transaction = await selectTransaction(fixture.env, api);
+  fixture.env.RELEASE_TRANSACTION = JSON.stringify(transaction);
+  const completedJobs = fixture.transactionJobs.splice(0);
+  await runReleaseControl('admit', fixture.env);
+  assert.ok(fixture.calls.every(call => call.method === 'GET'));
+  assert.ok(fixture.calls.every(call => !/actions\/|\/status\?|\/check-runs\?/.test(call.endpoint)),
+    'Admission cannot depend on evidence from its downstream jobs');
+  await assert.rejects(runReleaseControl('authorize', fixture.env), /receipt unavailable/);
+  await assert.rejects(qualifyTransaction(transaction, api), /qualification job/);
+  assert.ok(fixture.calls.every(call => call.method === 'GET'));
+
+  fixture.transactionJobs.push(...completedJobs);
+  const receipt = await qualifyTransaction(transaction, api);
+  mkdirSync(dirname(qualificationPath), { recursive: true });
+  const saveReceipt = value => writeFileSync(qualificationPath, JSON.stringify(value));
+  saveReceipt({ ...receipt, transaction: { ...transaction, sourceCommit: newerSha } });
+  await assert.rejects(runReleaseControl('authorize', fixture.env), /another release transaction/);
+  saveReceipt({ ...receipt, checkedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
+    expiresAt: new Date(Date.now() - 30 * 60_000).toISOString() });
+  await assert.rejects(runReleaseControl('authorize', fixture.env), /expired/);
+  saveReceipt(receipt);
+  fixture.review.status.creator.login = 'attacker';
+  await assert.rejects(runReleaseControl('authorize', fixture.env), /Untrusted source review/);
+  fixture.review.status.creator.login = 'github-actions[bot]';
+  fixture.transactionJobs[0].conclusion = 'failure';
+  await assert.rejects(runReleaseControl('authorize', fixture.env), /qualification job/);
+  fixture.transactionJobs[0].conclusion = 'success';
+  assert.ok(fixture.calls.every(call => call.method === 'GET'));
+  assert.equal(fixture.ledgerWrites.length, 0);
+  assert.equal(existsSync(authorizationPath), false);
+
+  const identity = await runReleaseControl('authorize', fixture.env);
+  const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
+  assert.ok(firstWrite > 0);
+  assert.ok(fixture.calls.slice(0, firstWrite).some(call => call.endpoint === 'actions/runs/31'),
+    'Genuine reviewed-head provenance must precede the first ledger/tag mutation');
+  assert.ok(fixture.calls.filter(call => call.method !== 'GET').every(call => call.publisher));
+  const consumer = { ...fixture.env, RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
+  await runReleaseControl('consume', consumer, () => {});
+  fixture.calls.length = 0;
+  await runReleaseControl('preflight', consumer, () => {});
+  assert.ok(fixture.calls.every(call => call.method === 'GET'));
+  fixture.review.status.state = 'failure';
+  await assert.rejects(runReleaseControl('preflight', consumer, () => {}), /Untrusted source review/);
+  writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+  await assert.rejects(runReleaseControl('advance', {
+    ...consumer, RELEASE_EXPECTED_POINTER: '', RELEASE_VERIFIED_BRANCH_HEAD: sha,
+  }, () => {}), /Untrusted source review/);
+  assert.ok(fixture.calls.every(call => call.method === 'GET'),
+    'Revoked evidence cannot reach publication preflight or pointer writes');
+});
+}
+}
 
 test('executed authority rejects initial and newly advanced stable floors before any source or publication write', async () => {
   const cwd = process.cwd();
@@ -3951,10 +4032,8 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     fixture.calls.length = 0;
     for (const operation of ['authorize', 'advance']) {
       for (const token of [undefined, fixture.env.GH_TOKEN]) {
-        const transaction = operation === 'advance' ?
-          { RELEASE_TRANSACTION: JSON.stringify(releaseTransaction(record())) } : {};
         await assert.rejects(runFixtureControl(operation, fixture, {
-          ...fixture.env, ...transaction, RELEASE_PUBLISHER_TOKEN: token,
+          ...fixture.env, RELEASE_PUBLISHER_TOKEN: token,
         }),
           /Protected publisher App token required/);
       }
@@ -4042,8 +4121,8 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
       RELEASE_EXPECTED_POINTER: '',
     }, verify);
     assert.ok(fixture.calls.some(call => call.method === 'PATCH'));
-    assert.ok(fixture.calls.every(call => call.publisher),
-      'Pointer writer and final protection revalidation require only the publisher App');
+    assert.ok(fixture.calls.filter(call => call.admin || call.method !== 'GET').every(call => call.publisher),
+      'Only the publisher App may read protected policy or write; github.token revalidates public evidence');
     fixture.calls.length = 0;
     const changed = structuredClone(identity);
     changed.protection.claims.exclusiveApprovedPublisher = false;
@@ -4144,7 +4223,7 @@ test('missing, malformed and weakened signed protection evidence always fails cl
   const ledger = state();
   const identity = record(ledger);
   delete identity.protection;
-  const fixture = authorizationFixture(ledger);
+  const fixture = authorizationFixture(ledger, { workflowCommit: identity.workflowCommit });
   const originalFetch = globalThis.fetch;
   const cwd = process.cwd();
   const root = resolve('.artifacts', `invalid-authorization-${process.pid}`);

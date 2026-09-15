@@ -7,10 +7,9 @@ import {
 import {
   command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
   verifyCanonicalSource, verifyProtection,
-  verifyAbandonmentApproval, verifyStableQualification, verifyReleaseChecks,
+  verifyAbandonmentApproval, verifyStableQualification,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
-import { qualificationClient, verifyCanonicalReleaseEvidence } from './canonical-qualification.mjs';
 import {
   privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, readReleaseManifest, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
@@ -68,6 +67,15 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance', 'recover-abandonment', 'abandon'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
   const transaction = transactionFromEnvironment(env);
+  const verifyQualification = async (requireReceipt = false) => {
+    if (requireReceipt) {
+      const receipt = readQualificationReceipt(transaction);
+      requireThat(receipt.run.attempt === env.GITHUB_RUN_ATTEMPT,
+        'Qualification receipt belongs to another execution attempt');
+    }
+    return verifyTransactionQualification(transaction, githubClient(env.GH_TOKEN),
+      Date.now(), env.GITHUB_RUN_ATTEMPT);
+  };
   if (operation === 'abandon') {
     requireThat(transaction.channel === 'insider', 'Only insider release transactions may abandon a reservation');
     requireThat(env.GITHUB_RUN_ATTEMPT === '1',
@@ -119,28 +127,19 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     await verifyCanonicalSource(api, branch, selectedHead);
     const admission = admit(context, selectedHead, await readVersion(api, selectedHead));
     validateReservationAdmission(state, admission);
-    if (operation === 'admit') {
-      await verifyCanonicalReleaseEvidence(qualificationClient(env.GH_TOKEN),
-        selectedHead, admission.channel, env.RELEASE_APPROVAL_MODE, Date.now(),
-        transaction.workflowCommit);
-      await verifyReleaseChecks(api, selectedHead);
-      await verifyCanonicalSource(api, branch, selectedHead);
-    }
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
     if (operation === 'admit') {
       output('approval_mode', env.RELEASE_APPROVAL_MODE);
       return admission;
     }
-    readQualificationReceipt(transaction);
-    await verifyTransactionQualification(transaction, api);
+    await verifyQualification(true);
     await verifyCanonicalSource(api, branch, selectedHead);
     const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, selectedHead);
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
     const record = await transact(store, async state => {
       const existing = validateReservationAdmission(state, admission);
-      readQualificationReceipt(transaction);
-      await verifyTransactionQualification(transaction, api);
+      await verifyQualification(true);
       const qualification = await verifyStableQualification(api, state, admission);
       await verifyCanonicalSource(api, branch, selectedHead);
       if (existing?.identitySha256) {
@@ -202,8 +201,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     requireThat(transaction.sourceCommit === record.sourceCommit,
       'Publication preflight transaction binding mismatch');
     const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+    await verifyQualification();
     await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
     const expectedPointer = state.pointers[record.channel]?.manifestEnvelopeSha256 || '';
     output('verified_branch_head', currentBranchHead);
     output('expected_pointer', expectedPointer);
@@ -226,8 +226,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     requireThat(transaction.sourceCommit === record.sourceCommit,
       'Pointer transaction binding mismatch');
     await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
+    await verifyQualification();
     await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
     requireThat(/^[a-f0-9]{40}$/.test(env.RELEASE_VERIFIED_BRANCH_HEAD || ''),
       'Missing publication preflight branch evidence');
     const { serializedManifest, serializedEnvelope } = readReleaseManifest();

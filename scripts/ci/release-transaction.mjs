@@ -3,6 +3,7 @@ import {
 } from 'node:fs';
 import { dirname, relative, resolve, sep } from 'node:path';
 import { canonicalValidationChecks } from './canonical-qualification.mjs';
+import { verifyReleaseSourceReview } from './release-source-review.mjs';
 import {
   branchHead, githubClient, parseGithubTimestamp, verifyCanonicalSource, verifyReleaseChecks,
 } from './release-github.mjs';
@@ -187,7 +188,10 @@ async function requiredCheckPolicy(api, transaction) {
   requireThat(releaseRequiredChecks.every(name =>
     required.some(rule => rule?.context === name)),
   'Owner blocker: live canonical branch policy is missing genuine source-commit checks');
-  return required.filter(rule => releaseRequiredChecks.includes(rule.context));
+  requireThat(required.every(rule => typeof rule?.context === 'string' &&
+    (rule.integration_id == null || (Number.isSafeInteger(rule.integration_id) && rule.integration_id > 0))),
+  'Owner blocker: malformed required check policy');
+  return required;
 }
 
 function matchingJob(jobs, name, transaction, executionAttempt) {
@@ -263,8 +267,34 @@ export async function verifyTransactionQualification(
     };
   });
   const required = await requiredCheckPolicy(api, transaction);
-  const sourceEvidence = await verifyReleaseChecks(api, transaction.sourceCommit, required, now, evidenceLifetimeMs);
+  for (const rule of required) {
+    if (rule.context === 'squad/pre-pr-verdict') {
+      requireThat(rule.integration_id == null, 'Commit review status cannot satisfy an App-bound check');
+    } else if (requiredQualificationJobs.includes(rule.context)) {
+      const job = matchingJob(jobs, rule.context, transaction, executionAttempt);
+      const check = checks.find(check => check.url === job.check_run_url);
+      requireThat(rule.integration_id == null || check.app.id === rule.integration_id,
+        'Qualification check does not match the required integration');
+    } else {
+      await verifyReleaseChecks(api, transaction.sourceCommit, [rule], now, evidenceLifetimeMs);
+    }
+  }
+  const review = await verifyReleaseSourceReview(api, transaction, now, evidenceLifetimeMs);
   const checkedAt = new Date(now).toISOString();
+  const sourceEvidence = {
+    sourceCommit: transaction.sourceCommit,
+    reviewUrl: review.reviewUrl,
+    review,
+    collectedAt: checkedAt,
+    checks: releaseRequiredChecks.map(context => {
+      if (context === 'squad/pre-pr-verdict') {
+        return { context, statusId: review.statusId, createdAt: review.createdAt, updatedAt: review.updatedAt };
+      }
+      const job = matchingJob(jobs, context, transaction, executionAttempt);
+      const check = checks.find(check => check.url === job.check_run_url);
+      return { context, checkId: check.id, completedAt: check.completed_at };
+    }),
+  };
   return {
     kind: 'release-qualification',
     schema: 2,
@@ -357,7 +387,18 @@ export function transactionFromEnvironment(env = process.env) {
   } catch {
     requireThat(false, 'Release transaction is malformed');
   }
-  return validateTransaction(transaction);
+  validateTransaction(transaction);
+  requireThat(env.GITHUB_REPOSITORY === transaction.repository &&
+    env.GITHUB_RUN_ID === transaction.runId &&
+    env.GITHUB_SHA === transaction.workflowCommit &&
+    env.GITHUB_WORKFLOW_SHA === transaction.workflowCommit &&
+    env.GITHUB_WORKFLOW_REF === transaction.workflowIdentity &&
+    env.GITHUB_REF === 'refs/heads/development' &&
+    ['workflow_dispatch', 'schedule'].includes(env.GITHUB_EVENT_NAME) &&
+    (env.GITHUB_EVENT_NAME !== 'schedule' || transaction.channel === 'insider'),
+  'Release transaction does not belong to the executing trusted workflow');
+  requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'execution attempt');
+  return transaction;
 }
 
 async function main() {
