@@ -622,6 +622,10 @@ export function validateReleaseManifest(manifest) {
   requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
   requireTimestamp(evidence.trust.createdTime, 'authorization creation time');
   requireTimestamp(evidence.trust.verificationTime, 'post-sign evidence verification time');
+  requireThat(evidence.trust.workflowCommit === lifecycle.signing.workflowCommit &&
+    evidence.trust.policyDigest === provenance.authorization.protectionDigest &&
+    evidence.trust.createdTime === identity.buildTime,
+  'Release trust binding mismatch');
   requireThat(Date.parse(evidence.trust.createdTime) <= Date.parse(evidence.trust.verificationTime),
     'Evidence verification predates authorization');
   const trustPolicy = loadReleaseTrustPolicy();

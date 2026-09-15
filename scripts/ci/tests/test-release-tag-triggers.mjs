@@ -188,6 +188,15 @@ test('release manifest bytes and envelope reject canonicality and binding substi
     },
   },
   }), /Evidence subject\/platform mismatch/);
+  for (const mutate of [
+    value => { value.evidence.trust.workflowCommit = newerSha; },
+    value => { value.evidence.trust.policyDigest = 'f'.repeat(64); },
+    value => { value.evidence.trust.createdTime = '2026-09-14T00:00:00.000Z'; },
+  ]) {
+    const changed = structuredClone(manifest);
+    mutate(changed);
+    assert.throws(() => validateReleaseManifest(changed), /Release trust binding mismatch/);
+  }
 });
 
 test('every docker publisher bash run block parses', () => {

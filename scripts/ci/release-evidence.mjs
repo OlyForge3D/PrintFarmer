@@ -164,7 +164,13 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   'Malformed Cosign DSSE attestation bundle');
   const predicate = parseJson(predicateBytes, 'SPDX predicate');
   for (let index = 0; index < entries.length; index++) {
-    const entry = entries[index]?.dsseEnvelope ?? entries[index];
+    const rawEntry = entries[index];
+    if (nativeBundle(rawEntry) && typeof verification[index]?.optional?.certificate === 'string') {
+      const verified = new X509Certificate(verification[index].optional.certificate);
+      requireThat(nativeCertificate(rawEntry).raw.toString('base64') === verified.raw.toString('base64'),
+        'Native Cosign attestation certificate differs from verification output');
+    }
+    const entry = rawEntry?.dsseEnvelope ?? rawEntry;
     let statement;
     try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
       throw new Error('Malformed Cosign DSSE payload');
