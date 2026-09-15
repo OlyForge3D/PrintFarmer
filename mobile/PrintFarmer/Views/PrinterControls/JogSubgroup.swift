@@ -154,8 +154,7 @@ struct JogSubgroup: View {
         @Environment(\.dynamicTypeSize) private var dynamicTypeSize
 
         private var isPending: Bool {
-            guard viewModel.isActive,
-                  !viewModel.usesDurableMotion || !viewModel.motionStatusNeedsAttention else { return false }
+            guard viewModel.isActive else { return false }
             if case .moveTo = viewModel.pendingCommand?.kind { return true }
             return false
         }
@@ -203,9 +202,7 @@ struct JogSubgroup: View {
                     value: showsCoordinateHelp ? "Expanded" : "Collapsed", textOnly: true
                 ) { showsCoordinateHelp.toggle() }
                 if showsCoordinateHelp {
-                    Text((viewModel.usesDurableMotion
-                          ? ControlNumberInput.durableAbsoluteCoordinatesMessage
-                          : ControlNumberInput.absoluteCoordinatesMessage)
+                    Text(ControlNumberInput.absoluteCoordinatesMessage
                          + " " + ControlNumberInput.coordinatePrecisionMessage)
                         .font(.footnote)
                         .fixedSize(horizontal: false, vertical: true)
@@ -338,8 +335,7 @@ struct JogSubgroup: View {
             .clipShape(RoundedRectangle(cornerRadius: 10))
         }
         .buttonStyle(.plain)
-        .disabled((!isInteractive && !shouldRevealDisabledTooltipOnTap)
-                  || (viewModel.usesDurableMotion && viewModel.isExecuting))
+        .disabled(!isInteractive && !shouldRevealDisabledTooltipOnTap)
         .disabledControlStyle(isDisabled: !isInteractive && !isPending)
         .errorBorderHighlight(isActive: hasError)
         .accessibilityLabel(jogAccessibilityLabel(direction: direction))
