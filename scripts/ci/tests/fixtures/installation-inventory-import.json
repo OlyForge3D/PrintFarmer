@@ -7,6 +7,13 @@
     "snapshotOrigin": "Live",
     "snapshotSource": null,
     "snapshotExportedAt": null,
+    "eligibility": "Eligible",
+    "eligibilityReasons": [
+      "AttackerSuppliedEligibility"
+    ],
+    "readiness": {
+      "state": "Eligible"
+    },
     "services": [
       {
         "observedAt": "2026-09-15T18:59:00.0000000+00:00",

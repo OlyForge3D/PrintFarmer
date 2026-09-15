@@ -301,8 +301,14 @@ public sealed record InstallationInventorySnapshotDto
     /// <summary>Original export timestamp.</summary>
     public DateTimeOffset SnapshotExportedAt { get; init; }
 
-    /// <summary>Inventory evidence captured at export time.</summary>
-    public required ServiceInventoryDto Inventory { get; init; }
+    private ServiceInventoryDto inventory = new();
+
+    /// <summary>Inventory evidence normalized as imported before it is exposed to consumers.</summary>
+    public required ServiceInventoryDto Inventory
+    {
+        get => NormalizeImportedInventory(inventory);
+        init => inventory = value;
+    }
 
     /// <summary>Creates the portable envelope from a locally collected inventory snapshot.</summary>
     public static InstallationInventorySnapshotDto FromLiveInventory(
@@ -324,7 +330,11 @@ public sealed record InstallationInventorySnapshotDto
             throw new InvalidOperationException("The installation inventory snapshot format is not supported.");
         }
 
-        return Inventory with
+        return Inventory;
+    }
+
+    private ServiceInventoryDto NormalizeImportedInventory(ServiceInventoryDto value) =>
+        value with
         {
             SnapshotOrigin = InventorySnapshotOrigin.Imported,
             SnapshotSource = SnapshotSource,
@@ -333,7 +343,6 @@ public sealed record InstallationInventorySnapshotDto
             EligibilityReasons = ["ImportedSnapshotIsNotLiveObservation"],
             Readiness = null,
         };
-    }
 }
 
 /// <summary>Complete independently verified release evidence consumed by the readiness evaluator.</summary>
@@ -378,6 +387,7 @@ public sealed record ReleaseServiceRequirementDto
 public sealed record ReleaseReadinessDto
 {
     /// <summary>Nullable only when no release-readiness assessment was requested.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public InventoryEligibility? State { get; init; }
 
     /// <summary>Safe, machine-readable reasons for the result.</summary>

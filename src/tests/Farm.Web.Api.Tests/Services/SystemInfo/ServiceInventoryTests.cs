@@ -215,14 +215,16 @@ public sealed class ServiceInventoryTests
         foreach (JsonIgnoreCondition ignore in new[] { JsonIgnoreCondition.WhenWritingNull, JsonIgnoreCondition.Never })
         {
             JsonSerializerOptions options = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = ignore };
-            using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(Evaluate([new()]), options));
+            ServiceInventoryDto inventory = Evaluate([new()]) with { Readiness = new() };
+            using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(inventory, options));
             JsonElement row = json.RootElement.GetProperty("services")[0];
             Assert.Equal("Unknown", row.GetProperty("observationState").GetString());
             Assert.Equal(JsonValueKind.Null, row.GetProperty("platformDigest").ValueKind);
             Assert.Equal(JsonValueKind.Null, row.GetProperty("applicationVersion").ValueKind);
             Assert.Equal(JsonValueKind.Null, row.GetProperty("identity").ValueKind);
             Assert.False(row.TryGetProperty("SourceCommit", out _));
-            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("readiness").ValueKind);
+            JsonElement readiness = json.RootElement.GetProperty("readiness");
+            Assert.Equal(JsonValueKind.Null, readiness.GetProperty("state").ValueKind);
             Assert.Equal("Live", json.RootElement.GetProperty("snapshotOrigin").GetString());
             Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("snapshotSource").ValueKind);
             Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("snapshotExportedAt").ValueKind);
@@ -393,7 +395,7 @@ public sealed class ServiceInventoryTests
             json,
             new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
 
-        ServiceInventoryDto imported = importedEnvelope.ToImportedInventory();
+        ServiceInventoryDto imported = importedEnvelope.Inventory;
         ServiceReplicaObservationDto service = Assert.Single(imported.Services);
         ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(imported, Release(null), Now);
 
