@@ -37,11 +37,18 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     private readonly Mock<IAuthenticationService> authentication = new();
     private readonly Mock<IPrinterSafetyGuard> safety = new();
     private readonly FakeChannel channel = new();
+    private readonly Mock<IBackendClientFactory> clients = new();
+    private readonly Mock<IBackendClient> client = new();
+    private readonly Mock<ISupportsDurableMotion> motionCapability;
     private readonly SnapshotCommands commands = new();
     private ServiceProvider provider = null!;
 
     public PrinterControlOperationTests()
     {
+        motionCapability = client.As<ISupportsDurableMotion>();
+        motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns(Enum.GetValues<PrinterControlKind>());
+        motionCapability.Setup(m => m.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>())).ReturnsAsync(channel);
+        clients.Setup(f => f.GetClient((int)PrinterBackend.Moonraker)).Returns(client.Object);
         keepAlive = new SqliteConnection(connectionString);
         authorization.Setup(a => a.CanActorAccessPrinterAsync(It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
         authorization.Setup(a => a.CanAccessPrinterAsync(It.IsAny<ClaimsPrincipal>(), It.IsAny<Guid>(), It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>())).ReturnsAsync(true);
@@ -62,9 +69,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         services.AddSingleton(safety.Object);
         services.AddSingleton<IDbOutboxSequenceAllocator, DbOutboxSequenceAllocator>();
         services.AddScoped<PrinterControlOperationService>();
-        var factory = new Mock<IMoonrakerMotionChannelFactory>();
-        factory.Setup(f => f.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>())).ReturnsAsync(channel);
-        services.AddSingleton(factory.Object);
+        services.AddSingleton(clients.Object);
         provider = services.BuildServiceProvider();
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -136,6 +141,10 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                 printerId, Guid.NewGuid(), userId.ToString(), new(PrinterControlKind.HomeAll), default));
         Assert.Equal("printer_operation_unsupported", error.Code);
         Assert.Equal(422, error.Status);
+        Assert.Empty((await scope.ServiceProvider.GetRequiredService<PrinterControlOperationService>()
+            .GetCurrentAsync(printerId, default)).PhysicalControl.SupportedOperations);
+        Assert.Empty((await PrinterControlOperationService.ProjectAsync(
+            scope.ServiceProvider.GetRequiredService<AppDbContext>(), [printerId], null, default))[printerId].SupportedOperations);
         Assert.Equal(0, await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrinterControlOperations.CountAsync());
         Guid queuedBeforePluginLoss = Guid.NewGuid();
         await AdmitAsync(queuedBeforePluginLoss);
@@ -162,6 +171,86 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         Assert.Equal(x, operation.X);
         Assert.Equal(y, operation.Y);
         Assert.Equal(z, operation.Z);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerAsync_AdvertisedNonMoonrakerBackend_UsesSemanticCapabilityAndExactCorrelation()
+    {
+        const int customBackend = 9001;
+        clients.Setup(f => f.GetClient(customBackend)).Returns(client.Object);
+        motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([PrinterControlKind.HomeAll]);
+        await ChangeAsync(async (db, service) =>
+        {
+            (await db.Printers.SingleAsync()).Backend = customBackend;
+            await db.SaveChangesAsync();
+            Assert.Equal([PrinterControlKind.HomeAll], (await service.GetCurrentAsync(printerId, default)).PhysicalControl.SupportedOperations);
+            Assert.Equal([PrinterControlKind.HomeAll],
+                (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId].SupportedOperations);
+        });
+
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance);
+        await worker.StartAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(new PrinterControlRequest(PrinterControlKind.HomeAll), channel.Request);
+        Assert.Equal(id, channel.CorrelationId);
+        motionCapability.Verify(m => m.ConnectAsync(It.Is<Printer>(p => p.Backend == customBackend &&
+            p.BackendUrl == "http://test.invalid:7125"), It.IsAny<CancellationToken>()), Times.Once);
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        await worker.StopAsync(default);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task AdmitAsync_UnadvertisedKind_IsUnsupportedWithoutPersistingOrSending()
+    {
+        motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([PrinterControlKind.HomeZ]);
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.AdmitAsync(printerId, Guid.NewGuid(), userId.ToString(), new(PrinterControlKind.HomeAll), default));
+            Assert.Equal("printer_operation_unsupported", error.Code);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task AdmitAsync_UnresolvablePlugin_ReportsUnsupportedAndProjectsNoKinds()
+    {
+        clients.Setup(f => f.GetClient((int)PrinterBackend.Moonraker))
+            .Throws(new InvalidOperationException("Plugin was not registered."));
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.AdmitAsync(printerId, Guid.NewGuid(), userId.ToString(), new(PrinterControlKind.HomeAll), default));
+            Assert.Equal("printer_operation_unsupported", error.Code);
+            Assert.Empty((await service.GetCurrentAsync(printerId, default)).PhysicalControl.SupportedOperations);
+            Assert.Empty((await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId].SupportedOperations);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task CommitSendAsync_CapabilityWithdrawnAfterAdmission_DoesNotCommitSend()
+    {
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            Guid owner = Guid.NewGuid();
+            Assert.NotNull(await service.ClaimAsync(id, owner, default));
+            motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([]);
+            PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.CommitSendAsync(id, owner, default));
+            Assert.Equal("printer_operation_unsupported", error.Code);
+            Assert.Null((await db.PrinterControlOperations.AsNoTracking().SingleAsync()).SendCommittedAtUtc);
+        });
         Assert.Equal(0, channel.SendCount);
     }
 
@@ -241,13 +330,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         if (allowed)
         {
             await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-            string command = scenario switch
-            {
-                "z_only" => "G1 Z3",
-                "single_axis" => kind == PrinterControlKind.Jog ? "G1 X1" : "G1 X51",
-                _ => kind == PrinterControlKind.Jog ? "G1 X1 Y2 Z3" : "G1 X51 Y2 Z3",
-            };
-            Assert.Contains($"\n{command}\n", channel.Script, StringComparison.Ordinal);
+            Assert.Equal(new PrinterControlRequest(kind, scenario == "z_only" ? null : x,
+                scenario == "multi_axis" ? 2 : null, scenario is "multi_axis" or "z_only" ? 3 : null), channel.Request);
             channel.Completion.SetResult();
         }
 
@@ -298,7 +382,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             if (bulk)
             {
-                PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], default))[printerId];
+                PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId];
                 Assert.Equal(!settled, projection.BarrierHeld);
                 Assert.Equal(settled ? null : id, projection.OperationId);
                 Assert.Equal(settled ? null : PrinterControlState.Running, projection.State);
@@ -332,7 +416,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                 await ChangeAsync(async (db, service) =>
                 {
                     AssertCoherent(await service.GetCurrentAsync(printerId, default));
-                    PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], default))[printerId];
+                    PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId];
                     Assert.Equal(projection.BarrierHeld, projection.OperationId.HasValue);
                     Assert.Equal(projection.BarrierHeld, projection.State == PrinterControlState.Running);
                 });
@@ -363,25 +447,20 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
 
     [Theory]
     [InlineData(PrinterControlState.Running)]
-    [InlineData(PrinterControlState.Unknown)]
     [InlineData(PrinterControlState.Recovering)]
     public async Task EmergencyStopAsync_DurableMotion_IsOutOfBandAndCannotReleaseOrSettleSuccessor(PrinterControlState state)
     {
         Guid id = Guid.NewGuid();
         Guid owner = Guid.NewGuid();
         await AdmitAsync(id);
-        await ChangeAsync(async (_, service) =>
+        await ChangeAsync(async (db, service) =>
         {
             await service.ClaimAsync(id, owner, default);
             await service.CommitSendAsync(id, owner, default);
-            if (state == PrinterControlState.Unknown)
+            if (state == PrinterControlState.Recovering)
             {
-                await service.SetOutcomeAsync(id, owner, false, "transport_lost", default);
-            }
-            else if (state == PrinterControlState.Recovering)
-            {
-                PrinterControlOperationDto current = await service.GetAsync(printerId, id, default);
-                await service.BeginRecoveryAsync(printerId, id, Quote(current.RowVersion), userId.ToString(), default);
+                (await db.PrinterControlOperations.SingleAsync()).State = state;
+                await db.SaveChangesAsync();
             }
         });
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
@@ -415,18 +494,18 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             await service.MaintainOwnerAsync(id, owner, true, default);
             during = await service.GetAsync(printerId, id, default);
-            var error = await Assert.ThrowsAsync<PrinterControlException>(() => service.CompleteRecoveryAsync(
-                printerId, id, Quote(during.RowVersion), userId.ToString(), Evidence() with { SenderIsolation = "ServiceConfirmed" }, default));
-            Assert.Equal(409, error.Status);
+            Assert.True(during.BarrierHeld);
+            Assert.False(during.RequiresRecovery);
+            PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.AdmitAsync(printerId, Guid.NewGuid(), userId.ToString(), new(PrinterControlKind.HomeAll), default));
+            Assert.Equal("physical_control_barrier", error.Code);
         });
         finish.SetResult(true);
         Assert.Equal(200, Assert.IsType<ObjectResult>((await stop.WaitAsync(TimeSpan.FromSeconds(3))).Result).StatusCode);
-        Assert.True((await GetAsync(id)).BarrierHeld);
+        Assert.False((await GetAsync(id)).BarrierHeld);
         actuation.Verify(service => service.QueueLifecycleAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
         actuation.Verify(service => service.CompleteDirectAsync(It.IsAny<PrinterActuationLease>(), It.IsAny<bool>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        PrinterControlOperationDto after = await GetAsync(id);
-        await ChangeAsync(async (_, service) =>
-            await service.CompleteRecoveryAsync(printerId, id, Quote(after.RowVersion), userId.ToString(), Evidence(), default));
+        Assert.Equal(PrinterControlState.Unknown, (await GetAsync(id)).State);
         Guid successor = Guid.NewGuid();
         await AdmitAsync(successor);
         await ChangeAsync(async (context, service) =>
@@ -462,7 +541,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     [InlineData(true, "false")]
     [InlineData(true, "cancelled")]
     [InlineData(true, "response_lost")]
-    public async Task EmergencyStopAsync_AmbiguousHttpDelivery_RemainsStickyAfterMotionQuiesces(bool running, string outcome)
+    public async Task EmergencyStopAsync_AmbiguousHttpDelivery_ReleasesAfterMotionQuiescesWithoutInventingSuccess(bool running, string outcome)
     {
         Guid id = Guid.NewGuid();
         Guid owner = Guid.NewGuid();
@@ -499,14 +578,13 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             await service.MaintainOwnerAsync(id, owner, true, default);
             PrinterControlOperationDto current = await service.GetAsync(printerId, id, default);
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, current.SenderIsolation);
-            Assert.True(current.BarrierHeld);
+            Assert.False(current.BarrierHeld);
+            Assert.False(current.RequiresRecovery);
+            Assert.Equal(running ? PrinterControlState.Unknown : PrinterControlState.Failed, current.State);
+            Assert.Equal(running ? PrinterControlEvidence.None : PrinterControlEvidence.NotSent, current.CompletionEvidence);
             Assert.Equal(PrinterEmergencyStopDelivery.Unknown, (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery);
-            var blocked = await Assert.ThrowsAsync<PrinterControlException>(() => service.CompleteRecoveryAsync(
-                printerId, id, Quote(current.RowVersion), userId.ToString(), Evidence() with { SenderIsolation = "ServiceConfirmed" }, default));
-            Assert.Equal(409, blocked.Status);
             await service.SetOutcomeAsync(id, owner, true, null, default);
-            Assert.Equal(PrinterControlState.Recovering, (await service.GetAsync(printerId, id, default)).State);
+            Assert.Equal(current, await service.GetAsync(printerId, id, default));
         });
         printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
         emergency.Verify(service => service.EmergencyStopAsync(It.IsAny<string>(), It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()), Times.Once);
@@ -516,7 +594,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task EmergencyStopAsync_CrashBeforeHttpWrite_NewServiceAllowsExplicitSecondAttempt(bool committed)
+    public async Task EmergencyStopAsync_CrashBeforeHttpWrite_FreshPendingBlocksThenExpiresWithoutReplaying(bool committed)
     {
         Guid id = Guid.NewGuid();
         await AdmitAsync(id);
@@ -543,10 +621,15 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             Assert.Equal(PrinterEmergencyStopDelivery.Pending,
                 (await db.PrinterEmergencyStopAttempts.SingleAsync(a => a.Id == abandoned.AttemptId)).Delivery);
             PrinterControlOperationDto current = await service.GetAsync(printerId, id, default);
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, current.SenderIsolation);
-            await Assert.ThrowsAsync<PrinterControlException>(() => service.CompleteRecoveryAsync(
-                printerId, id, Quote(current.RowVersion), userId.ToString(), Evidence() with { SenderIsolation = "ServiceConfirmed" }, default));
-            await service.CompleteRecoveryAsync(printerId, id, Quote(current.RowVersion), userId.ToString(), Evidence(), default);
+            Assert.True(current.BarrierHeld);
+            Assert.False(current.RequiresRecovery);
+            await service.ReconcileOrphansAsync(default);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            (await db.PrinterEmergencyStopAttempts.SingleAsync(a => a.Id == abandoned.AttemptId)).CreatedAtUtc =
+                DateTime.UtcNow - PrinterControlOperationService.OwnerLiveness - TimeSpan.FromSeconds(1);
+            await db.SaveChangesAsync();
+            await service.ReconcileOrphansAsync(default);
+            Assert.False((await service.GetAsync(printerId, id, default)).BarrierHeld);
         });
         Guid successor = Guid.NewGuid();
         await AdmitAsync(successor);
@@ -554,7 +637,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             Assert.False(await service.CommitEmergencyStopSendAsync(printerId, abandoned, userId.ToString(), default));
             await service.FinishEmergencyStopAsync(printerId, abandoned, PrinterEmergencyStopDelivery.Unknown, default);
-            Assert.Equal(PrinterEmergencyStopDelivery.ExternallyIsolated,
+            Assert.Equal(committed ? PrinterEmergencyStopDelivery.Unknown : PrinterEmergencyStopDelivery.NotSent,
                 (await db.PrinterEmergencyStopAttempts.SingleAsync(a => a.Id == abandoned.AttemptId)).Delivery);
             Assert.Equal(successor, (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
         });
@@ -596,7 +679,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             await service.MaintainOwnerAsync(id, owner, true, default);
             Assert.Equal(1, await db.PrinterEmergencyStopAttempts.CountAsync(a => a.Delivery == PrinterEmergencyStopDelivery.Pending));
             Assert.Equal(1, await db.PrinterEmergencyStopAttempts.CountAsync(a => a.Delivery == PrinterEmergencyStopDelivery.Accepted));
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, (await service.GetAsync(printerId, id, default)).SenderIsolation);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
         });
         firstResult.SetResult(false);
         Assert.Equal(503, Assert.IsType<ObjectResult>((await first.WaitAsync(TimeSpan.FromSeconds(3))).Result).StatusCode);
@@ -604,7 +687,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             await service.MaintainOwnerAsync(id, owner, true, default);
             Assert.Equal(1, await db.PrinterEmergencyStopAttempts.CountAsync(a => a.Delivery == PrinterEmergencyStopDelivery.Unknown));
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, (await service.GetAsync(printerId, id, default)).SenderIsolation);
+            Assert.False((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            Assert.Equal(PrinterControlState.Unknown, (await service.GetAsync(printerId, id, default)).State);
         });
     }
 
@@ -669,7 +753,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task EmergencyStopAsync_LegacyUncertainty_NewAcceptedStopNeverClearsOldSender(bool flag)
+    public async Task EmergencyStopAsync_LegacyFlags_DoNotRequireAttestationOrRetainIdleBarrier(bool flag)
     {
         Guid id = Guid.NewGuid();
         await AdmitAsync(id);
@@ -687,11 +771,13 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             PrinterEmergencyStopLease attempt = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
             Assert.True(await service.CommitEmergencyStopSendAsync(printerId, attempt, userId.ToString(), default));
             await service.FinishEmergencyStopAsync(printerId, attempt, PrinterEmergencyStopDelivery.Accepted, default);
-            Assert.True((await db.PrinterControlOperations.SingleAsync()).EmergencyStopInFlight);
+            Assert.Equal(flag, (await db.PrinterControlOperations.SingleAsync()).EmergencyStopInFlight);
             PrinterControlOperationDto current = await service.GetAsync(printerId, id, default);
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, current.SenderIsolation);
-            await Assert.ThrowsAsync<PrinterControlException>(() => service.CompleteRecoveryAsync(
-                printerId, id, Quote(current.RowVersion), userId.ToString(), Evidence() with { SenderIsolation = "ServiceConfirmed" }, default));
+            Assert.False(current.BarrierHeld);
+            Assert.False(current.RequiresRecovery);
+            Assert.Equal(PrinterControlState.Failed, current.State);
+            Assert.Equal(PrinterControlEvidence.NotSent, current.CompletionEvidence);
+            Assert.Null((await db.PrinterControlOperations.SingleAsync()).RecoveryEvidenceJson);
         });
     }
 
@@ -715,7 +801,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             PrinterEmergencyStopAttempt stored = await db.PrinterEmergencyStopAttempts.SingleAsync();
             Assert.Null(stored.SendCommittedAtUtc);
             Assert.Equal(PrinterEmergencyStopDelivery.NotSent, stored.Delivery);
-            Assert.Equal(PrinterSenderIsolation.Confirmed, (await service.GetAsync(printerId, id, default)).SenderIsolation);
+            Assert.False((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            Assert.Equal(PrinterControlState.Failed, (await service.GetAsync(printerId, id, default)).State);
         });
         Assert.Equal(0, channel.SendCount);
     }
@@ -753,7 +840,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             await service.FinishEmergencyStopAsync(printerId, first, PrinterEmergencyStopDelivery.Accepted, default);
             Assert.Equal(PrinterEmergencyStopDelivery.Unknown,
                 (await db.PrinterEmergencyStopAttempts.SingleAsync(a => a.Id == other.AttemptId)).Delivery);
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, (await service.GetAsync(printerId, id, default)).SenderIsolation);
+            Assert.False((await service.GetAsync(printerId, id, default)).BarrierHeld);
         });
         Assert.True(raced);
     }
@@ -794,7 +881,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         await ChangeAsync(async (db, service) =>
         {
             Assert.Equal(PrinterEmergencyStopDelivery.Pending, (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery);
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, (await service.GetAsync(printerId, id, default)).SenderIsolation);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            Assert.False((await service.GetAsync(printerId, id, default)).RequiresRecovery);
         });
         printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
@@ -1022,7 +1110,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             NullLogger<PrinterControlOperationWorker>.Instance);
         await worker.StartAsync(default);
         await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.EndsWith("\nM400", channel.Script, StringComparison.Ordinal);
+        Assert.Equal(new PrinterControlRequest(kind, X: kind is PrinterControlKind.Jog or PrinterControlKind.MoveTo ? 1.5 : null,
+            Y: kind == PrinterControlKind.MoveTo ? 2 : null, Z: kind == PrinterControlKind.MoveTo ? 10 : null), channel.Request);
         channel.Completion.SetResult();
         await WaitForStateAsync(id, PrinterControlState.Succeeded);
         await worker.StopAsync(default);
@@ -1098,11 +1187,11 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         await WaitForStateAsync(id, PrinterControlState.Unknown);
         await worker.StopAsync(default);
         PrinterControlOperationDto result = await GetAsync(id);
-        Assert.True(result.BarrierHeld);
+        Assert.False(result.BarrierHeld);
         Assert.Equal(PrinterControlEvidence.None, result.CompletionEvidence);
         Assert.Equal("printer_firmware_rejected", result.Failure!.Code);
         Assert.Contains("Motion may have partially executed", result.Failure.Message, StringComparison.Ordinal);
-        Assert.Contains("explicit recovery", result.Failure.Message, StringComparison.Ordinal);
+        Assert.DoesNotContain("recovery", result.Failure.Message, StringComparison.OrdinalIgnoreCase);
         Assert.DoesNotContain(SensitiveFailureDetail, result.Failure.Message, StringComparison.Ordinal);
         Assert.Equal(result, await AdmitAsync(id));
         await worker.TickAsync(default);
@@ -1110,7 +1199,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     }
 
     [Fact]
-    public async Task WorkerAsync_AlreadyUnknownSender_StillAcknowledgesLaterRecovery()
+    public async Task WorkerAsync_TransportFailure_SettlesUnknownAndReleasesWithoutReplayOrSensitiveLogs()
     {
         Guid id = Guid.NewGuid();
         await AdmitAsync(id);
@@ -1123,35 +1212,24 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         channel.Completion.SetException(transportFailure);
         await WaitForStateAsync(id, PrinterControlState.Unknown);
         PrinterControlOperationDto unknown = await GetAsync(id);
-        Assert.True(unknown.BarrierHeld);
+        Assert.False(unknown.BarrierHeld);
+        Assert.False(unknown.RequiresRecovery);
         Assert.Equal("backend_outcome_unknown", unknown.Failure?.Code);
         WorkerLog warning = Assert.Single(logger.Entries);
         Assert.Equal(nameof(IOException), LogFields(warning)["ExceptionType"]);
         Assert.Equal(id, LogFields(warning)["OperationId"]);
         AssertSafeLogs(logger, SensitiveFailureDetail);
-        await ChangeAsync(async (_, service) =>
-            await service.BeginRecoveryAsync(printerId, id, Quote(unknown.RowVersion), userId.ToString(), default));
-        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while ((await GetAsync(id)).SenderIsolation != PrinterSenderIsolation.Confirmed)
-        {
-            await Task.Delay(20, timeout.Token);
-        }
         await worker.StopAsync(default);
-        PrinterControlOperationDto isolated = await GetAsync(id);
+        Assert.True(channel.Disposed.Task.IsCompleted);
         await ChangeAsync(async (db, service) =>
         {
             (await db.PrinterControlOperations.SingleAsync()).OwnerHeartbeatAtUtc = DateTime.UtcNow.AddMinutes(-2);
             await db.SaveChangesAsync();
             await service.ReconcileOrphansAsync(default);
+            Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
+            Assert.Null((await db.PrinterControlOperations.SingleAsync()).RecoveryEvidenceJson);
         });
-        PrinterControlOperationDto retained = await GetAsync(id);
-        Assert.Equal(isolated.SenderIsolation, retained.SenderIsolation);
-        await ChangeAsync(async (_, service) =>
-        {
-            PrinterControlOperationDto recovered = await service.CompleteRecoveryAsync(printerId, id, Quote(retained.RowVersion),
-                userId.ToString(), Evidence() with { SenderIsolation = "ServiceConfirmed" }, default);
-            Assert.Equal(PrinterControlState.Recovered, recovered.State);
-        });
+        Assert.Equal(PrinterControlState.Unknown, (await GetAsync(id)).State);
         Assert.Equal(1, channel.SendCount);
     }
 
@@ -1238,12 +1316,54 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             barrier.PhysicalControlCommandId = Guid.NewGuid();
             barrier.PhysicalControlRequiresReconciliation = true;
             await db.SaveChangesAsync();
-            PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], default))[printerId];
+            PrinterPhysicalControlDto projection = (await PrinterControlOperationService.ProjectAsync(db, [printerId], clients.Object, default))[printerId];
             Assert.Empty(projection.SupportedOperations);
             Assert.True(projection.BarrierHeld);
-            Assert.True(projection.RequiresRecovery);
+            Assert.False(projection.RequiresRecovery);
             Assert.Null(projection.OperationId);
         });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task DeletePrinterAsync_UnknownHistory_BlocksOnlyWhilePhysicalBarrierRetained(bool barrierHeld)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            await service.CommitSendAsync(id, owner, default);
+            if (barrierHeld)
+            {
+                (await db.PrinterControlOperations.SingleAsync()).State = PrinterControlState.Unknown;
+                await db.SaveChangesAsync();
+            }
+            else
+            {
+                await service.SetOutcomeAsync(id, owner, false, "transport_lost", default);
+            }
+        });
+        await ChangeAsync(async (db, _) =>
+        {
+            var repository = new EfPrintersRepository(db, Mock.Of<ISensitiveDataProtector>());
+            if (barrierHeld)
+            {
+                PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                    repository.RemoveAsync(new Printer { Id = printerId }, default));
+                Assert.Equal("physical_control_barrier", error.Code);
+                Assert.True(await db.Printers.AnyAsync(p => p.Id == printerId));
+                Assert.Equal(id, (await db.PrinterDispatchStates.AsNoTracking().SingleAsync()).PhysicalControlCommandId);
+            }
+            else
+            {
+                await repository.RemoveAsync(new Printer { Id = printerId }, default);
+                Assert.False(await db.Printers.AnyAsync(p => p.Id == printerId));
+            }
+        });
+        Assert.Equal(0, channel.SendCount);
     }
 
     [Fact]
@@ -1258,15 +1378,21 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             (await db.PrinterControlOperations.SingleAsync()).OwnerHeartbeatAtUtc = DateTime.UtcNow.AddMinutes(-2);
             await db.SaveChangesAsync();
         });
-        await ChangeAsync(async (_, service) =>
+        await ChangeAsync(async (db, service) =>
         {
-            Assert.NotNull(await service.ClaimAsync(id, Guid.NewGuid(), default));
+            Guid successorOwner = Guid.NewGuid();
+            Assert.NotNull(await service.ClaimAsync(id, successorOwner, default));
             Assert.False(await service.CommitSendAsync(id, owner, default));
+            await service.SetOutcomeAsync(id, owner, false, "sender_interrupted", default);
+            PrinterControlOperation operation = await db.PrinterControlOperations.AsNoTracking().SingleAsync();
+            Assert.Equal(successorOwner, operation.OwnerToken);
+            Assert.Equal(PrinterControlState.Queued, operation.State);
+            Assert.Equal(id, (await db.PrinterDispatchStates.AsNoTracking().SingleAsync()).PhysicalControlCommandId);
         });
     }
 
     [Fact]
-    public async Task RecoveryAsync_SentCrash_RequiresEvidenceAndFencesLateCompletion()
+    public async Task ReconcileOrphansAsync_SentCrash_ReleasesWithoutEvidenceAndFencesLateCompletion()
     {
         Guid id = Guid.NewGuid();
         Guid owner = Guid.NewGuid();
@@ -1281,24 +1407,13 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         await ChangeAsync(async (_, service) => await service.ReconcileOrphansAsync(default));
         PrinterControlOperationDto unknown = await GetAsync(id);
         Assert.Equal(PrinterControlState.Unknown, unknown.State);
-        Assert.True(unknown.BarrierHeld);
+        Assert.False(unknown.BarrierHeld);
+        Assert.False(unknown.RequiresRecovery);
+        Assert.Equal(PrinterControlEvidence.None, unknown.CompletionEvidence);
         await ChangeAsync(async (_, service) =>
         {
             Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
-            PrinterControlOperationDto recovering = await service.BeginRecoveryAsync(printerId, id, Quote(unknown.RowVersion), userId.ToString(), default);
-            Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, recovering.SenderIsolation);
-            await Assert.ThrowsAsync<PrinterControlException>(() => service.CompleteRecoveryAsync(printerId, id, Quote(recovering.RowVersion),
-                userId.ToString(), new("checked", "ServiceConfirmed", "socket closed", true, true, "inspected"), default));
-        });
-        PrinterControlOperationDto recovery = await GetAsync(id);
-        await ChangeAsync(async (_, service) =>
-        {
-            PrinterControlException stale = await Assert.ThrowsAsync<PrinterControlException>(() => service.CompleteRecoveryAsync(
-                printerId, id, Quote(unknown.RowVersion), userId.ToString(), Evidence(), default));
-            Assert.Equal(412, stale.Status);
-            PrinterControlOperationDto recovered = await service.CompleteRecoveryAsync(printerId, id, Quote(recovery.RowVersion), userId.ToString(), Evidence(), default);
-            Assert.Equal(PrinterControlState.Recovered, recovered.State);
-            Assert.False(recovered.BarrierHeld);
+            Assert.False(await service.CommitSendAsync(id, owner, default));
         });
         Guid successor = Guid.NewGuid();
         await AdmitAsync(successor);
@@ -1306,14 +1421,17 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             await service.SetOutcomeAsync(id, owner, true, null, default);
             Assert.Equal(successor, (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
-            Assert.NotNull((await db.PrinterControlOperations.SingleAsync(o => o.Id == id)).RecoveryEvidenceJson);
+            PrinterControlOperation historical = await db.PrinterControlOperations.SingleAsync(o => o.Id == id);
+            Assert.Null(historical.RecoveryEvidenceJson);
+            Assert.Equal(PrinterControlState.Unknown, historical.State);
+            Assert.Equal(PrinterControlEvidence.None, historical.CompletionEvidence);
         });
     }
 
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task SetOutcomeAsync_PreSendVersusAmbiguousWrite_ReleasesOnlyNotSent(bool sent)
+    public async Task SetOutcomeAsync_PreSendVersusAmbiguousWrite_ReleasesBothWithTruthfulEvidence(bool sent)
     {
         Guid id = Guid.NewGuid();
         Guid owner = Guid.NewGuid();
@@ -1328,13 +1446,166 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             await service.SetOutcomeAsync(id, owner, false, "test_failure", default);
         });
         PrinterControlOperationDto result = await GetAsync(id);
-        Assert.Equal(sent, result.BarrierHeld);
+        Assert.False(result.BarrierHeld);
+        Assert.False(result.RequiresRecovery);
         Assert.Equal(sent ? PrinterControlState.Unknown : PrinterControlState.Failed, result.State);
         Assert.Equal(sent ? PrinterControlEvidence.None : PrinterControlEvidence.NotSent, result.CompletionEvidence);
     }
 
+    [Theory]
+    [InlineData(PrinterControlState.Succeeded, false)]
+    [InlineData(PrinterControlState.Failed, false)]
+    [InlineData(PrinterControlState.Unknown, false)]
+    [InlineData(PrinterControlState.Succeeded, true)]
+    [InlineData(PrinterControlState.Failed, true)]
+    [InlineData(PrinterControlState.Unknown, true)]
+    public async Task SetOutcomeAsync_ReleaseDeferred_TimestampsTerminalReceiptBeforeBarrierCleanup(
+        PrinterControlState state, bool pendingEmergency)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            if (state != PrinterControlState.Failed)
+            {
+                await service.CommitSendAsync(id, owner, default);
+            }
+            if (pendingEmergency)
+            {
+                db.PrinterEmergencyStopAttempts.Add(new PrinterEmergencyStopAttempt
+                {
+                    Id = Guid.NewGuid(), OperationId = id, PrinterId = printerId,
+                    ActorSubject = userId.ToString(), ConfigurationIdentity = "test",
+                    CreatedAtUtc = DateTime.UtcNow, Delivery = PrinterEmergencyStopDelivery.Pending,
+                });
+            }
+            else
+            {
+                (await db.PrinterDispatchStates.SingleAsync()).ActiveJobId = Guid.NewGuid();
+            }
+            await db.SaveChangesAsync();
+        });
+        DateTime before = DateTime.UtcNow;
+        await ChangeAsync(async (_, service) =>
+            await service.SetOutcomeAsync(id, owner, state == PrinterControlState.Succeeded,
+                state == PrinterControlState.Succeeded ? null : "sender_interrupted", default));
+        PrinterControlOperationDto terminal = await GetAsync(id);
+        Assert.Equal(state, terminal.State);
+        Assert.True(terminal.BarrierHeld);
+        Assert.False(terminal.RequiresRecovery);
+        Assert.NotNull(terminal.CompletedAtUtc);
+        Assert.InRange(terminal.CompletedAtUtc.Value, before, DateTime.UtcNow);
+        Assert.Equal(state == PrinterControlState.Succeeded ? PrinterControlEvidence.MotionQueueDrained :
+            state == PrinterControlState.Failed ? PrinterControlEvidence.NotSent : PrinterControlEvidence.None,
+            terminal.CompletionEvidence);
+        await ChangeAsync(async (db, service) =>
+        {
+            Assert.Equal(terminal.CompletedAtUtc, (await db.PrinterControlOperations.SingleAsync()).CompletedAtUtc);
+            if (pendingEmergency)
+            {
+                (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery = PrinterEmergencyStopDelivery.NotSent;
+            }
+            else
+            {
+                (await db.PrinterDispatchStates.SingleAsync()).ActiveJobId = null;
+            }
+            await db.SaveChangesAsync();
+            await service.ReconcileOrphansAsync(default);
+            await service.SetOutcomeAsync(id, owner, true, null, default);
+        });
+        PrinterControlOperationDto released = await GetAsync(id);
+        Assert.False(released.BarrierHeld);
+        Assert.Equal(state, released.State);
+        Assert.Equal(terminal.CompletedAtUtc, released.CompletedAtUtc);
+        Assert.Equal(terminal.CompletionEvidence, released.CompletionEvidence);
+    }
+
     [Fact]
-    public async Task SetOutcomeAsync_LateMatchingResponse_SettlesUnknownBeforeRecovery()
+    public async Task ReconcileOrphansAsync_AbandonedEmergencyStop_ReplacesInProgressCopyWithUnknownNoReplayReceipt()
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            await service.CommitSendAsync(id, owner, default);
+            PrinterEmergencyStopLease lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
+            Assert.True(await service.CommitEmergencyStopSendAsync(printerId, lease, userId.ToString(), default));
+            PrinterControlOperationDto pending = await service.GetAsync(printerId, id, default);
+            Assert.Equal(PrinterControlState.Recovering, pending.State);
+            Assert.Contains("is stopping", pending.Failure!.Message, StringComparison.Ordinal);
+            DateTime stale = DateTime.UtcNow - PrinterControlOperationService.OwnerLiveness - TimeSpan.FromSeconds(1);
+            (await db.PrinterControlOperations.SingleAsync()).OwnerHeartbeatAtUtc = stale;
+            (await db.PrinterEmergencyStopAttempts.SingleAsync()).CreatedAtUtc = stale;
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ReconcileOrphansAsync(default);
+            Assert.Equal(PrinterEmergencyStopDelivery.Unknown, (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery);
+            Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
+        });
+        PrinterControlOperationDto receipt = await GetAsync(id);
+        Assert.Equal(PrinterControlState.Unknown, receipt.State);
+        Assert.False(receipt.BarrierHeld);
+        Assert.False(receipt.RequiresRecovery);
+        Assert.NotNull(receipt.CompletedAtUtc);
+        Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+        Assert.Equal("emergency_stop_requested", receipt.Failure?.Code);
+        Assert.Equal("Physical outcome is unknown. Check the printer before requesting another move; this command will not be replayed.",
+            receipt.Failure?.Message);
+        Assert.DoesNotContain("is stopping", receipt.Failure!.Message, StringComparison.Ordinal);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData(PrinterEmergencyStopDelivery.Accepted, false)]
+    [InlineData(PrinterEmergencyStopDelivery.NotSent, false)]
+    [InlineData(PrinterEmergencyStopDelivery.Unknown, false)]
+    [InlineData(PrinterEmergencyStopDelivery.Accepted, true)]
+    [InlineData(PrinterEmergencyStopDelivery.NotSent, true)]
+    [InlineData(PrinterEmergencyStopDelivery.Unknown, true)]
+    public async Task FinishEmergencyStopAsync_SenderIsolated_PreservesEmergencyDiagnosticsAfterRelease(
+        PrinterEmergencyStopDelivery delivery, bool motionSent)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (_, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            if (motionSent)
+            {
+                await service.CommitSendAsync(id, owner, default);
+            }
+            PrinterEmergencyStopLease lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
+            if (delivery != PrinterEmergencyStopDelivery.NotSent)
+            {
+                Assert.True(await service.CommitEmergencyStopSendAsync(printerId, lease, userId.ToString(), default));
+            }
+            await service.MaintainOwnerAsync(id, owner, true, default);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            await service.FinishEmergencyStopAsync(printerId, lease, delivery, default);
+        });
+        PrinterControlOperationDto receipt = await GetAsync(id);
+        Assert.False(receipt.BarrierHeld);
+        Assert.NotNull(receipt.CompletedAtUtc);
+        Assert.Equal(motionSent ? PrinterControlState.Unknown : PrinterControlState.Failed, receipt.State);
+        Assert.Equal(delivery switch
+        {
+            PrinterEmergencyStopDelivery.Accepted => "emergency_stop_accepted",
+            PrinterEmergencyStopDelivery.NotSent => "emergency_stop_not_sent",
+            _ => "emergency_stop_outcome_unknown",
+        }, receipt.Failure?.Code);
+        Assert.Equal("Motion was interrupted. Check the printer; no command will be replayed.", receipt.Failure?.Message);
+        Assert.Equal(motionSent ? PrinterControlEvidence.None : PrinterControlEvidence.NotSent, receipt.CompletionEvidence);
+    }
+
+    [Fact]
+    public async Task SetOutcomeAsync_LateMatchingResponse_DoesNotRewriteSettledUnknown()
     {
         Guid id = Guid.NewGuid();
         Guid owner = Guid.NewGuid();
@@ -1347,8 +1618,8 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             await service.SetOutcomeAsync(id, owner, true, null, default);
         });
         PrinterControlOperationDto result = await GetAsync(id);
-        Assert.Equal(PrinterControlState.Succeeded, result.State);
-        Assert.Equal(PrinterControlEvidence.MotionQueueDrained, result.CompletionEvidence);
+        Assert.Equal(PrinterControlState.Unknown, result.State);
+        Assert.Equal(PrinterControlEvidence.None, result.CompletionEvidence);
         Assert.False(result.BarrierHeld);
     }
 
@@ -1371,7 +1642,105 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         });
         PrinterControlOperationDto result = await GetAsync(id);
         Assert.Equal(PrinterControlState.Unknown, result.State);
-        Assert.Equal(PrinterSenderIsolation.ExternalVerificationRequired, result.SenderIsolation);
+        Assert.False(result.BarrierHeld);
+        Assert.False(result.RequiresRecovery);
+    }
+
+    [Theory]
+    [InlineData("missing", "home", PrinterControlKind.HomeAll)]
+    [InlineData("missing", "move", PrinterControlKind.Jog)]
+    [InlineData("unresolvable", "home", PrinterControlKind.HomeAll)]
+    [InlineData("unresolvable", "move", PrinterControlKind.Jog)]
+    [InlineData("withdrawn", "home", PrinterControlKind.HomeAll)]
+    [InlineData("withdrawn", "move", PrinterControlKind.Jog)]
+    public async Task ImportLegacyAsync_UnavailableCapability_PreservesUnknownAuditAndReleasesWithoutReplay(
+        string capabilityState, string legacyOperation, PrinterControlKind kind)
+    {
+        Guid id = Guid.NewGuid();
+        await SeedUnavailableLegacyMotionAsync(id, legacyOperation, capabilityState);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ImportLegacyAsync(printerId, default);
+            await service.ImportLegacyAsync(printerId, default);
+            clients.Verify(f => f.GetClient(It.IsAny<int>()), Times.Never);
+            PrinterControlOperation operation = await db.PrinterControlOperations.SingleAsync();
+            Assert.Equal("legacy:unknown", operation.NormalizedIntent);
+            Assert.NotNull(operation.SendCommittedAtUtc);
+            Assert.Null(operation.OwnerToken);
+            Assert.Null(operation.X);
+            Assert.Null(operation.Y);
+            Assert.Null(operation.Z);
+            Assert.Equal(1, await db.QueueOperationAudits.CountAsync());
+            Assert.Equal(1, await db.QueueDispatchOutbox.CountAsync());
+            Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
+        });
+
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance);
+        await worker.TickAsync(default);
+        PrinterControlOperationDto receipt = await GetAsync(id);
+        Assert.Equal(kind, receipt.Kind);
+        Assert.Equal(PrinterControlState.Unknown, receipt.State);
+        Assert.Equal("legacy_outcome_unknown", receipt.Failure?.Code);
+        Assert.False(receipt.BarrierHeld);
+        Assert.False(receipt.RequiresRecovery);
+        Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+
+        await ChangeAsync(async (db, service) =>
+        {
+            Assert.Null((await db.PrinterControlOperations.SingleAsync()).RecoveryEvidenceJson);
+            Assert.Null((await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
+            PrinterControlException unsupported = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.AdmitAsync(printerId, Guid.NewGuid(), userId.ToString(),
+                    new(kind, X: kind == PrinterControlKind.Jog ? 1 : null), default));
+            Assert.Equal("printer_operation_unsupported", unsupported.Code);
+        });
+        motionCapability.Verify(m => m.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("missing", "home")]
+    [InlineData("missing", "move")]
+    [InlineData("unresolvable", "home")]
+    [InlineData("unresolvable", "move")]
+    [InlineData("withdrawn", "home")]
+    [InlineData("withdrawn", "move")]
+    public async Task PrepareEmergencyStopAsync_UnavailableLegacyCapability_CleansHistoricalMotionWithoutCreatingSender(
+        string capabilityState, string legacyOperation)
+    {
+        Guid id = Guid.NewGuid();
+        await SeedUnavailableLegacyMotionAsync(id, legacyOperation, capabilityState);
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterEmergencyStopLease? lease = await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default);
+            Assert.Null(lease);
+            clients.Verify(f => f.GetClient(It.IsAny<int>()), Times.Never);
+            Assert.Empty(await db.PrinterEmergencyStopAttempts.ToArrayAsync());
+            PrinterControlOperationDto receipt = await service.GetAsync(printerId, id, default);
+            Assert.Equal(PrinterControlState.Unknown, receipt.State);
+            Assert.False(receipt.RequiresRecovery);
+            Assert.False(receipt.BarrierHeld);
+            Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+        });
+        motionCapability.Verify(m => m.ConnectAsync(It.IsAny<Printer>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("extrude")]
+    [InlineData("disable_motors")]
+    [InlineData("async_motion")]
+    public async Task ImportLegacyAsync_UnrecognizedBarrierLabel_DoesNotInventMotionReceipt(string operation)
+    {
+        Guid id = Guid.NewGuid();
+        await SeedUnavailableLegacyMotionAsync(id, operation, "missing");
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ImportLegacyAsync(printerId, default);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+            Assert.Equal(id, (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
+        });
     }
 
     [Fact]
@@ -1383,7 +1752,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             NullLogger<PrinterControlOperationWorker>.Instance);
         await worker.StartAsync(default);
         await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        Assert.EndsWith("\nM400", channel.Script, StringComparison.Ordinal);
+        Assert.Equal(new PrinterControlRequest(PrinterControlKind.HomeAll), channel.Request);
         Assert.Equal(PrinterControlState.Running, (await GetAsync(id)).State);
         channel.Completion.SetResult();
         await WaitForStateAsync(id, PrinterControlState.Succeeded);
@@ -1392,36 +1761,48 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     }
 
     [Fact]
-    public async Task WorkerAsync_RecoveryRequest_JoinsTransportBeforeConfirmingIsolation()
+    public async Task WorkerAsync_EmergencyCancellation_JoinsTransportBeforeReleasingBarrier()
     {
         Guid id = Guid.NewGuid();
+        channel.HoldDisposal = true;
         await AdmitAsync(id);
         using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
             NullLogger<PrinterControlOperationWorker>.Instance);
         await worker.StartAsync(default);
         await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        // Stop heartbeat races at the observation/POST boundary using the public CAS retry contract.
-        for (int attempt = 0; attempt < 10; attempt++)
+        PrinterEmergencyStopLease lease = null!;
+        await ChangeAsync(async (_, service) =>
+            lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!);
+        await channel.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
         {
-            PrinterControlOperationDto current = await GetAsync(id);
-            try
+            Assert.False(channel.Disposed.Task.IsCompleted);
+            Assert.True((await GetAsync(id)).BarrierHeld);
+            await ChangeAsync(async (_, service) =>
             {
-                await ChangeAsync(async (_, service) => await service.BeginRecoveryAsync(printerId, id, Quote(current.RowVersion), userId.ToString(), default));
-                break;
-            }
-            catch (PrinterControlException exception) when (exception.Status == 412)
-            {
-            }
+                await service.FinishEmergencyStopAsync(printerId, lease, PrinterEmergencyStopDelivery.Unknown, default);
+                await service.ReconcileOrphansAsync(default);
+                Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            });
+        }
+        finally
+        {
+            channel.AllowDisposal.TrySetResult();
         }
         await channel.Disposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await WaitForStateAsync(id, PrinterControlState.Unknown);
         await worker.StopAsync(default);
         PrinterControlOperationDto isolated = await GetAsync(id);
-        Assert.Equal(PrinterSenderIsolation.Confirmed, isolated.SenderIsolation);
-        Assert.True(isolated.BarrierHeld);
+        Assert.False(isolated.BarrierHeld);
+        Assert.False(isolated.RequiresRecovery);
+        Assert.Equal(PrinterControlEvidence.None, isolated.CompletionEvidence);
+        Assert.Equal(1, channel.SendCount);
     }
 
-    [Fact]
-    public async Task ControllerAsync_AdmissionAndRecoveryPreconditions_UseFixedWireContract()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ControllerAsync_AdmissionAndSettledReplay_UseFixedWireContract(bool success)
     {
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
         var controller = new PrinterControlOperationsController(scope.ServiceProvider.GetRequiredService<PrinterControlOperationService>(),
@@ -1440,8 +1821,6 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         PrinterControlOperationDto dto = Assert.IsType<PrinterControlOperationDto>(response.Value);
         Assert.Equal(Quote(dto.RowVersion), controller.Response.Headers.ETag);
         Assert.Equal("no-store", controller.Response.Headers.CacheControl);
-        var missing = Assert.IsType<ObjectResult>(await controller.RecoverAsync(printerId, id, default));
-        Assert.Equal(428, missing.StatusCode);
         using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web)
         {
             DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
@@ -1449,6 +1828,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         Assert.Equal("Queued", json.RootElement.GetProperty("state").GetString());
         Assert.Equal("HomeAll", json.RootElement.GetProperty("kind").GetString());
         Assert.True(json.RootElement.GetProperty("barrierHeld").GetBoolean());
+        Assert.False(json.RootElement.GetProperty("requiresRecovery").GetBoolean());
         Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("failure").ValueKind);
 
         Guid owner = Guid.NewGuid();
@@ -1456,10 +1836,1006 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         {
             await service.ClaimAsync(id, owner, default);
             await service.CommitSendAsync(id, owner, default);
-            await service.SetOutcomeAsync(id, owner, true, null, default);
+            await service.SetOutcomeAsync(id, owner, success, success ? null : "transport_lost", default);
         });
         var replay = Assert.IsType<OkObjectResult>(await controller.SubmitAsync(printerId, new(PrinterControlKind.HomeAll), id.ToString(), default));
-        Assert.Equal(PrinterControlState.Succeeded, Assert.IsType<PrinterControlOperationDto>(replay.Value).State);
+        PrinterControlOperationDto receipt = Assert.IsType<PrinterControlOperationDto>(replay.Value);
+        Assert.Equal(success ? PrinterControlState.Succeeded : PrinterControlState.Unknown, receipt.State);
+        Assert.False(receipt.BarrierHeld);
+        Assert.False(receipt.RequiresRecovery);
+    }
+
+    [Theory]
+    [InlineData("submit")]
+    [InlineData("get")]
+    [InlineData("current")]
+    public async Task ControllerAsync_PrinterAccessDenied_DoesNotExposeOrMutateReceipt(string action)
+    {
+        Guid id = Guid.NewGuid();
+        PrinterControlOperationDto admitted = await AdmitAsync(id);
+        authorization.Setup(a => a.CanAccessPrinterAsync(It.IsAny<ClaimsPrincipal>(), printerId,
+            It.IsAny<PrinterGroupAccessLevel>(), It.IsAny<CancellationToken>())).ReturnsAsync(false);
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        PrinterControlOperationsController controller = CreateMotionController(scope.ServiceProvider);
+        IActionResult response = action switch
+        {
+            "submit" => await controller.SubmitAsync(printerId, new(PrinterControlKind.HomeAll), Guid.NewGuid().ToString(), default),
+            "get" => await controller.GetAsync(printerId, id, default),
+            _ => await controller.CurrentAsync(printerId, default),
+        };
+        Assert.Equal(404, Assert.IsType<ObjectResult>(response).StatusCode);
+        Assert.Equal(admitted, await GetAsync(id));
+        Assert.Equal(1, await scope.ServiceProvider.GetRequiredService<AppDbContext>().PrinterControlOperations.CountAsync());
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task SetOutcomeAsync_LateOwnerWithReplacedBarrier_DoesNotReleaseOrMutateSuccessor(bool success)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        Guid successor = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            await service.CommitSendAsync(id, owner, default);
+            (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId = successor;
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            long revision = (await db.PrinterDispatchStates.SingleAsync()).Revision;
+            int audits = await db.QueueOperationAudits.CountAsync();
+            await service.SetOutcomeAsync(id, owner, success, success ? null : "sender_interrupted", default);
+            await service.MaintainOwnerAsync(id, owner, true, default);
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            Assert.Equal(successor, barrier.PhysicalControlCommandId);
+            Assert.Equal(revision, barrier.Revision);
+            Assert.Equal(PrinterControlState.Running, (await db.PrinterControlOperations.SingleAsync()).State);
+            Assert.Equal(audits, await db.QueueOperationAudits.CountAsync());
+        });
+    }
+
+    [Fact]
+    public async Task FinishEmergencyStopAsync_LatePendingAttempt_DoesNotReleaseSuccessor()
+    {
+        Guid id = Guid.NewGuid();
+        Guid successor = Guid.NewGuid();
+        await AdmitAsync(id);
+        PrinterEmergencyStopLease lease = null!;
+        await ChangeAsync(async (db, service) =>
+        {
+            lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
+            Assert.True(await service.CommitEmergencyStopSendAsync(printerId, lease, userId.ToString(), default));
+            (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId = successor;
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            long revision = (await db.PrinterDispatchStates.SingleAsync()).Revision;
+            await service.FinishEmergencyStopAsync(printerId, lease, PrinterEmergencyStopDelivery.Unknown, default);
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            Assert.Equal(successor, barrier.PhysicalControlCommandId);
+            Assert.Equal(revision, barrier.Revision);
+            Assert.Equal(PrinterEmergencyStopDelivery.Unknown, (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery);
+        });
+    }
+
+    [Theory]
+    [InlineData(PrinterControlState.Running)]
+    [InlineData(PrinterControlState.Unknown)]
+    [InlineData(PrinterControlState.Recovering)]
+    [InlineData(PrinterControlState.Succeeded)]
+    [InlineData(PrinterControlState.Failed)]
+    [InlineData(PrinterControlState.Recovered)]
+    public async Task ReconcileOrphansAsync_HistoricalRetainedBarrier_ReleasesOnceWithoutRewritingEvidence(PrinterControlState state)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        PrinterControlEvidence evidence = state == PrinterControlState.Succeeded
+            ? PrinterControlEvidence.MotionQueueDrained
+            : state == PrinterControlState.Recovered ? PrinterControlEvidence.OperatorVerifiedRecovery : PrinterControlEvidence.None;
+        DateTime original = DateTime.UtcNow.AddHours(-1);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            await service.CommitSendAsync(id, owner, default);
+            PrinterControlOperation operation = await db.PrinterControlOperations.SingleAsync();
+            operation.State = state;
+            operation.OwnerHeartbeatAtUtc = original;
+            operation.CompletionEvidence = evidence;
+            operation.EmergencyStopInFlight = true;
+            operation.RecoveryRequestedAtUtc = original;
+            operation.RecoveryActorSubject = "historical-operator";
+            operation.RecoveryFromRevision = 7;
+            operation.RecoveryEvidenceJson = "{\"historical\":true}";
+            (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlRequiresReconciliation = true;
+            await db.SaveChangesAsync();
+        });
+
+        // A new scope simulates restart: cleanup cannot depend on live worker memory or plugin availability.
+        clients.Invocations.Clear();
+        clients.Setup(f => f.GetClient(It.IsAny<int>())).Throws(new InvalidOperationException("Missing plugin"));
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ReconcileOrphansAsync(default);
+            PrinterControlOperation operation = await db.PrinterControlOperations.SingleAsync();
+            Assert.Equal(state is PrinterControlState.Running or PrinterControlState.Recovering ? PrinterControlState.Unknown : state, operation.State);
+            Assert.Equal(evidence, operation.CompletionEvidence);
+            Assert.True(operation.Settled);
+            Assert.False(operation.RequiresRecovery);
+            Assert.NotNull(operation.CompletedAtUtc);
+            Assert.Equal(original, operation.RecoveryRequestedAtUtc);
+            Assert.Equal("historical-operator", operation.RecoveryActorSubject);
+            Assert.Equal(7, operation.RecoveryFromRevision);
+            Assert.Equal("{\"historical\":true}", operation.RecoveryEvidenceJson);
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            Assert.Null(barrier.PhysicalControlCommandId);
+            Assert.False(barrier.PhysicalControlRequiresReconciliation);
+            int audits = await db.QueueOperationAudits.CountAsync();
+            int events = await db.QueueDispatchOutbox.CountAsync();
+            await service.ReconcileOrphansAsync(default);
+            Assert.Equal(audits, await db.QueueOperationAudits.CountAsync());
+            Assert.Equal(events, await db.QueueDispatchOutbox.CountAsync());
+            Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
+        });
+        clients.Verify(f => f.GetClient(It.IsAny<int>()), Times.Never);
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("physical-attempt", false)]
+    [InlineData("dispatch-attempt", false)]
+    [InlineData("active-job", false)]
+    [InlineData("Starting", false)]
+    [InlineData("Printing", false)]
+    [InlineData("Paused", false)]
+    [InlineData("physical-attempt", true)]
+    [InlineData("dispatch-attempt", true)]
+    [InlineData("active-job", true)]
+    [InlineData("Starting", true)]
+    [InlineData("Printing", true)]
+    [InlineData("Paused", true)]
+    public async Task ManualCleanupAsync_PrintOccupancy_PreservesEveryIndependentFence(string fence, bool legacy)
+    {
+        Guid id = Guid.NewGuid();
+        Guid protectedId = Guid.NewGuid();
+        if (!legacy)
+        {
+            await AdmitAsync(id);
+        }
+
+        await ChangeAsync(async (db, _) =>
+        {
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            barrier.PhysicalControlCommandId = id;
+            barrier.PhysicalControlOperation = legacy ? "home" : "async_motion";
+            barrier.PhysicalControlRequiresReconciliation = true;
+            if (fence == "physical-attempt")
+            {
+                barrier.PhysicalControlAttemptId = protectedId;
+            }
+            else if (fence == "dispatch-attempt")
+            {
+                barrier.ActiveDispatchAttemptId = protectedId;
+            }
+            else if (fence == "active-job")
+            {
+                barrier.ActiveJobId = protectedId;
+            }
+            else
+            {
+                db.PrintJobs.Add(new PrintJob
+                {
+                    Id = protectedId, Name = "Occupying job", AssignedPrinterId = printerId,
+                    Status = Enum.Parse<PrintJobStatus>(fence),
+                });
+            }
+            if (!legacy)
+            {
+                PrinterControlOperation operation = await db.PrinterControlOperations.SingleAsync();
+                operation.State = PrinterControlState.Unknown;
+                operation.OwnerHeartbeatAtUtc = DateTime.UtcNow.AddHours(-1);
+            }
+            await db.SaveChangesAsync();
+        });
+
+        await ChangeAsync(async (db, service) =>
+        {
+            int audits = await db.QueueOperationAudits.CountAsync();
+            await service.ImportLegacyAsync(printerId, default);
+            await service.ReconcileOrphansAsync(default);
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            Assert.Equal(id, barrier.PhysicalControlCommandId);
+            Assert.True(barrier.PhysicalControlRequiresReconciliation);
+            Assert.Equal(fence == "physical-attempt" ? protectedId : (Guid?)null, barrier.PhysicalControlAttemptId);
+            Assert.Equal(fence == "dispatch-attempt" ? protectedId : (Guid?)null, barrier.ActiveDispatchAttemptId);
+            Assert.Equal(fence == "active-job" ? protectedId : (Guid?)null, barrier.ActiveJobId);
+            Assert.Equal(legacy ? 0 : 1, await db.PrinterControlOperations.CountAsync());
+            Assert.Equal(audits, await db.QueueOperationAudits.CountAsync());
+            if (Enum.TryParse(fence, out PrintJobStatus status))
+            {
+                PrintJob job = await db.PrintJobs.SingleAsync();
+                Assert.Equal(protectedId, job.Id);
+                Assert.Equal(printerId, job.AssignedPrinterId);
+                Assert.Equal(status, job.Status);
+            }
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData(PrinterControlState.Running)]
+    [InlineData(PrinterControlState.Unknown)]
+    [InlineData(PrinterControlState.Recovering)]
+    public async Task ReconcileOrphansAsync_FreshOwnerWithoutIsolation_RetainsCoordination(PrinterControlState state)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            await service.CommitSendAsync(id, owner, default);
+            (await db.PrinterControlOperations.SingleAsync()).State = state;
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (_, service) =>
+        {
+            await service.ReconcileOrphansAsync(default);
+            PrinterControlOperationDto receipt = await service.GetAsync(printerId, id, default);
+            Assert.Equal(state, receipt.State);
+            Assert.True(receipt.BarrierHeld);
+            Assert.False(receipt.RequiresRecovery);
+        });
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    [InlineData(true, true)]
+    public async Task MaintainOwnerAsync_HeartbeatGap_OnlyRenewsUnexpiredSenderLease(bool sent, bool expired)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        DateTime heartbeat = DateTime.UtcNow.AddSeconds(expired ? -21 : -5);
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            if (sent)
+            {
+                await service.CommitSendAsync(id, owner, default);
+            }
+            (await db.PrinterControlOperations.SingleAsync()).OwnerHeartbeatAtUtc = heartbeat;
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterControlOperationDto before = await service.GetAsync(printerId, id, default);
+            Assert.Equal(!expired, await service.MaintainOwnerAsync(id, owner, false, default));
+            PrinterControlOperation operation = await db.PrinterControlOperations.AsNoTracking().SingleAsync();
+            if (expired)
+            {
+                Assert.Equal(heartbeat, operation.OwnerHeartbeatAtUtc);
+            }
+            else
+            {
+                Assert.True(operation.OwnerHeartbeatAtUtc > heartbeat);
+            }
+            Assert.Equal(before, await service.GetAsync(printerId, id, default));
+            await service.ReconcileOrphansAsync(default);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+        });
+    }
+
+    [Theory]
+    [InlineData(false, false)]
+    [InlineData(false, true)]
+    [InlineData(true, false)]
+    public async Task CommitSendAsync_ExpiredSenderLeaseOrWrongBarrier_NeverCommitsPhysicalSend(bool replacedBarrier, bool nullHeartbeat)
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        Guid successor = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            if (replacedBarrier)
+            {
+                (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId = successor;
+            }
+            else
+            {
+                (await db.PrinterControlOperations.SingleAsync()).OwnerHeartbeatAtUtc =
+                    nullHeartbeat ? null : DateTime.UtcNow - PrinterControlOperationService.SenderLease - TimeSpan.FromSeconds(1);
+            }
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            if (replacedBarrier)
+            {
+                PrinterControlException error = await Assert.ThrowsAsync<PrinterControlException>(() => service.CommitSendAsync(id, owner, default));
+                Assert.Equal("physical_control_barrier", error.Code);
+            }
+            else
+            {
+                Assert.False(await service.CommitSendAsync(id, owner, default));
+            }
+            Assert.Null((await db.PrinterControlOperations.SingleAsync()).SendCommittedAtUtc);
+            Assert.Equal(replacedBarrier ? successor : id, (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task CommitEmergencyStopSendAsync_ExpiredUncommittedAttempt_CannotSendWhileFreshPendingStillBlocksSuccessor()
+    {
+        Guid id = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterEmergencyStopLease lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
+            (await db.PrinterEmergencyStopAttempts.SingleAsync()).CreatedAtUtc = DateTime.UtcNow.AddSeconds(-25);
+            await db.SaveChangesAsync();
+            Assert.False(await service.CommitEmergencyStopSendAsync(printerId, lease, userId.ToString(), default));
+            await service.ReconcileOrphansAsync(default);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            Assert.Null((await db.PrinterEmergencyStopAttempts.SingleAsync()).SendCommittedAtUtc);
+            Assert.Equal(PrinterEmergencyStopDelivery.Pending, (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery);
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerAsync_OutcomeArrives_DisposesAndJoinsBeforeWritingOutcomeOrReleasing(bool success)
+    {
+        Guid id = Guid.NewGuid();
+        channel.HoldDisposal = true;
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance);
+        await worker.StartAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        if (success)
+        {
+            channel.Completion.TrySetResult();
+        }
+        else
+        {
+            channel.Completion.TrySetException(new IOException("Response lost"));
+        }
+        await channel.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            PrinterControlOperationDto during = await GetAsync(id);
+            Assert.Equal(PrinterControlState.Running, during.State);
+            Assert.True(during.BarrierHeld);
+            Assert.False(channel.Disposed.Task.IsCompleted);
+        }
+        finally
+        {
+            channel.AllowDisposal.TrySetResult();
+        }
+        await WaitForStateAsync(id, success ? PrinterControlState.Succeeded : PrinterControlState.Unknown);
+        await worker.StopAsync(default);
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.False((await GetAsync(id)).BarrierHeld);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("home")]
+    [InlineData("home_xy")]
+    [InlineData("home_z")]
+    [InlineData("move")]
+    [InlineData("move_to")]
+    public async Task ImportLegacyAsync_FreshDirectSender_OnlyCleansAfterDeadlineAndOrphanGrace(string operation)
+    {
+        Guid id = Guid.NewGuid();
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            barrier.PhysicalControlCommandId = id;
+            barrier.PhysicalControlOperation = operation;
+            barrier.PhysicalControlStartedAtUtc = DateTime.UtcNow.AddMinutes(-5);
+            barrier.PhysicalControlRequiresReconciliation = false;
+            await db.SaveChangesAsync();
+            await service.ImportLegacyAsync(printerId, default);
+            Assert.Equal(id, barrier.PhysicalControlCommandId);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+            Assert.Empty(await db.QueueOperationAudits.ToArrayAsync());
+            barrier.PhysicalControlStartedAtUtc =
+                DateTime.UtcNow - PrinterControlOperationService.CommandTimeout - PrinterControlOperationService.OwnerLiveness - TimeSpan.FromSeconds(1);
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            await service.ImportLegacyAsync(printerId, default);
+            Assert.Null((await db.PrinterDispatchStates.SingleAsync()).PhysicalControlCommandId);
+            PrinterControlOperation receipt = await db.PrinterControlOperations.SingleAsync();
+            Assert.Equal(id, receipt.Id);
+            Assert.Equal(PrinterControlState.Unknown, receipt.State);
+            Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+            Assert.False(receipt.RequiresRecovery);
+            Assert.Null(await service.ClaimAsync(id, Guid.NewGuid(), default));
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("home", false, false)]
+    [InlineData("home_xy", false, false)]
+    [InlineData("home_z", false, false)]
+    [InlineData("move", false, false)]
+    [InlineData("move_to", false, false)]
+    [InlineData("home", true, true)]
+    [InlineData("move", true, true)]
+    [InlineData("disable_motors", false, true)]
+    [InlineData("emergencystop", false, true)]
+    [InlineData("start", true, true)]
+    public async Task MarkDirectUnknownAsync_ManualOnlyLease_ReleasesOnlyIdleMotionAndKeepsUnknownAudit(
+        string operation, bool attemptBound, bool retained)
+    {
+        Guid id = Guid.NewGuid();
+        Guid? attempt = attemptBound ? Guid.NewGuid() : null;
+        await ChangeAsync(async (db, _) =>
+        {
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            barrier.PhysicalControlCommandId = id;
+            barrier.PhysicalControlAttemptId = attempt;
+            barrier.PhysicalControlOperation = operation;
+            barrier.PhysicalControlStartedAtUtc = DateTime.UtcNow;
+            await db.SaveChangesAsync();
+            var service = new PrinterPhysicalActuationService(db, new DbOutboxSequenceAllocator(),
+                authorization.Object, NullLogger<PrinterPhysicalActuationService>.Instance);
+            await service.MarkDirectUnknownAsync(new(id, printerId, attempt, operation, userId.ToString()), "transport_lost", default);
+            Assert.Equal(retained ? id : (Guid?)null, barrier.PhysicalControlCommandId);
+            Assert.Equal(attempt, barrier.PhysicalControlAttemptId);
+            Assert.Equal(retained, barrier.PhysicalControlRequiresReconciliation);
+            QueueDispatchOutbox notification = await db.QueueDispatchOutbox.SingleAsync();
+            Assert.Equal(PrinterPhysicalActuationService.EventTypeUnknown, notification.EventType);
+            Assert.Equal(QueueAuditOutcomes.Unknown, (await db.QueueOperationAudits.SingleAsync()).Outcome);
+            Assert.Empty(await db.PrinterControlOperations.ToArrayAsync());
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("dispatch-attempt")]
+    [InlineData("active-job")]
+    [InlineData("Starting")]
+    [InlineData("Printing")]
+    [InlineData("Paused")]
+    public async Task MarkDirectUnknownAsync_PrintOccupancyAppears_PreservesManualBarrierAndPrintState(string fence)
+    {
+        Guid id = Guid.NewGuid();
+        Guid protectedId = Guid.NewGuid();
+        await ChangeAsync(async (db, _) =>
+        {
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            barrier.PhysicalControlCommandId = id;
+            barrier.PhysicalControlOperation = "move";
+            if (fence == "dispatch-attempt")
+            {
+                barrier.ActiveDispatchAttemptId = protectedId;
+            }
+            else if (fence == "active-job")
+            {
+                barrier.ActiveJobId = protectedId;
+            }
+            else
+            {
+                db.PrintJobs.Add(new PrintJob
+                {
+                    Id = protectedId, Name = "Occupying", AssignedPrinterId = printerId,
+                    Status = Enum.Parse<PrintJobStatus>(fence),
+                });
+            }
+            await db.SaveChangesAsync();
+            var service = new PrinterPhysicalActuationService(db, new DbOutboxSequenceAllocator(),
+                authorization.Object, NullLogger<PrinterPhysicalActuationService>.Instance);
+            await service.MarkDirectUnknownAsync(new(id, printerId, null, "move", userId.ToString()), "transport_lost", default);
+            Assert.Equal(id, barrier.PhysicalControlCommandId);
+            Assert.True(barrier.PhysicalControlRequiresReconciliation);
+            Assert.Equal(fence == "dispatch-attempt" ? protectedId : (Guid?)null, barrier.ActiveDispatchAttemptId);
+            Assert.Equal(fence == "active-job" ? protectedId : (Guid?)null, barrier.ActiveJobId);
+            if (Enum.TryParse(fence, out PrintJobStatus status))
+            {
+                Assert.Equal(status, (await db.PrintJobs.SingleAsync()).Status);
+            }
+        });
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerAsync_SenderLeaseOrCommandDeadlineExpires_CancelsAndJoinsBeforeSettlingUnknown(bool renewLease)
+    {
+        Assert.Equal(TimeSpan.FromSeconds(20), PrinterControlOperationService.SenderLease);
+        Assert.Equal(TimeSpan.FromMinutes(5), PrinterControlOperationService.CommandTimeout);
+        Assert.True(PrinterControlOperationService.SenderLease < PrinterControlOperationService.OwnerLiveness);
+        Guid id = Guid.NewGuid();
+        channel.HoldDisposal = true;
+        var clock = new MotionTestClock();
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        if (renewLease)
+        {
+            for (int renewal = 0; renewal < 19; renewal++)
+            {
+                clock.Advance(TimeSpan.FromSeconds(15));
+                await worker.TickAsync(default);
+                Assert.False(channel.Disposing.Task.IsCompleted);
+            }
+            clock.Advance(TimeSpan.FromSeconds(14));
+            await worker.TickAsync(default);
+        }
+        else
+        {
+            clock.Advance(TimeSpan.FromSeconds(19));
+        }
+        Assert.False(channel.Disposing.Task.IsCompleted);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await channel.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            Assert.Equal(PrinterControlState.Running, (await GetAsync(id)).State);
+            Assert.True((await GetAsync(id)).BarrierHeld);
+            Assert.False(channel.Disposed.Task.IsCompleted);
+        }
+        finally
+        {
+            channel.AllowDisposal.TrySetResult();
+        }
+        await WaitForStateAsync(id, PrinterControlState.Unknown);
+        await worker.TickAsync(default);
+        PrinterControlOperationDto receipt = await GetAsync(id);
+        Assert.Equal("sender_interrupted", receipt.Failure?.Code);
+        Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+        Assert.False(receipt.BarrierHeld);
+        Assert.False(receipt.RequiresRecovery);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task EmergencyStopAsync_AttemptBoundOwnershipAppearsBeforeSend_PreservesUnrelatedAttempt()
+    {
+        Guid id = Guid.NewGuid();
+        Guid attempt = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterEmergencyStopLease lease = (await service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default))!;
+            (await db.PrinterDispatchStates.SingleAsync()).PhysicalControlAttemptId = attempt;
+            await db.SaveChangesAsync();
+            Assert.False(await service.CommitEmergencyStopSendAsync(printerId, lease, userId.ToString(), default));
+            await service.FinishEmergencyStopAsync(printerId, lease, PrinterEmergencyStopDelivery.NotSent, default);
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            Assert.Equal(id, barrier.PhysicalControlCommandId);
+            Assert.Equal(attempt, barrier.PhysicalControlAttemptId);
+            Assert.Null((await db.PrinterEmergencyStopAttempts.SingleAsync()).SendCommittedAtUtc);
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData("physical-attempt")]
+    [InlineData("dispatch-attempt")]
+    [InlineData("active-job")]
+    [InlineData("Starting")]
+    [InlineData("Printing")]
+    [InlineData("Paused")]
+    public async Task PrepareEmergencyStopAsync_UnrelatedPrintOwnership_DoesNotAdmitOrMutate(string fence)
+    {
+        Guid id = Guid.NewGuid();
+        Guid protectedId = Guid.NewGuid();
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, _) =>
+        {
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            if (fence == "physical-attempt")
+            {
+                barrier.PhysicalControlAttemptId = protectedId;
+            }
+            else if (fence == "dispatch-attempt")
+            {
+                barrier.ActiveDispatchAttemptId = protectedId;
+            }
+            else if (fence == "active-job")
+            {
+                barrier.ActiveJobId = protectedId;
+            }
+            else
+            {
+                db.PrintJobs.Add(new PrintJob
+                {
+                    Id = protectedId, Name = "Occupying", AssignedPrinterId = printerId,
+                    Status = Enum.Parse<PrintJobStatus>(fence),
+                });
+            }
+            await db.SaveChangesAsync();
+        });
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterControlOperationDto before = await service.GetAsync(printerId, id, default);
+            PrinterControlException denied = await Assert.ThrowsAsync<PrinterControlException>(() =>
+                service.PrepareEmergencyStopAsync(printerId, userId.ToString(), default));
+            Assert.Equal(fence == "physical-attempt" ? "physical_control_barrier" : "printer_busy", denied.Code);
+            Assert.Equal(before, await service.GetAsync(printerId, id, default));
+            Assert.Empty(await db.PrinterEmergencyStopAttempts.ToArrayAsync());
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            Assert.Equal(fence == "physical-attempt" ? protectedId : (Guid?)null, barrier.PhysicalControlAttemptId);
+            Assert.Equal(fence == "dispatch-attempt" ? protectedId : (Guid?)null, barrier.ActiveDispatchAttemptId);
+            Assert.Equal(fence == "active-job" ? protectedId : (Guid?)null, barrier.ActiveJobId);
+        });
+        Assert.Equal(0, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task EmergencyStopAsync_DeadlineExpiresDuringSendAuthorization_NeverInvokesBackend()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        await AdmitAsync(id);
+        int checks = 0;
+        authentication.Setup(service => service.HasPermissionAsync(userId, "queue", "cancel"))
+            .Returns(() =>
+            {
+                if (++checks == 2)
+                {
+                    clock.Advance(TimeSpan.FromSeconds(20));
+                }
+                return Task.FromResult(true);
+            });
+        var printers = new Mock<IPrintersService>(MockBehavior.Strict);
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() =>
+            CreateEmergencyController(scope.ServiceProvider, printers, clock).EmergencyStopAsync(printerId, default));
+        Assert.Equal(2, checks);
+        printers.Verify(service => service.EmergencyStopAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        await ChangeAsync(async (db, service) =>
+        {
+            PrinterEmergencyStopAttempt attempt = await db.PrinterEmergencyStopAttempts.SingleAsync();
+            Assert.Null(attempt.SendCommittedAtUtc);
+            Assert.Equal(PrinterEmergencyStopDelivery.NotSent, attempt.Delivery);
+            Assert.False((await service.GetAsync(printerId, id, default)).BarrierHeld);
+        });
+    }
+
+    [Fact]
+    public async Task EmergencyStopAsync_SenderDeadlineExpires_CancelsBackendAndNeverRetriesOrFabricatesAcceptance()
+    {
+        Guid id = Guid.NewGuid();
+        Guid owner = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken backendToken = default;
+        await AdmitAsync(id);
+        await ChangeAsync(async (_, service) =>
+        {
+            await service.ClaimAsync(id, owner, default);
+            await service.CommitSendAsync(id, owner, default);
+        });
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.EmergencyStopAsync(printerId, It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns(async (Guid _, string _, CancellationToken token) =>
+            {
+                backendToken = token;
+                entered.TrySetResult();
+                await Task.Delay(Timeout.InfiniteTimeSpan, token);
+                return true;
+            });
+        await using AsyncServiceScope scope = provider.CreateAsyncScope();
+        Task<ActionResult<CommandResult>> request =
+            CreateEmergencyController(scope.ServiceProvider, printers, clock).EmergencyStopAsync(printerId, default);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        clock.Advance(TimeSpan.FromSeconds(19));
+        Assert.False(backendToken.IsCancellationRequested);
+        Assert.False(request.IsCompleted);
+        clock.Advance(TimeSpan.FromSeconds(1));
+        ObjectResult response = Assert.IsType<ObjectResult>((await request.WaitAsync(TimeSpan.FromSeconds(10))).Result);
+        Assert.Equal(503, response.StatusCode);
+        Assert.True(backendToken.IsCancellationRequested);
+        await ChangeAsync(async (db, service) =>
+        {
+            Assert.Equal(PrinterEmergencyStopDelivery.Unknown, (await db.PrinterEmergencyStopAttempts.SingleAsync()).Delivery);
+            Assert.True((await service.GetAsync(printerId, id, default)).BarrierHeld);
+            await service.MaintainOwnerAsync(id, owner, true, default);
+            PrinterControlOperationDto receipt = await service.GetAsync(printerId, id, default);
+            Assert.Equal(PrinterControlState.Unknown, receipt.State);
+            Assert.Equal(PrinterControlEvidence.None, receipt.CompletionEvidence);
+            Assert.False(receipt.BarrierHeld);
+        });
+        printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerLifetimeAsync_CompletedOutcome_DisposesBothTimersWithoutReplaying(bool success)
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, clock.CreatedTimerCount);
+        Assert.Equal(2, clock.ActiveTimerCount);
+        if (success)
+        {
+            channel.Completion.SetResult();
+        }
+        else
+        {
+            channel.Completion.SetException(new IOException("Response lost"));
+        }
+        await WaitForStateAsync(id, success ? PrinterControlState.Succeeded : PrinterControlState.Unknown);
+        Assert.Null(await DrainWorkerExecutionsAsync(worker, clock, 2));
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        await worker.TickAsync(default);
+        Assert.Equal(2, clock.CreatedTimerCount);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_FaultedSenderTask_DisposesTimersAndRemovesFaultedEntry()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        var logger = new WorkerLogger { ThrowOnMotionFailure = true };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), logger, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        channel.Completion.SetException(new IOException("Response lost"));
+        await WaitForStateAsync(id, PrinterControlState.Unknown);
+        Exception? failure = await DrainWorkerExecutionsAsync(worker, clock, 2);
+        Assert.Equal("Injected motion logger failure", failure?.Message);
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        await worker.TickAsync(default);
+        await worker.TickAsync(default);
+        Assert.Single(logger.Entries);
+        Assert.Equal(1, channel.SendCount);
+        Assert.Equal(PrinterControlEvidence.None, (await GetAsync(id)).CompletionEvidence);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_DeadlineTimerDisposalThrows_StillDisposesLeaseAndRemovesEntry()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock { TimerDisposed = FailFirstTimerDisposal };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        Exception? failure = await DrainWorkerExecutionsAsync(worker, clock, 2);
+        Assert.Equal("Injected timer disposal failure", failure?.Message);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        await worker.TickAsync(default);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_ShutdownCancellation_JoinsSenderBeforeDisposingTimers()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        channel.HoldDisposal = true;
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await worker.StartAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var grace = new CancellationTokenSource();
+        Task stopping = worker.StopAsync(grace.Token);
+        Assert.False(stopping.IsCompleted);
+        await grace.CancelAsync();
+        await channel.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            Assert.False(channel.Disposed.Task.IsCompleted);
+            Assert.Equal(2, clock.ActiveTimerCount);
+            Assert.Equal(0, clock.DisposedTimerCount);
+            Assert.NotNull(worker.ExecuteTask);
+            Assert.False(worker.ExecuteTask.IsCompleted);
+        }
+        finally
+        {
+            channel.AllowDisposal.TrySetResult();
+        }
+        await stopping.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.NotNull(worker.ExecuteTask);
+        await worker.ExecuteTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.Equal(2, clock.DisposedTimerCount);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(PrinterControlState.Unknown, (await GetAsync(id)).State);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerLifetimeAsync_ShutdownWithFaultedEntry_JoinsAndDisposesEverySender(bool disposalThrows)
+    {
+        Guid id = Guid.NewGuid();
+        Guid otherId = Guid.NewGuid();
+        Guid otherPrinterId = Guid.NewGuid();
+        var clock = new MotionTestClock { TimerDisposed = disposalThrows ? FailFirstTimerDisposal : null };
+        var logger = new WorkerLogger { ThrowOnMotionFailure = true };
+        await using var otherChannel = new FakeChannel { HoldDisposal = true };
+        motionCapability.Setup(m => m.ConnectAsync(It.Is<Printer>(p => p.Id == otherPrinterId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(otherChannel);
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            db.Printers.Add(new Printer
+            {
+                Id = otherPrinterId, Name = "Second sender", Backend = (int)PrinterBackend.Moonraker,
+                IsEnabled = true, ServerUrl = "http://other.invalid",
+            });
+            db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = otherPrinterId });
+            await db.SaveChangesAsync();
+            await service.AdmitAsync(otherPrinterId, otherId, userId.ToString(), new(PrinterControlKind.HomeAll), default);
+        });
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), logger, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await otherChannel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        channel.Completion.SetException(new IOException("Response lost"));
+        await WaitForStateAsync(id, PrinterControlState.Unknown);
+        Assert.Equal(4, clock.ActiveTimerCount);
+
+        // Pause the first hosted scan before it can remove the already-faulted entry.
+        commands.PauseNextOperationRead = true;
+        await worker.StartAsync(default);
+        using var grace = new CancellationTokenSource();
+        Task stopping = Task.CompletedTask;
+        try
+        {
+            await commands.OperationReadPaused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            stopping = worker.StopAsync(grace.Token);
+            await grace.CancelAsync();
+            await otherChannel.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, clock.DisposedTimerCount);
+            Assert.Equal(4, clock.ActiveTimerCount);
+            Assert.False(otherChannel.Disposed.Task.IsCompleted);
+            Assert.NotNull(worker.ExecuteTask);
+            Assert.False(worker.ExecuteTask.IsCompleted);
+        }
+        finally
+        {
+            commands.ResumeOperationRead.TrySetResult();
+            otherChannel.AllowDisposal.TrySetResult();
+        }
+        await stopping.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.NotNull(worker.ExecuteTask);
+        if (disposalThrows)
+        {
+            AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() =>
+                worker.ExecuteTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("Injected timer disposal failure", Assert.Single(failure.InnerExceptions).Message);
+        }
+        else
+        {
+            InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                worker.ExecuteTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("Injected motion logger failure", failure.Message);
+        }
+        Assert.Equal(4, clock.DisposedTimerCount);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.True(otherChannel.Disposed.Task.IsCompleted);
+        await worker.TickAsync(default);
+        await ChangeAsync(async (_, service) =>
+            Assert.Equal(PrinterControlState.Unknown, (await service.GetAsync(otherPrinterId, otherId, default)).State));
+        Assert.Equal(1, channel.SendCount);
+        Assert.Equal(1, otherChannel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_SecondTimerConstructionThrows_DisposesFirstAndAllowsLaterAdmission()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock { ThrowOnTimerCreate = 2 };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() => worker.TickAsync(default));
+        Assert.Equal("Injected timer construction failure", failure.Message);
+        Assert.Equal(1, clock.CreatedTimerCount);
+        Assert.Equal(1, clock.DisposedTimerCount);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(PrinterControlState.Queued, (await GetAsync(id)).State);
+        Assert.Equal(0, channel.SendCount);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(3, clock.CreatedTimerCount);
+        Assert.Equal(2, clock.ActiveTimerCount);
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        Assert.Null(await DrainWorkerExecutionsAsync(worker, clock, 3));
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_ConcurrentDuplicateAdmission_DisposesLoserWithoutRemovingLiveWinner()
+    {
+        Guid id = Guid.NewGuid();
+        using var rendezvous = new Barrier(2);
+        var clock = new MotionTestClock { AdmissionBarrier = rendezvous };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await Task.WhenAll(Task.Run(() => worker.TickAsync(default)), Task.Run(() => worker.TickAsync(default)))
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        clock.AdmissionBarrier = null;
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(4, clock.CreatedTimerCount);
+        Assert.Equal(2, clock.DisposedTimerCount);
+        Assert.Equal(2, clock.ActiveTimerCount);
+        Assert.Equal(PrinterControlState.Running, (await GetAsync(id)).State);
+        Assert.Equal(1, channel.SendCount);
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        Assert.Null(await DrainWorkerExecutionsAsync(worker, clock, 4));
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    private static void FailFirstTimerDisposal(int number)
+    {
+        if (number == 1)
+        {
+            throw new InvalidOperationException("Injected timer disposal failure");
+        }
+    }
+
+    private static async Task<Exception?> DrainWorkerExecutionsAsync(
+        PrinterControlOperationWorker worker, MotionTestClock clock, int expectedDisposed)
+    {
+        Exception? failure = null;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (clock.DisposedTimerCount < expectedDisposed)
+        {
+            try
+            {
+                await worker.TickAsync(timeout.Token);
+            }
+            catch (InvalidOperationException exception) when (
+                exception.Message is "Injected motion logger failure" or "Injected timer disposal failure")
+            {
+                Assert.Null(failure);
+                failure = exception;
+            }
+            if (clock.DisposedTimerCount < expectedDisposed)
+            {
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+        Assert.Equal(expectedDisposed, clock.DisposedTimerCount);
+        return failure;
     }
 
     private async Task<PrinterControlOperationDto> AdmitAsync(Guid id)
@@ -1487,14 +2863,15 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         return await scope.ServiceProvider.GetRequiredService<PrinterControlOperationService>().GetAsync(printerId, id, default);
     }
 
-    private PrintersController CreateEmergencyController(IServiceProvider services, Mock<IPrintersService> printers)
+    private PrintersController CreateEmergencyController(IServiceProvider services, Mock<IPrintersService> printers,
+        TimeProvider? timeProvider = null)
     {
         var real = new PrinterPhysicalActuationService(services.GetRequiredService<AppDbContext>(),
             services.GetRequiredService<IDbOutboxSequenceAllocator>(), authorization.Object, NullLogger<PrinterPhysicalActuationService>.Instance);
         var actuation = new Mock<IPrinterPhysicalActuationService>();
         PrintersController controller = PrintersControllerControlGuardsTests.CreateController(printers,
             new Mock<IPrinterStatusCacheReader>(), out _, actuation: actuation,
-            motionControl: services.GetRequiredService<PrinterControlOperationService>());
+            motionControl: services.GetRequiredService<PrinterControlOperationService>(), timeProvider: timeProvider);
         controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "test"));
         actuation.Setup(a => a.AcquireDirectAsync(printerId, userId.ToString(), "emergencystop", It.IsAny<CancellationToken>()))
             .Returns((Guid printer, string actor, string operation, CancellationToken token) => real.AcquireDirectAsync(printer, actor, operation, token));
@@ -1526,6 +2903,36 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),
             Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
             Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
+    }
+
+    private async Task SeedUnavailableLegacyMotionAsync(Guid id, string operation, string capabilityState)
+    {
+        const int backend = 9001;
+        if (capabilityState == "withdrawn")
+        {
+            clients.Setup(f => f.GetClient(backend)).Returns(client.Object);
+            motionCapability.SetupGet(m => m.SupportedMotionKinds).Returns([PrinterControlKind.HomeZ]);
+        }
+        else if (capabilityState == "unresolvable")
+        {
+            clients.Setup(f => f.GetClient(backend)).Throws(new InvalidOperationException("Plugin cannot be resolved."));
+        }
+        else
+        {
+            clients.Setup(f => f.GetClient(backend)).Throws(new ArgumentException("Plugin is not installed."));
+        }
+
+        await ChangeAsync(async (db, _) =>
+        {
+            (await db.Printers.SingleAsync()).Backend = backend;
+            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync();
+            barrier.PhysicalControlCommandId = id;
+            barrier.PhysicalControlOperation = operation;
+            barrier.PhysicalControlActorSubject = userId.ToString();
+            barrier.PhysicalControlStartedAtUtc = DateTime.UtcNow.AddMinutes(-5);
+            barrier.PhysicalControlRequiresReconciliation = true;
+            await db.SaveChangesAsync();
+        });
     }
 
     private async Task ChangeAsync(Func<AppDbContext, PrinterControlOperationService, Task> change)
@@ -1571,30 +2978,37 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     {
         public ConcurrentQueue<WorkerLog> Entries { get; } = new();
         public TaskCompletionSource FirstWarning { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ThrowOnMotionFailure { get; set; }
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            Entries.Enqueue(new(logLevel, formatter(state, exception), exception, state));
+            string message = formatter(state, exception);
+            Entries.Enqueue(new(logLevel, message, exception, state));
             if (logLevel == LogLevel.Warning)
             {
                 FirstWarning.TrySetResult();
             }
+            if (ThrowOnMotionFailure && message.StartsWith("Motion operation ", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Injected motion logger failure");
+            }
         }
     }
 
-    private static PrinterControlRecoveryRequest Evidence() => new("Inspected", "ExternallyVerified",
-        "Original sender process stopped and network isolated", true, true, "Queue cleared independently; printer physically inspected stationary");
-
-    private sealed class FakeChannel : IMoonrakerMotionChannel
+    private sealed class FakeChannel : IPrinterMotionChannel
     {
         public TaskCompletionSource Sent { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public TaskCompletionSource Disposed { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Disposing { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource AllowDisposal { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool HoldDisposal { get; set; }
         public int SendCount { get; private set; }
         public bool Idle { get; set; } = true;
-        public string Script { get; private set; } = string.Empty;
+        public PrinterControlRequest? Request { get; private set; }
+        public Guid? CorrelationId { get; private set; }
         public Task<bool> IsIdleAsync(CancellationToken ct) => Task.FromResult(Idle);
         public PrinterStatusDto? MotionState { get; set; }
         public Task<PrinterStatusDto> ReadMotionStateAsync(Guid printerId, CancellationToken ct) =>
@@ -1604,32 +3018,173 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                     HomedAxes = new(["x", "y", "z"], DateTime.UtcNow, 15, "test"),
                     CoordinateOriginOffsetMm = new(new(0, 0, 0), DateTime.UtcNow, 15, "test"),
                 }));
-        public async Task ExecuteAsync(Guid correlationId, string script, CancellationToken ct)
+        public async Task ExecuteAsync(Guid correlationId, PrinterControlRequest request, CancellationToken ct)
         {
             SendCount++;
-            Script = script;
+            Request = request;
+            CorrelationId = correlationId;
             Sent.SetResult();
             await Completion.Task.WaitAsync(ct);
         }
-        public ValueTask DisposeAsync()
+        public async ValueTask DisposeAsync()
         {
+            Disposing.TrySetResult();
+            if (HoldDisposal)
+            {
+                await AllowDisposal.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            }
             Disposed.TrySetResult();
-            return ValueTask.CompletedTask;
+        }
+    }
+
+    internal sealed class MotionTestClock : TimeProvider
+    {
+        private readonly object sync = new();
+        private readonly List<MotionTimer> timers = [];
+        private TimeSpan elapsed;
+        private int timerCreateCalls;
+
+        public int? ThrowOnTimerCreate { get; set; }
+        public Action<int>? TimerDisposed { get; set; }
+        public Barrier? AdmissionBarrier { get; set; }
+
+        public int CreatedTimerCount
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return timers.Count;
+                }
+            }
+        }
+
+        public int DisposedTimerCount
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return timers.Count(timer => timer.IsDisposed);
+                }
+            }
+        }
+
+        public int ActiveTimerCount
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return timers.Count(timer => !timer.IsDisposed);
+                }
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            if (dueTime == PrinterControlOperationService.CommandTimeout && AdmissionBarrier is { } barrier)
+            {
+                Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(10)));
+            }
+            lock (sync)
+            {
+                int number = ++timerCreateCalls;
+                if (ThrowOnTimerCreate == number)
+                {
+                    throw new InvalidOperationException("Injected timer construction failure");
+                }
+                var timer = new MotionTimer(this, callback, state, number);
+                timer.Change(dueTime, period);
+                timers.Add(timer);
+                return timer;
+            }
+        }
+
+        public void Advance(TimeSpan duration)
+        {
+            lock (sync)
+            {
+                elapsed += duration;
+                foreach (MotionTimer timer in timers.ToArray())
+                {
+                    timer.FireIfDue();
+                }
+            }
+        }
+
+        private sealed class MotionTimer(MotionTestClock clock, TimerCallback callback, object? state, int number) : ITimer
+        {
+            private TimeSpan? due;
+            public bool IsDisposed { get; private set; }
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                Assert.Equal(Timeout.InfiniteTimeSpan, period);
+                lock (clock.sync)
+                {
+                    if (IsDisposed)
+                    {
+                        return false;
+                    }
+                    due = dueTime == Timeout.InfiniteTimeSpan ? null : clock.elapsed + dueTime;
+                    return true;
+                }
+            }
+
+            public void FireIfDue()
+            {
+                if (!IsDisposed && due is TimeSpan at && at <= clock.elapsed)
+                {
+                    due = null;
+                    callback(state);
+                }
+            }
+
+            public void Dispose()
+            {
+                lock (clock.sync)
+                {
+                    if (IsDisposed)
+                    {
+                        return;
+                    }
+                    IsDisposed = true;
+                    due = null;
+                    clock.TimerDisposed?.Invoke(number);
+                }
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
         }
     }
 
     private sealed class SnapshotCommands : DbCommandInterceptor
     {
         public bool Capture { get; set; }
+        public bool PauseNextOperationRead { get; set; }
+        public TaskCompletionSource OperationReadPaused { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResumeOperationRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool ConflictNextOperationUpdate { get; set; }
         public bool FailNextOperationUpdate { get; set; }
         public int ConflictCount { get; private set; }
         public ConcurrentQueue<string> Statements { get; } = new();
 
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
             DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
+            if (PauseNextOperationRead && command.CommandText.StartsWith("SELECT", StringComparison.Ordinal) &&
+                command.CommandText.Contains("\"PrinterControlOperations\"", StringComparison.Ordinal))
+            {
+                PauseNextOperationRead = false;
+                OperationReadPaused.TrySetResult();
+                await ResumeOperationRead.Task.WaitAsync(cancellationToken);
+            }
             if (FailNextOperationUpdate && command.CommandText.Contains("UPDATE \"PrinterControlOperations\"", StringComparison.Ordinal))
             {
                 FailNextOperationUpdate = false;
@@ -1648,7 +3203,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                 Statements.Enqueue(command.CommandText);
             }
 
-            return ValueTask.FromResult(result);
+            return result;
         }
     }
 }

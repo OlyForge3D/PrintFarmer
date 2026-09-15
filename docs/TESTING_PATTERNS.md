@@ -48,6 +48,17 @@ handshake URLs. A separate fake-HTTP test holds G-code pending while the dedicat
 Moonraker emergency-stop endpoint completes; a mere lifecycle allowlist cannot
 pass that out-of-band regression.
 
+Shared durable-motion tests submit semantic requests through plugin capabilities,
+not raw G-code or a Moonraker-specific factory. Script assertions belong in the
+Moonraker plugin tests. `PrinterControlOwnershipTests` guards against restoring
+the shared endpoint resolver, script builder or backend-specific constructor
+dependencies. `PrintersServicePluginControlTests` verifies that different backend
+identities use the same semantic delegation and preserve credentials.
+
+`MoonrakerCameraRoutingTests` uses fake HTTP responses to assert that discovery
+and webcam-test requests reach the API port, while relative camera URLs retain
+the frontend port. No live camera or printer is needed.
+
 Run the two test projects sequentially when they share build output directories.
 Capture console verbosity `normal` (or TRX) so failures retain their actual stack
 traces; quiet-only output loses useful diagnostics. No physical printer or

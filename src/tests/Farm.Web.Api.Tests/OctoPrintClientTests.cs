@@ -1306,6 +1306,93 @@ public class OctoPrintClientTests
         result.Outcome.Should().Be(UploadAndPrintOutcome.FailedBeforeStart);
     }
 
+    [Theory]
+    [InlineData("home")]
+    [InlineData("send-home")]
+    [InlineData("home-xy")]
+    [InlineData("home-z")]
+    [InlineData("move")]
+    public async Task ManualMotionAsync_CallerCancelsPendingSend_CancelsHandlerWithoutRetry(string operation)
+    {
+        int requests = 0;
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken handlerToken = default;
+        using var handler = new AsyncMessageHandler(async (request, ct) =>
+        {
+            requests++;
+            request.Method.Should().Be(HttpMethod.Post);
+            request.RequestUri!.AbsolutePath.Should().Be("/api/printer/printhead");
+            _ = await request.Content!.ReadAsByteArrayAsync(ct);
+            handlerToken = ct;
+            entered.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new HttpResponseMessage(HttpStatusCode.NoContent);
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(http, NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+        using var cancellation = new CancellationTokenSource();
+        Task<bool> sending = InvokeManualMotionAsync(client, operation, cancellation.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.False(sending.IsCompleted);
+        await cancellation.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => sending.WaitAsync(TimeSpan.FromSeconds(10)));
+        handlerToken.IsCancellationRequested.Should().BeTrue();
+        requests.Should().Be(1);
+    }
+
+    [Theory]
+    [InlineData("home", false)]
+    [InlineData("send-home", false)]
+    [InlineData("home-xy", false)]
+    [InlineData("home-z", false)]
+    [InlineData("move", false)]
+    [InlineData("jog", false)]
+    [InlineData("home", true)]
+    [InlineData("send-home", true)]
+    [InlineData("home-xy", true)]
+    [InlineData("home-z", true)]
+    [InlineData("move", true)]
+    [InlineData("jog", true)]
+    public async Task ManualMotionAsync_TransportFailsAfterBodySent_DoesNotReplay(string operation, bool connectionFailure)
+    {
+        int requests = 0;
+        using var handler = new AsyncMessageHandler(async (request, ct) =>
+        {
+            requests++;
+            _ = await request.Content!.ReadAsByteArrayAsync(ct);
+            if (connectionFailure)
+            {
+                throw new HttpRequestException("Connection reset", new IOException("Response lost"));
+            }
+            throw new IOException("Response lost");
+        });
+        using var http = new HttpClient(handler);
+        var client = new OctoPrintClient(http, NullLogger<OctoPrintClient>.Instance,
+            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+        if (connectionFailure)
+        {
+            await Assert.ThrowsAsync<HttpRequestException>(() => InvokeManualMotionAsync(client, operation, default));
+        }
+        else
+        {
+            await Assert.ThrowsAsync<IOException>(() => InvokeManualMotionAsync(client, operation, default));
+        }
+        requests.Should().Be(1);
+    }
+
+    private static Task<bool> InvokeManualMotionAsync(OctoPrintClient client, string operation, CancellationToken ct) =>
+        operation switch
+        {
+            "home" => client.HomeAsync("http://octo", ct: ct),
+            "send-home" => client.SendHomeAsync("http://octo", ct),
+            "home-xy" => client.HomeXYAsync("http://octo", ct: ct),
+            "home-z" => client.HomeZAsync("http://octo", ct: ct),
+            "move" => client.MoveAsync("http://octo", x: 1, ct: ct),
+            "jog" => client.JogAsync("http://octo", null, x: 1),
+            _ => throw new ArgumentOutOfRangeException(nameof(operation)),
+        };
+
     private static int ReadQueryInt(HttpRequestMessage request, string name)
     {
         string value = request.RequestUri!.Query

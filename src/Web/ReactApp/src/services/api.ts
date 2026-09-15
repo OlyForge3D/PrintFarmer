@@ -2,13 +2,12 @@
 // Get hash for a G-code file (returns string)
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import { isControlOperationResolved, matchesPrinterControlIntent, printerControlOperationSchema } from "@/types/api";
+import { matchesPrinterControlIntent, printerControlOperationSchema } from "@/types/api";
 import type {
   PrinterControlCurrent,
   PrinterControlIntent,
   PrinterControlOperation,
   PrinterControlOperationResponse,
-  PrinterControlRecovery,
   PrinterStatus,
 } from "@/types/api";
 import {
@@ -1005,10 +1004,10 @@ export class ApiClient {
       { headers: { "Idempotency-Key": operationId } }
     );
     const operation = printerControlOperationSchema.parse(response.data);
-    const unresolved = ["Queued", "Running", "Unknown", "Recovering"].includes(operation.state);
+    const terminal = ["Succeeded", "Failed", "Unknown", "Recovered"].includes(operation.state);
     if (operation.operationId !== operationId || operation.printerId !== printerId || !matchesPrinterControlIntent(operation, intent) ||
-      !((response.status === 202 && unresolved) || (response.status === 200 && isControlOperationResolved(operation)))) {
-      throw new Error("Invalid durable motion admission receipt. Recheck the saved operation; do not assume admission or completion.");
+      !((response.status === 200 && terminal) || (response.status === 202 && operation.barrierHeld))) {
+      throw new Error("Invalid durable motion admission receipt. Recheck the operation; do not assume admission or completion.");
     }
     return { operation, etag: response.headers.etag ?? null };
   }
@@ -1027,18 +1026,6 @@ export class ApiClient {
       { headers: { "Cache-Control": "no-cache" } }
     );
     return response.data;
-  }
-
-  async recoverPrinterControlOperation(
-    printerId: string, operationId: string, etag: string, recovery?: PrinterControlRecovery
-  ): Promise<PrinterControlOperationResponse> {
-    if (!/^"[^"]+"$/.test(etag)) throw new Error("Refresh the operation to obtain its current ETag.");
-    const response = await this.client.post<PrinterControlOperation>(
-      `/printers/${printerId}/control-operations/${operationId}/recovery${recovery ? "/complete" : ""}`,
-      recovery ?? {},
-      { headers: { "If-Match": etag } }
-    );
-    return { operation: response.data, etag: response.headers.etag ?? null };
   }
 
   async setTemperatures(

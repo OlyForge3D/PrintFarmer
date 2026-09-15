@@ -1249,11 +1249,11 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             onChange={(axis, value) => ({ X: setMoveX, Y: setMoveY, Z: setMoveZ })[axis](value)}
             disabled={movementActionPending || !canManualMoveNow}
             onMove={handleMove}
-            onMoveTo={motion.isMoonraker ? handleMoveTo : undefined}
+            onMoveTo={motion.usesDurableMotion ? handleMoveTo : undefined}
             perAxisEnter
             goTitle="Move to entered coordinates"
           />
-          <PrinterMotionHelp absolute={motion.isMoonraker} />
+          <PrinterMotionHelp absolute={motion.usesDurableMotion} />
         </CollapsibleSection>
 
         {/* Temperatures Section */}

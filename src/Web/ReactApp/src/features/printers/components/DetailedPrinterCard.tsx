@@ -1078,7 +1078,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             onExtrudeSpeedChange={setExtrudeSpeed}
             onMove={handleMove}
             onHome={handleHome}
-            onMoveTo={motion.isMoonraker ? handleMoveTo : undefined}
+            onMoveTo={motion.usesDurableMotion ? handleMoveTo : undefined}
             onDisableMotors={() => handleControlAction('disable-motors')}
             onExtrude={handleExtrude}
             rightContent={

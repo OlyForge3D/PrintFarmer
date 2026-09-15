@@ -41,10 +41,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
+using ISupportsDurableMotion = Farm.Infrastructure.Services.Printers.ISupportsDurableMotion;
+using MmuControlAction = Farm.Infrastructure.Services.Printers.MmuControlAction;
+using MmuControlProtocol = Farm.Infrastructure.Services.Printers.MmuControlProtocol;
+using MmuControlRequest = Farm.Infrastructure.Services.Printers.MmuControlRequest;
 using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.MoonrakerEndpointResolution;
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
+using PrinterControlIntent = Farm.Infrastructure.Services.Printers.PrinterControlIntent;
+using PrinterControlOperationService = Farm.Infrastructure.Services.Printers.PrinterControlOperationService;
 using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
 using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
 using PrinterSafetyTelemetryNormalizer = Farm.Infrastructure.Services.Printers.PrinterSafetyTelemetryNormalizer;
@@ -85,7 +91,8 @@ public class PrintersController(
     AppDbContext? appDbContext = null,
     Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null,
     Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null,
-    Farm.Infrastructure.Services.Printers.PrinterControlOperationService? motionControl = null)
+    Farm.Infrastructure.Services.Printers.PrinterControlOperationService? motionControl = null,
+    TimeProvider? timeProvider = null)
     : ControllerBase
 {
     private const int MaxHistoryQueryEntries = 2000;
@@ -2650,6 +2657,11 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        using var timeout = new CancellationTokenSource(
+            PrinterControlIntent.LegacyKind(operation).HasValue ? PrinterControlOperationService.CommandTimeout : Timeout.InfiniteTimeSpan,
+            timeProvider ?? TimeProvider.System);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        ct = deadline.Token;
         ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
         if (asyncRequired is not null)
         {
@@ -2677,6 +2689,7 @@ public class PrintersController(
 
         try
         {
+            ct.ThrowIfCancellationRequested();
             bool accepted = await backendCall(ct);
             _telemetryService.RecordPrinterOperation(
                 telemetryOperation,
@@ -2687,7 +2700,7 @@ public class PrintersController(
                 await _physicalActuationService!.CompleteDirectAsync(
                     begin.Lease,
                     accepted: true,
-                    ct: ct);
+                    ct: CancellationToken.None);
                 return new CommandResult(true, null);
             }
 
@@ -2695,11 +2708,12 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_outcome_unknown",
                 CancellationToken.None);
+            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+                ? "The motion outcome is unknown; check the printer before requesting another move."
+                : "The backend did not prove whether the physical command was applied; reconciliation is required.";
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The backend did not prove whether the physical command was applied; reconciliation is required."));
+                new CommandResult(false, message));
         }
         catch (OperationCanceledException)
         {
@@ -2720,11 +2734,12 @@ public class PrintersController(
                 "Physical operation {Operation} has an unknown outcome on printer {PrinterId}",
                 LogSanitizer.Sanitize(operation),
                 printerId);
+            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+                ? "The motion outcome is unknown; check the printer before requesting another move."
+                : "The physical command outcome is unknown; reconciliation is required.";
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The physical command outcome is unknown; reconciliation is required."));
+                new CommandResult(false, message));
         }
     }
 
@@ -2737,6 +2752,11 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        using var timeout = new CancellationTokenSource(
+            PrinterControlIntent.LegacyKind(operation).HasValue ? PrinterControlOperationService.CommandTimeout : Timeout.InfiniteTimeSpan,
+            timeProvider ?? TimeProvider.System);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        ct = deadline.Token;
         ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
         if (asyncRequired is not null)
         {
@@ -2764,6 +2784,7 @@ public class PrintersController(
 
         try
         {
+            ct.ThrowIfCancellationRequested();
             Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
                 await backendCall(ct);
             bool accepted =
@@ -2785,7 +2806,7 @@ public class PrintersController(
                     begin.Lease,
                     accepted,
                     accepted ? null : outcome.ToString(),
-                    ct);
+                    CancellationToken.None);
             }
 
             return MapControlOutcome(outcome);
@@ -2804,11 +2825,12 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_exception",
                 CancellationToken.None);
+            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+                ? "The motion outcome is unknown; check the printer before requesting another move."
+                : "The physical command outcome is unknown; reconciliation is required.";
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The physical command outcome is unknown; reconciliation is required."));
+                new CommandResult(false, message));
         }
     }
 
@@ -2963,14 +2985,55 @@ public class PrintersController(
         int? backend = db is null
             ? (await _printersService.FindByIdAsync(printerId, ct))?.Backend
             : await db.Printers.AsNoTracking().Where(p => p.Id == printerId).Select(p => (int?)p.Backend).SingleOrDefaultAsync(ct);
-        if (backend != (int)PrinterBackend.Moonraker)
+        if (backend is null)
         {
             return null;
         }
 
+        Farm.Infrastructure.Contracts.Printers.IBackendClient? client;
+        try
+        {
+            client = _backendClientFactory.GetClient((PrinterBackend)backend.Value);
+        }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
+        {
+            _logger.LogWarning("Cannot resolve motion backend {Backend}: {ErrorType}", backend.Value, ex.GetType().Name);
+            return UnsupportedMotion();
+        }
+
+        if (client is null)
+        {
+            return UnsupportedMotion();
+        }
+
+        if (client is not ISupportsDurableMotion durableMotion)
+        {
+            return null;
+        }
+
+        PrinterControlKind kind = operation switch
+        {
+            "home" => PrinterControlKind.HomeAll,
+            "home_xy" => PrinterControlKind.HomeXY,
+            "home_z" => PrinterControlKind.HomeZ,
+            "move" => PrinterControlKind.Jog,
+            "move_to" => PrinterControlKind.MoveTo,
+            _ => throw new InvalidOperationException("Unexpected motion operation."),
+        };
+        if (!durableMotion.SupportedMotionKinds.Contains(kind))
+        {
+            return UnsupportedMotion();
+        }
+
         return Problem(statusCode: 409, title: "Updated client required",
-            detail: "Use control-operations for Moonraker motion.",
+            detail: "Use control-operations for this backend's motion.",
             extensions: new Dictionary<string, object?> { ["code"] = "async_control_required" });
+
+        ActionResult UnsupportedMotion() => Problem(
+            statusCode: StatusCodes.Status422UnprocessableEntity,
+            title: "Printer operation unsupported",
+            detail: "The backend did not provide the required motion capability.",
+            extensions: new Dictionary<string, object?> { ["code"] = "printer_operation_unsupported" });
     }
 
     private async Task<PrinterActuationResult> BeginPhysicalControlAsync(
@@ -3300,27 +3363,29 @@ public class PrintersController(
 
                 motionAttemptPrepared = true;
                 PrinterEmergencyStopDelivery delivery = PrinterEmergencyStopDelivery.NotSent;
+                using var timeout = new CancellationTokenSource(PrinterControlOperationService.SenderLease, timeProvider ?? TimeProvider.System);
+                using var senderDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
                 try
                 {
-                    if (!await motionControl.CommitEmergencyStopSendAsync(id, lease, QueueActorIdentity.Resolve(User), ct))
+                    if (!await motionControl.CommitEmergencyStopSendAsync(id, lease, QueueActorIdentity.Resolve(User), senderDeadline.Token))
                     {
                         continue;
                     }
 
-                    ct.ThrowIfCancellationRequested();
+                    senderDeadline.Token.ThrowIfCancellationRequested();
                     delivery = PrinterEmergencyStopDelivery.Unknown;
                     try
                     {
                         emergencyInvoked = true;
-                        bool accepted = await _printersService.EmergencyStopAsync(id, lease.ConfigurationIdentity, ct);
+                        bool accepted = await _printersService.EmergencyStopAsync(id, lease.ConfigurationIdentity, senderDeadline.Token);
                         delivery = accepted ? PrinterEmergencyStopDelivery.Accepted : PrinterEmergencyStopDelivery.Unknown;
                         return StatusCode(accepted ? 200 : 503, new CommandResult(
                             accepted,
-                            accepted ? "Emergency stop accepted; recovery verification is still required." : "Emergency stop outcome unknown; barrier retained."));
+                            accepted ? "Emergency stop accepted." : "Emergency stop outcome unknown; check the printer."));
                     }
                     catch (Exception)
                     {
-                        return StatusCode(503, new CommandResult(false, "Emergency stop delivery is uncertain; isolate all senders before recovery."));
+                        return StatusCode(503, new CommandResult(false, "Emergency stop delivery is uncertain; check the printer."));
                     }
                 }
                 finally
@@ -3337,7 +3402,7 @@ public class PrintersController(
             {
                 return Problem(
                     statusCode: 503,
-                    title: emergencyInvoked ? "Emergency stop evidence is uncertain; barrier retained" : "Emergency stop fence unavailable",
+                    title: emergencyInvoked ? "Emergency stop outcome is uncertain; check the printer" : "Emergency stop fence unavailable",
                     extensions: new Dictionary<string, object?>
                     {
                         ["code"] = emergencyInvoked ? "emergency_stop_outcome_unknown" : "emergency_stop_not_sent",
@@ -3511,39 +3576,27 @@ public class PrintersController(
                 return validationFailure;
             }
 
-            PrinterBackend backend = (PrinterBackend)p.Backend;
-            string saveCommands = backend switch
-            {
-                PrinterBackend.Moonraker => $"SET_GCODE_OFFSET Z={offsetMm:F3}\nSAVE_CONFIG",
-                _ => $"M851 Z{offsetMm:F3}\nM500"
-            };
-
             try
             {
-                foreach (string cmd in saveCommands.Split(
-                             '\n',
-                             StringSplitOptions.RemoveEmptyEntries))
+                bool sent = await _printersService.SaveZOffsetToFirmwareAsync(
+                    id,
+                    offsetMm,
+                    ct);
+                if (!sent)
                 {
-                    bool sent = await _printersService.SendGcodeAsync(
-                        id,
-                        cmd.Trim(),
-                        ct);
-                    if (!sent)
-                    {
-                        await _physicalActuationService!.MarkDirectUnknownAsync(
-                            physicalLease,
-                            "z_offset_firmware_outcome_unknown",
-                            CancellationToken.None);
-                        _telemetryService.RecordPrinterOperation(
-                            "save_z_offset",
-                            id.ToString(),
-                            false);
-                        return StatusCode(
-                            StatusCodes.Status503ServiceUnavailable,
-                            new CommandResult(
-                                false,
-                                "The firmware did not prove whether the Z-offset command was applied."));
-                    }
+                    await _physicalActuationService!.MarkDirectUnknownAsync(
+                        physicalLease,
+                        "z_offset_firmware_outcome_unknown",
+                        CancellationToken.None);
+                    _telemetryService.RecordPrinterOperation(
+                        "save_z_offset",
+                        id.ToString(),
+                        false);
+                    return StatusCode(
+                        StatusCodes.Status503ServiceUnavailable,
+                        new CommandResult(
+                            false,
+                            "The firmware did not prove whether the Z-offset command was applied."));
                 }
             }
             catch (OperationCanceledException)
@@ -3770,16 +3823,11 @@ public class PrintersController(
                 "Extrusion feedrate must be between 1 and 6000 mm/min."));
         }
 
-        string distance = request.DistanceMm.ToString(
-            "0.###",
-            CultureInfo.InvariantCulture);
-        string command =
-            $"M83\nG1 E{distance} F{request.FeedrateMmPerMinute}\nM82";
         return await ExecuteDirectBooleanControlAsync(
             id,
             "extrude_filament",
             "extrude_filament",
-            token => _printersService.SendGcodeAsync(id, command, token),
+            token => _printersService.ExtrudeFilamentAsync(id, request.DistanceMm, request.FeedrateMmPerMinute, token),
             ct,
             safetyOperation: PrinterSafetyOperation.Extrusion);
     }
@@ -3812,7 +3860,7 @@ public class PrintersController(
             id,
             "mmu_change_tool",
             "mmu_change_tool",
-            token => _printersService.SendGcodeAsync(id, $"MMU_CHANGE_TOOL TOOL={tool}", token),
+            token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.ChangeTool, Tool: tool), token),
             ct,
             safetyOperation: PrinterSafetyOperation.MmuChangeTool);
     }
@@ -3834,7 +3882,7 @@ public class PrintersController(
             id,
             "mmu_eject",
             "mmu_eject",
-            token => _printersService.SendGcodeAsync(id, "MMU_EJECT", token),
+            token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.Eject), token),
             ct,
             safetyOperation: PrinterSafetyOperation.MmuEject);
     }
@@ -3856,7 +3904,7 @@ public class PrintersController(
             id,
             "mmu_load",
             "mmu_load",
-            token => _printersService.SendGcodeAsync(id, "MMU_LOAD", token),
+            token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.Load), token),
             ct,
             safetyOperation: PrinterSafetyOperation.MmuLoad);
     }
@@ -3878,7 +3926,7 @@ public class PrintersController(
             id,
             "mmu_home",
             "mmu_home",
-            token => _printersService.SendGcodeAsync(id, "MMU_HOME", token),
+            token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.Home), token),
             ct);
     }
 
@@ -3905,7 +3953,7 @@ public class PrintersController(
             id,
             "mmu_select_tool",
             "mmu_select_tool",
-            token => _printersService.SendGcodeAsync(id, $"MMU_SELECT_TOOL TOOL={tool}", token),
+            token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.SelectTool, Tool: tool), token),
             ct);
     }
 
@@ -3926,7 +3974,7 @@ public class PrintersController(
             id,
             "mmu_recover",
             "mmu_recover",
-            token => _printersService.SendGcodeAsync(id, "MMU_RECOVER", token),
+            token => _printersService.ExecuteMmuAsync(id, new MmuControlRequest(MmuControlAction.Recover), token),
             ct);
     }
 
@@ -3945,15 +3993,15 @@ public class PrintersController(
     {
         string protocol = request.Protocol.Trim().ToLowerInvariant();
         string action = request.Action.Trim().ToLowerInvariant();
-        string? command = null;
+        MmuControlRequest? control = null;
         if (protocol == "qidibox" &&
             request.GateIndex is >= 0 and <= 16)
         {
-            command = action switch
+            control = action switch
             {
-                "load" => $"T{request.GateIndex}",
-                "unload" => $"UNLOAD_T{request.GateIndex}",
-                "eject" => $"EJECT_T{request.GateIndex}",
+                "load" => new(MmuControlAction.Load, MmuControlProtocol.Qidibox, GateIndex: request.GateIndex),
+                "unload" => new(MmuControlAction.Unload, MmuControlProtocol.Qidibox, GateIndex: request.GateIndex),
+                "eject" => new(MmuControlAction.Eject, MmuControlProtocol.Qidibox, GateIndex: request.GateIndex),
                 _ => null,
             };
         }
@@ -3965,15 +4013,15 @@ public class PrintersController(
                      "^[A-Za-z0-9_-]+$",
                      RegexOptions.CultureInvariant))
         {
-            command = action switch
+            control = action switch
             {
-                "load" => $"CHANGE_TOOL LANE={laneName}",
-                "unload" => $"TOOL_UNLOAD LANE={laneName}",
+                "load" => new(MmuControlAction.Load, MmuControlProtocol.Afc, LaneName: laneName),
+                "unload" => new(MmuControlAction.Unload, MmuControlProtocol.Afc, LaneName: laneName),
                 _ => null,
             };
         }
 
-        if (command is null)
+        if (control is null)
         {
             return BadRequest(new CommandResult(
                 false,
@@ -3992,7 +4040,7 @@ public class PrintersController(
             id,
             $"mmu_{protocol}_{action}",
             "mmu_gate_action",
-            token => _printersService.SendGcodeAsync(id, command, token),
+            token => _printersService.ExecuteMmuAsync(id, control, token),
             ct,
             safetyOperation: safetyOperation);
     }

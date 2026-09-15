@@ -13,10 +13,9 @@ let mockBlocked = false;
 let mockMoonraker = true;
 vi.mock('@/features/printers/hooks/use-printer-control-operation', () => ({
   usePrinterControlOperation: () => ({
-    execute: mockExecute, isMoonraker: mockMoonraker, blocked: mockBlocked,
+    execute: mockExecute, usesDurableMotion: mockMoonraker, blocked: mockBlocked,
     saved: null, operation: null, current: null, error: null, tracker: null,
     uncertain: false, checking: mockBlocked, submitting: false, admitting: false,
-    canRecover: false, canRetryAdmission: false,
   }),
 }));
 vi.mock('@/common/hooks/usePrinterDisplay', () => ({ usePrinterDisplay: (printer: Printer) => printer }));

@@ -16,11 +16,12 @@ using Microsoft.Extensions.Logging;
 
 namespace Farm.Backend.Plugin.Moonraker;
 
-public class MoonrakerClient(
+public partial class MoonrakerClient(
     HttpClient http,
     ILogger<MoonrakerClient> logger,
     BackendTimeoutSettings timeouts,
-    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null) : PrinterClientBase, IMoonrakerClient,
+    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null,
+    IMoonrakerMotionChannelFactory? motionChannels = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -64,6 +65,7 @@ public class MoonrakerClient(
         new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http = http;
+    private readonly IMoonrakerMotionChannelFactory? _motionChannels = motionChannels;
     private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
     private readonly ISnapmakerU1CameraMonitorManager _snapmakerU1CameraMonitorManager =
@@ -480,13 +482,7 @@ public class MoonrakerClient(
     {
         try
         {
-            // Get the raw camera URLs from the API (which handles relative URL resolution)
-            (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
-
-            // If we got URLs from the API, they should already be normalized
-            // But we can optionally apply frontendPort if it differs from what the API returned
-            // For now, just return what the API provided
-            return (stream, snapshot);
+            return await GetCameraUrlsAsync(baseUrl, GetCameraFrontendUrl(baseUrl, frontendPort), ct: ct);
         }
         catch
         {
@@ -654,7 +650,7 @@ public class MoonrakerClient(
         string? snap = null;
         if (status.IsOnline)
         {
-            (string? streamUrl, string? snapshotUrl) = await GetCameraUrlsAsync(baseUrl, ct);
+            (string? streamUrl, string? snapshotUrl) = await GetCameraUrlsAsync(baseUrl, ct: ct);
             cam = streamUrl;
             snap = snapshotUrl;
         }
@@ -753,15 +749,13 @@ public class MoonrakerClient(
     // Overload with credential for ISupportsMovement
     public async Task<bool> HomeXYAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
-        _ = credential;
-        return await SendGcodePrivateAsync(baseUrl, "G28 X Y", ct);
+        return await SendControlScriptAsync(baseUrl, "G28 X Y", credential, ct);
     }
 
     // Overload with credential for ISupportsMovement
     public async Task<bool> HomeZAsync(string baseUrl, PrinterCredential? credential, CancellationToken ct = default)
     {
-        _ = credential;
-        return await SendGcodePrivateAsync(baseUrl, "G28 Z", ct);
+        return await SendControlScriptAsync(baseUrl, "G28 Z", credential, ct);
     }
 
     public async Task<bool> SetTempsAsync(string baseUrl, double? hotend = null, double? bed = null, CancellationToken ct = default)
@@ -1531,7 +1525,8 @@ public class MoonrakerClient(
     }
 
     // Unified camera URL resolver: fetches both stream and snapshot from a single listing call, with test-resolution fallback
-    private async Task<(string? Stream, string? Snapshot)> GetCameraUrlsAsync(string baseUrl, CancellationToken ct = default)
+    private async Task<(string? Stream, string? Snapshot)> GetCameraUrlsAsync(
+        string baseUrl, string? cameraBaseUrl = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
         string? stream = null;
         string? snapshot = null;
@@ -1541,7 +1536,13 @@ public class MoonrakerClient(
             cts.CancelAfter(_timeouts.StatusPollTimeout);
             Uri baseUri = new(baseUrl);
             Uri listUri = new(baseUri, "server/webcams/list");
-            using HttpResponseMessage resp = await _http.GetAsync(listUri, cts.Token);
+            using var listRequest = new HttpRequestMessage(HttpMethod.Get, listUri);
+            if (credential?.HasApiKey == true)
+            {
+                listRequest.Headers.Add("X-Api-Key", credential.ApiKey);
+            }
+
+            using HttpResponseMessage resp = await _http.SendAsync(listRequest, cts.Token);
             if (!resp.IsSuccessStatusCode)
             {
                 return (null, null);
@@ -1596,7 +1597,13 @@ public class MoonrakerClient(
                 {
                     try
                     {
-                        using HttpResponseMessage tresp = await _http.PostAsync(testUri, content: null, cts.Token);
+                        using var testRequest = new HttpRequestMessage(HttpMethod.Post, testUri);
+                        if (credential?.HasApiKey == true)
+                        {
+                            testRequest.Headers.Add("X-Api-Key", credential.ApiKey);
+                        }
+
+                        using HttpResponseMessage tresp = await _http.SendAsync(testRequest, cts.Token);
                         if (tresp.IsSuccessStatusCode)
                         {
                             await using Stream tstream = await tresp.Content.ReadAsStreamAsync(cts.Token);
@@ -1609,12 +1616,12 @@ public class MoonrakerClient(
 
                             if (stream is null && troot.TryGetProperty("stream_url", out JsonElement tsu) && tsu.ValueKind == JsonValueKind.String)
                             {
-                                stream = NormalizeCameraUrl(tsu.GetString(), baseUrl);
+                                stream = NormalizeCameraUrl(tsu.GetString(), cameraBaseUrl ?? baseUrl);
                             }
 
                             if (snapshot is null && troot.TryGetProperty("snapshot_url", out JsonElement ssu) && ssu.ValueKind == JsonValueKind.String)
                             {
-                                snapshot = NormalizeCameraUrl(ssu.GetString(), baseUrl);
+                                snapshot = NormalizeCameraUrl(ssu.GetString(), cameraBaseUrl ?? baseUrl);
                             }
 
                             if (stream is not null && snapshot is not null)
@@ -1643,7 +1650,7 @@ public class MoonrakerClient(
                     string? s = su.GetString();
                     if (!string.IsNullOrWhiteSpace(s))
                     {
-                        stream = NormalizeCameraUrl(s, baseUrl);
+                        stream = NormalizeCameraUrl(s, cameraBaseUrl ?? baseUrl);
                     }
                 }
 
@@ -1652,7 +1659,7 @@ public class MoonrakerClient(
                     string? s = sn.GetString();
                     if (!string.IsNullOrWhiteSpace(s))
                     {
-                        snapshot = NormalizeCameraUrl(s, baseUrl);
+                        snapshot = NormalizeCameraUrl(s, cameraBaseUrl ?? baseUrl);
                     }
                 }
 
@@ -3723,7 +3730,7 @@ public class MoonrakerClient(
         => await GetCameraStreamUrlAsync(baseUrl, frontendPort, ct: ct);
 
     async Task<string?> ISupportsCamera.GetCameraSnapshotUrlAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await GetCameraSnapshotUrlAsync(baseUrl, ct: ct);
+        => await GetCameraSnapshotUrlAsync(baseUrl, frontendPort, ct);
 
     /// <summary>
     /// ISupportsConfiguredCameraDetection implementation - detects actually configured cameras.
@@ -3736,8 +3743,8 @@ public class MoonrakerClient(
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<(string? StreamUrl, string? SnapshotUrl)> ISupportsConfiguredCameraDetection.DetectConfiguredCameraUrlsAsync(string baseUrl, int? frontendPort = null, PrinterCredential? credential = null, CancellationToken ct = default)
     {
-        // Query the actual API to get configured camera URLs
-        (string? stream, string? snapshot) = await GetCameraUrlsAsync(baseUrl, ct);
+        (string? stream, string? snapshot) = await GetCameraUrlsAsync(
+            baseUrl, GetCameraFrontendUrl(baseUrl, frontendPort), credential, ct);
         return (stream, snapshot);
     }
 
@@ -3789,7 +3796,7 @@ public class MoonrakerClient(
     /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsMovement.HomeAsync(string baseUrl, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await SendHomeAsync(baseUrl, ct);
+        => await SendControlScriptAsync(baseUrl, "G28", credential, ct);
 
     async Task<bool> ISupportsMovement.SendHomeAsync(string baseUrl, CancellationToken ct = default)
         => await SendHomeAsync(baseUrl, ct);
@@ -3815,7 +3822,7 @@ public class MoonrakerClient(
     /// <param name="credential">Optional printer credential for authentication.</param>
     /// <param name="ct">Cancellation token to cancel the operation.</param>
     async Task<bool> ISupportsTemperatureControl.SetTemperaturesAsync(string baseUrl, double? hotendTemp = null, double? bedTemp = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await SetTempsAsync(baseUrl, hotendTemp, bedTemp, ct);
+        => await SetControlTemperaturesAsync(baseUrl, hotendTemp, bedTemp, credential, ct);
 
     /// <summary>
     /// ISupportsHistory implementations - get and manage print history.

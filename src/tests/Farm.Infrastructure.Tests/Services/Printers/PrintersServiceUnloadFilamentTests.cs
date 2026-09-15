@@ -255,7 +255,8 @@ public class PrintersServiceUnloadFilamentTests
         Id = Guid.NewGuid(),
         Name = "Moonraker",
         ServerUrl = "http://moonraker.local",
-        FrontendPort = 7125,
+        BackendPort = 7125,
+        FrontendPort = 80,
         Backend = (int)PrinterBackend.Moonraker,
     };
 
@@ -276,7 +277,7 @@ public class PrintersServiceUnloadFilamentTests
         var backendClient = new Mock<IBackendClient>();
         Mock<ISupportsFilamentControl> filamentClient = backendClient.As<ISupportsFilamentControl>();
         filamentClient
-            .Setup(c => c.UnloadFilamentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Setup(c => c.UnloadFilamentAsync("http://moonraker.local:7125", It.IsAny<CancellationToken>()))
             .ReturnsAsync(unloadResult);
 
         var backendClientFactory = new Mock<IBackendClientFactory>();

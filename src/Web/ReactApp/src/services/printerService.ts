@@ -3,7 +3,6 @@ import type {
   BulkImportResponse,
   CommandResult,
   PrinterControlIntent,
-  PrinterControlRecovery,
   CreatePrinterDto,
   DiscoveredPrinterDto,
   HistoryJob,
@@ -164,10 +163,6 @@ export const printerService = {
 
   getCurrentControlOperation(printerId: string) {
     return apiClient.getCurrentPrinterControlOperation(printerId);
-  },
-
-  recoverControlOperation(printerId: string, operationId: string, etag: string, recovery?: PrinterControlRecovery) {
-    return apiClient.recoverPrinterControlOperation(printerId, operationId, etag, recovery);
   },
 
   async setTemperatures(printerId: string, targets: TempTargets): Promise<CommandResult> {

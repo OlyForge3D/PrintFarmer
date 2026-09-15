@@ -16,7 +16,8 @@ const mockGetPrinter = vi.fn();
 const mockGetPrinters = vi.fn();
 const mockGetPrinterStatus = vi.fn();
 let completedOperation: PrinterControlOperation | null = null;
-let completionState: 'Succeeded' | 'Running' | 'Recovered' = 'Succeeded';
+let completionState: 'Succeeded' | 'Running' | 'Unknown' | 'Recovered' = 'Succeeded';
+let supportsDurableMotion = true;
 const auth = {
   isAuthenticated: true, user: { id: 'calibration-user' },
   hasRole: () => false, hasPermission: () => false,
@@ -41,7 +42,7 @@ vi.mock('@/services/api', () => ({
     getPrinterControlOperation: async () => ({ operation: completedOperation, etag: '"v1"' }),
     getCurrentPrinterControlOperation: async () => ({
       physicalControl: {
-        supportedOperations: ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'],
+        supportedOperations: supportsDurableMotion ? ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'] : [],
         barrierHeld: completedOperation?.barrierHeld ?? false, requiresRecovery: false,
         operationId: completedOperation?.barrierHeld ? completedOperation.operationId : null,
         state: completedOperation?.barrierHeld ? completedOperation.state : null,
@@ -127,6 +128,7 @@ describe('ZOffsetCalibrationWizard', () => {
     localStorage.setItem('auth-token', crypto.randomUUID());
     completedOperation = null;
     completionState = 'Succeeded';
+    supportsDurableMotion = true;
     mockCreateOperation.mockImplementation(async (printerId: string, operationId: string, intent: PrinterControlIntent) => {
       completedOperation = {
         printerId, operationId, kind: intent.kind, x: intent.x ?? null, y: intent.y ?? null, z: intent.z ?? null, f: intent.f ?? null,
@@ -234,7 +236,8 @@ describe('ZOffsetCalibrationWizard', () => {
     expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
   });
 
-  it('preserves non-Moonraker calibration without the Moonraker safety contract', async () => {
+  it('preserves calibration for a plugin advertising no durable operations', async () => {
+    supportsDurableMotion = false;
     const user = userEvent.setup();
     renderWizard({ printer: createTestPrinter({ backend: 'PrusaLink' as Printer['backend'] }) });
     await user.click(screen.getByRole('button', { name: /next/i }));
@@ -243,6 +246,18 @@ describe('ZOffsetCalibrationWizard', () => {
     expect(mockHomePrinter).toHaveBeenCalledOnce();
     expect(mockGetPrinterStatus).not.toHaveBeenCalled();
     expect(mockGetPrinters).not.toHaveBeenCalled();
+  });
+
+  it('uses durable completion and fresh safety checks for an advertising non-Moonraker plugin', async () => {
+    const user = userEvent.setup();
+    renderWizard({ printer: createTestPrinter({ backend: 'PrusaLink' as Printer['backend'] }) });
+    await user.click(screen.getByRole('button', { name: /next/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /home all axes/i })).toBeEnabled());
+    await user.click(screen.getByRole('button', { name: /home all axes/i }));
+    await waitFor(() => expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument());
+    expect(mockCreateOperation).toHaveBeenCalledOnce();
+    expect(mockHomePrinter).not.toHaveBeenCalled();
+    expect(mockGetPrinterStatus).toHaveBeenCalledOnce();
   });
 
   it('does not advance calibration on 202 or after 27 seconds, only after confirmed motion completion', async () => {
@@ -268,14 +283,16 @@ describe('ZOffsetCalibrationWizard', () => {
       }
     });
 
-  it('does not advance calibration on operator Recovered', async () => {
-      completionState = 'Recovered';
+  it.each(['Unknown', 'Recovered'] as const)('does not advance calibration or require recovery for settled %s', async state => {
+      completionState = state;
       const user = userEvent.setup();
       renderWizard();
       await user.click(screen.getByRole('button', { name: /next/i }));
       await user.click(screen.getByRole('button', { name: /home all axes/i }));
       await waitFor(() => expect(mockCreateOperation).toHaveBeenCalledTimes(1));
+      await waitFor(() => expect(screen.getByRole('button', { name: /home all axes/i })).toBeEnabled());
       expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
+      expect(screen.queryByRole('button', { name: /recover|re-submit/i })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: /home all axes/i })).toBeInTheDocument();
   });
 

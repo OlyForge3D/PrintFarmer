@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations.Schema;
 
 namespace Farm.Infrastructure.Domain;
 
-/// <summary>A durable, non-replayable physical motion intent and its recovery evidence.</summary>
+/// <summary>A durable, non-replayable physical motion intent and its historical outcome.</summary>
 public sealed class PrinterControlOperation : IRevisionedEntity
 {
     public Guid Id { get; set; }
@@ -67,7 +67,7 @@ public sealed class PrinterControlOperation : IRevisionedEntity
 
     public long? RecoveryFromRevision { get; set; }
 
-    [NotMapped] public bool Settled => State is PrinterControlState.Succeeded or PrinterControlState.Failed or PrinterControlState.Recovered;
+    [NotMapped] public bool Settled => State is PrinterControlState.Succeeded or PrinterControlState.Failed or PrinterControlState.Unknown or PrinterControlState.Recovered;
 
-    [NotMapped] public bool RequiresRecovery => State is PrinterControlState.Unknown or PrinterControlState.Recovering;
+    [NotMapped] public bool RequiresRecovery => false;
 }

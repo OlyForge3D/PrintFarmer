@@ -42,6 +42,31 @@ Solutions to common issues in PrintFarmer.
    # (Usually via printer UI or SSH)
    ```
 
+### Moonraker Jog Reports Unverified Movement Evidence
+
+If PrintFarmer reports `printer_safety_evidence_unknown` while the printer is
+online and homed, check the server logs for `Moonraker verified safety discovery
+failed`. A JSON error beginning with `'<'` can indicate that the request
+received the Fluidd/Mainsail HTML page instead of Moonraker JSON.
+
+Keep **Backend Port (API)** set to the actual Moonraker API port (commonly
+`7125`) and **Frontend Port (UI)** set to the web interface port (commonly `80`).
+API discovery and commands use the backend port; **Open in Browser** and relative
+camera URLs use the frontend port. For a reverse proxy, configure its API-facing
+port as the backend port rather than assuming every web UI proxies API requests.
+
+Read-only checks against the configured backend endpoint:
+
+```bash
+curl "http://<printer-ip>:7125/printer/objects/list"
+curl "http://<printer-ip>:7125/printer/objects/query?toolhead=axis_minimum,axis_maximum,homed_axes&gcode_move=homing_origin,gcode_position,position"
+```
+
+These should return JSON, not HTML. Do not bypass homing or travel-bound checks
+to work around an endpoint mismatch. On affected older builds, correct port
+settings alone do not fix frontend-port routing; deploy the endpoint-selection
+fix first.
+
 ### SignalR Connection Drops
 
 **Symptoms:** Real-time updates stop, connection indicator shows disconnected

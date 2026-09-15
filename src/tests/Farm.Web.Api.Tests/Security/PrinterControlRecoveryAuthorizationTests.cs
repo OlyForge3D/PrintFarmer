@@ -26,34 +26,32 @@ public sealed class PrinterControlRecoveryAuthorizationTests : IAsyncLifetime, I
     public void Dispose() => _factory.Dispose();
 
     [Theory]
-    [InlineData(false, true, true, PrinterGroupAccessLevel.Submit, HttpStatusCode.Unauthorized)]
-    [InlineData(true, true, true, PrinterGroupAccessLevel.Submit, HttpStatusCode.Unauthorized)]
-    [InlineData(false, false, false, PrinterGroupAccessLevel.Submit, HttpStatusCode.Forbidden)]
-    [InlineData(true, false, false, PrinterGroupAccessLevel.Submit, HttpStatusCode.Forbidden)]
-    [InlineData(false, false, true, PrinterGroupAccessLevel.View, HttpStatusCode.NotFound)]
-    [InlineData(true, false, true, PrinterGroupAccessLevel.View, HttpStatusCode.NotFound)]
-    [InlineData(false, false, true, null, HttpStatusCode.NotFound)]
-    [InlineData(true, false, true, null, HttpStatusCode.NotFound)]
-    public async Task Recovery_WithoutRequiredGrants_PreservesOperationAndBarrier(
-        bool complete, bool anonymous, bool reconcile, PrinterGroupAccessLevel? access, HttpStatusCode expected)
+    [InlineData(false, false, false)]
+    [InlineData(true, false, false)]
+    [InlineData(false, true, false)]
+    [InlineData(true, true, false)]
+    [InlineData(false, false, true)]
+    [InlineData(true, false, true)]
+    public async Task RemovedRecoveryRoutes_AnyActor_CannotAttestOrMutateHistoricalReceipt(
+        bool complete, bool anonymous, bool admin)
     {
-        Seed seed = await SeedAsync(complete, access);
-        using HttpClient client = CreateClient(seed, anonymous: anonymous, reconcile: reconcile);
+        Seed seed = await SeedAsync(complete, PrinterGroupAccessLevel.Submit);
+        using HttpClient client = CreateClient(seed, anonymous: anonymous, reconcile: true, admin: admin);
         using HttpRequestMessage request = CreateRequest(seed, complete, ETag(seed.Operation.Revision));
 
         using HttpResponseMessage response = await client.SendAsync(request);
 
-        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        response.StatusCode.Should().Be(anonymous ? HttpStatusCode.Unauthorized : HttpStatusCode.NotFound,
+            await response.Content.ReadAsStringAsync());
         await AssertUnchangedAsync(seed);
     }
 
     [Theory]
-    [InlineData(false, null, (HttpStatusCode)428)]
-    [InlineData(true, null, (HttpStatusCode)428)]
-    [InlineData(false, "\"AAAAAAAAAAA=\"", HttpStatusCode.PreconditionFailed)]
-    [InlineData(true, "\"AAAAAAAAAAA=\"", HttpStatusCode.PreconditionFailed)]
-    public async Task Recovery_GrantedOperatorStillRequiresCurrentRevision(
-        bool complete, string? revision, HttpStatusCode expected)
+    [InlineData(false, null)]
+    [InlineData(true, null)]
+    [InlineData(false, "\"AAAAAAAAAAA=\"")]
+    [InlineData(true, "\"AAAAAAAAAAA=\"")]
+    public async Task RemovedRecoveryRoutes_MissingOrStaleRevision_RemainAbsent(bool complete, string? revision)
     {
         Seed seed = await SeedAsync(complete, PrinterGroupAccessLevel.Submit);
         using HttpClient client = CreateClient(seed, reconcile: true);
@@ -61,60 +59,32 @@ public sealed class PrinterControlRecoveryAuthorizationTests : IAsyncLifetime, I
 
         using HttpResponseMessage response = await client.SendAsync(request);
 
-        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        response.StatusCode.Should().Be(HttpStatusCode.NotFound, await response.Content.ReadAsStringAsync());
         await AssertUnchangedAsync(seed);
     }
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task Recovery_GrantedOperatorOrAdministrator_RecordsRecoveryNotMotionSuccess(bool admin)
+    [InlineData(false, false, PrinterGroupAccessLevel.View, HttpStatusCode.OK)]
+    [InlineData(false, false, null, HttpStatusCode.NotFound)]
+    [InlineData(true, false, PrinterGroupAccessLevel.View, HttpStatusCode.Unauthorized)]
+    [InlineData(false, true, null, HttpStatusCode.OK)]
+    public async Task StatusRoute_HistoricalUnknown_RequiresReadAccessButNeverAttestation(
+        bool anonymous, bool admin, PrinterGroupAccessLevel? access, HttpStatusCode expected)
     {
-        // The administrator deliberately has neither a reconcile claim nor a printer-group grant.
-        Seed seed = await SeedAsync(false, admin ? null : PrinterGroupAccessLevel.Submit);
-        using HttpClient client = CreateClient(seed, admin: admin, reconcile: !admin);
-        using HttpRequestMessage begin = CreateRequest(seed, false, ETag(seed.Operation.Revision));
-        using HttpResponseMessage begun = await client.SendAsync(begin);
-        begun.StatusCode.Should().Be(HttpStatusCode.Accepted, await begun.Content.ReadAsStringAsync());
-        begun.Headers.ETag.Should().NotBeNull();
-        using (JsonDocument body = JsonDocument.Parse(await begun.Content.ReadAsStringAsync()))
+        Seed seed = await SeedAsync(false, access);
+        using HttpClient client = CreateClient(seed, anonymous: anonymous, admin: admin);
+        using HttpResponseMessage response = await client.GetAsync(
+            $"/api/printers/{seed.Operation.PrinterId}/control-operations/{seed.Operation.Id}");
+        response.StatusCode.Should().Be(expected, await response.Content.ReadAsStringAsync());
+        if (expected == HttpStatusCode.OK)
         {
-            body.RootElement.GetProperty("state").GetString().Should().Be("Recovering");
+            using JsonDocument body = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+            body.RootElement.GetProperty("state").GetString().Should().Be("Unknown");
+            body.RootElement.GetProperty("requiresRecovery").GetBoolean().Should().BeFalse();
+            body.RootElement.GetProperty("completionEvidence").GetString().Should().Be("None");
+            response.Headers.ETag.Should().NotBeNull();
         }
-
-        await using (AsyncServiceScope scope = _factory.Services.CreateAsyncScope())
-        {
-            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-            PrinterDispatchState barrier = await db.PrinterDispatchStates.SingleAsync(b => b.PrinterId == seed.Operation.PrinterId);
-            barrier.PhysicalControlCommandId.Should().Be(seed.Operation.Id);
-            barrier.PhysicalControlRequiresReconciliation.Should().BeTrue();
-        }
-
-        using HttpRequestMessage complete = CreateRequest(seed, true, begun.Headers.ETag!.ToString());
-        using HttpResponseMessage completed = await client.SendAsync(complete);
-        completed.StatusCode.Should().Be(HttpStatusCode.OK, await completed.Content.ReadAsStringAsync());
-        using (JsonDocument body = JsonDocument.Parse(await completed.Content.ReadAsStringAsync()))
-        {
-            body.RootElement.GetProperty("state").GetString().Should().Be("Recovered");
-        }
-
-        await using AsyncServiceScope finalScope = _factory.Services.CreateAsyncScope();
-        AppDbContext finalDb = finalScope.ServiceProvider.GetRequiredService<AppDbContext>();
-        PrinterControlOperation operation = await finalDb.PrinterControlOperations.SingleAsync(o => o.Id == seed.Operation.Id);
-        operation.State.Should().Be(PrinterControlState.Recovered);
-        operation.CompletionEvidence.Should().Be(PrinterControlEvidence.OperatorVerifiedRecovery);
-        operation.RecoveryActorSubject.Should().Be(seed.UserId.ToString());
-        operation.RecoveryFromRevision.Should().Be(seed.Operation.Revision + 1);
-        operation.Revision.Should().Be(seed.Operation.Revision + 2);
-        operation.RecoveryEvidenceJson.Should().Contain("ExternallyVerified").And.Contain("fixture inspection");
-        operation.SendCommittedAtUtc.Should().BeNull();
-        operation.OwnerToken.Should().BeNull();
-        PrinterDispatchState finalBarrier = await finalDb.PrinterDispatchStates.SingleAsync(b => b.PrinterId == operation.PrinterId);
-        finalBarrier.PhysicalControlCommandId.Should().BeNull();
-        finalBarrier.PhysicalControlRequiresReconciliation.Should().BeFalse();
-        List<QueueOperationAudit> audits = await finalDb.QueueOperationAudits.Where(a => a.ResourceId == operation.Id).ToListAsync();
-        audits.Should().HaveCount(2).And.OnlyContain(a => a.ActorSubject == seed.UserId.ToString());
-        (await finalDb.QueueDispatchOutbox.CountAsync(e => e.AggregateId == operation.Id)).Should().Be(2);
+        await AssertUnchangedAsync(seed);
     }
 
     private async Task AssertUnchangedAsync(Seed seed)

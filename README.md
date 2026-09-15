@@ -70,16 +70,20 @@ rules. Automated clearance-protected workflows retain their stricter policy.
 This does not enable unhomed-axis movement or out-of-envelope recovery moves.
 
 **Client upgrade required:** update the React frontend and iOS app alongside the
-API. Legacy Moonraker motion endpoints reject requests with
-`409 async_control_required` without moving the printer. Other printer backends
-retain their existing motion endpoints.
+API. Printers advertising durable motion through
+`physicalControl.supportedOperations` use the control-operations API, regardless
+of backend name. Their legacy motion endpoints reject requests with
+`409 async_control_required` without moving the printer. Backends without that
+capability retain their existing motion endpoints.
 
-If communication is lost after a command may have been sent, the operation can
-require explicit operator recovery with `queue:reconcile` permission and printer
-Submit access (the existing administrator bypass applies). Do not retry motion or assume the
-printer is unlocked because it looks idle. Recovery requires evidence that the
-prior sender is isolated, pending controller work is cleared, and the printer is
-physically stationary. See [operation ownership and recovery](./docs/JOB_QUEUE_ARCHITECTURE.md).
+If communication is lost after a command may have been sent, its historical
+outcome remains **Unknown** and it is never automatically replayed. Manual
+controls coordinate only while a command sender is active; failures, timeouts
+and restarts do not require recovery forms or operator attestations. Existing
+manual-motion lockouts are cleaned up automatically without clearing print-job
+ownership. Check the physical printer before requesting another move:
+released coordination does not prove the printer stopped.
+See [manual operation coordination](./docs/JOB_QUEUE_ARCHITECTURE.md).
 
 ## 🚀 Quick Start (2 minutes)
 
@@ -160,6 +164,10 @@ Database: SQLite / PostgreSQL / SQL Server
 - SignalR (real-time WebSocket communication)
 - Refit (type-safe HTTP clients)
 - xUnit (testing framework)
+
+Printer controls delegate protocol commands and support declarations to backend
+plugins; shared services retain authorization and operation lifecycle policy.
+See [printer control ownership](./docs/ARCHITECTURE.md#printer-control-ownership).
 
 **Frontend:**
 - React 19+ with TypeScript

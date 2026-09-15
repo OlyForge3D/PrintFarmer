@@ -17,6 +17,40 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 public class PrintersServiceSnapmakerU1CameraTests
 {
     [Fact]
+    public async Task GetCameraSnapshotAsync_PluginUnavailable_RetainsStoredDirectCameraFallback()
+    {
+        Printer printer = CreatePrinter("Voron", "V2.4");
+        byte[] image = [0xff, 0xd8, 0xff, 0xd9];
+        List<Camera> cameras =
+        [
+            new Camera
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = printer.Id,
+                Name = "camera",
+                IsEnabled = true,
+                Source = CameraSource.Moonraker,
+                SnapshotUrl = "http://camera.local/snapshot.jpg",
+            },
+        ];
+        var backendClients = new Mock<IBackendClientFactory>();
+        backendClients.Setup(factory => factory.GetClient(PrinterBackend.Moonraker))
+            .Throws(new InvalidOperationException("plugin unavailable"));
+        using var handler = new SnapshotHandler(image);
+        using var http = new HttpClient(handler);
+        var httpClients = new Mock<IHttpClientFactory>();
+        httpClients.Setup(factory => factory.CreateClient(It.IsAny<string>())).Returns(http);
+        await using AppDbContext db = CreateDbContext();
+        PrintersService service = await CreateServiceAsync(
+            db, printer, cameras, CreateDetectionClient((null, null)).Object, backendClients.Object, httpClients.Object);
+
+        byte[]? result = await service.GetCameraSnapshotAsync(printer.Id, CancellationToken.None);
+
+        result.Should().Equal(image);
+        handler.RequestUrl.Should().Be("http://camera.local/snapshot.jpg");
+    }
+
+    [Fact]
     public async Task RefreshCameraUrlsAsync_WhenSnapmakerU1HasNoWebcamList_StoresSnapshotOnlyU1Strategy()
     {
         Printer printer = CreatePrinter("Snapmaker", "Snapmaker U1");
@@ -58,6 +92,8 @@ public class PrintersServiceSnapmakerU1CameraTests
         dto!.CameraAccessMode.Should().Be(CameraAccessMode.StreamAndSnapshot);
         dto.CameraStreamFormat.Should().Be(CameraStreamFormat.Mjpeg);
         dto.CameraSnapshotStrategy.Should().Be(CameraSnapshotStrategy.DirectUrl);
+        detection.Verify(c => c.DetectConfiguredCameraUrlsAsync(
+            "http://voron.local:7125", 80, It.IsAny<PrinterCredential?>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     private static Mock<ISupportsConfiguredCameraDetection> CreateDetectionClient((string? StreamUrl, string? SnapshotUrl) urls)
@@ -92,7 +128,9 @@ public class PrintersServiceSnapmakerU1CameraTests
         AppDbContext db,
         Printer printer,
         List<Camera> cameras,
-        ISupportsConfiguredCameraDetection detectionClient)
+        ISupportsConfiguredCameraDetection detectionClient,
+        IBackendClientFactory? backendClients = null,
+        IHttpClientFactory? httpClients = null)
     {
         db.Printers.Add(printer);
         await db.SaveChangesAsync();
@@ -132,13 +170,20 @@ public class PrintersServiceSnapmakerU1CameraTests
             .Setup(f => f.GetStatusClient(It.IsAny<int>()))
             .Throws(new InvalidOperationException("offline"));
 
+        var backendFactory = new Mock<IBackendClientFactory>();
+        backendFactory.Setup(factory => factory.GetClient(PrinterBackend.Moonraker))
+            .Returns(new MoonrakerClient(
+                new HttpClient(),
+                NullLogger<MoonrakerClient>.Instance,
+                new Farm.Infrastructure.Settings.BackendTimeoutSettings()));
+
         return new PrintersService(
             unitOfWork.Object,
             db,
-            Mock.Of<IBackendClientFactory>(),
+            backendClients ?? backendFactory.Object,
             capabilityFactory.Object,
             Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),
-            Mock.Of<IHttpClientFactory>(),
+            httpClients ?? Mock.Of<IHttpClientFactory>(),
             NullLogger<PrintersService>.Instance,
             Mock.Of<IPrinterStatusBroadcaster>(),
             Mock.Of<IMultiPrinterStatusCoordinator>(),
@@ -150,6 +195,20 @@ public class PrintersServiceSnapmakerU1CameraTests
             Mock.Of<IGo2RtcService>(),
             Mock.Of<Farm.Infrastructure.Services.StorageManagement.IStoragePathService>(),
             Mock.Of<Farm.Infrastructure.Services.Spoolman.IFilamentCoverageSpoolResolver>());
+    }
+
+    private sealed class SnapshotHandler(byte[] image) : HttpMessageHandler
+    {
+        public string? RequestUrl { get; private set; }
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            RequestUrl = request.RequestUri?.ToString();
+            return Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(image),
+            });
+        }
     }
 
     private static AppDbContext CreateDbContext()

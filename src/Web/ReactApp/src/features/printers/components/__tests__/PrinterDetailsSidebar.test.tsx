@@ -24,6 +24,7 @@ const mockMovePrinter = vi.fn();
 const mockToastError = vi.fn();
 const mockCreateOperation = vi.fn();
 let durableOperation: PrinterControlOperation | null = null;
+let supportsDurableMotion = true;
 vi.mock('@/services/printer-signalr', () => ({
   printerSignalRService: {
     isConnected: true, onControlOperationUpdated: () => vi.fn(), onConnectionStateChange: () => vi.fn(),
@@ -114,7 +115,7 @@ vi.mock('@/services/api', () => ({
     getPrinterControlOperation: async () => ({ operation: durableOperation, etag: '"v1"' }),
     getCurrentPrinterControlOperation: async () => ({
       physicalControl: {
-        supportedOperations: ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'],
+        supportedOperations: supportsDurableMotion ? ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'] : [],
         barrierHeld: durableOperation?.barrierHeld ?? false, requiresRecovery: false,
         operationId: durableOperation?.barrierHeld ? durableOperation.operationId : null,
         state: durableOperation?.barrierHeld ? durableOperation.state : null,
@@ -206,6 +207,7 @@ describe('PrinterDetailsSidebar', () => {
     mockToastError.mockReset();
     localStorage.clear();
     durableOperation = null;
+    supportsDurableMotion = true;
     mockCreateOperation.mockReset();
     mockCreateOperation.mockImplementation(async (printerId: string, operationId: string, intent: PrinterControlIntent) => {
       durableOperation = {
@@ -218,15 +220,15 @@ describe('PrinterDetailsSidebar', () => {
     });
   });
 
-  it('routes Moonraker Home All/XY/Z, jog, GO and Enter positioning through durable operations only', async () => {
+  it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink])('routes advertised %s Home All/XY/Z, jog, GO and Enter through durable operations only', async backend => {
     localStorage.setItem('auth-token', crypto.randomUUID());
-    const moonraker = { ...printer, id: '11111111-1111-4111-8111-111111111111', backend: PrinterBackend.Moonraker };
+    const moonraker = { ...printer, id: '11111111-1111-4111-8111-111111111111', backend };
     const auth = {
       isAuthenticated: true, user: { id: 'sidebar-user' }, hasRole: () => false, hasPermission: () => false,
     } as unknown as AuthContextType;
     render(
       <AuthContext.Provider value={auth}>
-        <PrinterDetailsSidebar printerId={moonraker.id} printer={moonraker} backendCapabilities={capabilities({ backend: PrinterBackend.Moonraker })} onClose={vi.fn()} />
+        <PrinterDetailsSidebar printerId={moonraker.id} printer={moonraker} backendCapabilities={capabilities({ backend })} onClose={vi.fn()} />
       </AuthContext.Provider>
     );
     for (const [title, kind] of [['Home all axes', 'HomeAll'], ['Home X/Y', 'HomeXY'], ['Home Z', 'HomeZ']]) {
@@ -577,9 +579,15 @@ describe('PrinterDetailsSidebar', () => {
     });
 
     it('preserves the legacy error toast for non-Moonraker Home failures', async () => {
+      supportsDurableMotion = false;
+      localStorage.setItem('auth-token', crypto.randomUUID());
+      const auth = {
+        isAuthenticated: true, user: { id: 'sidebar-legacy-user' }, hasRole: () => false, hasPermission: () => false,
+      } as unknown as AuthContextType;
       mockHomePrinter.mockRejectedValue(new Error('reconciliation is required'));
 
       render(
+        <AuthContext.Provider value={auth}>
         <PrinterDetailsSidebar
           printerId={printer.id}
           printer={{ ...printer, backend: PrinterBackend.PrusaLink, state: 'Idle' }}
@@ -587,8 +595,10 @@ describe('PrinterDetailsSidebar', () => {
           onClose={vi.fn()}
           layout="panel"
         />
+        </AuthContext.Provider>
       );
 
+      await waitFor(() => expect(screen.getByTitle('Home all axes')).toBeEnabled());
       fireEvent.click(screen.getByTitle('Home all axes'));
 
       await waitFor(() => {

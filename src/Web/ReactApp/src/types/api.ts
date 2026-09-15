@@ -2529,7 +2529,7 @@ export const printerControlOperationSchema = z.object({
 
 type NormalizedControlIntentInput = PrinterControlIntent | Pick<PrinterControlOperation, 'kind' | 'x' | 'y' | 'z' | 'f'>;
 
-/** Compare receipts without rewriting the original persisted request. */
+/** Compare receipts without rewriting the original request. */
 export function matchesPrinterControlIntent(actual: NormalizedControlIntentInput, expected: NormalizedControlIntentInput): boolean {
   return actual.kind === expected.kind &&
     (['x', 'y', 'z', 'f'] as const).every(axis => (actual[axis] ?? null) === (expected[axis] ?? null));
@@ -2537,25 +2537,13 @@ export function matchesPrinterControlIntent(actual: NormalizedControlIntentInput
 
 /** A settled receipt, not necessarily successful actuation. */
 export function isControlOperationResolved(operation: PrinterControlOperation): boolean {
-  if (operation.barrierHeld || operation.requiresRecovery) return false;
-  return (operation.state === 'Succeeded' && operation.completionEvidence === 'MotionQueueDrained') ||
-    (operation.state === 'Recovered' && operation.completionEvidence === 'OperatorVerifiedRecovery') ||
-    (operation.state === 'Failed' && ['NotSent', 'BackendRejected'].includes(operation.completionEvidence));
+  return !operation.barrierHeld && !['Queued', 'Running'].includes(operation.state);
 }
 
 export interface PrinterControlCurrent {
   physicalControl: PrinterPhysicalControl;
   /** Current barrier owner only; settled receipts remain available through the exact operation GET. */
   operation: PrinterControlOperation | null;
-}
-
-export interface PrinterControlRecovery {
-  reason: string;
-  senderIsolation: 'ServiceConfirmed' | 'ExternallyVerified';
-  senderIsolationEvidence: string;
-  controllerQueueCleared: true;
-  physicallyStationary: true;
-  physicalEvidence: string;
 }
 
 export interface PrinterControlOperationResponse {
