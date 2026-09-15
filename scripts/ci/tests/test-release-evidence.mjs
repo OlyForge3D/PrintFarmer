@@ -122,7 +122,21 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
       signatures: [{ sig: 'native-dsse-signature' }],
     },
   }]);
-  assert.doesNotThrow(() => normalizeEvidence({ subject: digest, ...evidence }));
+  assert.doesNotThrow(() => normalizeEvidence({ subject: digest, trust: trust(), ...evidence }));
+
+  const wrongIdentity = structuredClone(evidence);
+  const identityVerification = JSON.parse(wrongIdentity.signatureBytes);
+  identityVerification[0].optional.Subject = 'https://example.invalid/untrusted';
+  wrongIdentity.signatureBytes = JSON.stringify(identityVerification);
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...wrongIdentity }),
+    /untrusted|rotation window/);
+
+  const wrongIssuer = structuredClone(evidence);
+  const issuerVerification = JSON.parse(wrongIssuer.signatureBytes);
+  issuerVerification[0].optional.Issuer = 'https://example.invalid/issuer';
+  wrongIssuer.signatureBytes = JSON.stringify(issuerVerification);
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...wrongIssuer }),
+    /untrusted|issuer/);
 });
 
 test('rejects stale, revoked, substituted, and out-of-window bundle trust before staging', () => {
