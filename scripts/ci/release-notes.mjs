@@ -22,7 +22,7 @@ function validatedOperationalNotes(notes) {
 }
 
 function escapeMarkdownText(value) {
-  return value.replace(/[\\`*_~[\]<>&]/g, '\\$&');
+  return value.replace(/\\/g, '\\\\').replace(/[`*_~[\]<>&]/g, '\\$&');
 }
 
 export function validateReleaseNotesMetadata(metadata, version) {

@@ -5,7 +5,8 @@ export const digest = `sha256:${'b'.repeat(64)}`;
 export const identity: CanonicalReleaseIdentity = {
   canonicalVersion: '1.2.3-insider.10', baseVersion: '1.2.3', channel: 'insider', releaseId: 'insider:1.2.3-insider.10',
   sourceTag: 'v1.2.3-insider.10', sourceBranch: 'development', sourceCommit: commit, authorizedBranchHead: commit,
-  buildId: '42', buildAttempt: '1', workflowIdentity: 'release-workflow', allocationIdentity: 'allocation-10', promotionOrigin: null,
+  buildId: '42', buildAttempt: '1', workflowIdentity: 'release-workflow', stableSequence: '0',
+  allocationIdentity: 'allocation-10', promotionOrigin: null,
 };
 export function replica(overrides: Partial<ServiceReplicaObservation> = {}): ServiceReplicaObservation {
   return {

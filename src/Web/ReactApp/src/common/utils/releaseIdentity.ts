@@ -7,7 +7,8 @@ export function readReleaseIdentity(value: string | undefined, sourceCommit: str
   if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error('Release identity must be an object.');
   const input = record as Record<string, unknown>;
   const keys = ['canonicalVersion', 'baseVersion', 'channel', 'releaseId', 'sourceTag', 'sourceBranch',
-    'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'allocationIdentity'] as const;
+    'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'stableSequence',
+    'allocationIdentity'] as const;
   for (const key of keys) {
     if (typeof input[key] !== 'string' || !input[key]) throw new Error(`Release identity is missing ${key}.`);
   }
