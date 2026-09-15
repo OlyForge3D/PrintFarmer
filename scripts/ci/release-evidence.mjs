@@ -206,14 +206,9 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   const predicate = parseJson(predicateBytes, 'SPDX predicate');
   for (let index = 0; index < entries.length; index++) {
     const rawEntry = entries[index];
-    requireThat(!nativeBundle(rawEntry) || nativeDsseBundle(rawEntry),
-      'Malformed native Cosign DSSE attestation bundle');
+    requireThat(nativeDsseBundle(rawEntry), 'Malformed native Cosign DSSE attestation bundle');
     const entry = rawEntry?.dsseEnvelope ?? rawEntry;
     const optional = verification[index]?.optional;
-    const verifierOutputMatchesDownload = verification[index]?.payloadType === entry.payloadType &&
-      verification[index]?.payload === entry.payload &&
-      JSON.stringify(canonicalJson(verification[index]?.signatures)) ===
-        JSON.stringify(canonicalJson(entry.signatures));
     let statement;
     try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
       throw new Error('Malformed Cosign DSSE payload');
@@ -222,17 +217,15 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
       JSON.stringify(canonicalJson(statement.predicate)) === JSON.stringify(canonicalJson(predicate)),
     'Cosign DSSE subject or SPDX predicate mismatch');
     requireThat(entry.signatures.length === 1 &&
-      ((entry.signatures[0].sig === optional?.Bundle?.Payload?.signature &&
+      (entry.signatures[0].sig === optional?.Bundle?.Payload?.signature &&
         typeof verification[index]?.payload === 'string' &&
-        verification[index].payload === entry.payload) || verifierOutputMatchesDownload),
+        verification[index].payload === entry.payload),
     'Cosign DSSE download is not the verified attestation');
-    if (nativeBundle(rawEntry)) {
-      const certificate = nativeCertificate(rawEntry);
-      requireThat(typeof optional?.certificate === 'string' &&
-        certificate.raw.toString('base64') === new X509Certificate(optional.certificate).raw.toString('base64') &&
-        rawEntry.verificationMaterial.tlogEntries[0]?.canonicalizedBody === optional.Bundle.Payload.canonicalizedBody,
-      'Native Cosign DSSE differs from verification output');
-    }
+    const certificate = nativeCertificate(rawEntry);
+    requireThat(typeof optional?.certificate === 'string' &&
+      certificate.raw.toString('base64') === new X509Certificate(optional.certificate).raw.toString('base64') &&
+      rawEntry.verificationMaterial.tlogEntries[0]?.canonicalizedBody === optional.Bundle.Payload.canonicalizedBody,
+    'Native Cosign DSSE differs from verification output');
   }
 }
 
@@ -248,15 +241,8 @@ function partitionDownload(bytes) {
     const fingerprint = JSON.stringify(canonicalJson(entry));
     requireThat(!fingerprints.has(fingerprint), 'Combined Cosign download contains duplicate entry');
     fingerprints.add(fingerprint);
-    const signature = nativeSignatureBundle(entry) ||
-      (typeof entry?.Base64Signature === 'string' && typeof entry?.Payload === 'string' &&
-        (entry.Cert === null || typeof entry.Cert === 'string' ||
-          (entry.Cert && typeof entry.Cert === 'object' && !Array.isArray(entry.Cert) &&
-            typeof entry.Cert.Raw === 'string')) &&
-        entry.Bundle && !entry.dsseEnvelope);
-    const attestation = nativeDsseBundle(entry) ||
-      (typeof entry?.payload === 'string' && typeof entry?.payloadType === 'string' &&
-        Array.isArray(entry?.signatures) && !entry.messageSignature);
+    const signature = nativeSignatureBundle(entry);
+    const attestation = nativeDsseBundle(entry);
     requireThat(signature !== attestation, 'Combined Cosign download contains unknown or ambiguous entry');
     (signature ? signatures : attestations).push(entry);
   }
@@ -265,65 +251,19 @@ function partitionDownload(bytes) {
   return { signatures, attestations };
 }
 
-function legacyCertificate(entry, certificate) {
-  if (certificate === undefined) {
-    if (!entry.Cert || typeof entry.Cert !== 'object' || Array.isArray(entry.Cert) ||
-      typeof entry.Cert.Raw !== 'string' || entry.Cert.Raw.length === 0) return false;
-    try { new X509Certificate(Buffer.from(entry.Cert.Raw, 'base64')); return true; } catch { return false; }
-  }
-  if (entry.Cert === null) return true;
-  if (typeof entry.Cert === 'string') return entry.Cert === certificate;
-  if (!entry.Cert || typeof entry.Cert !== 'object' || Array.isArray(entry.Cert) ||
-    typeof entry.Cert.Raw !== 'string' || entry.Cert.Raw.length === 0) return false;
-  try {
-    return new X509Certificate(Buffer.from(entry.Cert.Raw, 'base64')).raw.toString('base64') ===
-      new X509Certificate(certificate).raw.toString('base64');
-  } catch { return false; }
-}
-
-function verifierPayloadMatches(payload, verification) {
-  if (JSON.stringify(canonicalJson(payload)) === JSON.stringify(canonicalJson(verification))) return true;
-  const stripped = structuredClone(verification);
-  if (!stripped?.optional || typeof stripped.optional !== 'object' || Array.isArray(stripped.optional)) return false;
-  for (const field of ['Subject', 'Issuer', 'certificate', 'Bundle']) delete stripped.optional[field];
-  if (JSON.stringify(canonicalJson(payload)) === JSON.stringify(canonicalJson(stripped))) return true;
-  return JSON.stringify(canonicalJson(payload?.critical)) ===
-    JSON.stringify(canonicalJson(verification?.critical));
-}
-
-function rekorSignature(bundle) {
-  try {
-    return JSON.parse(Buffer.from(bundle?.Payload?.body ?? '', 'base64').toString('utf8'))?.spec?.signature?.content;
-  } catch { return undefined; }
-}
-
 function validateSignatureDownload(bundle, verification, subject) {
   const entries = Array.isArray(bundle) ? bundle : [bundle];
   requireThat(entries.length === verification.length && entries.length > 0 && entries.every((entry, index) => {
-    if (nativeBundle(entry)) {
-      if (!nativeSignatureBundle(entry)) return false;
-      validateNativeSignatureBundle(entry, subject, verification[index]);
-      return true;
-    }
-    const optional = verification[index]?.optional;
-    let signedPayload;
-    try { signedPayload = JSON.parse(Buffer.from(entry?.Payload ?? '', 'base64').toString('utf8')); } catch {
-      return false;
-    }
-    return typeof entry?.Base64Signature === 'string' && entry.Base64Signature.length > 0 &&
-      typeof entry?.Payload === 'string' && entry.Payload.length > 0 &&
-      entry.Bundle && typeof entry.Bundle === 'object' &&
-      typeof optional?.Subject === 'string' && typeof optional?.Issuer === 'string' &&
-      optional.Bundle && typeof optional.Bundle === 'object' &&
-      verifierPayloadMatches(signedPayload, verification[index]) &&
-      (entry.Base64Signature === optional.Bundle?.Payload?.signature ||
-        entry.Base64Signature === rekorSignature(entry.Bundle)) &&
-      (typeof optional.certificate === 'string' && optional.certificate.length > 0
-        ? legacyCertificate(entry, optional.certificate)
-        : legacyCertificate(entry)) &&
-      JSON.stringify(canonicalJson(entry.Bundle)) === JSON.stringify(canonicalJson(optional.Bundle));
+    if (!nativeSignatureBundle(entry)) return false;
+    validateNativeSignatureBundle(entry, subject, verification[index]);
+    return true;
   }),
   'Malformed Cosign signature download');
+}
+
+function equivalentEntries(left, right) {
+  const entries = value => Array.isArray(value) ? value : [value];
+  return JSON.stringify(canonicalJson(entries(left))) === JSON.stringify(canonicalJson(entries(right)));
 }
 
 function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
@@ -331,8 +271,16 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
   const signatureVerification = verificationEntries(signatureBytes, subject, 'signature');
   const attestationVerification = verificationEntries(attestationBytes, subject, 'attestation', predicateBytes);
   const partitioned = downloadBytes === undefined ? undefined : partitionDownload(downloadBytes);
-  const signatureBundle = partitioned?.signatures ?? parseJson(signatureBundleBytes, 'signature bundle');
-  const attestationBundle = partitioned?.attestations ?? parseJson(attestationBundleBytes, 'attestation bundle');
+  const storedSignatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
+  const storedAttestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
+  if (partitioned) {
+    requireThat(equivalentEntries(storedSignatureBundle, partitioned.signatures),
+      'Stored signature bundle does not match partitioned download');
+    requireThat(equivalentEntries(storedAttestationBundle, partitioned.attestations),
+      'Stored attestation bundle does not match partitioned download');
+  }
+  const signatureBundle = partitioned?.signatures ?? storedSignatureBundle;
+  const attestationBundle = partitioned?.attestations ?? storedAttestationBundle;
   validateSignatureDownload(signatureBundle, signatureVerification, subject);
   validateDsseBundle(attestationBundle, subject, predicateBytes, attestationVerification);
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
