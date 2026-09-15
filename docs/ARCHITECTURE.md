@@ -62,11 +62,15 @@ and credentials through capability interfaces; they must not select Moonraker
 ports, build firmware commands, or infer supported controls from backend names.
 The redundant `PrinterBackendEndpointResolver` is removed.
 
-`PrintersService` coordinates lookup and application results. The control service
-and worker retain authorization, durable ownership, dispatch fencing, fresh safety
-validation, recovery and no-replay guarantees. Plugin capabilities provide the
-transport, command translation and supported-operation facts. A broad legacy
-interface is not evidence that every method is implemented.
+`PrintersService` coordinates lookup and application results. Direct printer
+routes retain authorization and database physical-actuation fencing against
+concurrent controls and print dispatch. Plugins provide command translation,
+transport, supported-operation facts, and fresh backend safety evidence.
+Manual motion uses one ordinary authenticated HTTP send and returns backend
+acceptance, not proof of physical completion. There is no tracked-motion worker,
+command channel, receipt, or recovery workflow; uncertain sends are never
+automatically replayed. Attempt-bound print lifecycle safeguards remain separate.
+A broad legacy interface is not evidence that every method is implemented.
 
 API and frontend addresses remain separate. Moonraker camera discovery queries
 the backend API while the plugin resolves relative webcam URLs against the

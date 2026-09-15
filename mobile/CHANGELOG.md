@@ -4,6 +4,14 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ## [Unreleased]
 
+### Removed
+
+- Remove tracked manual-motion receipts, operation polling, journals, SignalR
+  listeners and recovery/admission UI. Home, jog and absolute positioning use
+  ordinary direct commands with capability, authorization and safety checks.
+  Success means command accepted, not physical completion; uncertain outcomes
+  require checking the printer and are never automatically replayed (#2713).
+
 ### Fixed
 
 - Keep full Overview/Controls titles readable at accessibility sizes using

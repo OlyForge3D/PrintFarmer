@@ -359,6 +359,70 @@ test('single authority has direct dependencies, one approval, and no alternate c
   assert.doesNotMatch(JSON.stringify(workflow), /RELEASE_MODE/);
 });
 
+function assertPermissionCeiling(requested, allowed, context) {
+  const levels = { none: 0, read: 1, write: 2 };
+  for (const permissions of [requested, allowed]) {
+    assert.ok(permissions && typeof permissions === 'object' && !Array.isArray(permissions),
+      `${context}: release permissions must be explicit maps, not blanket grants`);
+  }
+  for (const [scope, level] of Object.entries(requested)) {
+    const ceiling = allowed[scope] ?? 'none';
+    assert.ok(Object.hasOwn(levels, level) && Object.hasOwn(levels, ceiling),
+      `${context}: invalid permission level for ${scope}`);
+    assert.ok(levels[level] <= levels[ceiling],
+      `${context}: ${scope}: ${level} exceeds caller ${ceiling}`);
+  }
+}
+
+test('release reusable workflows stay within caller permission ceilings', () => {
+  const pending = ['.github/workflows/consolidated-release.yml'];
+  const visited = new Set();
+  while (pending.length > 0) {
+    const file = pending.pop();
+    if (visited.has(file)) continue;
+    visited.add(file);
+    const workflow = load(readFileSync(file, 'utf8'));
+    for (const [callerId, caller] of Object.entries(workflow.jobs)) {
+      if (!caller.uses) continue;
+      assert.ok(caller.uses.startsWith('./.github/workflows/'),
+        `${file} / ${callerId}: reusable release workflows must be locally inspectable`);
+      const callee = load(readFileSync(caller.uses, 'utf8'));
+      const allowed = caller.permissions ?? workflow.permissions;
+      if (callee.permissions !== undefined) {
+        assertPermissionCeiling(callee.permissions, allowed, `${file} / ${callerId} defaults`);
+      }
+      for (const [jobId, job] of Object.entries(callee.jobs)) {
+        assertPermissionCeiling(job.permissions ?? callee.permissions ?? allowed, allowed,
+          `${file} / ${callerId} -> ${caller.uses} / ${jobId}`);
+      }
+      pending.push(caller.uses);
+    }
+  }
+});
+
+for (const scope of ['checks', 'pull-requests', 'statuses']) {
+  test(`publisher permission ceiling rejects removal of caller ${scope}: read`, () => {
+    const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
+    const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+    const allowed = structuredClone(workflow.jobs.publish.permissions);
+    const requested = publisher.jobs.publish.permissions;
+    assertPermissionCeiling(requested, allowed, 'publisher');
+    assert.equal(allowed[scope], 'read');
+    delete allowed[scope];
+    assert.throws(() => assertPermissionCeiling(requested, allowed, 'publisher'),
+      { message: `publisher: ${scope}: read exceeds caller none` });
+  });
+}
+
+test('publisher caller retains only the required reads and existing OIDC write', () => {
+  const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
+  assert.deepEqual(workflow.jobs.publish.permissions, {
+    actions: 'read', checks: 'read', contents: 'read', packages: 'read',
+    'pull-requests': 'read', statuses: 'read', 'id-token': 'write',
+  });
+  assert.deepEqual(workflow.permissions, { contents: 'read', 'pull-requests': 'read' });
+});
+
 test('legacy qualifier and recorder remain reachable without an alternate release workflow', () => {
   const qualify = load(readFileSync('.github/workflows/qualify-canonical-release.yml', 'utf8'));
   const record = load(readFileSync('.github/workflows/record-canonical-qualification.yml', 'utf8'));

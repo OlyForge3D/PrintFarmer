@@ -2,8 +2,8 @@ import Foundation
 import Security
 
 /// Redirects can replay a mutating request or cross its registered-server
-/// boundary. Durable motion must return the redirect as a transport response.
-private final class ControlOperationTaskDelegate: NSObject, URLSessionTaskDelegate, Sendable {
+/// boundary. Direct commands must return the redirect as a transport response.
+private final class DirectCommandTaskDelegate: NSObject, URLSessionTaskDelegate, Sendable {
     func urlSession(
         _ session: URLSession,
         task: URLSessionTask,
@@ -885,70 +885,37 @@ actor APIClient {
 
     // MARK: - HTTP Methods
 
-    /// One transport attempt only. A lost POST response is resolved by a GET,
-    /// never a new nonce, an offline replay, or a legacy motion endpoint.
-    func controlOperation<T: Decodable & Sendable>(
-        _ path: String,
-        operationId: UUID? = nil,
-        body: PrinterControlOperationRequest? = nil
-    ) async throws -> T {
+    /// A physical command gets one transport attempt, never a redirect or replay.
+    func directCommand(_ path: String) async throws -> CommandResult {
+        try await sendDirectCommand(path, body: nil)
+    }
+
+    func directCommand<B: Encodable & Sendable>(_ path: String, body: B) async throws -> CommandResult {
+        try await sendDirectCommand(path, body: encoder.encode(body))
+    }
+
+    private func sendDirectCommand(_ path: String, body: Data?) async throws -> CommandResult {
         let requestSession = captureRequestSession()
         try Task.checkCancellation()
         try await checkTokenExpiry(session: requestSession)
         try validateControlSession(requestSession)
-        let isSubmission = body != nil
-        guard isSubmission == (operationId != nil) else {
-            throw PrinterControlOperationError.invalidResponse
-        }
-        var request = try buildRequest(
-            session: requestSession, path: path, method: isSubmission ? "POST" : "GET"
-        )
+        var request = try buildRequest(session: requestSession, path: path, method: "POST")
         request.cachePolicy = .reloadIgnoringLocalAndRemoteCacheData
         request.setValue("no-store", forHTTPHeaderField: "Cache-Control")
-        if let body, let operationId {
-            request.httpBody = try encoder.encode(body)
+        if let body {
+            request.httpBody = body
             request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            request.setValue(operationId.uuidString, forHTTPHeaderField: "Idempotency-Key")
         }
         try Task.checkCancellation()
-        let (data, response) = try await performRequest(request, delegate: ControlOperationTaskDelegate())
+        let (data, response) = try await performRequest(request, delegate: DirectCommandTaskDelegate())
         try Task.checkCancellation()
         try validateControlSession(requestSession)
-        guard let http = response as? HTTPURLResponse else {
-            throw NetworkError.invalidResponse
-        }
-        if [405, 501].contains(http.statusCode),
-           isSubmission || path.hasSuffix("/current") {
-            throw PrinterControlOperationError.updateRequired
-        }
-        if (400...499).contains(http.statusCode), ![401, 403].contains(http.statusCode) {
-            let problem = try? decoder.decode(APIError.self, from: data)
-            throw PrinterControlOperationError.problem(
-                statusCode: http.statusCode, code: problem?.code,
-                message: problem?.detail ?? problem?.message ?? problem?.title
-                    ?? (http.statusCode == 404
-                        ? "The printer or operation is unavailable, inaccessible, or unsupported by this server. Recheck access and server version; no legacy command was sent."
-                        : nil)
-            )
-        }
         try validateResponse(response, data: data, authSessionToken: requestSession.authSessionToken)
-        guard http.statusCode == 200 || (isSubmission && http.statusCode == 202) else {
-            throw PrinterControlOperationError.invalidResponse
-        }
-        let value: T
         do {
-            value = try decoder.decode(T.self, from: data)
+            return try decoder.decode(CommandResult.self, from: data)
         } catch {
-            throw NetworkError.decodingFailed(ResponseDecodingFailure(error: error, targetType: T.self))
+            throw NetworkError.decodingFailed(ResponseDecodingFailure(error: error, targetType: CommandResult.self))
         }
-        if isSubmission {
-            guard let operation = value as? PrinterControlOperation,
-                  (http.statusCode == 200 && operation.state.isTerminal)
-                    || (http.statusCode == 202 && operation.barrierHeld) else {
-                throw PrinterControlOperationError.invalidResponse
-            }
-        }
-        return value
     }
 
     private func validateControlSession(_ captured: RequestSession) throws {

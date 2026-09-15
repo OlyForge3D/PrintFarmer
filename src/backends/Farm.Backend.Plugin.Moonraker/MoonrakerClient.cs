@@ -1,5 +1,6 @@
 ﻿#pragma warning disable CS1066, S1006 // Default parameters in explicit interface implementations are architecturally intentional
 
+using System.Globalization;
 using System.IO;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -20,8 +21,7 @@ public partial class MoonrakerClient(
     HttpClient http,
     ILogger<MoonrakerClient> logger,
     BackendTimeoutSettings timeouts,
-    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null,
-    IMoonrakerMotionChannelFactory? motionChannels = null) : PrinterClientBase, IMoonrakerClient,
+    ISnapmakerU1CameraMonitorManager? snapmakerU1CameraMonitorManager = null) : PrinterClientBase, IMoonrakerClient,
     ISupportsFileDownload,
     ISupportsFileList,
     ISupportsFileUpload,
@@ -65,7 +65,6 @@ public partial class MoonrakerClient(
         new(JsonSerializerDefaults.Web);
 
     private readonly HttpClient _http = http;
-    private readonly IMoonrakerMotionChannelFactory? _motionChannels = motionChannels;
     private readonly ILogger<MoonrakerClient> _logger = logger;
     private readonly BackendTimeoutSettings _timeouts = timeouts;
     private readonly ISnapmakerU1CameraMonitorManager _snapmakerU1CameraMonitorManager =
@@ -774,61 +773,43 @@ public partial class MoonrakerClient(
         return await SendGcodePrivateAsync(baseUrl, cmds, ct);
     }
 
-    public async Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
-    {
-        List<string> parts = new() { "G91", "G0" };
-        if (x is not null)
-        {
-            parts.Add($"X{x:0.###}");
-        }
+    public Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+        => SendMovementAsync(baseUrl, true, x, y, z, f, null, ct);
 
-        if (y is not null)
-        {
-            parts.Add($"Y{y:0.###}");
-        }
-
-        if (z is not null)
-        {
-            parts.Add($"Z{z:0.###}");
-        }
-
-        if (f is not null)
-        {
-            parts.Add($"F{f:0.###}");
-        }
-
-        string[] cmds = new[] { string.Join(' ', parts), "G90" };
-        return await SendGcodePrivateAsync(baseUrl, cmds, ct);
-    }
-
-    public async Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+    private Task<bool> SendMovementAsync(string baseUrl, bool relative, double? x, double? y, double? z, double? f, PrinterCredential? credential, CancellationToken ct)
     {
         List<string> parts = new() { "G0" };
         if (x is not null)
         {
-            parts.Add($"X{x:0.###}");
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"X{x:0.###}"));
         }
 
         if (y is not null)
         {
-            parts.Add($"Y{y:0.###}");
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"Y{y:0.###}"));
         }
 
         if (z is not null)
         {
-            parts.Add($"Z{z:0.###}");
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"Z{z:0.###}"));
         }
 
         if (f is not null)
         {
-            parts.Add($"F{f:0.###}");
+            parts.Add(string.Create(CultureInfo.InvariantCulture, $"F{f:0.###}"));
         }
 
-        return await SendGcodePrivateAsync(
-            baseUrl,
-            ["G90", string.Join(' ', parts)],
-            ct);
+        string script = string.Join(
+            '\n',
+            "SAVE_GCODE_STATE NAME=printfarmer_manual",
+            relative ? "G91" : "G90",
+            string.Join(' ', parts),
+            "RESTORE_GCODE_STATE NAME=printfarmer_manual MOVE=0");
+        return SendControlScriptAsync(baseUrl, script, credential, ct);
     }
+
+    public Task<bool> MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, CancellationToken ct = default)
+        => SendMovementAsync(baseUrl, false, x, y, z, f, null, ct);
 
     /// <inheritdoc />
     public async Task<PrinterVerifiedSafetyDto> DiscoverVerifiedSafetyAsync(
@@ -3808,10 +3789,10 @@ public partial class MoonrakerClient(
         => await HomeZAsync(baseUrl, credential, ct);
 
     async Task<bool> ISupportsMovement.MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await MoveAsync(baseUrl, x, y, z, f, ct: ct);
+        => await SendMovementAsync(baseUrl, true, x, y, z, f, credential, ct);
 
     async Task<bool> ISupportsMovement.MoveToAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => await MoveToAsync(baseUrl, x, y, z, f, ct);
+        => await SendMovementAsync(baseUrl, false, x, y, z, f, credential, ct);
 
     /// <summary>
     /// ISupportsTemperatureControl implementation - set temperatures.

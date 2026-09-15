@@ -2,12 +2,7 @@
 // Get hash for a G-code file (returns string)
 import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
-import { matchesPrinterControlIntent, printerControlOperationSchema } from "@/types/api";
 import type {
-  PrinterControlCurrent,
-  PrinterControlIntent,
-  PrinterControlOperation,
-  PrinterControlOperationResponse,
   PrinterStatus,
 } from "@/types/api";
 import {
@@ -995,38 +990,6 @@ export class ApiClient {
   }
 
   // ============ Printer Control API methods ============
-
-  async createPrinterControlOperation(
-    printerId: string, operationId: string, intent: PrinterControlIntent
-  ): Promise<PrinterControlOperationResponse> {
-    const response = await this.client.post<PrinterControlOperation>(
-      `/printers/${printerId}/control-operations`, intent,
-      { headers: { "Idempotency-Key": operationId } }
-    );
-    const operation = printerControlOperationSchema.parse(response.data);
-    const terminal = ["Succeeded", "Failed", "Unknown", "Recovered"].includes(operation.state);
-    if (operation.operationId !== operationId || operation.printerId !== printerId || !matchesPrinterControlIntent(operation, intent) ||
-      !((response.status === 200 && terminal) || (response.status === 202 && operation.barrierHeld))) {
-      throw new Error("Invalid durable motion admission receipt. Recheck the operation; do not assume admission or completion.");
-    }
-    return { operation, etag: response.headers.etag ?? null };
-  }
-
-  async getPrinterControlOperation(printerId: string, operationId: string): Promise<PrinterControlOperationResponse> {
-    const response = await this.client.get<PrinterControlOperation>(
-      `/printers/${printerId}/control-operations/${operationId}`,
-      { headers: { "Cache-Control": "no-cache" } }
-    );
-    return { operation: response.data, etag: response.headers.etag ?? null };
-  }
-
-  async getCurrentPrinterControlOperation(printerId: string): Promise<PrinterControlCurrent> {
-    const response = await this.client.get<PrinterControlCurrent>(
-      `/printers/${printerId}/control-operations/current`,
-      { headers: { "Cache-Control": "no-cache" } }
-    );
-    return response.data;
-  }
 
   async setTemperatures(
     printerId: string,

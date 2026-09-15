@@ -94,42 +94,22 @@ The app supports multiple registered PrintFarmer backend servers. Server
 registrations are stored locally in UserDefaults on the device, and each server
 keeps its own Keychain-stored credentials.
 
-### Durable Moonraker Motion
+### Direct Motion Controls
 
-Moonraker Home All/XY/Z, relative jogs, absolute positioning and calibration
-motion use server-owned operations. Update both the server and app: older
-Moonraker motion endpoints are deliberately rejected, not used as a fallback.
-Other printer backends retain their existing command behavior.
-Durable absolute positioning requires explicit X, Y and Z coordinates; the app
-does not fill missing axes from telemetry. Calibration persists its complete
-validated XYZ target before submission, including Z adjustments.
+Home All/XY/Z, relative jogs and absolute positioning use ordinary direct
+command endpoints. Controls remain gated by authorization, printer readiness,
+backend capabilities and movement safety. Absolute positioning allows blank
+axes to remain unchanged; current telemetry is used only to validate safety.
 
-The app saves the operation UUID and intent before submitting, scoped to the
-registered server, signed-in account and printer. Closing a screen, disconnecting,
-or canceling observation does not cancel admitted motion. Reopening the printer,
-foregrounding the app and reconnecting refresh authoritative status. The
-**Refresh motion status** action only reads status; it never replays motion.
-HTTP acceptance, homed axes, coordinates and elapsed time are not completion.
+A successful response means the backend accepted the command, not that physical
+motion completed. The in-flight request disables conflicting actions.
+Canceling observation, closing a screen or disconnecting cannot recall a command.
+After a timeout or uncertain outcome, inspect the printer before another action.
+Commands are never automatically retried or replayed on reconnect.
 
-If submission admission is unconfirmed and the exact saved intent is available,
-**Review saved admission** offers a deliberate confirmation. **Resubmit same
-operation** reuses the original UUID and unchanged coordinates/feedrate: it may
-start the original motion if never admitted; an already admitted UUID returns
-the existing operation without sending twice. **Keep blocked** declines without
-sending anything. The app rechecks account/server authority, capabilities,
-readiness and movement safety before sending, then reads authoritative status.
-Reconnection, polling and a 404 never trigger this action. Known admitted
-Unknown/Recovering operations cannot use it. Web recovery cannot resolve a
-UUID that never reached the server.
-
-Unknown or recovering operations remain visibly locked, including while offline.
-Use **Open printer recovery on web** for an operator with `queue:reconcile`
-permission and printer Submit access to attest sender isolation, cleared queued
-backend work and physical inspection. Non-admin grant holders can recover; the
-web app and API enforce recovery authorization. A recovered
-operation is not a successful motion and never advances calibration. Calibration
-also requires fresh safety checks after server-confirmed success. Do not reset,
-re-home or retry known uncertain execution to try to clear its barrier.
+There are no motion journals, operation IDs, receipt polling, recovery panels
+or admission-resubmission flows. Ordinary printer telemetry and safety refreshes
+remain available; calibration still requires fresh safety evidence.
 
 ### Managing Servers
 

@@ -149,6 +149,24 @@ public sealed class PrinterPhysicalActuationService(
                 "An active dispatch owns the printer; use an attempt-bound lifecycle route.");
         }
 
+        if (state.PhysicalControlCommandId.HasValue &&
+            state.PhysicalControlAttemptId is null &&
+            PrinterDirectControl.IsManualMotion(state.PhysicalControlOperation) &&
+            state.PhysicalControlStartedAtUtc is DateTime started &&
+            started <= DateTime.UtcNow - PrinterDirectControl.CommandTimeout - TimeSpan.FromSeconds(45))
+        {
+            // The direct sender's bounded lifetime has elapsed (including shutdown grace).
+            // Reclaim coordination only, never replay or report the old command as successful.
+            _logger.LogWarning(
+                "Expired direct manual command {CommandId} on printer {PrinterId}; its physical outcome remains unknown",
+                state.PhysicalControlCommandId, printerId);
+            _ = QueueAuditWriter.Add(_db, actorSubject, AuditOperation(state.PhysicalControlOperation),
+                QueueAuditOutcomes.Unknown, nameof(Printer), resourceId: printerId, printerId: printerId,
+                reasonCode: "direct_manual_command_expired",
+                detail: new { commandId = state.PhysicalControlCommandId });
+            ClearBarrier(state);
+        }
+
         if (state.PhysicalControlCommandId.HasValue)
         {
             await WriteDeniedAsync(
@@ -345,8 +363,8 @@ public sealed class PrinterPhysicalActuationService(
                 ct);
         if (state?.PhysicalControlCommandId != lease.CommandId ||
             state.PhysicalControlAttemptId is not null ||
-            (PrinterControlIntent.LegacyKind(lease.Operation).HasValue &&
-             state.PhysicalControlStartedAtUtc <= DateTime.UtcNow - PrinterControlOperationService.CommandTimeout) ||
+            (PrinterDirectControl.IsManualMotion(lease.Operation) &&
+             state.PhysicalControlStartedAtUtc <= DateTime.UtcNow - PrinterDirectControl.CommandTimeout) ||
             !string.Equals(
                 state.PhysicalControlOperation,
                 lease.Operation,
@@ -403,7 +421,7 @@ public sealed class PrinterPhysicalActuationService(
             QueueAuditOutcomes.Unknown,
             EventTypeUnknown,
             failureCode,
-            retainBarrier: lease.AttemptId.HasValue || !PrinterControlIntent.LegacyKind(lease.Operation).HasValue,
+            retainBarrier: lease.AttemptId.HasValue || !PrinterDirectControl.IsManualMotion(lease.Operation),
             ct);
 
     /// <inheritdoc />
@@ -608,7 +626,7 @@ public sealed class PrinterPhysicalActuationService(
             return;
         }
 
-        if (!lease.AttemptId.HasValue && PrinterControlIntent.LegacyKind(lease.Operation).HasValue &&
+        if (!lease.AttemptId.HasValue && PrinterDirectControl.IsManualMotion(lease.Operation) &&
             (state.ActiveDispatchAttemptId.HasValue || state.ActiveJobId.HasValue ||
              await _db.PrintJobs.WhereOccupiesPrinter().AnyAsync(j => j.AssignedPrinterId == lease.PrinterId, ct)))
         {

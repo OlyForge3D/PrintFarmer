@@ -187,57 +187,6 @@ final class HomeSubgroupTests: XCTestCase {
         XCTAssertEqual(hint, "Disabled while printing.")
     }
 
-    func test_accessibilityHint_moonrakerActiveBarrier_returnsCoordinationReason() async throws {
-        var printer = try TestData.decodePrinter()
-        let service = MockPrinterService()
-        let operationID = UUID()
-        let timestamp = Date()
-        let runningOperation = PrinterControlOperation(
-            operationId: operationID,
-            printerId: printer.id,
-            kind: .homeAll,
-            x: nil,
-            y: nil,
-            z: nil,
-            f: nil,
-            state: .running,
-            rowVersion: "test-running",
-            createdAtUtc: timestamp,
-            updatedAtUtc: timestamp,
-            startedAtUtc: timestamp,
-            completedAtUtc: nil,
-            barrierHeld: true,
-            requiresRecovery: false,
-            completionEvidence: PrinterControlCompletionEvidence.none,
-            failure: nil,
-            senderIsolation: .notRequested
-        )
-        service.currentControlOperationToReturn = .init(
-            physicalControl: .init(
-                supportedOperations: [.homeAll, .homeXY, .homeZ, .jog, .moveTo],
-                barrierHeld: true,
-                operationId: operationID,
-                state: .running,
-                requiresRecovery: false
-            ),
-            operation: runningOperation
-        )
-        printer.physicalControl = service.currentControlOperationToReturn.physicalControl
-        let viewModel = PrinterControlsViewModel.configuredForTests(
-            printerService: service, printer: printer
-        )
-        await viewModel.loadCapabilities()
-
-        let hint = HomeSubgroup(viewModel: viewModel).accessibilityHint(
-            hasError: false, idleHint: "Homes X, Y, and Z."
-        )
-
-        XCTAssertEqual(
-            hint,
-            "The server holds a motion operation. Controls remain unavailable until it releases coordination; leaving this screen does not cancel it."
-        )
-    }
-
     func test_accessibilityValue_pending_returnsPending() throws {
         let view = HomeSubgroup(viewModel: PrinterControlsViewModel.configuredForTests(
             printerService: MockPrinterService(), printer: try idlePrinter()))

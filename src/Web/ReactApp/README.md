@@ -162,64 +162,26 @@ Tests use Vitest and React Testing Library. See `src/test/` for examples.
 
 ## API Integration
 
-### Capability-based durable motion
+### Direct printer movement
 
-Home All/XY/Z, relative jogs, absolute positioning, and calibration use durable
-`/api/printers/{id}/control-operations` records when the authoritative current
-status advertises `physicalControl.supportedOperations`, regardless of the
-printer's backend name. Loading or failed capability reads never imply legacy
-support. A known empty list uses the existing legacy routes; a durable plugin's
-unadvertised operations are rejected without legacy fallback.
-HTTP 202 means admission, not completion, and must contain a held barrier,
-including historical `Recovering` receipts. HTTP 200 admission replay must
-contain a terminal state (`Succeeded`, `Failed`, `Unknown`, or `Recovered`);
-its barrier may still be held while release is deferred. Both responses must
-identify the requested operation and intent. Mismatched
-status/state combinations, malformed receipts, and other successful HTTP statuses
-are rejected without confirming admission. Even valid terminal POST receipts
-still require canonical GET/current checks before success or release.
-Receipts associated with the current request must match its original kind,
-X/Y/Z, and feed rate on admission and canonical reads. Omitted request
-coordinates match null receipt values. An intent mismatch cannot confirm success.
-Active commands block overlapping motion; settled receipts trigger a current
-status recheck for a successor. Position telemetry, homed axes, and elapsed time
-never establish completion.
-The current endpoint identifies only a barrier owner; when unlocked its operation,
-operation ID, and state are null. Settled receipts are read by their exact UUID.
+All printer plugins use the ordinary `/api/printers/{id}/home`, `homexy`,
+`homez`, `move`, and `moveto` routes for homing, relative jogs, absolute
+positioning, and calibration. Existing backend capabilities, online state,
+homing checks, and travel protections still govern availability.
+GO and Enter submit one absolute request with finite X, Y, and Z targets.
+Calibration Z adjustments send only the selected Z target.
 
-The client tracks the operation UUID and intent only in session memory, scoped
-to the authenticated account, API server, and printer. Old local-storage receipts
-are ignored and cannot lock controls. Closing a panel or navigating away does
-not cancel backend work. Reopening, returning
-to the foreground, or reconnecting rechecks REST. SignalR's lowercase
-`printercontroloperationupdated` event is an invalidation hint, not an outcome.
-While an operation is active, a shared one-second
-read-only REST polling cadence also runs even when SignalR is connected; missed
-notifications cannot leave it waiting forever. Overlapping polls reuse the
-in-flight read, and timers never release barriers or replay physical commands.
-Unavailable current status prevents sending new motion. A lost admission response
-never triggers a retry, a new UUID, or a legacy fallback. If an exact receipt is
-missing but fresh current status has no active barrier, controls become available
-without claiming the previous movement succeeded. The outcome warning remains;
-do not repeat an unconfirmed movement. Older servers must be updated for
-durable motion.
-Non-durable printer plugins retain their existing motion endpoints.
-Durable absolute GO/Enter requires finite X, Y, and Z coordinates together;
-legacy partial-axis controls retain their existing behavior. Calibration
-Z adjustments retain the explicitly selected bed-center X/Y target.
+Controls for the same printer share a pending-request guard. It lasts only
+until the direct HTTP request settles; it is not a physical-completion gate.
+There is no motion-status panel, durable operation ID, receipt journal, recovery
+workflow, status polling, or reconnect replay. A successful `CommandResult`
+means the command was accepted, not that the printer physically completed it.
+Calibration explicitly asks the operator to wait for the printer to stop and
+verify its position before continuing.
 
-Unknown outcomes are settled failures, not persistent recovery gates. There is
-no operator-recovery form, attestation, or recovery API call. Historical
-`Recovering`/`Recovered` receipts and isolation evidence remain display-compatible,
-but never require operator action to unlock motion. Only an active server barrier
-blocks further commands. `Unknown` and `Recovered` are not successful execution;
-calibration advances only after confirmed success and
-fresh printer safety checks. It reads enabled/maintenance configuration from
-the printer list and fact-specific `safetyTelemetry.homedAxes` from
-`/api/printers/{id}/status`, not absent fields on basic printer GET or the legacy
-homed-axes string. The observation must contain all three axes, be no older than
-the completed operation, and satisfy its positive freshness window without a
-future timestamp. The current-operation barrier is checked again before advancing.
+HTTP errors, timeouts, aborts, and unsuccessful command results surface errors
+without automatically retrying physical commands. Check the printer before
+manually sending another command after an uncertain response.
 
 The React app communicates with the ASP.NET Core API backend using a centralized **apiClient** singleton:
 

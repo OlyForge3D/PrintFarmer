@@ -202,6 +202,11 @@ public interface IPrintersService
     Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Reads one fresh movement-safety snapshot using the already loaded printer.
+    /// </summary>
+    Task<PrinterStatusDto> GetMovementStatusAsync(Printer printer, CancellationToken ct);
+
+    /// <summary>
     /// Retrieves a single printer as a DTO for API responses.
     /// </summary>
     /// <param name="id">The printer ID</param>
@@ -517,9 +522,6 @@ public interface IPrintersService
     /// <param name="ct">Cancellation token</param>
     /// <returns>True if stop succeeded, false if backend unavailable or unsupported</returns>
     Task<bool> EmergencyStopAsync(Guid id, CancellationToken ct);
-
-    /// <summary>Stops only the exact printer configuration fenced by the emergency attempt.</summary>
-    Task<bool> EmergencyStopAsync(Guid id, string expectedConfigurationIdentity, CancellationToken ct);
 
     /// <summary>
     /// Reboots the printer's microcontroller (MCU).

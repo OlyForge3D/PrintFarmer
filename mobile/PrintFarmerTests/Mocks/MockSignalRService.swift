@@ -13,9 +13,6 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     /// direct-callback semantics without giving up subscription tracking.
     private let connectionStateHub: SignalRConnectionStateHub
     private let printerUpdateHub: SignalREventHub<PrinterStatusUpdate>
-    private let controlOperationHub: SignalREventHub<PrinterControlOperationInvalidation>
-    private let capturedControlOperationLock = NSLock()
-    private var capturedControlOperationHandlers: [@Sendable (PrinterControlOperationInvalidation) -> Void] = []
     private let jobQueueUpdateHub: SignalREventHub<JobQueueUpdate>
     private let attentionChangedHub: SignalREventHub<AttentionChangedEvent>
     private let taskInvalidationHub: SignalREventHub<ShiftTaskInvalidation>
@@ -34,7 +31,6 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     init() {
         self.connectionStateHub = SignalRConnectionStateHub(coordinator: coordinator)
         self.printerUpdateHub = SignalREventHub<PrinterStatusUpdate>(coordinator: coordinator)
-        self.controlOperationHub = SignalREventHub<PrinterControlOperationInvalidation>(coordinator: coordinator)
         self.jobQueueUpdateHub = SignalREventHub<JobQueueUpdate>(coordinator: coordinator)
         self.attentionChangedHub = SignalREventHub<AttentionChangedEvent>(coordinator: coordinator)
         self.taskInvalidationHub = SignalREventHub<ShiftTaskInvalidation>(coordinator: coordinator)
@@ -116,28 +112,6 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     @discardableResult
     func onPrinterUpdated(_ handler: @escaping @Sendable (PrinterStatusUpdate) -> Void) -> SignalRSubscription {
         printerUpdateHub.subscribe(handler)
-    }
-
-    @discardableResult
-    func onPrinterControlOperationUpdated(
-        _ handler: @escaping @Sendable (PrinterControlOperationInvalidation) -> Void
-    ) -> SignalRSubscription {
-        capturedControlOperationLock.lock()
-        capturedControlOperationHandlers.append(handler)
-        capturedControlOperationLock.unlock()
-        return controlOperationHub.subscribe(handler)
-    }
-
-    func simulateControlOperationUpdated(_ event: PrinterControlOperationInvalidation) {
-        controlOperationHub.deliverSync(event)
-    }
-
-    /// Models a callback already queued before its old authority was revoked.
-    func simulateCapturedControlOperationUpdated(at index: Int, event: PrinterControlOperationInvalidation) {
-        capturedControlOperationLock.lock()
-        let handler = capturedControlOperationHandlers[index]
-        capturedControlOperationLock.unlock()
-        handler(event)
     }
 
     @discardableResult
@@ -249,7 +223,6 @@ final class MockSignalRService: SignalRServiceProtocol, @unchecked Sendable {
     var filamentCoverageSubscriberCount: Int { filamentCoverageChangedHub.handlerCountForTesting }
     var taskInvalidationSubscriberCount: Int { taskInvalidationHub.handlerCountForTesting }
     var printerUpdateSubscriberCount: Int { printerUpdateHub.handlerCountForTesting }
-    var controlOperationSubscriberCount: Int { controlOperationHub.handlerCountForTesting }
     var jobQueueSubscriberCount: Int { jobQueueUpdateHub.handlerCountForTesting }
     var printerSubscriptionCalls: [[UUID]] {
         printerSubscriptionLock.lock()

@@ -10,5 +10,4 @@ public sealed record PrinterSummaryDto(
     string? State,
     bool InMaintenance,
     bool IsEnabled,
-    bool HasCatalogUpdate,
-    PrinterPhysicalControlDto? PhysicalControl = null);
+    bool HasCatalogUpdate);

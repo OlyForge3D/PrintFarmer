@@ -35,5 +35,4 @@ public record PrinterFastDto(
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
     string? BackendUrl = null,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWriting)]
-    string? FrontendUrl = null,
-    PrinterPhysicalControlDto? PhysicalControl = null);
+    string? FrontendUrl = null);

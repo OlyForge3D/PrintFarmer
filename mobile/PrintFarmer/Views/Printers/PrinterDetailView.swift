@@ -456,9 +456,6 @@ struct PrinterDetailView: View {
 
     private func overviewPrimary(_ printer: Printer) -> some View {
         VStack(alignment: .leading, spacing: 20) {
-            if let controlsViewModel {
-                PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: controlsViewModel)
-            }
             temperatureSection(printer)
             filamentSectionView(printer)
             currentJobBlock(printer)
@@ -495,9 +492,6 @@ struct PrinterDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if !controlsAvailable(for: printer) {
-                        if let controlsViewModel {
-                            PrinterSetupControlsContent.PrinterMotionStatusBanner(viewModel: controlsViewModel)
-                        }
                         controlsUnavailable(printer)
                     } else if let controlsViewModel {
                         PrinterSetupControlsContent(
