@@ -34,9 +34,11 @@ unreferenced legacy page, not the routed settings shell.
 The preferences form uses the existing `/api/settings/user` query/mutation and
 `rowVersion`. Only edited fields are held locally; untouched fields follow the
 shared cache, including changes from printer shortcuts. Saves preserve theme
-and slicer defaults, block overlapping account writes, and clear drafts only
-on success. A conflict retains edits and requires an explicit reload of the
-latest preferences before saving again; failed reloads do not discard edits.
+and slicer defaults and block overlapping writes for the current authenticated
+account. Drafts clear after a successful save or a successful explicit reload.
+A conflict retains edits until **Reload latest preferences (discard edits)**
+succeeds; that reload discards the drafts and loads the latest preferences before
+saving again. Failed reloads do not discard edits.
 
 ## Routes And Scopes
 

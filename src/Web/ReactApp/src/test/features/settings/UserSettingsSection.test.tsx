@@ -136,7 +136,7 @@ describe('UserSettingsSection', () => {
     expect(screen.getByLabelText('Locale')).toHaveValue('fr');
     expect(screen.getByLabelText('Items per page')).toHaveValue(75);
     expect(screen.getByLabelText('Printables username')).toHaveValue('maker');
-    expect(screen.getByText(/Your unsaved edits are kept/)).toBeInTheDocument();
+    expect(screen.getByRole('status')).toHaveTextContent(/Your unsaved edits are kept/);
     fireEvent.click(screen.getByRole('button', { name: 'Save Preferences' }));
     expect(mockMutate).toHaveBeenCalledWith(expect.objectContaining({
       theme: 'matrix', printerControlMode: 'Expert', locale: 'fr', itemsPerPage: 75,
@@ -182,11 +182,12 @@ describe('UserSettingsSection', () => {
     expect(screen.getByRole('radio', { name: 'Guided' })).toBeChecked();
   });
 
-  it('announces initial loading without offering a save against unknown preferences', () => {
-    mockUseUserSettings.mockReturnValue({ isLoading: true, isFetching: true });
+  it.each([true, false])('announces unknown preferences without claiming an error (isLoading=%s)', (isLoading) => {
+    mockUseUserSettings.mockReturnValue({ isLoading, isFetching: isLoading, data: undefined, error: null });
     render(<UserSettingsSection />);
     expect(screen.getByRole('status', { name: 'Loading user preferences' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: 'Save Preferences' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
 });

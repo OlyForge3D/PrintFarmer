@@ -1,5 +1,6 @@
 import { useId, useRef, useState, type FormEvent } from 'react';
-import { useIsMutating, useQueryClient } from '@tanstack/react-query';
+import { useIsMutating, useQueryClient, type MutationFilters } from '@tanstack/react-query';
+import { getAuthEpoch } from '@/common/auth/authEpoch';
 import { toast } from 'sonner';
 import { AlertCircleIcon } from '@/common/components/icons/MdiIcons';
 import { Skeleton } from '@/common/components/skeletons/Skeleton';
@@ -15,17 +16,27 @@ const LOCALE_OPTIONS = [
   { value: 'es', label: 'Español' },
 ];
 
+// Keep the render-time and synchronous guards aligned. An unset context is the
+// brief window before onMutate runs, so it must still block overlapping saves.
+const accountSaveFilters: MutationFilters = {
+  mutationKey: USER_SETTINGS_KEY,
+  predicate: mutation => {
+    const context = mutation.state.context as { epochAtStart: number } | undefined;
+    return !context || context.epochAtStart === getAuthEpoch();
+  },
+};
+
 const PRINTABLES_USERNAME_AT_PREFIX_ERROR = "Printables username must not begin with '@'.";
 
 export function UserSettingsSection() {
   const { data, isLoading, error, refetch, isFetching } = useUserSettings();
   const mutation = useUpdateUserSettings();
 
-  if (isLoading) {
+  if (isLoading || (!data && !error)) {
     return <div role="status" aria-label="Loading user preferences"><UserSettingsSkeleton /></div>;
   }
 
-  const loadError = error || !data ? (
+  const loadError = error ? (
     <Alert type="error" title="Unable to load user preferences">
       <div className="flex items-start gap-3">
         <AlertCircleIcon className="mt-0.5 h-5 w-5 shrink-0" ariaLabel="Error" />
@@ -48,7 +59,8 @@ export function UserSettingsSection() {
           data={data}
           mutation={mutation}
           refetch={refetch}
-          unavailable={Boolean(error) || isFetching}
+          unavailable={Boolean(error)}
+          refreshing={isFetching}
         />
       )}
     </div>
@@ -93,15 +105,17 @@ function UserSettingsForm({
   mutation,
   refetch,
   unavailable,
+  refreshing,
 }: {
   data: UserSettingsResponse;
   mutation: ReturnType<typeof useUpdateUserSettings>;
   refetch: ReturnType<typeof useUserSettings>['refetch'];
   unavailable: boolean;
+  refreshing: boolean;
 }) {
   const id = useId();
   const queryClient = useQueryClient();
-  const accountSavePending = useIsMutating({ mutationKey: USER_SETTINGS_KEY }) > 0;
+  const accountSavePending = useIsMutating(accountSaveFilters) > 0;
   const submitting = useRef(false);
   const itemsRef = useRef<HTMLInputElement>(null);
   const printablesRef = useRef<HTMLInputElement>(null);
@@ -148,8 +162,8 @@ function UserSettingsForm({
   const handleSave = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     // Check the cache synchronously too, before React has rendered pending state.
-    if (submitting.current || busy || unavailable || conflict
-      || queryClient.isMutating({ mutationKey: USER_SETTINGS_KEY }) > 0) return;
+    if (submitting.current || busy || unavailable || refreshing || conflict
+      || queryClient.isMutating(accountSaveFilters) > 0) return;
 
     const failValidation = (message: string, field: 'items' | 'printables') => {
       setInvalidField(field);
@@ -233,9 +247,11 @@ function UserSettingsForm({
               </Alert>
             )}
             {changedElsewhere && !conflict && (
-              <Alert type="info">
-                Preferences changed elsewhere. Your unsaved edits are kept; other fields show the latest values. Review before saving.
-              </Alert>
+              <div role="status">
+                <Alert type="info">
+                  Preferences changed elsewhere. Your unsaved edits are kept; other fields show the latest values. Review before saving.
+                </Alert>
+              </div>
             )}
             <fieldset disabled={busy || unavailable} className="min-w-0 space-y-6">
               <fieldset className="min-w-0" aria-describedby={`${id}-mode-help`}>
@@ -277,7 +293,7 @@ function UserSettingsForm({
         <Card.Footer>
           <div className="flex flex-wrap items-center justify-end gap-3">
             {accountSavePending && !mutation.isPending && <p role="status" className="text-sm text-pf-text-secondary">Saving account preferences…</p>}
-            <Button type="submit" variant="primary" disabled={busy || unavailable || conflict}>
+            <Button type="submit" variant="primary" disabled={busy || unavailable || refreshing || conflict}>
               {mutation.isPending ? 'Saving...' : 'Save Preferences'}
             </Button>
           </div>
