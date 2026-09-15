@@ -2,7 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn as nodeSpawn } from 'node:child_process';
+import { execFile, spawn as nodeSpawn } from 'node:child_process';
+import { promisify } from 'node:util';
 
 export const printFarmerRepository = 'OlyForge3D/PrintFarmer';
 export const activeJobStates = new Set(['reserved', 'delivery-intent', 'accepted', 'running', 'uncertain']);
@@ -663,6 +664,177 @@ export async function recordLocalTerminalResult(result, options = {}) {
     entry.updatedAt = new Date().toISOString();
     return entry;
   }, options);
+}
+
+const execFileAsync = promisify(execFile);
+const validUuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const completionHousekeeping = new Set(['hook.start', 'hook.end', 'session.usage_checkpoint', 'assistant.usage']);
+
+function invalidCompletion(message) {
+  throw new RalphMacSshError(message, 'INVALID_SESSION_COMPLETION');
+}
+
+async function readCompletionJournal(sessionId, sessionStateRoot) {
+  const file = path.join(sessionStateRoot, sessionId, 'events.jsonl');
+  let bytes;
+  let events;
+  try {
+    bytes = await readFile(file, 'utf8');
+    events = bytes.trim().split('\n').map((line) => JSON.parse(line));
+  } catch {
+    invalidCompletion('The local runtime journal is missing, unreadable or incomplete; retain the slot.');
+  }
+  if (!events.length || events.some((event) => !event || !validUuid(event.id) ||
+      !Number.isFinite(Date.parse(event.timestamp))) ||
+      new Set(events.map((event) => event.id)).size !== events.length) {
+    invalidCompletion('Runtime journal identities or timestamps are invalid.');
+  }
+  return { events, digest: sha256(bytes), file };
+}
+
+function validateCompletionJournal(journal, value, entry, ledger) {
+  const { events } = journal;
+  const start = events[0];
+  const taskIndex = events.findIndex((event) => event.id === value.taskCompleteEventId);
+  const endIndex = events.findIndex((event) => event.id === value.turnEndEventId);
+  const task = events[taskIndex];
+  const end = events[endIndex];
+  const turn = events.slice(0, taskIndex).findLast((event) => event.type === 'assistant.turn_start');
+  const boundaryTimes = [entry.createdAt, entry.updatedAt,
+    ...(entry.handoffEvidence ? [entry.handoffEvidence.observedAt] : []),
+    ...Object.values(ledger.jobs).filter((other) => other.jobId !== entry.jobId &&
+      (other.sessionId === entry.sessionId || other.strandedSessionId === entry.sessionId))
+      .map((other) => {
+        if (activeJobStates.has(other.state)) invalidCompletion('Session has another active admission.');
+        return other.updatedAt;
+      })];
+  if (start.type !== 'session.start' || start.data?.producer !== 'copilot-agent' ||
+      start.data?.sessionId !== entry.sessionId || !path.isAbsolute(start.data?.context?.cwd ?? '') ||
+      task?.type !== 'session.task_complete' || task.data?.success !== true ||
+      task.parentId !== events[taskIndex - 1]?.id ||
+      end?.type !== 'assistant.turn_end' || !turn || !turn.data?.turnId ||
+      end.data?.turnId !== turn.data.turnId || endIndex <= taskIndex ||
+      Date.parse(task.timestamp) < Date.parse(turn.timestamp) ||
+      boundaryTimes.some((time) => !Number.isFinite(Date.parse(time)) ||
+        Date.parse(task.timestamp) <= Date.parse(time))) {
+    invalidCompletion('Completion must belong to the admitted session and postdate admission and every predecessor.');
+  }
+  const pendingHooks = new Set();
+  for (let index = taskIndex + 1; index < events.length; index += 1) {
+    const event = events[index];
+    if (event.parentId !== events[index - 1].id ||
+        Date.parse(event.timestamp) < Date.parse(events[index - 1].timestamp) ||
+        (index !== endIndex && !completionHousekeeping.has(event.type))) {
+      invalidCompletion('Runtime history changed, resumed or has unrecognized activity after task completion.');
+    }
+    if (event.type === 'hook.start') pendingHooks.add(event.data?.hookInvocationId);
+    if (event.type === 'hook.end') {
+      if (event.data?.success !== true || !pendingHooks.delete(event.data?.hookInvocationId)) {
+        invalidCompletion('Post-completion runtime hooks are incomplete or failed.');
+      }
+    }
+  }
+  if (pendingHooks.size) invalidCompletion('Post-completion runtime hooks are still running.');
+  return { cwd: start.data.context.cwd, task, end };
+}
+
+function validateCompletionObservation(observation, entry, journal) {
+  const now = Date.now();
+  const observedAt = Date.parse(observation?.observedAt);
+  if (observation?.repository !== printFarmerRepository || observation.issue !== entry.issue ||
+      observation.jobId !== entry.jobId || observation.fence !== entry.fence ||
+      observation.sessionId !== entry.sessionId || observation.running !== false ||
+      observation.followUpPending !== false || typeof observation.source !== 'string' ||
+      !observation.source.trim() || observation.source.length > 2048 ||
+      !Number.isFinite(observedAt) || observedAt > now || now - observedAt > 60_000 ||
+      observedAt < Date.parse(journal.events.at(-1).timestamp) ||
+      observation.journalSha256 !== journal.digest || observation.runtimeHeadEventId !== journal.events.at(-1).id) {
+    invalidCompletion('Fresh stopped/no-follow-up app observation bound to the current runtime journal is required.');
+  }
+}
+
+async function completionGit(cwd, args, execute) {
+  try {
+    const { stdout } = await execute('git', ['-C', cwd, ...args], {
+      encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+    return stdout.trim();
+  } catch {
+    invalidCompletion('Git completion/publication proof could not be verified; retain the slot.');
+  }
+}
+
+async function verifyCompletionGit(cwd, entry, value, execute) {
+  const git = (args) => completionGit(cwd, args, execute);
+  const origin = await git(['remote', 'get-url', 'origin']);
+  if (!['https://github.com/OlyForge3D/PrintFarmer', 'https://github.com/OlyForge3D/PrintFarmer.git',
+    'git@github.com:OlyForge3D/PrintFarmer', 'git@github.com:OlyForge3D/PrintFarmer.git'].includes(origin)) {
+    invalidCompletion('Runtime worktree origin is not the admitted repository.');
+  }
+  await git(['merge-base', '--is-ancestor', entry.baseSha, value.headSha]);
+  const published = await git(['ls-remote', '--exit-code', 'origin', value.publicationRef]);
+  if (published !== `${value.headSha}\t${value.publicationRef}` ||
+      await git(['rev-parse', 'HEAD']) !== value.headSha ||
+      await git(['status', '--porcelain=v1', '--untracked-files=all']) !== '') {
+    invalidCompletion('Completion requires the exact published HEAD and a clean runtime worktree.');
+  }
+}
+
+export async function recordLocalSessionCompletion({ result, expectedGeneration }, options = {}) {
+  const value = safeJson(result, 'App-session completion');
+  if (!validJobIdentifier(value.jobId) || !validUuid(value.sessionId) ||
+      !Number.isSafeInteger(value.fence) || value.fence <= 0 || !validSha(value.headSha) ||
+      !validUuid(value.taskCompleteEventId) || !validUuid(value.turnEndEventId) ||
+      Object.hasOwn(value, 'exitCode') || value.workingTreeClean !== true || value.allCommitsPushed !== true ||
+      !/^refs\/(?:heads\/[A-Za-z0-9][A-Za-z0-9._/-]*|pull\/[1-9]\d*\/head)$/.test(value.publicationRef ?? '') ||
+      value.publicationRef.includes('..') || value.publicationRef.endsWith('/') ||
+      value.validationEvidence?.headSha !== value.headSha || value.validationEvidence.passed !== true ||
+      typeof value.validationEvidence.source !== 'string' || !value.validationEvidence.source.trim() ||
+      value.validationEvidence.source.length > 4096 || !Number.isSafeInteger(expectedGeneration)) {
+    invalidCompletion('App completion requires exact runtime event identities and clean/pushed validation proof, never an exit code.');
+  }
+  const proof = {
+    jobId: value.jobId, sessionId: value.sessionId, fence: value.fence, headSha: value.headSha,
+    taskCompleteEventId: value.taskCompleteEventId, turnEndEventId: value.turnEndEventId,
+    publicationRef: value.publicationRef,
+    validationEvidence: { headSha: value.headSha, passed: true, source: value.validationEvidence.source },
+  };
+  const evidenceDigest = sha256(JSON.stringify(proof));
+  const sessionStateRoot = options.sessionStateRoot ?? path.join(os.homedir(), '.copilot', 'session-state');
+  return mutateLedger(async (ledger) => {
+    const entry = ledger.jobs[value.jobId];
+    if (entry?.mode !== 'local' || entry.local !== true ||
+        entry.sessionId !== value.sessionId || entry.fence !== value.fence) {
+      invalidCompletion('App completion is fenced to a different local admission.');
+    }
+    if (entry.state === 'completed' && entry.sessionCompletion?.evidenceDigest === evidenceDigest) return entry;
+    if (!['accepted', 'running'].includes(entry.state)) invalidCompletion('Only live local admissions may complete.');
+    const journal = await readCompletionJournal(value.sessionId, sessionStateRoot);
+    const runtime = validateCompletionJournal(journal, value, entry, ledger);
+    validateCompletionObservation(value.observation, entry, journal);
+    await verifyCompletionGit(runtime.cwd, entry, value, options.execFile ?? execFileAsync);
+    const latest = await readCompletionJournal(value.sessionId, sessionStateRoot);
+    if (latest.digest !== journal.digest) invalidCompletion('Runtime changed during verification; refresh all evidence.');
+    validateCompletionObservation(value.observation, entry, latest);
+    entry.state = 'completed';
+    entry.headSha = value.headSha;
+    entry.workingTreeClean = true;
+    entry.allCommitsPushed = true;
+    entry.validationEvidence = proof.validationEvidence;
+    entry.sessionCompletion = {
+      kind: 'app-session-task', ...proof, evidenceDigest,
+      taskCompletedAt: runtime.task.timestamp, turnEndedAt: runtime.end.timestamp,
+      journalSha256: journal.digest,
+      observation: {
+        observedAt: value.observation.observedAt, source: value.observation.source,
+        runtimeHeadEventId: value.observation.runtimeHeadEventId, running: false, followUpPending: false,
+      },
+    };
+    entry.updatedAt = new Date().toISOString();
+    return entry;
+  }, { ...options, expectedGeneration }, true);
 }
 
 export async function recordDeliveryIntent(jobId, { deliveryLeaseMs = 60_000, ...options } = {}) {

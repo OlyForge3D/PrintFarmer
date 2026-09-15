@@ -18,6 +18,20 @@ For analysis/non-code work, report a completed, verified deliverable link and re
 Stop after reporting. Never archive any session. Ralph will assess this evidence only; it never
 deletes sessions unattended.
 
+## App Tasks Versus OS Processes
+
+Successful app `task_complete` followed by the corresponding turn end is a task lifecycle
+result, not a process exit. Report the real job/session/fence and deliverable proof, then stop;
+do not restart work or invent an integer exit code merely to satisfy accounting.
+
+Ralph may use `complete-local-session` for verified code delivery after checking the existing
+host runtime journal, exact published/clean HEAD, validation results and fresh stopped/no-queued-
+follow-up app state. The adapter records `sessionCompletion.kind:"app-session-task"` without
+an `exitCode`. A literal success statement or idle row cannot substitute for runtime events.
+See [the operations contract](operations.md#app-session-completion-without-process-exit) for
+identity/chronology checks, evidence trust boundaries, concurrency and idempotent replay.
+`terminal-local` is unchanged and remains reserved for actual correlated process results.
+
 ## Admission Identity And Resumed Work
 
 Report the current admission `jobId`, `fence` and app `sessionId` with terminal evidence.

@@ -101,6 +101,8 @@ delivery:
    proves the stranded session is gone. A `kickoff-unverified` failure never makes that claim stale,
    so the claim-reconciliation rule for terminal ledger states does not apply to it. On terminal completion, run `terminal-local` with the matching
    session ID and verified head, exit, validation, clean-worktree, and pushed-commit evidence.
+   App-managed task completion without a process-exit result uses the separate
+   `complete-local-session` route below; never synthesize an exit code.
 5. For an eligible mobile issue only, run `dispatch-remote` with
    `{"job":...,"eligibility":...,"controllerPid":...}` using the app Ralph controller's own
    process ID instead of local session creation. It reserves, records a PID-and-lease-fenced
@@ -160,9 +162,89 @@ For an accepted/running local job whose claimed session is authoritatively gone,
 `repository`, `issue`, `sessionId`, `fence`, `state:"absent"`, `observedAt`, `source`,
 `liveInventoryChecked:true`, `archivedHistoryChecked:true`, and `terminalHistoryChecked:true`.
 An absent inventory row is insufficient: inspect archived/terminal history and rule out ongoing
-work. If verified terminal proof exists, use `terminal-local` instead. Unavailable history is a
+work. If verified terminal proof exists, use `terminal-local` or the supported app-session
+completion route below instead. Unavailable history is a
 blocker, not absence. Recovery records `abandoned`/`session-lost` and retains the session, fence,
 digest and evidence; it is never success and does not authorize cleanup.
+
+### App-Session Completion Without Process Exit
+
+A persistent app host can record successful task completion without terminating its OS process.
+`terminal-local` remains the process-result contract and requires a real integer `exitCode`.
+Do not infer one from idle status, `task_complete`, a Git command or PR closure. Do not classify
+an existing completed session as lost. Use `complete-local-session` for a verified code deliverable:
+
+```json
+{
+  "expectedGeneration": 206,
+  "result": {
+    "jobId": "the-admitted-job",
+    "fence": 198,
+    "sessionId": "the-exact-app-session-uuid",
+    "taskCompleteEventId": "runtime-event-uuid",
+    "turnEndEventId": "runtime-event-uuid",
+    "headSha": "full-40-character-delivered-head",
+    "publicationRef": "refs/pull/2722/head",
+    "workingTreeClean": true,
+    "allCommitsPushed": true,
+    "validationEvidence": {
+      "headSha": "full-40-character-delivered-head",
+      "passed": true,
+      "source": "Exact-head test/CI result references independently checked by the controller"
+    },
+    "observation": {
+      "repository": "OlyForge3D/PrintFarmer",
+      "issue": 2720,
+      "jobId": "the-admitted-job",
+      "fence": 198,
+      "sessionId": "the-exact-app-session-uuid",
+      "observedAt": "fresh-UTC-timestamp",
+      "source": "Exact fresh host app inventory/queue observation and sole-writer handoff",
+      "running": false,
+      "followUpPending": false,
+      "journalSha256": "SHA256-of-current-events.jsonl-bytes",
+      "runtimeHeadEventId": "last-runtime-event-uuid"
+    }
+  }
+}
+```
+
+The controller reads only that UUID's `events.jsonl` from the local user's
+`~/.copilot/session-state` root; the CLI does not accept a caller-supplied journal path or event
+body. It requires the runtime's `session.start` identity, successful `session.task_complete`
+and matching `assistant.turn_end`, after admission and every same-session terminal predecessor.
+Subsequent user/tool/turn activity, unknown event types or unfinished hooks retain accounting.
+The publication ref must be an exact `refs/heads/...` or `refs/pull/N/head` on origin. The adapter
+checks the runtime-recorded worktree's repository identity, admitted-base ancestry, HEAD,
+clean Git status and exact remote ref. Feature branch deletion after merge is supported through
+the retained PR head ref. Validation evidence must name that same HEAD; verify its actual
+tests/acceptance criteria before attesting it. Neither PR closure nor task success alone is enough.
+
+Acquire sole-writer ownership, read the journal fingerprint, then freshly observe the app's
+running and queued/follow-up state without waking the child. Observation must be no more than
+60 seconds old and at least as recent as the journal tail. Do not reuse an old app snapshot.
+Under the ledger lock the adapter rechecks generation, identity, chronology and all evidence;
+after Git verification it re-reads the journal and rechecks observation freshness. Changed or
+unavailable evidence fails explicitly without releasing a slot. Refresh evidence before retrying.
+
+**Trust and race boundary:** the journal is host-owned local runtime evidence, not authenticated
+by caller prose, and not a cryptographic attestation against another process with the same OS
+account's filesystem privileges. App inventory/queue and validation observations are the trusted
+coordinator's attestations; this standalone CLI cannot query or lock the app host. Sole-writer
+coordination must cover reconciliation and avoid steering the child during this short window.
+The ledger lock does not freeze the app. Re-read live inventory after recording completion and
+again before any admission: later/concurrent follow-up work still consumes effective-union
+capacity until accounted as a new job/fence. Never treat a saved stopped observation as a lease
+guaranteeing future inactivity. If host queue/activity cannot be established, retain a named
+evidence blocker rather than declaring an OS exit or silently freeing capacity.
+
+This writes `completed` with `sessionCompletion.kind:"app-session-task"` and immutable
+event IDs/timestamps, journal fingerprint, publication and validation provenance. It never
+inserts `exitCode`, deletes files, archives the session or authorizes further dispatch.
+The old job ID remains fenced. An exact proof replay with the current ledger generation
+returns the historical record without another write; it is **not** fresh liveness evidence
+and cannot release or hide resumed work. Different proof for a terminal job is rejected.
+All remote terminal/abandonment rules remain unchanged.
 
 ### Legacy Remote Records
 
