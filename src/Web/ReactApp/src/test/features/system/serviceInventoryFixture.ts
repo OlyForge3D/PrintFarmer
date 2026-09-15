@@ -22,7 +22,7 @@ export function inventory(overrides: Partial<ServiceInventory> = {}): ServiceInv
     selectedChannel: 'stable', selectionSource: 'Default', collectedAt: '2026-09-12T12:00:00Z',
     observedChannel: null, targetChannel: null, channelState: 'Unknown', compatibilityState: 'Unknown',
     compatibilityReasons: ['IncompleteReleaseOrPlatformEvidence'], eligibility: 'NotManaged',
-    eligibilityReasons: ['ReadOnlyInventory'], readiness: null, snapshotOrigin: 'Live', snapshotSource: null,
+    eligibilityReasons: ['ManagedEligibilityNotEstablished', 'ReadOnlyInventory'], readiness: null, snapshotOrigin: 'Live', snapshotSource: null,
     snapshotExportedAt: null, services: [replica()], ...overrides,
   };
 }

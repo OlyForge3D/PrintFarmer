@@ -260,6 +260,7 @@ public sealed record ServiceInventoryDto
     public IReadOnlyList<string> EligibilityReasons { get; init; } = ["EligibilityNotEvaluated", "ReadOnlyInventory"];
 
     /// <summary>Read-only installation lifecycle derived from supplied signed release evidence.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public ReleaseReadinessDto? Readiness { get; init; }
 
     /// <summary>Whether the snapshot was collected locally or imported for offline inspection.</summary>
@@ -328,6 +329,9 @@ public sealed record InstallationInventorySnapshotDto
             SnapshotOrigin = InventorySnapshotOrigin.Imported,
             SnapshotSource = SnapshotSource,
             SnapshotExportedAt = SnapshotExportedAt,
+            Eligibility = InventoryEligibility.Unknown,
+            EligibilityReasons = ["ImportedSnapshotIsNotLiveObservation"],
+            Readiness = null,
         };
     }
 }

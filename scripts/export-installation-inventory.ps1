@@ -47,8 +47,22 @@ if ($PSCmdlet.ParameterSetName -eq 'Export') {
 }
 
 $snapshot = Get-Content -LiteralPath $InputPath -Raw | ConvertFrom-Json
-if ($snapshot.formatVersion -ne 1 -or $snapshot.snapshotOrigin -ne 'Imported' -or $null -eq $snapshot.inventory) {
+$inventoryProperty = $snapshot.PSObject.Properties['inventory']
+$snapshotSourceProperty = $snapshot.PSObject.Properties['snapshotSource']
+$snapshotExportedAtProperty = $snapshot.PSObject.Properties['snapshotExportedAt']
+if (
+    $snapshot.formatVersion -ne 1 -or
+    $snapshot.snapshotOrigin -ne 'Imported' -or
+    $null -eq $inventoryProperty -or
+    $null -eq $snapshotSourceProperty -or
+    $null -eq $snapshotExportedAtProperty -or
+    $null -eq $inventoryProperty.Value
+) {
     throw 'The file is not a supported imported installation inventory snapshot.'
 }
 
+$inventory = $inventoryProperty.Value
+$inventory | Add-Member -NotePropertyName snapshotOrigin -NotePropertyValue 'Imported' -Force
+$inventory | Add-Member -NotePropertyName snapshotSource -NotePropertyValue $snapshotSourceProperty.Value -Force
+$inventory | Add-Member -NotePropertyName snapshotExportedAt -NotePropertyValue $snapshotExportedAtProperty.Value -Force
 $snapshot

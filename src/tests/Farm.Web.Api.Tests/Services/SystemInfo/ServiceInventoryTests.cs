@@ -222,6 +222,10 @@ public sealed class ServiceInventoryTests
             Assert.Equal(JsonValueKind.Null, row.GetProperty("applicationVersion").ValueKind);
             Assert.Equal(JsonValueKind.Null, row.GetProperty("identity").ValueKind);
             Assert.False(row.TryGetProperty("SourceCommit", out _));
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("readiness").ValueKind);
+            Assert.Equal("Live", json.RootElement.GetProperty("snapshotOrigin").GetString());
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("snapshotSource").ValueKind);
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("snapshotExportedAt").ValueKind);
         }
     }
 
@@ -375,7 +379,11 @@ public sealed class ServiceInventoryTests
     [Fact]
     public void Readiness_DeserializedExportEnvelope_ForcesImportedEvidenceAndPreservesProvenance()
     {
-        ServiceInventoryDto live = Evaluate([Verified("a")]);
+        ServiceInventoryDto live = Evaluate([Verified("a")]) with
+        {
+            Eligibility = InventoryEligibility.Eligible,
+            Readiness = new() { State = InventoryEligibility.Eligible },
+        };
         InstallationInventorySnapshotDto exported = InstallationInventorySnapshotDto.FromLiveInventory(
             live,
             "operator-export",
@@ -394,6 +402,9 @@ public sealed class ServiceInventoryTests
         Assert.Equal(Now.AddMinutes(-1), imported.SnapshotExportedAt);
         Assert.Equal(live.Services[0].Source, service.Source);
         Assert.Equal(live.Services[0].VerifiedAt, service.VerifiedAt);
+        Assert.Equal(InventoryEligibility.Unknown, imported.Eligibility);
+        Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(imported.EligibilityReasons));
+        Assert.Null(imported.Readiness);
         Assert.Equal(InventoryEligibility.Unknown, result.State);
         Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(result.Reasons));
     }
