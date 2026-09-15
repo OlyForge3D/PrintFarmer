@@ -2562,6 +2562,282 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerLifetimeAsync_CompletedOutcome_DisposesBothTimersWithoutReplaying(bool success)
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(2, clock.CreatedTimerCount);
+        Assert.Equal(2, clock.ActiveTimerCount);
+        if (success)
+        {
+            channel.Completion.SetResult();
+        }
+        else
+        {
+            channel.Completion.SetException(new IOException("Response lost"));
+        }
+        await WaitForStateAsync(id, success ? PrinterControlState.Succeeded : PrinterControlState.Unknown);
+        Assert.Null(await DrainWorkerExecutionsAsync(worker, clock, 2));
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        await worker.TickAsync(default);
+        Assert.Equal(2, clock.CreatedTimerCount);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_FaultedSenderTask_DisposesTimersAndRemovesFaultedEntry()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        var logger = new WorkerLogger { ThrowOnMotionFailure = true };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), logger, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        channel.Completion.SetException(new IOException("Response lost"));
+        await WaitForStateAsync(id, PrinterControlState.Unknown);
+        Exception? failure = await DrainWorkerExecutionsAsync(worker, clock, 2);
+        Assert.Equal("Injected motion logger failure", failure?.Message);
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        await worker.TickAsync(default);
+        await worker.TickAsync(default);
+        Assert.Single(logger.Entries);
+        Assert.Equal(1, channel.SendCount);
+        Assert.Equal(PrinterControlEvidence.None, (await GetAsync(id)).CompletionEvidence);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_DeadlineTimerDisposalThrows_StillDisposesLeaseAndRemovesEntry()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock { TimerDisposed = FailFirstTimerDisposal };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        Exception? failure = await DrainWorkerExecutionsAsync(worker, clock, 2);
+        Assert.Equal("Injected timer disposal failure", failure?.Message);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        await worker.TickAsync(default);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_ShutdownCancellation_JoinsSenderBeforeDisposingTimers()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock();
+        channel.HoldDisposal = true;
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await worker.StartAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        using var grace = new CancellationTokenSource();
+        Task stopping = worker.StopAsync(grace.Token);
+        Assert.False(stopping.IsCompleted);
+        await grace.CancelAsync();
+        await channel.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            Assert.False(channel.Disposed.Task.IsCompleted);
+            Assert.Equal(2, clock.ActiveTimerCount);
+            Assert.Equal(0, clock.DisposedTimerCount);
+            Assert.NotNull(worker.ExecuteTask);
+            Assert.False(worker.ExecuteTask.IsCompleted);
+        }
+        finally
+        {
+            channel.AllowDisposal.TrySetResult();
+        }
+        await stopping.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.NotNull(worker.ExecuteTask);
+        await worker.ExecuteTask.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.Equal(2, clock.DisposedTimerCount);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(PrinterControlState.Unknown, (await GetAsync(id)).State);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task WorkerLifetimeAsync_ShutdownWithFaultedEntry_JoinsAndDisposesEverySender(bool disposalThrows)
+    {
+        Guid id = Guid.NewGuid();
+        Guid otherId = Guid.NewGuid();
+        Guid otherPrinterId = Guid.NewGuid();
+        var clock = new MotionTestClock { TimerDisposed = disposalThrows ? FailFirstTimerDisposal : null };
+        var logger = new WorkerLogger { ThrowOnMotionFailure = true };
+        await using var otherChannel = new FakeChannel { HoldDisposal = true };
+        motionCapability.Setup(m => m.ConnectAsync(It.Is<Printer>(p => p.Id == otherPrinterId), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(otherChannel);
+        await AdmitAsync(id);
+        await ChangeAsync(async (db, service) =>
+        {
+            db.Printers.Add(new Printer
+            {
+                Id = otherPrinterId, Name = "Second sender", Backend = (int)PrinterBackend.Moonraker,
+                IsEnabled = true, ServerUrl = "http://other.invalid",
+            });
+            db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = otherPrinterId });
+            await db.SaveChangesAsync();
+            await service.AdmitAsync(otherPrinterId, otherId, userId.ToString(), new(PrinterControlKind.HomeAll), default);
+        });
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(), logger, clock);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await otherChannel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        channel.Completion.SetException(new IOException("Response lost"));
+        await WaitForStateAsync(id, PrinterControlState.Unknown);
+        Assert.Equal(4, clock.ActiveTimerCount);
+
+        // Pause the first hosted scan before it can remove the already-faulted entry.
+        commands.PauseNextOperationRead = true;
+        await worker.StartAsync(default);
+        using var grace = new CancellationTokenSource();
+        Task stopping = Task.CompletedTask;
+        try
+        {
+            await commands.OperationReadPaused.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            stopping = worker.StopAsync(grace.Token);
+            await grace.CancelAsync();
+            await otherChannel.Disposing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(0, clock.DisposedTimerCount);
+            Assert.Equal(4, clock.ActiveTimerCount);
+            Assert.False(otherChannel.Disposed.Task.IsCompleted);
+            Assert.NotNull(worker.ExecuteTask);
+            Assert.False(worker.ExecuteTask.IsCompleted);
+        }
+        finally
+        {
+            commands.ResumeOperationRead.TrySetResult();
+            otherChannel.AllowDisposal.TrySetResult();
+        }
+        await stopping.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.NotNull(worker.ExecuteTask);
+        if (disposalThrows)
+        {
+            AggregateException failure = await Assert.ThrowsAsync<AggregateException>(() =>
+                worker.ExecuteTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("Injected timer disposal failure", Assert.Single(failure.InnerExceptions).Message);
+        }
+        else
+        {
+            InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                worker.ExecuteTask.WaitAsync(TimeSpan.FromSeconds(10)));
+            Assert.Equal("Injected motion logger failure", failure.Message);
+        }
+        Assert.Equal(4, clock.DisposedTimerCount);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.True(channel.Disposed.Task.IsCompleted);
+        Assert.True(otherChannel.Disposed.Task.IsCompleted);
+        await worker.TickAsync(default);
+        await ChangeAsync(async (_, service) =>
+            Assert.Equal(PrinterControlState.Unknown, (await service.GetAsync(otherPrinterId, otherId, default)).State));
+        Assert.Equal(1, channel.SendCount);
+        Assert.Equal(1, otherChannel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_SecondTimerConstructionThrows_DisposesFirstAndAllowsLaterAdmission()
+    {
+        Guid id = Guid.NewGuid();
+        var clock = new MotionTestClock { ThrowOnTimerCreate = 2 };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        InvalidOperationException failure = await Assert.ThrowsAsync<InvalidOperationException>(() => worker.TickAsync(default));
+        Assert.Equal("Injected timer construction failure", failure.Message);
+        Assert.Equal(1, clock.CreatedTimerCount);
+        Assert.Equal(1, clock.DisposedTimerCount);
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(PrinterControlState.Queued, (await GetAsync(id)).State);
+        Assert.Equal(0, channel.SendCount);
+        await worker.TickAsync(default);
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(3, clock.CreatedTimerCount);
+        Assert.Equal(2, clock.ActiveTimerCount);
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        Assert.Null(await DrainWorkerExecutionsAsync(worker, clock, 3));
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    [Fact]
+    public async Task WorkerLifetimeAsync_ConcurrentDuplicateAdmission_DisposesLoserWithoutRemovingLiveWinner()
+    {
+        Guid id = Guid.NewGuid();
+        using var rendezvous = new Barrier(2);
+        var clock = new MotionTestClock { AdmissionBarrier = rendezvous };
+        await AdmitAsync(id);
+        using var worker = new PrinterControlOperationWorker(provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<PrinterControlOperationWorker>.Instance, clock);
+        await Task.WhenAll(Task.Run(() => worker.TickAsync(default)), Task.Run(() => worker.TickAsync(default)))
+            .WaitAsync(TimeSpan.FromSeconds(10));
+        clock.AdmissionBarrier = null;
+        await channel.Sent.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.Equal(4, clock.CreatedTimerCount);
+        Assert.Equal(2, clock.DisposedTimerCount);
+        Assert.Equal(2, clock.ActiveTimerCount);
+        Assert.Equal(PrinterControlState.Running, (await GetAsync(id)).State);
+        Assert.Equal(1, channel.SendCount);
+        channel.Completion.SetResult();
+        await WaitForStateAsync(id, PrinterControlState.Succeeded);
+        Assert.Null(await DrainWorkerExecutionsAsync(worker, clock, 4));
+        Assert.Equal(0, clock.ActiveTimerCount);
+        Assert.Equal(1, channel.SendCount);
+    }
+
+    private static void FailFirstTimerDisposal(int number)
+    {
+        if (number == 1)
+        {
+            throw new InvalidOperationException("Injected timer disposal failure");
+        }
+    }
+
+    private static async Task<Exception?> DrainWorkerExecutionsAsync(
+        PrinterControlOperationWorker worker, MotionTestClock clock, int expectedDisposed)
+    {
+        Exception? failure = null;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (clock.DisposedTimerCount < expectedDisposed)
+        {
+            try
+            {
+                await worker.TickAsync(timeout.Token);
+            }
+            catch (InvalidOperationException exception) when (
+                exception.Message is "Injected motion logger failure" or "Injected timer disposal failure")
+            {
+                Assert.Null(failure);
+                failure = exception;
+            }
+            if (clock.DisposedTimerCount < expectedDisposed)
+            {
+                await Task.Delay(10, timeout.Token);
+            }
+        }
+        Assert.Equal(expectedDisposed, clock.DisposedTimerCount);
+        return failure;
+    }
+
     private async Task<PrinterControlOperationDto> AdmitAsync(Guid id)
     {
         await using AsyncServiceScope scope = provider.CreateAsyncScope();
@@ -2702,15 +2978,21 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     {
         public ConcurrentQueue<WorkerLog> Entries { get; } = new();
         public TaskCompletionSource FirstWarning { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public bool ThrowOnMotionFailure { get; set; }
         public IDisposable? BeginScope<TState>(TState state) where TState : notnull => null;
         public bool IsEnabled(LogLevel logLevel) => true;
         public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception,
             Func<TState, Exception?, string> formatter)
         {
-            Entries.Enqueue(new(logLevel, formatter(state, exception), exception, state));
+            string message = formatter(state, exception);
+            Entries.Enqueue(new(logLevel, message, exception, state));
             if (logLevel == LogLevel.Warning)
             {
                 FirstWarning.TrySetResult();
+            }
+            if (ThrowOnMotionFailure && message.StartsWith("Motion operation ", StringComparison.Ordinal))
+            {
+                throw new InvalidOperationException("Injected motion logger failure");
             }
         }
     }
@@ -2760,12 +3042,59 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
         private readonly object sync = new();
         private readonly List<MotionTimer> timers = [];
         private TimeSpan elapsed;
+        private int timerCreateCalls;
+
+        public int? ThrowOnTimerCreate { get; set; }
+        public Action<int>? TimerDisposed { get; set; }
+        public Barrier? AdmissionBarrier { get; set; }
+
+        public int CreatedTimerCount
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return timers.Count;
+                }
+            }
+        }
+
+        public int DisposedTimerCount
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return timers.Count(timer => timer.IsDisposed);
+                }
+            }
+        }
+
+        public int ActiveTimerCount
+        {
+            get
+            {
+                lock (sync)
+                {
+                    return timers.Count(timer => !timer.IsDisposed);
+                }
+            }
+        }
 
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
+            if (dueTime == PrinterControlOperationService.CommandTimeout && AdmissionBarrier is { } barrier)
+            {
+                Assert.True(barrier.SignalAndWait(TimeSpan.FromSeconds(10)));
+            }
             lock (sync)
             {
-                var timer = new MotionTimer(this, callback, state);
+                int number = ++timerCreateCalls;
+                if (ThrowOnTimerCreate == number)
+                {
+                    throw new InvalidOperationException("Injected timer construction failure");
+                }
+                var timer = new MotionTimer(this, callback, state, number);
                 timer.Change(dueTime, period);
                 timers.Add(timer);
                 return timer;
@@ -2784,17 +3113,17 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             }
         }
 
-        private sealed class MotionTimer(MotionTestClock clock, TimerCallback callback, object? state) : ITimer
+        private sealed class MotionTimer(MotionTestClock clock, TimerCallback callback, object? state, int number) : ITimer
         {
             private TimeSpan? due;
-            private bool disposed;
+            public bool IsDisposed { get; private set; }
 
             public bool Change(TimeSpan dueTime, TimeSpan period)
             {
                 Assert.Equal(Timeout.InfiniteTimeSpan, period);
                 lock (clock.sync)
                 {
-                    if (disposed)
+                    if (IsDisposed)
                     {
                         return false;
                     }
@@ -2805,7 +3134,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
 
             public void FireIfDue()
             {
-                if (!disposed && due is TimeSpan at && at <= clock.elapsed)
+                if (!IsDisposed && due is TimeSpan at && at <= clock.elapsed)
                 {
                     due = null;
                     callback(state);
@@ -2816,8 +3145,13 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
             {
                 lock (clock.sync)
                 {
-                    disposed = true;
+                    if (IsDisposed)
+                    {
+                        return;
+                    }
+                    IsDisposed = true;
                     due = null;
+                    clock.TimerDisposed?.Invoke(number);
                 }
             }
 
@@ -2832,15 +3166,25 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
     private sealed class SnapshotCommands : DbCommandInterceptor
     {
         public bool Capture { get; set; }
+        public bool PauseNextOperationRead { get; set; }
+        public TaskCompletionSource OperationReadPaused { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource ResumeOperationRead { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
         public bool ConflictNextOperationUpdate { get; set; }
         public bool FailNextOperationUpdate { get; set; }
         public int ConflictCount { get; private set; }
         public ConcurrentQueue<string> Statements { get; } = new();
 
-        public override ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
+        public override async ValueTask<InterceptionResult<DbDataReader>> ReaderExecutingAsync(
             DbCommand command, CommandEventData eventData, InterceptionResult<DbDataReader> result,
             CancellationToken cancellationToken = default)
         {
+            if (PauseNextOperationRead && command.CommandText.StartsWith("SELECT", StringComparison.Ordinal) &&
+                command.CommandText.Contains("\"PrinterControlOperations\"", StringComparison.Ordinal))
+            {
+                PauseNextOperationRead = false;
+                OperationReadPaused.TrySetResult();
+                await ResumeOperationRead.Task.WaitAsync(cancellationToken);
+            }
             if (FailNextOperationUpdate && command.CommandText.Contains("UPDATE \"PrinterControlOperations\"", StringComparison.Ordinal))
             {
                 FailNextOperationUpdate = false;
@@ -2859,7 +3203,7 @@ public sealed class PrinterControlOperationTests : IAsyncLifetime, IAsyncDisposa
                 Statements.Enqueue(command.CommandText);
             }
 
-            return ValueTask.FromResult(result);
+            return result;
         }
     }
 }

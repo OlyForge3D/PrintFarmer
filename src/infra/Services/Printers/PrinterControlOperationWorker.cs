@@ -69,12 +69,21 @@ public sealed class PrinterControlOperationWorker(
         {
             // Host cancellation stops sends and joins I/O. A sent operation whose response
             // cannot be collected is persisted Unknown, not returned to the work queue.
-            foreach (Execution execution in active.Values)
+            try
             {
-                await execution.Stop.CancelAsync();
+                await Task.WhenAll(active.Values.Select(async execution => await execution.Stop.CancelAsync()));
             }
-
-            await Task.WhenAll(active.Values.Select(e => e.Task));
+            finally
+            {
+                try
+                {
+                    await Task.WhenAll(active.Values.Select(execution => execution.Task));
+                }
+                finally
+                {
+                    DisposeExecutions();
+                }
+            }
         }
     }
 
@@ -92,9 +101,21 @@ public sealed class PrinterControlOperationWorker(
 
             if (execution.Task.IsCompleted)
             {
-                await execution.Task;
-                active.TryRemove(id, out _);
-                execution.Dispose();
+                try
+                {
+                    await execution.Task;
+                }
+                finally
+                {
+                    try
+                    {
+                        active.TryRemove(new KeyValuePair<Guid, Execution>(id, execution));
+                    }
+                    finally
+                    {
+                        execution.Dispose();
+                    }
+                }
             }
             else
             {
@@ -135,15 +156,57 @@ public sealed class PrinterControlOperationWorker(
             .OrderBy(o => o.CreatedAtUtc).Take(20).Select(o => o.Id).ToArrayAsync(ct);
         foreach (Guid id in queued)
         {
-            var execution = new Execution(clock);
-            if (active.TryAdd(id, execution))
+            Execution? pending = new(clock);
+            try
             {
-                execution.Task = RunOneAsync(id, execution.Stop.Token);
+                if (active.TryAdd(id, pending))
+                {
+                    pending.Task = RunOneAsync(id, pending.Stop.Token);
+                    pending = null;
+                }
             }
-            else
+            finally
             {
-                execution.Dispose();
+                if (pending is not null)
+                {
+                    try
+                    {
+                        active.TryRemove(new KeyValuePair<Guid, Execution>(id, pending));
+                    }
+                    finally
+                    {
+                        pending.Dispose();
+                    }
+                }
             }
+        }
+    }
+
+    private void DisposeExecutions()
+    {
+        List<Exception>? failures = null;
+        foreach ((Guid id, Execution execution) in active)
+        {
+            try
+            {
+                try
+                {
+                    active.TryRemove(new KeyValuePair<Guid, Execution>(id, execution));
+                }
+                finally
+                {
+                    execution.Dispose();
+                }
+            }
+            catch (Exception exception)
+            {
+                (failures ??= []).Add(exception);
+            }
+        }
+
+        if (failures is not null)
+        {
+            throw new AggregateException("Motion execution resources could not all be disposed.", failures);
         }
     }
 
@@ -262,8 +325,24 @@ public sealed class PrinterControlOperationWorker(
         public Execution(TimeProvider clock)
         {
             deadline = new(PrinterControlOperationService.CommandTimeout, clock);
-            lease = new(PrinterControlOperationService.SenderLease, clock);
-            Stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, lease.Token);
+            try
+            {
+                lease = new(PrinterControlOperationService.SenderLease, clock);
+                try
+                {
+                    Stop = CancellationTokenSource.CreateLinkedTokenSource(deadline.Token, lease.Token);
+                }
+                catch
+                {
+                    lease.Dispose();
+                    throw;
+                }
+            }
+            catch
+            {
+                deadline.Dispose();
+                throw;
+            }
         }
 
         public CancellationTokenSource Stop { get; }
@@ -274,9 +353,21 @@ public sealed class PrinterControlOperationWorker(
 
         public void Dispose()
         {
-            Stop.Dispose();
-            deadline.Dispose();
-            lease.Dispose();
+            try
+            {
+                Stop.Dispose();
+            }
+            finally
+            {
+                try
+                {
+                    deadline.Dispose();
+                }
+                finally
+                {
+                    lease.Dispose();
+                }
+            }
         }
     }
 }
