@@ -427,10 +427,11 @@ jobs:
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/attestation.json"
             date -u +%Y-%m-%dT%H:%M:%S.000Z > "$index_evidence/attestation.verification-time"
-            cosign download signature "$reference" | jq -sc . > "$index_evidence/signature.bundle.json"
-            cosign download attestation "$reference" | jq -sc . > "$index_evidence/attestation.bundle.json"
-            (cosign download signature "$reference"; cosign download attestation "$reference") |
-              jq -sc . > "$index_evidence/download.json"
+            cosign download signature "$reference" > "$index_evidence/signature.ndjson"
+            cosign download attestation "$reference" > "$index_evidence/attestation.ndjson"
+            cat "$index_evidence/signature.ndjson" "$index_evidence/attestation.ndjson" > "$index_evidence/download.json"
+            jq -sc . "$index_evidence/signature.ndjson" > "$index_evidence/signature.bundle.json"
+            jq -sc . "$index_evidence/attestation.ndjson" > "$index_evidence/attestation.bundle.json"
             cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "$index_evidence/predicate.json"
             platform_digests="$(
@@ -456,10 +457,11 @@ jobs:
                 --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/attestation.json"
               date -u +%Y-%m-%dT%H:%M:%S.000Z > "$platform_evidence/attestation.verification-time"
-              cosign download signature "$platform_reference" | jq -sc . > "$platform_evidence/signature.bundle.json"
-              cosign download attestation "$platform_reference" | jq -sc . > "$platform_evidence/attestation.bundle.json"
-              (cosign download signature "$platform_reference"; cosign download attestation "$platform_reference") |
-                jq -sc . > "$platform_evidence/download.json"
+              cosign download signature "$platform_reference" > "$platform_evidence/signature.ndjson"
+              cosign download attestation "$platform_reference" > "$platform_evidence/attestation.ndjson"
+              cat "$platform_evidence/signature.ndjson" "$platform_evidence/attestation.ndjson" > "$platform_evidence/download.json"
+              jq -sc . "$platform_evidence/signature.ndjson" > "$platform_evidence/signature.bundle.json"
+              jq -sc . "$platform_evidence/attestation.ndjson" > "$platform_evidence/attestation.bundle.json"
               cp "source/crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json" \
                 "$platform_evidence/predicate.json"
             done <<< "$platform_digests"

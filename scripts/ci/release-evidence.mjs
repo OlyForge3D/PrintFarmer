@@ -75,6 +75,10 @@ function validateNativeSignatureBundle(entry, subject, verification) {
   nativeCertificate(entry);
   requireThat(entry.messageSignature.signature === verification?.optional?.Bundle?.Payload?.signature,
     'Native Cosign signature differs from verification output');
+  requireThat(typeof verification?.optional?.certificate === 'string' &&
+    nativeCertificate(entry).raw.toString('base64') ===
+      new X509Certificate(verification.optional.certificate).raw.toString('base64'),
+  'Native Cosign certificate differs from verification output');
 }
 
 function subjects(result, label) {
@@ -213,14 +217,14 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
     requireThat(statement?.subject?.[0]?.digest?.sha256 === subject.slice(7) &&
       JSON.stringify(canonicalJson(statement.predicate)) === JSON.stringify(canonicalJson(predicate)),
     'Cosign DSSE subject or SPDX predicate mismatch');
-    requireThat(typeof verification[index]?.payload === 'string' &&
+    requireThat(entry.signatures.length === 1 &&
+      entry.signatures[0].sig === optional?.Bundle?.Payload?.signature &&
+      typeof verification[index]?.payload === 'string' &&
       verification[index].payload === entry.payload,
     'Cosign DSSE download is not the verified attestation');
     if (nativeBundle(rawEntry)) {
       const certificate = nativeCertificate(rawEntry);
-      requireThat(entry.signatures.length === 1 &&
-        entry.signatures[0].sig === optional?.Bundle?.Payload?.signature &&
-        typeof optional?.certificate === 'string' &&
+      requireThat(typeof optional?.certificate === 'string' &&
         certificate.raw.toString('base64') === new X509Certificate(optional.certificate).raw.toString('base64') &&
         rawEntry.verificationMaterial.tlogEntries[0]?.canonicalizedBody === optional.Bundle.Payload.canonicalizedBody,
       'Native Cosign DSSE differs from verification output');
@@ -230,9 +234,16 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
 
 function partitionDownload(bytes) {
   const entries = parseJson(bytes, 'combined Cosign download');
+  requireThat(Array.isArray(entries), 'Combined Cosign download must be an array');
   const signatures = [];
   const attestations = [];
+  const fingerprints = new Set();
   for (const entry of entries) {
+    requireThat(entry && typeof entry === 'object' && !Array.isArray(entry),
+      'Combined Cosign download contains malformed entry');
+    const fingerprint = JSON.stringify(canonicalJson(entry));
+    requireThat(!fingerprints.has(fingerprint), 'Combined Cosign download contains duplicate entry');
+    fingerprints.add(fingerprint);
     const signature = nativeSignatureBundle(entry) ||
       (typeof entry?.Base64Signature === 'string' && typeof entry?.Payload === 'string' &&
         typeof entry?.Cert === 'string' && entry?.Bundle && !entry.dsseEnvelope);

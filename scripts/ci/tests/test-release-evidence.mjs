@@ -150,12 +150,14 @@ test('partitions a genuine mixed Cosign v3 download stream and binds every legac
   const dsse = JSON.parse(evidence.attestationBundleBytes)[0].dsseEnvelope;
   evidence.signatureBundleBytes = JSON.stringify([signature]);
   evidence.attestationBundleBytes = JSON.stringify([dsse]);
+  evidence.downloadBytes = JSON.stringify([signature, dsse]);
   assert.doesNotThrow(() => normalizeEvidence({ subject: digest, trust: trust(), ...evidence }));
   for (const field of ['Base64Signature', 'Payload', 'Cert', 'Bundle']) {
     const substituted = structuredClone(evidence);
     const stream = JSON.parse(substituted.signatureBundleBytes);
     stream[0][field] = field === 'Bundle' ? {} : 'substituted';
     substituted.signatureBundleBytes = JSON.stringify(stream);
+    substituted.downloadBytes = JSON.stringify([...stream, dsse]);
     assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substituted }),
       /Malformed Cosign signature download/);
   }
@@ -163,8 +165,43 @@ test('partitions a genuine mixed Cosign v3 download stream and binds every legac
   const stream = JSON.parse(substitutedDsse.attestationBundleBytes);
   stream[0].payload = Buffer.from(JSON.stringify({ subject: [] })).toString('base64');
   substitutedDsse.attestationBundleBytes = JSON.stringify(stream);
+  substitutedDsse.downloadBytes = JSON.stringify([signature, ...stream]);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substitutedDsse }),
     /DSSE|subject/);
+
+  for (const [label, downloadBytes] of [
+    ['non-array', JSON.stringify(signature)],
+    ['malformed', '{'],
+    ['unknown', JSON.stringify([{ unknown: true }])],
+    ['ambiguous', JSON.stringify([{ ...signature, ...dsse }])],
+    ['duplicate', JSON.stringify([signature, signature, dsse])],
+  ]) {
+    const substituted = { ...evidence, downloadBytes };
+    assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substituted }),
+      /combined Cosign download/i, label);
+  }
+});
+
+test('retains byte-faithful Cosign v3.0.6 raw capture composition metadata', () => {
+  const fixtureRoot = join('scripts', 'ci', 'tests', 'fixtures', 'cosign-v3.0.6');
+  const metadata = JSON.parse(readFileSync(join(fixtureRoot, 'metadata.json'), 'utf8'));
+  const signature = readFileSync(join(fixtureRoot, 'legacy-signature.ndjson'));
+  const attestation = readFileSync(join(fixtureRoot, 'native-attestation.ndjson'));
+  const combined = readFileSync(join(fixtureRoot, 'combined.ndjson'));
+
+  assert.equal(metadata.cliVersion, 'v3.0.6');
+  assert.equal(metadata.order, 'legacy-signature.ndjson, native-attestation.ndjson');
+  assert.equal(metadata.composition,
+    'legacy-signature.ndjson bytes, then one LF delimiter if absent, then native-attestation.ndjson bytes; no JSON reserialization');
+  const delimiter = signature.at(-1) === 0x0a ? Buffer.alloc(0) : Buffer.from('\n');
+  assert.deepEqual(combined, Buffer.concat([signature, delimiter, attestation]));
+
+  const signatureEntries = signature.toString('utf8').trim().split(/\r?\n/).map(JSON.parse);
+  const attestationEntries = attestation.toString('utf8').trim().split(/\r?\n/).map(JSON.parse);
+  const combinedEntries = combined.toString('utf8').trim().split(/\r?\n/).map(JSON.parse);
+  assert.ok(signatureEntries.every(entry => entry.Base64Signature && entry.Payload && entry.Bundle && !entry.dsseEnvelope));
+  assert.ok(attestationEntries.every(entry => entry.dsseEnvelope && !entry.messageSignature));
+  assert.deepEqual(combinedEntries, [...signatureEntries, ...attestationEntries]);
 });
 
 test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => {
@@ -205,6 +242,22 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
     assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substituted }),
       /differs from verification output/, label);
   }
+  const substitutedDsseSignature = structuredClone(evidence);
+  const dsseBundle = JSON.parse(substitutedDsseSignature.attestationBundleBytes);
+  dsseBundle[0].dsseEnvelope.signatures[0].sig = 'substituted';
+  substitutedDsseSignature.attestationBundleBytes = JSON.stringify(dsseBundle);
+  substitutedDsseSignature.downloadBytes = JSON.stringify([nativeSignature, ...dsseBundle]);
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substitutedDsseSignature }),
+    /DSSE download is not the verified attestation|DSSE differs from verification output/);
+  const substitutedCertificate = structuredClone(evidence);
+  const certificateBundle = JSON.parse(substitutedCertificate.signatureBundleBytes);
+  certificateBundle[0].verificationMaterial.certificate.rawBytes =
+    `A${new X509Certificate(certificate).raw.toString('base64').slice(1)}`;
+  substitutedCertificate.signatureBundleBytes = JSON.stringify(certificateBundle);
+  substitutedCertificate.downloadBytes = JSON.stringify([...certificateBundle,
+    ...JSON.parse(substitutedCertificate.attestationBundleBytes)]);
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substitutedCertificate }),
+    /certificate differs from verification output|certificate is malformed/);
 
   const wrongIdentity = structuredClone(evidence);
   const identityVerification = JSON.parse(wrongIdentity.signatureBytes);
@@ -295,7 +348,7 @@ test('rejects legacy signature and attestation verification missing trusted opti
   delete attestationVerification[0].optional;
   legacyAttestation.attestationBytes = JSON.stringify(attestationVerification);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...legacyAttestation }),
-    /Native Cosign DSSE differs from verification output/);
+    /DSSE download is not the verified attestation/);
 });
 
 test('rejects staged signature bundle, subject, predicate, and platform substitutions', () => {
