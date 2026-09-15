@@ -1,4 +1,4 @@
-import { act, render, screen } from '@testing-library/react';
+import { act, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { InstallerUpdatesExperience } from '@/features/admin/components/InstallerUpdatesExperience';
@@ -35,9 +35,17 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByText('Insider updates may arrive more frequently and have reduced stability compared with stable releases.')).toBeVisible();
     expect(screen.getByText(/Selected train/).parentElement).toHaveTextContent('insider');
     expect(screen.getByText(/Proposed target release identity: Unknown/)).toBeVisible();
-    await userEvent.setup().click(screen.getByText(/api: insider:1.2.3-insider.10/));
-    expect(screen.getByText(identity.releaseId)).toBeVisible();
-    expect(screen.getByText(identity.sourceCommit)).toBeVisible();
+    const observedReplicaSummary = screen.getByLabelText(
+      'api (replica-a): insider:1.2.3-insider.10',
+    );
+    const observedReplica = observedReplicaSummary.closest('details');
+    expect(observedReplica).not.toBeNull();
+    await userEvent.setup().click(observedReplicaSummary);
+    expect(within(observedReplica!).getByText(identity.releaseId)).toBeVisible();
+    const sourceCommit = within(observedReplica!).getByText('Source commit')
+      .parentElement;
+    expect(sourceCommit).toBeVisible();
+    expect(sourceCommit).toHaveTextContent(identity.sourceCommit);
     expect(screen.getByText(/downgrade is not offered as a bypass/)).toBeVisible();
     expect(screen.getByText(/Release notes and operation history are unavailable pending the read-only release contract/)).toBeVisible();
   });
@@ -74,7 +82,11 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByText(/Snapshot provenance: Imported/)).toBeVisible();
     expect(screen.getByText(/replica-b.*Stale/)).toBeVisible();
     expect(screen.getByText(/Proposed target release identity: Unknown/)).toBeVisible();
-    await userEvent.setup().click(screen.getByText(/replica-b: stable:1.2.4/));
+    await userEvent.setup().click(
+      screen.getByLabelText(
+        'api (replica-b): stable:1.2.4',
+      ),
+    );
     expect(screen.getByText('stable:1.2.4')).toBeVisible();
   });
 });

@@ -53,7 +53,10 @@ function observedIdentityDetails(
                 <details
                   key={`${service.serviceId}-${service.instanceId ?? index}`}
                 >
-                  <summary className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2">
+                  <summary
+                    aria-label={`${label}: ${text(identity.releaseId)}`}
+                    className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2"
+                  >
                     {label}: {text(identity.releaseId)}
                   </summary>
                   <dl className="mt-2 space-y-1">
