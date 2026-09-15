@@ -30,6 +30,13 @@ function canonicalJson(value) {
   return value;
 }
 
+function canonicalEvidenceSet(set) {
+  const services = canonicalJson(set.services);
+  return Object.hasOwn(set, 'createdTime')
+    ? JSON.stringify({ schema: set.schema, createdTime: set.createdTime,
+      verificationTime: set.verificationTime, services })
+    : JSON.stringify({ schema: set.schema, services });
+}
 function nativeBundle(entry) {
   return entry?.mediaType === 'application/vnd.dev.sigstore.bundle.v0.3+json' &&
     entry.verificationMaterial && typeof entry.verificationMaterial === 'object';
@@ -329,7 +336,7 @@ export function stageEvidence(evidencePath, completeSet, collected, trust) {
   }
   validateEvidenceSet(set, completeSet, trust);
   mkdirSync(dirname(evidencePath), { recursive: true });
-  const serialized = JSON.stringify(set);
+  const serialized = canonicalEvidenceSet(set);
   writeFileSync(evidencePath, serialized);
   return { set, sha256: sha256(serialized) };
 }
@@ -368,6 +375,6 @@ export function stageEvidenceFromFiles(evidencePath, completeSet, root, trust) {
 export function readEvidence(evidencePath, completeSet, trust) {
   const bytes = readEvidenceFile(evidencePath);
   const set = validateEvidenceSet(parseJson(bytes, 'release evidence'), completeSet, trust);
-  requireThat(bytes === JSON.stringify(set), 'Release evidence bytes are not canonical');
+  requireThat(bytes === canonicalEvidenceSet(set), 'Release evidence bytes are not canonical');
   return { set, sha256: sha256(bytes), bytes };
 }
