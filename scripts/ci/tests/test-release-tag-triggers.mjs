@@ -3319,10 +3319,12 @@ function authorizationFixture(initial = state(), settings = {}) {
         return response(checks);
       }
       if ([`commits/${sourceCommit}/status?per_page=100`, `commits/${sourceCommit}/statuses?per_page=100`].includes(endpoint)) {
+        const { creator: _creator, ...combinedStatus } = canonical.status;
         const statuses = { sha: sourceCommit, total_count: reviewedHead === sourceCommit ? 1 : 0,
-          statuses: reviewedHead === sourceCommit ? [structuredClone(canonical.status)] : [] };
+          statuses: reviewedHead === sourceCommit ? [structuredClone(combinedStatus)] : [] };
         settings.mutateStatuses?.(statuses);
-        return response(endpoint.includes('/statuses?') ? statuses.statuses : statuses);
+        if (endpoint.includes('/statuses?')) return response(reviewedHead === sourceCommit ? [canonical.status] : []);
+        return response(statuses);
       }
       if (channel === 'stable' && (endpoint === `git/commits/${sha}` || endpoint === `git/commits/${newerSha}`)) {
         return response(await trees(endpoint));
