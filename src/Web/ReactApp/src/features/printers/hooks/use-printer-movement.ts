@@ -38,7 +38,7 @@ export function usePrinterMovement(printer?: Pick<Printer, 'id'>) {
           case 'MoveTo': return await apiClient.movePrinterTo(printerId, move);
         }
       } catch (error) {
-        throw new Error(`${mutationErrorMessage(error, 'Movement request failed')}. Check the printer before sending another command; it may have already moved.`);
+        throw new Error(`${mutationErrorMessage(error, 'Movement request failed')}. Check the printer before sending another command; it may have already moved.`, { cause: error });
       } finally {
         active.delete(printerId);
       }

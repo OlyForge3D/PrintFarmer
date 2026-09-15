@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 // DTO for a discovered file in a harvest operation
 // DTO for importing selected discovered files
 export interface ImportSelectedGcodeFilesDto {
