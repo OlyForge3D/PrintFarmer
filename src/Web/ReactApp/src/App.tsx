@@ -306,7 +306,7 @@ function AuthenticatedAppRoutes() {
         <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="user" />)} />
         {/*
          * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
-         * API key management is a per-user feature â€” every authenticated user needs
+         * API key management is a per-user feature — every authenticated user needs
          * access to create/revoke their own keys. Admins can also reach ApiKeysPage
          * via the User Settings profile section, but the direct /profile/api-keys route
          * must remain open to all authenticated users to avoid a regression.
