@@ -54,6 +54,42 @@ release-workflow, release-guide and test changes inspected on 2026-09-12.
 Target updater contracts, routes and remaining delivery increments are
 **proposed**; channel-policy decisions fix their defaults and safeguards.
 
+### Host updater foundation (#2662)
+
+The shared host-updater foundation implements only the `Planned`, `Approved`,
+and `Staged` boundary. It is one host-local engine for future operator-triggered
+one-time requests and administrator-enabled standing policies; neither caller
+may provide arbitrary commands, URLs, or filesystem paths. The engine has no
+apply, recovery, scheduler, Docker-control, or API/UI request-integration
+capability.
+
+Each plan accepts only typed, explicitly configured installation/source-target
+fingerprints; topology/replica/remote-worker inventory; provider/schema/config
+fingerprints; updater/resource/disk/recovery/maintenance evidence; and registry
+and backup readiness. It binds the source and target channels plus the
+channel-policy revision to canonical signed release identity: release/version,
+source tag/branch/commit and authorized branch head, build metadata, OCI labels,
+provenance subject, manifest/index, and every required component platform
+digest. All immutable evidence is hashed. Before artifact transfer, staging
+reacquires a single-installation OS file lock and revalidates current signed
+metadata and the hash. Drift, channel changes, incompatible evidence, incomplete
+component sets, mixed identity, invalid signatures, or digest conflicts reject
+the handoff. Staging adapters receive only the approved immutable plan and
+verified metadata, must retain recovery artifacts, and report failures as
+recoverable while leaving the running release untouched.
+
+The append-only JSON-lines operation journal and installation lock are
+host-local files, outside replaced containers and application databases.
+Journal intent is flushed before staging, outcomes are durable and monotonic
+across a process restart, and its redacted records retain only bounded
+operation/actor/reason/outcome identifiers, channel and policy identities,
+canonical release identity, plan hash, and staged/recovery digests. Arbitrary
+paths, URLs, commands, and exception text are never journalled. Journal
+corruption is a fail-closed reconciliation condition.
+Issue #2663 owns all transitions after `Staged`, including drain, backup,
+migration, apply, verification, and recovery. Issue #2666 owns request
+integration and scheduling.
+
 Scope: single-host Docker Compose, monolith and split-service deployments,
 optional/local/remote workers, external databases, and offline installations.
 The [provider matrix](DEPLOYMENT.md#database-configuration) permits PostgreSQL
