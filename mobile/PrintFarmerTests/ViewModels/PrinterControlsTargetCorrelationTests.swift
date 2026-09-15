@@ -10,6 +10,8 @@ import XCTest
 /// Measured temperatures are irrelevant, and an
 /// uncontrollable setpoint (`nil` target, e.g. a bed-less backend) is treated
 /// as already satisfied.
+/// Direct motion shares in-flight ownership but settles at HTTP acceptance;
+/// neither matching coordinates nor homed axes confirm physical completion.
 @MainActor
 final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
@@ -226,7 +228,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         }
     }
 
-    func test_absoluteCachedZero_reportsAcceptanceOnlyForCompleteXYZ() async throws {
+    func test_absoluteCachedZero_reportsDirectAcceptanceWithoutPhysicalCompletion() async throws {
         let service = MockPrinterService()
         var base = try idlePrinter()
         base.x = 0
@@ -241,7 +243,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         let vm = makeViewModel(printer: base, capabilities: caps, service: service)
         await vm.loadCapabilities()
         await vm.moveTo(x: 0, y: 0, z: 0, feedrateMmMin: nil)
-        assertAcceptanceOnly(vm)
+        assertDirectAcceptanceOnly(vm)
         XCTAssertEqual(service.moveToCalledWith?.x, 0)
         XCTAssertEqual(service.moveToCalledWith?.y, 0)
         XCTAssertEqual(service.moveToCalledWith?.z, 0)
@@ -259,6 +261,19 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertTrue(vm.commandNotice?.hasPrefix("Request accepted.") == true, file: file, line: line)
         XCTAssertTrue(vm.commandNotice?.contains("fresh physical completion is not confirmed") == true, file: file, line: line)
         XCTAssertFalse(vm.commandNotice?.contains("Matching telemetry") == true, file: file, line: line)
+    }
+
+    private func assertDirectAcceptanceOnly(
+        _ vm: PrinterControlsViewModel, file: StaticString = #filePath, line: UInt = #line
+    ) {
+        XCTAssertNil(vm.pendingCommand, file: file, line: line)
+        XCTAssertFalse(vm.isExecuting, file: file, line: line)
+        XCTAssertNil(vm.lastError, file: file, line: line)
+        XCTAssertEqual(
+            vm.commandNotice,
+            "Command accepted. Physical completion is not confirmed; check the printer before another action.",
+            file: file, line: line
+        )
     }
 
     // MARK: - Non-matching cached targets keep waiting for live evidence
@@ -300,15 +315,16 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
     func test_telemetryBeforeResponse_doesNotPermitOverlappingDispatch() async throws {
         let service = MockPrinterService()
-        let gate = AsyncGate()
-        service.beforeSetTemperatures = { await gate.wait() }
+        let gate = AsyncBarrier()
+        defer { gate.close() }
+        service.beforeSetTemperatures = { await gate.arriveAndWait() }
         let base = try idlePrinter()
         let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         // C1: a preheat blocked in-flight at the gate.
         async let first: Void = vm.preheat(.pla)
-        while await !gate.hasWaiters { await Task.yield() }
+        await gate.waitUntilArrived()
 
         // Telemetry alone must not release the transport's single-flight slot.
         var warmed = base
@@ -316,32 +332,46 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         vm.handlePrinterUpdate(warmed)
         XCTAssertTrue(vm.isExecuting)
 
-        // C2: a new jog begins and becomes the pending command.
+        // C2 cannot dispatch until C1's HTTP response settles.
         await vm.jog(axis: "X", distanceMm: 10)
         XCTAssertNil(service.moveCalledWith)
+        XCTAssertEqual(service.motionCallCount, 0)
 
-        // C1's stale success finally returns; it must not clear the newer C2.
-        await gate.open()
+        // Matching preheat telemetry is acknowledged only after C1 settles.
+        gate.release()
         await first
         XCTAssertNil(vm.pendingCommand)
         XCTAssertEqual(vm.commandNotice, "Matching telemetry received. A heater target is a setpoint, not a measured temperature.")
-        await vm.jog(axis: "X", distanceMm: 10)
-        guard case .jog = vm.pendingCommand?.kind else {
-            return XCTFail("A stale preheat response cleared the newer jog command")
-        }
+
+        let motionGate = AsyncBarrier()
+        defer { motionGate.close() }
+        service.beforeMotion = { await motionGate.arriveAndWait() }
+        let second = Task { await vm.jog(axis: "X", distanceMm: 10) }
+        await motionGate.waitUntilArrived()
+        let secondOwner = try XCTUnwrap(vm.pendingCommand)
+        XCTAssertEqual(secondOwner.kind, .jog(axis: "X", distanceMm: 10))
+        vm.handlePrinterUpdate(warmed)
+        await vm.preheat(.abs)
+        XCTAssertEqual(vm.pendingCommand, secondOwner)
+        XCTAssertEqual(service.setTemperaturesCallCount, 1)
+        XCTAssertEqual(service.motionCallCount, 1)
+        motionGate.release()
+        await second.value
+        assertDirectAcceptanceOnly(vm)
     }
 
     func test_stopWaiting_retainsLateFailureOwnershipBeforeAllowingNewCommand() async throws {
         let service = MockPrinterService()
-        let gate = AsyncGate()
-        service.beforeSetTemperatures = { await gate.wait() }
+        let gate = AsyncBarrier()
+        defer { gate.close() }
+        service.beforeSetTemperatures = { await gate.arriveAndWait() }
         let base = try idlePrinter()
         let vm = makeViewModel(printer: base, capabilities: Self.fullCaps, service: service)
         await vm.loadCapabilities()
 
         // C1: a preheat blocked in-flight at the gate.
         async let first: Void = vm.preheat(.pla)
-        while await !gate.hasWaiters { await Task.yield() }
+        await gate.waitUntilArrived()
 
         // Stopping observation never releases the unresolved transport slot,
         // even if matching telemetry was received before the stop.
@@ -361,7 +391,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
 
         // Arm the error so C1 fails *late* when it resumes past the gate.
         service.errorToThrow = NetworkError.serverError(500)
-        await gate.open()
+        gate.release()
         await first
 
         XCTAssertNil(vm.pendingCommand)
@@ -369,7 +399,11 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertTrue(vm.lastError?.message.contains("Outcome may be unknown") == true)
         XCTAssertNil(vm.commandNotice, "Rejection must not leave stale success wording")
         service.errorToThrow = nil
-        await vm.jog(axis: "X", distanceMm: 10)
+        let motionGate = AsyncBarrier()
+        defer { motionGate.close() }
+        service.beforeMotion = { await motionGate.arriveAndWait() }
+        let second = Task { await vm.jog(axis: "X", distanceMm: 10) }
+        await motionGate.waitUntilArrived()
         let secondOwner = try XCTUnwrap(vm.pendingCommand)
         XCTAssertNotEqual(firstOwner.id, secondOwner.id)
         vm.handlePrinterUpdate(warmed)
@@ -378,6 +412,12 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         }
         XCTAssertEqual(vm.pendingCommand, secondOwner)
         XCTAssertNil(vm.lastError, "The next invocation must not inherit the old response's error")
+        XCTAssertEqual(service.motionCallCount, 1)
+        motionGate.release()
+        await second.value
+        assertDirectAcceptanceOnly(vm)
+        vm.handlePrinterUpdate(warmed)
+        XCTAssertEqual(service.motionCallCount, 1, "Late heater telemetry never replays motion")
     }
 
     func test_currentCommandFailure_recordsError_andClearsPending() async throws {
@@ -412,7 +452,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         XCTAssertNil(vm.pendingCommand)
     }
 
-    func test_absolute_requiresMatchingXYZ_notMissingAxesOrUnrelatedNoise() async throws {
+    func test_absolute_waitsForResponseRegardlessOfMatchingXYZOrUnrelatedNoise() async throws {
         let service = MockPrinterService()
         var base = try idlePrinter()
         base.x = 5
@@ -426,7 +466,11 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         )
         let vm = makeViewModel(printer: base, capabilities: caps, service: service)
         await vm.loadCapabilities()
-        await vm.moveTo(x: 0, y: -2.5, z: 2, feedrateMmMin: nil)
+        let gate = AsyncBarrier()
+        defer { gate.close() }
+        service.beforeAbsoluteMove = { await gate.arriveAndWait() }
+        let request = Task { await vm.moveTo(x: 0, y: -2.5, z: 2, feedrateMmMin: nil) }
+        await gate.waitUntilArrived()
         let pending = try XCTUnwrap(vm.pendingCommand)
         XCTAssertNil(vm.lastError)
         XCTAssertEqual(pending.kind, .moveTo(x: 0, y: -2.5, z: 2, feedrateMmMin: 600))
@@ -458,13 +502,25 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         update.y = -2.5
         update.z = 2
         vm.handlePrinterUpdate(update)
-        XCTAssertNil(vm.pendingCommand)
+        XCTAssertEqual(vm.pendingCommand, pending, "Even matching XYZ cannot settle an in-flight direct request")
+        await vm.jog(axis: "X", distanceMm: 1)
+        XCTAssertNil(service.moveCalledWith)
+        update.x = nil
+        update.y = 99
+        vm.handlePrinterUpdate(update)
+        XCTAssertEqual(vm.pendingCommand, pending)
+        gate.release()
+        await request.value
+        assertDirectAcceptanceOnly(vm)
+        update.x = 0
+        update.y = -2.5
+        vm.handlePrinterUpdate(update)
+        assertDirectAcceptanceOnly(vm)
         XCTAssertNil(vm.lastError)
-        XCTAssertEqual(vm.commandNotice, "Matching telemetry received. Check the machine before further setup.")
-        XCTAssertNil(service.moveToCalledWith, "Correlation must not retry the physical command")
+        XCTAssertNil(service.moveToCalledWith, "Telemetry must not retry the physical command")
     }
 
-    func test_homeZ_doesNotResolveOnUnrelatedHomingOrMissingTelemetry() throws {
+    func test_homeZ_neverResolvesFromHomingTelemetry() throws {
         var base = try idlePrinter()
         base.homedAxes = nil
         let command = ControlCommand(kind: .home(axes: ["Z"]), startedAt: Date())
@@ -474,7 +530,7 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         update.homedAxes = nil
         XCTAssertFalse(PrinterControlsViewModel.transition(from: base, to: update, resolves: command))
         update.homedAxes = "xyz"
-        XCTAssertTrue(PrinterControlsViewModel.transition(from: base, to: update, resolves: command))
+        XCTAssertFalse(PrinterControlsViewModel.transition(from: base, to: update, resolves: command))
     }
 
     func test_offlineReconnect_abandonsPendingWithoutReplaying() async throws {
@@ -500,26 +556,5 @@ final class PrinterControlsTargetCorrelationTests: XCTestCase {
         let second = ControlCommand(kind: .heater(.bed, target: 60), startedAt: date)
         XCTAssertNotEqual(first, second)
         XCTAssertEqual(first, first)
-    }
-}
-
-// MARK: - Test gate helper
-
-private actor AsyncGate {
-    private var waiters: [CheckedContinuation<Void, Never>] = []
-    private var opened = false
-
-    var hasWaiters: Bool { !waiters.isEmpty || opened }
-
-    func wait() async {
-        if opened { return }
-        await withCheckedContinuation { c in waiters.append(c) }
-    }
-
-    func open() {
-        opened = true
-        let toResume = waiters
-        waiters.removeAll()
-        for c in toResume { c.resume() }
     }
 }
