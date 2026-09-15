@@ -853,17 +853,17 @@ test('source tag is authorized in durable state before public ref creation and n
 
 test('record consumers reject foreign callers while allowing same-run retry attempts', () => {
   const identity = record();
-  verifyConsumer(identity, identity, context());
-  assert.doesNotThrow(() => verifyConsumer(identity, identity, context({ buildAttempt: '2' })));
+  verifyConsumer(identity, { record: identity }, context());
+  assert.doesNotThrow(() => verifyConsumer(identity, { record: identity }, context({ buildAttempt: '2' })));
   for (const override of [{ event: 'push' }, { repository: 'fork/repo' },
     { workflowIdentity: 'caller-forgery' }, { workflowSha: newerSha }]) {
-    assert.throws(() => verifyConsumer(identity, identity, context(override)));
+    assert.throws(() => verifyConsumer(identity, { record: identity }, context(override)));
   }
-  assert.throws(() => verifyConsumer({ ...identity, sourceCommit: newerSha }, identity, context()));
+  assert.throws(() => verifyConsumer({ ...identity, sourceCommit: newerSha }, { record: identity }, context()));
   for (const override of [{ repository: 'fork/repo' }, { releaseId: 'stable:1.2.3' },
     { canonicalVersion: '1.2.4-insider.1' }, { stage: 'rc' }, { allocationKey: 'forged' }]) {
     const malformed = { ...identity, ...override };
-    assert.throws(() => verifyConsumer(malformed, malformed, context()), ReleasePolicyError);
+    assert.throws(() => verifyConsumer(malformed, { record: malformed }, context()), ReleasePolicyError);
   }
 });
 
@@ -3491,7 +3491,7 @@ test('every ledger write path removes unknown top-level seed fields without chan
     assert.equal(persisted.pointers.insider.manifestEnvelopeSha256,
       signedReleasePointer(identity, signedManifest(identity, set)).manifestEnvelopeSha256);
     assert.deepEqual(fixture.ledgerWrites[4], fixture.ledgerWrites[5]);
-    verifyConsumer(identity, entry.record, context(), entry.identitySha256);
+    verifyConsumer(identity, entry, context(), entry.identitySha256);
   } finally {
     globalThis.fetch = originalFetch;
   }

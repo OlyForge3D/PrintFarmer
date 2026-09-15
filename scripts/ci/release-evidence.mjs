@@ -120,11 +120,17 @@ function validateBundleTrust(bundle, trust, verification = []) {
     !policy.revokedReleaseIds.includes(releaseId),
     'Invalid or revoked release evidence time');
   const entries = Array.isArray(bundle) ? bundle : [bundle];
+  requireThat(entries.length > 0 && (verification.length === 0 || verification.length === entries.length),
+    'Cosign verification trust entries are missing or mismatched');
   for (const [index, entry] of entries.entries()) {
-    const optional = verification[index]?.optional;
+    const optional = entry?.optional ?? verification[index]?.optional;
+    if (!nativeBundle(entry) && !optional) continue;
+    requireThat(typeof optional?.Subject === 'string' && typeof optional.Issuer === 'string' &&
+      typeof optional.certificate === 'string' && optional.Bundle?.Payload &&
+      Number.isSafeInteger(optional.Bundle.Payload.integratedTime),
+    'Cosign verifier lacks required identity, certificate, or transparency trust material');
     if (nativeBundle(entry)) {
-      requireThat(typeof optional?.Subject === 'string' && optional.Issuer === policy.issuer &&
-        typeof optional.certificate === 'string',
+      requireThat(optional.Issuer === policy.issuer,
       'Native Cosign bundle lacks authoritative verifier identity or issuer');
       const integratedTime = nativeIntegratedTime(entry);
       const integratedAt = integratedTime * 1000;
@@ -139,8 +145,7 @@ function validateBundleTrust(bundle, trust, verification = []) {
         trustedAt <= Date.parse(certificate.validTo),
       'Cosign transparency time is expired or revoked');
     }
-    if (!nativeBundle(entry) && !entry?.optional) continue;
-    const trustedOptional = nativeBundle(entry) ? optional : entry.optional;
+    const trustedOptional = optional;
     const signer = trustedOptional?.Subject;
     const integratedTime = nativeBundle(entry)
       ? nativeIntegratedTime(entry)
@@ -364,5 +369,6 @@ export function stageEvidenceFromFiles(evidencePath, completeSet, root, trust) {
 export function readEvidence(evidencePath, completeSet, trust) {
   const bytes = readEvidenceFile(evidencePath);
   const set = validateEvidenceSet(parseJson(bytes, 'release evidence'), completeSet, trust);
+  requireThat(bytes === JSON.stringify(set), 'Release evidence bytes are not canonical');
   return { set, sha256: sha256(bytes), bytes };
 }

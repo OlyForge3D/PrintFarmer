@@ -488,13 +488,15 @@ export async function ensureSourceTag(api, store, record, transact) {
     const projected = publicLedger(state);
     const entry = projected.reservations[record.allocationKey];
     requireThat(entry?.identitySha256 === hash(record) &&
-      hash(entry.record) === hash(publicRecord(record)), 'Source tag authorization mismatch');
+      hash(entry.record) === hash(publicRecord(record)) && !entry.abandonment,
+    'Source tag authorization mismatch or reservation was terminally abandoned');
     return entry;
   };
   // Reserve the annotated object in the ledger BEFORE creating its public ref.
   await transact(store, async state => {
     const authorized = preflight(state).record;
     const entry = state.reservations[record.allocationKey];
+    requireThat(!entry.abandonment, 'Terminally abandoned reservation cannot create a source tag');
     if (entry.tagObject) return;
     requireThat(!await readTag(api, authorized.sourceTag), 'Existing tag has no immutable authorization');
     const tag = await api('git/tags', 'POST', {
@@ -506,6 +508,7 @@ export async function ensureSourceTag(api, store, record, transact) {
   });
   const { state } = await store.read();
   const entry = preflight(state);
+  requireThat(!entry.abandonment, 'Terminally abandoned reservation cannot publish a source tag');
   const expected = entry.tagObject;
   const actual = await readTag(api, entry.record.sourceTag);
   requireThat(!entry.tagPublished || actual,
@@ -514,7 +517,11 @@ export async function ensureSourceTag(api, store, record, transact) {
     await api('git/refs', 'POST', { ref: `refs/tags/${entry.record.sourceTag}`, sha: expected });
   }
   verifyTag(record, expected, await readTag(api, entry.record.sourceTag));
-  await transact(store, state => { state.reservations[record.allocationKey].tagPublished = true; });
+  await transact(store, state => {
+    requireThat(!state.reservations[record.allocationKey].abandonment,
+      'Terminally abandoned reservation cannot mark a source tag published');
+    state.reservations[record.allocationKey].tagPublished = true;
+  });
 }
 
 export async function verifyStableQualification(api, state, admission) {

@@ -152,7 +152,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   requireThat(entry, 'Unknown release authorization');
   requireThat(!entry.abandonment, 'Terminally abandoned reservation cannot be consumed, preflighted, advanced, or recovered');
   requireThat(entry.identitySha256 === hash(record), 'Release authorization differs from the immutable reservation');
-  if (operation !== 'abandon') verifyConsumer(record, entry.record, context, entry.identitySha256);
+  if (operation !== 'abandon') verifyConsumer(record, entry, context, entry.identitySha256);
   verifyProtectionEvidence(record.protection, record.channel);
   requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
     'Protection evidence postdates authorization');

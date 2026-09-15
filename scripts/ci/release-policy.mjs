@@ -1317,8 +1317,9 @@ export function verifyTag(record, expectedObject, actualTag) {
     'Source tag missing, moved, recreated, or not the exact authorized peeled SHA');
 }
 
-export function verifyConsumer(record, stored, context, identitySha256 = hash(stored)) {
-  requireThat(!stored?.abandonment, 'Terminally abandoned reservation cannot be consumed');
+export function verifyConsumer(record, reservation, context, identitySha256 = reservation?.identitySha256 ?? hash(reservation?.record)) {
+  requireThat(!reservation?.abandonment, 'Terminally abandoned reservation cannot be consumed');
+  const stored = reservation?.record;
   requireThat(hash(record) === identitySha256, 'Canonical record was changed');
   validateRecord(record);
   const tag = parseTag(record.sourceTag);
