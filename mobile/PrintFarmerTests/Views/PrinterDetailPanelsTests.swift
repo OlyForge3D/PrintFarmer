@@ -53,11 +53,12 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
         XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
                        "Protected status must be fetched; lifecycle invalidations may refresh it")
-        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
-        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
         })
-        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.url?.host == fixture.second.baseURL.host })
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.url?.host == fixture.second.baseURL.host })
+        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first, fixture.second])
 
         let field = try XCTUnwrap(heaterTarget(in: controller.view))
         let selector = try XCTUnwrap(views(UISegmentedControl.self, in: controller.view).first)
@@ -73,7 +74,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
             self.heaterTarget(in: controller.view)?.isEnabled != true
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1, "Identity churn cannot rebind or replace this host's owner")
-        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
+        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first, fixture.second])
     }
 
     func testProductionDetailHostInitialLoadCreatesOneControlsOwner() async throws {
@@ -93,12 +95,40 @@ final class PrinterDetailPanelsTests: XCTestCase {
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
         XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
                        "Protected status must be fetched; lifecycle invalidations may refresh it")
-        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.httpMethod == "GET" })
-        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy {
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
         })
-        XCTAssertTrue(fixture.api.capturedRequests.allSatisfy { $0.url?.host == fixture.first.baseURL.host })
+        XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.url?.host == fixture.first.baseURL.host })
+        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first])
     }
+
+    func testDetailHostFixtureExplicitlyDisablesIncidentalDeviceRegistration() async throws {
+        let fixture = try detailHostFixture()
+        let token = String(repeating: "ab", count: 32)
+        for method in ["POST", "DELETE"] {
+            do {
+                if method == "POST" {
+                    _ = try await fixture.services.notificationService.registerDeviceToken(token, platform: "ios")
+                } else {
+                    try await fixture.services.notificationService.unregisterDeviceToken(token)
+                }
+                XCTFail("Expected explicit featureDisabled for device-token \(method)")
+            } catch let error as NetworkError {
+                guard case .featureDisabled(let problem) = error else {
+                    return XCTFail("Unexpected device-token \(method) error: \(error)")
+                }
+                XCTAssertEqual(problem.code, "featureDisabled")
+                XCTAssertEqual(problem.status, 404)
+            }
+            XCTAssertTrue(fixture.api.capturedRequests.contains {
+                $0.url?.path == Self.deviceTokensPath && $0.httpMethod == method
+            })
+        }
+        assertIncidentalRegistrationRequests(fixture.api, servers: [fixture.first])
+    }
+
+    private static let deviceTokensPath = "/api/notifications/device-tokens"
 
     private func detailHostFixture() throws -> (
         services: ServiceContainer, registry: ServerRegistry, printer: Printer,
@@ -119,6 +149,10 @@ final class PrinterDetailPanelsTests: XCTestCase {
         var printer = try TestData.decodePrinter()
         printer.state = "idle"
         printer.isOnline = true
+        // The production host selects durable routing from this advertisement, not the backend name.
+        printer.physicalControl = try TestData.decoder.decode(
+            PrinterPhysicalControl.self, from: Data(ControlOperationTestJSON.unlockedProjection.utf8)
+        )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let printerData = try encoder.encode(printer)
@@ -129,12 +163,21 @@ final class PrinterDetailPanelsTests: XCTestCase {
          "supportsHotendTemperature":true,"supportsBedTemperature":true}
         """.utf8)
         let currentControlOperation = Data("""
-        {"physicalControl":{"supportedOperations":["HomeAll","HomeXY","HomeZ","Jog","MoveTo"],
-         "barrierHeld":false,"requiresRecovery":false,"operationId":null,"state":null},"operation":null}
+        {"physicalControl":\(ControlOperationTestJSON.unlockedProjection),"operation":null}
         """.utf8)
+        // ServiceContainer shares the APNs manager, whose saved token varies by simulator.
+        // Model the documented push-disabled backend for both registration and handoff.
+        let pushDisabled = Data("""
+        {"type":"https://printfarmer/errors/feature-disabled","title":"Feature Disabled",
+         "status":404,"detail":"Native push is disabled on this server.","code":"featureDisabled"}
+        """.utf8)
+        let deviceTokensPath = Self.deviceTokensPath
         let api = MockAPIClient()
         api.requestHandler = { request in
             let path = request.url?.path ?? ""
+            if path == deviceTokensPath && ["POST", "DELETE"].contains(request.httpMethod ?? "") {
+                return (TestData.httpResponse(url: request.url, statusCode: 404), pushDisabled)
+            }
             let data: Data
             if path == printerPath {
                 data = printerData
@@ -226,6 +269,22 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     private func currentControlOperationRequests(_ api: MockAPIClient) -> [URLRequest] {
         api.capturedRequests.filter { $0.url?.path.hasSuffix("/control-operations/current") == true }
+    }
+
+    private func detailRequests(_ api: MockAPIClient) -> [URLRequest] {
+        api.capturedRequests.filter { $0.url?.path != Self.deviceTokensPath }
+    }
+
+    private func assertIncidentalRegistrationRequests(
+        _ api: MockAPIClient, servers: [RegisteredServer], file: StaticString = #filePath, line: UInt = #line
+    ) {
+        for request in api.capturedRequests where request.url?.path == Self.deviceTokensPath {
+            XCTAssertTrue(["POST", "DELETE"].contains(request.httpMethod ?? ""), file: file, line: line)
+            XCTAssertTrue(servers.contains { $0.baseURL.host == request.url?.host }, file: file, line: line)
+            XCTAssertEqual(request.value(forHTTPHeaderField: "Authorization"),
+                           "Bearer detail-host-test-token",
+                           file: file, line: line)
+        }
     }
 
     private func selectControls<Content: View>(in controller: DetailHostingController<Content>) async throws {
