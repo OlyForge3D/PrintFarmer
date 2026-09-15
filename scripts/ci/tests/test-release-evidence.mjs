@@ -85,7 +85,7 @@ test('rejects swapped signature subject, predicate, and platform', () => {
 test('accepts only versioned Cosign signature download formats and rejects forged entries', () => {
   const legacy = signed();
   legacy.signatureBundleBytes = JSON.stringify([{ Base64Signature: 'signature', Payload: 'payload' }]);
-  assert.doesNotThrow(() => normalizeEvidence({ subject: digest, ...legacy }));
+  assert.throws(() => normalizeEvidence({ subject: digest, ...legacy }), /signature download/);
 
   const invalid = signed();
   invalid.signatureBundleBytes = JSON.stringify([{ payload: 'invented-lowercase', certificate: certificate }]);
@@ -184,14 +184,14 @@ test('rejects legacy signature and attestation verification missing trusted opti
   delete signatureVerification[0].optional;
   legacySignature.signatureBytes = JSON.stringify(signatureVerification);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...legacySignature }),
-    /required identity, certificate, or transparency trust material/);
+    /Malformed Cosign signature download/);
 
   const legacyAttestation = signed();
   const attestationVerification = JSON.parse(legacyAttestation.attestationBytes);
   delete attestationVerification[0].optional;
   legacyAttestation.attestationBytes = JSON.stringify(attestationVerification);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...legacyAttestation }),
-    /required identity, certificate, or transparency trust material/);
+    /Cosign verifier lacks required identity, certificate, or transparency trust material/);
 });
 
 test('rejects staged signature bundle, subject, predicate, and platform substitutions', () => {

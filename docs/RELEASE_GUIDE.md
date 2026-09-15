@@ -199,7 +199,10 @@ the publisher App token to read the current protected environment approval. The
 immutable abandonment authorization binds the active allocation key, source
 commit, canonical version, channel, original authorization hash, exact current
 workflow run/attempt/job/environment/target, normalized approval time, and a
-current owner-allowlisted approver. Missing, forged, stale, mismatched, or
+current owner-allowlisted approver. GitHub's approval-history response has no
+approval timestamp, so the normalized time is the authenticated protected
+publisher job start time for the exact run and attempt, which occurs only after
+environment approval. Missing, forged, stale, mismatched, or
 wrong-environment approval evidence fails closed. The ledger projects only these
 public-safe bindings; raw approval, reviewer, and protection data are never
 projected. Abandonment consumes the original identity and sequence permanently,

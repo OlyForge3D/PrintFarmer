@@ -91,7 +91,8 @@ const cryptoEvidenceFixture = set => {
       signatureBytes,
       attestationBytes,
       predicateBytes: predicate,
-      signatureBundleBytes: JSON.stringify([{ Base64Signature: 'signature', Payload: 'signed-payload' }]),
+      signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: cryptoCertificate,
+        Bundle: optional.Bundle }]),
       attestationBundleBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify({
         subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
       })).toString('base64'), payloadType: 'application/vnd.in-toto+json',
@@ -2763,6 +2764,7 @@ test('protected release-control abandonment uses App policy verification and Git
     const fixture = authorizationFixture(state(), { includeAbandonmentProof: true });
     globalThis.fetch = fixture.fetch;
     const identity = await runFixtureControl('authorize', fixture);
+    fixture.abandonmentJob.started_at = new Date().toISOString();
     fixture.calls.length = 0;
     for (const [name, mutate] of [
       ['spoofed approver', value => { value.user.login = 'outsider'; }],
@@ -2786,7 +2788,6 @@ test('protected release-control abandonment uses App policy verification and Git
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
       RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
     }, () => {}), /Missing fixture object|Unexpected API host\/path|Unexpected request|workflow run evidence/, 'wrong approval run');
-    fixture.approvalEvidence.submitted_at = new Date().toISOString();
     await runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
@@ -3057,8 +3058,8 @@ function authorizationFixture(initial = state(), settings = {}) {
     state: 'approved', user: { login: 'jpapiez' }, submitted_at: new Date().toISOString(),
     environments: [{ name: 'release-insider' }],
   };
-  const abandonmentJob = { id: 900, name: 'Abandon immutable release reservation', run_id: 42,
-    run_attempt: 1, status: 'in_progress', conclusion: undefined };
+  const abandonmentJob = { id: 900, name: 'Protected release publication / Abandon immutable release reservation', run_id: 42,
+    run_attempt: 1, status: 'in_progress', started_at: qualificationCompletedAt, conclusion: undefined };
   const transactionJobs = qualificationJobs.map((name, index) => ({
     id: 1000 + index,
     name: `${qualificationJobNamespace} / ${name}`,
@@ -3074,7 +3075,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     html_url: `${qualificationRunUrl}/job/${1000 + index}`,
   }));
   return {
-    env, calls, ledgerWrites, environment, branchRules, approvalEvidence,
+    env, calls, ledgerWrites, environment, branchRules, approvalEvidence, abandonmentJob,
     deleteTag() { tag = undefined; },
     setCanonicalHead(value) { canonicalHead = value; },
     setCanonicalComparison(value) { canonicalComparison = value; },
@@ -3140,7 +3141,7 @@ function authorizationFixture(initial = state(), settings = {}) {
       }
       if (endpoint === 'actions/runs/42/approvals') {
         const approvals = settings.includeAbandonmentProof ? [approvalEvidence] : [];
-        return response({ total_count: approvals.length, approvals });
+        return response(approvals);
       }
       if (workflowCommit !== sourceCommit &&
         endpoint.startsWith(`commits/${workflowCommit}/check-runs`)) {

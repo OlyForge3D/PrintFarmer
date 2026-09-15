@@ -220,7 +220,7 @@ function validateSignatureDownload(bundle, verification, subject) {
       return true;
     }
     if (!legacy && !modern) return false;
-    if (legacy) return true;
+    if (legacy) return false;
     const optional = verification[index]?.optional;
     return optional?.certificate === entry.Cert &&
       JSON.stringify(canonicalJson(optional.Bundle)) === JSON.stringify(canonicalJson(entry.Bundle));

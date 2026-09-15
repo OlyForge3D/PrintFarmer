@@ -506,13 +506,16 @@ export async function verifyAbandonmentApproval(api, transaction, record, target
   const jobs = await api(`actions/runs/${transaction.runId}/attempts/${transaction.runAttempt}/jobs?per_page=100`);
   requireThat(jobs?.total_count === jobs.jobs?.length && jobs.jobs.length > 0,
     'Abandonment workflow job evidence is missing or truncated');
-  const job = jobs.jobs.find(candidate => candidate?.name === 'Abandon immutable release reservation');
+  const job = jobs.jobs.filter(candidate => candidate?.run_id === Number(transaction.runId) &&
+    candidate.run_attempt === Number(transaction.runAttempt) &&
+    /^[\w -]+(?:\/ )?Abandon immutable release reservation$/i.test(candidate.name ?? '') &&
+    typeof candidate.started_at === 'string')[0];
   requireThat(job && Number.isSafeInteger(job.id) && job.id > 0 &&
     job.run_id === Number(transaction.runId) && job.run_attempt === Number(transaction.runAttempt),
   'Abandonment protected job evidence is missing or mismatched');
   const approvals = await api(`actions/runs/${transaction.runId}/approvals`);
-  requireThat(approvals?.total_count === approvals.approvals?.length && approvals.approvals.length > 0,
-    'Abandonment environment approval evidence is missing or truncated');
+  requireThat(Array.isArray(approvals) && approvals.length > 0,
+    'Abandonment environment approval evidence is missing or malformed');
   let configuredOwners;
   try {
     configuredOwners = ownerApprovedReviewers === undefined || ownerApprovedReviewers === ''
@@ -524,14 +527,15 @@ export async function verifyAbandonmentApproval(api, transaction, record, target
     .filter(value => typeof value === 'string').map(value => value.toLowerCase()));
   requireThat(allowed.size > 0, 'Abandonment owner approver allowlist is unavailable');
   const environment = 'release-insider';
-  const approval = approvals.approvals
+  const approval = approvals
     .filter(candidate => candidate?.state === 'approved' &&
       Array.isArray(candidate.environments) && candidate.environments.length === 1 &&
       candidate.environments[0]?.name === environment &&
       allowed.has(candidate.user?.login?.toLowerCase()))
-    .sort((left, right) => String(right.submitted_at).localeCompare(String(left.submitted_at)))[0];
+    [0];
   requireThat(approval, 'Abandonment requires approval from an allowed owner');
-  const approvedAt = parseGithubTimestamp(approval.submitted_at, 'abandonment environment approval timestamp');
+  // GitHub's approval-history response has no timestamp; protected job start proves approval completed.
+  const approvedAt = parseGithubTimestamp(job.started_at, 'abandonment protected job start timestamp');
   requireThat(Number.isFinite(now) && approvedAt <= now, 'Abandonment approval is future-dated');
   return {
     runId: transaction.runId, runAttempt: transaction.runAttempt, jobId: String(job.id),

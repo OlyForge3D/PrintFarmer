@@ -365,6 +365,15 @@ test('publisher has exactly one protected deployment containing every credential
     job.indexOf('actions/create-github-app-token@'));
 });
 
+test('abandonment has a minimal protected path with no source checkout or publication step', () => {
+  const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  const steps = publisher.jobs.publish.steps;
+  assert.ok(steps.some(step => step.name === 'Record approved immutable reservation abandonment' && step.if === "inputs.operation == 'abandon'"));
+  for (const step of steps.filter(step => step['working-directory'] === 'source' || step.with?.path === 'source')) {
+    assert.match(step.if ?? '', /inputs\.operation == 'publish'/);
+  }
+});
+
 test('publisher completes revocable preflight before registry login and image publication', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
   const steps = publisher.jobs.publish.steps;
