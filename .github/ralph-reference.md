@@ -302,7 +302,11 @@ with `jobId`, `sessionAbsent:true`, and fresh `sessionEvidence` containing `repo
 `liveInventoryChecked:true`, `archivedHistoryChecked:true`, and `terminalHistoryChecked:true`.
 Confirm absence against live inventory and archived/terminal history; a missing inventory
 row or idle session alone is insufficient. If correlated terminal proof exists, use
-`terminal-local` instead. Unavailable history remains a blocker.
+`terminal-local` for actual process results, or `complete-local-session` for correlated runtime
+task completion plus verified clean/pushed delivery and fresh stopped/no-follow-up observation.
+The latter never invents an exit code; see the
+[app-session completion contract](../.copilot/skills/ralph-loop/operations.md#app-session-completion-without-process-exit).
+Unavailable history remains a blocker.
 This transitions the job to a new terminal `abandoned` state — distinct from `failed` —
 and frees the issue's slot for a fresh `jobId` (an explicit re-admission/fresh
 reproduction). It never deletes the ledger entry, the session's worktree, or any

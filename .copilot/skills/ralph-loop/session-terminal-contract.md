@@ -18,6 +18,32 @@ For analysis/non-code work, report a completed, verified deliverable link and re
 Stop after reporting. Never archive any session. Ralph will assess this evidence only; it never
 deletes sessions unattended.
 
+## App Tasks Versus OS Processes
+
+Successful app `task_complete` followed by the corresponding turn end is a task lifecycle
+result, not a process exit. Report the real job/session/fence and deliverable proof, then stop;
+do not restart work or invent an integer exit code merely to satisfy accounting.
+
+Ralph may use `complete-local-session` for verified code delivery after checking the existing
+host runtime journal, exact published/clean HEAD, validation results and fresh stopped/no-queued-
+follow-up app state. The adapter records `sessionCompletion.kind:"app-session-task"` without
+an `exitCode`. A literal success statement or idle row cannot substitute for runtime events.
+See [the operations contract](operations.md#app-session-completion-without-process-exit) for
+identity/chronology checks, evidence trust boundaries, concurrency and idempotent replay.
+`terminal-local` is unchanged and remains reserved for actual correlated process results.
+If a new issue already resumed in the same session before bookkeeping caught up, only an
+explicitly authorized atomic `handoff-local-session` may record the old completion and new
+admission together. Keep both task boundaries and never label the later result with the old
+job/fence. See [atomic handoffs](operations.md#atomic-completed-task-to-resumed-task-handoff).
+If both tasks already ended before accounting, the separately authorized
+`complete-local-handoff` records the successor retrospectively from its own existing
+task/turn and publication proof. Its audit fence is allocated now, never claimed to have
+appeared in a historical report. Do not fabricate an active session or restart it for bookkeeping.
+Unrecorded dispatch model/effort/agent/host metadata stays absent, explicitly marked unknown
+in the retrospective audit. Earlier successful task checkpoints must be explicitly enumerated
+on the correct task side with paired runtime turns; undeclared or failed completions reject.
+Checkpoints never substitute for the selected final delivery proof.
+
 ## Admission Identity And Resumed Work
 
 Report the current admission `jobId`, `fence` and app `sessionId` with terminal evidence.
