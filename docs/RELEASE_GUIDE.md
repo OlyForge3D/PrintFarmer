@@ -57,6 +57,9 @@ transaction, GitHub Actions App, check suite, workflow commit, and namespaced
 reusable-workflow jobs that check out the pinned source. These jobs satisfy the
 corresponding build checks, including their configured App integration bindings;
 additional configured checks still require genuine exact-source evidence.
+Release qualification always forces the full-safe CI matrix, including scheduled
+insider runs with no changed-file list. Build receipt entries explicitly identify
+their transaction job, run, attempt and workflow commit.
 The same authorization step re-reads that API evidence, source review mapping,
 evidence timestamps, and live strict branch policy after environment approval.
 Publication preflight and pointer advancement revalidate the same live chain.
@@ -78,6 +81,8 @@ a second person's approval. `separation-of-duties` additionally requires current
 exact-reviewed-head native approval by a source code owner other than the PR
 author or release initiator, with live write permission. Existing branch and
 environment policy requirements for both modes remain unchanged.
+The supported native CODEOWNERS policy ends with a user-only catch-all rule;
+team or path-specific ownership requires reviewed support rather than guessing.
 
 By owner decision, release validation is limited to automated tests,
 static analysis, code review, and fail-closed checks. No rehearsal or alternate
@@ -680,9 +685,12 @@ their `.github/release-candidate.json` must match the branch, reference an
 ancestor qualified source, and stay within `RELEASE_CANDIDATE_MAX_DAYS`.
 Protected branch policy and owner review govern lifecycle deletion actions.
 
-## Owner activation and continuity recovery — currently blocked
+## Owner activation and continuity recovery
 
-Read-only live API evidence on 2026-09-12:
+### Historical snapshot — 2026-09-12, not current activation status
+
+The following read-only observations are retained as dated history, not current
+configuration requirements or proof that publication is blocked:
 
 - Ruleset **12465886 `Main`** is **disabled**, has an empty include scope, and
   only deletion/non-fast-forward rules. It does not enforce release policy.
@@ -702,7 +710,11 @@ of this new policy.
 The ledger is a data-only coordination ref, never an additional release source
 branch. Manual environment approval always needs an eligible reviewer and an
 explicit approval mode; admin API access alone does not approve the new policy.
-Live activation under #2668 must wait until #2682 is merged.
+The historical activation dependency was #2682 under #2668. Neither this snapshot
+nor its resolution grants blanket activation: the current run must verify live
+policy, continuity and credentials and receive the selected protected environment
+approval. Later configuration can differ from the snapshot; do not recreate
+variables, credentials or rules merely because they were absent on 2026-09-12.
 
 ### Explicit release approval configuration
 

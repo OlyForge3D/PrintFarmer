@@ -267,6 +267,7 @@ export async function verifyTransactionQualification(
     };
   });
   const required = await requiredCheckPolicy(api, transaction);
+  const additionalChecks = [];
   for (const rule of required) {
     if (rule.context === 'squad/pre-pr-verdict') {
       requireThat(rule.integration_id == null, 'Commit review status cannot satisfy an App-bound check');
@@ -276,8 +277,11 @@ export async function verifyTransactionQualification(
       requireThat(rule.integration_id == null || check.app.id === rule.integration_id,
         'Qualification check does not match the required integration');
     } else {
-      await verifyReleaseChecks(api, transaction.sourceCommit, [rule], now, evidenceLifetimeMs);
+      additionalChecks.push(rule);
     }
+  }
+  if (additionalChecks.length > 0) {
+    await verifyReleaseChecks(api, transaction.sourceCommit, additionalChecks, now, evidenceLifetimeMs);
   }
   const review = await verifyReleaseSourceReview(api, transaction, now, evidenceLifetimeMs);
   const checkedAt = new Date(now).toISOString();
@@ -292,7 +296,11 @@ export async function verifyTransactionQualification(
       }
       const job = matchingJob(jobs, context, transaction, executionAttempt);
       const check = checks.find(check => check.url === job.check_run_url);
-      return { context, checkId: check.id, completedAt: check.completed_at };
+      return {
+        context, checkId: check.id, completedAt: check.completed_at,
+        satisfiedBy: 'transaction-job', workflowCommit: transaction.workflowCommit,
+        runId: transaction.runId, runAttempt: executionAttempt, jobName: job.name,
+      };
     }),
   };
   return {

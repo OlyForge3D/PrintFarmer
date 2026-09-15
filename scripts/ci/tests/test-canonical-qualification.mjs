@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdirSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { spawnSync, execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { runInNewContext } from 'node:vm';
 import { load } from 'js-yaml';
@@ -640,6 +640,45 @@ test('canonical job privilege matcher detects package permissions in parsed YAML
   for (const permission of ['read', 'write']) {
     const job = load(`permissions:\n  packages: ${permission}\n`);
     assert.match(JSON.stringify(job), forbiddenJobCapabilities);
+  }
+});
+
+test('scheduled release qualification executes the full-safe selector despite an empty change set', t => {
+  const directory = relative(root, scratch(t)).replaceAll('\\', '/');
+  const ci = load(read('.github/workflows/ci.yml'));
+  const selector = ci.jobs.select.steps.find(step => step.id === 'selector');
+  const force = selector.env.FORCE_FULL_SAFE.replace(/^\$\{\{\s*|\s*\}\}$/g, '');
+  const resolveForce = (qualification, diffFailure = '') => runInNewContext(force, {
+    inputs: { release_qualification: qualification },
+    steps: { diff: { outputs: { force_full_safe: diffFailure } } },
+  });
+  assert.equal(resolveForce(false), '');
+  assert.equal(resolveForce(false, 'diff-failed'), 'diff-failed');
+  for (const event of ['schedule', 'workflow_dispatch']) {
+    const diffOutput = `${directory}/diff-${event}`;
+    const changed = `${directory}/changed-${event}.z`;
+    const env = { ...process.env, EVENT_NAME: event, BASE_REF: 'development',
+      OUT_FILE: changed, GITHUB_OUTPUT: diffOutput };
+    const diff = spawnSync(shell, ['scripts/ci/compute-change-set.sh'], {
+      cwd: root, encoding: 'utf8', env,
+    });
+    assert.equal(diff.status, 0, diff.stdout + diff.stderr);
+    assert.equal(readFileSync(join(root, changed), 'utf8'), '');
+    assert.match(readFileSync(join(root, diffOutput), 'utf8'), /force_full_safe=\r?\n/);
+    const output = `${directory}/selection-${event}`;
+    writeFileSync(join(root, output), '');
+    const selected = spawnSync(shell, ['scripts/ci/select-dotnet-tests.sh'], {
+      cwd: root, encoding: 'utf8', env: {
+        ...env, FORCE_FULL_SAFE: resolveForce(true), CHANGED_FILES_FROM_Z: changed, GITHUB_OUTPUT: output,
+      },
+    });
+    assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+    const outputs = readFileSync(join(root, output), 'utf8');
+    for (const name of ['want_frontend', 'want_dotnet_build', 'want_dotnet_test', 'want_mig_drift', 'full_matrix']) {
+      assert.match(outputs, new RegExp(`^${name}=true$`, 'm'), `${event}: ${name}`);
+    }
+    assert.ok(JSON.parse(outputs.match(/^matrix=(.+)$/m)[1]).include.length > 0);
+    assert.ok(JSON.parse(outputs.match(/^mig_matrix=(.+)$/m)[1]).include.length > 0);
   }
 });
 

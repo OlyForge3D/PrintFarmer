@@ -33,8 +33,8 @@ async function nativeReview(api, pull, transaction, now, maximumAgeMs) {
     if (review.state !== 'APPROVED' || review.commit_id !== pull.head.sha ||
         excluded.has(login) || !ownersSet.has(`@${login}`)) continue;
     const submitted = parseGithubTimestamp(review.submitted_at, 'native review time');
-    requireThat(submitted >= now - maximumAgeMs && submitted <= now,
-      'Native review is stale or future-dated');
+    requireThat(submitted <= now, 'Native review is future-dated');
+    if (submitted < now - maximumAgeMs) continue;
     const permission = await api(`collaborators/${review.user.login}/permission`);
     requireThat(permission.user?.login?.toLowerCase() === login &&
       ['admin', 'maintain', 'write'].includes(permission.permission),

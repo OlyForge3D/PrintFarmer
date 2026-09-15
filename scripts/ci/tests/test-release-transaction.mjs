@@ -366,6 +366,51 @@ test('same-run reattempt requires fresh qualification jobs from that attempt and
   assert.equal(receipt.transaction.sourceCommit, sourceSha);
 });
 
+test('scheduled insider qualification collects the current full-safe job set and exact-tree review', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  fixture.values.get('actions/runs/42').event = 'schedule';
+  const receipt = await qualifyTransaction(value, fixture.api, now);
+  assert.equal(receipt.jobs.length, jobNames.length);
+  assert.ok(receipt.sourceEvidence.checks.filter(check => check.checkId)
+    .every(check => check.satisfiedBy === 'transaction-job' && check.runId === value.runId &&
+      check.runAttempt === '1' && check.workflowCommit === workflowSha));
+});
+
+test('unmapped required checks still need latest exact-source evidence without repeating collection', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  const policy = fixture.values.get('rules/branches/development?per_page=100')[0].parameters;
+  policy.required_status_checks.push({ context: 'extra-a', integration_id: 15368 }, { context: 'extra-b' });
+  const sourceChecks = fixture.values.get(`commits/${sourceSha}/check-runs?per_page=100`);
+  const extra = ['extra-a', 'extra-b'].map((name, index) => ({
+    ...fixture.sourceChecks[0], name, id: 800 + index,
+  }));
+  sourceChecks.check_runs.push(...extra);
+  sourceChecks.total_count = sourceChecks.check_runs.length;
+  let reads = 0;
+  const api = async endpoint => {
+    if (endpoint === `commits/${sourceSha}/check-runs?per_page=100`) reads++;
+    return fixture.api(endpoint);
+  };
+  await qualifyTransaction(value, api, now);
+  assert.equal(reads, 1);
+  extra[0].conclusion = 'failure';
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /required qualification/);
+  extra[0].conclusion = 'success';
+  extra[0].app = { id: 999, slug: 'github-actions' };
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /required qualification/);
+});
+
+test('a stale native owner does not mask another fresh eligible owner approval', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  value.approvalMode = 'separation-of-duties';
+  fixture.values.get(`contents/.github/CODEOWNERS?ref=${sourceSha}`).content =
+    Buffer.from('* @stale-owner @native-reviewer').toString('base64');
+  const reviews = fixture.values.get('pulls/60/reviews?per_page=100');
+  reviews.unshift({ ...reviews[0], id: 69, user: { login: 'stale-owner' },
+    submitted_at: '2026-09-12T18:00:00Z' });
+  await qualifyTransaction(value, fixture.api, now);
+});
+
 test('qualification receipt freshness rejects expiry, future, malformed lifetime and delayed approval', async () => {
   const { value, fixture } = await transaction();
   const receipt = await verifyTransactionQualification(value, fixture.api, now);
