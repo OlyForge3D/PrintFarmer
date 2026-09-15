@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
-import { recordLocalSessionCompletion, recordLocalTerminalResult, reserveLocalJob } from '../ralph-macos-ssh.mjs';
+import { activeJobStates, recordLocalSessionCompletion, recordLocalSessionHandoff, recordLocalTerminalResult, reserveLocalJob } from '../ralph-macos-ssh.mjs';
 
 const repository = 'OlyForge3D/PrintFarmer';
 const sessionId = '9667f607-58da-47c2-a2ea-90ee64198dc9';
@@ -33,7 +33,7 @@ async function fixture(t) {
   const events = [
     { type: 'session.start', data: { producer: 'copilot-agent', sessionId, context: { cwd: root } } },
     { type: 'assistant.turn_start', data: { turnId: 'turn-1' } },
-    { type: 'session.task_complete', data: { success: true, summary: 'Delivered; this prose is not the authentication source.' } },
+    { type: 'session.task_complete', data: { success: true, summary: `Delivered ${jobId}, fence 198; prose is not the authentication source.` } },
     { type: 'assistant.turn_end', data: { turnId: 'turn-1' } },
     { type: 'session.usage_checkpoint', data: {} },
   ].map((event, index) => ({ ...event, id: randomUUID(), timestamp: timestamp(10_000 - index) }));
@@ -157,6 +157,8 @@ test('runtime evidence rejects forged prose, failure, wrong identity, chronology
   const cases = [
     ['caller prose only', (f) => { f.events[2].type = 'assistant.message'; }],
     ['failed task', (f) => { f.events[2].data.success = false; }],
+    ['another task report', (f) => { f.events[2].data.summary = 'Delivered ralph-another-job, fence 199'; }],
+    ['wrong reported fence', (f) => { f.events[2].data.summary = `Delivered ${jobId}, fence 1980`; }],
     ['wrong runtime session', (f) => { f.events[0].data.sessionId = randomUUID(); }],
     ['wrong producer', (f) => { f.events[0].data.producer = 'caller'; }],
     ['wrong turn', (f) => { f.events[3].data.turnId = 'different-turn'; }],
@@ -211,6 +213,40 @@ test('completed hooks that cross task completion remain verifiable', async (t) =
   assert.equal((await f.complete()).state, 'completed');
 });
 
+test('an embedded agent cannot close another agent hook', async (t) => {
+  const f = await fixture(t);
+  f.events.splice(2, 0, { id: randomUUID(), type: 'hook.start', data: { hookInvocationId: 'root-hook' }, timestamp: f.events[1].timestamp });
+  f.events.push({ id: randomUUID(), agentId: randomUUID(), type: 'hook.end',
+    data: { hookInvocationId: 'root-hook', success: true }, timestamp: f.events.at(-1).timestamp });
+  f.events.forEach((event, index) => { if (index) event.parentId = f.events[index - 1].id; });
+  await f.writeJournal();
+  await assert.rejects(() => f.complete(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+});
+
+test('multiplexed agent turns with repeated turn IDs are independent; only root completion counts', async (t) => {
+  for (const kind of ['valid', 'embedded-completion', 'embedded-end', 'pending-agent']) await t.test(kind, async (subtest) => {
+    const f = await fixture(subtest);
+    const firstAgent = randomUUID();
+    const secondAgent = randomUUID();
+    const embedded = [
+      { agentId: firstAgent, type: 'assistant.turn_start', data: { turnId: 'turn-1' } },
+      { agentId: secondAgent, type: 'assistant.turn_start', data: { turnId: 'turn-1' } },
+      { agentId: secondAgent, type: 'assistant.turn_end', data: { turnId: 'turn-1' } },
+      ...(kind === 'pending-agent' ? [] : [{ agentId: firstAgent, type: 'assistant.turn_end', data: { turnId: 'turn-1' } }]),
+    ];
+    f.events.splice(2, 0, ...embedded.map((event) => ({ ...event, id: randomUUID(), timestamp: f.events[1].timestamp })));
+    if (kind === 'embedded-completion') f.events.find((event) => event.id === f.result.taskCompleteEventId).agentId = firstAgent;
+    if (kind === 'embedded-end') f.events.find((event) => event.id === f.result.turnEndEventId).agentId = firstAgent;
+    f.events.forEach((event, index) => { if (index) event.parentId = f.events[index - 1].id; });
+    await f.writeJournal();
+    if (kind === 'valid') assert.equal((await f.complete()).state, 'completed');
+    else {
+      await assert.rejects(() => f.complete(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+      assert.equal((await f.readLedger()).generation, 206);
+    }
+  });
+});
+
 test('large multi-chunk journals stream successfully without whole-file materialization', async (t) => {
   const f = await fixture(t);
   const file = await open(f.journalFile, 'w');
@@ -237,6 +273,25 @@ test('large multi-chunk journals stream successfully without whole-file material
   f.result.observation.journalSha256 = hash.digest('hex');
   f.result.observation.observedAt = timestamp(0);
   assert.equal((await f.complete()).state, 'completed');
+});
+
+test('host external-tool receipts correlate by requestId across native causal branches', async (t) => {
+  for (const kind of ['valid', 'receipt-parent', 'wrong-receipt', 'pending-request', 'broken-main-chain']) await t.test(kind, async (subtest) => {
+    const f = await fixture(subtest);
+    const requestId = randomUUID();
+    const requested = { id: randomUUID(), parentId: f.events[1].id, type: 'external_tool.requested',
+      timestamp: f.events[1].timestamp, data: { requestId } };
+    const completed = { id: randomUUID(), parentId: randomUUID(), type: 'external_tool.completed',
+      timestamp: f.events[1].timestamp, data: { requestId: kind === 'wrong-receipt' ? randomUUID() : requestId } };
+    f.events[2].parentId = kind === 'broken-main-chain' ? randomUUID() : kind === 'receipt-parent' ? completed.id : requested.id;
+    f.events.splice(2, 0, requested, ...(kind === 'pending-request' ? [] : [completed]));
+    await f.writeJournal();
+    if (kind === 'valid' || kind === 'receipt-parent') assert.equal((await f.complete()).state, 'completed');
+    else {
+      await assert.rejects(() => f.complete(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+      assert.equal((await f.readLedger()).generation, 206);
+    }
+  });
 });
 
 test('missing or partially written journals retain accounting', async (t) => {
@@ -318,4 +373,117 @@ test('CLI exposes the separate app-session command and rejects missing proof wit
   const code = await new Promise((resolve) => child.on('close', resolve));
   assert.equal(code, 1);
   assert.equal(JSON.parse(error).code, 'INVALID_SESSION_COMPLETION');
+});
+
+async function handoffFixture(t) {
+  const f = await fixture(t);
+  const content = `Historical clean worktree / HEAD check: ${headSha}`;
+  const receipt = { id: randomUUID(), type: 'tool.execution_complete', timestamp: f.events[1].timestamp,
+    data: { success: true, toolCallId: 'recorded-delivery', result: { content } } };
+  f.events.splice(2, 0, { id: randomUUID(), type: 'tool.execution_start', timestamp: f.events[1].timestamp,
+    data: { toolCallId: 'recorded-delivery', toolName: 'powershell' } }, receipt);
+  f.events.find((event) => event.id === f.result.taskCompleteEventId).data.summary =
+    `${jobId}, fence 198. Working tree clean; all commits pushed.`;
+  const assignment = { id: randomUUID(), type: 'user.message', timestamp: timestamp(5_000),
+    data: { content: 'Implement new scoped issue #2724, preserve prior completed work.', source: `agent-${randomUUID()}`, interactionId: randomUUID() } };
+  const activity = { id: randomUUID(), type: 'assistant.turn_start', timestamp: timestamp(4_000),
+    data: { turnId: 'new-task', interactionId: assignment.data.interactionId } };
+  f.events.push(assignment, activity);
+  f.events.forEach((event, index) => { if (index) event.parentId = f.events[index - 1].id; });
+  const successor = {
+    sessionId, job: { jobId: 'ralph-2724-handoff', repository, issue: 2724, owner: 'parker', baseSha: 'a'.repeat(40),
+      expectedHost: 'windows-local', model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad',
+      acceptanceCriteria: ['Correct provenance collector without weakening trust.'] },
+    assignmentEventId: assignment.id, activityEventId: activity.id, assignmentSource: assignment.data.source,
+    assignmentContentSha256: createHash('sha256').update(assignment.data.content).digest('hex'),
+    deliveryEventId: receipt.id, deliveryContentSha256: createHash('sha256').update(content).digest('hex'),
+  };
+  const refresh = async () => {
+    await f.writeJournal();
+    Object.assign(f.result.observation, {
+      issue: 2724, running: true, activeWork: true, assignmentEventId: assignment.id, successorJobId: successor.job.jobId,
+      currentAssignmentConfirmed: true, latestUserEventId: assignment.id,
+    });
+    delete f.result.observation.followUpPending;
+  };
+  f.git[`merge-base --is-ancestor ${successor.job.baseSha} HEAD`] = '';
+  await refresh();
+  const handoff = (expectedGeneration = 206) => recordLocalSessionHandoff({ result: f.result, successor, expectedGeneration }, f.options);
+  return { ...f, assignment, activity, receipt, successor, refresh, handoff };
+}
+
+test('atomic handoff completes the exact historical task and keeps occupancy constant with a new fenced successor', async (t) => {
+  const f = await handoffFixture(t);
+  const before = await f.readLedger();
+  const result = await f.handoff();
+  const after = await f.readLedger();
+  assert.equal(after.generation, 207);
+  assert.equal(result.completed.state, 'completed');
+  assert.equal(result.completed.exitCode, undefined);
+  assert.equal(result.completed.fence, 198);
+  assert.equal(result.successor.state, 'accepted');
+  assert.equal(result.successor.fence, 207);
+  assert.equal(result.successor.predecessorJobId, jobId);
+  assert.equal(result.successor.sessionId, sessionId);
+  assert.equal(result.successor.handoffBoundary.assignmentEventId, f.assignment.id);
+  const count = (ledger) => Object.values(ledger.jobs).filter((entry) => activeJobStates.has(entry.state)).length;
+  assert.equal(count(after), count(before));
+  for (const id of ['retained', 'retired']) assert.deepEqual(after.jobs[id], before.jobs[id]);
+  assert.deepEqual(await f.handoff(207), result);
+  assert.equal((await f.readLedger()).generation, 207);
+});
+
+test('ordinary completion never accepts later task activity that only the separate handoff can account', async (t) => {
+  const f = await handoffFixture(t);
+  await assert.rejects(() => f.complete(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+  assert.equal((await f.readLedger()).generation, 206);
+});
+
+test('atomic handoff rejects mismatched, ambiguous, missing or completed successor evidence without partial writes', async (t) => {
+  const cases = [
+    ['other session', (f) => { f.successor.sessionId = randomUUID(); }],
+    ['duplicate old job', (f) => { f.successor.job.jobId = jobId; }],
+    ['same old issue', (f) => { f.successor.job.issue = 2720; }],
+    ['duplicate issue', (f) => { f.ledger.jobs.retained.issue = 2724; }],
+    ['existing new identifier', (f) => { f.ledger.jobs[f.successor.job.jobId] = { state: 'failed' }; }],
+    ['wrong assignment source', (f) => { f.successor.assignmentSource = `agent-${randomUUID()}`; }],
+    ['wrong assignment digest', (f) => { f.successor.assignmentContentSha256 = 'a'.repeat(64); }],
+    ['missing assignment', (f) => { f.successor.assignmentEventId = randomUUID(); }],
+    ['wrong current issue', (f) => { f.result.observation.issue = 2661; }],
+    ['not active', (f) => { f.result.observation.activeWork = false; }],
+    ['unmatched activity', (f) => { f.activity.data.interactionId = randomUUID(); }],
+    ['missing delivery', (f) => { f.successor.deliveryEventId = randomUUID(); }],
+    ['failed delivery receipt', (f) => { f.receipt.data.success = false; }],
+    ['unpaired delivery receipt', (f) => { f.receipt.data.toolCallId = 'missing-start'; }],
+    ['changed delivery', (f) => { f.successor.deliveryContentSha256 = 'a'.repeat(64); }],
+    ['missing old clean/pushed attestation', (f) => { f.events.find((event) => event.id === f.result.taskCompleteEventId).data.summary = 'Done'; }],
+    ['completed destination', (f) => { f.events.push({ id: randomUUID(), type: 'session.task_complete', data: { success: true }, timestamp: timestamp(3_000), parentId: f.activity.id }); }],
+    ['later root input before selected assignment', (f) => {
+      const index = f.events.indexOf(f.assignment);
+      const other = { id: randomUUID(), type: 'user.message', timestamp: timestamp(6_000), data: { content: 'Different task' }, parentId: f.events[index - 1].id };
+      f.assignment.parentId = other.id;
+      f.events.splice(index, 0, other);
+    }],
+  ];
+  for (const [name, change] of cases) await t.test(name, async (subtest) => {
+    const f = await handoffFixture(subtest);
+    change(f);
+    await f.saveLedger();
+    const observation = structuredClone(f.result.observation);
+    await f.writeJournal();
+    Object.assign(f.result.observation, observation, {
+      journalSha256: f.result.observation.journalSha256, runtimeHeadEventId: f.events.at(-1).id,
+    });
+    const before = await readFile(f.ledgerFile, 'utf8');
+    await assert.rejects(() => f.handoff(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+    assert.equal(await readFile(f.ledgerFile, 'utf8'), before);
+  });
+});
+
+test('atomic handoff concurrent CAS permits one winner and never exposes a released intermediate slot', async (t) => {
+  const f = await handoffFixture(t);
+  const outcomes = await Promise.allSettled([f.handoff(), f.handoff()]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find((outcome) => outcome.status === 'rejected').reason.code, 'STALE_LEDGER');
+  assert.equal(Object.values((await f.readLedger()).jobs).filter((entry) => activeJobStates.has(entry.state)).length, 2);
 });

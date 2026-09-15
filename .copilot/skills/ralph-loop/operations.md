@@ -213,6 +213,18 @@ The controller reads only that UUID's `events.jsonl` from the local user's
 `~/.copilot/session-state` root; the CLI does not accept a caller-supplied journal path or event
 body. It requires the runtime's `session.start` identity, successful `session.task_complete`
 and matching `assistant.turn_end`, after admission and every same-session terminal predecessor.
+The selected root completion report must name that exact `jobId` and `fence`; chronology alone
+must not accidentally attribute a later task's result to an earlier admission.
+The journal multiplexes subagents: turns are tracked by the runtime envelope's `agentId`,
+not a globally unique turn number. Selected completion/end events must belong to the root
+session (no `agentId`); an embedded agent's successful task cannot finish the admitted parent.
+Every tracked agent turn and hook must have ended before accounting completes.
+Host `external_tool.completed` receipts are correlated to the existing
+`external_tool.requested` by UUID `requestId`; their bridge-owned parent IDs can lie outside
+the journal. Every other event must reference an already observed parent in the append-ordered
+causal graph (native bridge events can branch rather than form one linear chain). All timestamps remain
+ordered, and pending/unmatched external requests reject completion. These receipts never
+substitute for root task/turn completion or excuse later activity.
 Subsequent user/tool/turn activity, unknown event types or unfinished hooks retain accounting.
 The publication ref must be an exact `refs/heads/...` or `refs/pull/N/head` on origin. The adapter
 checks the runtime-recorded worktree's repository identity, admitted-base ancestry, HEAD,
@@ -248,6 +260,49 @@ The old job ID remains fenced. An exact proof replay with the current ledger gen
 returns the historical record without another write; it is **not** fresh liveness evidence
 and cannot release or hide resumed work. Different proof for a terminal job is rejected.
 All remote terminal/abandonment rules remain unchanged.
+
+### Atomic Completed-Task To Resumed-Task Handoff
+
+If the same app session has already started another explicitly assigned issue, ordinary
+`complete-local-session` must reject its old completion. Do not release and re-reserve in two
+steps, reuse the old fence for new work, or use a later task's completion as the earlier result.
+With explicit authorization for the exact issue pair, use `handoff-local-session`. It commits
+the old task's `completed` result and a new `accepted` job/fence with `predecessorJobId` in one
+expected-generation transaction. Occupancy is unchanged, including when all five slots are
+occupied. No momentarily free slot or session duplication is exposed.
+
+Supply the same `result` identity/event/publication/validation fields, plus `successor`:
+its canonical `job`, the same `sessionId`, `assignmentEventId`, `assignmentSource` (the exact
+host-recorded `agent-<coordinator UUID>` source), `assignmentContentSha256`, `activityEventId`,
+`deliveryEventId` and `deliveryContentSha256`. Assignment is a root user event containing the
+new issue number, strictly after the old root turn ended with no pending turn/hook/request.
+Activity must be the corresponding root turn start with the same interaction ID.
+Any intervening new activity before that selected assignment rejects an ambiguous boundary.
+
+`deliveryEventId` identifies an existing successful root tool receipt, before old completion,
+whose exact content hash and delivered HEAD match the request. Independently examine its
+recorded command and result for historical clean-worktree/validation evidence; a successful
+tool wrapper alone does not prove those facts. The old root task summary must explicitly
+attest clean worktree and pushed commits. The adapter verifies old published HEAD and base
+ancestry live but does not require the now-resumed worktree to still equal the old HEAD or
+be clean. New work is allowed to be dirty. Validation and historical clean-worktree meaning
+remain trusted coordinator attestations tied to actual immutable runtime receipts, not
+guessed from current state. Never rerun old commands or rewrite journals to manufacture proof.
+
+The fresh `result.observation` binds the old `jobId`/`fence`/session, new `issue` and
+`successorJobId`, selected `assignmentEventId`, `activeWork:true`, actual boolean `running`,
+`currentAssignmentConfirmed:true` and the current `latestUserEventId`, alongside the same
+source/timestamp/journal hash/tail fields. Inspect every later root instruction to confirm it
+still concerns the authorized successor; if the user repurposed the session, stop and report
+the different scope. A task-complete event after the new assignment rejects this active
+handoff route; never invent active evidence for a successor that already ended.
+
+Both old and new identities, runtime boundaries, provenance and digests persist. Existing
+successor identifiers, active/stranded duplicate issues, different sessions, incomplete delivery,
+stale observations, missing/failed/ambiguous boundaries or concurrent ledger/journal changes
+reject without either partial write. Exact replay returns the historical linked pair without
+changing generation or asserting present liveness. Later completion/resumption must still use
+its own actual job identity; no remote or process-result semantics are changed.
 
 ### Legacy Remote Records
 

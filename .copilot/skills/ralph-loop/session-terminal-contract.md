@@ -31,6 +31,10 @@ an `exitCode`. A literal success statement or idle row cannot substitute for run
 See [the operations contract](operations.md#app-session-completion-without-process-exit) for
 identity/chronology checks, evidence trust boundaries, concurrency and idempotent replay.
 `terminal-local` is unchanged and remains reserved for actual correlated process results.
+If a new issue already resumed in the same session before bookkeeping caught up, only an
+explicitly authorized atomic `handoff-local-session` may record the old completion and new
+admission together. Keep both task boundaries and never label the later result with the old
+job/fence. See [atomic handoffs](operations.md#atomic-completed-task-to-resumed-task-handoff).
 
 ## Admission Identity And Resumed Work
 
