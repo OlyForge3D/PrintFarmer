@@ -2,7 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { copyFile, mkdir, open, readFile, rename, rm, stat } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { spawn as nodeSpawn } from 'node:child_process';
+import { execFile, spawn as nodeSpawn } from 'node:child_process';
+import { promisify } from 'node:util';
+import { createReadStream } from 'node:fs';
+import { createInterface } from 'node:readline';
 
 export const printFarmerRepository = 'OlyForge3D/PrintFarmer';
 export const activeJobStates = new Set(['reserved', 'delivery-intent', 'accepted', 'running', 'uncertain']);
@@ -663,6 +666,568 @@ export async function recordLocalTerminalResult(result, options = {}) {
     entry.updatedAt = new Date().toISOString();
     return entry;
   }, options);
+}
+
+const execFileAsync = promisify(execFile);
+const validUuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
+const sha256 = (value) => createHash('sha256').update(value).digest('hex');
+const completionHousekeeping = new Set(['hook.start', 'hook.end', 'session.usage_checkpoint', 'assistant.usage', 'session.shutdown']);
+
+function invalidCompletion(message) {
+  throw new RalphMacSshError(message, 'INVALID_SESSION_COMPLETION');
+}
+
+async function journalFingerprint(file) {
+  try {
+    const details = await stat(file, { bigint: true });
+    return [details.dev, details.ino, details.size, details.mtimeNs, details.ctimeNs].join(':');
+  } catch {
+    invalidCompletion('The local runtime journal is unavailable; retain the slot.');
+  }
+}
+
+function completionCheckpointIds(value) {
+  const ids = value ?? [];
+  if (!Array.isArray(ids) || ids.some((id) => !validUuid(id)) || new Set(ids).size !== ids.length) {
+    invalidCompletion('Prior completion checkpoints must be unique runtime event IDs in chronological order.');
+  }
+  return [...ids];
+}
+
+async function readCompletionJournal(sessionId, sessionStateRoot, value, successor, admittedAt) {
+  const file = path.join(sessionStateRoot, sessionId, 'events.jsonl');
+  const fingerprint = await journalFingerprint(file);
+  const input = createReadStream(file);
+  const lines = createInterface({ input, crlfDelay: Infinity });
+  const hash = createHash('sha256');
+  const ids = new Set();
+  const hooks = new Map();
+  const externalRequests = new Map();
+  const deliveryCalls = new Map();
+  const deliveryCallIds = new Set();
+  const checkpointIds = completionCheckpointIds(value.priorTaskCompleteEventIds);
+  const successorCheckpointIds = completionCheckpointIds(successor?.completion?.priorTaskCompleteEventIds);
+  const declaredIds = [...checkpointIds, ...successorCheckpointIds, value.taskCompleteEventId,
+    ...(successor?.completion ? [successor.completion.taskCompleteEventId] : [])];
+  if (new Set(declaredIds).size !== declaredIds.length) invalidCompletion('Task boundaries and checkpoints overlap.');
+  const journal = { file, fingerprint, checkpoints: [], successorCheckpoints: [] };
+  const openTurns = new Map();
+  let pendingCheckpoint;
+  let readError;
+  input.on('data', (chunk) => hash.update(chunk));
+  input.on('error', (error) => { readError = error; lines.close(); });
+  try {
+    for await (const line of lines) {
+      const event = JSON.parse(line);
+      if (!event || !validUuid(event.id) || ids.has(event.id) || !Number.isFinite(Date.parse(event.timestamp)) ||
+          (event.agentId !== undefined && !validUuid(event.agentId)) ||
+          (journal.last && Date.parse(event.timestamp) < Date.parse(journal.last.timestamp))) {
+        invalidCompletion('Runtime journal has duplicate identities, broken links or regressing timestamps.');
+      }
+      if (event.type === 'external_tool.completed') {
+        const requested = externalRequests.get(event.data?.requestId);
+        if (!requested || Date.parse(event.timestamp) < Date.parse(requested.timestamp)) {
+          invalidCompletion('External-tool receipt has no matching runtime request.');
+        }
+        externalRequests.delete(event.data.requestId);
+      } else {
+        if (journal.last && !ids.has(event.parentId)) invalidCompletion('Runtime predecessor chain is broken.');
+        if (event.type === 'external_tool.requested') {
+          const requestId = event.data?.requestId;
+          if (!validUuid(requestId) || externalRequests.has(requestId)) {
+            invalidCompletion('External-tool runtime request identity is invalid.');
+          }
+          externalRequests.set(requestId, { timestamp: event.timestamp });
+        }
+      }
+      ids.add(event.id);
+      journal.start ??= event;
+      const agent = event.agentId ?? 'root';
+      if (event.type === 'session.shutdown' && (agent !== 'root' || event.data?.shutdownType !== 'routine')) {
+        invalidCompletion('Unexpected shutdown receipt cannot establish task completion.');
+      }
+      if (event.type === 'user.message' && agent === 'root') journal.latestUserEventId = event.id;
+      if (successor && agent === 'root' && event.type === 'tool.execution_start') {
+        const callId = event.data?.toolCallId;
+        if (typeof callId !== 'string' || !callId || deliveryCallIds.has(callId)) {
+          invalidCompletion('Runtime delivery tool identity is missing or reused.');
+        }
+        deliveryCallIds.add(callId);
+        deliveryCalls.set(callId, { id: event.id, timestamp: event.timestamp, afterActivity: Boolean(journal.activity) });
+      }
+      if (journal.task && !journal.assignment && event.id !== value.turnEndEventId &&
+          event.id !== successor?.assignmentEventId && !completionHousekeeping.has(event.type)) {
+        invalidCompletion('Runtime has resumed or unrecognized activity after task completion.');
+      }
+      if (journal.successorTask && event.id !== successor.completion.turnEndEventId &&
+          !completionHousekeeping.has(event.type)) {
+        invalidCompletion('Activity resumed after the successor completion; retain the slot.');
+      }
+      if (event.type === 'session.resume') {
+        if (agent !== 'root' || event.data?.sessionWasActive !== false || event.data?.alreadyInUse !== false ||
+            event.data?.context?.cwd !== journal.start.data?.context?.cwd || hooks.size || externalRequests.size) {
+          invalidCompletion('Runtime resume lacks a closed host epoch and matching inactive session identity.');
+        }
+        if (journal.last?.type === 'session.shutdown') {
+          journal.epochs ??= [];
+          journal.epochs.push({ shutdownEventId: journal.last.id, resumeEventId: event.id,
+            resumedAt: event.timestamp, interruptedTurnCount: openTurns.size, interruptedToolCount: deliveryCalls.size });
+          if (pendingCheckpoint) invalidCompletion('A checkpoint lacks its paired turn end before runtime restart.');
+          openTurns.clear();
+          deliveryCalls.clear();
+        }
+      }
+      if (successor && event.id === successor.deliveryEventId) {
+        const content = event.data?.result?.content;
+        if (agent !== 'root' || event.type !== 'tool.execution_complete' ||
+            event.data?.success !== true || typeof content !== 'string' ||
+            !deliveryCalls.has(event.data.toolCallId) ||
+            sha256(content) !== successor.deliveryContentSha256 || !content.includes(value.headSha) ||
+            journal.task) invalidCompletion('Prior delivery receipt is missing, failed, changed or not before completion.');
+        journal.delivery = {
+          id: event.id, timestamp: event.timestamp, contentSha256: sha256(content),
+          requestEventId: deliveryCalls.get(event.data.toolCallId).id,
+        };
+      }
+      if (successor && event.id === successor.assignmentEventId) {
+        const content = event.data?.content;
+        if (!journal.end || openTurns.size || hooks.size || externalRequests.size || deliveryCalls.size ||
+            agent !== 'root' || event.type !== 'user.message' ||
+            !validUuid(event.data?.interactionId) || event.data?.source !== successor.assignmentSource ||
+            typeof content !== 'string' || sha256(content) !== successor.assignmentContentSha256 ||
+            !new RegExp(`#${successor.job.issue}(?!\\d)`).test(content) ||
+            Date.parse(event.timestamp) <= Date.parse(journal.end.timestamp)) {
+          invalidCompletion('Handoff assignment is not a distinct authoritative post-completion task boundary.');
+        }
+        journal.assignment = { id: event.id, timestamp: event.timestamp, interactionId: event.data.interactionId };
+      }
+      if (successor && event.id === successor.activityEventId) {
+        if (!journal.assignment || agent !== 'root' || event.type !== 'assistant.turn_start' ||
+            event.data?.interactionId !== journal.assignment.interactionId ||
+            Date.parse(event.timestamp) < Date.parse(journal.assignment.timestamp)) {
+          invalidCompletion('New task activity is not correlated to its assignment.');
+        }
+        journal.activity = { id: event.id, timestamp: event.timestamp };
+      }
+      if (journal.assignment && event.type === 'session.task_complete' && agent === 'root' && !successor.completion) {
+        invalidCompletion('Successor task already ended; refresh scope rather than pretending it is active.');
+      }
+      if (successor?.completion && event.id === successor.completion.deliveryEventId) {
+        const content = event.data?.result?.content;
+        if (!journal.activity || journal.successorTask || agent !== 'root' ||
+            event.type !== 'tool.execution_complete' || event.data?.success !== true ||
+            !deliveryCalls.get(event.data.toolCallId)?.afterActivity || typeof content !== 'string' ||
+            sha256(content) !== successor.completion.deliveryContentSha256 ||
+            !content.includes(successor.completion.headSha)) {
+          invalidCompletion('Successor delivery receipt is not correlated to its own task.');
+        }
+        journal.successorDelivery = { id: event.id, timestamp: event.timestamp, contentSha256: sha256(content),
+          requestEventId: deliveryCalls.get(event.data.toolCallId).id };
+      }
+      if (successor && agent === 'root' && event.type === 'tool.execution_complete') {
+        if (!deliveryCalls.delete(event.data?.toolCallId)) {
+          invalidCompletion('Runtime delivery tool receipt is unmatched or already consumed.');
+        }
+      }
+      if (agent === 'root' && event.type === 'session.task_complete' &&
+          event.id !== value.taskCompleteEventId && event.id !== successor?.completion?.taskCompleteEventId &&
+          Date.parse(event.timestamp) >= Date.parse(admittedAt)) {
+        const checkpoints = journal.assignment ? journal.successorCheckpoints : journal.checkpoints;
+        const expected = journal.assignment ? successorCheckpointIds : checkpointIds;
+        if (event.id !== expected[checkpoints.length] || event.data?.success !== true ||
+            !openTurns.has('root') || pendingCheckpoint || journal.successorTask ||
+            (journal.assignment && !journal.activity) || (!journal.assignment && journal.task) ||
+            typeof event.data.summary !== 'string' || !event.data.summary.trim()) {
+          invalidCompletion('Runtime has an undeclared, failed, misplaced or unpaired completion checkpoint.');
+        }
+        pendingCheckpoint = { id: event.id, timestamp: event.timestamp, summarySha256: sha256(event.data.summary),
+          turnId: openTurns.get('root') };
+        checkpoints.push(pendingCheckpoint);
+      }
+      if (event.type === 'assistant.turn_start') {
+        if (openTurns.has(agent) || typeof event.data?.turnId !== 'string' || !event.data.turnId) {
+          invalidCompletion('Runtime turn lifecycle is incomplete or ambiguous.');
+        }
+        openTurns.set(agent, event.data.turnId);
+      }
+      if (event.type === 'assistant.turn_end') {
+        if (!openTurns.has(agent) || event.data?.turnId !== openTurns.get(agent)) {
+          invalidCompletion('Runtime turn end does not match an open turn.');
+        }
+        if (agent === 'root' && pendingCheckpoint) {
+          if (event.data.turnId !== pendingCheckpoint.turnId) invalidCompletion('Checkpoint turn end is mismatched.');
+          pendingCheckpoint.turnEndEventId = event.id;
+          pendingCheckpoint.turnEndedAt = event.timestamp;
+          pendingCheckpoint = undefined;
+        }
+        if (event.id === value.turnEndEventId) {
+          if (agent !== 'root' || !journal.task || journal.taskTurnId !== openTurns.get(agent)) {
+            invalidCompletion('Selected turn end does not follow the selected task completion.');
+          }
+          journal.end = event;
+        }
+        if (successor?.completion && event.id === successor.completion.turnEndEventId) {
+          if (agent !== 'root' || !journal.successorTask || journal.successorTaskTurnId !== openTurns.get(agent)) {
+            invalidCompletion('Successor turn end is not paired with its own root completion.');
+          }
+          journal.successorEnd = { id: event.id, timestamp: event.timestamp };
+        }
+        openTurns.delete(agent);
+      }
+      if (event.type === 'hook.start' || event.type === 'hook.end') {
+        const hookId = event.data?.hookInvocationId;
+        if (typeof hookId !== 'string' || !hookId ||
+            (event.type === 'hook.start' ? hooks.has(hookId) : hooks.get(hookId) !== agent)) {
+          invalidCompletion('Runtime hook identities are missing, duplicated or unmatched.');
+        }
+        if (event.type === 'hook.start') hooks.set(hookId, agent);
+        else {
+          hooks.delete(hookId);
+          if (((journal.task && !journal.assignment) || journal.successorTask) &&
+              event.data.success !== true) invalidCompletion('Post-completion hook failed.');
+        }
+      }
+      if (event.id === value.taskCompleteEventId) {
+        if (agent !== 'root' || event.type !== 'session.task_complete' ||
+            event.data?.success !== true || !openTurns.has('root') || pendingCheckpoint ||
+            journal.checkpoints.length !== checkpointIds.length) {
+          invalidCompletion('Selected event is not successful task completion inside an open turn.');
+        }
+        const escapedJobId = value.jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (typeof event.data.summary !== 'string' ||
+            !new RegExp(`(?<![A-Za-z0-9._-])${escapedJobId}(?![A-Za-z0-9._-])`).test(event.data.summary) ||
+            !new RegExp(`(?<![A-Za-z0-9_-])fence[\\s\`:=]+${value.fence}(?![A-Za-z0-9_-]|\\.\\d)`, 'i').test(event.data.summary)) {
+          invalidCompletion('Root completion report does not name this exact admission job and fence.');
+        }
+        if (successor && (typeof event.data.summary !== 'string' ||
+            !/working tree clean/i.test(event.data.summary) ||
+            !/all commits pushed/i.test(event.data.summary))) {
+          invalidCompletion('Historical task lacks the prior clean/pushed delivery attestation.');
+        }
+        journal.task = { id: event.id, timestamp: event.timestamp, summarySha256: sha256(event.data.summary ?? '') };
+        journal.taskTurnId = openTurns.get('root');
+      }
+      if (successor?.completion && event.id === successor.completion.taskCompleteEventId) {
+        if (!journal.activity || !journal.successorDelivery || agent !== 'root' ||
+            event.type !== 'session.task_complete' || event.data?.success !== true || !openTurns.has('root') ||
+            pendingCheckpoint || journal.successorCheckpoints.length !== successorCheckpointIds.length ||
+            Date.parse(event.timestamp) <= Date.parse(journal.activity.timestamp) ||
+            typeof event.data.summary !== 'string' ||
+            !new RegExp(`#${successor.job.issue}(?!\\d)`).test(event.data.summary) ||
+            !/working tree clean/i.test(event.data.summary) || !/all commits pushed/i.test(event.data.summary)) {
+          invalidCompletion('Retrospective successor completion lacks its own successful task and delivered-issue proof.');
+        }
+        journal.successorTask = { id: event.id, timestamp: event.timestamp, summarySha256: sha256(event.data.summary) };
+        journal.successorTaskTurnId = openTurns.get('root');
+      }
+      journal.last = { id: event.id, timestamp: event.timestamp, type: event.type };
+    }
+    if (readError) throw readError;
+    if (!journal.task || !journal.end ||
+        pendingCheckpoint || journal.checkpoints.length !== checkpointIds.length ||
+        journal.successorCheckpoints.length !== successorCheckpointIds.length ||
+        (successor ? !journal.assignment || !journal.activity || !journal.delivery : openTurns.size || hooks.size || externalRequests.size) ||
+        (successor?.completion && (!journal.successorTask || !journal.successorEnd ||
+          openTurns.size || hooks.size || externalRequests.size || deliveryCalls.size))) {
+      invalidCompletion('Runtime completion is missing or turns/hooks remain pending.');
+    }
+  } catch (error) {
+    if (error instanceof RalphMacSshError) throw error;
+    if (error.code === 'ERR_STRING_TOO_LONG') {
+      invalidCompletion('One runtime event exceeds the Node string limit; a supported runtime export is required.');
+    }
+    invalidCompletion('Runtime journal could not be streamed or contains malformed JSON; retain the slot.');
+  } finally {
+    lines.close();
+    input.destroy();
+  }
+  if (await journalFingerprint(file) !== fingerprint) {
+    invalidCompletion('Runtime journal changed while being inspected; refresh the observation.');
+  }
+  return { ...journal, digest: hash.digest('hex') };
+}
+
+function validateCompletionJournal(journal, value, entry, ledger) {
+  const { start, task, end } = journal;
+  const predecessors = Object.values(ledger.jobs).filter((other) => other.jobId !== entry.jobId &&
+    (other.sessionId === entry.sessionId || other.strandedSessionId === entry.sessionId));
+  if (predecessors.some((other) => activeJobStates.has(other.state))) {
+    invalidCompletion('Session has another active admission.');
+  }
+  const boundaryTimes = [entry.createdAt, entry.updatedAt,
+    ...(entry.handoffEvidence ? [entry.handoffEvidence.observedAt] : []),
+    ...predecessors.map((other) => other.updatedAt)];
+  if (start.agentId !== undefined || start.type !== 'session.start' || start.data?.producer !== 'copilot-agent' ||
+      start.data?.sessionId !== entry.sessionId || !path.isAbsolute(start.data?.context?.cwd ?? '') ||
+      boundaryTimes.some((time) => !Number.isFinite(Date.parse(time)) ||
+        Date.parse(task.timestamp) <= Date.parse(time) ||
+        journal.checkpoints.some((checkpoint) => Date.parse(checkpoint.timestamp) <= Date.parse(time)))) {
+    invalidCompletion('Completion must belong to the admitted session and postdate admission and every predecessor.');
+  }
+  return { cwd: start.data.context.cwd, task, end };
+}
+
+async function recheckCompletionJournal(journal) {
+  const hash = createHash('sha256');
+  try {
+    for await (const chunk of createReadStream(journal.file)) hash.update(chunk);
+  } catch {
+    invalidCompletion('Runtime journal became unavailable during verification.');
+  }
+  if (hash.digest('hex') !== journal.digest || await journalFingerprint(journal.file) !== journal.fingerprint) {
+    invalidCompletion('Runtime changed during verification; refresh all evidence.');
+  }
+}
+
+function validateCompletionObservation(observation, entry, journal, successor) {
+  const now = Date.now();
+  const observedAt = Date.parse(observation?.observedAt);
+  if (observation?.repository !== printFarmerRepository || observation.issue !== (successor?.job.issue ?? entry.issue) ||
+      observation.jobId !== entry.jobId || observation.fence !== entry.fence ||
+      observation.sessionId !== entry.sessionId ||
+      (successor ? typeof observation.running !== 'boolean' ||
+        (successor.completion ? observation.running !== false || observation.activeWork !== false ||
+          observation.followUpPending !== false : observation.activeWork !== true) ||
+        observation.assignmentEventId !== successor.assignmentEventId || observation.successorJobId !== successor.job.jobId ||
+        observation.currentAssignmentConfirmed !== true || observation.latestUserEventId !== journal.latestUserEventId
+        : observation.running !== false || observation.followUpPending !== false) ||
+      typeof observation.source !== 'string' ||
+      !observation.source.trim() || observation.source.length > 2048 ||
+      !Number.isFinite(observedAt) || observedAt > now || now - observedAt > 60_000 ||
+      observedAt < Date.parse(journal.last.timestamp) ||
+      observation.journalSha256 !== journal.digest || observation.runtimeHeadEventId !== journal.last.id) {
+    invalidCompletion('Fresh stopped/no-follow-up app observation bound to the current runtime journal is required.');
+  }
+}
+
+async function completionGit(cwd, args, execute) {
+  try {
+    const { stdout } = await execute('git', ['-C', cwd, ...args], {
+      encoding: 'utf8', timeout: 15_000, maxBuffer: 1024 * 1024,
+      env: { ...process.env, GIT_TERMINAL_PROMPT: '0', GCM_INTERACTIVE: 'never' },
+    });
+    return stdout.trim();
+  } catch {
+    invalidCompletion('Git completion/publication proof could not be verified; retain the slot.');
+  }
+}
+
+async function verifyCompletionGit(cwd, entry, value, execute, successor) {
+  const git = (args) => completionGit(cwd, args, execute);
+  const origin = await git(['remote', 'get-url', 'origin']);
+  if (!['https://github.com/OlyForge3D/PrintFarmer', 'https://github.com/OlyForge3D/PrintFarmer.git',
+    'git@github.com:OlyForge3D/PrintFarmer', 'git@github.com:OlyForge3D/PrintFarmer.git'].includes(origin)) {
+    invalidCompletion('Runtime worktree origin is not the admitted repository.');
+  }
+  await git(['merge-base', '--is-ancestor', entry.baseSha, value.headSha]);
+  const published = await git(['ls-remote', '--exit-code', 'origin', value.publicationRef]);
+  if (published !== `${value.headSha}\t${value.publicationRef}` ||
+      (!successor && (await git(['rev-parse', 'HEAD']) !== value.headSha ||
+      await git(['status', '--porcelain=v1', '--untracked-files=all']) !== ''))) {
+    invalidCompletion('Completion requires the exact published HEAD and a clean runtime worktree.');
+  }
+  if (successor) {
+    await git(['merge-base', '--is-ancestor', successor.job.baseSha, 'HEAD']);
+  }
+}
+
+export async function recordLocalSessionCompletion({ result, expectedGeneration }, options = {}) {
+  return recordAppCompletion({ result, expectedGeneration }, options);
+}
+
+export async function recordLocalSessionHandoff({ result, successor, expectedGeneration }, options = {}) {
+  if (successor?.completion !== undefined) invalidCompletion('Active handoff cannot import a completed successor.');
+  return prepareLocalSessionHandoff({ result, successor, expectedGeneration }, options);
+}
+
+export async function recordLocalCompletedHandoff({ result, successor, expectedGeneration }, options = {}) {
+  const completed = safeJson(successor?.completion, 'Retrospective successor completion');
+  if (!validSha(completed.headSha) || !validUuid(completed.taskCompleteEventId) ||
+      !validUuid(completed.turnEndEventId) || !validUuid(completed.deliveryEventId) ||
+      !/^[0-9a-f]{64}$/.test(completed.deliveryContentSha256 ?? '') ||
+      !/^refs\/pull\/[1-9]\d*\/head$/.test(completed.publicationRef ?? '') ||
+      completed.workingTreeClean !== true || completed.allCommitsPushed !== true ||
+      completed.validationEvidence?.headSha !== completed.headSha || completed.validationEvidence.passed !== true ||
+      typeof completed.validationEvidence.source !== 'string' || !completed.validationEvidence.source.trim() ||
+      completed.validationEvidence.source.length > 4096 || Object.hasOwn(completed, 'exitCode') ||
+      completed.taskCompleteEventId === result?.taskCompleteEventId || completed.turnEndEventId === result?.turnEndEventId) {
+    invalidCompletion('Completed handoff requires separate successful successor events and exact publication/validation proof.');
+  }
+  return prepareLocalSessionHandoff({ result, successor, expectedGeneration }, options);
+}
+
+async function prepareLocalSessionHandoff({ result, successor, expectedGeneration }, options) {
+  safeJson(successor, 'Atomic handoff');
+  const job = safeJson(successor.job, 'Successor job');
+  let canonicalJob;
+  if (successor.completion) {
+    const fields = ['jobId', 'repository', 'issue', 'owner', 'baseSha', 'acceptanceCriteria'];
+    if (Object.keys(job).some((key) => !fields.includes(key)) ||
+        job.repository !== printFarmerRepository || !validJobIdentifier(job.jobId) ||
+        !Number.isSafeInteger(job.issue) || job.issue <= 0 || !validIdentifier(job.owner) || !validSha(job.baseSha) ||
+        !Array.isArray(job.acceptanceCriteria) || !job.acceptanceCriteria.length ||
+        job.acceptanceCriteria.some((item) => typeof item !== 'string' || !item.trim())) {
+      invalidCompletion('Retrospective local jobs require work identity only, not unrecorded dispatch metadata.');
+    }
+    canonicalJob = Object.fromEntries(fields.map((key) => [key, structuredClone(job[key])]));
+    if (Buffer.byteLength(JSON.stringify(canonicalJob), 'utf8') > 64 * 1024) {
+      invalidCompletion('Retrospective local job exceeds the accounting protocol limit.');
+    }
+  } else {
+    canonicalJob = JSON.parse(createRemoteRequest({ ...job, fence: Number.MAX_SAFE_INTEGER })).job;
+    delete canonicalJob.fence;
+  }
+  if (!validUuid(successor.assignmentEventId) || !validUuid(successor.activityEventId) ||
+      !validUuid(successor.deliveryEventId) || successor.sessionId !== result?.sessionId ||
+      !/^agent-[0-9a-f-]{36}$/i.test(successor.assignmentSource ?? '') ||
+      !/^[0-9a-f]{64}$/.test(successor.assignmentContentSha256 ?? '') ||
+      !/^[0-9a-f]{64}$/.test(successor.deliveryContentSha256 ?? '')) {
+    invalidCompletion('Atomic handoff requires exact same-session assignment, activity and historical delivery receipts.');
+  }
+  const canonical = {
+    job: canonicalJob, sessionId: successor.sessionId,
+    assignmentEventId: successor.assignmentEventId, activityEventId: successor.activityEventId,
+    assignmentSource: successor.assignmentSource, assignmentContentSha256: successor.assignmentContentSha256,
+    deliveryEventId: successor.deliveryEventId, deliveryContentSha256: successor.deliveryContentSha256,
+    ...(successor.completion ? { completion: {
+      headSha: successor.completion.headSha, taskCompleteEventId: successor.completion.taskCompleteEventId,
+      turnEndEventId: successor.completion.turnEndEventId, deliveryEventId: successor.completion.deliveryEventId,
+      deliveryContentSha256: successor.completion.deliveryContentSha256, publicationRef: successor.completion.publicationRef,
+      workingTreeClean: true, allCommitsPushed: true,
+      validationEvidence: { headSha: successor.completion.headSha, passed: true, source: successor.completion.validationEvidence.source },
+      priorTaskCompleteEventIds: completionCheckpointIds(successor.completion.priorTaskCompleteEventIds),
+    } } : {}),
+  };
+  return recordAppCompletion({ result, successor: canonical, expectedGeneration }, options);
+}
+
+async function recordAppCompletion({ result, successor, expectedGeneration }, options) {
+  const value = safeJson(result, 'App-session completion');
+  if (!validJobIdentifier(value.jobId) || !validUuid(value.sessionId) ||
+      !Number.isSafeInteger(value.fence) || value.fence <= 0 || !validSha(value.headSha) ||
+      !validUuid(value.taskCompleteEventId) || !validUuid(value.turnEndEventId) ||
+      Object.hasOwn(value, 'exitCode') || value.workingTreeClean !== true || value.allCommitsPushed !== true ||
+      !/^refs\/(?:heads\/[A-Za-z0-9][A-Za-z0-9._/-]*|pull\/[1-9]\d*\/head)$/.test(value.publicationRef ?? '') ||
+      value.publicationRef.includes('..') || value.publicationRef.endsWith('/') ||
+      value.validationEvidence?.headSha !== value.headSha || value.validationEvidence.passed !== true ||
+      typeof value.validationEvidence.source !== 'string' || !value.validationEvidence.source.trim() ||
+      value.validationEvidence.source.length > 4096 || !Number.isSafeInteger(expectedGeneration)) {
+    invalidCompletion('App completion requires exact runtime event identities and clean/pushed validation proof, never an exit code.');
+  }
+  const proof = {
+    jobId: value.jobId, sessionId: value.sessionId, fence: value.fence, headSha: value.headSha,
+    taskCompleteEventId: value.taskCompleteEventId, turnEndEventId: value.turnEndEventId,
+    publicationRef: value.publicationRef,
+    priorTaskCompleteEventIds: completionCheckpointIds(value.priorTaskCompleteEventIds),
+    validationEvidence: { headSha: value.headSha, passed: true, source: value.validationEvidence.source },
+    ...(successor ? { successor } : {}),
+  };
+  const requestEvidenceDigest = sha256(JSON.stringify(proof));
+  const sessionStateRoot = options.sessionStateRoot ?? path.join(os.homedir(), '.copilot', 'session-state');
+  const inspectEntry = (ledger) => {
+    const entry = ledger.jobs[value.jobId];
+    if (entry?.mode !== 'local' || entry.local !== true ||
+        entry.sessionId !== value.sessionId || entry.fence !== value.fence) {
+      invalidCompletion('App completion is fenced to a different local admission.');
+    }
+    if (entry.state === 'completed' && entry.sessionCompletion?.requestEvidenceDigest === requestEvidenceDigest) {
+      if (successor && ledger.jobs[successor.job.jobId]?.predecessorJobId !== entry.jobId) {
+        invalidCompletion('Atomic handoff replay is missing its successor audit.');
+      }
+      return entry;
+    }
+    if (!['accepted', 'running'].includes(entry.state)) invalidCompletion('Only live local admissions may complete.');
+    if (successor && (successor.job.jobId === entry.jobId || successor.job.issue === entry.issue ||
+        ledger.jobs[successor.job.jobId] || Object.values(ledger.jobs).some((other) =>
+          other.issue === successor.job.issue && (activeJobStates.has(other.state) ||
+            (other.strandedSessionId && other.strandedSessionCleared !== true))))) {
+      invalidCompletion('Successor job or issue is already owned or does not identify distinct work.');
+    }
+    return entry;
+  };
+  const mutationOptions = { ...options, expectedGeneration };
+  const snapshot = await mutateLedger((ledger) => {
+    inspectEntry(ledger);
+    return structuredClone(ledger);
+  }, mutationOptions, true);
+  const admitted = snapshot.jobs[value.jobId];
+  if (admitted.state === 'completed') return successor
+    ? { completed: admitted, successor: snapshot.jobs[successor.job.jobId] } : admitted;
+  const journal = await readCompletionJournal(value.sessionId, sessionStateRoot, value, successor, admitted.createdAt);
+  const evidenceDigest = sha256(JSON.stringify({ proof, checkpoints: journal.checkpoints,
+    successorCheckpoints: journal.successorCheckpoints }));
+  const runtime = validateCompletionJournal(journal, value, admitted, snapshot);
+  validateCompletionObservation(value.observation, admitted, journal, successor);
+  await verifyCompletionGit(runtime.cwd, admitted, value, options.execFile ?? execFileAsync, successor);
+  if (successor?.completion) {
+    await verifyCompletionGit(runtime.cwd, successor.job, successor.completion, options.execFile ?? execFileAsync);
+  }
+  await recheckCompletionJournal(journal);
+  return mutateLedger(async (ledger) => {
+    const entry = inspectEntry(ledger);
+    validateCompletionJournal(journal, value, entry, ledger);
+    validateCompletionObservation(value.observation, entry, journal, successor);
+    if (await journalFingerprint(journal.file) !== journal.fingerprint) {
+      invalidCompletion('Runtime journal changed before the locked write; refresh all evidence.');
+    }
+    entry.state = 'completed';
+    entry.headSha = value.headSha;
+    entry.workingTreeClean = true;
+    entry.allCommitsPushed = true;
+    entry.validationEvidence = proof.validationEvidence;
+    entry.sessionCompletion = {
+      kind: 'app-session-task', ...proof, evidenceDigest, requestEvidenceDigest, checkpoints: journal.checkpoints,
+      taskCompletedAt: runtime.task.timestamp, turnEndedAt: runtime.end.timestamp,
+      journalSha256: journal.digest,
+      ...(journal.epochs ? { runtimeEpochs: journal.epochs } : {}),
+      ...(successor ? { historicalDelivery: journal.delivery, assignment: journal.assignment, activity: journal.activity } : {}),
+      observation: {
+        observedAt: value.observation.observedAt, source: value.observation.source,
+        runtimeHeadEventId: value.observation.runtimeHeadEventId, running: value.observation.running,
+        ...(successor ? {
+          activeWork: !successor.completion, ...(successor.completion ? { followUpPending: false } : {}),
+          successorJobId: successor.job.jobId,
+          currentAssignmentConfirmed: true, latestUserEventId: journal.latestUserEventId,
+        } : { followUpPending: false }),
+      },
+    };
+    entry.updatedAt = new Date().toISOString();
+    if (successor) {
+      const job = successor.completion ? { ...successor.job, fence: ledger.generation + 1 }
+        : JSON.parse(createRemoteRequest({ ...successor.job, fence: ledger.generation + 1 })).job;
+      const next = {
+        jobId: job.jobId, repository: job.repository, issue: job.issue, owner: job.owner, baseSha: job.baseSha,
+        ...(job.expectedHost ? { expectedHost: job.expectedHost } : {}),
+        fence: job.fence, job, requestDigest: requestDigest(job),
+        mode: 'local', local: true, state: 'accepted',
+        sessionId: entry.sessionId, predecessorJobId: entry.jobId, createdAt: entry.updatedAt, updatedAt: entry.updatedAt,
+        handoffBoundary: {
+          assignmentEventId: journal.assignment.id, assignmentAt: journal.assignment.timestamp,
+          activityEventId: journal.activity.id, activityAt: journal.activity.timestamp,
+          journalSha256: journal.digest, predecessorEvidenceDigest: evidenceDigest,
+        },
+      };
+      entry.sessionCompletion.successorJobId = next.jobId;
+      if (successor.completion) {
+        next.state = 'completed';
+        next.headSha = successor.completion.headSha;
+        next.workingTreeClean = true;
+        next.allCommitsPushed = true;
+        next.validationEvidence = successor.completion.validationEvidence;
+        next.sessionCompletion = {
+          kind: 'app-session-task-retrospective', accountedAt: entry.updatedAt, runtimeReportedAdmission: false,
+          dispatchMetadataRecorded: false, checkpoints: journal.successorCheckpoints,
+          ...successor.completion, taskCompletedAt: journal.successorTask.timestamp,
+          turnEndedAt: journal.successorEnd.timestamp, historicalDelivery: journal.successorDelivery,
+          journalSha256: journal.digest, predecessorEvidenceDigest: evidenceDigest,
+          observation: entry.sessionCompletion.observation,
+        };
+      }
+      ledger.jobs[next.jobId] = next;
+      return { completed: entry, successor: next };
+    }
+    return entry;
+  }, mutationOptions, true);
 }
 
 export async function recordDeliveryIntent(jobId, { deliveryLeaseMs = 60_000, ...options } = {}) {

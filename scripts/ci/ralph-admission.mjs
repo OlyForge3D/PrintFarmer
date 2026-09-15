@@ -1,6 +1,6 @@
 import {
   RalphMacSshError, accountLocalSession, acknowledgeLocalJob, clearStrandedKickoff, dispatchMacJob, failLocalKickoff,
-  recordLocalTerminalResult, reconcileMacJob, recoverLocalReservation, recoverLostLocalSession,
+  recordLocalTerminalResult, recordLocalSessionCompletion, recordLocalSessionHandoff, recordLocalCompletedHandoff, reconcileMacJob, recoverLocalReservation, recoverLostLocalSession,
   recoverRemoteDelivery, reserveLocalJob,
 } from './ralph-macos-ssh.mjs';
 
@@ -21,6 +21,11 @@ const commands = Object.assign(Object.create(null), {
   'recover-local': ({ jobId, sessionAbsent }) => recoverLocalReservation(jobId, { sessionAbsent }),
   'recover-local-session': ({ jobId, sessionAbsent, sessionEvidence }) => recoverLostLocalSession(jobId, { sessionAbsent, sessionEvidence }),
   'terminal-local': ({ result }) => recordLocalTerminalResult(result),
+  'complete-local-session': ({ result, expectedGeneration }) => recordLocalSessionCompletion({ result, expectedGeneration }),
+  'handoff-local-session': ({ result, successor, expectedGeneration }) =>
+    recordLocalSessionHandoff({ result, successor, expectedGeneration }),
+  'complete-local-handoff': ({ result, successor, expectedGeneration }) =>
+    recordLocalCompletedHandoff({ result, successor, expectedGeneration }),
   'dispatch-remote': ({ job, eligibility, controllerPid }) => dispatchMacJob({ job, eligibility, controllerPid }),
   'status-remote': ({ job, jobId, legacyIdentity }) => reconcileMacJob({ job, jobId, legacyIdentity }),
   'abandon-incomplete-remote': ({ job, jobId, legacyIdentity }) =>
@@ -53,7 +58,7 @@ async function main() {
   const command = process.argv[2];
   const execute = commands[command];
   if (!execute || process.argv.length !== 3) {
-    throw new RalphMacSshError('Usage: ralph-admission.mjs <reserve-local|account-local-session|acknowledge-local|fail-local-kickoff|clear-stranded-kickoff|recover-local|recover-local-session|terminal-local|dispatch-remote|status-remote|abandon-incomplete-remote|recover-remote>.', 'INVALID_COMMAND');
+    throw new RalphMacSshError('Usage: ralph-admission.mjs <reserve-local|account-local-session|acknowledge-local|fail-local-kickoff|clear-stranded-kickoff|recover-local|recover-local-session|terminal-local|complete-local-session|handoff-local-session|complete-local-handoff|dispatch-remote|status-remote|abandon-incomplete-remote|recover-remote>.', 'INVALID_COMMAND');
   }
   const request = await readRequest();
   const result = await execute(request);
