@@ -11,7 +11,7 @@ export function evidenceCollection(endpoint) {
   if (/^commits\/[a-f0-9]{40}\/status\?per_page=100$/.test(endpoint)) return 'statuses';
   if (/^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/.test(endpoint)) return 'jobs';
   if (/^actions\/workflows\/(?:ci|qualify-canonical-release)\.yml\/runs\?(?:head_sha=[a-f0-9]{40}|created=%3E%3D(?:[0-9TZ.-]|%3A)+)&per_page=100$/.test(endpoint)) return 'workflow_runs';
-  if (/^(?:commits\/[a-f0-9]{40}\/(?:comments|statuses)|pulls\/[1-9][0-9]*\/reviews)\?per_page=100$/.test(endpoint)) return '';
+  if (/^(?:commits\/[a-f0-9]{40}\/(?:comments|statuses|pulls)|pulls\/[1-9][0-9]*\/reviews)\?per_page=100$/.test(endpoint)) return '';
   return undefined;
 }
 

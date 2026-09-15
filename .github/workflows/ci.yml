@@ -233,7 +233,7 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           BASE_REF: ${{ env.CI_SOURCE_BRANCH }}
           CHANGED_FILES_FROM_Z: ${{ steps.diff.outputs.changed_file }}
-          FORCE_FULL_SAFE: ${{ steps.diff.outputs.force_full_safe }}
+          FORCE_FULL_SAFE: ${{ inputs.release_qualification && 'release-qualification' || steps.diff.outputs.force_full_safe }}
         run: bash scripts/ci/select-dotnet-tests.sh
 
       - name: Publish selection to summary

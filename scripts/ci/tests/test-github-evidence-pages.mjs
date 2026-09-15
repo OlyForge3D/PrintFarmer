@@ -11,6 +11,7 @@ const numericRoot = 'https://api.github.com/repositories/1044049720/';
 const checks = `commits/${sha}/check-runs?per_page=100`;
 const routes = [checks, `commits/${sha}/status?per_page=100`,
   `commits/${sha}/statuses?per_page=100`, `commits/${sha}/comments?per_page=100`,
+  `commits/${sha}/pulls?per_page=100`,
   'pulls/60/reviews?per_page=100', 'actions/runs/10/attempts/1/jobs?per_page=100',
   'actions/runs/10/attempts/17/jobs?per_page=100',
   `actions/workflows/ci.yml/runs?head_sha=${sha}&per_page=100`,
@@ -298,10 +299,14 @@ for (const [name, client] of [
 }
 
 test('page allowlists preserve exact source, attempt, method and collection constraints', () => {
-  for (const endpoint of routes.filter(endpoint => !endpoint.includes('/status?'))) {
+  for (const endpoint of routes.filter(endpoint => !/\/(?:status|pulls)\?/.test(endpoint))) {
     assert.equal(qualificationRequestUrl(`${endpoint}&page=2`), `${root}${endpoint}&page=2`);
   }
   assert.equal(githubRequestUrl(`${checks}&page=2`, 'GET'), `${root}${checks}&page=2`);
+  const pulls = `commits/${sha}/pulls?per_page=100`;
+  assert.equal(githubRequestUrl(`${pulls}&page=2`, 'GET'), `${root}${pulls}&page=2`);
+  assert.throws(() => qualificationRequestUrl(pulls), /not allowlisted/);
+  assert.throws(() => githubRequestUrl(pulls, 'POST'), /not allowlisted/);
   for (const endpoint of [`actions/runs/10/attempts/0/jobs?per_page=100&page=2`,
     `actions/runs/10/attempts/01/jobs?per_page=100&page=2`,
     `${checks}&page=0`, `${checks}&page=-1`, `${checks}&page=02`, `${checks}&page=2&page=3`,
