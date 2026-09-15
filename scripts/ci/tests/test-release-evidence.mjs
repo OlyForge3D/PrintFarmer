@@ -137,6 +137,15 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
   wrongIssuer.signatureBytes = JSON.stringify(issuerVerification);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...wrongIssuer }),
     /untrusted|issuer/);
+
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust({
+    policy: { ...trust().policy, revokedSignerIdentities: [signer] },
+  }), ...evidence }), /untrusted|revoked/);
+
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust({
+    policy: { ...trust().policy, signers: [{ ...trust().policy.signers[0],
+      validUntil: '2026-09-01T00:00:00.000Z' }] },
+  }), ...evidence }), /rotation window/);
 });
 
 test('rejects stale, revoked, substituted, and out-of-window bundle trust before staging', () => {

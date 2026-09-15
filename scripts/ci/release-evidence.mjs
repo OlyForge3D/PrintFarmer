@@ -104,7 +104,7 @@ function validateVerification(bytes, expectedDigest, type, expectedPredicate) {
   verificationEntries(bytes, expectedDigest, type, expectedPredicate);
 }
 
-function validateBundleTrust(bundle, trust) {
+function validateBundleTrust(bundle, trust, verification = []) {
   if (trust === undefined) return;
   const { policy, releaseId, createdTime, trustedTime } = trust;
   requireThat(policy && typeof releaseId === 'string' && typeof createdTime === 'string' &&
@@ -116,8 +116,12 @@ function validateBundleTrust(bundle, trust) {
     !policy.revokedReleaseIds.includes(releaseId),
     'Invalid or revoked release evidence time');
   const entries = Array.isArray(bundle) ? bundle : [bundle];
-  for (const entry of entries) {
+  for (const [index, entry] of entries.entries()) {
+    const optional = verification[index]?.optional;
     if (nativeBundle(entry)) {
+      requireThat(typeof optional?.Subject === 'string' && optional.Issuer === policy.issuer &&
+        typeof optional.certificate === 'string',
+      'Native Cosign bundle lacks authoritative verifier identity or issuer');
       const integratedTime = nativeIntegratedTime(entry);
       const integratedAt = integratedTime * 1000;
       const certificate = nativeCertificate(entry);
@@ -126,21 +130,22 @@ function validateBundleTrust(bundle, trust) {
         Date.parse(certificate.validFrom) <= integratedAt && integratedAt <= Date.parse(certificate.validTo) &&
         trustedAt <= Date.parse(certificate.validTo),
       'Cosign transparency time is expired or revoked');
-      continue;
     }
-    if (!entry?.optional) continue;
-    const optional = entry.optional;
-    const signer = optional?.Subject;
-    const integratedTime = optional?.Bundle?.Payload?.integratedTime;
+    if (!nativeBundle(entry) && !entry?.optional) continue;
+    const trustedOptional = nativeBundle(entry) ? optional : entry.optional;
+    const signer = trustedOptional?.Subject;
+    const integratedTime = nativeBundle(entry)
+      ? nativeIntegratedTime(entry)
+      : trustedOptional?.Bundle?.Payload?.integratedTime;
     const integratedAt = integratedTime * 1000;
-    requireThat(typeof signer === 'string' && optional?.Issuer === policy.issuer &&
+    requireThat(typeof signer === 'string' && trustedOptional?.Issuer === policy.issuer &&
       !policy.revokedSignerIdentities.includes(signer), 'Cosign bundle signer is untrusted or revoked');
     requireThat(Number.isSafeInteger(integratedTime) && createdAt <= integratedAt &&
       integratedAt >= Date.parse(policy.revocationEpoch) &&
       integratedAt <= trustedAt && trustedAt - integratedAt <= policy.certificateMaxAgeSeconds * 1000,
     'Cosign transparency time is expired or revoked');
     let certificate;
-    try { certificate = new X509Certificate(optional?.certificate); } catch {
+    try { certificate = new X509Certificate(nativeBundle(entry) ? nativeCertificate(entry).raw : trustedOptional?.certificate); } catch {
       throw new Error('Cosign bundle certificate is malformed');
     }
     requireThat(Date.parse(certificate.validFrom) <= integratedAt &&
@@ -217,8 +222,8 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
     (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
-  validateBundleTrust(signatureBundle, trust);
-  validateBundleTrust(attestationBundle, trust);
+  validateBundleTrust(signatureBundle, trust, signatureVerification);
+  validateBundleTrust(attestationBundle, trust, attestationVerification);
   validateBundleTrust(signatureVerification, trust);
   validateBundleTrust(attestationVerification, trust);
   return {
@@ -287,8 +292,8 @@ function validateStored(value, digest, platform, trust) {
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
     (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
-  validateBundleTrust(signatureBundle, trust);
-  validateBundleTrust(attestationBundle, trust);
+  validateBundleTrust(signatureBundle, trust, signatureVerification);
+  validateBundleTrust(attestationBundle, trust, attestationVerification);
   validateBundleTrust(signatureVerification, trust);
   validateBundleTrust(attestationVerification, trust);
 }

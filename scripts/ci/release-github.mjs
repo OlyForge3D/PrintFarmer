@@ -43,6 +43,26 @@ function publicReservation(entry, key) {
   if (entry.set !== undefined) {
     result.set = writePublicSet(record, entry.set, identitySha256);
   }
+  if (entry.abandonment !== undefined) {
+    const abandonment = entry.abandonment;
+    requireKeys(abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
+      'channel', 'authorizationSha256', 'ownerApprovedAt'], [], 'public ledger abandonment');
+    requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
+      abandonment.sourceCommit === record.sourceCommit &&
+      abandonment.canonicalVersion === record.canonicalVersion &&
+      abandonment.channel === 'insider' &&
+      abandonment.authorizationSha256 === identitySha256,
+    'Invalid public ledger abandonment');
+    result.abandonment = {
+      schema: 1,
+      allocationKey: publicReference(abandonment.allocationKey, hashPattern),
+      sourceCommit: publicReference(abandonment.sourceCommit, shaPattern),
+      canonicalVersion: parseTag(`v${abandonment.canonicalVersion}`).canonicalVersion,
+      channel: abandonment.channel,
+      authorizationSha256: publicReference(abandonment.authorizationSha256, hashPattern),
+      ownerApprovedAt: abandonment.ownerApprovedAt,
+    };
+  }
   return result;
 }
 
@@ -254,7 +274,7 @@ export function gitLedger(api, anchor) {
         JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission) &&
         state.reservations[key]?.identitySha256 === reservation.identitySha256,
         'Ledger lost or changed an immutable reservation');
-      for (const field of ['tagObject', 'tagPublished', 'setHash', 'set']) {
+      for (const field of ['tagObject', 'tagPublished', 'setHash', 'set', 'abandonment']) {
         if (reservation[field] !== undefined) {
           requireThat(JSON.stringify(state.reservations[key]?.[field]) === JSON.stringify(reservation[field]),
             `Ledger lost or changed immutable ${field}`);

@@ -190,6 +190,17 @@ or mismatched recovery artifacts fail closed. Failed reservations remain consume
 Stable has no N: a new run cannot rebuild an already reserved stable identity.
 Resume byte-identical transfer in the same run, or qualify a reviewed new base;
 never replace a stable identity with new build bytes.
+An active insider reservation that cannot be completed may be terminally abandoned
+only through the protected `release-control abandon` transaction. The transaction
+requires a fresh, immutable abandonment authorization bound to the active
+allocation key, source commit, canonical version, channel, and original
+authorization hash, plus current explicit owner approval and protected-policy
+verification. It records only those public-safe binding facts and the approval
+time in the ledger; raw approval, reviewer, and protection data are never
+projected. Abandonment consumes the original identity and sequence permanently,
+does not publish a pointer or aliases, cannot be reversed, and permits a later
+allocation only as the next identity. A missing, stale, forged, mismatched, or
+already activated authorization fails closed.
 Big integers are compared numerically, not lexically or through floating point.
 No timestamp, run-number concatenation or local tag scan allocates identities.
 

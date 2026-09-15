@@ -9,7 +9,7 @@ import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import {
-  admit, advance as advancePolicy, allocationKey, compareVersions, components, hash, identityLabels, signedReleasePointer,
+  abandon, abandonmentAuthorization, admit, advance as advancePolicy, allocationKey, compareVersions, components, hash, identityLabels, signedReleasePointer,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord, migrateLegacyLedger, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
@@ -82,7 +82,9 @@ const cryptoEvidenceFixture = set => {
     },
   ]));
   const verificationTime = '2099-01-01T00:00:00.000Z';
-  return { schema: 1, verificationTime, services, sha256: hash({ schema: 1, verificationTime, services }) };
+  return { schema: 1, verificationTime, services, sha256: hash({
+    schema: 1, createdTime: set.identity.buildTime ?? set.identity.created, verificationTime, services,
+  }) };
 };
 
 const signedManifest = (identity, set) => {
@@ -197,6 +199,11 @@ test('release manifest bytes and envelope reject canonicality and binding substi
     mutate(changed);
     assert.throws(() => validateReleaseManifest(changed), /Release trust binding mismatch/);
   }
+  const changedDigest = structuredClone(manifest);
+  changedDigest.evidence.trust.createdTime = identity.buildTime;
+  changedDigest.evidence.cryptoEvidence.sha256 = 'f'.repeat(64);
+  assert.throws(() => validateReleaseManifest(changedDigest),
+    /Invalid release trust evidence fields|Immutable crypto evidence digest mismatch/);
 });
 
 test('every docker publisher bash run block parses', () => {
@@ -629,7 +636,7 @@ test('durable reservation reuses identity across same-run attempts and increases
   assert.equal(persisted.reservations[first.allocationKey].record.sequence, '1');
 });
 
-test('concurrent allocators use a real CAS retry boundary and never recycle failed reservations', async () => {
+test('serialized insider allocation rejects overlapping active reservations and never recycles identities', async () => {
   const store = memoryStore();
   const results = await Promise.allSettled(Array.from({ length: 12 }, (_, index) => transact(store,
     state => reserve(state, admission({ buildId: String(index + 100) }), created).record)));
@@ -644,6 +651,63 @@ test('concurrent allocators use a real CAS retry boundary and never recycle fail
   await transact(store, state => advance(state, accepted[0].value, completeSet(accepted[0].value), sha, ''));
   const next = await transact(store, state => reserve(state, admission({ buildId: '999' }), created).record);
   assert.equal(next.sequence, '2');
+});
+
+test('owner-approved terminal abandonment projects only safe binding fields and consumes identity and sequence', () => {
+  const ledger = state();
+  const first = record(ledger);
+  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z');
+  const terminal = abandon(ledger, first, approval, first.protection);
+  assert.deepEqual(Object.keys(terminal).sort(), [
+    'allocationKey', 'authorizationSha256', 'canonicalVersion', 'channel', 'ownerApprovedAt', 'schema', 'sourceCommit',
+  ]);
+  const projected = publicLedger(ledger);
+  const persisted = projected.reservations[first.allocationKey].abandonment;
+  assert.deepEqual(persisted, terminal);
+  assert.doesNotMatch(JSON.stringify(projected), /protectionDigest|protection|ownerApprovedReviewer|private/i);
+  const next = record(ledger, { buildId: '43' });
+  assert.equal(next.sequence, '2');
+  assert.notEqual(next.canonicalVersion, first.canonicalVersion);
+  assert.equal(ledger.identities[first.canonicalVersion], first.allocationKey);
+  validateLedger(ledger, anchor);
+});
+
+test('abandonment rejects forged bindings, duplicate terminal transitions, and activated reservations', () => {
+  const ledger = state();
+  const first = record(ledger);
+  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z');
+  for (const mutate of [
+    value => { value.allocationKey = 'f'.repeat(64); },
+    value => { value.sourceCommit = newerSha; },
+    value => { value.canonicalVersion = '1.2.3-insider.9'; },
+    value => { value.channel = 'stable'; },
+    value => { value.authorizationSha256 = 'f'.repeat(64); },
+    value => { value.protectionDigest = 'f'.repeat(64); },
+  ]) {
+    const forged = structuredClone(approval);
+    mutate(forged);
+    assert.throws(() => abandon(ledger, first, forged, first.protection), /Abandonment authorization/);
+  }
+  abandon(ledger, first, approval, first.protection);
+  assert.throws(() => abandon(ledger, first, approval, first.protection), /cannot be reactivated or abandoned twice/);
+
+  const activatedLedger = state();
+  const activated = record(activatedLedger);
+  advance(activatedLedger, activated, completeSet(activated), sha, '');
+  assert.throws(() => abandon(activatedLedger, activated,
+    abandonmentAuthorization(activated, activated.protection, '2026-09-12T20:01:00.000Z'), activated.protection),
+  /cannot be reactivated or abandoned twice/);
+});
+
+test('pointer advancement rejects a stale expected pointer without another ledger write', async () => {
+  const store = memoryStore();
+  const first = await transact(store, next => reserve(next, admission(), created).record);
+  await transact(store, next => advance(next, first, completeSet(first), sha, ''));
+  const writes = store.writes;
+  const { state: latest } = await store.read();
+  assert.throws(() => advance(latest, first, completeSet(first), sha, 'stale-pointer'),
+    /Channel compare-and-set conflict/);
+  assert.equal(store.writes, writes);
 });
 
 test('every new stable and insider reservation exceeds the historical or current stable floor before persistence', async () => {
@@ -2651,6 +2715,44 @@ test('single-maintainer authorization rejects unapproved, automatic and conflict
       assert.deepEqual(fixture.ledgerWrites, []);
     }
   } finally { globalThis.fetch = previous; }
+});
+
+test('protected release-control abandonment uses App policy verification and GitHub CAS without exposing authorization data', async () => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `abandon-control-${process.pid}`);
+  const previousFetch = globalThis.fetch;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    const fixture = authorizationFixture();
+    globalThis.fetch = fixture.fetch;
+    const identity = await runFixtureControl('authorize', fixture);
+    fixture.calls.length = 0;
+    await runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_OWNER_APPROVED_AT: '2026-09-12T20:01:00.000Z',
+    }, () => {});
+    const persisted = (await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read()).state;
+    const terminal = persisted.reservations[identity.allocationKey].abandonment;
+    assert.deepEqual(Object.keys(terminal).sort(), [
+      'allocationKey', 'authorizationSha256', 'canonicalVersion', 'channel', 'ownerApprovedAt', 'schema', 'sourceCommit',
+    ]);
+    assert.ok(fixture.calls.some(call => call.admin && call.publisher));
+    assert.ok(fixture.calls.some(call => call.method === 'PATCH' && call.publisher));
+    assert.doesNotMatch(JSON.stringify(fixture.ledgerWrites.at(-1)), /protectionDigest|reviewer|private/i);
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_OWNER_APPROVED_AT: '2026-09-12T20:01:00.000Z',
+    }, () => {}), /cannot be reactivated or abandoned twice/);
+    const subsequent = reserve(persisted, admission({ buildId: '43' }), created).record;
+    assert.equal(subsequent.sequence, '2');
+  } finally {
+    globalThis.fetch = previousFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
 });
 
 async function authorizedRecord() {

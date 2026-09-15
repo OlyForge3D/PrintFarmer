@@ -479,7 +479,7 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
   requireThat(Date.parse(record.created) <= Date.parse(cryptoEvidence.verificationTime),
     'Evidence verification predates authorization');
   validateManifestCryptoEvidence(cryptoEvidence.services, completeSet, {
-    policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, createdTime: record.created,
+    policy: trustPolicy, releaseId: record.releaseId, createdTime: record.created,
     trustedTime: cryptoEvidence.verificationTime,
   });
   const directHotfix = qualification?.mode === 'hotfix'
@@ -650,7 +650,8 @@ export function validateReleaseManifest(manifest) {
     trustedTime: evidence.trust.verificationTime,
   });
   requireThat(evidence.cryptoEvidence.sha256 === sha256Bytes(JSON.stringify({
-    schema: 1, verificationTime: evidence.trust.verificationTime, services: evidence.services,
+    schema: 1, createdTime: evidence.trust.createdTime,
+    verificationTime: evidence.trust.verificationTime, services: evidence.services,
   })), 'Immutable crypto evidence digest mismatch');
   requireKeys(compatibility, ['schema', 'managedEligible', 'releaseMetadata', 'api', 'services', 'storage', 'configuration', 'updater'], [], 'release compatibility');
   requireThat(compatibility.schema === 3 && compatibility.managedEligible ===
@@ -957,7 +958,7 @@ export function validateLedger(state, anchor) {
     requireKeys(reservation, ['admission', 'record', 'stableSequence',
       ...(projected ? ['identitySha256'] : []),
       ...(reservation.record?.channel === 'insider' ? ['sequence'] : [])],
-    ['tagObject', 'tagPublished', 'setHash', 'set'], 'public ledger reservation');
+    ['tagObject', 'tagPublished', 'setHash', 'set', 'abandonment'], 'public ledger reservation');
     validateRecord(reservation.record, projected);
     validateAdmission(reservation.admission);
     requireThat(Object.entries(reservation.admission).every(([field, value]) => reservation.record[field] === value),
@@ -974,6 +975,22 @@ export function validateLedger(state, anchor) {
       reservation.tagObject, 'Invalid public ledger tag publication claim');
     requireThat(Object.hasOwn(reservation, 'setHash') === Object.hasOwn(reservation, 'set'),
       'Incomplete public ledger set/hash');
+    if (Object.hasOwn(reservation, 'abandonment')) {
+      requireKeys(reservation.abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
+        'channel', 'authorizationSha256', 'ownerApprovedAt'], [], 'reservation abandonment');
+      const abandonment = reservation.abandonment;
+      requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
+        abandonment.sourceCommit === reservation.record.sourceCommit &&
+        abandonment.canonicalVersion === reservation.record.canonicalVersion &&
+        abandonment.channel === reservation.record.channel &&
+        abandonment.authorizationSha256 === (reservation.identitySha256 ?? hash(reservation.record)) &&
+        hashPattern.test(abandonment.authorizationSha256) &&
+        typeof abandonment.ownerApprovedAt === 'string' &&
+        Number.isFinite(Date.parse(abandonment.ownerApprovedAt)) &&
+        new Date(abandonment.ownerApprovedAt).toISOString() === abandonment.ownerApprovedAt &&
+        reservation.set === undefined,
+      'Invalid terminal reservation abandonment');
+    }
     if (Object.hasOwn(reservation, 'set')) {
       requireString(reservation.setHash, hashPattern, 'public ledger set hash');
       requireThat(reservation.setHash === hash(writePublicSet(reservation.record, reservation.set,
@@ -1203,9 +1220,10 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   }
   if (admission.channel === 'insider') {
     requireThat(!Object.values(state.reservations).some(reservation =>
-      reservation.record.channel === 'insider' && !reservation.set),
+      reservation.record.channel === 'insider' && !reservation.set && !reservation.abandonment),
     'Unadvanced insider reservation blocks a new insider allocation');
   }
+
   const key = allocationKey(admission);
   const sequence = admission.channel === 'insider'
     ? ((BigInt(state.counter) > BigInt(state.channelSequences.insider)
@@ -1243,6 +1261,38 @@ export function reserve(state, admission, created, protection, verifiedQualifica
     state.stages[admission.baseVersion] = canonicalVersion;
   }
   return reservation;
+}
+
+export function abandonmentAuthorization(record, protection, ownerApprovedAt) {
+  validateRecord(record);
+  requireThat(record.channel === 'insider', 'Only active insider reservations may be abandoned');
+  verifyProtectionEvidence(protection, record.channel);
+  requireThat(typeof ownerApprovedAt === 'string' && Number.isFinite(Date.parse(ownerApprovedAt)) &&
+    new Date(ownerApprovedAt).toISOString() === ownerApprovedAt, 'Abandonment requires explicit owner approval');
+  return { schema: 1, kind: 'release-reservation-abandonment', allocationKey: record.allocationKey,
+    sourceCommit: record.sourceCommit, canonicalVersion: record.canonicalVersion, channel: record.channel,
+    authorizationSha256: hash(record), protectionDigest: protection.policyDigest, ownerApprovedAt };
+}
+
+export function abandon(state, record, authorization, protection) {
+  validateLedger(state, state.anchor);
+  validateRecord(record);
+  verifyProtectionEvidence(protection, record.channel);
+  requireThat(record.channel === 'insider' && authorization?.schema === 1 &&
+    authorization.kind === 'release-reservation-abandonment' &&
+    authorization.authorizationSha256 === hash(record) && authorization.allocationKey === record.allocationKey &&
+    authorization.sourceCommit === record.sourceCommit && authorization.canonicalVersion === record.canonicalVersion &&
+    authorization.channel === record.channel && authorization.protectionDigest === protection.policyDigest &&
+    typeof authorization.ownerApprovedAt === 'string' && Number.isFinite(Date.parse(authorization.ownerApprovedAt)) &&
+    new Date(authorization.ownerApprovedAt).toISOString() === authorization.ownerApprovedAt,
+  'Abandonment authorization is not bound to the active insider reservation');
+  const reservation = state.reservations[record.allocationKey];
+  requireThat(reservation && (reservation.identitySha256 ?? hash(reservation.record)) === hash(record) && !reservation.set &&
+    !reservation.abandonment, 'Reservation cannot be reactivated or abandoned twice');
+  reservation.abandonment = { schema: 1, allocationKey: record.allocationKey, sourceCommit: record.sourceCommit,
+    canonicalVersion: record.canonicalVersion, channel: record.channel,
+    authorizationSha256: reservation.identitySha256 ?? hash(record), ownerApprovedAt: authorization.ownerApprovedAt };
+  return reservation.abandonment;
 }
 
 export function verifyTag(record, expectedObject, actualTag) {
