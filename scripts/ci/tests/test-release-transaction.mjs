@@ -174,6 +174,28 @@ test('selection rejects foreign refs, malformed sources, and workflow substituti
   }
 });
 
+test('trusted scheduled insider publication selects a transaction while untrusted schedule contexts fail closed', async () => {
+  const trustedSchedule = {
+    ...base,
+    GITHUB_EVENT_NAME: 'schedule',
+    RELEASE_CHANNEL: 'insider',
+    RELEASE_SOURCE_SHA: '',
+  };
+  const selected = await selectTransaction(trustedSchedule, apiFixture().api);
+  assert.equal(selected.channel, 'insider');
+  assert.equal(selected.sourceBranch, 'development');
+  for (const overrides of [
+    { GITHUB_REPOSITORY: 'attacker/PrintFarmer' },
+    { GITHUB_REF: 'refs/heads/main' },
+    { GITHUB_WORKFLOW_REF: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main' },
+    { RELEASE_CHANNEL: 'stable' },
+    { RELEASE_SOURCE_SHA: sourceSha },
+  ]) {
+    await assert.rejects(selectTransaction({ ...trustedSchedule, ...overrides }, apiFixture().api),
+      /Untrusted release dispatch|immutable release-control workflow/);
+  }
+});
+
 test('same-run rerun recovers immutable attempt-one transaction and revalidates ancestry', async t => {
   const first = await transaction('stable', sourceSha);
   const cwd = process.cwd();

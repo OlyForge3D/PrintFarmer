@@ -90,8 +90,11 @@ function readBoundedJson(path, description) {
 }
 
 export async function selectTransaction(env = process.env, api = githubClient(env.GH_TOKEN)) {
+  const scheduled = env.GITHUB_EVENT_NAME === 'schedule';
   requireThat(env.GITHUB_REPOSITORY === repository &&
-    env.GITHUB_EVENT_NAME === 'workflow_dispatch', 'Untrusted release dispatch');
+    (env.GITHUB_EVENT_NAME === 'workflow_dispatch' || scheduled) &&
+    (!scheduled || (env.RELEASE_CHANNEL === 'insider' && !env.RELEASE_SOURCE_SHA?.trim())),
+  'Untrusted release dispatch');
   requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'run attempt');
   const channel = env.RELEASE_CHANNEL;
   const branch = channelBranch(channel);
@@ -214,7 +217,7 @@ export async function verifyTransactionQualification(
     definition.path === controlWorkflow && definition.state === 'active' &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
     run.head_branch === 'development' && run.head_sha === transaction.workflowCommit &&
-    run.event === 'workflow_dispatch' && run.html_url ===
+    ['workflow_dispatch', 'schedule'].includes(run.event) && run.html_url ===
       `https://github.com/${repository}/actions/runs/${transaction.runId}` &&
     ['in_progress', 'completed'].includes(run.status) &&
     (run.status !== 'completed' || run.conclusion === 'success'),

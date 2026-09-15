@@ -209,6 +209,23 @@ test('canonical schema-3 release metadata generates release notes through the sh
   assert.match(notes, /verified provider backup/);
 });
 
+test('main-equivalent schema-3 metadata validation passes its closed notes adapter to release notes', () => {
+  const rawMetadata = JSON.parse(readFileSync('release-metadata/0.2.3.json', 'utf8'));
+  const validatedNotes = validateReleaseNotesMetadata(rawMetadata, '0.2.3');
+  const notes = releaseNotes({
+    version: '0.2.3', sourceCommit: sha, previousTag: 'v0.2.2',
+    pullRequests: [{ number: 2660, title: 'Signed release publication', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/2660' }],
+    changelog: '### Features\n\n- Signed release publication.\n\n### Fixes\n\n- None.\n\n### Breaking changes\n\n- None.',
+    metadata: validatedNotes,
+  });
+  assert.match(notes, /Only the declared source release IDs/);
+  assert.throws(() => releaseNotes({
+    version: '0.2.3', sourceCommit: sha, previousTag: 'v0.2.2',
+    pullRequests: [{ number: 2660, title: 'Signed release publication', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/2660' }],
+    changelog: 'entry', metadata: { ...validatedNotes, inferred: 'no' },
+  }), /unknown or missing fields/);
+});
+
 test('closed release metadata is canonical, complete, and digest-bound into the manifest', () => {
   const metadata = releaseMetadataFixture('1.2.3');
   const identity = record();

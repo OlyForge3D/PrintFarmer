@@ -11,6 +11,16 @@ function requireText(value, field) {
     `Release metadata requires ${field}`);
 }
 
+function validatedOperationalNotes(notes) {
+  const noteFields = ['compatibility', 'migration', 'downtime', 'backup', 'recovery'];
+  requireThat(notes && typeof notes === 'object' && !Array.isArray(notes) &&
+    Object.keys(notes).length === noteFields.length &&
+    noteFields.every(field => Object.hasOwn(notes, field)),
+  'Release metadata notes have unknown or missing fields');
+  for (const field of noteFields) requireText(notes[field], field);
+  return notes;
+}
+
 export function validateReleaseNotesMetadata(metadata, version) {
   requireThat(metadata && typeof metadata === 'object' && !Array.isArray(metadata),
     'Release metadata is malformed');
@@ -25,12 +35,7 @@ export function validateReleaseNotesMetadata(metadata, version) {
       requireThat(Object.keys(metadata).length === fields.length && fields.every(field => Object.hasOwn(metadata, field)) &&
         metadata.version === version && metadata.notes && typeof metadata.notes === 'object' && !Array.isArray(metadata.notes),
       'Release metadata version does not match the release');
-      const noteFields = ['compatibility', 'migration', 'downtime', 'backup', 'recovery'];
-      requireThat(Object.keys(metadata.notes).length === noteFields.length &&
-        noteFields.every(field => Object.hasOwn(metadata.notes, field)),
-      'Release metadata notes have unknown or missing fields');
-      for (const field of noteFields) requireText(metadata.notes[field], field);
-      return metadata.notes;
+      return validatedOperationalNotes(metadata.notes);
   }
   const fields = ['schema', 'version', 'compatibility', 'migration', 'downtime', 'backup', 'recovery'];
   requireThat(Object.keys(metadata).length === fields.length && fields.every(field => Object.hasOwn(metadata, field)),
@@ -42,7 +47,7 @@ export function validateReleaseNotesMetadata(metadata, version) {
 }
 
 export function releaseNotes({ version, sourceCommit, previousTag, pullRequests, changelog, metadata, repository = 'OlyForge3D/PrintFarmer' }) {
-  validateReleaseNotesMetadata(metadata, version.replace(/-(?:insider|beta|rc)\.\d+$/, ''));
+  const baseVersion = version.replace(/-(?:insider|beta|rc)\.\d+$/, '');
   requireThat(/^[a-f0-9]{40}$/.test(sourceCommit), 'Release notes require the exact source commit');
   requireThat(typeof previousTag === 'string' && /^v\d+\.\d+\.\d+/.test(previousTag),
     'Release notes require a previous canonical version tag');
@@ -58,7 +63,9 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
     'Release notes contain malformed merged pull request data');
     return `- [#${pr.number}](${pr.url}): ${pr.title.trim().replace(/([\\[\]`])/g, '\\$1')}`;
   });
-  const operational = validateReleaseNotesMetadata(metadata, version.replace(/-(?:insider|beta|rc)\.\d+$/, ''));
+  const operational = Object.hasOwn(metadata ?? {}, 'schema')
+    ? validateReleaseNotesMetadata(metadata, baseVersion)
+    : validatedOperationalNotes(metadata);
   return `## PrintFarmer ${version}\n\nSource commit: ${sourceCommit}\nRelease range: ${previousTag}...${sourceCommit}\n\n` +
     `### Merged pull requests\n\n${entries.join('\n')}\n\n${changelog.trim()}\n\n### Compatibility\n\n${operational.compatibility}\n\n` +
     `### Migration\n\n${operational.migration}\n\n### Downtime\n\n${operational.downtime}\n\n### Backup\n\n${operational.backup}\n\n### Recovery\n\n${operational.recovery}\n`;
