@@ -13,6 +13,16 @@ on:
         description: Optional full selected-channel ancestor SHA; blank pins that branch HEAD once
         type: string
         required: false
+      operation:
+        description: Protected operation
+        type: choice
+        options: [publish, abandon]
+        default: publish
+        required: true
+      reservation_target:
+        description: Immutable insider reservation allocation key required only for abandonment
+        type: string
+        required: false
   schedule:
     - cron: '27 9 * * *'
 
@@ -81,6 +91,7 @@ jobs:
           transaction="$(node scripts/ci/release-transaction.mjs select)"
           echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
       - name: Admit immutable release transaction
+        if: inputs.operation == 'publish'
         id: admit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,6 +108,7 @@ jobs:
           retention-days: 30
 
   qualification:
+    if: inputs.operation == 'publish'
     name: Automatic exact-source qualification
     needs: admit
     uses: ./.github/workflows/ci.yml
@@ -108,6 +120,7 @@ jobs:
       source_branch: ${{ needs.admit.outputs.channel == 'stable' && 'main' || 'development' }}
 
   collect-qualification:
+    if: inputs.operation == 'publish'
     name: Collect genuine qualification evidence
     needs: [admit, qualification]
     runs-on: ubuntu-latest
@@ -165,7 +178,10 @@ jobs:
           retention-days: 30
 
   publish:
-    name: Approve and publish immutable release
+    if: >-
+      always() && needs.admit.result == 'success' && (inputs.operation == 'abandon' ||
+      (needs.qualification.result == 'success' && needs.collect-qualification.result == 'success'))
+    name: Approve and execute immutable release operation
     needs: [admit, qualification, collect-qualification]
     uses: ./.github/workflows/docker-publish.yml
     permissions:
@@ -175,6 +191,8 @@ jobs:
       id-token: write
     with:
       transaction: ${{ needs.admit.outputs.transaction }}
+      operation: ${{ inputs.operation }}
+      reservation_target: ${{ inputs.reservation_target }}
     secrets: inherit
 
   summary:

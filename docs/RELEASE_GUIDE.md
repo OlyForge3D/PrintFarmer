@@ -191,12 +191,17 @@ Stable has no N: a new run cannot rebuild an already reserved stable identity.
 Resume byte-identical transfer in the same run, or qualify a reviewed new base;
 never replace a stable identity with new build bytes.
 An active insider reservation that cannot be completed may be terminally abandoned
-only through the protected `release-control abandon` transaction. The transaction
-requires a fresh, immutable abandonment authorization bound to the active
-allocation key, source commit, canonical version, channel, and original
-authorization hash, plus current explicit owner approval and protected-policy
-verification. It records only those public-safe binding facts and the approval
-time in the ledger; raw approval, reviewer, and protection data are never
+only by selecting `abandon` in the same Consolidated Release dispatch and passing
+its immutable allocation key as `reservation_target`; that dispatch calls the
+existing protected Docker publisher and never invokes publication. The publisher
+recovers the original signed authorization by its original run identity, then uses
+the publisher App token to read the current protected environment approval. The
+immutable abandonment authorization binds the active allocation key, source
+commit, canonical version, channel, original authorization hash, exact current
+workflow run/attempt/job/environment/target, normalized approval time, and a
+current owner-allowlisted approver. Missing, forged, stale, mismatched, or
+wrong-environment approval evidence fails closed. The ledger projects only these
+public-safe bindings; raw approval, reviewer, and protection data are never
 projected. Abandonment consumes the original identity and sequence permanently,
 does not publish a pointer or aliases, cannot be reversed, and permits a later
 allocation only as the next identity. A missing, stale, forged, mismatched, or

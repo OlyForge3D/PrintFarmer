@@ -177,6 +177,23 @@ test('rejects stale, revoked, substituted, and out-of-window bundle trust before
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 
+test('rejects legacy signature and attestation verification missing trusted optional material', () => {
+  const legacySignature = signed();
+  legacySignature.signatureBundleBytes = JSON.stringify([{ Base64Signature: 'signature', Payload: 'payload' }]);
+  const signatureVerification = JSON.parse(legacySignature.signatureBytes);
+  delete signatureVerification[0].optional;
+  legacySignature.signatureBytes = JSON.stringify(signatureVerification);
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...legacySignature }),
+    /required identity, certificate, or transparency trust material/);
+
+  const legacyAttestation = signed();
+  const attestationVerification = JSON.parse(legacyAttestation.attestationBytes);
+  delete attestationVerification[0].optional;
+  legacyAttestation.attestationBytes = JSON.stringify(attestationVerification);
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...legacyAttestation }),
+    /required identity, certificate, or transparency trust material/);
+});
+
 test('rejects staged signature bundle, subject, predicate, and platform substitutions', () => {
   const root = mkdtempSync(join('.artifacts', 'release-evidence-'));
   try {

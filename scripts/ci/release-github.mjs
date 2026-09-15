@@ -46,7 +46,8 @@ function publicReservation(entry, key) {
   if (entry.abandonment !== undefined) {
     const abandonment = entry.abandonment;
     requireKeys(abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
-      'channel', 'identitySha256', 'ownerApprovedAt'], [], 'public ledger abandonment');
+      'channel', 'identitySha256', 'approvalRunId', 'approvalRunAttempt', 'approvalJobId',
+      'approvalEnvironment', 'approvalTarget', 'ownerApprovedAt'], [], 'public ledger abandonment');
     requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
       abandonment.sourceCommit === record.sourceCommit &&
       abandonment.canonicalVersion === record.canonicalVersion &&
@@ -60,6 +61,11 @@ function publicReservation(entry, key) {
       canonicalVersion: parseTag(`v${abandonment.canonicalVersion}`).canonicalVersion,
       channel: abandonment.channel,
       identitySha256: publicReference(abandonment.identitySha256, hashPattern),
+      approvalRunId: publicReference(abandonment.approvalRunId, /^[1-9][0-9]*$/),
+      approvalRunAttempt: publicReference(abandonment.approvalRunAttempt, /^[1-9][0-9]*$/),
+      approvalJobId: publicReference(abandonment.approvalJobId, /^[1-9][0-9]*$/),
+      approvalEnvironment: abandonment.approvalEnvironment,
+      approvalTarget: publicReference(abandonment.approvalTarget, hashPattern),
       ownerApprovedAt: abandonment.ownerApprovedAt,
     };
   }
@@ -136,6 +142,7 @@ export function githubRequestUrl(endpoint, method) {
     /^commits\/[a-f0-9]{40}\/status\?per_page=100$/,
     /^actions\/runs\/[1-9][0-9]*$/,
     /^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/,
+    /^actions\/runs\/[1-9][0-9]*\/approvals$/,
     /^actions\/workflows\/consolidated-release\.yml$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
     /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
@@ -445,6 +452,8 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
     catch (error) {
       throw new Error(`Protection policy read failed${Number.isInteger(error.status) ? `: HTTP ${error.status}` : ''}`);
     }
+
+
   };
   const branch = channel === 'stable' ? 'main' : 'development';
   const branchRules = await readPolicy(`rules/branches/${branch}?per_page=100`);
@@ -482,6 +491,53 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   return normalized;
 }
 
+
+export async function verifyAbandonmentApproval(api, transaction, record, targetReservation,
+  ownerApprovedReviewers, now = Date.now()) {
+  requireThat(record.channel === 'insider' && targetReservation === record.allocationKey,
+    'Abandonment target does not match the immutable reservation');
+  requireString(transaction?.runId, /^[1-9][0-9]*$/, 'abandonment workflow run');
+  requireString(transaction?.runAttempt, /^[1-9][0-9]*$/, 'abandonment workflow attempt');
+  const run = await api(`actions/runs/${transaction.runId}`);
+  requireThat(run?.id === Number(transaction.runId) && run.run_attempt === Number(transaction.runAttempt) &&
+    run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
+    run.path === '.github/workflows/consolidated-release.yml' && run.event === 'workflow_dispatch',
+  'Abandonment workflow run evidence is malformed or mismatched');
+  const jobs = await api(`actions/runs/${transaction.runId}/attempts/${transaction.runAttempt}/jobs?per_page=100`);
+  requireThat(jobs?.total_count === jobs.jobs?.length && jobs.jobs.length > 0,
+    'Abandonment workflow job evidence is missing or truncated');
+  const job = jobs.jobs.find(candidate => candidate?.name === 'Abandon immutable release reservation');
+  requireThat(job && Number.isSafeInteger(job.id) && job.id > 0 &&
+    job.run_id === Number(transaction.runId) && job.run_attempt === Number(transaction.runAttempt),
+  'Abandonment protected job evidence is missing or mismatched');
+  const approvals = await api(`actions/runs/${transaction.runId}/approvals`);
+  requireThat(approvals?.total_count === approvals.approvals?.length && approvals.approvals.length > 0,
+    'Abandonment environment approval evidence is missing or truncated');
+  let configuredOwners;
+  try {
+    configuredOwners = ownerApprovedReviewers === undefined || ownerApprovedReviewers === ''
+      ? [] : JSON.parse(ownerApprovedReviewers);
+  } catch {
+    throw new Error('Abandonment owner approver allowlist is unavailable');
+  }
+  const allowed = new Set(['jpapiez', ...(Array.isArray(configuredOwners) ? configuredOwners : [])]
+    .filter(value => typeof value === 'string').map(value => value.toLowerCase()));
+  requireThat(allowed.size > 0, 'Abandonment owner approver allowlist is unavailable');
+  const environment = 'release-insider';
+  const approval = approvals.approvals
+    .filter(candidate => candidate?.state === 'approved' &&
+      Array.isArray(candidate.environments) && candidate.environments.length === 1 &&
+      candidate.environments[0]?.name === environment &&
+      allowed.has(candidate.user?.login?.toLowerCase()))
+    .sort((left, right) => String(right.submitted_at).localeCompare(String(left.submitted_at)))[0];
+  requireThat(approval, 'Abandonment requires approval from an allowed owner');
+  const approvedAt = parseGithubTimestamp(approval.submitted_at, 'abandonment environment approval timestamp');
+  requireThat(Number.isFinite(now) && approvedAt <= now, 'Abandonment approval is future-dated');
+  return {
+    runId: transaction.runId, runAttempt: transaction.runAttempt, jobId: String(job.id),
+    environment, targetReservation, approvedAt: new Date(approvedAt).toISOString(),
+  };
+}
 export async function ensureSourceTag(api, store, record, transact) {
   validateRecord(record);
   const preflight = state => {

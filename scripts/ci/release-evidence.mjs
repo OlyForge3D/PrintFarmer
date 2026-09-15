@@ -119,15 +119,14 @@ function validateBundleTrust(bundle, trust, verification = []) {
   requireThat(Number.isFinite(createdAt) && Number.isFinite(trustedAt) && createdAt <= trustedAt &&
     !policy.revokedReleaseIds.includes(releaseId),
     'Invalid or revoked release evidence time');
-  const entries = Array.isArray(bundle) ? bundle : [bundle];
-  requireThat(entries.length > 0 && (verification.length === 0 || verification.length === entries.length),
-    'Cosign verification trust entries are missing or mismatched');
-  for (const [index, entry] of entries.entries()) {
-    const optional = entry?.optional ?? verification[index]?.optional;
-    if (!nativeBundle(entry) && !optional) continue;
-    requireThat(typeof optional?.Subject === 'string' && typeof optional.Issuer === 'string' &&
-      typeof optional.certificate === 'string' && optional.Bundle?.Payload &&
-      Number.isSafeInteger(optional.Bundle.Payload.integratedTime),
+    const entries = Array.isArray(bundle) ? bundle : [bundle];
+    requireThat(entries.length > 0 && (verification.length === 0 || verification.length === entries.length),
+      'Cosign verification trust entries are missing or mismatched');
+    for (const [index, entry] of entries.entries()) {
+      const optional = verification.length > 0 ? verification[index]?.optional : entry?.optional;
+      requireThat(typeof optional?.Subject === 'string' && typeof optional.Issuer === 'string' &&
+        typeof optional.certificate === 'string' && optional.Bundle?.Payload &&
+        Number.isSafeInteger(optional.Bundle.Payload.integratedTime),
     'Cosign verifier lacks required identity, certificate, or transparency trust material');
     if (nativeBundle(entry)) {
       requireThat(optional.Issuer === policy.issuer,

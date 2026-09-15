@@ -7,7 +7,7 @@ import {
 import {
   command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
   verifyCanonicalSource, verifyProtection,
-  verifyStableQualification, verifyReleaseChecks,
+  verifyAbandonmentApproval, verifyStableQualification, verifyReleaseChecks,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
 import { qualificationClient, verifyCanonicalReleaseEvidence } from './canonical-qualification.mjs';
@@ -65,14 +65,14 @@ export function output(name, value) {
 }
 
 export async function runReleaseControl(operation, env = process.env, verify = command) {
-  requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance', 'abandon'].includes(operation), 'Unknown release operation');
+  requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance', 'recover-abandonment', 'abandon'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
   const transaction = transactionFromEnvironment(env);
-  if (operation !== 'admit') {
+  if (['authorize', 'consume', 'preflight', 'advance'].includes(operation)) {
     requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit,
       'Release source identity does not match the pinned release transaction');
   }
-  const privileged = ['authorize', 'preflight', 'advance', 'abandon'].includes(operation);
+  const privileged = ['authorize', 'preflight', 'advance', 'recover-abandonment', 'abandon'].includes(operation);
   if (privileged) {
     requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
       'Protected publisher App token required; github.token cannot verify Administration or publish');
@@ -84,6 +84,20 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     'Consumer source identity does not match the pinned release transaction');
   }
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
+  if (operation === 'recover-abandonment') {
+    const target = env.RELEASE_ABANDONMENT_TARGET;
+    requireThat(/^[a-f0-9]{64}$/.test(target || ''), 'Immutable abandonment reservation target is missing or malformed');
+    const { state } = await store.read();
+    const reservation = state.reservations[target];
+    requireThat(reservation?.record?.allocationKey === target && reservation.record.channel === 'insider' &&
+      reservation.identitySha256 === hash(reservation.record) && !reservation.set && !reservation.abandonment,
+    'Immutable abandonment reservation is unavailable, activated, or terminal');
+    output('authorization_run_id', reservation.record.buildId);
+    output('authorization_attempt', reservation.record.buildAttempt);
+    output('source_sha', reservation.record.sourceCommit);
+    output('public_identity', JSON.stringify(publicAuthorization(reservation.record)));
+    return reservation.record;
+  }
   if (['admit', 'authorize'].includes(operation)) {
     validateApprovalMode(env.RELEASE_APPROVAL_MODE);
     if (operation === 'authorize') {
@@ -183,11 +197,13 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     output('verified_branch_head', currentBranchHead);
     output('expected_pointer', expectedPointer);
   } else if (operation === 'abandon') {
+    requireThat(env.RELEASE_ABANDONMENT_TARGET === record.allocationKey,
+      'Immutable abandonment reservation target does not match authorization');
     const protection = await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
-    const approvedAt = env.GITHUB_RUN_STARTED_AT;
-    requireThat(typeof approvedAt === 'string', 'Protected environment run approval evidence is missing');
-    const authorization = abandonmentAuthorization(record, protection, approvedAt);
+    const approval = await verifyAbandonmentApproval(api, transaction, record,
+      env.RELEASE_ABANDONMENT_TARGET, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+    const authorization = abandonmentAuthorization(record, protection, approval);
     await transact(store, async latest => abandon(latest, record, authorization, protection));
   } else if (operation === 'advance') {
     const set = readPrivateJson(privateSetPath);

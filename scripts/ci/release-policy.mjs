@@ -986,7 +986,8 @@ export function validateLedger(state, anchor) {
       'Incomplete public ledger set/hash');
     if (Object.hasOwn(reservation, 'abandonment')) {
       requireKeys(reservation.abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
-        'channel', 'identitySha256', 'ownerApprovedAt'], [], 'reservation abandonment');
+        'channel', 'identitySha256', 'approvalRunId', 'approvalRunAttempt', 'approvalJobId',
+        'approvalEnvironment', 'approvalTarget', 'ownerApprovedAt'], [], 'reservation abandonment');
       const abandonment = reservation.abandonment;
       requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
         abandonment.sourceCommit === reservation.record.sourceCommit &&
@@ -994,6 +995,11 @@ export function validateLedger(state, anchor) {
         abandonment.channel === reservation.record.channel &&
         abandonment.identitySha256 === (reservation.identitySha256 ?? hash(reservation.record)) &&
         hashPattern.test(abandonment.identitySha256) &&
+        positivePattern.test(abandonment.approvalRunId) &&
+        positivePattern.test(abandonment.approvalRunAttempt) &&
+        positivePattern.test(abandonment.approvalJobId) &&
+        abandonment.approvalEnvironment === `release-${reservation.record.channel}` &&
+        abandonment.approvalTarget === key &&
         typeof abandonment.ownerApprovedAt === 'string' &&
         Number.isFinite(Date.parse(abandonment.ownerApprovedAt)) &&
         new Date(abandonment.ownerApprovedAt).toISOString() === abandonment.ownerApprovedAt &&
@@ -1273,10 +1279,16 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   return reservation;
 }
 
-export function abandonmentAuthorization(record, protection, ownerApprovedAt, now = Date.now()) {
+export function abandonmentAuthorization(record, protection, approval, now = Date.now()) {
   validateRecord(record);
   requireThat(record.channel === 'insider', 'Only active insider reservations may be abandoned');
   verifyProtectionEvidence(protection, record.channel);
+  requireKeys(approval, ['runId', 'runAttempt', 'jobId', 'environment', 'targetReservation', 'approvedAt'], [],
+    'abandonment approval');
+  requireThat(positivePattern.test(approval.runId) && positivePattern.test(approval.runAttempt) &&
+    positivePattern.test(approval.jobId) && approval.environment === `release-${record.channel}` &&
+    approval.targetReservation === record.allocationKey, 'Abandonment approval is not bound to the release reservation');
+  const ownerApprovedAt = approval.approvedAt;
   requireThat(typeof ownerApprovedAt === 'string' && Number.isFinite(Date.parse(ownerApprovedAt)) &&
     new Date(ownerApprovedAt).toISOString() === ownerApprovedAt, 'Abandonment requires explicit owner approval');
   const approvedAt = Date.parse(ownerApprovedAt);
@@ -1288,7 +1300,9 @@ export function abandonmentAuthorization(record, protection, ownerApprovedAt, no
   'Abandonment approval is stale, future-dated, or predates authorization/protection');
   return { schema: 1, kind: 'release-reservation-abandonment', allocationKey: record.allocationKey,
     sourceCommit: record.sourceCommit, canonicalVersion: record.canonicalVersion, channel: record.channel,
-    identitySha256: hash(record), protectionDigest: protection.policyDigest, ownerApprovedAt };
+    identitySha256: hash(record), protectionDigest: protection.policyDigest,
+    approvalRunId: approval.runId, approvalRunAttempt: approval.runAttempt, approvalJobId: approval.jobId,
+    approvalEnvironment: approval.environment, approvalTarget: approval.targetReservation, ownerApprovedAt };
 }
 
 export function abandon(state, record, authorization, protection) {
@@ -1300,6 +1314,9 @@ export function abandon(state, record, authorization, protection) {
     authorization.identitySha256 === hash(record) && authorization.allocationKey === record.allocationKey &&
     authorization.sourceCommit === record.sourceCommit && authorization.canonicalVersion === record.canonicalVersion &&
     authorization.channel === record.channel && authorization.protectionDigest === protection.policyDigest &&
+    positivePattern.test(authorization.approvalRunId) && positivePattern.test(authorization.approvalRunAttempt) &&
+    positivePattern.test(authorization.approvalJobId) && authorization.approvalEnvironment === `release-${record.channel}` &&
+    authorization.approvalTarget === record.allocationKey &&
     typeof authorization.ownerApprovedAt === 'string' && Number.isFinite(Date.parse(authorization.ownerApprovedAt)) &&
     new Date(authorization.ownerApprovedAt).toISOString() === authorization.ownerApprovedAt,
   'Abandonment authorization is not bound to the active insider reservation');
@@ -1308,7 +1325,10 @@ export function abandon(state, record, authorization, protection) {
     !reservation.abandonment, 'Reservation cannot be reactivated or abandoned twice');
   reservation.abandonment = { schema: 1, allocationKey: record.allocationKey, sourceCommit: record.sourceCommit,
     canonicalVersion: record.canonicalVersion, channel: record.channel,
-    identitySha256: reservation.identitySha256 ?? hash(record), ownerApprovedAt: authorization.ownerApprovedAt };
+    identitySha256: reservation.identitySha256 ?? hash(record),
+    approvalRunId: authorization.approvalRunId, approvalRunAttempt: authorization.approvalRunAttempt,
+    approvalJobId: authorization.approvalJobId, approvalEnvironment: authorization.approvalEnvironment,
+    approvalTarget: authorization.approvalTarget, ownerApprovedAt: authorization.ownerApprovedAt };
   return reservation.abandonment;
 }
 

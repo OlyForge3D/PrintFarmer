@@ -41,8 +41,27 @@ const newerSha = 'b'.repeat(40);
 const anchor = 'c'.repeat(40);
 const workflowControlSha = '9'.repeat(40);
 const currentCanonicalSha = '8'.repeat(40);
-const created = '2026-09-12T20:00:00.000Z';
+const created = '2026-09-14T22:40:00.000Z';
 const releaseNotesHash = 'd'.repeat(64);
+const cryptoCertificate = `-----BEGIN CERTIFICATE-----
+MIIDITCCAgmgAwIBAgIUJgCnA8pimf4TtHhn54DkRCgUikowDQYJKoZIhvcNAQEL
+BQAwIDEeMBwGA1UEAwwVcmVsZWFzZS1ldmlkZW5jZS10ZXN0MB4XDTI2MDkxNDIy
+NDc0NFoXDTI3MDkxNDIyNDc0NFowIDEeMBwGA1UEAwwVcmVsZWFzZS1ldmlkZW5j
+ZS10ZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtZ3XWRa4DU9i
+CHWD3tUhj5Kf2dpXE3+luZikC1/FQti6ZrxeT+6nLihTCdroFpNoXQrT2O3neUFI
+37OOiygQ6Cd8WSRJ+CLt6VIUuTu6ntWbLR3OHEv2wBCAVsL1HWoiUoAuKoOVZEHq
+HwHU+z6BCw/1MhbGDdzgc6tyirAN1WB5NYB8HXjnpfY4DLIvjYr7bLhn2ep5r1QH
+mtM4pN67lgpEYxc6JLMvu5V+Dg3GU6VEX34OGXdmBT3xEQ7T54XJtFgU05OtRHpm
+ME8rqz7U2uGWlPwPKmLin/Hb+o05UskhCNM5x/l/HnD0ggBVPFnhCNaDO18QJs0m
+7CbykcQh+wIDAQABo1MwUTAdBgNVHQ4EFgQUn1N4X6p6NnttpzKqzDvNu/lbyDww
+HwYDVR0jBBgwFoAUn1N4X6p6NnttpzKqzDvNu/lbyDwwDwYDVR0TAQH/BAUwAwEB
+/zANBgkqhkiG9w0BAQsFAAOCAQEAq2mAhPcSnYNlCNYPX/iCn0GSg32RwYUdi2Ap
+2L0lmztFLny0pKiYcwKwIK35+pYSVOr28vRj16SBmZFPdAjUGKnyMVbOKGR6Zggj
+v7m19BoUidStAqQ32L6VT1Qr9CpbqFERXUEzn6AfnP0QoPo6WctYia+sa+FjYlk9
+rQlctU3q0xs/y0h/ZtBMtiCSqoWd/pSr21YrXPLUFQPPKpE1eYfh1Zoc4sWY5xMF
+xhbqlANI3r0ql7hOlLRKsnswTHq4h1xJ/81+BTahCkwGIbvBnO2ddVdZfNeAkNS4
+JvcWVV+jlxUIUkvyi8jjlUzq/l/os6B8crubKZ9z++J4rrlAoA==
+-----END CERTIFICATE-----`;
 const context = (overrides = {}) => ({
   repository: 'OlyForge3D/PrintFarmer', event: 'workflow_dispatch',
   ref: 'refs/heads/development', eventSha: sha,
@@ -58,7 +77,9 @@ const releaseMetadataFixture = version => {
 const cryptoEvidenceFixture = set => {
   const subject = digest => {
     const predicate = JSON.stringify({ SPDXID: 'SPDXRef-DOCUMENT' });
-    const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } } }]);
+    const optional = { Subject: publisherWorkflowIdentity, Issuer: 'https://token.actions.githubusercontent.com',
+      certificate: cryptoCertificate, Bundle: { Payload: { integratedTime: 1789426200 } } };
+    const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } }, optional }]);
     const attestationBytes = JSON.stringify([{ payload: Buffer.from(JSON.stringify({
       subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
     })).toString('base64') }]);
@@ -81,7 +102,7 @@ const cryptoEvidenceFixture = set => {
       ])),
     },
   ]));
-  const verificationTime = '2099-01-01T00:00:00.000Z';
+  const verificationTime = '2026-09-14T23:00:00.000Z';
   const createdTime = set.identity.buildTime ?? set.identity.created;
   return { schema: 1, createdTime, verificationTime, services, sha256: hash({
     schema: 1, createdTime, verificationTime, services,
@@ -285,6 +306,10 @@ function fixtureProtection(channel) {
 }
 const reserve = (ledger, admitted, timestamp, protection = fixtureProtection(admitted.channel), qualification) =>
   reserveRelease(ledger, admitted, timestamp, protection, qualification);
+const abandonmentApproval = (identity, overrides = {}) => ({
+  runId: '42', runAttempt: '1', jobId: '900', environment: 'release-insider',
+  targetReservation: identity.allocationKey, approvedAt: '2026-09-14T22:41:00.000Z', ...overrides,
+});
 const admission = (overrides = {}) => admit(context(overrides), overrides.eventSha || sha, 'v1.2.3\n', '1.2.2');
 const stableAdmission = (baseVersion = '1.2.3', overrides = {}) => admit(context({
   channel: 'stable', ...overrides,
@@ -657,10 +682,11 @@ test('serialized insider allocation rejects overlapping active reservations and 
 test('owner-approved terminal abandonment projects only safe binding fields and consumes identity and sequence', () => {
   const ledger = state();
   const first = record(ledger);
-  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z', Date.parse('2026-09-12T20:05:00.000Z'));
+  const approval = abandonmentAuthorization(first, first.protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
   const terminal = abandon(ledger, first, approval, first.protection);
   assert.deepEqual(Object.keys(terminal).sort(), [
-    'allocationKey', 'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
+    'allocationKey', 'approvalEnvironment', 'approvalJobId', 'approvalRunAttempt', 'approvalRunId', 'approvalTarget',
+    'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
   ]);
   const projected = publicLedger(ledger);
   const persisted = projected.reservations[first.allocationKey].abandonment;
@@ -676,7 +702,7 @@ test('owner-approved terminal abandonment projects only safe binding fields and 
 test('abandonment rejects forged bindings, duplicate terminal transitions, and activated reservations', () => {
   const ledger = state();
   const first = record(ledger);
-  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z', Date.parse('2026-09-12T20:05:00.000Z'));
+  const approval = abandonmentAuthorization(first, first.protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
   for (const mutate of [
     value => { value.allocationKey = 'f'.repeat(64); },
     value => { value.sourceCommit = newerSha; },
@@ -696,7 +722,7 @@ test('abandonment rejects forged bindings, duplicate terminal transitions, and a
   const activated = record(activatedLedger);
   advance(activatedLedger, activated, completeSet(activated), sha, '');
   assert.throws(() => abandon(activatedLedger, activated,
-    abandonmentAuthorization(activated, activated.protection, '2026-09-12T20:01:00.000Z', Date.parse('2026-09-12T20:05:00.000Z')), activated.protection),
+    abandonmentAuthorization(activated, activated.protection, abandonmentApproval(activated), Date.parse('2026-09-14T22:45:00.000Z')), activated.protection),
   /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
 });
 
@@ -2725,19 +2751,42 @@ test('protected release-control abandonment uses App policy verification and Git
   mkdirSync(root, { recursive: true });
   process.chdir(root);
   try {
-    const fixture = authorizationFixture();
+    const fixture = authorizationFixture(state(), { includeAbandonmentProof: true });
     globalThis.fetch = fixture.fetch;
     const identity = await runFixtureControl('authorize', fixture);
     fixture.calls.length = 0;
+    for (const [name, mutate] of [
+      ['spoofed approver', value => { value.user.login = 'outsider'; }],
+      ['wrong environment', value => { value.environments[0].name = 'release-stable'; }],
+      ['missing approval', value => { value.state = 'rejected'; }],
+    ]) {
+      const original = structuredClone(fixture.approvalEvidence);
+      mutate(fixture.approvalEvidence);
+      await assert.rejects(runReleaseControl('abandon', {
+        ...fixture.env,
+        RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+        RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+      }, () => {}), /Abandonment requires approval from an allowed owner/, name);
+      Object.assign(fixture.approvalEvidence, original);
+    }
+    const wrongRun = JSON.parse(fixture.env.RELEASE_TRANSACTION);
+    wrongRun.runId = '43';
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_TRANSACTION: JSON.stringify(wrongRun),
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /Unexpected API host\/path|Unexpected request|workflow run evidence/, 'wrong approval run');
     await runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
-      GITHUB_RUN_STARTED_AT: new Date().toISOString(),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
     }, () => {});
     const persisted = (await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read()).state;
     const terminal = persisted.reservations[identity.allocationKey].abandonment;
     assert.deepEqual(Object.keys(terminal).sort(), [
-      'allocationKey', 'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
+      'allocationKey', 'approvalEnvironment', 'approvalJobId', 'approvalRunAttempt', 'approvalRunId', 'approvalTarget',
+    'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
     ]);
     assert.ok(fixture.calls.some(call => call.admin && call.publisher));
     assert.ok(fixture.calls.some(call => call.method === 'PATCH' && call.publisher));
@@ -2745,7 +2794,7 @@ test('protected release-control abandonment uses App policy verification and Git
     await assert.rejects(runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
-      GITHUB_RUN_STARTED_AT: new Date().toISOString(),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
     }, () => {}), /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
     const subsequent = reserve(persisted, admission({ buildId: '43' }), created).record;
     assert.equal(subsequent.sequence, '2');
@@ -2966,6 +3015,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
     RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     RELEASE_ADMITTED_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
+    RELEASE_OWNER_APPROVED_REVIEWERS: '[\"jpapiez\"]',
     GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
     GITHUB_REF: selected.ref, GITHUB_SHA: workflowCommit,
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: workflowCommit,
@@ -2993,6 +3043,12 @@ function authorizationFixture(initial = state(), settings = {}) {
   const qualificationStartedAt = new Date(Date.now() - 4 * 60_000).toISOString();
   const qualificationCompletedAt = new Date(Date.now() - 2 * 60_000).toISOString();
   const qualificationRunUrl = `https://github.com/${selected.repository}/actions/runs/42`;
+  const approvalEvidence = settings.approvalEvidence ?? {
+    state: 'approved', user: { login: 'jpapiez' }, submitted_at: new Date().toISOString(),
+    environments: [{ name: 'release-insider' }],
+  };
+  const abandonmentJob = { id: 900, name: 'Abandon immutable release reservation', run_id: 42,
+    run_attempt: 1, status: 'in_progress', conclusion: undefined };
   const transactionJobs = qualificationJobs.map((name, index) => ({
     id: 1000 + index,
     name: `${qualificationJobNamespace} / ${name}`,
@@ -3008,7 +3064,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     html_url: `${qualificationRunUrl}/job/${1000 + index}`,
   }));
   return {
-    env, calls, ledgerWrites, environment, branchRules,
+    env, calls, ledgerWrites, environment, branchRules, approvalEvidence,
     deleteTag() { tag = undefined; },
     setCanonicalHead(value) { canonicalHead = value; },
     setCanonicalComparison(value) { canonicalComparison = value; },
@@ -3069,7 +3125,12 @@ function authorizationFixture(initial = state(), settings = {}) {
         });
       }
       if (endpoint === 'actions/runs/42/attempts/1/jobs?per_page=100') {
-        return response({ total_count: transactionJobs.length, jobs: transactionJobs });
+        const jobs = settings.includeAbandonmentProof ? [...transactionJobs, abandonmentJob] : transactionJobs;
+        return response({ total_count: jobs.length, jobs });
+      }
+      if (endpoint === 'actions/runs/42/approvals') {
+        const approvals = settings.includeAbandonmentProof ? [approvalEvidence] : [];
+        return response({ total_count: approvals.length, approvals });
       }
       if (workflowCommit !== sourceCommit &&
         endpoint.startsWith(`commits/${workflowCommit}/check-runs`)) {

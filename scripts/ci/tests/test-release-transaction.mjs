@@ -312,14 +312,14 @@ test('qualification writer rejects oversized network evidence before writing', a
 
 test('single authority has direct dependencies, one approval, and no alternate ceremony', () => {
   const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha']);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha', 'operation', 'reservation_target']);
   assert.deepEqual(workflow.jobs.publish.needs,
     ['admit', 'qualification', 'collect-qualification']);
   assert.equal(workflow.jobs.authorize, undefined);
   assert.deepEqual(Object.keys(workflow.jobs),
     ['schedule-insider', 'admit', 'qualification', 'collect-qualification', 'publish', 'summary']);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');
-  assert.deepEqual(Object.keys(workflow.jobs.publish.with), ['transaction']);
+  assert.deepEqual(Object.keys(workflow.jobs.publish.with), ['transaction', 'operation', 'reservation_target']);
   assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
   assert.match(JSON.stringify(workflow.jobs['schedule-insider']), /--ref development/);
   assert.doesNotMatch(JSON.stringify(workflow.jobs['schedule-insider']), /mode=/);
@@ -338,7 +338,7 @@ test('legacy qualifier and recorder remain reachable without an alternate releas
 
 test('publisher has exactly one protected deployment containing every credential and mutation', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
-  assert.deepEqual(Object.keys(publisher.on.workflow_call.inputs), ['transaction']);
+  assert.deepEqual(Object.keys(publisher.on.workflow_call.inputs), ['transaction', 'operation', 'reservation_target']);
   assert.deepEqual(Object.keys(publisher.jobs), ['publish']);
   const environments = Object.values(publisher.jobs).filter(job => job.environment).map(job => job.environment);
   assert.deepEqual(environments, [
@@ -350,8 +350,10 @@ test('publisher has exactly one protected deployment containing every credential
     '${{ fromJSON(inputs.transaction).sourceCommit }}');
   const job = JSON.stringify(publisher.jobs.publish);
   assert.doesNotMatch(job, /inputs\.(?:channel|source_sha|approval_mode)/);
+  assert.match(job, /inputs\.operation/);
+  assert.match(job, /inputs\.reservation_target/);
   for (const value of job.matchAll(/"RELEASE_SOURCE_COMMIT":"([^"]+)"/g)) {
-    assert.equal(value[1], '${{ fromJSON(inputs.transaction).sourceCommit }}');
+    assert.ok(['${{ fromJSON(inputs.transaction).sourceCommit }}', '${{ steps.recover_abandonment.outputs.source_sha }}'].includes(value[1]));
   }
   assert.match(job, /RELEASE_PUBLISHER_PRIVATE_KEY/);
   assert.match(job, /RELEASE_REGISTRY_TOKEN/);
