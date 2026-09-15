@@ -339,6 +339,10 @@ async function mutateLedger(mutator, options = {}) {
         !ledger.jobs || typeof ledger.jobs !== 'object' || Array.isArray(ledger.jobs)) {
       throw new RalphMacSshError('Admission ledger has an invalid schema.', 'CORRUPT_LEDGER');
     }
+    if (options.expectedGeneration !== undefined &&
+        (!Number.isSafeInteger(options.expectedGeneration) || options.expectedGeneration !== ledger.generation)) {
+      throw new RalphMacSshError('Ledger changed since the evidence snapshot; refresh before accounting.', 'STALE_LEDGER');
+    }
     const result = await mutator(ledger);
     ledger.generation += 1;
     const temporary = await open(temp, 'wx');
@@ -473,9 +477,9 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
   }, options);
 }
 
-export async function accountLocalSession({ job, sessionEvidence }, options = {}) {
+export async function accountLocalSession({ job, sessionEvidence, expectedGeneration }, options = {}) {
   safeJson(sessionEvidence, 'Existing live session evidence');
-  return reserveJob({ job, mode: 'local', sessionEvidence }, options);
+  return reserveJob({ job, mode: 'local', sessionEvidence }, { ...options, expectedGeneration });
 }
 
 export async function reserveLocalJob({ job, eligibility, now = new Date().toISOString(), controllerPid = process.pid }, options = {}) {

@@ -11,7 +11,8 @@ const commands = Object.assign(Object.create(null), {
     }
     return reserveLocalJob({ job, eligibility, controllerPid });
   },
-  'account-local-session': ({ job, sessionEvidence }) => accountLocalSession({ job, sessionEvidence }),
+  'account-local-session': ({ job, sessionEvidence, expectedGeneration }) =>
+    accountLocalSession({ job, sessionEvidence, expectedGeneration }),
   'acknowledge-local': ({ jobId, sessionId, kickoffVerified, kickoffRetried }) =>
     acknowledgeLocalJob(jobId, sessionId, { kickoffVerified, kickoffRetried: kickoffRetried ?? false }),
   'fail-local-kickoff': ({ jobId, sessionId, controllerPid, kickoffUnverified }) =>

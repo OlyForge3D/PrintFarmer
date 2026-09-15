@@ -229,7 +229,14 @@ test('resumed terminal handoff uses a new job/fence and preserves its terminal a
   const evidence = {
     ...sessionEvidence('existing-session'), previousJobId: terminal.jobId, resumedAfterTerminal: true,
   };
-  const resumed = await accountLocalSession({ job: job('resumed'), sessionEvidence: evidence }, options());
+  const generation = (await readLedger()).generation;
+  await assert.rejects(() => accountLocalSession({
+    job: job('resumed'), sessionEvidence: evidence, expectedGeneration: generation - 1,
+  }, options()), (error) => error.code === 'STALE_LEDGER');
+  assert.equal((await readLedger()).generation, generation);
+  const resumed = await accountLocalSession({
+    job: job('resumed'), sessionEvidence: evidence, expectedGeneration: generation,
+  }, options());
   assert.equal(resumed.state, 'accepted');
   assert.notEqual(resumed.fence, terminal.fence);
   assert.deepEqual((await readLedger()).jobs[terminal.jobId], terminal);

@@ -135,6 +135,8 @@ and session identity, not issue title. Idle alone is not absent or terminal. Cou
 whose old ledger entry is terminal; never resurrect that completed entry or ignore the session.
 
 Account an existing local handoff using `account-local-session` with `{"job":...,"sessionEvidence":...}`.
+For a coordinated repair, also pass `expectedGeneration` from the freshly inspected ledger:
+the locked write rejects changed generations with `STALE_LEDGER`; refresh all evidence before retrying.
 This does not spawn, claim an issue, or require new-issue eligibility. Supply a new stable job ID,
 the observed repository/issue/owner/base and current non-secret work criteria. Evidence contains
 `repository`, `issue`, `sessionId`, `state:"active"`, `observedAt` and `source` (the exact app
