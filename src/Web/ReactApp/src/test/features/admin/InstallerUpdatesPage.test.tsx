@@ -26,7 +26,10 @@ function renderPage() {
 }
 
 describe('InstallerUpdatesPage reconnect reconciliation', () => {
-  beforeEach(() => { vi.clearAllMocks(); });
+  beforeEach(() => {
+    vi.clearAllMocks();
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
+  });
   it('makes exactly one explicit request for one online event', async () => {
     getSystemInfo.mockResolvedValue({ inventory: inventory() });
     renderPage();
@@ -35,6 +38,27 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
 
     await act(async () => { window.dispatchEvent(new Event('online')); });
     await waitFor(() => expect(getSystemInfo).toHaveBeenCalledTimes(2));
+    // Flush query notifications too: automatic reconnect is disabled for this query.
+    await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
+    expect(getSystemInfo).toHaveBeenCalledTimes(2);
+  });
+
+  it('shows an explicit unknown state for an initially offline paused query', async () => {
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    renderPage();
+
+    expect(await screen.findByRole('status', { name: 'Update observation unknown' })).toHaveTextContent(/reconnect and retry/);
+    expect(screen.getByRole('button', { name: 'Retry installation observation' })).toBeVisible();
+  });
+
+  it('keeps the observation unknown when an explicit retry fails', async () => {
+    getSystemInfo.mockRejectedValue(new Error('network unavailable'));
+    renderPage();
+
+    await screen.findByRole('button', { name: 'Retry installation observation' });
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Retry installation observation' }));
+    expect(await screen.findByRole('status', { name: 'Update observation unknown' })).toHaveTextContent(/snapshot is unknown/);
+    expect(getSystemInfo.mock.calls.length).toBeGreaterThanOrEqual(2);
   });
 
   it('keeps a failed reconciliation unknown and allows a successful retry', async () => {

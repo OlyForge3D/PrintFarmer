@@ -24,6 +24,8 @@ export function InstallerUpdatesPage() {
     queryFn: () => apiClient.getSystemInfo(),
     enabled: canView,
     refetchOnWindowFocus: true,
+    // This page owns reconnect reconciliation through its single explicit listener.
+    refetchOnReconnect: false,
   });
   const refetch = useCallback(async () => {
     try {
@@ -54,19 +56,21 @@ export function InstallerUpdatesPage() {
         installation updates.
       </Alert>
     );
-  if (isLoading) return <p role="status">Loading installation observation…</p>;
-  if (isError)
+  // A paused initial query has no observation. Do not leave an offline admin at
+  // a loading message that cannot resolve until the browser reconnects.
+  if (isError || (observation === "unknown" && !data))
     return (
-      <div className="space-y-2">
+      <div className="space-y-2" role="status" aria-live="polite" aria-label="Update observation unknown">
         <Alert type="warning" title="Update observation unknown">
-          The installation snapshot could not be loaded. No update result is
-          inferred; reconnect and retry to reconcile.
+          The installation snapshot is unknown. No update result is inferred;
+          reconnect and retry to reconcile the host observation.
         </Alert>
         <Button type="button" variant="secondary" onClick={refetch}>
           Retry installation observation
         </Button>
       </div>
     );
+  if (isLoading) return <p role="status">Loading installation observation...</p>;
 
   // `updates:execute` has no backend authorization contract yet. A safe admin/view check
   // may display this read-only surface, but it must not imply a runtime permission grant.

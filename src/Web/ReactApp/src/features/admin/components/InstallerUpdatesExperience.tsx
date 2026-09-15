@@ -1,4 +1,4 @@
-import { Alert, Button, Card, Checkbox, Input } from "@/common/components/ui";
+import { Alert, Button, Card, Input } from "@/common/components/ui";
 import type { ServiceInventory } from "@/types/api";
 
 const INSIDER_WARNING =
@@ -20,24 +20,34 @@ function text(value: string | null | undefined) {
 
 type ConnectionObservation = "connected" | "unknown";
 
-type ObservedDeploymentFingerprint = {
-  releaseId: string | null;
-  sourceCommit: string | null;
-  manifestDigest: string | null;
-  platform: string | null;
-  platformDigest: string | null;
-  indexDigest: string | null;
+type CanonicalReleaseSource = {
+  releaseId: string;
+  sourceCommit: string;
 };
 
-function observedDeploymentFingerprint(service: ServiceInventory["services"][number]): ObservedDeploymentFingerprint {
-  return {
-    releaseId: service.identity?.releaseId ?? null,
-    sourceCommit: service.identity?.sourceCommit ?? null,
-    manifestDigest: service.manifestDigest,
-    platform: service.platform,
-    platformDigest: service.platformDigest,
-    indexDigest: service.indexDigest,
-  };
+type PlatformDigestEvidence = {
+  manifestDigest: string;
+  platformDigest: string;
+  indexDigest: string;
+};
+
+function canonicalReleaseSource(
+  service: ServiceInventory["services"][number],
+): CanonicalReleaseSource | null {
+  const releaseId = service.identity?.releaseId;
+  const sourceCommit = service.identity?.sourceCommit;
+  return releaseId !== null && releaseId !== undefined && sourceCommit !== null && sourceCommit !== undefined
+    ? { releaseId, sourceCommit }
+    : null;
+}
+
+function platformDigestEvidence(
+  service: ServiceInventory["services"][number],
+): PlatformDigestEvidence | null {
+  const { manifestDigest, platformDigest, indexDigest } = service;
+  return service.platform !== null && manifestDigest !== null && platformDigest !== null && indexDigest !== null
+    ? { manifestDigest, platformDigest, indexDigest }
+    : null;
 }
 
 function verificationQuality(
@@ -57,21 +67,41 @@ function verificationQuality(
 
 function observedIdentityDetails(inventory: ServiceInventory | null | undefined) {
   const services = inventory?.services ?? [];
-  const fingerprintGroups = new Map<string, Set<string>>();
+  const canonicalSources = new Map<string, Set<string>>();
+  const platformDigests = new Map<string, Set<string>>();
+  let incompleteEvidence = false;
 
   for (const service of services) {
-    // Platform digests are only comparable between like-for-like replicas.
-    const group = `${service.serviceId}\u0000${service.platform ?? UNKNOWN}`;
-    const fingerprint = observedDeploymentFingerprint(service);
-    const hasFingerprint = Object.values(fingerprint).some((value) => value !== null);
-    if (hasFingerprint) {
-      const fingerprints = fingerprintGroups.get(group) ?? new Set<string>();
-      fingerprints.add(JSON.stringify(fingerprint));
-      fingerprintGroups.set(group, fingerprints);
+    // Release/source identity is comparable across every replica platform.
+    const canonical = canonicalReleaseSource(service);
+    if (canonical) {
+      const sources = canonicalSources.get(service.serviceId) ?? new Set<string>();
+      sources.add(JSON.stringify(canonical));
+      canonicalSources.set(service.serviceId, sources);
+    } else {
+      incompleteEvidence = true;
+    }
+
+    // Digest evidence is platform-specific, so compare it only for like platforms.
+    const digestEvidence = platformDigestEvidence(service);
+    if (digestEvidence) {
+      const platform = `${service.serviceId}\u0000${service.platform!}`;
+      const fingerprints = platformDigests.get(platform) ?? new Set<string>();
+      fingerprints.add(JSON.stringify(digestEvidence));
+      platformDigests.set(platform, fingerprints);
+    } else {
+      incompleteEvidence = true;
     }
   }
 
-  const hasConflict = [...fingerprintGroups.values()].some((fingerprints) => fingerprints.size > 1);
+  const hasCanonicalConflict = [...canonicalSources.values()].some(
+    (sources) => sources.size > 1,
+  );
+  const hasPlatformDigestConflict = [...platformDigests.values()].some(
+    (fingerprints) => fingerprints.size > 1,
+  );
+  const hasConflict = hasCanonicalConflict || hasPlatformDigestConflict;
+
   return (
     <section aria-labelledby="observed-identities-heading" className="space-y-2">
       <h3 id="observed-identities-heading" className="font-medium">
@@ -83,7 +113,15 @@ function observedIdentityDetails(inventory: ServiceInventory | null | undefined)
         <>
           {hasConflict && (
             <Alert type="warning" title="Conflicting observed deployments">
-              Like-for-like observed replicas report different deployment fingerprints. This is a conflicting observed deployment state, not a proposed target.
+              {hasCanonicalConflict
+                ? "Observed replicas report different canonical release or source identities."
+                : "Like-for-like observed replicas report different platform digest evidence."}{" "}
+              This is a conflicting observed deployment state, not a proposed target.
+            </Alert>
+          )}
+          {incompleteEvidence && (
+            <Alert type="info" title="Incomplete comparison evidence">
+              Some replica evidence is incomplete or not comparable. It is not reported as a conflict.
             </Alert>
           )}
           <div className="space-y-2">
@@ -128,16 +166,16 @@ function observedIdentityDetails(inventory: ServiceInventory | null | undefined)
               );
             })}
           </div>
+          <h3 className="font-medium">Replica observations</h3>
+          <ul className="space-y-1">
+            {services.map((service, index) => (
+              <li key={`${service.serviceId}-${service.instanceId ?? index}`}>
+                {service.component}{service.instanceId ? ` (${service.instanceId})` : ""}: {service.observationState}; observed {text(service.observedAt)}; source {service.source}
+              </li>
+            ))}
+          </ul>
         </>
       )}
-      <h3 className="font-medium">Replica observations</h3>
-      <ul className="space-y-1">
-        {services.map((service, index) => (
-          <li key={`${service.serviceId}-${service.instanceId ?? index}`}>
-            {service.component}{service.instanceId ? ` (${service.instanceId})` : ""}: {service.observationState}; observed {text(service.observedAt)}; source {service.source}
-          </li>
-        ))}
-      </ul>
     </section>
   );
 }
@@ -214,7 +252,7 @@ export function InstallerUpdatesExperience({
             </div>
             <div>
               <dt>Proposed target train</dt>
-              <dd>{inventory?.targetChannel ?? UNKNOWN}</dd>
+              <dd>{UNKNOWN} - target-release contract unavailable</dd>
             </div>
           </dl>
           {observedIdentityDetails(inventory)}
@@ -307,18 +345,29 @@ export function InstallerUpdatesExperience({
             Auto-update is off by default. Disabling it stops new work; an
             active operation stops only at safe checkpoints.
           </p>
-          <fieldset disabled aria-describedby="auto-update-reason">
+          <fieldset aria-describedby="auto-update-reason">
             <legend className="font-medium">
               Administrator standing permission
             </legend>
-            <label className="mt-2 flex gap-2">
-              <Checkbox aria-describedby="auto-update-reason" /> Enable
-              Auto-update for the selected train
-            </label>
+            <Button
+              className="mt-2 justify-start"
+              role="checkbox"
+              aria-checked={false}
+              aria-describedby="auto-update-reason"
+              disabled
+              explainedDisabled
+              title={AUTO_DISABLED_REASON}
+              type="button"
+              variant="unstyled"
+            >
+              Enable Auto-update for the selected train (off)
+            </Button>
             <label className="mt-2 block">
               Maintenance window{" "}
               <Input
                 aria-describedby="auto-update-reason"
+                aria-disabled="true"
+                title={AUTO_DISABLED_REASON}
                 className="ml-2"
                 type="text"
                 value="Not configured"
@@ -349,12 +398,9 @@ export function InstallerUpdatesExperience({
         </Card.Header>
         <Card.Body>
           <p>
-            Durable update operation records are unavailable pending the
-            read-only contract. When the contract is available, this section
-            will show accepted, skipped, deferred, failed, completed, recovered,
-            and NeedsOperator records with timestamp, reason, actor, immutable
-            prior/target/observed identity, manifest digest, policy revision,
-            and recovery result.
+            No durable update operation history is reported by this service
+            inventory. Operation records and recovery results require a separate
+            trusted runtime contract and are not inferred here.
           </p>
         </Card.Body>
       </Card>

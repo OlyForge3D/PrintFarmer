@@ -2,7 +2,7 @@ import { render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it } from 'vitest';
 import { InstallerUpdatesExperience } from '@/features/admin/components/InstallerUpdatesExperience';
-import { blockedReadinessInventory, conflictingReplicaInventory, identity, inventory, replica } from '@/test/features/system/serviceInventoryFixture';
+import { blockedReadinessInventory, conflictingReplicaInventory, digest, identity, inventory, replica } from '@/test/features/system/serviceInventoryFixture';
 
 describe('InstallerUpdatesExperience', () => {
   it('keeps execution inaccessible to view-only users and explains the security prerequisites', async () => {
@@ -34,6 +34,8 @@ describe('InstallerUpdatesExperience', () => {
     render(<InstallerUpdatesExperience inventory={inventory({ selectedChannel: 'insider', observedChannel: 'stable', targetChannel: 'stable', eligibility: 'Blocked', compatibilityState: 'MixedChannel', services: [replica({ identity })] })} observation="connected" />);
     expect(screen.getByText('Insider updates may arrive more frequently and have reduced stability compared with stable releases.')).toBeVisible();
     expect(screen.getByText(/Selected train/).parentElement).toHaveTextContent('insider');
+    expect(screen.getByText(/Proposed target train/).parentElement).toHaveTextContent('Unknown - target-release contract unavailable');
+    expect(screen.getByText(/Proposed target train/).parentElement).not.toHaveTextContent('stable');
     expect(screen.getByText(/Proposed target release identity: Unknown/)).toBeVisible();
     const observedReplicaSummary = screen.getByLabelText(
       'api (replica-a): insider:1.2.3-insider.10',
@@ -74,15 +76,35 @@ describe('InstallerUpdatesExperience', () => {
     expect(within(details).getByText('Platform digest').parentElement).toHaveTextContent(platformDigest);
   });
 
+  it('compares canonical release/source identity across platforms but treats incomplete evidence as not comparable', () => {
+    render(<InstallerUpdatesExperience inventory={inventory({ services: [
+      replica({ identity, platform: 'linux/amd64', manifestDigest: digest, platformDigest: digest, indexDigest: digest }),
+      replica({ instanceId: 'replica-b', identity: { ...identity, sourceCommit: 'f'.repeat(40) }, platform: 'linux/arm64', manifestDigest: `sha256:${'d'.repeat(64)}`, platformDigest: `sha256:${'e'.repeat(64)}`, indexDigest: digest }),
+      replica({ instanceId: 'replica-c', identity: null, platform: null }),
+    ] })} observation="connected" />);
+
+    expect(screen.getByText(/different canonical release or source identities/)).toBeVisible();
+    expect(screen.getByText('Incomplete comparison evidence')).toBeVisible();
+    expect(screen.getByText(/not reported as a conflict/)).toBeVisible();
+  });
+
+  it('does not render an empty replica observations heading or list', () => {
+    render(<InstallerUpdatesExperience inventory={inventory({ services: [] })} observation="connected" />);
+    expect(screen.queryByText('Replica observations')).not.toBeInTheDocument();
+    expect(screen.queryByRole('list')).not.toBeInTheDocument();
+  });
+
   it('uses named status and explained-disabled controls for keyboard and screen-reader users', async () => {
     const user = userEvent.setup();
     render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" />);
     await user.tab();
     expect(screen.getByRole('button', { name: 'Update now' })).toHaveFocus();
     expect(screen.queryByRole('status', { name: '' })).not.toBeInTheDocument();
-    expect(screen.getByRole('checkbox')).toHaveAttribute('aria-describedby', 'auto-update-reason');
+    const autoUpdate = screen.getByRole('checkbox', { name: /Enable auto-update for the selected train/i });
+    expect(autoUpdate).toHaveAttribute('aria-describedby', 'auto-update-reason');
+    expect(autoUpdate).toHaveAttribute('aria-disabled', 'true');
+    expect(autoUpdate).not.toHaveAttribute('disabled');
   });
-
 
   it('presents blocked readiness even when eligibility is NotManaged and compatibility is Compatible', () => {
     render(<InstallerUpdatesExperience inventory={blockedReadinessInventory()} observation="connected" />);
