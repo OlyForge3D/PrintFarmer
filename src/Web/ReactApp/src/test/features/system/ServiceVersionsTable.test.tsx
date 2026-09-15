@@ -68,4 +68,12 @@ describe('ServiceVersionsTable', () => {
     expect(screen.getByText(/Frontend canonical version: 1.2.3-insider.10/)).toBeVisible();
     expect(screen.getByText(/Frontend provenance: self-report/)).toBeVisible();
   });
+
+  it.each(['MixedRelease', 'Incompatible'] as const)('renders authoritative observed conflict detail for %s', (compatibilityState) => {
+    render(<ServiceVersionsTable inventory={inventory({ compatibilityState, compatibilityReasons: ['CanonicalReleaseDivergence'] })} />);
+    expect(screen.getByText('Observed compatibility state').parentElement).toHaveTextContent(compatibilityState);
+    expect(screen.getByText('Observed compatibility reasons').parentElement).toHaveTextContent('CanonicalReleaseDivergence');
+    expect(screen.getByText('Observed compatibility conflict')).toBeVisible();
+  });
+
 });

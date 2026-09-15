@@ -20,33 +20,30 @@ function text(value: string | null | undefined) {
 
 type ConnectionObservation = "connected" | "unknown";
 
-type CanonicalReleaseSource = {
+type CanonicalReleaseApplicationSource = {
   releaseId: string;
+  applicationVersion: string;
   sourceCommit: string;
 };
 
-type PlatformDigestEvidence = {
-  manifestDigest: string;
-  platformDigest: string;
-  indexDigest: string;
-};
+type PlatformDigestName = "manifestDigest" | "platformDigest" | "indexDigest";
 
-function canonicalReleaseSource(
+const platformDigestNames: readonly PlatformDigestName[] = [
+  "manifestDigest",
+  "platformDigest",
+  "indexDigest",
+];
+
+function canonicalReleaseApplicationSource(
   service: ServiceInventory["services"][number],
-): CanonicalReleaseSource | null {
+): CanonicalReleaseApplicationSource | null {
   const releaseId = service.identity?.releaseId;
-  const sourceCommit = service.identity?.sourceCommit;
-  return releaseId !== null && releaseId !== undefined && sourceCommit !== null && sourceCommit !== undefined
-    ? { releaseId, sourceCommit }
-    : null;
-}
-
-function platformDigestEvidence(
-  service: ServiceInventory["services"][number],
-): PlatformDigestEvidence | null {
-  const { manifestDigest, platformDigest, indexDigest } = service;
-  return service.platform !== null && manifestDigest !== null && platformDigest !== null && indexDigest !== null
-    ? { manifestDigest, platformDigest, indexDigest }
+  const applicationVersion = service.applicationVersion;
+  // The canonical identity is preferred; the top-level source commit remains
+  // useful evidence when a reporter did not duplicate it in the identity.
+  const sourceCommit = service.identity?.sourceCommit ?? service.sourceCommit;
+  return releaseId != null && applicationVersion != null && sourceCommit != null
+    ? { releaseId, applicationVersion, sourceCommit }
     : null;
 }
 
@@ -67,38 +64,44 @@ function verificationQuality(
 
 function observedIdentityDetails(inventory: ServiceInventory | null | undefined) {
   const services = inventory?.services ?? [];
-  const canonicalSources = new Map<string, Set<string>>();
+  const canonicalEvidence = new Set<string>();
   const platformDigests = new Map<string, Set<string>>();
-  let incompleteEvidence = false;
+  let missingCanonicalIdentity = false;
+  let missingPlatformDigestEvidence = false;
 
   for (const service of services) {
-    // Release/source identity is comparable across every replica platform.
-    const canonical = canonicalReleaseSource(service);
+    // Coordinated services must agree on the canonical release, application,
+    // and source evidence even when they run on different platforms.
+    const canonical = canonicalReleaseApplicationSource(service);
     if (canonical) {
-      const sources = canonicalSources.get(service.serviceId) ?? new Set<string>();
-      sources.add(JSON.stringify(canonical));
-      canonicalSources.set(service.serviceId, sources);
+      canonicalEvidence.add(JSON.stringify(canonical));
     } else {
-      incompleteEvidence = true;
+      missingCanonicalIdentity = true;
     }
 
-    // Digest evidence is platform-specific, so compare it only for like platforms.
-    const digestEvidence = platformDigestEvidence(service);
-    if (digestEvidence) {
-      const platform = `${service.serviceId}\u0000${service.platform!}`;
-      const fingerprints = platformDigests.get(platform) ?? new Set<string>();
-      fingerprints.add(JSON.stringify(digestEvidence));
-      platformDigests.set(platform, fingerprints);
-    } else {
-      incompleteEvidence = true;
+    // A known digest is useful on its own. Compare each kind separately among
+    // replicas of the same service on the same platform; never require the
+    // other two digest fields before reporting a known divergence.
+    if (service.platform == null) {
+      missingPlatformDigestEvidence = true;
+      continue;
     }
+    let hasPlatformDigest = false;
+    for (const digestName of platformDigestNames) {
+      const digest = service[digestName];
+      if (digest == null) continue;
+      hasPlatformDigest = true;
+      const key = `${service.serviceId}\u0000${service.platform}\u0000${digestName}`;
+      const values = platformDigests.get(key) ?? new Set<string>();
+      values.add(digest);
+      platformDigests.set(key, values);
+    }
+    if (!hasPlatformDigest) missingPlatformDigestEvidence = true;
   }
 
-  const hasCanonicalConflict = [...canonicalSources.values()].some(
-    (sources) => sources.size > 1,
-  );
+  const hasCanonicalConflict = canonicalEvidence.size > 1;
   const hasPlatformDigestConflict = [...platformDigests.values()].some(
-    (fingerprints) => fingerprints.size > 1,
+    (digests) => digests.size > 1,
   );
   const hasConflict = hasCanonicalConflict || hasPlatformDigestConflict;
 
@@ -114,14 +117,19 @@ function observedIdentityDetails(inventory: ServiceInventory | null | undefined)
           {hasConflict && (
             <Alert type="warning" title="Conflicting observed deployments">
               {hasCanonicalConflict
-                ? "Observed replicas report different canonical release or source identities."
+                ? "Observed coordinated services report different canonical release, application, or source evidence."
                 : "Like-for-like observed replicas report different platform digest evidence."}{" "}
               This is a conflicting observed deployment state, not a proposed target.
             </Alert>
           )}
-          {incompleteEvidence && (
-            <Alert type="info" title="Incomplete comparison evidence">
-              Some replica evidence is incomplete or not comparable. It is not reported as a conflict.
+          {missingCanonicalIdentity && (
+            <Alert type="info" title="Missing canonical identity evidence">
+              Some replicas do not report the canonical release, application, and source evidence needed for comparison.
+            </Alert>
+          )}
+          {missingPlatformDigestEvidence && (
+            <Alert type="info" title="Missing platform digest evidence">
+              Some replicas do not report a platform and at least one platform digest; missing digest evidence is not reported as a conflict.
             </Alert>
           )}
           <div className="space-y-2">
@@ -138,8 +146,8 @@ function observedIdentityDetails(inventory: ServiceInventory | null | undefined)
                     <div><dt>Observed at</dt><dd>{text(service.observedAt)}</dd></div>
                     <div><dt>Observation source</dt><dd>{service.source}</dd></div>
                     <div><dt>Verification quality</dt><dd>{verificationQuality(service, inventory?.snapshotOrigin)}</dd></div>
-                    {service.verificationSource !== null && <div><dt>Verification source</dt><dd>{service.verificationSource}</dd></div>}
-                    {service.verifiedAt !== null && <div><dt>Verified at</dt><dd>{service.verifiedAt}</dd></div>}
+                    {service.verificationSource != null && <div><dt>Verification source</dt><dd>{service.verificationSource}</dd></div>}
+                    {service.verifiedAt != null && <div><dt>Verified at</dt><dd>{service.verifiedAt}</dd></div>}
                     <div><dt>Release ID</dt><dd>{text(identity?.releaseId)}</dd></div>
                     <div><dt>Canonical version</dt><dd>{text(identity?.canonicalVersion)}</dd></div>
                     <div><dt>Base version</dt><dd>{text(identity?.baseVersion)}</dd></div>
@@ -254,7 +262,20 @@ export function InstallerUpdatesExperience({
               <dt>Proposed target train</dt>
               <dd>{UNKNOWN} - target-release contract unavailable</dd>
             </div>
+            <div>
+              <dt>Observed compatibility state</dt>
+              <dd>{inventory?.compatibilityState ?? UNKNOWN}</dd>
+            </div>
+            <div>
+              <dt>Observed compatibility reasons</dt>
+              <dd>{Array.isArray(inventory?.compatibilityReasons) && inventory.compatibilityReasons.length > 0 ? inventory.compatibilityReasons.join(", ") : UNKNOWN}</dd>
+            </div>
           </dl>
+          {(inventory?.compatibilityState === "MixedRelease" || inventory?.compatibilityState === "Incompatible") && (
+            <Alert type="error" title="Observed compatibility conflict">
+              Observed compatibility is {inventory.compatibilityState}: {Array.isArray(inventory.compatibilityReasons) && inventory.compatibilityReasons.length > 0 ? inventory.compatibilityReasons.join(", ") : UNKNOWN}. This conflict is reported from the observed inventory, not as a proposed target.
+            </Alert>
+          )}
           {observedIdentityDetails(inventory)}
           <p>
             Proposed target release identity: {UNKNOWN}. Service inventory only

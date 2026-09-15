@@ -83,9 +83,10 @@ describe('InstallerUpdatesExperience', () => {
       replica({ instanceId: 'replica-c', identity: null, platform: null }),
     ] })} observation="connected" />);
 
-    expect(screen.getByText(/different canonical release or source identities/)).toBeVisible();
-    expect(screen.getByText('Incomplete comparison evidence')).toBeVisible();
-    expect(screen.getByText(/not reported as a conflict/)).toBeVisible();
+    expect(screen.getByText(/different canonical release, application, or source evidence/)).toBeVisible();
+    expect(screen.getByText('Missing canonical identity evidence')).toBeVisible();
+    expect(screen.getByText('Missing platform digest evidence')).toBeVisible();
+    expect(screen.getByText(/missing digest evidence is not reported as a conflict/)).toBeVisible();
   });
 
   it('does not render an empty replica observations heading or list', () => {
@@ -127,4 +128,39 @@ describe('InstallerUpdatesExperience', () => {
     const staleReplica = screen.getByLabelText('api (replica-b): stable:1.2.4').closest('details')!;
     expect(within(staleReplica).getByText('Verification quality').parentElement).toHaveTextContent('Imported; Stale');
   });
+
+  it('compares canonical evidence across coordinated services', () => {
+    render(<InstallerUpdatesExperience inventory={inventory({ services: [
+      replica({ serviceId: 'api', component: 'api', identity, applicationVersion: '1.2.3', sourceCommit: identity.sourceCommit }),
+      replica({ serviceId: 'worker', component: 'worker', identity, applicationVersion: '1.2.4', sourceCommit: identity.sourceCommit }),
+    ] })} observation="connected" />);
+
+    expect(screen.getByText(/different canonical release, application, or source evidence/)).toBeVisible();
+  });
+
+  it('detects a partial known platform digest divergence', () => {
+    render(<InstallerUpdatesExperience inventory={inventory({ services: [
+      replica({ identity, platform: 'linux/amd64', manifestDigest: digest, platformDigest: null, indexDigest: null }),
+      replica({ instanceId: 'replica-b', identity, platform: 'linux/amd64', manifestDigest: `sha256:${'f'.repeat(64)}`, platformDigest: null, indexDigest: null }),
+    ] })} observation="connected" />);
+
+    expect(screen.getByText(/Like-for-like observed replicas report different platform digest evidence/)).toBeVisible();
+    expect(screen.queryByText('Missing platform digest evidence')).not.toBeInTheDocument();
+  });
+
+  it.each(['MixedRelease', 'Incompatible'] as const)(
+    'renders authoritative observed compatibility conflict details for %s',
+    (compatibilityState) => {
+      render(<InstallerUpdatesExperience inventory={inventory({
+        compatibilityState,
+        compatibilityReasons: ['CanonicalReleaseDivergence'],
+      })} observation="connected" />);
+
+      expect(screen.getByText('Observed compatibility state').parentElement).toHaveTextContent(compatibilityState);
+      expect(screen.getByText('Observed compatibility reasons').parentElement).toHaveTextContent('CanonicalReleaseDivergence');
+      expect(screen.getByText('Observed compatibility conflict')).toBeVisible();
+      expect(screen.getByText(new RegExp(`Observed compatibility is ${compatibilityState}`))).toBeVisible();
+    },
+  );
+
 });

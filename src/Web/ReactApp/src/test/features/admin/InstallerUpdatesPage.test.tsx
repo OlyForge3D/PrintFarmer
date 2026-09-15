@@ -74,4 +74,24 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
     await screen.findByTestId('installer-updates');
     expect(getSystemInfo).toHaveBeenCalledTimes(3);
   });
+
+  it('does not let an in-flight reconnect revive connected after an offline event', async () => {
+    let completeReconnect: (() => void) | undefined;
+    getSystemInfo.mockResolvedValueOnce({ inventory: inventory() }).mockImplementationOnce(
+      () => new Promise((resolve) => {
+        completeReconnect = () => resolve({ inventory: inventory() });
+      }),
+    );
+    renderPage();
+    await screen.findByTestId('installer-updates');
+
+    await act(async () => { window.dispatchEvent(new Event('online')); });
+    await waitFor(() => expect(getSystemInfo).toHaveBeenCalledTimes(2));
+    Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
+    await act(async () => { window.dispatchEvent(new Event('offline')); });
+    await act(async () => { completeReconnect?.(); });
+
+    expect(await screen.findByRole('status', { name: 'Connection observation unknown' })).toHaveTextContent(/browser is disconnected/);
+  });
+
 });

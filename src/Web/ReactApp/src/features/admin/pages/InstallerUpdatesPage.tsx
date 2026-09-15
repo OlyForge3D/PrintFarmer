@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button } from "@/common/components/ui";
 import { InstallerUpdatesExperience } from "@/features/admin/components/InstallerUpdatesExperience";
@@ -12,10 +12,17 @@ export function InstallerUpdatesPage() {
   const [observation, setObservation] = useState<ConnectionObservation>(
     navigator.onLine ? "connected" : "unknown",
   );
+  const observationGeneration = useRef(0);
+  const [unknownSince, setUnknownSince] = useState(() => navigator.onLine ? 0 : Date.now());
+  const markUnknown = useCallback(() => {
+    setUnknownSince(Date.now());
+    setObservation("unknown");
+  }, []);
   const { hasPermission } = useAuth();
   const canView = hasPermission("system_settings", "admin");
   const {
     data,
+    dataUpdatedAt,
     isError,
     isLoading,
     refetch: refetchInventory,
@@ -27,27 +34,48 @@ export function InstallerUpdatesPage() {
     // This page owns reconnect reconciliation through its single explicit listener.
     refetchOnReconnect: false,
   });
+
+  // A later successful focus fetch has a newer query timestamp than the
+  // offline observation, so it is fresh evidence while the browser is online.
+  // This derived value avoids a synchronous state update from an effect.
+  const effectiveObservation: ConnectionObservation =
+    observation === "unknown" && navigator.onLine && dataUpdatedAt > unknownSince
+      ? "connected"
+      : observation;
+
   const refetch = useCallback(async () => {
+    const requestGeneration = ++observationGeneration.current;
     try {
       const result = await refetchInventory();
+      // An offline event increments the generation. Both that token and the
+      // current browser state prevent its older in-flight request from reviving
+      // a connected banner after the browser became offline.
+      if (requestGeneration !== observationGeneration.current || !navigator.onLine) {
+        if (!navigator.onLine) markUnknown();
+        return;
+      }
       setObservation(result.isError ? "unknown" : "connected");
     } catch {
-      // Keep the observation unknown until a successful explicit retry.
-      setObservation("unknown");
+      if (requestGeneration === observationGeneration.current) {
+        markUnknown();
+      }
     }
-  }, [refetchInventory]);
+  }, [markUnknown, refetchInventory]);
 
   useEffect(() => {
     if (!canView) return;
     const reconnect = () => { void refetch(); };
-    const disconnect = () => setObservation("unknown");
+    const disconnect = () => {
+      observationGeneration.current += 1;
+      markUnknown();
+    };
     window.addEventListener("online", reconnect);
     window.addEventListener("offline", disconnect);
     return () => {
       window.removeEventListener("online", reconnect);
       window.removeEventListener("offline", disconnect);
     };
-  }, [canView, refetch]);
+  }, [canView, markUnknown, refetch]);
 
   if (!canView)
     return (
@@ -58,7 +86,7 @@ export function InstallerUpdatesPage() {
     );
   // A paused initial query has no observation. Do not leave an offline admin at
   // a loading message that cannot resolve until the browser reconnects.
-  if (isError || (observation === "unknown" && !data))
+  if (isError || (effectiveObservation === "unknown" && !data))
     return (
       <div className="space-y-2" role="status" aria-live="polite" aria-label="Update observation unknown">
         <Alert type="warning" title="Update observation unknown">
@@ -75,6 +103,6 @@ export function InstallerUpdatesPage() {
   // `updates:execute` has no backend authorization contract yet. A safe admin/view check
   // may display this read-only surface, but it must not imply a runtime permission grant.
   return (
-    <InstallerUpdatesExperience inventory={data?.inventory} observation={observation} />
+    <InstallerUpdatesExperience inventory={data?.inventory} observation={effectiveObservation} />
   );
 }
