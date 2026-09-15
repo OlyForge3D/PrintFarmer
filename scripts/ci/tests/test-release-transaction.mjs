@@ -342,7 +342,7 @@ test('publisher has exactly one protected deployment containing every credential
   assert.deepEqual(Object.keys(publisher.jobs), ['publish']);
   const environments = Object.values(publisher.jobs).filter(job => job.environment).map(job => job.environment);
   assert.deepEqual(environments, [
-    "${{ fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider' }}",
+    "${{ inputs.operation == 'abandon' && 'release-insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider') }}",
   ]);
   assert.equal(publisher.concurrency.group,
     "release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}");

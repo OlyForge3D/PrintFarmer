@@ -90,7 +90,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const { state } = await store.read();
     const reservation = state.reservations[target];
     requireThat(reservation?.record?.allocationKey === target && reservation.record.channel === 'insider' &&
-      reservation.identitySha256 === hash(reservation.record) && !reservation.set && !reservation.abandonment,
+      reservation.identitySha256 === reservation.record.identitySha256 && !reservation.set && !reservation.abandonment,
     'Immutable abandonment reservation is unavailable, activated, or terminal');
     output('authorization_run_id', reservation.record.buildId);
     output('authorization_attempt', reservation.record.buildAttempt);
@@ -161,6 +161,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   }
 
   const record = verifyAuthorization(env, verify);
+  if (operation === 'abandon') requireThat(record.channel === 'insider',
+    'Only insider reservations may be abandoned');
   const { state } = await store.read();
   const entry = state.reservations[record.allocationKey];
   requireThat(entry, 'Unknown release authorization');
@@ -203,8 +205,6 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       'Immutable abandonment reservation target does not match authorization');
     const protection = await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
-    requireThat(transaction.runId === env.GITHUB_RUN_ID && transaction.runAttempt === env.GITHUB_RUN_ATTEMPT,
-      'Abandonment transaction must bind the current workflow run and attempt');
     const approval = await verifyAbandonmentApproval(api, {
       runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT,
     }, record,

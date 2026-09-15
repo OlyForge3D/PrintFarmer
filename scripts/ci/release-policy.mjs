@@ -1113,6 +1113,10 @@ export function migrateLegacyLedger(legacy, anchor) {
   }
   for (const reservation of Object.values(migrated.reservations)) {
     if (reservation.record.channel !== 'insider') continue;
+    requireThat(!Object.hasOwn(reservation, 'identitySha256') && !Object.hasOwn(reservation, 'set') &&
+      !Object.hasOwn(reservation, 'tagObject') && !Object.hasOwn(reservation, 'tagPublished') &&
+      !Object.hasOwn(reservation, 'abandonment'),
+    'Legacy signed reservation requires owner recovery; migration cannot replace signed identities');
     reservation.stableSequence = '0';
     reservation.record.stableSequence = '0';
   }

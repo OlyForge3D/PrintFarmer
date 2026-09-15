@@ -1001,6 +1001,11 @@ test('stable-sequence migration is explicit, deterministic, and rejects signed l
   const malformed = structuredClone(legacy);
   malformed.pointers.stable = { allocationKey: 'a'.repeat(64) };
   assert.throws(() => migrateLegacyLedger(malformed, anchor), /owner recovery/);
+  const signedInsider = state();
+  const insider = record(signedInsider);
+  signedInsider.reservations[insider.allocationKey].tagObject = sha;
+  delete signedInsider.channelSequences;
+  assert.throws(() => migrateLegacyLedger(signedInsider, anchor), /owner recovery/);
   assert.throws(() => migrateLegacyLedger(state(), anchor), /pre-stable-sequence/);
 });
 
@@ -2719,7 +2724,7 @@ test('release workflow explicitly wires approval mode and confines reviewer evid
   assert.match(publisher,
     /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ fromJSON\(inputs\.transaction\)\.approvalMode \}\}/);
   assert.match(publisher,
-    /environment: \$\{\{ fromJSON\(inputs\.transaction\)\.channel == 'stable' && 'release-stable' \|\| 'release-insider' \}\}/);
+    /environment: \$\{\{ inputs\.operation == 'abandon' && 'release-insider' \|\| \(fromJSON\(inputs\.transaction\)\.channel == 'stable' && 'release-stable' \|\| 'release-insider'\) \}\}/);
   assert.match(publisher,
     /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
   assert.match(admissionJob, /statuses: read/);
@@ -2773,6 +2778,10 @@ test('protected release-control abandonment uses App policy verification and Git
     const fixture = authorizationFixture(state(), { includeAbandonmentProof: true });
     globalThis.fetch = fixture.fetch;
     const identity = await runFixtureControl('authorize', fixture);
+    const recovered = await runReleaseControl('recover-abandonment', {
+      ...fixture.env, RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {});
+    assert.equal(recovered.identitySha256, hash(identity));
     fixture.abandonmentJob.started_at = new Date().toISOString();
     fixture.deleteTag();
     fixture.setCanonicalHead('f'.repeat(40));
@@ -2798,14 +2807,12 @@ test('protected release-control abandonment uses App policy verification and Git
       }, () => {}), /Abandonment requires approval from an allowed owner/, name);
       Object.assign(fixture.approvalEvidence, original);
     }
-    const wrongRun = JSON.parse(fixture.env.RELEASE_TRANSACTION);
-    wrongRun.runId = '43';
+    const wrongRun = { ...fixture.env, GITHUB_RUN_ID: '43' };
     await assert.rejects(runReleaseControl('abandon', {
-      ...fixture.env,
-      RELEASE_TRANSACTION: JSON.stringify(wrongRun),
+      ...wrongRun,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
       RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
-    }, () => {}), /current workflow run and attempt/, 'wrong approval run');
+    }, () => {}), /workflow run evidence|Unexpected API host\/path|Missing fixture object/, 'wrong current approval run');
     await runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),

@@ -37,7 +37,7 @@ jobs:
   publish:
     name: ${{ inputs.operation == 'abandon' && 'Abandon immutable release reservation' || 'Authorize and publish immutable release' }}
     runs-on: ubuntu-latest
-    environment: ${{ fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider' }}
+    environment: ${{ inputs.operation == 'abandon' && 'release-insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider') }}
     permissions:
       contents: read
       id-token: write
