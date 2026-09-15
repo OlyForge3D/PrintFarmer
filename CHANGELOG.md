@@ -7,6 +7,10 @@
 ### Fixes
 
 - Publication keeps the release draft until its signed manifest is verified.
+- Automatic release qualification runs after read-only admission, with genuine
+  same-transaction checks and exact-tree reviewed-PR evidence before publication.
+- Release review verification reads individual commit statuses so genuine
+  GitHub Actions creator provenance is retained through collection and authorization.
 
 ### Breaking changes
 

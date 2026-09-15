@@ -4,10 +4,12 @@ import test from 'node:test';
 import { load } from 'js-yaml';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
+import { sourceReviewFixture } from './fixtures/release-source-review.mjs';
+import { githubClient } from '../release-github.mjs';
 import {
   qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
   qualifyTransaction, selectTransaction, transactionPath,
-  validateQualificationReceipt, validateTransaction, verifyTransactionQualification,
+  transactionFromEnvironment, validateQualificationReceipt, validateTransaction, verifyTransactionQualification,
 } from '../release-transaction.mjs';
 
 const workflowSha = 'a'.repeat(40);
@@ -34,7 +36,7 @@ const base = {
   GH_TOKEN: 'test-only',
 };
 
-function apiFixture(channel = 'insider', head = sourceSha) {
+function apiFixture(channel = 'insider', head = sourceSha, reviewedHead = sourceSha) {
   const branch = channel === 'stable' ? 'main' : 'development';
   const runUrl = 'https://github.com/OlyForge3D/PrintFarmer/actions/runs/42';
   const jobs = jobNames.map((name, index) => ({
@@ -120,15 +122,23 @@ function apiFixture(channel = 'insider', head = sourceSha) {
       }],
     }],
   ]);
+  const review = sourceReviewFixture(sourceSha, branch, now, reviewedHead);
+  for (const [key, value] of review.values) values.set(key, value);
+  if (reviewedHead !== sourceSha) {
+    values.set(`commits/${sourceSha}/status?per_page=100`, { sha: sourceSha, total_count: 0, statuses: [] });
+  }
+  const transactionRun = values.get('actions/runs/42');
+  transactionRun.actor = { login: 'author' };
+  transactionRun.triggering_actor = { login: 'author' };
   const api = async endpoint => {
     if (!values.has(endpoint)) throw new Error(`Unexpected endpoint: ${endpoint}`);
     return structuredClone(values.get(endpoint));
   };
-  return { api, values, jobs, transactionChecks, sourceChecks, branch };
+  return { api, values, jobs, transactionChecks, sourceChecks, branch, review };
 }
 
-async function transaction(channel = 'insider', requested = '') {
-  const f = apiFixture(channel);
+async function transaction(channel = 'insider', requested = '', reviewedHead = sourceSha) {
+  const f = apiFixture(channel, sourceSha, reviewedHead);
   return {
     value: await selectTransaction({
       ...base,
@@ -172,6 +182,21 @@ test('selection rejects foreign refs, malformed sources, and workflow substituti
   ]) {
     await assert.rejects(selectTransaction({ ...base, ...overrides }, apiFixture().api));
   }
+});
+
+test('transaction consumers reject cross-run and caller substitutions before trusting stored JSON', async () => {
+  const { value } = await transaction();
+  const env = { ...base, RELEASE_TRANSACTION: JSON.stringify(value) };
+  assert.deepEqual(transactionFromEnvironment(env), value);
+  for (const override of [
+    { GITHUB_RUN_ID: '43' },
+    { GITHUB_WORKFLOW_SHA: movedHead },
+    { GITHUB_SHA: movedHead },
+    { GITHUB_WORKFLOW_REF: base.GITHUB_WORKFLOW_REF.replace('consolidated-release', 'untrusted') },
+    { GITHUB_REPOSITORY: 'attacker/repo' },
+    { GITHUB_REF: 'refs/heads/feature' },
+    { GITHUB_EVENT_NAME: 'pull_request' },
+  ]) assert.throws(() => transactionFromEnvironment({ ...env, ...override }), /executing trusted workflow/);
 });
 
 test('trusted scheduled insider publication selects a transaction while untrusted schedule contexts fail closed', async () => {
@@ -238,12 +263,243 @@ test('qualification binds namespaced jobs to this run, attempt, app, suite and s
     f => { f.jobs[0].name = 'CI tooling tests'; f.jobs.push({ ...f.jobs[0] }); },
     f => { f.transactionChecks[0].check_suite.id = 99; },
     f => { f.transactionChecks[0].app.slug = 'foreign'; },
-    f => { f.sourceChecks[0].conclusion = 'failure'; },
+    f => { f.review.status.state = 'failure'; },
   ]) {
     const isolated = await transaction();
     mutate(isolated.fixture);
     await assert.rejects(verifyTransactionQualification(isolated.value, isolated.fixture.api, now));
   }
+});
+
+test('automatic qualification accepts a reviewed squash tree without any prior canonical status or build checks', async () => {
+  const reviewed = 'e'.repeat(40);
+  for (const channel of ['stable', 'insider']) {
+    for (const mode of ['single-maintainer', 'separation-of-duties']) {
+      const { value, fixture } = await transaction(channel, '', reviewed);
+      value.approvalMode = mode;
+      fixture.values.delete(`commits/${sourceSha}/status?per_page=100`);
+      fixture.values.delete(`commits/${sourceSha}/check-runs?per_page=100`);
+      const receipt = await qualifyTransaction(value, fixture.api, now);
+      assert.equal(receipt.sourceEvidence.review.sourceCommit, sourceSha);
+      assert.equal(receipt.sourceEvidence.review.reviewedHead, reviewed);
+      assert.equal(receipt.sourceEvidence.review.tree, 'd'.repeat(40));
+      assert.equal(receipt.sourceEvidence.review.classification, 'REVIEWED');
+      assert.equal(receipt.jobs.length, jobNames.length);
+    }
+  }
+});
+
+function statusTransport(fixture, reviewedHead, statuses, changePage = () => {}) {
+  const prefix = 'https://api.github.com/repos/OlyForge3D/PrintFarmer/';
+  const route = `commits/${reviewedHead}/statuses?per_page=100`;
+  const calls = [];
+  const api = githubClient('test-only', async (url, options) => {
+    assert.ok(url.startsWith(prefix));
+    assert.equal(options.method, 'GET');
+    assert.equal(options.redirect, 'error');
+    const path = url.slice(prefix.length);
+    calls.push(path);
+    if (path === route || path.startsWith(`${route}&page=`)) {
+      const page = Number(new URL(url).searchParams.get('page') ?? '1');
+      const data = structuredClone(statuses.slice((page - 1) * 100, page * 100));
+      const response = { data, status: 200,
+        link: statuses.length > page * 100 ? `<${prefix}${route}&page=${page + 1}>; rel="next"` : '' };
+      changePage(response, page);
+      return new Response(typeof response.data === 'string' ? response.data : JSON.stringify(response.data), {
+        status: response.status, headers: { link: response.link },
+      });
+    }
+    return new Response(JSON.stringify(await fixture.api(path)));
+  });
+  return { api, calls, route };
+}
+
+test('real release transport collects individual creator provenance through full and terminal status pages', async () => {
+  for (const channel of ['stable', 'insider']) {
+    for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+      for (const count of [1, 100, 101, 200, 201]) {
+        const reviewed = 'e'.repeat(40);
+        const { value, fixture } = await transaction(channel, '', reviewed);
+        value.approvalMode = approvalMode;
+        const combined = fixture.values.get(`commits/${reviewed}/status?per_page=100`);
+        assert.equal(combined.statuses[0].creator, undefined, 'Combined API deliberately has no creator');
+        const statuses = Array.from({ length: count - 1 }, (_, index) => ({
+          id: index + 1, context: `other-${index}`, state: 'success',
+        }));
+        statuses.push({ ...fixture.review.status, id: 10001 });
+        const transport = statusTransport(fixture, reviewed, statuses);
+        const receipt = await qualifyTransaction(value, transport.api, now);
+        assert.equal(receipt.sourceEvidence.review.statusId, 10001);
+        assert.equal(receipt.sourceEvidence.review.reviewedHead, reviewed);
+        assert.equal(receipt.sourceEvidence.review.classification, 'REVIEWED');
+        assert.ok(!transport.calls.some(path => path.includes('/status?')), 'Never infer creator from combined status');
+        assert.equal(transport.calls.filter(path => path.startsWith(transport.route)).length,
+          Math.floor(count / 100) + 1, 'Full terminal arrays require an empty-page completeness probe');
+      }
+    }
+  }
+});
+
+test('individual status transport rejects later-page failure, truncation, substitution and untrusted provenance', async () => {
+  const cases = [
+    ['HTTP failure', response => { response.status = 403; response.data = {}; }],
+    ['malformed JSON', response => { response.data = '{'; }],
+    ['missing advertised terminal page', response => {
+      response.data = [];
+      response.link = '<https://api.github.com/repos/OlyForge3D/PrintFarmer/commits/' +
+        `${'e'.repeat(40)}/statuses?per_page=100&page=3>; rel="last"`;
+    }],
+    ['foreign source link', response => {
+      response.link = `<https://api.github.com/repos/OlyForge3D/PrintFarmer/commits/${sourceSha}/statuses?per_page=100&page=3>; rel="next"`;
+    }],
+    ['duplicate ID', response => { response.data[0].id = 1; }],
+    ['missing creator', response => { delete response.data[0].creator; }],
+    ['untrusted creator', response => { response.data[0].creator.login = 'attacker'; }],
+    ['substituted SHA', response => { response.data[0].sha = sourceSha; }],
+    ['stale verdict', response => { response.data[0].created_at = '2026-09-12T19:00:00Z'; }],
+    ['newest failure cannot resurrect approval', response => { response.data[0].state = 'failure'; }],
+    ['substituted run', response => { response.data[0].target_url = 'https://github.com/attacker/repo/actions/runs/31'; }],
+  ];
+  for (const [name, change] of cases) {
+    const reviewed = 'e'.repeat(40);
+    const { value, fixture } = await transaction('insider', '', reviewed);
+    const statuses = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1, context: `other-${index}`, state: 'success',
+    }));
+    statuses[0] = { ...fixture.review.status, id: 1 };
+    statuses.push({ ...fixture.review.status, id: 101 });
+    const transport = statusTransport(fixture, reviewed, statuses, (response, page) => {
+      if (page === 2) change(response);
+    });
+    await assert.rejects(qualifyTransaction(value, transport.api, now), undefined, name);
+    assert.equal(transport.calls.filter(path => path.startsWith(transport.route)).length, 2);
+  }
+});
+
+test('squash qualification fails closed for source, review, tree and transaction substitutions', async () => {
+  const mutations = [
+    ['missing associated PR', f => f.values.set(`commits/${sourceSha}/pulls?per_page=100`, [])],
+    ['ambiguous PRs', f => f.values.get(`commits/${sourceSha}/pulls?per_page=100`).push({ ...f.review.pull, number: 61 })],
+    ['merge SHA', f => { f.review.pull.merge_commit_sha = movedHead; }],
+    ['base branch', f => { f.review.pull.base.ref = 'untrusted'; }],
+    ['base repository', f => { f.review.pull.base.repo.full_name = 'attacker/repo'; }],
+    ['head repository', f => { f.review.pull.head.repo.full_name = 'attacker/repo'; }],
+    ['not merged', f => { f.review.pull.merged = false; }],
+    ['changed tree', f => { f.values.get(`git/commits/${sourceSha}`).tree.sha = movedHead; }],
+    ['commit response substitution', f => { f.values.get(`git/commits/${sourceSha}`).sha = movedHead; }],
+    ['status text', f => { f.review.status.description = `REVIEWED (self-attested) @ ${sourceSha.slice(0, 12)} by bishop`; }],
+    ['status creator', f => { f.review.status.creator.login = 'attacker'; }],
+    ['status target', f => { f.review.status.target_url = 'https://example.com/actions/runs/31'; }],
+    ['missing review', f => f.values.set(`commits/${f.review.pull.head.sha}/statuses?per_page=100`, [])],
+    ['missing creator', f => { delete f.review.status.creator; }],
+    ['substituted status SHA', f => { f.review.status.sha = sourceSha; }],
+    ['failed review', f => { f.review.status.state = 'failure'; }],
+    ['stale review', f => { f.review.status.created_at = '2026-09-12T19:00:00Z'; }],
+    ['foreign review workflow', f => { f.review.run.repository.full_name = 'attacker/repo'; }],
+    ['untrusted review event', f => { f.review.run.event = 'pull_request'; }],
+    ['wrong review PR', f => { f.review.run.display_title = 'Squad review record for PR #61'; }],
+    ['replayed review run', f => { f.review.run.run_attempt = 2; }],
+    ['failed review run', f => { f.review.run.conclusion = 'failure'; }],
+    ['missing qualification', f => { f.jobs[0].conclusion = 'skipped'; }],
+    ['wrong qualification attempt', f => { f.jobs[0].run_attempt = 2; }],
+    ['wrong qualification source workflow', f => { f.values.get('actions/runs/42').head_sha = movedHead; }],
+    ['wrong qualification run', f => { f.jobs[0].run_id = 43; }],
+    ['newer negative review', f => {
+      const statuses = f.values.get(`commits/${f.review.pull.head.sha}/statuses?per_page=100`);
+      statuses.push({ ...f.review.status, id: 999, state: 'failure' });
+    }],
+    ['combined response substituted for status list', f => {
+      f.values.set(`commits/${f.review.pull.head.sha}/statuses?per_page=100`,
+        f.values.get(`commits/${f.review.pull.head.sha}/status?per_page=100`));
+    }],
+    ['wrong build integration', f => {
+      f.values.get(`rules/branches/${f.branch}?per_page=100`)[0].parameters.required_status_checks[0].integration_id = 999;
+    }],
+  ];
+  for (const [name, mutate] of mutations) {
+    const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+    mutate(fixture);
+    await assert.rejects(qualifyTransaction(value, fixture.api, now), undefined, name);
+  }
+});
+
+test('single-maintainer requires genuine review but only separation-of-duties requires non-self native code-owner review', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  fixture.values.set('pulls/60/reviews?per_page=100', []);
+  await qualifyTransaction(value, fixture.api, now);
+  value.approvalMode = 'separation-of-duties';
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /non-self code-owner/);
+  const review = { id: 70, commit_id: fixture.review.pull.head.sha,
+    user: { login: 'native-reviewer' }, state: 'APPROVED', submitted_at: '2026-09-13T19:00:00Z' };
+  fixture.values.set('pulls/60/reviews?per_page=100', [review]);
+  await qualifyTransaction(value, fixture.api, now);
+  for (const login of ['author', 'native-reviewer']) {
+    fixture.values.get('actions/runs/42').actor.login = login;
+    if (login === 'native-reviewer') {
+      await assert.rejects(qualifyTransaction(value, fixture.api, now), /non-self code-owner/);
+    }
+  }
+  fixture.values.get('actions/runs/42').actor.login = 'author';
+  fixture.values.get('collaborators/native-reviewer/permission').permission = 'read';
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /live write permission/);
+});
+
+test('same-run reattempt requires fresh qualification jobs from that attempt and preserves original source', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  fixture.values.get('actions/runs/42').run_attempt = 2;
+  fixture.values.set('actions/runs/42/attempts/2/jobs?per_page=100',
+    { total_count: fixture.jobs.length, jobs: fixture.jobs });
+  await assert.rejects(verifyTransactionQualification(value, fixture.api, now, '2'), /qualification job/);
+  fixture.jobs.forEach(job => { job.run_attempt = 2; });
+  const receipt = await verifyTransactionQualification(value, fixture.api, now, '2');
+  assert.equal(receipt.run.attempt, '2');
+  assert.equal(receipt.transaction.runAttempt, '1');
+  assert.equal(receipt.transaction.sourceCommit, sourceSha);
+});
+
+test('scheduled insider qualification collects the current full-safe job set and exact-tree review', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  fixture.values.get('actions/runs/42').event = 'schedule';
+  const receipt = await qualifyTransaction(value, fixture.api, now);
+  assert.equal(receipt.jobs.length, jobNames.length);
+  assert.ok(receipt.sourceEvidence.checks.filter(check => check.checkId)
+    .every(check => check.satisfiedBy === 'transaction-job' && check.runId === value.runId &&
+      check.runAttempt === '1' && check.workflowCommit === workflowSha));
+});
+
+test('unmapped required checks still need latest exact-source evidence without repeating collection', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  const policy = fixture.values.get('rules/branches/development?per_page=100')[0].parameters;
+  policy.required_status_checks.push({ context: 'extra-a', integration_id: 15368 }, { context: 'extra-b' });
+  const sourceChecks = fixture.values.get(`commits/${sourceSha}/check-runs?per_page=100`);
+  const extra = ['extra-a', 'extra-b'].map((name, index) => ({
+    ...fixture.sourceChecks[0], name, id: 800 + index,
+  }));
+  sourceChecks.check_runs.push(...extra);
+  sourceChecks.total_count = sourceChecks.check_runs.length;
+  let reads = 0;
+  const api = async endpoint => {
+    if (endpoint === `commits/${sourceSha}/check-runs?per_page=100`) reads++;
+    return fixture.api(endpoint);
+  };
+  await qualifyTransaction(value, api, now);
+  assert.equal(reads, 1);
+  extra[0].conclusion = 'failure';
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /required qualification/);
+  extra[0].conclusion = 'success';
+  extra[0].app = { id: 999, slug: 'github-actions' };
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /required qualification/);
+});
+
+test('a stale native owner does not mask another fresh eligible owner approval', async () => {
+  const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
+  value.approvalMode = 'separation-of-duties';
+  fixture.values.get(`contents/.github/CODEOWNERS?ref=${sourceSha}`).content =
+    Buffer.from('* @stale-owner @native-reviewer').toString('base64');
+  const reviews = fixture.values.get('pulls/60/reviews?per_page=100');
+  reviews.unshift({ ...reviews[0], id: 69, user: { login: 'stale-owner' },
+    submitted_at: '2026-09-12T18:00:00Z' });
+  await qualifyTransaction(value, fixture.api, now);
 });
 
 test('qualification receipt freshness rejects expiry, future, malformed lifetime and delayed approval', async () => {
@@ -262,23 +518,21 @@ test('qualification receipt freshness rejects expiry, future, malformed lifetime
 
 test('underlying qualification evidence rejects missing, stale, future and post-collection timestamps', async () => {
   for (const mutate of [
-    f => { delete f.sourceChecks[0].completed_at; },
-    f => { f.sourceChecks[0].completed_at = '2026-09-12T19:59:59.999Z'; },
-    f => { f.sourceChecks[0].completed_at = '2026-09-13T20:00:00.001Z'; },
+    f => { delete f.transactionChecks[0].completed_at; },
+    f => { f.transactionChecks[0].completed_at = '2026-09-12T19:59:59.999Z'; },
+    f => { f.transactionChecks[0].completed_at = '2026-09-13T20:00:00.001Z'; },
     f => {
-      const statuses = f.values.get(`commits/${sourceSha}/status?per_page=100`);
-      statuses.statuses[0].created_at = '2026-09-13T20:00:00.001Z';
-      statuses.statuses[0].updated_at = '2026-09-13T20:00:00.001Z';
+      f.review.status.created_at = '2026-09-13T20:00:00.001Z';
+      f.review.status.updated_at = '2026-09-13T20:00:00.001Z';
     },
     f => { f.jobs[0].completed_at = '2026-09-13T20:00:00.001Z'; },
-    f => { f.sourceChecks[0].completed_at = '2026-09-13T19:30:00+00:00'; },
-    f => { f.sourceChecks[0].completed_at = '2026-02-30T19:30:00Z'; },
-    f => { f.sourceChecks[0].completed_at = '2026-09-13T19:30:00.1234Z'; },
-    f => { f.sourceChecks[0].completed_at = '2026-09-13T19:30:00'; },
+    f => { f.transactionChecks[0].completed_at = '2026-09-13T19:30:00+00:00'; },
+    f => { f.transactionChecks[0].completed_at = '2026-02-30T19:30:00Z'; },
+    f => { f.transactionChecks[0].completed_at = '2026-09-13T19:30:00.1234Z'; },
+    f => { f.transactionChecks[0].completed_at = '2026-09-13T19:30:00'; },
     f => {
-      const statuses = f.values.get(`commits/${sourceSha}/status?per_page=100`);
-      statuses.statuses[0].created_at = '2026-09-13T19:32:00Z';
-      statuses.statuses[0].updated_at = '2026-09-13T19:31:00Z';
+      f.review.status.created_at = '2026-09-13T19:32:00Z';
+      f.review.status.updated_at = '2026-09-13T19:31:00Z';
     },
     f => { f.jobs[0].completed_at = '2026-09-13T19:39:59Z'; },
   ]) {
@@ -304,9 +558,8 @@ test('GitHub REST second-precision timestamps remain valid throughout qualificat
     check.completed_at = check.head_sha === workflowSha ?
       '2026-09-13T19:50:00Z' : '2026-09-13T19:30:00Z';
   }
-  const statuses = fixture.values.get(`commits/${sourceSha}/status?per_page=100`);
-  statuses.statuses[0].created_at = '2026-09-13T19:31:00Z';
-  statuses.statuses[0].updated_at = '2026-09-13T19:31:00Z';
+  fixture.review.status.created_at = '2026-09-13T19:31:00Z';
+  fixture.review.status.updated_at = '2026-09-13T19:31:00Z';
   const receipt = await verifyTransactionQualification(value, fixture.api, now);
   receipt.checkedAt = '2026-09-13T20:00:00Z';
   receipt.expiresAt = '2026-09-13T20:30:00Z';

@@ -48,14 +48,45 @@ consolidated journey, and do not author formatted commit comments or statuses.
 An explicit source outside the selected canonical branch's ancestry is rejected;
 once admitted, later branch movement does not retarget the source commit.
 
+Admission is read-only: it validates the trusted transaction, canonical ancestry,
+VERSION and complete ledger continuity/floors. It does not require qualification
+evidence from jobs that depend on admission and cannot allocate or publish.
+
 Qualification is bound to the current release run ID, immutable attempt-one
 transaction, GitHub Actions App, check suite, workflow commit, and namespaced
-reusable-workflow jobs. The
-same authorization step re-reads that API evidence, exact-source required
-checks, review status, evidence timestamps, and live strict branch policy after
-environment approval. Receipts last 30 minutes and underlying evidence must
+reusable-workflow jobs that check out the pinned source. These jobs satisfy the
+corresponding build checks, including their configured App integration bindings;
+additional configured checks still require genuine exact-source evidence.
+Release qualification always forces the full-safe CI matrix, including scheduled
+insider runs with no changed-file list. Build receipt entries explicitly identify
+their transaction job, run, attempt and workflow commit.
+The same authorization step re-reads that API evidence, source review mapping,
+evidence timestamps, and live strict branch policy after environment approval.
+Publication preflight and pointer advancement revalidate the same live chain.
+Receipts last 30 minutes and underlying evidence must
 predate collection, remain within its own freshness window, and not be future
 dated. Delayed approval beyond the receipt window requires a new dispatch.
+
+Squash merges do not inherit PR-head commit statuses. Review discovery therefore
+requires one API-associated merged PR into the selected canonical branch whose
+`merge_commit_sha` equals the selected source. The selected source and reviewed
+PR head must have **identical Git tree SHAs**; no patch/diff heuristic is accepted.
+The receipt records both commits, the tree, PR and original review run. The
+existing verifier authenticates the latest PR-head verdict's workflow, event,
+repository, attempt, timestamps and PR identity. Collector and authority checks
+read `/commits/{reviewedHead}/statuses` through bounded complete pagination:
+individual statuses carry creator provenance, while combined `/status` entries
+may omit it. Missing or untrusted creator metadata is never inferred or bypassed.
+This is exact-tree review
+mapping, **not** a review status on the squash commit, and no status is created.
+Missing, stale, failed, forged, ambiguous or tree-mismatched evidence fails closed.
+`single-maintainer` accepts genuine self-attested/owner review without introducing
+a second person's approval. `separation-of-duties` additionally requires current
+exact-reviewed-head native approval by a source code owner other than the PR
+author or release initiator, with live write permission. Existing branch and
+environment policy requirements for both modes remain unchanged.
+The supported native CODEOWNERS policy ends with a user-only catch-all rule;
+team or path-specific ownership requires reviewed support rather than guessing.
 
 By owner decision, release validation is limited to automated tests,
 static analysis, code review, and fail-closed checks. No rehearsal or alternate
@@ -263,7 +294,7 @@ ordinary insider. All stages share the durable counter, so switching stages
 never recycles N. Failed RC reservations also establish the stage high water.
 
 Admission verifies trusted repository/event/workflow, pins the selected canonical
-source and checks VERSION plus required exact-SHA checks. Later ordinary forward
+source and checks VERSION plus ledger continuity. Later ordinary forward
 branch movement neither fails nor retargets the release. Authorization and
 pre-publication checks instead require the pinned source to remain an ancestor
 of the current canonical head and reject trust revocation, pointer regression
@@ -273,8 +304,9 @@ Consumers check both object ID and peeled commit. Missing, moved or recreated
 tags fail. No tag force-update/delete API is used. Continuous tag protection
 prevents a delete/recreate of the identical object between observations.
 
-Read-only admission uses `github.token` only for source, ledger and qualification
-checks. It does **not** call Administration APIs. After environment approval,
+Read-only admission uses `github.token` only for source and ledger checks.
+Qualification uses that token's existing read ceiling, including PR reads.
+Neither calls Administration APIs. After environment approval,
 authorization obtains the protected publisher App token and verifies live branch
 rules, tag/ledger rulesets and environment restrictions before reserving anything.
 Missing App credentials or any denied protection read fails without publication;
@@ -410,7 +442,7 @@ exist with its declared type, and unknown or explicitly undefined fields fail.
 Stable records/admissions must not contain `stage` or `sequence`. Repository,
 workflow ref and branch are fixed by channel. Tag, base, canonical version,
 release ID and sequence must agree; source, authorized head and workflow commit
-must be the same lowercase 40-hex SHA. Run/attempt/sequence are positive decimal
+are separately bound lowercase 40-hex SHAs. Run/attempt/sequence are positive decimal
 strings without leading zeros; timestamps are canonical UTC ISO milliseconds.
 Allocation keys are recomputed, admission must equal the record, and the public
 reservation/record authorization hashes must agree. `created` equals `buildTime`.
@@ -657,9 +689,12 @@ their `.github/release-candidate.json` must match the branch, reference an
 ancestor qualified source, and stay within `RELEASE_CANDIDATE_MAX_DAYS`.
 Protected branch policy and owner review govern lifecycle deletion actions.
 
-## Owner activation and continuity recovery — currently blocked
+## Owner activation and continuity recovery
 
-Read-only live API evidence on 2026-09-12:
+### Historical snapshot — 2026-09-12, not current activation status
+
+The following read-only observations are retained as dated history, not current
+configuration requirements or proof that publication is blocked:
 
 - Ruleset **12465886 `Main`** is **disabled**, has an empty include scope, and
   only deletion/non-fast-forward rules. It does not enforce release policy.
@@ -679,7 +714,11 @@ of this new policy.
 The ledger is a data-only coordination ref, never an additional release source
 branch. Manual environment approval always needs an eligible reviewer and an
 explicit approval mode; admin API access alone does not approve the new policy.
-Live activation under #2668 must wait until #2682 is merged.
+The historical activation dependency was #2682 under #2668. Neither this snapshot
+nor its resolution grants blanket activation: the current run must verify live
+policy, continuity and credentials and receive the selected protected environment
+approval. Later configuration can differ from the snapshot; do not recreate
+variables, credentials or rules merely because they were absent on 2026-09-12.
 
 ### Explicit release approval configuration
 
@@ -733,11 +772,12 @@ in the effective branch rules:
 The first three are GitHub Actions **check runs**, not check-suite conclusions.
 The last is a **commit status** produced by `squad-review-verdict.yml` using
 `repos.createCommitStatus` and `squad-verdict-gate.mjs`'s `verdictContext`.
-A green workflow job cannot substitute for that status. Read-only admission and
-protected authorization query the selected full SHA's check runs and combined
-commit status; authorization also checks every additional configured context.
-Latest required runs must be completed/successful at that SHA and the latest
-review status must be successful with an exact-head `REVIEWED (self-attested)`,
+A green workflow job cannot substitute for that status. Automatic qualification
+and protected authorization verify the latest status at the reviewed PR head,
+with the exact-tree canonical source mapping described above. Build checks come
+from the successful current-transaction source qualification, not an earlier
+manual run; every additional configured context is also checked. The latest
+review status must be successful with an exact-reviewed-head `REVIEWED (self-attested)`,
 `REVIEWED (self-attested, carried across sync)` or `APPROVE (owner)` description.
 `NOT_APPLICABLE` is not review evidence. The API response SHA, not the shortened
 description alone, establishes the full-SHA binding. Raw descriptions/identities
@@ -751,11 +791,12 @@ check-suite fields. Check/status evidence is collected in pages of 100 with
 stable totals, unique IDs and exact-source pagination links. Missing pages,
 changed totals, duplicate IDs, redirects and foreign links fail closed.
 
-The PR producer still posts only to the reviewed PR head. Release admission
-additionally requires the canonical qualification below; an ordinary PR verdict,
-owner override or carried-across-sync status cannot substitute for it. The low-level
-check adapter understands both status vocabularies, but release admission and
-each allocation retry require the completed canonical workflow audit chain.
+The PR producer still posts only to the reviewed PR head. The consolidated
+release does not require the retired canonical qualification chain below.
+Admission cannot confer publication authority; each allocation retry verifies
+the same-transaction automatic qualification and genuine exact-tree review
+mapping. The low-level legacy check adapter still understands both status
+vocabularies for historical callers, but it is not the consolidated review gate.
 
 ### Retired manual canonical qualification history
 
