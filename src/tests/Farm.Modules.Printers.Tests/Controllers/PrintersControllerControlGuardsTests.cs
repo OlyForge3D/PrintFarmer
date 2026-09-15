@@ -1345,7 +1345,40 @@ public class PrintersControllerControlGuardsTests
                 clock.Advance(TimeSpan.FromMinutes(5));
                 return Task.FromResult(new PrinterActuationResult(PrinterActuationResultCode.Accepted, lease));
             });
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.HomeAsync(id, default));
+        ObjectResult response = Assert.IsType<ObjectResult>((await controller.HomeAsync(id, default)).Result);
+        Assert.Equal(503, response.StatusCode);
+        Assert.Equal("printer_safety_evidence_unknown", Assert.IsType<ProblemDetails>(response.Value).Extensions["code"]);
+        printers.Verify(service => service.SendHomeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        actuation.Verify(service => service.CompleteDirectAsync(
+            It.IsAny<PrinterActuationLease>(), false, "printer_safety_revalidation_failed",
+            CancellationToken.None), Times.Once);
+        actuation.Verify(service => service.CompleteDirectAsync(
+            It.IsAny<PrinterActuationLease>(), It.IsAny<bool>(), "printer_operation_cancelled_before_dispatch",
+            It.IsAny<CancellationToken>()), Times.Never);
+        actuation.Verify(service => service.MarkDirectUnknownAsync(
+            It.IsAny<PrinterActuationLease>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HomeAsync_CallerCancelsDuringPreSendValidation_PropagatesAndReleasesLease()
+    {
+        Guid id = Guid.NewGuid();
+        using var caller = new CancellationTokenSource();
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(SamplePrinter(id));
+        var status = new Mock<IPrinterStatusCacheReader>();
+        status.Setup(cache => cache.GetStatus(id)).Returns(new PrinterStatusDto(id, true, "Idle"));
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        PrintersController controller = CreateController(printers, status, out _, actuation: actuation);
+        actuation.Setup(service => service.RevalidateDirectAsync(
+                It.IsAny<PrinterActuationLease>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrinterActuationLease lease, CancellationToken _) =>
+            {
+                caller.Cancel();
+                return new PrinterActuationResult(PrinterActuationResultCode.Accepted, lease);
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.HomeAsync(id, caller.Token));
         printers.Verify(service => service.SendHomeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         actuation.Verify(service => service.CompleteDirectAsync(
             It.IsAny<PrinterActuationLease>(), false, "printer_operation_cancelled_before_dispatch",

@@ -164,7 +164,7 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
                 userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
             .Returns(async () =>
             {
-                if (++checks == 1)
+                if (Interlocked.Increment(ref checks) == 1)
                 {
                     return true;
                 }
@@ -265,7 +265,7 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
         int checks = 0;
         authorization.Setup(service => service.CanActorAccessPrinterAsync(
                 userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(() => ++checks == 1);
+            .ReturnsAsync(() => Interlocked.Increment(ref checks) == 1);
 
         ActionResult<CommandResult> response = await CreateController(db).EmergencyStopAsync(printerId, default);
 
