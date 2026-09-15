@@ -1,4 +1,3 @@
-import { useEffect, useState } from "react";
 import { Alert, Button, Card, Checkbox, Input } from "@/common/components/ui";
 import type { ServiceInventory } from "@/types/api";
 
@@ -12,86 +11,118 @@ const AUTO_DISABLED_REASON =
 
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
-  refetch: () => void;
+  observation: ConnectionObservation;
 }
 
 function text(value: string | null | undefined) {
   return value ?? UNKNOWN;
 }
 
-function observedIdentityDetails(
-  inventory: ServiceInventory | null | undefined,
+type ConnectionObservation = "connected" | "unknown";
+
+type ObservedDeploymentFingerprint = {
+  releaseId: string | null;
+  sourceCommit: string | null;
+  manifestDigest: string | null;
+  platform: string | null;
+  platformDigest: string | null;
+  indexDigest: string | null;
+};
+
+function observedDeploymentFingerprint(service: ServiceInventory["services"][number]): ObservedDeploymentFingerprint {
+  return {
+    releaseId: service.identity?.releaseId ?? null,
+    sourceCommit: service.identity?.sourceCommit ?? null,
+    manifestDigest: service.manifestDigest,
+    platform: service.platform,
+    platformDigest: service.platformDigest,
+    indexDigest: service.indexDigest,
+  };
+}
+
+function verificationQuality(
+  service: ServiceInventory["services"][number],
+  snapshotOrigin: ServiceInventory["snapshotOrigin"] | undefined,
 ) {
+  const qualities: string[] = [];
+  if (snapshotOrigin === "Imported") qualities.push("Imported");
+  if (service.observationState === "Stale") qualities.push("Stale");
+  if (service.verificationSource !== null && service.verifiedAt !== null) {
+    qualities.push("Verified");
+  } else if (service.source === "SelfReport") {
+    qualities.push("Self-reported");
+  }
+  return qualities.join("; ") || UNKNOWN;
+}
+
+function observedIdentityDetails(inventory: ServiceInventory | null | undefined) {
   const services = inventory?.services ?? [];
-  const observed = services.filter((service) => service.identity !== null);
-  const distinct = new Set(
-    observed.map((service) => JSON.stringify(service.identity)),
-  ).size;
+  const fingerprintGroups = new Map<string, Set<string>>();
+
+  for (const service of services) {
+    // Platform digests are only comparable between like-for-like replicas.
+    const group = `${service.serviceId}\u0000${service.platform ?? UNKNOWN}`;
+    const fingerprint = observedDeploymentFingerprint(service);
+    const hasFingerprint = Object.values(fingerprint).some((value) => value !== null);
+    if (hasFingerprint) {
+      const fingerprints = fingerprintGroups.get(group) ?? new Set<string>();
+      fingerprints.add(JSON.stringify(fingerprint));
+      fingerprintGroups.set(group, fingerprints);
+    }
+  }
+
+  const hasConflict = [...fingerprintGroups.values()].some((fingerprints) => fingerprints.size > 1);
   return (
-    <section
-      aria-labelledby="observed-identities-heading"
-      className="space-y-2"
-    >
+    <section aria-labelledby="observed-identities-heading" className="space-y-2">
       <h3 id="observed-identities-heading" className="font-medium">
-        Observed replica identities
+        Observed replica deployment fingerprints
       </h3>
-      {observed.length === 0 ? (
-        <p>Unknown. No service identity was observed.</p>
+      {services.length === 0 ? (
+        <p>Unknown. No replica observations were reported.</p>
       ) : (
         <>
-          {distinct > 1 && (
-            <Alert type="warning" title="Conflicting observed identities">
-              Observed replicas report distinct release identities. This is a
-              mixed/conflicting observed state, not a proposed target.
+          {hasConflict && (
+            <Alert type="warning" title="Conflicting observed deployments">
+              Like-for-like observed replicas report different deployment fingerprints. This is a conflicting observed deployment state, not a proposed target.
             </Alert>
           )}
           <div className="space-y-2">
-            {observed.map((service, index) => {
-              const identity = service.identity!;
+            {services.map((service, index) => {
+              const identity = service.identity;
               const label = `${service.component}${service.instanceId ? ` (${service.instanceId})` : ""}`;
               return (
-                <details
-                  key={`${service.serviceId}-${service.instanceId ?? index}`}
-                >
-                  <summary
-                    aria-label={`${label}: ${text(identity.releaseId)}`}
-                    className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2"
-                  >
-                    {label}: {text(identity.releaseId)}
+                <details key={`${service.serviceId}-${service.instanceId ?? index}`}>
+                  <summary aria-label={`${label}: ${text(identity?.releaseId)}`} className="cursor-pointer rounded focus-visible:outline-2 focus-visible:outline-offset-2">
+                    {label}: {text(identity?.releaseId)}
                   </summary>
                   <dl className="mt-2 space-y-1">
-                    <div>
-                      <dt>Observation state</dt>
-                      <dd>{service.observationState}</dd>
-                    </div>
-                    <div>
-                      <dt>Observed at</dt>
-                      <dd>{text(service.observedAt)}</dd>
-                    </div>
-                    <div>
-                      <dt>Observation source</dt>
-                      <dd>{service.source}</dd>
-                    </div>
-                    <div>
-                      <dt>Release ID</dt>
-                      <dd>{text(identity.releaseId)}</dd>
-                    </div>
-                    <div>
-                      <dt>Source commit</dt>
-                      <dd className="break-all">
-                        {text(identity.sourceCommit)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Authorized branch head</dt>
-                      <dd className="break-all">
-                        {text(identity.authorizedBranchHead)}
-                      </dd>
-                    </div>
-                    <div>
-                      <dt>Promotion origin</dt>
-                      <dd>{text(identity.promotionOrigin?.releaseId)}</dd>
-                    </div>
+                    <div><dt>Observation state</dt><dd>{service.observationState}</dd></div>
+                    <div><dt>Observed at</dt><dd>{text(service.observedAt)}</dd></div>
+                    <div><dt>Observation source</dt><dd>{service.source}</dd></div>
+                    <div><dt>Verification quality</dt><dd>{verificationQuality(service, inventory?.snapshotOrigin)}</dd></div>
+                    {service.verificationSource !== null && <div><dt>Verification source</dt><dd>{service.verificationSource}</dd></div>}
+                    {service.verifiedAt !== null && <div><dt>Verified at</dt><dd>{service.verifiedAt}</dd></div>}
+                    <div><dt>Release ID</dt><dd>{text(identity?.releaseId)}</dd></div>
+                    <div><dt>Canonical version</dt><dd>{text(identity?.canonicalVersion)}</dd></div>
+                    <div><dt>Base version</dt><dd>{text(identity?.baseVersion)}</dd></div>
+                    <div><dt>Release channel</dt><dd>{text(identity?.channel)}</dd></div>
+                    <div><dt>Source tag</dt><dd>{text(identity?.sourceTag)}</dd></div>
+                    <div><dt>Source branch</dt><dd>{text(identity?.sourceBranch)}</dd></div>
+                    <div><dt>Source commit</dt><dd className="break-all">{text(identity?.sourceCommit)}</dd></div>
+                    <div><dt>Authorized branch head</dt><dd className="break-all">{text(identity?.authorizedBranchHead)}</dd></div>
+                    <div><dt>Build ID</dt><dd>{text(identity?.buildId)}</dd></div>
+                    <div><dt>Build attempt</dt><dd>{text(identity?.buildAttempt)}</dd></div>
+                    <div><dt>Workflow identity</dt><dd>{text(identity?.workflowIdentity)}</dd></div>
+                    <div><dt>Allocation identity</dt><dd>{text(identity?.allocationIdentity)}</dd></div>
+                    <div><dt>Promotion origin release ID</dt><dd>{text(identity?.promotionOrigin?.releaseId)}</dd></div>
+                    <div><dt>Promotion origin version</dt><dd>{text(identity?.promotionOrigin?.canonicalVersion)}</dd></div>
+                    <div><dt>Promotion origin source commit</dt><dd className="break-all">{text(identity?.promotionOrigin?.sourceCommit)}</dd></div>
+                    <div><dt>Promotion origin manifest digest</dt><dd className="break-all">{text(identity?.promotionOrigin?.manifestDigest)}</dd></div>
+                    <div><dt>Promotion origin evidence</dt><dd>{text(identity?.promotionOrigin?.evidence)}</dd></div>
+                    <div><dt>Platform</dt><dd>{text(service.platform)}</dd></div>
+                    <div><dt>Platform digest</dt><dd className="break-all">{text(service.platformDigest)}</dd></div>
+                    <div><dt>Index digest</dt><dd className="break-all">{text(service.indexDigest)}</dd></div>
+                    <div><dt>Manifest digest</dt><dd className="break-all">{text(service.manifestDigest)}</dd></div>
                   </dl>
                 </details>
               );
@@ -103,10 +134,7 @@ function observedIdentityDetails(
       <ul className="space-y-1">
         {services.map((service, index) => (
           <li key={`${service.serviceId}-${service.instanceId ?? index}`}>
-            {service.component}
-            {service.instanceId ? ` (${service.instanceId})` : ""}:{" "}
-            {service.observationState}; observed {text(service.observedAt)};
-            source {service.source}
+            {service.component}{service.instanceId ? ` (${service.instanceId})` : ""}: {service.observationState}; observed {text(service.observedAt)}; source {service.source}
           </li>
         ))}
       </ul>
@@ -117,24 +145,8 @@ function observedIdentityDetails(
 /** Read-only M1 installer-update surface. It intentionally has no mutation until the constrained handoff exists. */
 export function InstallerUpdatesExperience({
   inventory,
-  refetch,
+  observation,
 }: InstallerUpdatesExperienceProps) {
-  const [observation, setObservation] = useState(
-    navigator.onLine ? "connected" : "unknown",
-  );
-  useEffect(() => {
-    const reconnect = () => {
-      setObservation("connected");
-      refetch();
-    };
-    const disconnect = () => setObservation("unknown");
-    window.addEventListener("online", reconnect);
-    window.addEventListener("offline", disconnect);
-    return () => {
-      window.removeEventListener("online", reconnect);
-      window.removeEventListener("offline", disconnect);
-    };
-  }, [refetch]);
 
   const insider =
     inventory?.selectedChannel === "insider" ||
@@ -239,7 +251,7 @@ export function InstallerUpdatesExperience({
           <p>
             Readiness: {readiness?.state ?? UNKNOWN}. Eligibility:{" "}
             {inventory?.eligibility ?? UNKNOWN}.{" "}
-            {eligibilityReasons.join(", ") || "No host evidence reported."}
+            {eligibilityReasons.join(", ") || "No reasons reported."}
           </p>
           <p>
             Readiness reasons: {readinessReasons.join(", ") || UNKNOWN}.

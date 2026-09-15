@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { Alert, Button } from "@/common/components/ui";
 import { InstallerUpdatesExperience } from "@/features/admin/components/InstallerUpdatesExperience";
@@ -6,7 +6,12 @@ import { useAuth } from "@/features/auth/hooks/useAuth";
 import { apiClient } from "@/services/api";
 import type { SystemInfo } from "@/types/api";
 
+type ConnectionObservation = "connected" | "unknown";
+
 export function InstallerUpdatesPage() {
+  const [observation, setObservation] = useState<ConnectionObservation>(
+    navigator.onLine ? "connected" : "unknown",
+  );
   const { hasPermission } = useAuth();
   const canView = hasPermission("system_settings", "admin");
   const {
@@ -20,14 +25,26 @@ export function InstallerUpdatesPage() {
     enabled: canView,
     refetchOnWindowFocus: true,
   });
-  const refetch = useCallback(() => {
-    void refetchInventory();
+  const refetch = useCallback(async () => {
+    try {
+      const result = await refetchInventory();
+      setObservation(result.isError ? "unknown" : "connected");
+    } catch {
+      // Keep the observation unknown until a successful explicit retry.
+      setObservation("unknown");
+    }
   }, [refetchInventory]);
 
   useEffect(() => {
     if (!canView) return;
-    window.addEventListener("online", refetch);
-    return () => window.removeEventListener("online", refetch);
+    const reconnect = () => { void refetch(); };
+    const disconnect = () => setObservation("unknown");
+    window.addEventListener("online", reconnect);
+    window.addEventListener("offline", disconnect);
+    return () => {
+      window.removeEventListener("online", reconnect);
+      window.removeEventListener("offline", disconnect);
+    };
   }, [canView, refetch]);
 
   if (!canView)
@@ -54,6 +71,6 @@ export function InstallerUpdatesPage() {
   // `updates:execute` has no backend authorization contract yet. A safe admin/view check
   // may display this read-only surface, but it must not imply a runtime permission grant.
   return (
-    <InstallerUpdatesExperience inventory={data?.inventory} refetch={refetch} />
+    <InstallerUpdatesExperience inventory={data?.inventory} observation={observation} />
   );
 }
