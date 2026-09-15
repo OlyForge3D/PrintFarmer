@@ -417,7 +417,8 @@ describe('SettingsShell', () => {
 
   it('keeps personal settings route-locked even for a farm administrator', () => {
     renderSettings('/settings?scope=system&tab=users&sub=accounts', 'user');
-    expect(screen.getByTestId('theme-switcher')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
     expect(screen.queryByTestId('accounts-editor')).not.toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
   });
@@ -502,6 +503,28 @@ describe('SettingsShell', () => {
     renderSettings();
     expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
     expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+  });
+
+  it('separates Appearance from Preferences without changing the default URL', () => {
+    renderSettings('/settings?scope=user&tab=profile&sub=preferences', 'user');
+    expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('tab', { name: 'Appearance' }));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=appearance');
+    expect(screen.getByTestId('theme-switcher')).toBeInTheDocument();
+    expect(screen.queryByRole('form', { name: 'User preferences' })).not.toBeInTheDocument();
+    for (const name of ['API Keys', 'Notifications', 'Passkeys']) {
+      expect(screen.getByRole('tab', { name })).toBeInTheDocument();
+    }
+    fireEvent.click(screen.getByRole('tab', { name: 'Preferences' }));
+    expect(screen.getByTestId('location-search')).toHaveTextContent('sub=preferences');
+    expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
+  });
+
+  it('opens Appearance directly inside the existing User Settings shell', () => {
+    renderSettings('/settings?scope=user&tab=profile&sub=appearance', 'user');
+    expect(getCategoryButton('Profile')).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('tab', { name: 'Appearance' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.getAllByTestId('theme-switcher')).toHaveLength(1);
   });
 
   it('switches to system scope when picking a system destination', () => {
