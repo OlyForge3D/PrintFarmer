@@ -440,9 +440,9 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
-function validateManifestCryptoEvidence(services, completeSet, trust) {
+function validateManifestCryptoEvidence(evidence, completeSet, trust) {
   try {
-    validateEvidenceSet({ schema: 1, services }, completeSet, trust);
+    validateEvidenceSet(evidence, completeSet, trust);
   } catch (error) {
     throw new ReleasePolicyError(error.message);
   }
@@ -478,7 +478,11 @@ export function releaseManifest(record, set, identitySha256, releaseNotesSha256,
   requireTimestamp(cryptoEvidence.verificationTime, 'post-sign evidence verification time');
   requireThat(Date.parse(record.created) <= Date.parse(cryptoEvidence.verificationTime),
     'Evidence verification predates authorization');
-  validateManifestCryptoEvidence(cryptoEvidence.services, completeSet, {
+  requireThat(cryptoEvidence.createdTime === record.created, 'Crypto evidence creation time differs from authorization');
+  validateManifestCryptoEvidence({
+    schema: cryptoEvidence.schema, createdTime: cryptoEvidence.createdTime,
+    verificationTime: cryptoEvidence.verificationTime, services: cryptoEvidence.services,
+  }, completeSet, {
     policy: trustPolicy, releaseId: record.releaseId, createdTime: record.created,
     trustedTime: cryptoEvidence.verificationTime,
   });
@@ -645,7 +649,12 @@ export function validateReleaseManifest(manifest) {
   'Release metadata hash mismatch');
   requireThat(evidence.cryptoEvidence.schema === 1 && hashPattern.test(evidence.cryptoEvidence.sha256),
     'Invalid immutable crypto evidence binding');
-  validateManifestCryptoEvidence(evidence.services, manifest.completeSet, {
+  validateManifestCryptoEvidence({
+    schema: evidence.cryptoEvidence.schema,
+    createdTime: evidence.trust.createdTime,
+    verificationTime: evidence.trust.verificationTime,
+    services: evidence.services,
+  }, manifest.completeSet, {
     policy: trustPolicy, releaseId: identity.releaseId, createdTime: evidence.trust.createdTime,
     trustedTime: evidence.trust.verificationTime,
   });
@@ -977,14 +986,14 @@ export function validateLedger(state, anchor) {
       'Incomplete public ledger set/hash');
     if (Object.hasOwn(reservation, 'abandonment')) {
       requireKeys(reservation.abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
-        'channel', 'authorizationSha256', 'ownerApprovedAt'], [], 'reservation abandonment');
+        'channel', 'identitySha256', 'ownerApprovedAt'], [], 'reservation abandonment');
       const abandonment = reservation.abandonment;
       requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
         abandonment.sourceCommit === reservation.record.sourceCommit &&
         abandonment.canonicalVersion === reservation.record.canonicalVersion &&
         abandonment.channel === reservation.record.channel &&
-        abandonment.authorizationSha256 === (reservation.identitySha256 ?? hash(reservation.record)) &&
-        hashPattern.test(abandonment.authorizationSha256) &&
+        abandonment.identitySha256 === (reservation.identitySha256 ?? hash(reservation.record)) &&
+        hashPattern.test(abandonment.identitySha256) &&
         typeof abandonment.ownerApprovedAt === 'string' &&
         Number.isFinite(Date.parse(abandonment.ownerApprovedAt)) &&
         new Date(abandonment.ownerApprovedAt).toISOString() === abandonment.ownerApprovedAt &&
@@ -1196,6 +1205,7 @@ export function validateReservationAdmission(state, admission) {
   validateAdmission(admission);
   const existing = state.reservations[allocationKey(admission)];
   if (existing) {
+    requireThat(!existing.abandonment, 'Terminally abandoned reservation cannot be recovered or reused');
     const retryIdentity = value => Object.fromEntries(
       Object.entries(value).filter(([key]) => key !== 'buildAttempt'));
     requireThat(hash(retryIdentity(existing.admission)) === hash(retryIdentity(admission)),
@@ -1263,15 +1273,22 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   return reservation;
 }
 
-export function abandonmentAuthorization(record, protection, ownerApprovedAt) {
+export function abandonmentAuthorization(record, protection, ownerApprovedAt, now = Date.now()) {
   validateRecord(record);
   requireThat(record.channel === 'insider', 'Only active insider reservations may be abandoned');
   verifyProtectionEvidence(protection, record.channel);
   requireThat(typeof ownerApprovedAt === 'string' && Number.isFinite(Date.parse(ownerApprovedAt)) &&
     new Date(ownerApprovedAt).toISOString() === ownerApprovedAt, 'Abandonment requires explicit owner approval');
+  const approvedAt = Date.parse(ownerApprovedAt);
+  const createdAt = Date.parse(record.created);
+  const verifiedAt = Date.parse(protection.verifiedAt);
+  requireThat(Number.isFinite(now) && approvedAt >= createdAt && verifiedAt >= createdAt &&
+    approvedAt <= now && now - approvedAt <= 15 * 60 * 1000 &&
+    now - verifiedAt <= 15 * 60 * 1000,
+  'Abandonment approval is stale, future-dated, or predates authorization/protection');
   return { schema: 1, kind: 'release-reservation-abandonment', allocationKey: record.allocationKey,
     sourceCommit: record.sourceCommit, canonicalVersion: record.canonicalVersion, channel: record.channel,
-    authorizationSha256: hash(record), protectionDigest: protection.policyDigest, ownerApprovedAt };
+    identitySha256: hash(record), protectionDigest: protection.policyDigest, ownerApprovedAt };
 }
 
 export function abandon(state, record, authorization, protection) {
@@ -1280,7 +1297,7 @@ export function abandon(state, record, authorization, protection) {
   verifyProtectionEvidence(protection, record.channel);
   requireThat(record.channel === 'insider' && authorization?.schema === 1 &&
     authorization.kind === 'release-reservation-abandonment' &&
-    authorization.authorizationSha256 === hash(record) && authorization.allocationKey === record.allocationKey &&
+    authorization.identitySha256 === hash(record) && authorization.allocationKey === record.allocationKey &&
     authorization.sourceCommit === record.sourceCommit && authorization.canonicalVersion === record.canonicalVersion &&
     authorization.channel === record.channel && authorization.protectionDigest === protection.policyDigest &&
     typeof authorization.ownerApprovedAt === 'string' && Number.isFinite(Date.parse(authorization.ownerApprovedAt)) &&
@@ -1291,7 +1308,7 @@ export function abandon(state, record, authorization, protection) {
     !reservation.abandonment, 'Reservation cannot be reactivated or abandoned twice');
   reservation.abandonment = { schema: 1, allocationKey: record.allocationKey, sourceCommit: record.sourceCommit,
     canonicalVersion: record.canonicalVersion, channel: record.channel,
-    authorizationSha256: reservation.identitySha256 ?? hash(record), ownerApprovedAt: authorization.ownerApprovedAt };
+    identitySha256: reservation.identitySha256 ?? hash(record), ownerApprovedAt: authorization.ownerApprovedAt };
   return reservation.abandonment;
 }
 
@@ -1301,6 +1318,7 @@ export function verifyTag(record, expectedObject, actualTag) {
 }
 
 export function verifyConsumer(record, stored, context, identitySha256 = hash(stored)) {
+  requireThat(!stored?.abandonment, 'Terminally abandoned reservation cannot be consumed');
   requireThat(hash(record) === identitySha256, 'Canonical record was changed');
   validateRecord(record);
   const tag = parseTag(record.sourceTag);
@@ -1358,6 +1376,7 @@ export function advance(state, record, set, signed, currentHead, expectedPointer
   requireString(currentHead, shaPattern, 'verified canonical branch HEAD');
   const reservation = state.reservations[record.allocationKey];
   requireThat(reservation && (reservation.identitySha256 || hash(reservation.record)) === hash(record), 'Unknown authorization');
+  requireThat(!reservation.abandonment, 'Terminally abandoned reservation cannot advance');
   const pointer = state.pointers[record.channel];
   requireThat((pointer?.manifestEnvelopeSha256 || '') === expectedPointer, 'Channel compare-and-set conflict');
   const immutablePointer = signedReleasePointer(record, signed);

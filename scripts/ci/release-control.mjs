@@ -66,7 +66,7 @@ export function output(name, value) {
 
 export async function runReleaseControl(operation, env = process.env, verify = command) {
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance', 'abandon'].includes(operation), 'Unknown release operation');
-  const consumer = ['consume', 'preflight', 'advance', 'abandon'].includes(operation);
+  const consumer = ['consume', 'preflight', 'advance'].includes(operation);
   const transaction = transactionFromEnvironment(env);
   if (operation !== 'admit') {
     requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit,
@@ -150,7 +150,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const { state } = await store.read();
   const entry = state.reservations[record.allocationKey];
   requireThat(entry, 'Unknown release authorization');
-  verifyConsumer(record, entry.record, context, entry.identitySha256);
+  requireThat(!entry.abandonment, 'Terminally abandoned reservation cannot be consumed, preflighted, advanced, or recovered');
+  requireThat(entry.identitySha256 === hash(record), 'Release authorization differs from the immutable reservation');
+  if (operation !== 'abandon') verifyConsumer(record, entry.record, context, entry.identitySha256);
   verifyProtectionEvidence(record.protection, record.channel);
   requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
     'Protection evidence postdates authorization');
@@ -183,7 +185,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   } else if (operation === 'abandon') {
     const protection = await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
-    const authorization = abandonmentAuthorization(record, protection, env.RELEASE_ABANDONMENT_OWNER_APPROVED_AT);
+    const approvedAt = env.GITHUB_RUN_STARTED_AT;
+    requireThat(typeof approvedAt === 'string', 'Protected environment run approval evidence is missing');
+    const authorization = abandonmentAuthorization(record, protection, approvedAt);
     await transact(store, async latest => abandon(latest, record, authorization, protection));
   } else if (operation === 'advance') {
     const set = readPrivateJson(privateSetPath);

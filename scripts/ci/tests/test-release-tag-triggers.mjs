@@ -82,8 +82,9 @@ const cryptoEvidenceFixture = set => {
     },
   ]));
   const verificationTime = '2099-01-01T00:00:00.000Z';
-  return { schema: 1, verificationTime, services, sha256: hash({
-    schema: 1, createdTime: set.identity.buildTime ?? set.identity.created, verificationTime, services,
+  const createdTime = set.identity.buildTime ?? set.identity.created;
+  return { schema: 1, createdTime, verificationTime, services, sha256: hash({
+    schema: 1, createdTime, verificationTime, services,
   }) };
 };
 
@@ -656,10 +657,10 @@ test('serialized insider allocation rejects overlapping active reservations and 
 test('owner-approved terminal abandonment projects only safe binding fields and consumes identity and sequence', () => {
   const ledger = state();
   const first = record(ledger);
-  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z');
+  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z', Date.parse('2026-09-12T20:05:00.000Z'));
   const terminal = abandon(ledger, first, approval, first.protection);
   assert.deepEqual(Object.keys(terminal).sort(), [
-    'allocationKey', 'authorizationSha256', 'canonicalVersion', 'channel', 'ownerApprovedAt', 'schema', 'sourceCommit',
+    'allocationKey', 'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
   ]);
   const projected = publicLedger(ledger);
   const persisted = projected.reservations[first.allocationKey].abandonment;
@@ -675,13 +676,13 @@ test('owner-approved terminal abandonment projects only safe binding fields and 
 test('abandonment rejects forged bindings, duplicate terminal transitions, and activated reservations', () => {
   const ledger = state();
   const first = record(ledger);
-  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z');
+  const approval = abandonmentAuthorization(first, first.protection, '2026-09-12T20:01:00.000Z', Date.parse('2026-09-12T20:05:00.000Z'));
   for (const mutate of [
     value => { value.allocationKey = 'f'.repeat(64); },
     value => { value.sourceCommit = newerSha; },
     value => { value.canonicalVersion = '1.2.3-insider.9'; },
     value => { value.channel = 'stable'; },
-    value => { value.authorizationSha256 = 'f'.repeat(64); },
+    value => { value.identitySha256 = 'f'.repeat(64); },
     value => { value.protectionDigest = 'f'.repeat(64); },
   ]) {
     const forged = structuredClone(approval);
@@ -689,14 +690,14 @@ test('abandonment rejects forged bindings, duplicate terminal transitions, and a
     assert.throws(() => abandon(ledger, first, forged, first.protection), /Abandonment authorization/);
   }
   abandon(ledger, first, approval, first.protection);
-  assert.throws(() => abandon(ledger, first, approval, first.protection), /cannot be reactivated or abandoned twice/);
+  assert.throws(() => abandon(ledger, first, approval, first.protection), /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
 
   const activatedLedger = state();
   const activated = record(activatedLedger);
   advance(activatedLedger, activated, completeSet(activated), sha, '');
   assert.throws(() => abandon(activatedLedger, activated,
-    abandonmentAuthorization(activated, activated.protection, '2026-09-12T20:01:00.000Z'), activated.protection),
-  /cannot be reactivated or abandoned twice/);
+    abandonmentAuthorization(activated, activated.protection, '2026-09-12T20:01:00.000Z', Date.parse('2026-09-12T20:05:00.000Z')), activated.protection),
+  /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
 });
 
 test('pointer advancement rejects a stale expected pointer without another ledger write', async () => {
@@ -2731,12 +2732,12 @@ test('protected release-control abandonment uses App policy verification and Git
     await runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
-      RELEASE_ABANDONMENT_OWNER_APPROVED_AT: '2026-09-12T20:01:00.000Z',
+      GITHUB_RUN_STARTED_AT: new Date().toISOString(),
     }, () => {});
     const persisted = (await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read()).state;
     const terminal = persisted.reservations[identity.allocationKey].abandonment;
     assert.deepEqual(Object.keys(terminal).sort(), [
-      'allocationKey', 'authorizationSha256', 'canonicalVersion', 'channel', 'ownerApprovedAt', 'schema', 'sourceCommit',
+      'allocationKey', 'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
     ]);
     assert.ok(fixture.calls.some(call => call.admin && call.publisher));
     assert.ok(fixture.calls.some(call => call.method === 'PATCH' && call.publisher));
@@ -2744,8 +2745,8 @@ test('protected release-control abandonment uses App policy verification and Git
     await assert.rejects(runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
-      RELEASE_ABANDONMENT_OWNER_APPROVED_AT: '2026-09-12T20:01:00.000Z',
-    }, () => {}), /cannot be reactivated or abandoned twice/);
+      GITHUB_RUN_STARTED_AT: new Date().toISOString(),
+    }, () => {}), /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
     const subsequent = reserve(persisted, admission({ buildId: '43' }), created).record;
     assert.equal(subsequent.sequence, '2');
   } finally {

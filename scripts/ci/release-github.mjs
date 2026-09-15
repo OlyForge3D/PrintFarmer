@@ -46,12 +46,12 @@ function publicReservation(entry, key) {
   if (entry.abandonment !== undefined) {
     const abandonment = entry.abandonment;
     requireKeys(abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
-      'channel', 'authorizationSha256', 'ownerApprovedAt'], [], 'public ledger abandonment');
+      'channel', 'identitySha256', 'ownerApprovedAt'], [], 'public ledger abandonment');
     requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
       abandonment.sourceCommit === record.sourceCommit &&
       abandonment.canonicalVersion === record.canonicalVersion &&
       abandonment.channel === 'insider' &&
-      abandonment.authorizationSha256 === identitySha256,
+      abandonment.identitySha256 === identitySha256,
     'Invalid public ledger abandonment');
     result.abandonment = {
       schema: 1,
@@ -59,7 +59,7 @@ function publicReservation(entry, key) {
       sourceCommit: publicReference(abandonment.sourceCommit, shaPattern),
       canonicalVersion: parseTag(`v${abandonment.canonicalVersion}`).canonicalVersion,
       channel: abandonment.channel,
-      authorizationSha256: publicReference(abandonment.authorizationSha256, hashPattern),
+      identitySha256: publicReference(abandonment.identitySha256, hashPattern),
       ownerApprovedAt: abandonment.ownerApprovedAt,
     };
   }

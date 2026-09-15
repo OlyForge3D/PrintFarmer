@@ -60,9 +60,10 @@ test('stages validated index and platform crypto evidence', () => {
   try {
     const completeSet = { images: { api: { digest, platforms: { 'linux/amd64': { digest } } } } };
     const evidencePath = join(root, 'release-crypto-evidence.json');
-    const result = stageEvidence(evidencePath, completeSet, { api: { index: signed(), platforms: { 'linux/amd64': signed() } } });
+    const context = trust();
+    const result = stageEvidence(evidencePath, completeSet, { api: { index: signed(), platforms: { 'linux/amd64': signed() } } }, context);
     assert.equal(result.set.services.api.platforms['linux/amd64'].subject, digest);
-    assert.deepEqual(readEvidence(evidencePath, completeSet).set, result.set);
+    assert.deepEqual(readEvidence(evidencePath, completeSet, context).set, result.set);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test('accepts formatted key-reordered predicate bytes while retaining their raw digest', () => {
@@ -115,7 +116,6 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
   evidence.attestationBundleBytes = JSON.stringify([{
     mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
     verificationMaterial: nativeSignature.verificationMaterial,
-    messageSignature: nativeSignature.messageSignature,
     dsseEnvelope: {
       payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
       payloadType: 'application/vnd.in-toto+json',
@@ -187,10 +187,10 @@ test('rejects staged signature bundle, subject, predicate, and platform substitu
     const collected = {
       api: { index: signed(), platforms: { 'linux/amd64': signed(platformDigest) } },
     };
-    const staged = stageEvidence(evidencePath, completeSet, collected);
+    const staged = stageEvidence(evidencePath, completeSet, collected, trust());
     staged.set.services.api.platforms['linux/amd64'].signature.bytes = signed(other).signatureBytes;
     writeFileSync(evidencePath, JSON.stringify(staged.set));
-    assert.throws(() => readEvidence(evidencePath, completeSet), /bytes digest mismatch/);
+    assert.throws(() => readEvidence(evidencePath, completeSet, trust()), /bytes digest mismatch/);
 
     assert.throws(() => stageEvidence(evidencePath, completeSet, {
       api: { index: signed(), platforms: { 'linux/amd64': signed(digest) } },
@@ -202,17 +202,17 @@ test('rejects staged signature bundle, subject, predicate, and platform substitu
       api: { index: signed(), platforms: { 'linux/amd64': wrongPredicate } },
     }), /predicate mismatch/);
 
-    stageEvidence(evidencePath, completeSet, collected);
+    stageEvidence(evidencePath, completeSet, collected, trust());
     const substituted = JSON.parse(readFileSync(evidencePath, 'utf8'));
     substituted.services.api.platforms['linux/amd64'].platform = 'linux/arm64';
     writeFileSync(evidencePath, JSON.stringify(substituted));
-    assert.throws(() => readEvidence(evidencePath, completeSet), /subject\/platform mismatch/);
+    assert.throws(() => readEvidence(evidencePath, completeSet, trust()), /subject\/platform mismatch/);
 
-    stageEvidence(evidencePath, completeSet, collected);
+    stageEvidence(evidencePath, completeSet, collected, trust());
     const unknown = JSON.parse(readFileSync(evidencePath, 'utf8'));
     unknown.services.api.index.unverified = true;
     writeFileSync(evidencePath, JSON.stringify(unknown));
-    assert.throws(() => readEvidence(evidencePath, completeSet), /Invalid evidence entry/);
+    assert.throws(() => readEvidence(evidencePath, completeSet, trust()), /Invalid evidence entry/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

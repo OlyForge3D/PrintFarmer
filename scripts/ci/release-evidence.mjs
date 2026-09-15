@@ -32,8 +32,17 @@ function canonicalJson(value) {
 
 function nativeBundle(entry) {
   return entry?.mediaType === 'application/vnd.dev.sigstore.bundle.v0.3+json' &&
-    entry.verificationMaterial && typeof entry.verificationMaterial === 'object' &&
-    entry.messageSignature && typeof entry.messageSignature === 'object';
+    entry.verificationMaterial && typeof entry.verificationMaterial === 'object';
+}
+
+function nativeSignatureBundle(entry) {
+  return nativeBundle(entry) && entry.messageSignature && typeof entry.messageSignature === 'object' &&
+    entry.dsseEnvelope === undefined;
+}
+
+function nativeDsseBundle(entry) {
+  return nativeBundle(entry) && entry.dsseEnvelope && typeof entry.dsseEnvelope === 'object' &&
+    entry.messageSignature === undefined;
 }
 
 function nativeCertificate(entry) {
@@ -52,16 +61,11 @@ function nativeIntegratedTime(entry) {
 }
 
 function validateNativeSignatureBundle(entry, subject, verification) {
-  requireThat(nativeBundle(entry) && entry.messageSignature?.messageDigest?.algorithm === 'SHA2_256' &&
+  requireThat(nativeSignatureBundle(entry) && entry.messageSignature?.messageDigest?.algorithm === 'SHA2_256' &&
     entry.messageSignature?.messageDigest?.digest === Buffer.from(subject.slice(7), 'hex').toString('base64') &&
     typeof entry.messageSignature?.signature === 'string' && entry.messageSignature.signature.length > 0,
   'Malformed native Cosign signature bundle');
-  const certificate = nativeCertificate(entry);
-  const verifiedCertificate = verification?.optional?.certificate;
-  if (typeof verifiedCertificate === 'string') {
-    requireThat(certificate.raw.toString('base64') === new X509Certificate(verifiedCertificate).raw.toString('base64'),
-      'Native Cosign certificate differs from verification output');
-  }
+  nativeCertificate(entry);
 }
 
 function subjects(result, label) {
@@ -125,6 +129,10 @@ function validateBundleTrust(bundle, trust, verification = []) {
       const integratedTime = nativeIntegratedTime(entry);
       const integratedAt = integratedTime * 1000;
       const certificate = nativeCertificate(entry);
+      const verifiedCertificate = optional?.certificate;
+      requireThat(typeof verifiedCertificate === 'string' &&
+        certificate.raw.toString('base64') === new X509Certificate(verifiedCertificate).raw.toString('base64'),
+      'Native Cosign certificate differs from verification output');
       requireThat(createdAt <= integratedAt && integratedAt >= Date.parse(policy.revocationEpoch) &&
         integratedAt <= trustedAt && trustedAt - integratedAt <= policy.certificateMaxAgeSeconds * 1000 &&
         Date.parse(certificate.validFrom) <= integratedAt && integratedAt <= Date.parse(certificate.validTo) &&
@@ -170,11 +178,8 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   const predicate = parseJson(predicateBytes, 'SPDX predicate');
   for (let index = 0; index < entries.length; index++) {
     const rawEntry = entries[index];
-    if (nativeBundle(rawEntry) && typeof verification[index]?.optional?.certificate === 'string') {
-      const verified = new X509Certificate(verification[index].optional.certificate);
-      requireThat(nativeCertificate(rawEntry).raw.toString('base64') === verified.raw.toString('base64'),
-        'Native Cosign attestation certificate differs from verification output');
-    }
+    requireThat(!nativeBundle(rawEntry) || nativeDsseBundle(rawEntry),
+      'Malformed native Cosign DSSE attestation bundle');
     const entry = rawEntry?.dsseEnvelope ?? rawEntry;
     let statement;
     try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
@@ -199,6 +204,7 @@ function validateSignatureDownload(bundle, verification, subject) {
       typeof entry?.Cert === 'string' && entry.Cert.length > 0 && entry?.Bundle &&
       typeof entry.Bundle === 'object' && entry.Base64Signature === undefined;
     if (nativeBundle(entry)) {
+      if (!nativeSignatureBundle(entry)) return false;
       validateNativeSignatureBundle(entry, subject, verification[index]);
       return true;
     }
@@ -243,7 +249,12 @@ export function normalizeEvidence({ subject, signatureBytes, attestationBytes, p
 }
 
 export function validateEvidenceSet(set, completeSet, trust) {
-  requireThat(set?.schema === 1 && typeof set.services === 'object', 'Invalid release evidence set');
+  const trustedShape = trust === undefined ||
+    (Object.keys(set ?? {}).sort().join() === 'createdTime,schema,services,verificationTime' &&
+      typeof set.createdTime === 'string' && typeof set.verificationTime === 'string' &&
+      trust.createdTime === set.createdTime && trust.trustedTime === set.verificationTime);
+  requireThat(set?.schema === 1 && typeof set.services === 'object' && trustedShape,
+  'Invalid release evidence set');
   for (const [service, image] of Object.entries(completeSet.images)) {
     const entry = set.services?.[service];
     requireThat(entry && Object.keys(entry).sort().join() === 'index,platforms', 'Incomplete release evidence');
@@ -299,7 +310,9 @@ function validateStored(value, digest, platform, trust) {
 }
 
 export function stageEvidence(evidencePath, completeSet, collected, trust) {
-  const set = { schema: 1, ...(trust === undefined ? {} : { verificationTime: trust.trustedTime }), services: {} };
+  const set = { schema: 1, ...(trust ? {
+    createdTime: trust.createdTime, verificationTime: trust.trustedTime,
+  } : {}), services: {} };
   for (const [service, image] of Object.entries(completeSet.images)) {
     const value = collected[service];
     requireThat(value, `Missing evidence: ${service}`);
