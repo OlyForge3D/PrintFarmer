@@ -3,6 +3,7 @@ import {
   buildAdminDestinationCommandItems,
   buildSettingCommandItems,
   buildSettingsPath,
+  buildSettingsCommandItems,
   getFuzzyMatchIndices,
   getFuzzyResult,
   groupRankedResults,
@@ -20,6 +21,22 @@ import type { SettingMetadata } from '@/common/components/SettingsPagelet';
 import type { SettingGroupMetadata } from '@/services/settingsApi';
 
 describe('resolveSettingsNavigationTarget', () => {
+  it('resolves the new appearance subtab without redirect aliases', () => {
+    expect(resolveSettingsNavigationTarget('profile', 'appearance', 'user')).toEqual({
+      scopeId: 'user', categoryId: 'profile', subPageId: 'appearance',
+    });
+    expect(buildSettingsPath({ scopeId: 'user', categoryId: 'profile', subPageId: 'appearance' }))
+      .toBe('/settings?scope=user&tab=profile&sub=appearance');
+  });
+
+  it.each([['theme', 'appearance'], ['preview', 'appearance'], ['expert', 'preferences'], ['guided', 'preferences'], ['printables', 'preferences']])(
+    'indexes %s under %s, not unrelated sibling tabs', (query, subPageId) => {
+      const items = buildSettingsCommandItems().filter(item => item.scopeId === 'user' && item.subPageId);
+      const matches = items.filter(item => item.keywords.includes(query));
+      expect(matches.map(item => item.subPageId)).toEqual([subPageId]);
+    },
+  );
+
   it('falls back to User Settings when scope is invalid', () => {
     expect(resolveSettingsNavigationTarget(undefined, undefined, 'not-a-real-scope')).toEqual({
       scopeId: 'user',

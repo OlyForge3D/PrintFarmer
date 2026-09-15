@@ -161,6 +161,20 @@ describe('GlobalCommandPaletteProvider', () => {
     expect(screen.getByTestId('state')).toHaveTextContent('"pageParent": "admin-control-center"');
   });
 
+  it.each([['Appearance', 'appearance'], ['Guided', 'preferences'], ['Printables', 'preferences']])(
+    'routes personal settings search for %s to %s', async (query, subPage) => {
+      authState.roles = ['farm_user'];
+      renderProvider();
+      fireEvent.click(screen.getByRole('button', { name: 'Open palette' }));
+      const input = await screen.findByRole('combobox', { name: 'Search settings command palette' });
+      fireEvent.change(input, { target: { value: query } });
+      fireEvent.keyDown(input, { key: 'Enter' });
+      await waitFor(() => expect(screen.getByTestId('search')).toHaveTextContent(`sub=${subPage}`));
+      expect(screen.getByTestId('pathname')).toHaveTextContent('/settings');
+      expect(screen.getByTestId('search')).toHaveTextContent('scope=user');
+    },
+  );
+
   it('runs the switch-theme action inline and closes the palette', async () => {
     renderProvider();
 

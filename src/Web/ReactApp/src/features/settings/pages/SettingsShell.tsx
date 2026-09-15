@@ -113,21 +113,18 @@ function IntegrationConnectionsPanel() {
   );
 }
 
-function UserPreferencesPanel() {
+function UserAppearancePanel() {
   return (
     <SettingsSection>
-      <div className="space-y-6">
-        <section className="rounded-md border border-pf-border bg-pf-card px-5 py-5">
-          <h3 className="text-lg font-semibold text-pf-text-primary">Appearance</h3>
-          <p className="mt-1 text-sm text-pf-text-secondary">
-            Choose a theme and preview the dashboard surface in real time.
-          </p>
-          <div className="mt-4">
-            <ThemeSwitcher />
-          </div>
-        </section>
-        <UserSettingsSection />
-      </div>
+      <section className="rounded-md border border-pf-border bg-pf-card px-5 py-5">
+        <h3 className="text-lg font-semibold text-pf-text-primary">Appearance</h3>
+        <p className="mt-1 text-sm text-pf-text-secondary">
+          Choose a theme and preview the dashboard surface in real time.
+        </p>
+        <div className="mt-4">
+          <ThemeSwitcher />
+        </div>
+      </section>
     </SettingsSection>
   );
 }
@@ -172,7 +169,8 @@ const SUB_PAGE_CONTENT: Record<string, ReactNode> = {
       <WebhooksAdminPage embedded />
     </SettingsSection>
   ),
-  'profile.preferences': <UserPreferencesPanel />,
+  'profile.preferences': <SettingsSection><UserSettingsSection /></SettingsSection>,
+  'profile.appearance': <UserAppearancePanel />,
   'profile.api-keys': (
     <SettingsSection>
       <ApiKeysPage embedded />
