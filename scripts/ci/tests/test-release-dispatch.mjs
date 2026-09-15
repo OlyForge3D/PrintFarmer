@@ -264,6 +264,7 @@ test('real workflow collects assessment without secrets or bypassing existing en
   assert.equal(upload.if, "steps.assess_dispatch.outcome == 'success'");
   assert.equal(upload['continue-on-error'], true);
   const unavailable = job.steps.find(step => step.name === 'Report unavailable non-authorizing dispatch assessment');
+  assert.equal(unavailable['continue-on-error'], true);
   assert.match(unavailable.if, /steps\.assess_dispatch\.outcome != 'success'/);
   assert.match(unavailable.if, /steps\.dispatch_assessment_artifact\.outcome != 'success'/);
   assert.match(unavailable.run, /::warning::/);

@@ -1001,6 +1001,10 @@ authorization nor permission to access publication secrets.
 
 The assessment checks the live GitHub run's repository, workflow definition,
 original actor and triggering actor against the trusted runner event and context.
+The collaborator permission response shape was verified with the owner credential,
+not the admission job's `github.token`. Confirm that token's endpoint access in
+the first live audit: a denied read means unavailable evidence, never inferred
+permission or an instruction to expand token grants.
 Only initial manual `publish` by user `jpapiez` (pinned account ID `5460061`),
 still holding the live `admin`
 role, is eligible. Every rerun requires the existing explicit approval, including
