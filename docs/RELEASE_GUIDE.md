@@ -73,7 +73,11 @@ requires one API-associated merged PR into the selected canonical branch whose
 PR head must have **identical Git tree SHAs**; no patch/diff heuristic is accepted.
 The receipt records both commits, the tree, PR and original review run. The
 existing verifier authenticates the latest PR-head verdict's workflow, event,
-repository, attempt, timestamps and PR identity. This is exact-tree review
+repository, attempt, timestamps and PR identity. Collector and authority checks
+read `/commits/{reviewedHead}/statuses` through bounded complete pagination:
+individual statuses carry creator provenance, while combined `/status` entries
+may omit it. Missing or untrusted creator metadata is never inferred or bypassed.
+This is exact-tree review
 mapping, **not** a review status on the squash commit, and no status is created.
 Missing, stale, failed, forged, ambiguous or tree-mismatched evidence fails closed.
 `single-maintainer` accepts genuine self-attested/owner review without introducing

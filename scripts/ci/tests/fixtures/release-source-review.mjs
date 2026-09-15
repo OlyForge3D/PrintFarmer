@@ -21,16 +21,18 @@ export function sourceReviewFixture(source, branch, now = Date.now(), reviewedHe
   const status = {
     id: 1, context: releaseReviewStatus, state: 'success',
     description: `REVIEWED (self-attested) @ ${reviewedHead.slice(0, 12)} by bishop+hicks+vasquez`,
-    target_url: run.html_url, creator: { login: 'github-actions[bot]' },
+    target_url: run.html_url, creator: { login: 'github-actions[bot]', type: 'Bot', id: 41898282 },
     created_at: at(29), updated_at: at(29),
   };
+  const { creator: _creator, ...combinedStatus } = status;
   const values = new Map([
     [`commits/${source}/pulls?per_page=100`, [pull]],
     ['pulls/60', pull],
     [`git/commits/${source}`, { sha: source, tree: { sha: 'd'.repeat(40) } }],
     [`git/commits/${reviewedHead}`, { sha: reviewedHead, tree: { sha: 'd'.repeat(40) } }],
     [`commits/${reviewedHead}/status?per_page=100`,
-      { sha: reviewedHead, total_count: 1, statuses: [status] }],
+      { sha: reviewedHead, total_count: 1, statuses: [combinedStatus] }],
+    [`commits/${reviewedHead}/statuses?per_page=100`, [status]],
     ['actions/runs/31', run],
     [`contents/.github/CODEOWNERS?ref=${source}`, {
       encoding: 'base64', content: Buffer.from('* @native-reviewer').toString('base64'),

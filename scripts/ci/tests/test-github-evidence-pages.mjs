@@ -303,6 +303,13 @@ test('page allowlists preserve exact source, attempt, method and collection cons
     assert.equal(qualificationRequestUrl(`${endpoint}&page=2`), `${root}${endpoint}&page=2`);
   }
   assert.equal(githubRequestUrl(`${checks}&page=2`, 'GET'), `${root}${checks}&page=2`);
+  const statuses = `commits/${sha}/statuses?per_page=100`;
+  assert.equal(githubRequestUrl(statuses, 'GET'), `${root}${statuses}`);
+  assert.equal(githubRequestUrl(`${statuses}&page=2`, 'GET'), `${root}${statuses}&page=2`);
+  assert.throws(() => githubRequestUrl(statuses, 'POST'), /not allowlisted/);
+  assert.throws(() => githubRequestUrl(`commits/development/statuses?per_page=100`, 'GET'), /not allowlisted/);
+  assert.throws(() => githubRequestUrl(`${statuses}&page=0`, 'GET'), /not allowlisted/);
+  assert.throws(() => githubRequestUrl(`${statuses}&page=2&page=3`, 'GET'), /not allowlisted/);
   const pulls = `commits/${sha}/pulls?per_page=100`;
   assert.equal(githubRequestUrl(`${pulls}&page=2`, 'GET'), `${root}${pulls}&page=2`);
   assert.throws(() => qualificationRequestUrl(pulls), /not allowlisted/);

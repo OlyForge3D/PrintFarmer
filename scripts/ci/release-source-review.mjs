@@ -67,11 +67,10 @@ export async function verifyReleaseSourceReview(api, transaction, now, maximumAg
     return commit.tree.sha;
   }));
   requireThat(trees[0] === trees[1], 'Canonical source tree differs from the reviewed PR head');
-  const response = await api(`commits/${pull.head.sha}/status?per_page=100`);
-  requireThat(response.sha === pull.head.sha && Number.isSafeInteger(response.total_count) &&
-    Array.isArray(response.statuses) && response.total_count === response.statuses.length,
-  'Missing or truncated exact-head review status evidence');
-  const statuses = response.statuses.filter(status => status.context === releaseReviewStatus);
+  // Combined status entries omit creator; individual statuses carry the provenance.
+  const response = await api(`commits/${pull.head.sha}/statuses?per_page=100`);
+  requireThat(Array.isArray(response), 'Missing exact-head review status list');
+  const statuses = response.filter(status => status?.context === releaseReviewStatus);
   requireThat(statuses.length > 0 &&
     statuses.every(status => Number.isSafeInteger(status.id) && status.id > 0),
   'Missing genuine source review status');
