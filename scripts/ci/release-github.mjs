@@ -141,7 +141,7 @@ export function githubRequestUrl(endpoint, method) {
     /^compare\/[a-f0-9]{40}\.\.\.[a-f0-9]{40}$/,
     /^contents\/VERSION\?ref=[a-f0-9]{40}$/,
     /^commits\/[a-f0-9]{40}\/check-runs\?per_page=100$/,
-    /^commits\/[a-f0-9]{40}\/status\?per_page=100$/,
+    /^commits\/[a-f0-9]{40}\/(?:status|statuses)\?per_page=100$/,
     /^commits\/[a-f0-9]{40}\/pulls\?per_page=100$/,
     /^pulls\/[1-9][0-9]*(?:\/reviews\?per_page=100)?$/,
     /^contents\/\.github\/(?:CODEOWNERS|workflows\/squad-review-verdict\.yml)\?ref=[a-f0-9]{40}$/,

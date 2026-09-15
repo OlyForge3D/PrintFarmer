@@ -5,6 +5,7 @@ import { load } from 'js-yaml';
 import { randomUUID } from 'node:crypto';
 import { resolve } from 'node:path';
 import { sourceReviewFixture } from './fixtures/release-source-review.mjs';
+import { githubClient } from '../release-github.mjs';
 import {
   qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
   qualifyTransaction, selectTransaction, transactionPath,
@@ -288,6 +289,93 @@ test('automatic qualification accepts a reviewed squash tree without any prior c
   }
 });
 
+function statusTransport(fixture, reviewedHead, statuses, changePage = () => {}) {
+  const prefix = 'https://api.github.com/repos/OlyForge3D/PrintFarmer/';
+  const route = `commits/${reviewedHead}/statuses?per_page=100`;
+  const calls = [];
+  const api = githubClient('test-only', async (url, options) => {
+    assert.ok(url.startsWith(prefix));
+    assert.equal(options.method, 'GET');
+    assert.equal(options.redirect, 'error');
+    const path = url.slice(prefix.length);
+    calls.push(path);
+    if (path === route || path.startsWith(`${route}&page=`)) {
+      const page = Number(new URL(url).searchParams.get('page') ?? '1');
+      const data = structuredClone(statuses.slice((page - 1) * 100, page * 100));
+      const response = { data, status: 200,
+        link: statuses.length > page * 100 ? `<${prefix}${route}&page=${page + 1}>; rel="next"` : '' };
+      changePage(response, page);
+      return new Response(typeof response.data === 'string' ? response.data : JSON.stringify(response.data), {
+        status: response.status, headers: { link: response.link },
+      });
+    }
+    return new Response(JSON.stringify(await fixture.api(path)));
+  });
+  return { api, calls, route };
+}
+
+test('real release transport collects individual creator provenance through full and terminal status pages', async () => {
+  for (const channel of ['stable', 'insider']) {
+    for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+      for (const count of [1, 100, 101, 200, 201]) {
+        const reviewed = 'e'.repeat(40);
+        const { value, fixture } = await transaction(channel, '', reviewed);
+        value.approvalMode = approvalMode;
+        const combined = fixture.values.get(`commits/${reviewed}/status?per_page=100`);
+        assert.equal(combined.statuses[0].creator, undefined, 'Combined API deliberately has no creator');
+        const statuses = Array.from({ length: count - 1 }, (_, index) => ({
+          id: index + 1, context: `other-${index}`, state: 'success',
+        }));
+        statuses.push({ ...fixture.review.status, id: 10001 });
+        const transport = statusTransport(fixture, reviewed, statuses);
+        const receipt = await qualifyTransaction(value, transport.api, now);
+        assert.equal(receipt.sourceEvidence.review.statusId, 10001);
+        assert.equal(receipt.sourceEvidence.review.reviewedHead, reviewed);
+        assert.equal(receipt.sourceEvidence.review.classification, 'REVIEWED');
+        assert.ok(!transport.calls.some(path => path.includes('/status?')), 'Never infer creator from combined status');
+        assert.equal(transport.calls.filter(path => path.startsWith(transport.route)).length,
+          Math.floor(count / 100) + 1, 'Full terminal arrays require an empty-page completeness probe');
+      }
+    }
+  }
+});
+
+test('individual status transport rejects later-page failure, truncation, substitution and untrusted provenance', async () => {
+  const cases = [
+    ['HTTP failure', response => { response.status = 403; response.data = {}; }],
+    ['malformed JSON', response => { response.data = '{'; }],
+    ['missing advertised terminal page', response => {
+      response.data = [];
+      response.link = '<https://api.github.com/repos/OlyForge3D/PrintFarmer/commits/' +
+        `${'e'.repeat(40)}/statuses?per_page=100&page=3>; rel="last"`;
+    }],
+    ['foreign source link', response => {
+      response.link = `<https://api.github.com/repos/OlyForge3D/PrintFarmer/commits/${sourceSha}/statuses?per_page=100&page=3>; rel="next"`;
+    }],
+    ['duplicate ID', response => { response.data[0].id = 1; }],
+    ['missing creator', response => { delete response.data[0].creator; }],
+    ['untrusted creator', response => { response.data[0].creator.login = 'attacker'; }],
+    ['substituted SHA', response => { response.data[0].sha = sourceSha; }],
+    ['stale verdict', response => { response.data[0].created_at = '2026-09-12T19:00:00Z'; }],
+    ['newest failure cannot resurrect approval', response => { response.data[0].state = 'failure'; }],
+    ['substituted run', response => { response.data[0].target_url = 'https://github.com/attacker/repo/actions/runs/31'; }],
+  ];
+  for (const [name, change] of cases) {
+    const reviewed = 'e'.repeat(40);
+    const { value, fixture } = await transaction('insider', '', reviewed);
+    const statuses = Array.from({ length: 100 }, (_, index) => ({
+      id: index + 1, context: `other-${index}`, state: 'success',
+    }));
+    statuses[0] = { ...fixture.review.status, id: 1 };
+    statuses.push({ ...fixture.review.status, id: 101 });
+    const transport = statusTransport(fixture, reviewed, statuses, (response, page) => {
+      if (page === 2) change(response);
+    });
+    await assert.rejects(qualifyTransaction(value, transport.api, now), undefined, name);
+    assert.equal(transport.calls.filter(path => path.startsWith(transport.route)).length, 2);
+  }
+});
+
 test('squash qualification fails closed for source, review, tree and transaction substitutions', async () => {
   const mutations = [
     ['missing associated PR', f => f.values.set(`commits/${sourceSha}/pulls?per_page=100`, [])],
@@ -302,8 +390,9 @@ test('squash qualification fails closed for source, review, tree and transaction
     ['status text', f => { f.review.status.description = `REVIEWED (self-attested) @ ${sourceSha.slice(0, 12)} by bishop`; }],
     ['status creator', f => { f.review.status.creator.login = 'attacker'; }],
     ['status target', f => { f.review.status.target_url = 'https://example.com/actions/runs/31'; }],
-    ['missing review', f => f.values.set(`commits/${f.review.pull.head.sha}/status?per_page=100`,
-      { sha: f.review.pull.head.sha, total_count: 0, statuses: [] })],
+    ['missing review', f => f.values.set(`commits/${f.review.pull.head.sha}/statuses?per_page=100`, [])],
+    ['missing creator', f => { delete f.review.status.creator; }],
+    ['substituted status SHA', f => { f.review.status.sha = sourceSha; }],
     ['failed review', f => { f.review.status.state = 'failure'; }],
     ['stale review', f => { f.review.status.created_at = '2026-09-12T19:00:00Z'; }],
     ['foreign review workflow', f => { f.review.run.repository.full_name = 'attacker/repo'; }],
@@ -316,11 +405,13 @@ test('squash qualification fails closed for source, review, tree and transaction
     ['wrong qualification source workflow', f => { f.values.get('actions/runs/42').head_sha = movedHead; }],
     ['wrong qualification run', f => { f.jobs[0].run_id = 43; }],
     ['newer negative review', f => {
-      const status = f.values.get(`commits/${f.review.pull.head.sha}/status?per_page=100`);
-      status.statuses.push({ ...f.review.status, id: 999, state: 'failure' });
-      status.total_count++;
+      const statuses = f.values.get(`commits/${f.review.pull.head.sha}/statuses?per_page=100`);
+      statuses.push({ ...f.review.status, id: 999, state: 'failure' });
     }],
-    ['truncated reviews', f => { f.values.get(`commits/${f.review.pull.head.sha}/status?per_page=100`).total_count++; }],
+    ['combined response substituted for status list', f => {
+      f.values.set(`commits/${f.review.pull.head.sha}/statuses?per_page=100`,
+        f.values.get(`commits/${f.review.pull.head.sha}/status?per_page=100`));
+    }],
     ['wrong build integration', f => {
       f.values.get(`rules/branches/${f.branch}?per_page=100`)[0].parameters.required_status_checks[0].integration_id = 999;
     }],
@@ -431,9 +522,8 @@ test('underlying qualification evidence rejects missing, stale, future and post-
     f => { f.transactionChecks[0].completed_at = '2026-09-12T19:59:59.999Z'; },
     f => { f.transactionChecks[0].completed_at = '2026-09-13T20:00:00.001Z'; },
     f => {
-      const statuses = f.values.get(`commits/${sourceSha}/status?per_page=100`);
-      statuses.statuses[0].created_at = '2026-09-13T20:00:00.001Z';
-      statuses.statuses[0].updated_at = '2026-09-13T20:00:00.001Z';
+      f.review.status.created_at = '2026-09-13T20:00:00.001Z';
+      f.review.status.updated_at = '2026-09-13T20:00:00.001Z';
     },
     f => { f.jobs[0].completed_at = '2026-09-13T20:00:00.001Z'; },
     f => { f.transactionChecks[0].completed_at = '2026-09-13T19:30:00+00:00'; },
@@ -441,9 +531,8 @@ test('underlying qualification evidence rejects missing, stale, future and post-
     f => { f.transactionChecks[0].completed_at = '2026-09-13T19:30:00.1234Z'; },
     f => { f.transactionChecks[0].completed_at = '2026-09-13T19:30:00'; },
     f => {
-      const statuses = f.values.get(`commits/${sourceSha}/status?per_page=100`);
-      statuses.statuses[0].created_at = '2026-09-13T19:32:00Z';
-      statuses.statuses[0].updated_at = '2026-09-13T19:31:00Z';
+      f.review.status.created_at = '2026-09-13T19:32:00Z';
+      f.review.status.updated_at = '2026-09-13T19:31:00Z';
     },
     f => { f.jobs[0].completed_at = '2026-09-13T19:39:59Z'; },
   ]) {
@@ -469,9 +558,8 @@ test('GitHub REST second-precision timestamps remain valid throughout qualificat
     check.completed_at = check.head_sha === workflowSha ?
       '2026-09-13T19:50:00Z' : '2026-09-13T19:30:00Z';
   }
-  const statuses = fixture.values.get(`commits/${sourceSha}/status?per_page=100`);
-  statuses.statuses[0].created_at = '2026-09-13T19:31:00Z';
-  statuses.statuses[0].updated_at = '2026-09-13T19:31:00Z';
+  fixture.review.status.created_at = '2026-09-13T19:31:00Z';
+  fixture.review.status.updated_at = '2026-09-13T19:31:00Z';
   const receipt = await verifyTransactionQualification(value, fixture.api, now);
   receipt.checkedAt = '2026-09-13T20:00:00Z';
   receipt.expiresAt = '2026-09-13T20:30:00Z';
