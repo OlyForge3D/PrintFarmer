@@ -73,12 +73,14 @@ public class SystemInfoService(
         int archiveCount = await _db.GcodeFiles.CountAsync(cancellationToken);
         (long diskUsedBytes, long diskTotalBytes) = GetDiskSnapshot(storageDirectory);
 
+        IReadOnlyList<string> appMigrationHeads = await GetMigrationHeadsAsync(cancellationToken);
         List<ServiceReplicaObservationDto> observations = [];
         foreach (IServiceInventorySource source in inventorySources)
         {
             observations.AddRange(await source.ReadAsync(cancellationToken));
         }
 
+        string databaseProvider = NormalizeDatabaseEngine(_db.Database.ProviderName);
         return new SystemInfoDto
         {
             Inventory = ServiceInventoryEvaluator.Evaluate(observations, configuration["Deployment:SelectedChannel"], DateTimeOffset.UtcNow),
@@ -108,8 +110,8 @@ public class SystemInfoService(
             Services = GetServices(appVersion),
             Database = new SystemDatabaseInfoDto
             {
-                MigrationHeads = await GetMigrationHeadsAsync(cancellationToken),
-                Engine = NormalizeDatabaseEngine(_db.Database.ProviderName),
+                MigrationHeads = appMigrationHeads,
+                Engine = databaseProvider,
                 Version = databaseVersion,
                 PrinterCount = printerCount,
                 ArchiveCount = archiveCount,

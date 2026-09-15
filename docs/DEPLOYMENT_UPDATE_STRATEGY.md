@@ -13,6 +13,30 @@ post_date: "2026-09-12"
 
 ## Recommendation and scope
 
+### Read-only inventory and installation readiness
+
+`GET /api/system/info` returns the additive, administrator-only `inventory` read
+model. It reports redacted topology/replica observations, running build/digest
+evidence, and any database provider or migration head independently observed by
+a trusted source. Process self-report does not establish those fields. It never
+performs host inspection, Docker access, an update check, or an installation.
+
+Operators can export that model with
+`scripts/export-installation-inventory.ps1`. The corresponding import mode is
+offline inspection only: the portable envelope preserves the original source,
+export timestamp, and per-observation verification provenance while conversion
+forces `Imported`. No production API import or readiness assessment output is
+wired in this increment. An imported snapshot is never live evidence, so a
+future readiness assessment must not treat it as eligible even if its historical
+evidence was complete.
+
+The `Eligible`, `Blocked`, `Unknown`, and `NotManaged` readiness lifecycle is a
+pure evidence evaluation. `Eligible` requires a complete signature-verified
+release and fresh, complete compatible observations for every required service,
+including platform, migration head, and worker requirements. Until release
+distribution supplies a verified target, an evaluator returns `NotManaged`; the
+live API does not currently emit readiness and does not offer or install software.
+
 Deliver **read-only installed-version inventory first**, followed by compatible
 release alerts. Make an **operator-approved, host-run updater** the first
 execution path. Prefer an explicitly enrolled **external pull reconciler** for

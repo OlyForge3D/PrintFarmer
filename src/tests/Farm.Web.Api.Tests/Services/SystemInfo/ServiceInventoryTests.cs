@@ -1,5 +1,5 @@
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.Json;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
 using Xunit;
@@ -11,6 +11,12 @@ public sealed class ServiceInventoryTests
     private static readonly DateTimeOffset Now = new(2026, 9, 12, 12, 0, 0, TimeSpan.Zero);
     private static readonly string Commit = new('a', 40);
     private static readonly string Digest = "sha256:" + new string('b', 64);
+
+    [Fact]
+    public void ServiceInventory_DefaultEligibility_IsBlocked()
+    {
+        Assert.Equal(InventoryEligibility.Blocked, new ServiceInventoryDto().Eligibility);
+    }
 
     [Theory]
     [InlineData(null)]
@@ -79,6 +85,26 @@ public sealed class ServiceInventoryTests
         Assert.Equal(InventoryCompatibilityState.Compatible, result.CompatibilityState);
         Assert.Equal("stable", result.ObservedChannel);
         Assert.Null(result.Services[1].Identity);
+    }
+
+    [Fact]
+    public void Evaluate_SelfReportedOptionalAbsence_ClearsDatabaseMetadata()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            Verified("optional") with
+            {
+                Required = false,
+                ObservationState = InventoryObservationState.NotInstalled,
+                Source = "SelfReport",
+                DatabaseProvider = "SQL Server",
+                MigrationHead = "202609150001_Initial",
+            },
+        ]);
+
+        ServiceReplicaObservationDto service = Assert.Single(result.Services);
+        Assert.Null(service.DatabaseProvider);
+        Assert.Null(service.MigrationHead);
     }
 
     [Fact]
@@ -189,13 +215,19 @@ public sealed class ServiceInventoryTests
         foreach (JsonIgnoreCondition ignore in new[] { JsonIgnoreCondition.WhenWritingNull, JsonIgnoreCondition.Never })
         {
             JsonSerializerOptions options = new(JsonSerializerDefaults.Web) { DefaultIgnoreCondition = ignore };
-            using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(Evaluate([new()]), options));
+            ServiceInventoryDto inventory = Evaluate([new()]) with { Readiness = new() };
+            using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(inventory, options));
             JsonElement row = json.RootElement.GetProperty("services")[0];
             Assert.Equal("Unknown", row.GetProperty("observationState").GetString());
             Assert.Equal(JsonValueKind.Null, row.GetProperty("platformDigest").ValueKind);
             Assert.Equal(JsonValueKind.Null, row.GetProperty("applicationVersion").ValueKind);
             Assert.Equal(JsonValueKind.Null, row.GetProperty("identity").ValueKind);
             Assert.False(row.TryGetProperty("SourceCommit", out _));
+            JsonElement readiness = json.RootElement.GetProperty("readiness");
+            Assert.Equal(JsonValueKind.Null, readiness.GetProperty("state").ValueKind);
+            Assert.Equal("Live", json.RootElement.GetProperty("snapshotOrigin").GetString());
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("snapshotSource").ValueKind);
+            Assert.Equal(JsonValueKind.Null, json.RootElement.GetProperty("snapshotExportedAt").ValueKind);
         }
     }
 
@@ -207,6 +239,36 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.Services[0].ManifestDigest);
         Assert.Null(result.Services[0].IndexDigest);
         Assert.Null(result.Services[0].Identity);
+    }
+
+    [Fact]
+    public void Evaluate_SelfReportedDatabaseMetadata_IsNotIndependentObservation()
+    {
+        ServiceInventoryDto inventory = Evaluate(
+        [
+            Verified("a") with
+            {
+                Source = "SelfReport",
+                DatabaseProvider = "SqlServer",
+                MigrationHead = "202609150001_Initial",
+            },
+        ]);
+
+        ServiceReplicaObservationDto service = Assert.Single(inventory.Services);
+        Assert.Null(service.DatabaseProvider);
+        Assert.Null(service.MigrationHead);
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.NotEqual(InventoryEligibility.Eligible, result.State);
+    }
+
+    [Fact]
+    public void Evaluate_IndependentSqlServerProvider_NormalizesProviderName()
+    {
+        ServiceInventoryDto result = Evaluate([Verified("a") with { DatabaseProvider = "SqlServer" }]);
+
+        Assert.Equal("SQL Server", Assert.Single(result.Services).DatabaseProvider);
     }
 
     [Theory]
@@ -250,12 +312,173 @@ public sealed class ServiceInventoryTests
     {
         PromotionOriginDto promotion = new()
         {
-            ReleaseId = "insider:1.2.3-insider.10", CanonicalVersion = "1.2.3-insider.10", SourceCommit = new string('c', 40),
-            ManifestDigest = Digest, Evidence = "qualification-10",
+            ReleaseId = "insider:1.2.3-insider.10",
+            CanonicalVersion = "1.2.3-insider.10",
+            SourceCommit = new string('c', 40),
+            ManifestDigest = Digest,
+            Evidence = "qualification-10",
         };
         ServiceReplicaObservationDto original = Verified("a");
         ServiceInventoryDto result = Evaluate([original with { Identity = original.Identity! with { PromotionOrigin = promotion } }]);
         Assert.Equal(promotion, result.Services[0].Identity!.PromotionOrigin);
+    }
+
+    [Fact]
+    public void Readiness_CompleteFreshComposeEvidence_IsEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }]);
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.Equal(InventoryEligibility.Eligible, result.State);
+        Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+        Assert.False(result.Hops is string[]);
+    }
+
+    [Theory]
+    [InlineData("stale")]
+    [InlineData("incomplete")]
+    [InlineData("schema")]
+    [InlineData("platform")]
+    [InlineData("missing-service")]
+    public void Readiness_InvalidOrIncompleteEvidence_NeverBecomesEligible(string caseName)
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }]);
+        VerifiedReleaseEvidenceDto release = Release("202609150001_Initial");
+        (inventory, release) = caseName switch
+        {
+            "stale" => (inventory with { Services = [inventory.Services[0] with { ObservedAt = Now.AddMinutes(-2) }] }, release),
+            "incomplete" => (inventory, release with { IsComplete = false }),
+            "schema" => (inventory, Release("202609150002_Next")),
+            "platform" => (inventory with { Services = [inventory.Services[0] with { Platform = "linux/arm64" }] }, release),
+            _ => (inventory, release with { Services = [] }),
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.NotEqual(InventoryEligibility.Eligible, result.State);
+        Assert.NotEmpty(result.Reasons);
+    }
+
+    [Fact]
+    public void Readiness_ImportedSnapshot_PreservesProvenanceAndRemainsUnknown()
+    {
+        ServiceInventoryDto imported = Evaluate([Verified("a")]) with
+        {
+            SnapshotOrigin = InventorySnapshotOrigin.Imported,
+            SnapshotSource = "operator-export",
+            SnapshotExportedAt = Now.AddMinutes(-1),
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(imported, Release(null), Now);
+
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(result.Reasons));
+        Assert.Equal(Now.AddMinutes(-1), imported.SnapshotExportedAt);
+    }
+
+    [Fact]
+    public void Readiness_DeserializedExportEnvelope_ForcesImportedEvidenceAndPreservesProvenance()
+    {
+        ServiceInventoryDto live = Evaluate([Verified("a")]) with
+        {
+            Eligibility = InventoryEligibility.Eligible,
+            Readiness = new() { State = InventoryEligibility.Eligible },
+        };
+        InstallationInventorySnapshotDto exported = InstallationInventorySnapshotDto.FromLiveInventory(
+            live,
+            "operator-export",
+            Now.AddMinutes(-1));
+        string json = JsonSerializer.Serialize(exported, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        InstallationInventorySnapshotDto importedEnvelope = JsonSerializer.Deserialize<InstallationInventorySnapshotDto>(
+            json,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        ServiceInventoryDto imported = importedEnvelope.Inventory;
+        ServiceReplicaObservationDto service = Assert.Single(imported.Services);
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(imported, Release(null), Now);
+
+        Assert.Equal(InventorySnapshotOrigin.Imported, imported.SnapshotOrigin);
+        Assert.Equal("operator-export", imported.SnapshotSource);
+        Assert.Equal(Now.AddMinutes(-1), imported.SnapshotExportedAt);
+        Assert.Equal(live.Services[0].Source, service.Source);
+        Assert.Equal(live.Services[0].VerifiedAt, service.VerifiedAt);
+        Assert.Equal(InventoryEligibility.Unknown, imported.Eligibility);
+        Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(imported.EligibilityReasons));
+        Assert.Null(imported.Readiness);
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_ReleaseTargetAbsentFromInventory_NeverBecomesEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a")]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                .. Release(null).Services,
+                new()
+                {
+                    ServiceId = "frontend",
+                    Platform = "linux/amd64",
+                    PlatformDigest = Digest,
+                },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("RequiredServiceInventoryMissing:frontend", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_RequiredInventoryServiceWithoutReleaseTarget_NeverBecomesEligible()
+    {
+        ServiceReplicaObservationDto frontend = Verified("frontend") with
+        {
+            ServiceId = "frontend",
+            Component = "frontend",
+        };
+        ServiceInventoryDto inventory = Evaluate([Verified("api"), frontend]);
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release(null), Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("MissingTargetService:frontend", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_OfflineTargetWorker_NeverBecomesEligible()
+    {
+        ServiceReplicaObservationDto worker = Verified("worker") with
+        {
+            ServiceId = "worker",
+            Component = "slicer-worker",
+            ObservationState = InventoryObservationState.Unavailable,
+        };
+        ServiceInventoryDto inventory = Evaluate([Verified("api"), worker]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                .. Release(null).Services,
+                new()
+                {
+                    ServiceId = "worker",
+                    Platform = "linux/amd64",
+                    PlatformDigest = Digest,
+                },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("RequiredServiceEvidenceMissingOrStale:worker", Assert.Single(result.Reasons));
     }
 
     [Fact]
@@ -284,18 +507,59 @@ public sealed class ServiceInventoryTests
         string version = channel == "stable" ? "1.2.3" : "1.2.3-insider.10";
         return new()
         {
-            ServiceId = "api", InstanceId = instance, Component = "api", Required = true,
-            ApplicationVersion = version, SourceCommit = Commit, Source = "VerifiedImport",
-            ObservationState = InventoryObservationState.Observed, ObservedAt = Now, LastSuccessAt = Now,
-            VerificationSource = "LocalVerifiedImport", VerifiedAt = Now, Platform = "linux/amd64",
-            PlatformDigest = Digest, ManifestDigest = Digest,
+            ServiceId = "api",
+            InstanceId = instance,
+            Component = "api",
+            Required = true,
+            ApplicationVersion = version,
+            SourceCommit = Commit,
+            Source = "VerifiedImport",
+            ObservationState = InventoryObservationState.Observed,
+            ObservedAt = Now,
+            LastSuccessAt = Now,
+            VerificationSource = "LocalVerifiedImport",
+            VerifiedAt = Now,
+            Platform = "linux/amd64",
+            PlatformDigest = Digest,
+            ManifestDigest = Digest,
             Identity = new()
             {
-                CanonicalVersion = version, BaseVersion = "1.2.3", ReleaseId = $"{channel}:{version}", Channel = channel,
-                SourceCommit = Commit, AuthorizedBranchHead = Commit, SourceBranch = channel == "stable" ? "main" : "development",
-                SourceTag = $"v{version}", BuildId = "100", BuildAttempt = "1", WorkflowIdentity = "authoritative-workflow",
+                CanonicalVersion = version,
+                BaseVersion = "1.2.3",
+                ReleaseId = $"{channel}:{version}",
+                Channel = channel,
+                SourceCommit = Commit,
+                AuthorizedBranchHead = Commit,
+                SourceBranch = channel == "stable" ? "main" : "development",
+                SourceTag = $"v{version}",
+                BuildId = "100",
+                BuildAttempt = "1",
+                WorkflowIdentity = "authoritative-workflow",
                 AllocationIdentity = "reservation-10",
             },
         };
     }
+
+    private static VerifiedReleaseEvidenceDto Release(string? migrationHead) => new()
+    {
+        SignatureVerified = true,
+        IsComplete = true,
+        ManifestDigest = Digest,
+        Identity = new()
+        {
+            Channel = "stable",
+            CanonicalVersion = "1.2.4",
+            ReleaseId = "stable:1.2.4",
+        },
+        Services =
+        [
+            new()
+            {
+                ServiceId = "api",
+                Platform = "linux/amd64",
+                PlatformDigest = Digest,
+                RequiredMigrationHead = migrationHead,
+            },
+        ],
+    };
 }

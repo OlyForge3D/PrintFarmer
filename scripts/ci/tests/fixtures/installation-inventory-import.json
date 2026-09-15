@@ -1,0 +1,24 @@
+{
+  "formatVersion": 1,
+  "snapshotOrigin": "Imported",
+  "snapshotSource": "operator-export",
+  "snapshotExportedAt": "2026-09-15T19:00:00.0000000+00:00",
+  "inventory": {
+    "snapshotOrigin": "Live",
+    "snapshotSource": null,
+    "snapshotExportedAt": null,
+    "eligibility": "Eligible",
+    "eligibilityReasons": [
+      "AttackerSuppliedEligibility"
+    ],
+    "readiness": {
+      "state": "Eligible"
+    },
+    "services": [
+      {
+        "observedAt": "2026-09-15T18:59:00.0000000+00:00",
+        "verifiedAt": "2026-09-15T18:59:30.0000000+00:00"
+      }
+    ]
+  }
+}

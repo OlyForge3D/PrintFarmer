@@ -10,7 +10,7 @@ export const identity: CanonicalReleaseIdentity = {
 export function replica(overrides: Partial<ServiceReplicaObservation> = {}): ServiceReplicaObservation {
   return {
     serviceId: 'api', instanceId: 'replica-a', component: 'api', required: true, applicationVersion: '1.2.3',
-    sourceCommit: commit, engineVersion: null, observationState: 'Observed', observedAt: '2026-09-12T12:00:00Z',
+    sourceCommit: commit, engineVersion: null, databaseProvider: null, migrationHead: null, observationState: 'Observed', observedAt: '2026-09-12T12:00:00Z',
     lastSuccessAt: '2026-09-12T12:00:00Z', source: 'SelfReport', reasonCode: 'AssemblyMetadataNotDigestAttestation',
     identity: null, verificationSource: null, verifiedAt: null, platform: null, platformDigest: null,
     indexDigest: null, manifestDigest: null, configuredImage: null, observedChannel: null, channelState: 'Unknown',
@@ -22,6 +22,7 @@ export function inventory(overrides: Partial<ServiceInventory> = {}): ServiceInv
     selectedChannel: 'stable', selectionSource: 'Default', collectedAt: '2026-09-12T12:00:00Z',
     observedChannel: null, targetChannel: null, channelState: 'Unknown', compatibilityState: 'Unknown',
     compatibilityReasons: ['IncompleteReleaseOrPlatformEvidence'], eligibility: 'NotManaged',
-    eligibilityReasons: ['ReadOnlyInventory'], services: [replica()], ...overrides,
+    eligibilityReasons: ['ManagedEligibilityNotEstablished', 'ReadOnlyInventory'], readiness: null, snapshotOrigin: 'Live', snapshotSource: null,
+    snapshotExportedAt: null, services: [replica()], ...overrides,
   };
 }
