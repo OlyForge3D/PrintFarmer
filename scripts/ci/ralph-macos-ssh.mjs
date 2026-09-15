@@ -808,8 +808,10 @@ async function readCompletionJournal(sessionId, sessionStateRoot, value, success
             event.data?.success !== true || !openTurns.has('root')) {
           invalidCompletion('Selected event is not successful task completion inside an open turn.');
         }
-        if (typeof event.data.summary !== 'string' || !event.data.summary.includes(value.jobId) ||
-            !new RegExp(`fence[\\s\`:=]*${value.fence}(?!\\d)`, 'i').test(event.data.summary)) {
+        const escapedJobId = value.jobId.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        if (typeof event.data.summary !== 'string' ||
+            !new RegExp(`(?<![A-Za-z0-9._-])${escapedJobId}(?![A-Za-z0-9._-])`).test(event.data.summary) ||
+            !new RegExp(`(?<![A-Za-z0-9_-])fence[\\s\`:=]+${value.fence}(?![A-Za-z0-9_-]|\\.\\d)`, 'i').test(event.data.summary)) {
           invalidCompletion('Root completion report does not name this exact admission job and fence.');
         }
         if (successor && (typeof event.data.summary !== 'string' ||
@@ -1035,7 +1037,9 @@ async function recordAppCompletion({ result, successor, expectedGeneration }, op
     if (successor) {
       const job = JSON.parse(createRemoteRequest({ ...successor.job, fence: ledger.generation + 1 })).job;
       const next = {
-        ...job, job, requestDigest: requestDigest(job), mode: 'local', local: true, state: 'accepted',
+        jobId: job.jobId, repository: job.repository, issue: job.issue, owner: job.owner, baseSha: job.baseSha,
+        expectedHost: job.expectedHost, fence: job.fence, job, requestDigest: requestDigest(job),
+        mode: 'local', local: true, state: 'accepted',
         sessionId: entry.sessionId, predecessorJobId: entry.jobId, createdAt: entry.updatedAt, updatedAt: entry.updatedAt,
         handoffBoundary: {
           assignmentEventId: journal.assignment.id, assignmentAt: journal.assignment.timestamp,
