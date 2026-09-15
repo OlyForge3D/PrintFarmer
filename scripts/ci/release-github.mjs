@@ -506,10 +506,13 @@ export async function verifyAbandonmentApproval(api, transaction, record, target
   const jobs = await api(`actions/runs/${transaction.runId}/attempts/${transaction.runAttempt}/jobs?per_page=100`);
   requireThat(jobs?.total_count === jobs.jobs?.length && jobs.jobs.length > 0,
     'Abandonment workflow job evidence is missing or truncated');
-  const job = jobs.jobs.filter(candidate => candidate?.run_id === Number(transaction.runId) &&
+  const protectedJobs = jobs.jobs.filter(candidate => candidate?.run_id === Number(transaction.runId) &&
     candidate.run_attempt === Number(transaction.runAttempt) &&
-    /^[\w -]+(?:\/ )?Abandon immutable release reservation$/i.test(candidate.name ?? '') &&
-    typeof candidate.started_at === 'string')[0];
+    candidate.name?.startsWith('Protected release publication / ') &&
+    candidate.name?.endsWith('Abandon immutable release reservation') &&
+    typeof candidate.started_at === 'string');
+  requireThat(protectedJobs.length === 1, 'Abandonment protected job evidence is missing, ambiguous, or mismatched');
+  const [job] = protectedJobs;
   requireThat(job && Number.isSafeInteger(job.id) && job.id > 0 &&
     job.run_id === Number(transaction.runId) && job.run_attempt === Number(transaction.runAttempt),
   'Abandonment protected job evidence is missing or mismatched');

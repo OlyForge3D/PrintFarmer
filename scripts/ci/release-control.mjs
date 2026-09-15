@@ -170,10 +170,12 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   verifyProtectionEvidence(record.protection, record.channel);
   requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
     'Protection evidence postdates authorization');
-  // Consumer verification binds these public ledger references to the signed artifact.
-  verifyTag(record, entry.tagObject, await readTag(api, entry.record.sourceTag));
-  requireThat(parseTag(record.sourceTag).baseVersion ===
-    (await readVersion(api, entry.record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
+  if (operation !== 'abandon') {
+    // Consumer verification binds these public ledger references to the signed artifact.
+    verifyTag(record, entry.tagObject, await readTag(api, entry.record.sourceTag));
+    requireThat(parseTag(record.sourceTag).baseVersion ===
+      (await readVersion(api, entry.record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
+  }
   if (operation === 'consume') {
     const metadata = emitBuildIdentity(record);
     output('frontend_identity', metadata.frontendIdentity);
@@ -200,8 +202,12 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     requireThat(env.RELEASE_ABANDONMENT_TARGET === record.allocationKey,
       'Immutable abandonment reservation target does not match authorization');
     const protection = await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
-    const approval = await verifyAbandonmentApproval(api, transaction, record,
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+    requireThat(transaction.runId === env.GITHUB_RUN_ID && transaction.runAttempt === env.GITHUB_RUN_ATTEMPT,
+      'Abandonment transaction must bind the current workflow run and attempt');
+    const approval = await verifyAbandonmentApproval(api, {
+      runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT,
+    }, record,
       env.RELEASE_ABANDONMENT_TARGET, env.RELEASE_OWNER_APPROVED_REVIEWERS);
     const authorization = abandonmentAuthorization(record, protection, approval);
     await transact(store, async latest => abandon(latest, record, authorization, protection));

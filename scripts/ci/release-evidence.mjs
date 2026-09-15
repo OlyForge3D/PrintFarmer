@@ -73,6 +73,8 @@ function validateNativeSignatureBundle(entry, subject, verification) {
     typeof entry.messageSignature?.signature === 'string' && entry.messageSignature.signature.length > 0,
   'Malformed native Cosign signature bundle');
   nativeCertificate(entry);
+  requireThat(entry.messageSignature.signature === verification?.optional?.Bundle?.Payload?.signature,
+    'Native Cosign signature differs from verification output');
 }
 
 function subjects(result, label) {
@@ -145,6 +147,9 @@ function validateBundleTrust(bundle, trust, verification = []) {
       requireThat(typeof verifiedCertificate === 'string' &&
         certificate.raw.toString('base64') === new X509Certificate(verifiedCertificate).raw.toString('base64'),
       'Native Cosign certificate differs from verification output');
+      requireThat(entry.verificationMaterial.tlogEntries[0]?.canonicalizedBody ===
+        optional.Bundle.Payload.canonicalizedBody,
+      'Native Cosign transparency body differs from verification output');
       requireThat(createdAt <= integratedAt && integratedAt >= Date.parse(policy.revocationEpoch) &&
         integratedAt <= trustedAt && trustedAt - integratedAt <= policy.certificateMaxAgeSeconds * 1000 &&
         Date.parse(certificate.validFrom) <= integratedAt && integratedAt <= Date.parse(certificate.validTo) &&
@@ -178,6 +183,7 @@ function validateBundleTrust(bundle, trust, verification = []) {
 
 function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   const entries = Array.isArray(bundle) ? bundle : [bundle];
+  requireThat(entries.every(nativeBundle), 'Legacy Cosign DSSE attestation downloads are unsupported');
   requireThat(entries.length > 0 && entries.every(entry => {
     const envelope = entry?.dsseEnvelope ?? entry;
     return typeof envelope?.payload === 'string' &&

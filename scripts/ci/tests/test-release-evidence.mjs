@@ -40,7 +40,8 @@ const trust = (overrides = {}) => ({
 function signed(subject = digest, predicateValue = predicate) {
   const verification = {
     optional: { Subject: signer, Issuer: 'https://token.actions.githubusercontent.com', certificate,
-      Bundle: { Payload: { integratedTime: 1789426200 }, SignedEntryTimestamp: 'proof' } },
+      Bundle: { Payload: { integratedTime: 1789426200, canonicalizedBody: 'proof', signature: 'native-signature' },
+        SignedEntryTimestamp: 'proof' } },
   };
   const statement = {
     subject: [{ digest: { sha256: subject.slice(7) } }], predicate: predicateValue,
@@ -50,9 +51,16 @@ function signed(subject = digest, predicateValue = predicate) {
     attestationBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'), ...verification }]),
     predicateBytes: JSON.stringify(predicateValue),
     signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: certificate,
-      Bundle: { Payload: { integratedTime: 1789426200 }, SignedEntryTimestamp: 'proof' } }]),
-    attestationBundleBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
-      payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'dsse-signature' }] }]),
+      Bundle: verification.optional.Bundle }]),
+    attestationBundleBytes: JSON.stringify([{
+      mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+      verificationMaterial: {
+        certificate: { rawBytes: new X509Certificate(certificate).raw.toString('base64') },
+        tlogEntries: [{ integratedTime: 1789426200, canonicalizedBody: 'proof' }],
+      },
+      dsseEnvelope: { payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
+        payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'dsse-signature' }] },
+    }]),
   };
 }
 test('stages validated index and platform crypto evidence', () => {
@@ -100,12 +108,13 @@ test('accepts only versioned Cosign signature download formats and rejects forge
 
 test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => {
   const evidence = signed();
-  const statement = JSON.parse(Buffer.from(JSON.parse(evidence.attestationBundleBytes)[0].payload, 'base64').toString('utf8'));
+  const statement = JSON.parse(Buffer.from(
+    JSON.parse(evidence.attestationBundleBytes)[0].dsseEnvelope.payload, 'base64').toString('utf8'));
   const nativeSignature = {
     mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
     verificationMaterial: {
       certificate: { rawBytes: new X509Certificate(certificate).raw.toString('base64') },
-      tlogEntries: [{ integratedTime: 1789426200 }],
+      tlogEntries: [{ integratedTime: 1789426200, canonicalizedBody: 'proof' }],
     },
     messageSignature: {
       messageDigest: { algorithm: 'SHA2_256', digest: Buffer.from(digest.slice(7), 'hex').toString('base64') },
@@ -123,6 +132,18 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
     },
   }]);
   assert.doesNotThrow(() => normalizeEvidence({ subject: digest, trust: trust(), ...evidence }));
+  for (const [label, mutate] of [
+    ['signature', value => { value.messageSignature.signature = 'substituted'; }],
+    ['transparency body', value => { value.verificationMaterial.tlogEntries[0].canonicalizedBody = 'substituted'; }],
+  ]) {
+    const substituted = structuredClone(evidence);
+    mutate(JSON.parse(substituted.signatureBundleBytes)[0]);
+    const bundle = JSON.parse(substituted.signatureBundleBytes);
+    mutate(bundle[0]);
+    substituted.signatureBundleBytes = JSON.stringify(bundle);
+    assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substituted }),
+      /differs from verification output/, label);
+  }
 
   const wrongIdentity = structuredClone(evidence);
   const identityVerification = JSON.parse(wrongIdentity.signatureBytes);

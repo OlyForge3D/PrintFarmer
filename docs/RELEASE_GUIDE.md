@@ -209,6 +209,9 @@ projected. Abandonment consumes the original identity and sequence permanently,
 does not publish a pointer or aliases, cannot be reversed, and permits a later
 allocation only as the next identity. A missing, stale, forged, mismatched, or
 already activated authorization fails closed.
+Abandonment verifies the original signed ledger authorization and the current
+protected environment policy, but intentionally does not require the original
+source tag, `VERSION`, branch head, or source qualification to remain available.
 Big integers are compared numerically, not lexically or through floating point.
 No timestamp, run-number concatenation or local tag scan allocates identities.
 

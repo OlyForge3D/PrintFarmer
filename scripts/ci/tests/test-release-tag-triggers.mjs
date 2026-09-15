@@ -4,6 +4,7 @@ import {
   symlinkSync, writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
@@ -82,7 +83,8 @@ const cryptoEvidenceFixture = set => {
       ? Math.max(Math.floor(createdAt / 1000) + 60, 1789426200)
       : 1789426200;
     const optional = { Subject: publisherWorkflowIdentity, Issuer: 'https://token.actions.githubusercontent.com',
-      certificate: cryptoCertificate, Bundle: { Payload: { integratedTime } } };
+      certificate: cryptoCertificate,
+      Bundle: { Payload: { integratedTime, canonicalizedBody: 'proof', signature: 'native-signature' } } };
     const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } }, optional }]);
     const attestationBytes = JSON.stringify([{ payload: Buffer.from(JSON.stringify({
       subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
@@ -93,10 +95,17 @@ const cryptoEvidenceFixture = set => {
       predicateBytes: predicate,
       signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: cryptoCertificate,
         Bundle: optional.Bundle }]),
-      attestationBundleBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify({
-        subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
-      })).toString('base64'), payloadType: 'application/vnd.in-toto+json',
-      signatures: [{ sig: 'dsse-signature' }] }]),
+      attestationBundleBytes: JSON.stringify([{
+        mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+        verificationMaterial: {
+          certificate: { rawBytes: new X509Certificate(cryptoCertificate).raw.toString('base64') },
+          tlogEntries: [{ integratedTime, canonicalizedBody: 'proof' }],
+        },
+        dsseEnvelope: { payload: Buffer.from(JSON.stringify({
+          subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
+        })).toString('base64'), payloadType: 'application/vnd.in-toto+json',
+        signatures: [{ sig: 'dsse-signature' }] },
+      }]),
     };
   };
   const services = Object.fromEntries(Object.entries(set.images).map(([service, image]) => [
@@ -2765,6 +2774,15 @@ test('protected release-control abandonment uses App policy verification and Git
     globalThis.fetch = fixture.fetch;
     const identity = await runFixtureControl('authorize', fixture);
     fixture.abandonmentJob.started_at = new Date().toISOString();
+    fixture.deleteTag();
+    fixture.setCanonicalHead('f'.repeat(40));
+    fixture.abandonmentJobs.push({ ...fixture.abandonmentJob, id: 901 });
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /protected job evidence is missing, ambiguous, or mismatched/, 'ambiguous protected job');
+    fixture.abandonmentJobs.pop();
     fixture.calls.length = 0;
     for (const [name, mutate] of [
       ['spoofed approver', value => { value.user.login = 'outsider'; }],
@@ -2787,7 +2805,7 @@ test('protected release-control abandonment uses App policy verification and Git
       RELEASE_TRANSACTION: JSON.stringify(wrongRun),
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
       RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
-    }, () => {}), /Missing fixture object|Unexpected API host\/path|Unexpected request|workflow run evidence/, 'wrong approval run');
+    }, () => {}), /current workflow run and attempt/, 'wrong approval run');
     await runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
@@ -3060,6 +3078,7 @@ function authorizationFixture(initial = state(), settings = {}) {
   };
   const abandonmentJob = { id: 900, name: 'Protected release publication / Abandon immutable release reservation', run_id: 42,
     run_attempt: 1, status: 'in_progress', started_at: qualificationCompletedAt, conclusion: undefined };
+  const abandonmentJobs = [abandonmentJob];
   const transactionJobs = qualificationJobs.map((name, index) => ({
     id: 1000 + index,
     name: `${qualificationJobNamespace} / ${name}`,
@@ -3075,7 +3094,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     html_url: `${qualificationRunUrl}/job/${1000 + index}`,
   }));
   return {
-    env, calls, ledgerWrites, environment, branchRules, approvalEvidence, abandonmentJob,
+    env, calls, ledgerWrites, environment, branchRules, approvalEvidence, abandonmentJob, abandonmentJobs,
     deleteTag() { tag = undefined; },
     setCanonicalHead(value) { canonicalHead = value; },
     setCanonicalComparison(value) { canonicalComparison = value; },
@@ -3136,7 +3155,7 @@ function authorizationFixture(initial = state(), settings = {}) {
         });
       }
       if (endpoint === 'actions/runs/42/attempts/1/jobs?per_page=100') {
-        const jobs = settings.includeAbandonmentProof ? [...transactionJobs, abandonmentJob] : transactionJobs;
+        const jobs = settings.includeAbandonmentProof ? [...transactionJobs, ...abandonmentJobs] : transactionJobs;
         return response({ total_count: jobs.length, jobs });
       }
       if (endpoint === 'actions/runs/42/approvals') {
