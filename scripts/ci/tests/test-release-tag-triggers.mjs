@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  closeSync, constants, copyFileSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync,
+  copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync,
   symlinkSync, writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -3475,7 +3475,13 @@ test(`${channel} ${approvalMode} executes pin, admission, automatic qualificatio
   if (channel === 'stable') ledger.qualifications[sha] = hotfixQualification();
   const fixture = authorizationFixture(ledger, { channel, approvalMode, reviewedHead: '7'.repeat(40) });
   globalThis.fetch = fixture.fetch;
-  const api = githubClient(fixture.env.GH_TOKEN);
+  const api = async endpoint => {
+    const response = await fixture.fetch(githubRequestUrl(endpoint, 'GET'), {
+      method: 'GET', headers: { Authorization: `Bearer ${fixture.env.GH_TOKEN}` },
+    });
+    assert.ok(response.ok, `Local fixture read failed: ${endpoint}`);
+    return response.json();
+  };
   const transaction = await selectTransaction(fixture.env, api);
   fixture.env.RELEASE_TRANSACTION = JSON.stringify(transaction);
   const completedJobs = fixture.transactionJobs.splice(0);
@@ -3490,17 +3496,7 @@ test(`${channel} ${approvalMode} executes pin, admission, automatic qualificatio
   fixture.transactionJobs.push(...completedJobs);
   const receipt = await qualifyTransaction(transaction, api);
   mkdirSync(dirname(qualificationPath), { recursive: true });
-  const saveFixture = (path, value) => {
-    assert.ok([qualificationPath, privateSetPath].includes(path));
-    const descriptor = openSync(path,
-      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
-    try {
-      writeFileSync(descriptor, JSON.stringify(value));
-    } finally {
-      closeSync(descriptor);
-    }
-  };
-  const saveReceipt = value => saveFixture(qualificationPath, value);
+  const saveReceipt = value => writeFileSync(qualificationPath, JSON.stringify(value));
   saveReceipt({ ...receipt, transaction: { ...transaction, sourceCommit: newerSha } });
   await assert.rejects(runReleaseControl('authorize', fixture.env), /another release transaction/);
   saveReceipt({ ...receipt, checkedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
@@ -3530,7 +3526,9 @@ test(`${channel} ${approvalMode} executes pin, admission, automatic qualificatio
   assert.ok(fixture.calls.every(call => call.method === 'GET'));
   fixture.review.status.state = 'failure';
   await assert.rejects(runReleaseControl('preflight', consumer, () => {}), /Untrusted source review/);
-  saveFixture(privateSetPath, completeSet(identity));
+  const persistedIdentity = readPrivateJson(authorizationPath);
+  assert.deepEqual(persistedIdentity, identity);
+  writeAuthorizationSet(persistedIdentity, completeSet(persistedIdentity));
   await assert.rejects(runReleaseControl('advance', {
     ...consumer, RELEASE_EXPECTED_POINTER: '', RELEASE_VERIFIED_BRANCH_HEAD: sha,
   }, () => {}), /Untrusted source review/);
