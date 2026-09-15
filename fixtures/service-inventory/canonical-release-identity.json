@@ -10,7 +10,6 @@
   "buildId": "42",
   "buildAttempt": "1",
   "workflowIdentity": "release-workflow",
-  "stableSequence": "0",
   "allocationIdentity": "allocation-10",
   "promotionOrigin": null
 }

@@ -164,6 +164,10 @@ test('changelog release entry parser handles final, multiple, and literal z cont
   const entry = heading => `### Features\n\n${heading}\n\n### Fixes\n\nNone.\n\n### Breaking changes\n\nN/A`;
   assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}`, '1.2.3'), entry('z'));
   assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}\n\n## [1.2.4]\n\n${entry('later')}`, '1.2.3'), entry('z'));
+  assert.equal(changelogEntry(`## 1.2.3 - 2026-09-14\n\n${entry('dated')}`, '1.2.3'), entry('dated'));
+  for (const version of ['1.2.3|1.2.4', '1.2.3.*', '1.2.3\\d', '[1.2.3]']) {
+    assert.throws(() => changelogEntry(`## [1.2.4]\n\n${entry('unrelated')}`, version));
+  }
 });
 
 test('release notes derive bounded merged PRs and mandatory version-controlled operational metadata', () => {

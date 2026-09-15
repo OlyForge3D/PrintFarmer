@@ -3,4 +3,4 @@ declare const __GIT_HASH__: string;
 declare const __BUILD_TIME__: string;
 
 /** Shared build record supplied by the release authority, never derived from package.json. */
-declare const __RELEASE_IDENTITY__: import('./types/api').CanonicalReleaseIdentity | null;
+declare const __RELEASE_IDENTITY__: import('./common/utils/releaseIdentity').BuildReleaseIdentity | null;

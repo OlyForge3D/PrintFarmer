@@ -749,7 +749,7 @@ export function validateApprovalMode(mode) {
   return mode;
 }
 
-function approvedReviewers(value) {
+export function approvedReviewers(value) {
   if (value === undefined || value === '') return ['jpapiez'];
   let reviewers;
   try { reviewers = JSON.parse(value); } catch {

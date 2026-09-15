@@ -3,7 +3,7 @@ import {
   repository, ledgerBranch, requireThat, validateLedger, migrateLegacyLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
   validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, validateApprovalMode,
-  releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
+  approvedReviewers, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './github-evidence-pages.mjs';
@@ -522,16 +522,7 @@ export async function verifyAbandonmentApproval(api, transaction, record, target
   const approvals = await api(`actions/runs/${transaction.runId}/approvals`);
   requireThat(Array.isArray(approvals) && approvals.length > 0,
     'Abandonment environment approval evidence is missing or malformed');
-  let configuredOwners;
-  try {
-    configuredOwners = ownerApprovedReviewers === undefined || ownerApprovedReviewers === ''
-      ? [] : JSON.parse(ownerApprovedReviewers);
-  } catch {
-    throw new Error('Abandonment owner approver allowlist is unavailable');
-  }
-  const allowed = new Set(['jpapiez', ...(Array.isArray(configuredOwners) ? configuredOwners : [])]
-    .filter(value => typeof value === 'string').map(value => value.toLowerCase()));
-  requireThat(allowed.size > 0, 'Abandonment owner approver allowlist is unavailable');
+  const allowed = new Set(approvedReviewers(ownerApprovedReviewers));
   const environment = 'release-insider';
   const approval = approvals
     .filter(candidate => candidate?.state === 'approved' &&

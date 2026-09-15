@@ -1,6 +1,7 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { parseTag } from './release-policy.mjs';
 
 function requireThat(condition, message) {
   if (!condition) throw new Error(message);
@@ -78,9 +79,12 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
 }
 
 export function changelogEntry(changelog, version) {
-  const match = changelog.match(new RegExp(`^## \\[?${version.replace(/[.]/g, '\\.')}\\]?[^\\n]*\\n([\\s\\S]*?)(?=^## |(?![\\s\\S]))`, 'm'));
+  const canonicalVersion = parseTag(`v${version}`).canonicalVersion;
+  const match = [...changelog.matchAll(
+    /^## \[?(\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?)\]?[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/gm,
+  )].find(([, headingVersion]) => headingVersion === canonicalVersion);
   requireThat(match, `Release notes require a ${version} CHANGELOG entry`);
-  const entry = match[1].trim();
+  const entry = match[2].trim();
   for (const heading of ['Features', 'Fixes', 'Breaking changes']) {
     const section = entry.match(new RegExp(`^### ${heading}\\s*$\\n([\\s\\S]*?)(?=^### |$)`, 'm'));
     requireThat(section && (section[1].trim() === 'None.' || section[1].trim() === 'N/A' || section[1].trim().length > 0),

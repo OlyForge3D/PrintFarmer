@@ -156,6 +156,23 @@ version-controlled metadata: missing data fails publication rather than
 defaulting to a generic safe claim. No routine user notes, signing input, or
 extra approval is accepted.
 
+### Pinned source artifact line endings
+
+The three metadata-hashed source artifacts are intentionally pinned to LF by
+`.gitattributes`; their canonical Git blobs and manifest digests must not be
+rewritten. If a Windows checkout reports CRLF working bytes, first ensure there
+are no local edits to those exact paths, then refresh only them:
+
+```powershell
+git checkout -- scripts/docker/configs/security-config.json `
+  scripts/docker/database-templates/postgres.yml `
+  scripts/docker/compose-templates/docker-compose.common.yml
+```
+
+Confirm each reports `w/lf` with `git ls-files --eol -- <path>`. Do not use
+repository-wide `git add --renormalize .`; it creates unrelated churn and is
+not a release-metadata recovery step.
+
 TestFlight remains independent under `ios/vX.Y-{alpha,beta,rc}.N`. Historical
 `v1.0-beta.*` identities and their `ios/*` aliases retain their original objects.
 No migration rewrites existing source tags, registry tags, or historical evidence.

@@ -5063,7 +5063,6 @@ export interface CanonicalReleaseIdentity {
   buildId: string | null;
   buildAttempt: string | null;
   workflowIdentity: string | null;
-  stableSequence: string | null;
   allocationIdentity: string | null;
   promotionOrigin: PromotionOrigin | null;
 }
