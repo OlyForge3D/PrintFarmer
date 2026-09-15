@@ -23,7 +23,6 @@ struct PrinterSetupControlsContent: View {
     }
 
     var body: some View {
-        PrinterMotionStatusBanner(viewModel: viewModel)
         if !PrinterControlsSection.isHidden(for: printer) {
             content
                 .task(id: scenePhase) {
@@ -80,8 +79,7 @@ struct PrinterSetupControlsContent: View {
                 if isPrintingOrPaused {
                     lockoutBanner
                         .padding(.bottom, 12)
-                } else if let reason = viewModel.blockedReason,
-                          reason != viewModel.motionBlockedReason || viewModel.motionStatusSummary == nil {
+                } else if let reason = viewModel.blockedReason {
                     Label(reason, systemImage: "lock.fill")
                         .font(.footnote)
                         .foregroundStyle(Color.pfTextPrimary)
@@ -123,59 +121,6 @@ struct PrinterSetupControlsContent: View {
         }
     }
 
-    /// Kept outside disabled controls and offline branches so uncertainty is actionable.
-    struct PrinterMotionStatusBanner: View {
-        @ObservedObject var viewModel: PrinterControlsViewModel
-        @State private var showsDetails = false
-
-        var body: some View {
-            if let message = viewModel.motionStatusSummary {
-                VStack(alignment: .leading, spacing: 8) {
-                    Label(message, systemImage: viewModel.motionStatusNeedsAttention
-                          ? "exclamationmark.triangle.fill" : viewModel.hasUnresolvedMotion ? "clock" : "checkmark.circle")
-                        .font(.footnote)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("printer.controls.motion.summary")
-                    ControlActionButton(
-                        title: "Motion details", identifier: "printer.controls.motion.details",
-                        hint: "Shows operation identifier and diagnostic information.",
-                        compact: true, systemImage: "info.circle",
-                        value: showsDetails ? "Expanded" : "Collapsed", textOnly: true
-                    ) { showsDetails.toggle() }
-                    if showsDetails {
-                        VStack(alignment: .leading, spacing: 8) {
-                            if let detail = viewModel.motionStatusMessage { Text(detail) }
-                            if let operationID = viewModel.motionOperationID {
-                                Text("Operation \(operationID.uuidString)").textSelection(.enabled)
-                            }
-                            if let error = viewModel.operationReadError { Text(error) }
-                        }
-                        .font(.footnote)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .accessibilityIdentifier("printer.controls.motion.diagnostics")
-                    }
-                    if viewModel.hasUnresolvedMotion || viewModel.motionStatusNeedsAttention || showsDetails {
-                        ControlActionButton(
-                            title: "Refresh motion status", identifier: "printer.controls.motion.refresh",
-                            hint: "Reads current status and operation history. Never sends or retries motion."
-                        ) { Task { await viewModel.refreshControlOperation() } }
-                        .disabled(viewModel.isRefreshingControlOperation || !viewModel.isActive)
-                    }
-                }
-                .foregroundStyle(Color.pfTextPrimary)
-                .padding(12)
-                .background((viewModel.motionStatusNeedsAttention ? Color.pfWarning : Color.pfBackgroundSecondary)
-                    .opacity(viewModel.motionStatusNeedsAttention ? 0.12 : 1), in: RoundedRectangle(cornerRadius: 10))
-                .accessibilityElement(children: .contain)
-                .accessibilityIdentifier("printer.controls.motion.status")
-                .onChange(of: viewModel.motionOperationID) { _, _ in showsDetails = false }
-                .onChange(of: viewModel.controlOperation?.hasConfirmedSuccess) { _, confirmed in
-                    if confirmed == true { showsDetails = false }
-                }
-            }
-        }
-    }
-
     private func insetGroup<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -212,8 +157,7 @@ struct PrinterControlCommandFeedback: View {
     let section: ControlCommand.Section
 
     var body: some View {
-        if viewModel.feedbackSection == section,
-           section != .motion || viewModel.motionStatusSummary == nil || viewModel.lastError != nil {
+        if viewModel.feedbackSection == section {
             VStack(alignment: .leading, spacing: 8) {
                 if let error = viewModel.lastError {
                     errorBanner(error)
@@ -231,7 +175,7 @@ struct PrinterControlCommandFeedback: View {
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
-                if viewModel.pendingCommand != nil && !viewModel.hasUnresolvedMotion {
+                if viewModel.pendingCommand != nil {
                     ControlActionButton(
                         title: "Stop waiting for command", identifier: "printer.controls.stop-waiting",
                         hint: "Does not stop the printer. Physical execution may continue."

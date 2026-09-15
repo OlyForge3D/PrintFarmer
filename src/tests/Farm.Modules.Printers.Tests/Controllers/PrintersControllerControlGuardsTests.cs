@@ -88,12 +88,21 @@ public class PrintersControllerControlGuardsTests
     [InlineData("homez")]
     [InlineData("move")]
     [InlineData("moveto")]
-    public async Task LegacyMotionAsync_Moonraker_RequiresUpdatedClientWithoutAcquiringOrSending(string route)
+    public async Task DirectMotionAsync_Moonraker_SendsOnceWithoutTrackedCapability(string route)
     {
         Guid id = Guid.NewGuid();
         var printers = new Mock<IPrintersService>();
         printers.Setup(p => p.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = id, Backend = (int)PrinterBackend.Moonraker });
+        printers.Setup(p => p.GetMovementStatusAsync(It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(id, true, "Idle", X: 10, Y: 20, Z: 0));
+        printers.Setup(p => p.SendHomeAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        printers.Setup(p => p.HomeXYAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        printers.Setup(p => p.HomeZAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        printers.Setup(p => p.MoveAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.Ok);
+        printers.Setup(p => p.MoveToAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.Ok);
         var actuation = new Mock<IPrinterPhysicalActuationService>();
         PrintersController controller = CreateController(printers, new Mock<IPrinterStatusCacheReader>(), out _, actuation: actuation);
         ActionResult<CommandResult> response = route switch
@@ -104,26 +113,33 @@ public class PrintersControllerControlGuardsTests
             "move" => await controller.MoveAsync(id, new MoveRequest(1, null, null, null), default),
             _ => await controller.MoveToAsync(id, new MoveRequest(1, null, null, null), default),
         };
-        var result = Assert.IsType<ObjectResult>(response.Result);
-        Assert.Equal(409, result.StatusCode);
-        Assert.Equal("async_control_required", Assert.IsType<ProblemDetails>(result.Value).Extensions["code"]);
-        actuation.Verify(a => a.AcquireDirectAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        Assert.DoesNotContain(printers.Invocations, invocation => invocation.Method.Name is "SendHomeAsync" or "HomeXYAsync" or "HomeZAsync" or "MoveAsync" or "MoveToAsync");
+        Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
+        actuation.Verify(a => a.AcquireDirectAsync(id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(p => p.GetMovementStatusAsync(
+            It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(p => p.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.Single(printers.Invocations, invocation => invocation.Method.Name is "SendHomeAsync" or "HomeXYAsync" or "HomeZAsync" or "MoveAsync" or "MoveToAsync");
+        Assert.All(printers.Invocations, invocation => Assert.Contains(invocation.Method.Name,
+            new[] { "FindByIdAsync", "GetMovementStatusAsync", "SendHomeAsync", "HomeXYAsync", "HomeZAsync", "MoveAsync", "MoveToAsync" }));
     }
 
     [Theory]
     [InlineData(PrinterBackend.Moonraker)]
     [InlineData(PrinterBackend.OctoPrint)]
     [InlineData(PrinterBackend.SDCP)]
-    public async Task LegacyMotionAsync_DurableCapability_RequiresUpdatedClientRegardlessOfBackendIdentity(PrinterBackend backend)
+    [InlineData(PrinterBackend.PrusaLink)]
+    [InlineData(PrinterBackend.FlashForge)]
+    public async Task DirectMotionAsync_SupportedBackend_DoesNotRequireTrackedTransport(PrinterBackend backend)
     {
         Guid id = Guid.NewGuid();
         var printers = new Mock<IPrintersService>();
         printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = id, Backend = (int)backend });
+        printers.Setup(p => p.GetMovementStatusAsync(It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(id, true, "Idle", X: 10, Y: 20, Z: 0));
+        printers.Setup(value => value.MoveAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterControlOutcome.Ok);
         var client = new Mock<IBackendClient>();
-        client.As<ISupportsDurableMotion>().SetupGet(value => value.SupportedMotionKinds)
-            .Returns([PrinterControlKind.Jog]);
         var factory = new Mock<IBackendClientFactory>();
         factory.Setup(value => value.GetClient(backend)).Returns(client.Object);
         var actuation = new Mock<IPrinterPhysicalActuationService>();
@@ -132,47 +148,35 @@ public class PrintersControllerControlGuardsTests
 
         ActionResult<CommandResult> response = await controller.MoveAsync(id, new MoveRequest(1, null, null, null), default);
 
-        Assert.Equal(409, Assert.IsType<ObjectResult>(response.Result).StatusCode);
-        actuation.Verify(value => value.AcquireDirectAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        printers.Verify(value => value.MoveAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+        Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
+        actuation.Verify(value => value.AcquireDirectAsync(id, It.IsAny<string>(), "move", It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(value => value.MoveAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Theory]
-    [InlineData(true, false)]
-    [InlineData(true, true)]
-    [InlineData(false, false)]
-    public async Task LegacyMotionAsync_MissingPluginOrMissingDurableTransport_NeverFallsBack(bool missingPlugin, bool unregisteredBackend)
+    [InlineData(PrinterControlOutcome.BackendUnsupported, 502)]
+    [InlineData(PrinterControlOutcome.BackendUnreachable, 503)]
+    public async Task DirectMotionAsync_BackendRejects_DoesNotReportSuccessOrRetry(PrinterControlOutcome outcome, int statusCode)
     {
         Guid id = Guid.NewGuid();
         var printers = new Mock<IPrintersService>();
         printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = id, Backend = (int)PrinterBackend.Moonraker });
-        var factory = new Mock<IBackendClientFactory>();
-        if (missingPlugin)
-        {
-            Exception exception = unregisteredBackend
-                ? new ArgumentException("Unsupported printer backend: Moonraker")
-                : new InvalidOperationException("not installed");
-            factory.Setup(value => value.GetClient(PrinterBackend.Moonraker)).Throws(exception);
-        }
-        else
-        {
-            var client = new Mock<IBackendClient>();
-            client.As<ISupportsDurableMotion>().SetupGet(value => value.SupportedMotionKinds).Returns([]);
-            factory.Setup(value => value.GetClient(PrinterBackend.Moonraker)).Returns(client.Object);
-        }
+        printers.Setup(p => p.GetMovementStatusAsync(It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(id, true, "Idle", X: 10, Y: 20, Z: 0));
+        printers.Setup(value => value.MoveAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(outcome);
 
         var actuation = new Mock<IPrinterPhysicalActuationService>();
         PrintersController controller = CreateController(
-            printers, new Mock<IPrinterStatusCacheReader>(), out _, actuation: actuation, backendClients: factory.Object);
+            printers, new Mock<IPrinterStatusCacheReader>(), out _, actuation: actuation);
 
         ActionResult<CommandResult> response = await controller.MoveAsync(id, new MoveRequest(1, null, null, null), default);
 
-        ObjectResult result = Assert.IsType<ObjectResult>(response.Result);
-        Assert.Equal(422, result.StatusCode);
-        Assert.Equal("printer_operation_unsupported", Assert.IsType<ProblemDetails>(result.Value).Extensions["code"]);
-        actuation.Verify(value => value.AcquireDirectAsync(It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
-        printers.Verify(value => value.MoveAsync(It.IsAny<Guid>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<double?>(), It.IsAny<CancellationToken>()), Times.Never);
+        ObjectResult result = Assert.IsAssignableFrom<ObjectResult>(response.Result);
+        Assert.Equal(statusCode, result.StatusCode);
+        Assert.False(Assert.IsType<CommandResult>(result.Value).Success);
+        printers.Verify(value => value.MoveAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()), Times.Once);
     }
 
     internal static PrintersController CreateController(
@@ -183,9 +187,9 @@ public class PrintersControllerControlGuardsTests
         Mock<IPrinterPhysicalActuationService>? actuation = null,
         Mock<IQueueResourceAuthorizationService>? resourceAuthorization = null,
         Mock<IPrinterBackendCapabilitiesService>? capabilitiesService = null,
-        PrinterControlOperationService? motionControl = null,
         IBackendClientFactory? backendClients = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IPrinterPhysicalActuationService? realActuation = null)
     {
         telemetry = new Mock<IPrintFarmerTelemetryService>();
 
@@ -277,10 +281,6 @@ public class PrintersControllerControlGuardsTests
         {
             var factory = new Mock<IBackendClientFactory>();
             factory.Setup(value => value.GetClient(It.IsAny<PrinterBackend>())).Returns(Mock.Of<IBackendClient>());
-            var durableClient = new Mock<IBackendClient>();
-            durableClient.As<ISupportsDurableMotion>().SetupGet(value => value.SupportedMotionKinds)
-                .Returns(Enum.GetValues<PrinterControlKind>());
-            factory.Setup(value => value.GetClient(PrinterBackend.Moonraker)).Returns(durableClient.Object);
             backendClients = factory.Object;
         }
 
@@ -302,11 +302,10 @@ public class PrintersControllerControlGuardsTests
             printerSessionTimelineService: Mock.Of<IPrinterSessionTimelineService>(),
             telemetryService: telemetry.Object,
             bedTypeService: Mock.Of<Farm.Infrastructure.Services.BedTypes.IBedTypeService>(),
-            physicalActuationService: actuation.Object,
+            physicalActuationService: realActuation ?? actuation.Object,
             queueResourceAuthorization: resourceAuthorization.Object,
             printerSafetyGuard:
                 safetyGuard?.Object ?? CreatePermissiveSafetyGuard(),
-            motionControl: motionControl,
             timeProvider: timeProvider);
         controller.ControllerContext = new ControllerContext
         {
@@ -629,6 +628,10 @@ public class PrintersControllerControlGuardsTests
     private static IPrinterSafetyGuard CreatePermissiveSafetyGuard()
     {
         var guard = new Mock<IPrinterSafetyGuard>();
+        guard.Setup(service => service.ValidateObservedManualMoveAsync(
+                It.IsAny<Guid>(), It.IsAny<PrinterSafetyMoveRequest>(),
+                It.IsAny<PrinterStatusDto>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(PrinterSafetyValidationResult.Allowed);
         guard.Setup(service => service.ValidateAsync(
                 It.IsAny<Guid>(),
                 It.IsAny<PrinterSafetyOperation>(),
@@ -790,7 +793,7 @@ public class PrintersControllerControlGuardsTests
 
         ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.False(Assert.IsType<CommandResult>(conflict.Value).Success);
-        printersService.Verify(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()), Times.Exactly(operation == "moveto" ? 2 : 1));
+        printersService.Verify(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()), Times.Once);
         printersService.VerifyNoOtherCalls();
     }
 
@@ -1292,7 +1295,7 @@ public class PrintersControllerControlGuardsTests
     public async Task HomeAsync_DirectDeadlineExpires_CancelsSenderAndRecordsUnknownWithoutRetry()
     {
         Guid id = Guid.NewGuid();
-        var clock = new PrinterControlOperationTests.MotionTestClock();
+        var clock = new DirectControlTestClock();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var printers = new Mock<IPrintersService>();
         printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(SamplePrinter(id));
@@ -1312,7 +1315,11 @@ public class PrintersControllerControlGuardsTests
         clock.Advance(TimeSpan.FromMinutes(5) - TimeSpan.FromSeconds(1));
         Assert.False(request.IsCompleted);
         clock.Advance(TimeSpan.FromSeconds(1));
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => request.WaitAsync(TimeSpan.FromSeconds(10)));
+        ObjectResult response = Assert.IsType<ObjectResult>((await request.WaitAsync(TimeSpan.FromSeconds(10))).Result);
+        Assert.Equal(503, response.StatusCode);
+        CommandResult body = Assert.IsType<CommandResult>(response.Value);
+        Assert.False(body.Success);
+        Assert.Contains("timed out", body.Message!, StringComparison.OrdinalIgnoreCase);
         actuation.Verify(service => service.MarkDirectUnknownAsync(
             It.Is<PrinterActuationLease>(lease => lease.Operation == "home" && lease.AttemptId == null),
             "backend_control_cancelled_after_send", CancellationToken.None), Times.Once);
@@ -1323,7 +1330,7 @@ public class PrintersControllerControlGuardsTests
     public async Task HomeAsync_DeadlineExpiresDuringPreSendValidation_DoesNotInvokeBackend()
     {
         Guid id = Guid.NewGuid();
-        var clock = new PrinterControlOperationTests.MotionTestClock();
+        var clock = new DirectControlTestClock();
         var printers = new Mock<IPrintersService>();
         printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(SamplePrinter(id));
         var status = new Mock<IPrinterStatusCacheReader>();
@@ -1338,7 +1345,40 @@ public class PrintersControllerControlGuardsTests
                 clock.Advance(TimeSpan.FromMinutes(5));
                 return Task.FromResult(new PrinterActuationResult(PrinterActuationResultCode.Accepted, lease));
             });
-        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.HomeAsync(id, default));
+        ObjectResult response = Assert.IsType<ObjectResult>((await controller.HomeAsync(id, default)).Result);
+        Assert.Equal(503, response.StatusCode);
+        Assert.Equal("printer_safety_evidence_unknown", Assert.IsType<ProblemDetails>(response.Value).Extensions["code"]);
+        printers.Verify(service => service.SendHomeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        actuation.Verify(service => service.CompleteDirectAsync(
+            It.IsAny<PrinterActuationLease>(), false, "printer_safety_revalidation_failed",
+            CancellationToken.None), Times.Once);
+        actuation.Verify(service => service.CompleteDirectAsync(
+            It.IsAny<PrinterActuationLease>(), It.IsAny<bool>(), "printer_operation_cancelled_before_dispatch",
+            It.IsAny<CancellationToken>()), Times.Never);
+        actuation.Verify(service => service.MarkDirectUnknownAsync(
+            It.IsAny<PrinterActuationLease>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task HomeAsync_CallerCancelsDuringPreSendValidation_PropagatesAndReleasesLease()
+    {
+        Guid id = Guid.NewGuid();
+        using var caller = new CancellationTokenSource();
+        var printers = new Mock<IPrintersService>();
+        printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(SamplePrinter(id));
+        var status = new Mock<IPrinterStatusCacheReader>();
+        status.Setup(cache => cache.GetStatus(id)).Returns(new PrinterStatusDto(id, true, "Idle"));
+        var actuation = new Mock<IPrinterPhysicalActuationService>();
+        PrintersController controller = CreateController(printers, status, out _, actuation: actuation);
+        actuation.Setup(service => service.RevalidateDirectAsync(
+                It.IsAny<PrinterActuationLease>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((PrinterActuationLease lease, CancellationToken _) =>
+            {
+                caller.Cancel();
+                return new PrinterActuationResult(PrinterActuationResultCode.Accepted, lease);
+            });
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => controller.HomeAsync(id, caller.Token));
         printers.Verify(service => service.SendHomeAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         actuation.Verify(service => service.CompleteDirectAsync(
             It.IsAny<PrinterActuationLease>(), false, "printer_operation_cancelled_before_dispatch",

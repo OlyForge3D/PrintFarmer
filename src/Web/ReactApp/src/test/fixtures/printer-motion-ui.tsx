@@ -2,43 +2,9 @@ import { useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { Button } from '@/common/components/ui';
-import { PrinterControlOperationPanel } from '@/features/printers/components/PrinterControlOperationPanel';
 import { PrinterCoordinateRow } from '@/features/printers/components/PrinterCoordinateRow';
 import { PrinterControlsMode, PrinterMotionHelp } from '@/features/printers/components/PrinterControlsMode';
-import { PrinterControlTracker } from '@/services/printer-control-operations';
-import type { PrinterControlOperationController } from '@/features/printers/hooks/use-printer-control-operation';
-import type { PrinterControlOperation } from '@/types/api';
 import '@/index.css';
-
-export function mountMotionPanel(element: HTMLElement, state: 'Queued' | 'Running' | 'Unknown') {
-  const operation: PrinterControlOperation = {
-    operationId: '22222222-2222-4222-8222-222222222222',
-    printerId: '11111111-1111-4111-8111-111111111111',
-    kind: 'Jog', x: null, y: 10, z: null, f: null, state, rowVersion: 'fixture-v1',
-    requiresRecovery: false, barrierHeld: state !== 'Unknown',
-    completionEvidence: 'None', senderIsolation: 'NotRequested', failure: null,
-    createdAtUtc: '2026-09-13T00:00:00Z', updatedAtUtc: '2026-09-13T00:00:00Z',
-    startedAtUtc: null, completedAtUtc: null,
-  };
-  const tracker = new PrinterControlTracker(operation.printerId, () => true);
-  tracker.refresh = async () => operation;
-  const control: PrinterControlOperationController = {
-    usesDurableMotion: true, blocked: operation.barrierHeld, checking: false, submitting: false,
-    admitting: false, uncertain: false, error: null, saved: null, operation,
-    current: {
-      operation: operation.barrierHeld ? operation : null,
-      physicalControl: {
-        barrierHeld: operation.barrierHeld, supportedOperations: ['Jog'], requiresRecovery: false,
-        operationId: operation.barrierHeld ? operation.operationId : null, state: operation.barrierHeld ? operation.state : null,
-      },
-    },
-    tracker,
-    execute: async () => { throw new Error('No physical commands in browser fixtures'); },
-  };
-  createRoot(element).render(
-    <div style={{ maxWidth: 420, padding: 12 }}><PrinterControlOperationPanel control={control} /></div>,
-  );
-}
 
 export function mountCoordinates(element: HTMLElement) {
   function CoordinateControls({ name, width }: { name: string; width: number }) {

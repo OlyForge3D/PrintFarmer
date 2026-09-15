@@ -21,10 +21,7 @@ final class APIClientAuthSessionTests: XCTestCase {
         }
         let service = PrinterService(apiClient: client)
         let submission = Task {
-            try await service.submitControlOperation(
-                printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
-                request: .init(kind: .homeAll)
-            )
+            try await service.home(printerId: TestData.testUUID, axes: ["X", "Y", "Z"])
         }
         await barrier.waitUntilArrived()
         await client.setAuthenticatedSession(.init(accessToken: "shared-test-bearer", serverID: UUID()))
@@ -55,8 +52,8 @@ final class APIClientAuthSessionTests: XCTestCase {
                 if switchAfterSend {
                     transport.asyncRequestHandler = { request in
                         await barrier.arriveAndWait()
-                        return (TestData.httpResponse(url: request.url, statusCode: 202),
-                                Data(ControlOperationTestJSON.operation().utf8))
+                        return (TestData.httpResponse(url: request.url, statusCode: 200),
+                                Data(#"{"success":true,"message":"Accepted"}"#.utf8))
                     }
                 } else {
                     await client.setTokenExpiryChecker {
@@ -66,10 +63,7 @@ final class APIClientAuthSessionTests: XCTestCase {
                 }
                 let service = PrinterService(apiClient: client)
                 let submission = Task {
-                    try await service.submitControlOperation(
-                        printerId: TestData.testUUID, operationId: ControlOperationTestJSON.operationId,
-                        request: .init(kind: .homeAll)
-                    )
+                    try await service.home(printerId: TestData.testUUID, axes: ["X", "Y", "Z"])
                 }
                 await barrier.waitUntilArrived()
                 let secondToken = epoch.advance()

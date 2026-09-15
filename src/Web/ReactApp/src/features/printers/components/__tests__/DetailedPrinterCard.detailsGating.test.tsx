@@ -25,9 +25,10 @@ vi.mock('@/services/maintenanceService', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
+  useIsMutating: () => 0,
   useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
   useQuery: () => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }),
-  useMutation: () => ({ mutate: vi.fn(), isPending: false }),
+  useMutation: () => ({ mutate: vi.fn(), mutateAsync: vi.fn(), isPending: false }),
 }));
 
 vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({

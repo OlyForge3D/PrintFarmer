@@ -1,403 +1,155 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { ZOffsetCalibrationWizard } from '../ZOffsetCalibrationWizard';
-import type { Printer } from '@/types/api';
-import type { PrinterControlIntent, PrinterControlOperation, PrinterStatus } from '@/types/api';
-import { AuthContext } from '@/common/contexts/auth-context';
-import type { AuthContextType } from '@/contexts/AuthContextValue';
+import { ZOffsetCalibrationWizard } from '@/features/printers/components/ZOffsetCalibrationWizard';
+import type { CommandResult, Printer } from '@/types/api';
 
 const mockHomePrinter = vi.fn();
 const mockMovePrinterTo = vi.fn();
 const mockSaveZOffset = vi.fn();
-const mockCreateOperation = vi.fn();
-const mockGetPrinter = vi.fn();
-const mockGetPrinters = vi.fn();
-const mockGetPrinterStatus = vi.fn();
-let completedOperation: PrinterControlOperation | null = null;
-let completionState: 'Succeeded' | 'Running' | 'Unknown' | 'Recovered' = 'Succeeded';
-let supportsDurableMotion = true;
-const auth = {
-  isAuthenticated: true, user: { id: 'calibration-user' },
-  hasRole: () => false, hasPermission: () => false,
-} as unknown as AuthContextType;
-
-vi.mock('@/services/printer-signalr', () => ({
-  printerSignalRService: {
-    isConnected: true, onControlOperationUpdated: () => vi.fn(), onConnectionStateChange: () => vi.fn(),
-    subscribeToPrinter: vi.fn().mockResolvedValue(undefined),
-  },
-}));
+const mockToastError = vi.fn();
+const mockToastSuccess = vi.fn();
 
 vi.mock('@/services/api', () => ({
   apiClient: {
     homePrinter: (...args: unknown[]) => mockHomePrinter(...args),
     movePrinterTo: (...args: unknown[]) => mockMovePrinterTo(...args),
     saveZOffset: (...args: unknown[]) => mockSaveZOffset(...args),
-    getPrinter: (...args: unknown[]) => mockGetPrinter(...args),
-    getPrinters: (...args: unknown[]) => mockGetPrinters(...args),
-    getPrinterStatus: (...args: unknown[]) => mockGetPrinterStatus(...args),
-    createPrinterControlOperation: (...args: unknown[]) => mockCreateOperation(...args),
-    getPrinterControlOperation: async () => ({ operation: completedOperation, etag: '"v1"' }),
-    getCurrentPrinterControlOperation: async () => ({
-      physicalControl: {
-        supportedOperations: supportsDurableMotion ? ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'] : [],
-        barrierHeld: completedOperation?.barrierHeld ?? false, requiresRecovery: false,
-        operationId: completedOperation?.barrierHeld ? completedOperation.operationId : null,
-        state: completedOperation?.barrierHeld ? completedOperation.state : null,
-      }, operation: completedOperation?.barrierHeld ? completedOperation : null,
-    }),
   },
 }));
-
+vi.mock('sonner', () => ({
+  toast: {
+    error: (...args: unknown[]) => mockToastError(...args),
+    success: (...args: unknown[]) => mockToastSuccess(...args),
+  },
+}));
 vi.mock('@/common/hooks/useApi', () => ({
-  queryKeys: {
-    printers: ['printers'],
-    printerDetails: (id: string) => ['printers', id, 'details'],
-  },
+  queryKeys: { printers: ['printers'] },
 }));
-
 vi.mock('@/common/components/modals/Modal', () => ({
   Modal: ({ isOpen, title, footer, children }: { isOpen: boolean; title: string; footer?: React.ReactNode; children: React.ReactNode }) => (
-    isOpen ? (
-      <div data-testid="modal">
-        <h1>{title}</h1>
-        {children}
-        {footer}
-      </div>
-    ) : null
+    isOpen ? <div data-testid="modal"><h1>{title}</h1>{children}{footer}</div> : null
   ),
 }));
 
 function createTestPrinter(overrides: Partial<Printer> = {}): Printer {
   return {
-    id: '11111111-1111-4111-8111-111111111111',
-    name: 'Test Printer',
-    backend: 'Moonraker' as unknown as Printer['backend'],
-    isOnline: true,
-    isEnabled: true,
-    inMaintenance: false,
-    state: 'Idle',
-    serverUrl: 'http://test.local',
-    rowVersion: 'printer-v1',
+    id: 'calibration-printer', name: 'Test Printer',
+    backend: 'Moonraker' as Printer['backend'], isOnline: true, isEnabled: true,
+    inMaintenance: false, state: 'Idle', rowVersion: 'printer-v1',
     ...overrides,
-  } as Printer;
-}
-
-function freshStatus(): PrinterStatus {
-  return {
-    id: createTestPrinter().id, isOnline: true, state: 'Idle',
-    safetyTelemetry: {
-      homedAxes: { value: ['X', 'y', 'Z'], observedAtUtc: new Date().toISOString(), staleAfterSeconds: 15, source: 'backend.status.homedAxes' },
-    },
-  } as PrinterStatus;
+  };
 }
 
 function renderWizard(props: { isOpen?: boolean; printer?: Printer } = {}) {
-  const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: 3 } } });
   const onClose = vi.fn();
-  const printer = props.printer ?? createTestPrinter();
-
   return {
     onClose,
     ...render(
-      <QueryClientProvider client={queryClient}>
-        <AuthContext.Provider value={auth}>
-        <ZOffsetCalibrationWizard
-          isOpen={props.isOpen ?? true}
-          onClose={onClose}
-          printer={printer}
-        />
-        </AuthContext.Provider>
+      <QueryClientProvider client={client}>
+        <ZOffsetCalibrationWizard isOpen={props.isOpen ?? true} onClose={onClose} printer={props.printer ?? createTestPrinter()} />
       </QueryClientProvider>,
     ),
   };
 }
 
-describe('ZOffsetCalibrationWizard', () => {
-  afterEach(() => vi.useRealTimers());
+async function openAdjustment() {
+  const user = userEvent.setup();
+  await user.click(screen.getByRole('button', { name: /next/i }));
+  await user.click(screen.getByRole('button', { name: /home all axes/i }));
+  await user.click(await screen.findByRole('button', { name: /move to center/i }));
+  await screen.findByText(/Z-Offset:.*0\.000 mm/);
+  return user;
+}
+
+describe('ZOffsetCalibrationWizard direct commands', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    vi.resetAllMocks();
     mockHomePrinter.mockResolvedValue({ success: true });
     mockMovePrinterTo.mockResolvedValue({ success: true });
     mockSaveZOffset.mockResolvedValue({ success: true });
-    mockGetPrinters.mockImplementation(async () => [createTestPrinter()]);
-    mockGetPrinterStatus.mockImplementation(async () => freshStatus());
-    localStorage.clear();
-    localStorage.setItem('auth-token', crypto.randomUUID());
-    completedOperation = null;
-    completionState = 'Succeeded';
-    supportsDurableMotion = true;
-    mockCreateOperation.mockImplementation(async (printerId: string, operationId: string, intent: PrinterControlIntent) => {
-      completedOperation = {
-        printerId, operationId, kind: intent.kind, x: intent.x ?? null, y: intent.y ?? null, z: intent.z ?? null, f: intent.f ?? null,
-        state: completionState, rowVersion: 'v1', barrierHeld: completionState === 'Running', requiresRecovery: false,
-        completionEvidence: completionState === 'Succeeded' ? 'MotionQueueDrained' : completionState === 'Recovered' ? 'OperatorVerifiedRecovery' : 'None',
-        senderIsolation: 'NotRequested', failure: null, createdAtUtc: '2026-09-12T18:00:00Z', updatedAtUtc: '2026-09-12T18:00:00Z',
-        startedAtUtc: null, completedAtUtc: completionState === 'Running' ? null : new Date().toISOString(),
-      };
-      return { operation: completedOperation, etag: '"v1"' };
-    });
   });
 
-  it('does not render when closed', async () => {
+  it('does not render when closed', () => {
     renderWizard({ isOpen: false });
-    await act(async () => {});
     expect(screen.queryByTestId('modal')).not.toBeInTheDocument();
   });
 
-  it('renders the introduction step initially', async () => {
+  it('renders introduction, progress, and an honest acceptance notice without tracking UI', () => {
     renderWizard();
-    await act(async () => {});
-    expect(screen.getByText('Z-Offset Calibration')).toBeInTheDocument();
     expect(screen.getByText(/this wizard will guide you/i)).toBeInTheDocument();
-  });
-
-  it('shows step progress as a progress bar', async () => {
-    renderWizard();
-    await act(async () => {});
     expect(screen.getByRole('progressbar')).toBeInTheDocument();
-    // Step label text is split across nodes: "Step 1 of 6: Introduction"
-    expect(screen.getByText(/Introduction/)).toBeInTheDocument();
+    expect(screen.getByText(/not confirmed physically complete/i)).toBeInTheDocument();
+    expect(screen.queryByText(/Motion Ready|Operation ID|Motion technical details/i)).not.toBeInTheDocument();
   });
 
-  it('advances to Home Axes step when Next is clicked', async () => {
+  it.each(['Moonraker', 'PrusaLink', 'OctoPrint', 'FlashForge', 'SDCP'])('uses direct homing for %s and reports acceptance, not completion', async backend => {
     const user = userEvent.setup();
-    renderWizard();
-
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    expect(screen.getByRole('button', { name: /home all axes/i })).toBeInTheDocument();
-  });
-
-  it('uses durable home admission and advances only after REST completion and fresh safety checks', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    // Go to Home Axes step
+    renderWizard({ printer: createTestPrinter({ backend: backend as Printer['backend'] }) });
     await user.click(screen.getByRole('button', { name: /next/i }));
     await user.click(screen.getByRole('button', { name: /home all axes/i }));
-
-    expect(mockCreateOperation).toHaveBeenCalledWith(createTestPrinter().id, expect.any(String), { kind: 'HomeAll' });
-    expect(mockHomePrinter).not.toHaveBeenCalled();
-    // After success, auto-advances to Move to Center
-    await waitFor(() => {
-      expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument();
-    });
-    expect(mockGetPrinters).toHaveBeenCalledWith(true, true);
-    expect(mockGetPrinterStatus).toHaveBeenCalledWith(createTestPrinter().id);
-    expect(mockGetPrinter).not.toHaveBeenCalled();
+    await screen.findByText(/move the nozzle to the center/i);
+    expect(mockHomePrinter).toHaveBeenCalledExactlyOnceWith('calibration-printer');
+    expect(mockToastSuccess).toHaveBeenCalledWith(expect.stringContaining('Homing command accepted'));
   });
 
-  it.each([
-    'missing-fact', 'legacy-axes-only', 'stale', 'future', 'before-completion',
-    'missing-timestamp', 'omitted-timestamp', 'omitted-axes', 'invalid-timestamp', 'zero-ttl', 'missing-axis', 'wrong-printer', 'offline', 'printing',
-  ])('does not advance on unsafe authoritative status: %s', async invalid => {
-    mockGetPrinterStatus.mockImplementation(async () => {
-      const status = freshStatus();
-      const homed = status.safetyTelemetry!.homedAxes!;
-      if (invalid === 'missing-fact') status.safetyTelemetry = null;
-      if (invalid === 'legacy-axes-only') return { ...status, safetyTelemetry: null, homedAxes: 'xyz' };
-      if (invalid === 'stale') homed.observedAtUtc = new Date(Date.now() - 16_000).toISOString();
-      if (invalid === 'future') homed.observedAtUtc = new Date(Date.now() + 10_000).toISOString();
-      if (invalid === 'before-completion') homed.observedAtUtc = new Date(Date.parse(completedOperation!.completedAtUtc!) - 1).toISOString();
-      if (invalid === 'missing-timestamp') homed.observedAtUtc = null;
-      if (invalid === 'omitted-timestamp') delete homed.observedAtUtc;
-      if (invalid === 'omitted-axes') delete homed.value;
-      if (invalid === 'invalid-timestamp') homed.observedAtUtc = 'not-a-date';
-      if (invalid === 'zero-ttl') homed.staleAfterSeconds = 0;
-      if (invalid === 'missing-axis') homed.value = ['x', 'y'];
-      if (invalid === 'wrong-printer') status.id = 'different-printer';
-      if (invalid === 'offline') status.isOnline = false;
-      if (invalid === 'printing') status.state = 'Printing';
-      return status;
-    });
-    const user = userEvent.setup();
+  it('keeps navigation blocked until the direct request settles without duplicate sends', async () => {
+    let finish!: (result: CommandResult) => void;
+    mockHomePrinter.mockImplementation(() => new Promise(resolve => { finish = resolve; }));
     renderWizard();
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(mockGetPrinterStatus).toHaveBeenCalledOnce());
-    await waitFor(() => expect(screen.getByRole('button', { name: /home all axes/i })).toBeEnabled());
-    expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
-    expect(mockCreateOperation).toHaveBeenCalledTimes(1);
-  });
-
-  it.each(['absent', 'disabled', 'maintenance', 'unknown-enabled', 'unknown-maintenance'])('does not advance with %s list configuration', async invalid => {
-    mockGetPrinters.mockResolvedValue(invalid === 'absent' ? [] : [createTestPrinter({
-      isEnabled: invalid === 'unknown-enabled' ? undefined : invalid !== 'disabled',
-      inMaintenance: invalid === 'unknown-maintenance' ? undefined : invalid === 'maintenance',
-    })]);
-    const user = userEvent.setup();
-    renderWizard();
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(mockGetPrinterStatus).toHaveBeenCalledOnce());
-    await waitFor(() => expect(screen.getByRole('button', { name: /home all axes/i })).toBeEnabled());
-    expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
-  });
-
-  it('preserves calibration for a plugin advertising no durable operations', async () => {
-    supportsDurableMotion = false;
-    const user = userEvent.setup();
-    renderWizard({ printer: createTestPrinter({ backend: 'PrusaLink' as Printer['backend'] }) });
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument());
+    fireEvent.click(screen.getByRole('button', { name: /next/i }));
+    fireEvent.click(screen.getByRole('button', { name: /home all axes/i }));
+    await waitFor(() => expect(mockHomePrinter).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: /please wait/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: /back/i })).toBeDisabled();
+    fireEvent.click(screen.getByRole('button', { name: /please wait/i }));
     expect(mockHomePrinter).toHaveBeenCalledOnce();
-    expect(mockGetPrinterStatus).not.toHaveBeenCalled();
-    expect(mockGetPrinters).not.toHaveBeenCalled();
+    await act(async () => finish({ success: true }));
+    expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument();
   });
 
-  it('uses durable completion and fresh safety checks for an advertising non-Moonraker plugin', async () => {
-    const user = userEvent.setup();
-    renderWizard({ printer: createTestPrinter({ backend: 'PrusaLink' as Printer['backend'] }) });
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    await waitFor(() => expect(screen.getByRole('button', { name: /home all axes/i })).toBeEnabled());
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument());
-    expect(mockCreateOperation).toHaveBeenCalledOnce();
-    expect(mockHomePrinter).not.toHaveBeenCalled();
-    expect(mockGetPrinterStatus).toHaveBeenCalledOnce();
-  });
-
-  it('does not advance calibration on 202 or after 27 seconds, only after confirmed motion completion', async () => {
-      vi.useFakeTimers();
-      try {
-        completionState = 'Running';
-        renderWizard();
-        await act(async () => { await vi.advanceTimersByTimeAsync(0); });
-        fireEvent.click(screen.getByRole('button', { name: /next/i }));
-        fireEvent.click(screen.getByRole('button', { name: /home all axes/i }));
-        await act(async () => { await vi.advanceTimersByTimeAsync(27_110); });
-        expect(screen.getByRole('button', { name: /Please wait/i })).toBeDisabled();
-        expect(screen.getByRole('status')).toHaveTextContent('Home all axes: in progress');
-        expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
-        expect(mockCreateOperation).toHaveBeenCalledTimes(1);
-        completedOperation = { ...completedOperation!, state: 'Succeeded', barrierHeld: false, completionEvidence: 'MotionQueueDrained', completedAtUtc: new Date().toISOString() };
-        fireEvent.click(screen.getByText('Motion technical details'));
-        fireEvent.click(screen.getByRole('button', { name: /Recheck motion status/i }));
-        await act(async () => { await vi.advanceTimersByTimeAsync(2_000); });
-        expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument();
-      } finally {
-        vi.useRealTimers();
-      }
-    });
-
-  it.each(['Unknown', 'Recovered'] as const)('does not advance calibration or require recovery for settled %s', async state => {
-      completionState = state;
-      const user = userEvent.setup();
-      renderWizard();
-      await user.click(screen.getByRole('button', { name: /next/i }));
-      await user.click(screen.getByRole('button', { name: /home all axes/i }));
-      await waitFor(() => expect(mockCreateOperation).toHaveBeenCalledTimes(1));
-      await waitFor(() => expect(screen.getByRole('button', { name: /home all axes/i })).toBeEnabled());
-      expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
-      expect(screen.queryByRole('button', { name: /recover|re-submit/i })).not.toBeInTheDocument();
-      expect(screen.getByRole('button', { name: /home all axes/i })).toBeInTheDocument();
-  });
-
-  it('navigates back with the Back button', async () => {
+  it.each(['rejected', 'HTTP failure', 'timeout', 'aborted'])('does not advance or retry after %s', async failure => {
+    if (failure === 'rejected') mockHomePrinter.mockResolvedValue({ success: false, error: 'Printer rejected command' });
+    else mockHomePrinter.mockRejectedValue(new Error(failure));
     const user = userEvent.setup();
     renderWizard();
-
-    // Go to step 2
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    expect(screen.getByRole('button', { name: /home all axes/i })).toBeInTheDocument();
-
-    // Go back — intro text should reappear
-    await user.click(screen.getByRole('button', { name: /back/i }));
-    expect(screen.getByText(/this wizard will guide you/i)).toBeInTheDocument();
-  });
-
-  it('navigates to Adjust Z-Offset step via action buttons', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    // Step 1 → 2 via Next
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    // Step 2 → 3 via Home action (auto-advance on success)
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/move the nozzle to the center/i)).toBeInTheDocument();
-    });
-    // Step 3 → 4 via Move action (auto-advance on success)
-    await user.click(screen.getByRole('button', { name: /move to center/i }));
-    await waitFor(() => {
-      expect(screen.getByText(/Z-Offset:.*0\.000 mm/)).toBeInTheDocument();
-    });
-
-    // Verify increment buttons
-    expect(screen.getByText('0.01 mm')).toBeInTheDocument();
-    expect(screen.getByText('0.05 mm')).toBeInTheDocument();
-    expect(screen.getByText('0.1 mm')).toBeInTheDocument();
-  });
-
-  it('adjusts Z-offset down through the typed move endpoint', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    // Navigate to Adjust step
     await user.click(screen.getByRole('button', { name: /next/i }));
     await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(screen.getByText(/move the nozzle/i)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /move to center/i }));
-    await waitFor(() => expect(screen.getByText(/Z-Offset:/)).toBeInTheDocument());
-
-    // Click Nozzle Down — sends an absolute typed move from Z=10 offset by -0.05
-    await user.click(screen.getByRole('button', { name: /nozzle down/i }));
-    expect(mockCreateOperation).toHaveBeenLastCalledWith(
-      createTestPrinter().id, expect.any(String),
-      { kind: 'MoveTo', x: 110, y: 110, z: 9.95, f: 300 },
-    );
+    await waitFor(() => expect(mockToastError).toHaveBeenCalledOnce());
+    expect(screen.getByRole('button', { name: /home all axes/i })).toBeEnabled();
+    expect(screen.queryByText(/move the nozzle to the center/i)).not.toBeInTheDocument();
+    expect(mockHomePrinter).toHaveBeenCalledOnce();
     expect(mockMovePrinterTo).not.toHaveBeenCalled();
   });
 
-  it('shows the first layer visual guide on Adjust step', async () => {
+  it('navigates back to the introduction and cancels', async () => {
     const user = userEvent.setup();
-    renderWizard();
-
-    // Navigate to Adjust step
+    const { onClose } = renderWizard();
     await user.click(screen.getByRole('button', { name: /next/i }));
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(screen.getByText(/move the nozzle/i)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /move to center/i }));
-    await waitFor(() => expect(screen.getByText(/Z-Offset:/)).toBeInTheDocument());
-
-    expect(screen.getByText('First Layer Visual Guide')).toBeInTheDocument();
-    expect(screen.getByText('Too Far')).toBeInTheDocument();
-    expect(screen.getByText('Just Right')).toBeInTheDocument();
-    expect(screen.getByText('Too Close')).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /back/i }));
+    expect(screen.getByText(/this wizard will guide you/i)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /cancel/i }));
+    expect(onClose).toHaveBeenCalledOnce();
   });
 
-  it('"Looks Good — Continue" advances to Save step', async () => {
-    const user = userEvent.setup();
+  it('moves to center, adjusts Z directly, and preserves the visual guide and save contract', async () => {
     renderWizard();
-
-    // Navigate to Adjust step
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(screen.getByText(/move the nozzle/i)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /move to center/i }));
-    await waitFor(() => expect(screen.getByText(/Z-Offset:/)).toBeInTheDocument());
-
-    // Click "Looks Good — Continue"
+    const user = await openAdjustment();
+    expect(mockMovePrinterTo).toHaveBeenCalledExactlyOnceWith('calibration-printer', { x: 110, y: 110, z: 10, f: 3000 });
+    for (const text of ['0.01 mm', '0.05 mm', '0.1 mm', 'First Layer Visual Guide', 'Too Far', 'Just Right', 'Too Close']) {
+      expect(screen.getByText(text)).toBeInTheDocument();
+    }
+    await user.click(screen.getByRole('button', { name: /nozzle down/i }));
+    expect(mockMovePrinterTo).toHaveBeenLastCalledWith('calibration-printer', { z: 9.95, f: 300 });
     await user.click(screen.getByRole('button', { name: /looks good/i }));
     expect(screen.getByText(/ready to save/i)).toBeInTheDocument();
-  });
-
-  it('shows Klipper commands for Moonraker backend on Save step', async () => {
-    const user = userEvent.setup();
-    renderWizard();
-
-    // Navigate to Save step
-    await user.click(screen.getByRole('button', { name: /next/i }));
-    await user.click(screen.getByRole('button', { name: /home all axes/i }));
-    await waitFor(() => expect(screen.getByText(/move the nozzle/i)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /move to center/i }));
-    await waitFor(() => expect(screen.getByText(/Z-Offset:/)).toBeInTheDocument());
-    await user.click(screen.getByRole('button', { name: /looks good/i }));
-
     expect(screen.getByText(/Klipper\/Moonraker/i)).toBeInTheDocument();
     expect(screen.getByText(/SET_GCODE_OFFSET/)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: /save z-offset/i }));
+    await waitFor(() => expect(mockSaveZOffset).toHaveBeenCalledExactlyOnceWith(
+      'calibration-printer', { offsetMm: -0.05, saveToFirmware: true }, 'printer-v1',
+    ));
   });
 });

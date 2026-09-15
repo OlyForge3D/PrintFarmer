@@ -139,12 +139,7 @@ public class EfPrintersRepository(AppDbContext db, ISensitiveDataProtector sensi
             await _db.PrinterDispatchStates.Where(state => state.PrinterId == trackedPrinter.Id)
                 .ExecuteUpdateAsync(setters => setters.SetProperty(state => state.Revision, state => state.Revision + 1), ct);
             if (await _db.PrinterDispatchStates.AsNoTracking().AnyAsync(
-                    state => state.PrinterId == trackedPrinter.Id && state.PhysicalControlCommandId != null, ct) ||
-                await _db.PrinterControlOperations.AsNoTracking().AnyAsync(
-                    operation =>
-                    operation.PrinterId == trackedPrinter.Id &&
-                    operation.State != PrinterControlState.Succeeded && operation.State != PrinterControlState.Failed &&
-                    operation.State != PrinterControlState.Unknown && operation.State != PrinterControlState.Recovered, ct))
+                    state => state.PrinterId == trackedPrinter.Id && state.PhysicalControlCommandId != null, ct))
             {
                 throw new PrinterControlException(409, "physical_control_barrier", "Resolve the physical control operation before deleting this printer.");
             }

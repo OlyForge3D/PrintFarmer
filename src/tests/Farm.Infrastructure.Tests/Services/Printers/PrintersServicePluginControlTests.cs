@@ -14,6 +14,59 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 
 public sealed class PrintersServicePluginControlTests
 {
+    [Fact]
+    public async Task EmergencyStopAsync_PluginCancelled_PropagatesCancellationWithoutRetry()
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        using var cancellation = new CancellationTokenSource();
+        var client = new Mock<IBackendClient>(MockBehavior.Strict);
+        Mock<ISupportsEmergencyStop> emergency = client.As<ISupportsEmergencyStop>();
+        emergency.Setup(value => value.EmergencyStopAsync(
+                printer.BackendUrl, It.IsAny<PrinterCredential?>(), cancellation.Token))
+            .Returns(async () =>
+            {
+                cancellation.Cancel();
+                return await Task.FromCanceled<bool>(cancellation.Token);
+            });
+        PrintersService service = CreateService(db, printer, client.Object);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(
+            () => service.EmergencyStopAsync(printer.Id, cancellation.Token));
+
+        emergency.Verify(value => value.EmergencyStopAsync(
+            printer.BackendUrl, It.Is<PrinterCredential?>(credential => credential != null && credential.ApiKey == "test-key"),
+            cancellation.Token), Times.Once);
+        emergency.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task GetMovementStatusAsync_ManualControl_ReadsOnlyOneMovementSnapshot()
+    {
+        await using var db = CreateDbContext();
+        Printer printer = CreatePrinter(PrinterBackend.Moonraker);
+        using var cancellation = new CancellationTokenSource();
+        var status = new Mock<IPrinterStatusClient>(MockBehavior.Strict);
+        var observed = new PrinterStatusDto(printer.Id, true, "Idle", X: 10, Y: 20, Z: 0);
+        status.Setup(value => value.GetMovementStatusAsync(printer, cancellation.Token)).ReturnsAsync(observed);
+        var factory = new Mock<IPrinterStatusClientFactory>(MockBehavior.Strict);
+        factory.Setup(value => value.GetStatusClient(printer.Backend)).Returns(status.Object);
+        var client = new Mock<IBackendClient>(MockBehavior.Strict);
+        PrintersService service = CreateService(db, printer, client.Object, factory.Object);
+
+        PrinterStatusDto result = await service.GetMovementStatusAsync(printer, cancellation.Token);
+
+        result.IsOnline.Should().BeTrue();
+        result.X.Should().Be(10);
+        result.Y.Should().Be(20);
+        result.Z.Should().Be(0);
+        factory.Verify(value => value.GetStatusClient(printer.Backend), Times.Once);
+        status.Verify(value => value.GetMovementStatusAsync(printer, cancellation.Token), Times.Once);
+        status.VerifyNoOtherCalls();
+        factory.VerifyNoOtherCalls();
+        client.VerifyNoOtherCalls();
+    }
+
     [Theory]
     [InlineData(PrinterBackend.Moonraker)]
     [InlineData(PrinterBackend.OctoPrint)]
@@ -101,7 +154,8 @@ public sealed class PrintersServicePluginControlTests
         Credential = PrinterCredential.FromAll("test-key", "test-user", "test-password"),
     };
 
-    private static PrintersService CreateService(AppDbContext db, Printer printer, IBackendClient client)
+    private static PrintersService CreateService(
+        AppDbContext db, Printer printer, IBackendClient client, IPrinterStatusClientFactory? statusClientFactory = null)
     {
         var printers = new Mock<IPrintersRepository>();
         printers.Setup(repository => repository.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);
@@ -117,7 +171,7 @@ public sealed class PrintersServicePluginControlTests
             Mock.Of<Farm.Infrastructure.Services.Catalog.ICatalogService>(),
             Mock.Of<IHttpClientFactory>(), NullLogger<PrintersService>.Instance,
             Mock.Of<IPrinterStatusBroadcaster>(), Mock.Of<IMultiPrinterStatusCoordinator>(),
-            Mock.Of<IPrinterStatusClientFactory>(), Mock.Of<IPrinterStatusCacheReader>(),
+            statusClientFactory ?? Mock.Of<IPrinterStatusClientFactory>(), Mock.Of<IPrinterStatusCacheReader>(),
             Mock.Of<Farm.Infrastructure.Services.Locations.ILocationService>(), protector.Object,
             Mock.Of<Farm.Infrastructure.Services.Interfaces.ISpoolmanService>(),
             Mock.Of<Farm.Infrastructure.Services.Cameras.IGo2RtcService>(),

@@ -26,9 +26,7 @@ using Farm.Modules.Printers.Controllers.Requests;
 using FluentAssertions;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.AspNetCore.Mvc.Routing;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -747,49 +745,23 @@ public sealed class FinalFactCheckerRemediationTests : IAsyncDisposable
     }
 
     [Fact]
-    public void MotionRoutes_RemovedRecoveryActions_ExposeOnlyAuthorizedAdmissionAndStatus()
+    public void TrackingRuntime_RemovedControllerAndProjections_AreAbsent()
     {
-        Type controller = typeof(PrinterControlOperationsController);
-        controller.GetCustomAttributes(typeof(AuthorizeAttribute), inherit: true).Should().NotBeEmpty();
-        var actions = controller.GetMethods()
-            .SelectMany(method => method.GetCustomAttributes(typeof(HttpMethodAttribute), inherit: true)
-                .Cast<HttpMethodAttribute>().Select(route => (Method: method, Route: route)))
-            .ToArray();
-        actions.Should().HaveCount(3);
-        actions.Select(action => action.Method.Name).Should().BeEquivalentTo(
-            nameof(PrinterControlOperationsController.SubmitAsync),
-            nameof(PrinterControlOperationsController.GetAsync),
-            nameof(PrinterControlOperationsController.CurrentAsync));
-        actions.Should().NotContain(action => (action.Route.Template ?? string.Empty).Contains("recover", StringComparison.OrdinalIgnoreCase));
-        var submit = actions.Single(action => action.Method.Name == nameof(PrinterControlOperationsController.SubmitAsync));
-        submit.Route.HttpMethods.Should().ContainSingle().Which.Should().Be("POST");
-        submit.Method.GetCustomAttributes(typeof(RequirePermissionAttribute), inherit: true)
-            .Cast<RequirePermissionAttribute>().Select(attribute => attribute.Permission)
-            .Should().Contain(PrintFarmerPermissions.Queue.Start);
-        typeof(PrinterControlOperationService).GetMethod("BeginRecoveryAsync").Should().BeNull();
-        typeof(PrinterControlOperationService).GetMethod("CompleteRecoveryAsync").Should().BeNull();
-    }
-
-    [Theory]
-    [InlineData(PrinterControlState.Unknown)]
-    [InlineData(PrinterControlState.Recovered)]
-    public void HistoricalMotionReceipt_SettledStates_PreserveSchemaWithoutDemandingRecovery(PrinterControlState state)
-    {
-        var operation = new PrinterControlOperation
+        typeof(PrintersController).Assembly.GetType("Farm.Modules.Printers.Controllers.PrinterControlOperationsController")
+            .Should().BeNull();
+        object[] projections =
+        [
+            new PrinterDto(Guid.NewGuid(), "Direct controls", null, true, "Idle"),
+            new PrinterStatusDto(Guid.NewGuid(), true, "Idle"),
+        ];
+        foreach (object projection in projections)
         {
-            State = state,
-            RecoveryActorSubject = "historical",
-            RecoveryEvidenceJson = "{\"historical\":true}",
-            RecoveryRequestedAtUtc = DateTime.UtcNow.AddYears(-1),
-            RecoveryFromRevision = 4,
-            EmergencyStopInFlight = true,
-            SenderIsolation = PrinterSenderIsolation.ExternalVerificationRequired,
-        };
-        operation.Settled.Should().BeTrue();
-        operation.RequiresRecovery.Should().BeFalse();
-        operation.State.Should().Be(state);
-        operation.CompletionEvidence.Should().Be(PrinterControlEvidence.None);
-        operation.RecoveryEvidenceJson.Should().Be("{\"historical\":true}");
+            using JsonDocument json = JsonDocument.Parse(JsonSerializer.Serialize(
+                projection, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
+            json.RootElement.TryGetProperty("physicalControl", out _).Should().BeFalse();
+            json.RootElement.TryGetProperty("controlOperation", out _).Should().BeFalse();
+            json.RootElement.TryGetProperty("requiresRecovery", out _).Should().BeFalse();
+        }
     }
 
     [Fact]

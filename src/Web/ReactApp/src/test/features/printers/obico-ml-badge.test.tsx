@@ -35,6 +35,7 @@ vi.mock('@/common/hooks/usePrinterDisplay', () => ({
 }));
 
 vi.mock('@tanstack/react-query', () => ({
+  useIsMutating: () => 0,
   useQueryClient: () => ({
     invalidateQueries: vi.fn(),
     setQueryData: vi.fn(),

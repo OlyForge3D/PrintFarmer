@@ -51,8 +51,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.second.baseURL.host)
-        XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
-                       "Protected status must be fetched; lifecycle invalidations may refresh it")
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path.contains("control-operations") == true },
+                       "Controls must not query the removed tracking API")
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
@@ -93,8 +93,8 @@ final class PrinterDetailPanelsTests: XCTestCase {
         }
         XCTAssertEqual(capabilityRequests(fixture.api).count, 1)
         XCTAssertEqual(capabilityRequests(fixture.api).first?.url?.host, fixture.first.baseURL.host)
-        XCTAssertFalse(currentControlOperationRequests(fixture.api).isEmpty,
-                       "Protected status must be fetched; lifecycle invalidations may refresh it")
+        XCTAssertFalse(fixture.api.capturedRequests.contains { $0.url?.path.contains("control-operations") == true },
+                       "Controls must not query the removed tracking API")
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy { $0.httpMethod == "GET" })
         XCTAssertTrue(detailRequests(fixture.api).allSatisfy {
             $0.value(forHTTPHeaderField: "Authorization") == "Bearer detail-host-test-token"
@@ -149,10 +149,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         var printer = try TestData.decodePrinter()
         printer.state = "idle"
         printer.isOnline = true
-        // The production host selects durable routing from this advertisement, not the backend name.
-        printer.physicalControl = try TestData.decoder.decode(
-            PrinterPhysicalControl.self, from: Data(ControlOperationTestJSON.unlockedProjection.utf8)
-        )
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         let printerData = try encoder.encode(printer)
@@ -161,9 +157,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
         let capabilities = Data("""
         {"printerId":"\(printer.id)","backend":"Moonraker",
          "supportsHotendTemperature":true,"supportsBedTemperature":true}
-        """.utf8)
-        let currentControlOperation = Data("""
-        {"physicalControl":\(ControlOperationTestJSON.unlockedProjection),"operation":null}
         """.utf8)
         // ServiceContainer shares the APNs manager, whose saved token varies by simulator.
         // Model the documented push-disabled backend for both registration and handoff.
@@ -185,8 +178,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
                 data = capabilities
             } else if path.hasSuffix("/details") {
                 data = details
-            } else if path.hasSuffix("/control-operations/current") {
-                data = currentControlOperation
             } else {
                 return (TestData.httpResponse(url: request.url, statusCode: 404), Data())
             }
@@ -265,10 +256,6 @@ final class PrinterDetailPanelsTests: XCTestCase {
 
     private func capabilityRequests(_ api: MockAPIClient) -> [URLRequest] {
         api.capturedRequests.filter { $0.url?.path.hasSuffix("/backend-capabilities") == true }
-    }
-
-    private func currentControlOperationRequests(_ api: MockAPIClient) -> [URLRequest] {
-        api.capturedRequests.filter { $0.url?.path.hasSuffix("/control-operations/current") == true }
     }
 
     private func detailRequests(_ api: MockAPIClient) -> [URLRequest] {

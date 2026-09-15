@@ -116,7 +116,7 @@ struct HomeSubgroup: View {
                         ) {
                             Task { await viewModel.homeXY() }
                         }
-                        .disabled(isDisabled || (anyPending && (viewModel.usesDurableMotion || !isXYPending)))
+                        .disabled(isDisabled || (anyPending && !isXYPending))
                     }
 
                     if viewModel.capabilities?.supportsHomingZ == true {
@@ -132,7 +132,7 @@ struct HomeSubgroup: View {
                         ) {
                             Task { await viewModel.homeZ() }
                         }
-                        .disabled(isDisabled || (anyPending && (viewModel.usesDurableMotion || !isZPending)))
+                        .disabled(isDisabled || (anyPending && !isZPending))
                     }
                 }
 
@@ -161,7 +161,7 @@ struct HomeSubgroup: View {
             RoundedRectangle(cornerRadius: 10, style: .continuous)
                 .strokeBorder(isAllPending ? Color.pfAssigned : Color.clear, lineWidth: 1.5)
         )
-        .disabled((isDisabled && !shouldRevealDisabledTooltipOnTap) || (anyPending && (viewModel.usesDurableMotion || !isAllPending)))
+        .disabled((isDisabled && !shouldRevealDisabledTooltipOnTap) || (anyPending && !isAllPending))
         .disabledControlStyle(isDisabled: isDisabled && !isAllPending)
         .errorBorderHighlight(isActive: isErrored(matching: ["X", "Y", "Z"]))
         .accessibilityLabel(
@@ -266,9 +266,6 @@ struct HomeSubgroup: View {
     func accessibilityHint(hasError: Bool, idleHint: String) -> String {
         if hasError, let message = viewModel.lastError?.message {
             return String(localized: "Failed: \(message). Double tap to retry.", comment: "VoiceOver hint when last home command failed")
-        }
-        if viewModel.hasDurableMotionBarrier, let reason = viewModel.motionBlockedReason {
-            return reason
         }
         if viewModel.isPrintingOrPaused {
             return String(localized: "Disabled while printing.", comment: "VoiceOver disabled hint per spec §4.1")

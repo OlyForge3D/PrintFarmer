@@ -57,12 +57,23 @@ const useMutationMock = vi.hoisted(() =>
           (error) => options.onError?.(error)
         );
       },
+      mutateAsync: async (arg?: unknown) => {
+        try {
+          const data = await options.mutationFn(arg);
+          await options.onSuccess?.(data, arg);
+          return data;
+        } catch (error) {
+          await options.onError?.(error);
+          throw error;
+        }
+      },
       isPending: false,
     })
   )
 );
 
 vi.mock('@tanstack/react-query', () => ({
+  useIsMutating: () => 0,
   useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: setQueryDataMock }),
   useQuery: useQueryMock,
   useMutation: useMutationMock,

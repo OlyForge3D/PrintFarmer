@@ -20,9 +20,10 @@ const usePrinterDetailsMock = vi.hoisted(() => vi.fn(() => ({ data: undefined })
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 
 vi.mock('@tanstack/react-query', () => ({
+  useIsMutating: () => 0,
   useQuery: () => ({ data: undefined, isLoading: false, refetch: vi.fn() }),
   useQueryClient: () => ({ invalidateQueries: vi.fn(), setQueryData: vi.fn() }),
-  useMutation: () => ({ isPending: false, mutate: vi.fn() }),
+  useMutation: () => ({ isPending: false, mutate: vi.fn(), mutateAsync: vi.fn() }),
 }));
 
 vi.mock('@/common/hooks/useApi', () => ({

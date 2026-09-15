@@ -1,5 +1,3 @@
-import { z } from 'zod';
-
 // DTO for a discovered file in a harvest operation
 // DTO for importing selected discovered files
 export interface ImportSelectedGcodeFilesDto {
@@ -264,7 +262,6 @@ export interface PrinterJobInfo {
  * Operational state flags for a printer.
  */
 export interface PrinterOperationalState {
-  physicalControl?: PrinterPhysicalControl;
   /** Whether printer is in maintenance mode */
   inMaintenance?: boolean;
   /** Whether printer is enabled for operations */
@@ -479,7 +476,6 @@ export interface PrinterFast extends
 
 export interface PrinterSummary {
   id: string;
-  physicalControl?: PrinterPhysicalControl;
   name: string;
   isOnline: boolean;
   state?: string | null;
@@ -626,7 +622,6 @@ export interface PrinterStatus extends
   PrinterJobInfo {
   /** Printer ID for correlation */
   id: string;
-  physicalControl?: PrinterPhysicalControl;
   safetyTelemetry?: {
     homedAxes?: {
       value?: string[] | null;
@@ -1402,7 +1397,6 @@ export interface ToolheadDto {
 // Printer details for edit page
 export interface PrinterDetails {
   id: string;
-  physicalControl?: PrinterPhysicalControl;
   rowVersion?: string | null;
   name: string;
   serverUrl?: string | null;
@@ -2477,80 +2471,6 @@ export interface DispatchUploadProgressDto {
 }
 
 // Printer control types
-export type PrinterControlOperationKind = 'HomeAll' | 'HomeXY' | 'HomeZ' | 'Jog' | 'MoveTo';
-export type PrinterControlOperationState = 'Queued' | 'Running' | 'Succeeded' | 'Failed' | 'Unknown' | 'Recovering' | 'Recovered';
-
-export interface PrinterPhysicalControl {
-  supportedOperations: PrinterControlOperationKind[];
-  barrierHeld: boolean;
-  operationId: string | null;
-  state: PrinterControlOperationState | null;
-  requiresRecovery: boolean;
-}
-
-export interface PrinterControlIntent extends MoveRequest {
-  kind: PrinterControlOperationKind;
-}
-
-export interface PrinterControlOperation {
-  operationId: string;
-  printerId: string;
-  kind: PrinterControlOperationKind;
-  x: number | null;
-  y: number | null;
-  z: number | null;
-  f: number | null;
-  state: PrinterControlOperationState;
-  rowVersion: string;
-  createdAtUtc: string;
-  updatedAtUtc: string;
-  startedAtUtc: string | null;
-  completedAtUtc: string | null;
-  barrierHeld: boolean;
-  requiresRecovery: boolean;
-  completionEvidence: 'None' | 'NotSent' | 'BackendRejected' | 'MotionQueueDrained' | 'OperatorVerifiedRecovery';
-  failure: { code: string; message: string } | null;
-  senderIsolation: 'NotRequested' | 'Pending' | 'Confirmed' | 'ExternalVerificationRequired';
-}
-
-export const printerControlKindSchema = z.enum(['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo']);
-export const printerControlStateSchema = z.enum(['Queued', 'Running', 'Succeeded', 'Failed', 'Unknown', 'Recovering', 'Recovered']);
-export const printerControlOperationSchema = z.object({
-  operationId: z.string().uuid(), printerId: z.string().uuid(), kind: printerControlKindSchema,
-  x: z.number().nullable(), y: z.number().nullable(), z: z.number().nullable(), f: z.number().nullable(),
-  state: printerControlStateSchema, rowVersion: z.string().min(1),
-  createdAtUtc: z.string().datetime({ offset: true }), updatedAtUtc: z.string().datetime({ offset: true }),
-  startedAtUtc: z.string().datetime({ offset: true }).nullable(), completedAtUtc: z.string().datetime({ offset: true }).nullable(),
-  barrierHeld: z.boolean(), requiresRecovery: z.boolean(),
-  completionEvidence: z.enum(['None', 'NotSent', 'BackendRejected', 'MotionQueueDrained', 'OperatorVerifiedRecovery']),
-  failure: z.object({ code: z.string(), message: z.string() }).nullable(),
-  senderIsolation: z.enum(['NotRequested', 'Pending', 'Confirmed', 'ExternalVerificationRequired']),
-});
-
-type NormalizedControlIntentInput = PrinterControlIntent | Pick<PrinterControlOperation, 'kind' | 'x' | 'y' | 'z' | 'f'>;
-
-/** Compare receipts without rewriting the original request. */
-export function matchesPrinterControlIntent(actual: NormalizedControlIntentInput, expected: NormalizedControlIntentInput): boolean {
-  return actual.kind === expected.kind &&
-    (['x', 'y', 'z', 'f'] as const).every(axis => (actual[axis] ?? null) === (expected[axis] ?? null));
-}
-
-/** A settled receipt, not necessarily successful actuation. */
-export function isControlOperationResolved(operation: PrinterControlOperation): boolean {
-  return !operation.barrierHeld && !['Queued', 'Running'].includes(operation.state);
-}
-
-export interface PrinterControlCurrent {
-  physicalControl: PrinterPhysicalControl;
-  /** Current barrier owner only; settled receipts remain available through the exact operation GET. */
-  operation: PrinterControlOperation | null;
-}
-
-export interface PrinterControlOperationResponse {
-  operation: PrinterControlOperation;
-  etag: string | null;
-}
-
 export interface MoveRequest {
   x?: number;
   y?: number;

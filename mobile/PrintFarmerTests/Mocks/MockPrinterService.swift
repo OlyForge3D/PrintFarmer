@@ -33,46 +33,6 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
     var queueOverviewToReturn: [QueueOverview] = []
     var spoolsToReturn: [SpoolmanSpool] = []
     var errorToThrow: Error?
-    var currentControlOperationToReturn = PrinterCurrentControlOperation(
-        physicalControl: .init(supportedOperations: PrinterControlOperationKind.allCases, barrierHeld: false, requiresRecovery: false),
-        operation: nil
-    )
-    var controlOperationToReturn: PrinterControlOperation?
-    var controlOperationError: Error?
-    var submitControlOperationHandler: (@Sendable (UUID, UUID, PrinterControlOperationRequest) async throws -> PrinterControlOperation)?
-    var currentControlOperationHandler: (@Sendable (UUID) async throws -> PrinterCurrentControlOperation)?
-    var controlOperationHandler: (@Sendable (UUID, UUID) async throws -> PrinterControlOperation)?
-    var submittedControlOperations: [(printerID: UUID, operationID: UUID, request: PrinterControlOperationRequest)] = []
-    var controlOperationReadIDs: [UUID] = []
-    var currentControlOperationReadCount = 0
-
-    func submitControlOperation(
-        printerId: UUID, operationId: UUID, request: PrinterControlOperationRequest
-    ) async throws -> PrinterControlOperation {
-        submittedControlOperations.append((printerId, operationId, request))
-        if let submitControlOperationHandler {
-            return try await submitControlOperationHandler(printerId, operationId, request)
-        }
-        if let controlOperationError { throw controlOperationError }
-        guard let operation = controlOperationToReturn else { throw NetworkError.timeout }
-        return operation
-    }
-
-    func getControlOperation(printerId: UUID, operationId: UUID) async throws -> PrinterControlOperation {
-        controlOperationReadIDs.append(operationId)
-        if let controlOperationHandler { return try await controlOperationHandler(printerId, operationId) }
-        if let controlOperationError { throw controlOperationError }
-        guard let operation = controlOperationToReturn else { throw NetworkError.notFound }
-        return operation
-    }
-
-    func getCurrentControlOperation(printerId: UUID) async throws -> PrinterCurrentControlOperation {
-        currentControlOperationReadCount += 1
-        if let currentControlOperationHandler { return try await currentControlOperationHandler(printerId) }
-        if let controlOperationError { throw controlOperationError }
-        return currentControlOperationToReturn
-    }
-
     // Call tracking
     var listPrintersCalled = false
     var listIncludeDisabledArg: Bool?
@@ -349,23 +309,34 @@ final class MockPrinterService: PrinterServiceProtocol, @unchecked Sendable {
         afterSetTemperatures?()
     }
 
+    var beforeMotion: (@Sendable () async -> Void)?
+    private(set) var motionCallCount = 0
+
     func home(printerId: UUID, axes: [String]) async throws {
+        motionCallCount += 1
         homeCalledWith = (printerId, axes)
+        if let beforeMotion { await beforeMotion() }
         if let error = errorToThrow { throw error }
     }
 
     func homeXY(printerId: UUID) async throws {
+        motionCallCount += 1
         homeXYCalledWith = printerId
+        if let beforeMotion { await beforeMotion() }
         if let error = errorToThrow { throw error }
     }
 
     func homeZ(printerId: UUID) async throws {
+        motionCallCount += 1
         homeZCalledWith = printerId
+        if let beforeMotion { await beforeMotion() }
         if let error = errorToThrow { throw error }
     }
 
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
+        motionCallCount += 1
         moveCalledWith = (printerId, axis, distanceMm, feedrateMmMin)
+        if let beforeMotion { await beforeMotion() }
         if let error = errorToThrow { throw error }
     }
 

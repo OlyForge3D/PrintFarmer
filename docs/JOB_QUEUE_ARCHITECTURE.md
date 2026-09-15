@@ -116,190 +116,107 @@ exclusive lease until reconciliation. Every physical control, raw G-code, MMU,
 upload, and cancel route has an explicit queue permission and printer-resource
 check before backend I/O. Idle controls acquire a database physical-I/O barrier;
 active lifecycle controls carry the exact job and attempt. No later dispatch may
-claim the printer until a known outcome releases that barrier.
+claim the printer while that barrier is held. Direct manual-motion uncertainty
+uses the release rules below, not print-start reconciliation.
 
-### Durable Moonraker motion control
+### Direct manual-motion control
 
-Moonraker `HomeAll`, `HomeXY`, `HomeZ`, relative `Jog`, and absolute `MoveTo`
-use `POST /api/printers/{printerId}/control-operations`. The caller supplies
-`Idempotency-Key: <UUID>` and `{kind,x?,y?,z?,f?}`. Distances are millimeters;
-feedrate is positive millimeters/minute. Homes reject movement fields.
-`MoveTo` and Jog accept one or several finite axes; omitted absolute axes retain
-coordinates from the fresh command-channel observation, while omitted jog axes
-have zero delta. Empty movement intents remain `400 invalid`. Their destinations
-are bounded by the verified travel envelope, not an arbitrary UI-only step limit.
-The optional-axis wire shape is unchanged for web and iOS clients.
-Admission requires `queue:start` and printer-submit access and atomically stores
-the operation, shared dispatch barrier, audit, and invalidation outbox entry.
-HTTP returns `202` with the operation and `Location`; disconnecting does not
-cancel physical execution. Reusing the same key, printer, actor and normalized
-intent returns the original operation (`200` when settled); conflicting reuse
-returns `409 idempotency_conflict`. Authorization is checked before replay lookup.
+React and iOS submit `HomeAll`, `HomeXY`, `HomeZ`, relative jog, and absolute
+movement through the existing `POST /api/printers/{id}/home`, `/homexy`,
+`/homez`, `/move`, and `/moveto` routes. Authorization and printer-resource
+checks still precede backend I/O. The result is the ordinary `CommandResult`:
+success means backend acceptance, **not physical completion or a drained motion
+queue**. The direct-command timeout is five minutes.
 
-If the POST outcome is unknown, clients report that uncertainty and refetch
-authoritative current state without replaying the request. A missing receipt is
-not proof that a delayed request was never admitted. Clients do not keep a
-persistent recovery journal, offer a replay action, or demand attestations before
-ordinary use. Any further movement is a new explicit operator request; database
-admission still coordinates concurrent commands.
+Pending UI is bounded by the request. Errors, cancellation, and timeouts remain
+visible, and a lost response is not proof that no motion occurred. Neither
+clients nor plugins automatically replay an uncertain write. Another movement
+requires a new explicit operator request. Guided/Expert web presentation
+remains independent of permissions, safety validation, and command semantics.
 
-Updated clients are required. Clients select durable motion from the advertised
-`physicalControl.supportedOperations`, not a backend-name allowlist. For any
-adapter providing durable motion, the old `/home`, `/homexy`, `/homez`, `/move`,
-and `/moveto` routes return `409 async_control_required` without sending
-anything. Adapters without durable motion and attempt-bound lifecycle controls
-retain their existing execution paths and share the same physical barrier.
-OctoPrint manual home/jog passes cancellation through to its HTTP transport and
-does not retry ambiguous writes.
+There is no tracked-motion admission service, worker, command channel, journal,
+receipt, operation ID, result polling, or recovery workflow. All
+`/control-operations` admission, receipt, current-state, and recovery endpoints
+are removed (`404`). Printer DTOs omit `physicalControl`, and the
+`printercontroloperationupdated` SignalR event is removed.
 
-The dedicated worker claims only unsent operations. Private ownership claims and
-heartbeats do not change the public ETag; public transitions have audit/outbox evidence.
-If the optional Moonraker plugin is absent, API startup still succeeds and new motion
-admission returns `422 printer_operation_unsupported`; previously queued unsent
-work settles `Failed/NotSent`, never as a silent success.
-The worker rechecks authorization,
-configuration identity, backend readiness/idle state, the dispatch barrier, and
-manual-movement safety evidence before committing an irreversible send marker.
-For both Jog and MoveTo, one command-channel query reads current G-code position,
-homed axes, and origin offset. Jog's resulting absolute target and the current
-position must be inside the verified envelope; all XYZ axes must be homed and
-homing/frame facts must be fresh. Multi-axis and sparse single-axis motion are
-supported. Missing, stale, unhomed, nonfinite or out-of-envelope evidence causes
-a zero-send failure.
-Cached coordinates never stand in for this pre-send observation.
+**Moonraker transport and protection:** the plugin sends each command once over
+ordinary HTTP using the configured credentials. Jog and absolute movement save
+and restore G-code state without a restore move. Movement uses one fresh
+authenticated safety snapshot of position, homed axes, and the effective frame,
+not full composite status enrichment. No tracking admission, receipt, polling,
+or worker hops and no artificial waits precede the direct send. Cached UI
+coordinates are not safety evidence. The effective offset
+includes G92 (`gcode_move.position - gcode_move.gcode_position`), not just
+`homing_origin`.
 
-**Manual versus clearance-protected motion:** `ValidateObservedManualMoveAsync`
-is only for operator-directed durable Jog/MoveTo. It does not require a minimum
-workflow Z clearance: approaching the bed is legitimate manual positioning, and
-Moonraker discovery correctly reports `MinimumClearanceZMm` as Unknown/null (no
-authoritative collision-clearance source). Neither UI presentation modes nor a
-fabricated zero clearance may change these facts. Firmware-configured travel
-bounds, including a configured negative Z minimum, are retained; firmware still
-enforces its native kinematic and movement constraints when executing the unchanged
-bounded script. Manual admission is not proof of an obstacle-free path.
+All XYZ axes must be homed, and both current position and resulting target must
+fit the verified travel envelope, including for sparse single-axis requests.
+Missing, stale, nonfinite, unhomed, or out-of-envelope evidence prevents sending.
+Manual jog/absolute positioning does not require automated minimum Z clearance:
+Moonraker cannot authoritatively discover that clearance, and approaching the bed
+is a legitimate manual action. Configured firmware bounds, including negative Z
+minima, remain enforced. This does not enable unhomed or out-of-envelope recovery
+motion or prove an obstacle-free path. Unrelated automated clearance policies and
+attempt-bound lifecycle safeguards remain unchanged.
 
-The general `ValidateAsync(AbsoluteMovement, ...)` path retains its verified finite
-minimum-clearance requirement and full target validation. Its legacy non-durable
-controller caller is unchanged; Moonraker legacy routes still reject with
-`async_control_required`. No automated/attempt-bound lifecycle path is routed to
-the manual guard, and automated lifecycle safeguards are unchanged. PrintFarmer
-still requires all XYZ axes homed, a known fresh frame and current coordinates
-inside the envelope even for a single-axis manual request; native axis-only or
-out-of-envelope recovery motion is intentionally not enabled by this fix.
+**Database coordination remains:** the generic physical-actuation barrier
+serializes direct commands against other controls and print dispatch. An
+uncertain manual outcome releases only after backend I/O settles and remains
+`Unknown` in the audit; release never implies successful motion or physical
+stopping. A new explicit direct admission can reclaim a crashed direct manual
+barrier after its five-minute deadline plus a 45-second grace. It never replays
+the abandoned command. Exact-owner fencing prevents late settlement from
+releasing a successor's barrier. Print-job and attempt-bound dispatch ownership
+are not cleared by manual cleanup.
 
-Discovery is invalidated/requeried at validation, not optimized by reusing stale
-safety evidence. The worker's nominal one-second scan remains: wake-on-admission
-could reduce idle latency, but is not required to fix admission and would need a
-separate durable-ownership/fencing assessment; a wake signal must never authorize
-a send or replace scanning.
+Calibration still requires fresh homing telemetry from the existing
+`GET /api/printers/{id}/status` endpoint; accepting a home command alone is not
+proof that the axes are homed. Static backend capabilities are not live homing
+evidence.
 
-The effective G-code offset is `gcode_move.position - gcode_move.gcode_position`
-from that same response; `homing_origin` alone would incorrectly omit G92 offsets.
-It then sends once over a dedicated persistent WebSocket with exact JSON-RPC
-correlation. One receive loop handles fragmented responses and unrelated
-notifications. Connect and write limits are separate from the five-minute
-manual command deadline. WebSocket PING/PONG detects dead connections
-without requiring status or homing-progress notifications. Credentials travel in
-the `X-Api-Key` handshake header, never in a WebSocket query string.
+**Emergency Stop targets the selected printer**, even if manual motion finishes
+and new work starts before the stop arrives. Existing active-print lifecycle
+handling remains. The direct-fence fallback checks printer access and sends once
+over separate authenticated HTTP with a 20-second bound, without changing or
+clearing any owner's fence or adding tracking. Acceptance is not proof of
+stationarity; after failure or timeout, inspect the printer. Never automatically
+retry.
 
-Every script ends with `M400`; Jog and MoveTo restore the preceding G-code
-coordinate/extrusion/feed state without a
-restore move before draining. Matching success proves `MotionQueueDrained` for
-the current controller queue, not future delayed macros or other external clients.
-Errors after send, partial writes, connection loss and sender failure become
-`Unknown`, without an operator-recovery lockout. A crash between marker and actual send is also
-conservatively unknown. A correlated firmware error retains the diagnostic code
-`printer_firmware_rejected` and explicitly warns that motion may have partially
-executed; it does not require an attestation. Raw firmware messages, command payloads,
-endpoints and credentials are never copied into the receipt. Pre-send failures
-retain diagnostic codes and use fixed, actionable messages (home axes, obtain
-fresh evidence, check configured bounds, or wait for ready/idle status).
-Never replay a send-committed operation. Only unsent
-claims are reclaimable. Unknown receipts remain historical outcomes, including
-when a late callback arrives. Late callbacks cannot release a successor's
-coordination.
+**Upgrade requirement:** stop every old API instance and worker before applying
+the `RetireTrackedPrinterMotion` migration for PostgreSQL, SQL Server, or SQLite.
+Take a pre-upgrade backup with writers stopped. Do not run mixed old/new writers.
+Upgrade React and iOS alongside the API because the old motion contract no
+longer exists. One-time retirement is a deployment migration, not an ongoing
+motion worker.
 
-Active sends retain short database ownership plus a locally renewable 20-second
-cancellation lease. Successful owner heartbeats renew only that local lease;
-expired owners cannot renew or pass the pre-send ownership/configuration fence.
-The overall five-minute deadline is not renewed. Cancellation aborts and joins
-the command channel before recording the outcome and releasing coordination.
-The worker cleans up lost-owner manual barriers after 45 seconds without replay.
-Neither cancellation nor expiry claims physical stopping or successful motion.
+The migration renames the tracking tables to unmapped
+`RetiredPrinterControlOperations` and `RetiredPrinterEmergencyStopAttempts`,
+preserving their original states, evidence, and foreign key. Historical audits
+remain intact; archived rows are not live receipts or queued work.
 
-`GET .../{operationId}` returns the authoritative operation, a strong ETag and
-`Cache-Control: no-store`. `GET .../current` returns `{physicalControl,operation}`.
-Operation receipts, `/current`, and bulk printer projections join their barrier and operation in one
-query under a consistent read transaction; concurrent settlement cannot produce
-a mixed old operation/new barrier response.
-For configured cross-origin clients, CORS allows `Idempotency-Key` and `If-Match`
-and exposes `ETag` and `Location`; the origin allowlist remains unchanged.
-List, detail and status projections read `physicalControl` from the database,
-separately from telemetry. `/hubs/printers` emits only the durable invalidation
-`printercontroloperationupdated {printerId,operationId,rowVersion}` to authorized
-printer groups; clients refetch REST after events and reconnects.
+Barrier cleanup clears only `PhysicalControl*` metadata and increments the state
+revision for an existing manual command (`async_motion`, `home`, `home_xy`,
+`home_z`, `move`, or `move_to`) when all of these conditions hold:
 
-**Emergency stop bypasses motion execution.** An authenticated caller with
-`queue:cancel` and printer-submit access can use the existing emergency-stop route
-while a motion sender is active. The server first durably fences
-the exact motion owner into Recovering, then calls Moonraker's dedicated
-`POST /printer/emergency_stop` immediately on separate HTTP transport. It does not
-enqueue M112 through `printer.gcode.script`, wait for the motion socket, or place
-the stop behind a lifecycle start. `Recovering` is now only a transient internal
-sender-cancellation state, not an operator workflow.
-Late motion/stop responses cannot release a successor.
-Each explicit stop has its own durable attempt identity, configuration fingerprint,
-pre-send fence and delivery evidence. A restart or abandoned attempt does not prevent
-a **new explicit** stop; neither admission CAS retries nor restarts replay HTTP.
-If motion settles during admission, the request must acquire a fresh physical fence
-before sending. Callbacks update only their exact attempt and owner.
-HTTP `false`, cancellation, timeout and response loss are **Unknown**, not
-physical-stop evidence. Emergency send admission and HTTP use a 20-second bound.
-Coordination waits for the motion sender and currently pending emergency sends,
-not for operator evidence. Abandoned emergency attempts expire after 45 seconds
-and retain Unknown/NotSent delivery records. An unknown completed delivery does
-not create a permanent lockout.
+- `PhysicalControlAttemptId`, `ActiveJobId`, and `ActiveDispatchAttemptId` are null.
+- No assigned print job is `Starting`, `Printing`, or `Paused`.
+- No dispatch attempt requires reconciliation, has outcome `InProgress` or
+  `Unknown`, or is `Accepted` without a terminal timestamp.
 
-`GET /control-operations/current` is read-only, including for view-only callers:
-an unimported legacy barrier briefly appears with a null operation until the
-worker imports and releases it with audit/outbox evidence. A read never performs
-that import.
+Other state, queue, and acknowledgement fields are unchanged. Cleanup never
+replays a command or declares physical success.
 
-After successful homing, calibration reads `GET /api/printers/{id}/status`
-(authenticated printer-view access, `Cache-Control: no-store`). This existing
-endpoint polls the backend rather than the status cache. Moonraker queries
-`toolhead.position` and `toolhead.homed_axes` together and returns `isOnline`,
-`state`, and `safetyTelemetry.homedAxes` containing `value` (axis-name array),
-`observedAtUtc`, `staleAfterSeconds` (15), and `source`
-(`moonraker:toolhead.homed_axes`). The observation timestamp is captured when
-the controller response is parsed, not when later enrichment or HTTP delivery
-finishes. An explicit empty axis string means an observed empty array; absent,
-malformed, or failed queries produce no verified homing observation.
-Require a fresh observation containing x/y/z at or after the successful
-operation's `completedAtUtc`; never infer homing solely from command success.
-Read `isEnabled` and `inMaintenance` from the matching
-`GET /api/printers` list entry; a missing entry fails closed. The existing
-`GET /api/printers/{id}/backend-capabilities` supplies static `verifiedSafety`
-support and positioning bounds, not live homing facts. There is no separate
-`/verified-safety` endpoint.
+Only pending/processing `PrintFarmer.Printer.ControlOperationUpdated.v1` outbox
+entries are dead-lettered, with UTC completion recorded, retry scheduling
+cleared, and revision incremented. Payloads, previous errors, and attempt counts
+are preserved. Already published/dead-lettered tracking events and unrelated
+events are untouched.
 
-Manual recovery forms and the two recovery POST endpoints have been removed;
-old endpoint calls return `404` without changing the printer. The compatibility
-`requiresRecovery` field is always false. Historical enum values, recovery
-evidence, audit records and idempotency identities remain stored, but do not
-require new evidence or represent successful motion.
-
-The worker automatically releases retained Unknown/Recovering manual receipts
-once no current sender owns them. Legacy idle home/jog/move barriers import as
-Unknown under their original command UUID, including missing timestamps, then
-release without sending. A fresh non-durable manual call is not imported:
-its five-minute send deadline plus a 45-second grace must elapse, unless it
-already recorded an uncertain completed outcome. Direct manual failures release
-their own coordination while retaining unknown audit events. Cleanup never clears attempt-bound control,
-ActiveDispatchAttemptId, ActiveJobId, or a printer occupied by a print job.
-Printer deletion remains fenced against active commands and racing admission,
-not against a released Unknown receipt. No schema migration is needed: existing
-rows are reconciled through the audited lifecycle.
+**Rollback is not a down migration:** `Down` is intentionally unsupported because
+restoring queued motion intents is unsafe. Restore the pre-upgrade backup with
+all writers stopped and reconcile the physical printer state with an operator
+before restarting old software.
 
 ### Dispatch lifecycle and reconciliation
 

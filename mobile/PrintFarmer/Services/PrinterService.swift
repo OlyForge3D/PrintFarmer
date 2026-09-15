@@ -54,34 +54,6 @@ actor PrinterService: PrinterServiceProtocol {
 
     // MARK: - Printer Commands
 
-    func submitControlOperation(printerId: UUID, operationId: UUID, request: PrinterControlOperationRequest) async throws -> PrinterControlOperation {
-        let operation: PrinterControlOperation = try await apiClient.controlOperation(
-            "/api/printers/\(printerId)/control-operations",
-            operationId: operationId, body: request
-        )
-        try operation.validate(printerId: printerId, operationId: operationId)
-        guard operation.kind == request.kind else {
-            throw PrinterControlOperationError.invalidResponse
-        }
-        return operation
-    }
-
-    func getControlOperation(printerId: UUID, operationId: UUID) async throws -> PrinterControlOperation {
-        let operation: PrinterControlOperation = try await apiClient.controlOperation(
-            "/api/printers/\(printerId)/control-operations/\(operationId)"
-        )
-        try operation.validate(printerId: printerId, operationId: operationId)
-        return operation
-    }
-
-    func getCurrentControlOperation(printerId: UUID) async throws -> PrinterCurrentControlOperation {
-        let current: PrinterCurrentControlOperation = try await apiClient.controlOperation(
-            "/api/printers/\(printerId)/control-operations/current"
-        )
-        try current.validate(printerId: printerId)
-        return current
-    }
-
     func pause(id: UUID) async throws -> CommandResult {
         try await apiClient.post("/api/printers/\(id)/pause")
     }
@@ -237,7 +209,7 @@ actor PrinterService: PrinterServiceProtocol {
             throw PrinterControlError.invalidRequest("Home supports All, XY or Z only.")
         }
         let path = PrinterService.homePath(forAxes: axes, printerId: printerId)
-        let result: CommandResult = try await apiClient.post(path)
+        let result: CommandResult = try await apiClient.directCommand(path)
         try requireAccepted(result)
     }
 
@@ -251,7 +223,7 @@ actor PrinterService: PrinterServiceProtocol {
 
     func move(printerId: UUID, axis: String, distanceMm: Double, feedrateMmMin: Int) async throws {
         let body = MovePrinterRequest(axis: axis, distanceMm: distanceMm, feedrateMmMin: feedrateMmMin)
-        let result: CommandResult = try await apiClient.post("/api/printers/\(printerId)/move", body: body)
+        let result: CommandResult = try await apiClient.directCommand("/api/printers/\(printerId)/move", body: body)
         try requireAccepted(result)
     }
 
@@ -263,7 +235,7 @@ actor PrinterService: PrinterServiceProtocol {
             throw PrinterControlError.invalidRequest("Provide a finite coordinate and a positive feedrate.")
         }
         let body = MoveToPrinterRequest(x: x, y: y, z: z, f: feedrateMmMin)
-        return try await apiClient.post("/api/printers/\(printerId)/moveto", body: body)
+        return try await apiClient.directCommand("/api/printers/\(printerId)/moveto", body: body)
     }
 
     func extrude(printerId: UUID, distanceMm: Double, feedrateMmPerMinute: Int) async throws -> CommandResult {

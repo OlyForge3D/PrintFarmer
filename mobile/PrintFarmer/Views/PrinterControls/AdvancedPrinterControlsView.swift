@@ -51,15 +51,10 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
             .onAppear { configure() }
             .onChange(of: viewModel.map(ObjectIdentifier.init)) { _, _ in configure() }
             .onChange(of: accessSignal) { _, _ in viewModel?.refreshAccess() }
-            .task(id: "\(accessSignal)|\(scenePhase)|\(viewModel.map(ObjectIdentifier.init).map(String.init(describing:)) ?? "")") {
+            .onChange(of: scenePhase) { _, _ in
                 guard scenePhase == .active, let viewModel else { return }
                 configure()
-                await viewModel.refreshControlOperation()
-                while !Task.isCancelled && viewModel.isActive {
-                    do { try await Task.sleep(for: .seconds(2)) } catch { return }
-                    // Only status reads, never a retry of a physical request.
-                    await viewModel.refreshControlOperation()
-                }
+                viewModel.refreshAccess()
             }
             .onDisappear { viewModel?.deactivate() }
     }
@@ -69,8 +64,7 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
         let serverID = viewModel.registeredServerID
         let userID = auth.currentUser?.id
         let authEpoch = services.authOperationEpoch.current
-        let serverURL = registry.activeServer?.id == serverID ? registry.activeServer?.baseURL : nil
-        viewModel.configureAccess(serverID: serverID, userID: userID, serverURL: serverURL) { [weak viewModel, registry, services, auth] in
+        viewModel.configureAccess(serverID: serverID) { [weak viewModel, registry, services, auth] in
             AdvancedPrinterControlsAccess.blockedReason(
                 enabled: registry.advancedPrinterControlsEnabled,
                 authenticated: auth.isAuthenticated,
@@ -86,7 +80,6 @@ struct PrinterControlsAccessLifecycle: ViewModifier {
                     && services.authOperationEpoch.current == authEpoch
             )
         }
-        viewModel.observeControlOperations(using: services.signalRService)
     }
 }
 

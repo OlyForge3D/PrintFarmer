@@ -10,7 +10,7 @@ import { PrinterDetailsSidebar } from '../PrinterDetailsSidebar';
 import type { PrinterStatistics } from '@/types/maintenance';
 import { AuthContext } from '@/common/contexts/auth-context';
 import type { AuthContextType } from '@/contexts/AuthContextValue';
-import type { PrinterControlIntent, PrinterControlOperation } from '@/types/api';
+import type { PrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 
 const mockInvalidateQueries = vi.fn();
 const mockSetQueryData = vi.fn();
@@ -22,14 +22,20 @@ const mockHomeXY = vi.fn();
 const mockHomeZ = vi.fn();
 const mockMovePrinter = vi.fn();
 const mockToastError = vi.fn();
-const mockCreateOperation = vi.fn();
-let durableOperation: PrinterControlOperation | null = null;
-let supportsDurableMotion = true;
-vi.mock('@/services/printer-signalr', () => ({
-  printerSignalRService: {
-    isConnected: true, onControlOperationUpdated: () => vi.fn(), onConnectionStateChange: () => vi.fn(),
-    subscribeToPrinter: vi.fn().mockResolvedValue(undefined),
-  },
+const mockMovePrinterTo = vi.fn();
+vi.mock('@/features/printers/hooks/use-printer-movement', () => ({
+  usePrinterMovement: (printer: Printer) => ({
+    blocked: false,
+    execute: async ({ kind, ...move }: PrinterMovement) => {
+      switch (kind) {
+        case 'HomeAll': return mockHomePrinter(printer.id);
+        case 'HomeXY': return mockHomeXY(printer.id);
+        case 'HomeZ': return mockHomeZ(printer.id);
+        case 'Jog': return mockMovePrinter(printer.id, move);
+        case 'MoveTo': return mockMovePrinterTo(printer.id, move);
+      }
+    },
+  }),
 }));
 let capturedStatisticsQueryOptions: UseQueryOptions<PrinterStatistics> | undefined;
 let mockStatisticsData: PrinterStatistics | undefined;
@@ -111,16 +117,7 @@ vi.mock('@/services/api', () => ({
     homeXY: (printerId: string) => mockHomeXY(printerId),
     homeZ: (printerId: string) => mockHomeZ(printerId),
     movePrinter: (printerId: string, move: unknown) => mockMovePrinter(printerId, move),
-    createPrinterControlOperation: (...args: unknown[]) => mockCreateOperation(...args),
-    getPrinterControlOperation: async () => ({ operation: durableOperation, etag: '"v1"' }),
-    getCurrentPrinterControlOperation: async () => ({
-      physicalControl: {
-        supportedOperations: supportsDurableMotion ? ['HomeAll', 'HomeXY', 'HomeZ', 'Jog', 'MoveTo'] : [],
-        barrierHeld: durableOperation?.barrierHeld ?? false, requiresRecovery: false,
-        operationId: durableOperation?.barrierHeld ? durableOperation.operationId : null,
-        state: durableOperation?.barrierHeld ? durableOperation.state : null,
-      }, operation: durableOperation?.barrierHeld ? durableOperation : null,
-    }),
+    movePrinterTo: (printerId: string, move: unknown) => mockMovePrinterTo(printerId, move),
   },
 }));
 
@@ -206,21 +203,12 @@ describe('PrinterDetailsSidebar', () => {
     mockMovePrinter.mockReset();
     mockToastError.mockReset();
     localStorage.clear();
-    durableOperation = null;
-    supportsDurableMotion = true;
-    mockCreateOperation.mockReset();
-    mockCreateOperation.mockImplementation(async (printerId: string, operationId: string, intent: PrinterControlIntent) => {
-      durableOperation = {
-        printerId, operationId, kind: intent.kind, x: intent.x ?? null, y: intent.y ?? null, z: intent.z ?? null, f: intent.f ?? null,
-        state: 'Succeeded', rowVersion: 'v1', barrierHeld: false, requiresRecovery: false, completionEvidence: 'MotionQueueDrained',
-        senderIsolation: 'NotRequested', failure: null, createdAtUtc: '2026-09-12T18:00:00Z', updatedAtUtc: '2026-09-12T18:00:00Z',
-        startedAtUtc: null, completedAtUtc: '2026-09-12T18:00:00Z',
-      };
-      return { operation: durableOperation, etag: '"v1"' };
-    });
+    for (const command of [mockHomePrinter, mockHomeXY, mockHomeZ, mockMovePrinter, mockMovePrinterTo]) {
+      command.mockReset().mockResolvedValue({ success: true });
+    }
   });
 
-  it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink])('routes advertised %s Home All/XY/Z, jog, GO and Enter through durable operations only', async backend => {
+  it.each([PrinterBackend.Moonraker, PrinterBackend.PrusaLink])('routes %s Home All/XY/Z, jog, GO and Enter through direct commands', async backend => {
     localStorage.setItem('auth-token', crypto.randomUUID());
     const moonraker = { ...printer, id: '11111111-1111-4111-8111-111111111111', backend };
     const auth = {
@@ -231,32 +219,29 @@ describe('PrinterDetailsSidebar', () => {
         <PrinterDetailsSidebar printerId={moonraker.id} printer={moonraker} backendCapabilities={capabilities({ backend })} onClose={vi.fn()} />
       </AuthContext.Provider>
     );
-    for (const [title, kind] of [['Home all axes', 'HomeAll'], ['Home X/Y', 'HomeXY'], ['Home Z', 'HomeZ']]) {
+    for (const [title, command] of [['Home all axes', mockHomePrinter], ['Home X/Y', mockHomeXY], ['Home Z', mockHomeZ]] as const) {
       await waitFor(() => expect(screen.getByTitle(title)).toBeEnabled());
       fireEvent.click(screen.getByTitle(title));
-      await waitFor(() => expect(mockCreateOperation).toHaveBeenLastCalledWith(moonraker.id, expect.any(String), { kind }));
+      await waitFor(() => expect(command).toHaveBeenLastCalledWith(moonraker.id));
     }
     await waitFor(() => expect(screen.getByRole('button', { name: 'Jog Y positive' })).toBeEnabled());
     fireEvent.click(screen.getByRole('button', { name: 'Jog Y positive' }));
-    await waitFor(() => expect(mockCreateOperation).toHaveBeenLastCalledWith(moonraker.id, expect.any(String), { kind: 'Jog', y: 10 }));
+    await waitFor(() => expect(mockMovePrinter).toHaveBeenLastCalledWith(moonraker.id, { y: 10 }));
     await waitFor(() => expect(screen.getByLabelText('X absolute target')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('X absolute target'), { target: { value: '110' } });
     fireEvent.change(screen.getByLabelText('Y absolute target'), { target: { value: '120' } });
     expect(screen.getByTitle('Move to entered coordinates')).toBeDisabled();
     fireEvent.keyDown(screen.getByLabelText('X absolute target'), { key: 'Enter' });
-    expect(mockCreateOperation).toHaveBeenCalledTimes(4);
+    expect(mockMovePrinterTo).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText('Z absolute target'), { target: { value: '10' } });
     fireEvent.click(screen.getByTitle('Move to entered coordinates'));
-    await waitFor(() => expect(mockCreateOperation).toHaveBeenLastCalledWith(moonraker.id, expect.any(String), { kind: 'MoveTo', x: 110, y: 120, z: 10 }));
+    await waitFor(() => expect(mockMovePrinterTo).toHaveBeenLastCalledWith(moonraker.id, { x: 110, y: 120, z: 10 }));
     await waitFor(() => expect(screen.getByLabelText('Z absolute target')).toBeEnabled());
     fireEvent.change(screen.getByLabelText('Z absolute target'), { target: { value: '15' } });
     fireEvent.keyDown(screen.getByLabelText('Z absolute target'), { key: 'Enter' });
-    await waitFor(() => expect(mockCreateOperation).toHaveBeenLastCalledWith(moonraker.id, expect.any(String), { kind: 'MoveTo', x: 110, y: 120, z: 15 }));
-    expect(mockCreateOperation).toHaveBeenCalledTimes(6);
-    expect(mockHomePrinter).not.toHaveBeenCalled();
-    expect(mockHomeXY).not.toHaveBeenCalled();
-    expect(mockHomeZ).not.toHaveBeenCalled();
-    expect(mockMovePrinter).not.toHaveBeenCalled();
+    await waitFor(() => expect(mockMovePrinterTo).toHaveBeenLastCalledWith(moonraker.id, { x: 110, y: 120, z: 15 }));
+    expect(mockMovePrinterTo).toHaveBeenCalledTimes(2);
+    expect(screen.queryByText(/Motion Ready|Operation ID/i)).not.toBeInTheDocument();
   });
 
   it('bounds content layout on desktop and lets the inner region scroll', () => {
@@ -562,7 +547,7 @@ describe('PrinterDetailsSidebar', () => {
       expect(screen.getByTitle('Move to entered coordinates')).toBeDisabled();
     });
 
-    it('keeps Moonraker controls locked without authenticated durable status, even when idle and online', () => {
+    it('enables idle online Moonraker controls without fetching tracking status', () => {
       render(
         <PrinterDetailsSidebar
           printerId={printer.id}
@@ -573,13 +558,12 @@ describe('PrinterDetailsSidebar', () => {
         />
       );
 
-      expect(screen.getByTitle('Home all axes')).toBeDisabled();
-      expect(screen.getByTitle('Home X/Y')).toBeDisabled();
-      expect(screen.getByTitle('Home Z')).toBeDisabled();
+      expect(screen.getByTitle('Home all axes')).toBeEnabled();
+      expect(screen.getByTitle('Home X/Y')).toBeEnabled();
+      expect(screen.getByTitle('Home Z')).toBeEnabled();
     });
 
-    it('preserves the legacy error toast for non-Moonraker Home failures', async () => {
-      supportsDurableMotion = false;
+    it('preserves the error toast for direct Home failures', async () => {
       localStorage.setItem('auth-token', crypto.randomUUID());
       const auth = {
         isAuthenticated: true, user: { id: 'sidebar-legacy-user' }, hasRole: () => false, hasPermission: () => false,

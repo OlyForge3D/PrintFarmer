@@ -22,6 +22,12 @@ public interface IPrinterStatusClient
     Task<PrinterStatusDto> GetPrinterStatusAsync(Printer printer, CancellationToken ct);
 
     /// <summary>
+    /// Reads fresh safety evidence for manual movement without unrelated status enrichment.
+    /// </summary>
+    Task<PrinterStatusDto> GetMovementStatusAsync(Printer printer, CancellationToken ct) =>
+        GetPrinterStatusAsync(printer, ct);
+
+    /// <summary>
     /// Retrieves the full printer DTO with all details from the backend system.
     /// </summary>
     /// <param name="printer">The printer entity containing connection details</param>

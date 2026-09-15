@@ -113,7 +113,6 @@ enum Heater: String, CaseIterable, Sendable {
 
 enum ControlNumberInput {
     static let absoluteCoordinatesMessage = "Enter destination coordinate in mm for X, Y, or Z. Unspecified axes remain unchanged."
-    static let durableAbsoluteCoordinatesMessage = "Enter X, Y and Z destinations in mm, including zero. All three are required."
     static let heaterPrecisionMessage = "Use whole degrees Celsius. Fractional targets are not supported; no rounding is applied."
     static let coordinatePrecisionMessage = "Use at most 3 decimal places in millimetres. No rounding is applied."
     static let customFeedrateMessage = "Custom feedrates are unavailable without a verified maximum. Leave this field blank to use the established axis-specific rate."
@@ -215,13 +214,6 @@ struct PrinterControlsComposition: Sendable {
 private struct PrinterControlsIdentity: Hashable, Sendable {
     let serverID: UUID
     let printerID: UUID
-    let userID: UUID?
-}
-
-/// In-memory observation only; never persisted or replayed.
-private struct PendingPrinterMotion {
-    let operationID: UUID
-    let request: PrinterControlOperationRequest
 }
 
 /// Process-wide request/telemetry-wait ownership, independent of service lifetime.
@@ -305,20 +297,6 @@ final class PrinterControlsViewModel: ObservableObject {
     @Published private(set) var isRefreshingSafety = false
     @Published private(set) var safetyReadError: String?
     @Published private(set) var safetyCheckedAt: Date?
-    @Published private(set) var controlOperation: PrinterControlOperation?
-    @Published private(set) var physicalControl: PrinterPhysicalControl?
-    @Published private(set) var operationReadError: String?
-    @Published private(set) var isRefreshingControlOperation = false
-    @Published private(set) var hasUnresolvedMotion = false
-    private var pendingMotion: PendingPrinterMotion?
-    private var motionUserID: UUID?
-    private var durableMotionRequired: Bool
-    private var motionCurrentVerified = false
-    private var motionSubmissionInFlight = false
-    private var validatingMotionAdmission = false
-    private var motionReadID = UUID()
-    private var motionEventSubscription: SignalRSubscription?
-    private var motionConnectionSubscription: SignalRSubscription?
     private var safetyReadID = UUID()
     private var calibrationFrame: SafetyVector3Dto?
     private var calibrationPosition: SafetyVector3Dto?
@@ -376,7 +354,6 @@ final class PrinterControlsViewModel: ObservableObject {
         self.printerService = printerService
         self.composition = composition
         self.printer = printer
-        self.durableMotionRequired = printer.physicalControl?.supportedOperations.isEmpty == false
         self.clock = clock
         leaseObservation = commandLeases.objectWillChange.sink { [weak self] _ in
             self?.objectWillChange.send()
@@ -400,7 +377,6 @@ final class PrinterControlsViewModel: ObservableObject {
             }
             if hardware == nil || hardwareLoadError != nil { await loadHardware() }
             if safetyStatus == nil { await refreshSafetyEvidence(refreshDiscovery: false) }
-            if usesDurableMotion { await refreshControlOperation() }
         } catch {
             guard !Task.isCancelled, canPublishRead(generation) else { return }
             // Failed reads are not cached as proof of unsupported hardware.
@@ -564,7 +540,7 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     func configureAccess(
-        serverID: UUID?, userID: UUID? = nil, serverURL: URL? = nil,
+        serverID: UUID?,
         _ check: @escaping @MainActor () -> String?
     ) {
         guard let serverID, composition != nil, registeredServerID == serverID else {
@@ -572,13 +548,8 @@ final class PrinterControlsViewModel: ObservableObject {
             return
         }
         if !hasConfiguredAccess {
-            motionUserID = userID
             accessCheck = check
             hasConfiguredAccess = true
-            if usesDurableMotion, let projection = printer.physicalControl {
-                physicalControl = projection
-                hasUnresolvedMotion = projection.barrierHeld
-            }
         }
         isActive = true
         refreshAccess()
@@ -592,11 +563,6 @@ final class PrinterControlsViewModel: ObservableObject {
     func refreshAccess() {
         if accessCheck() != nil {
             lifecycleGeneration += 1
-            motionCurrentVerified = false
-            motionReadID = UUID()
-            motionEventSubscription = nil
-            motionConnectionSubscription = nil
-            isRefreshingControlOperation = false
             invalidateSafety()
             cancelCalibration()
             cancelPendingCommand()
@@ -606,11 +572,6 @@ final class PrinterControlsViewModel: ObservableObject {
     func deactivate() {
         isActive = false
         lifecycleGeneration += 1
-        motionCurrentVerified = false
-        motionReadID = UUID()
-        motionEventSubscription = nil
-        motionConnectionSubscription = nil
-        isRefreshingControlOperation = false
         invalidateSafety()
         cancelCalibration()
         cancelPendingCommand()
@@ -618,11 +579,6 @@ final class PrinterControlsViewModel: ObservableObject {
 
     func cancelPendingCommand() {
         guard let command = pendingCommand else { return }
-        if usesDurableMotion, Self.motionRequest(for: command) != nil, hasUnresolvedMotion {
-            commandStateInvalidated = true
-            commandNotice = "Observation stopped, not the physical operation. Refresh status or reopen this printer. No command will be replayed."
-            return
-        }
         if calibrationCommandID == command.id {
             calibrationCommandID = nil
             calibrationInterrupted = true
@@ -1124,8 +1080,7 @@ final class PrinterControlsViewModel: ObservableObject {
     private func confirmCalibrationObservation(
         previous: PrinterStatusDetail?, status: PrinterStatusDetail, readStartedAt: Date
     ) {
-        guard !usesDurableMotion,
-              let command = pendingCommand, calibrationCommandID == command.id,
+        guard let command = pendingCommand, calibrationCommandID == command.id,
               commandWasDispatched, !commandStateInvalidated, !calibrationInterrupted,
               readStartedAt >= command.startedAt, calibrationPositionBlockedReason == nil else { return }
         let matches: Bool
@@ -1300,9 +1255,6 @@ final class PrinterControlsViewModel: ObservableObject {
 
     func absoluteMoveBlockedReason(x: Double?, y: Double?, z: Double?, feedrateMmMin: Int? = nil) -> String? {
         if let reason = blockedReason { return reason }
-        if usesDurableMotion, x == nil || y == nil || z == nil {
-            return ControlNumberInput.durableAbsoluteCoordinatesMessage
-        }
         guard feedrateMmMin == nil else { return ControlNumberInput.customFeedrateMessage }
         let target: (x: Double?, y: Double?, z: Double?)
         do {
@@ -1371,380 +1323,6 @@ final class PrinterControlsViewModel: ObservableObject {
         lastError = nil
     }
 
-    // MARK: - Advertised durable motion
-
-    var usesDurableMotion: Bool { durableMotionRequired }
-
-    var hasDurableMotionBarrier: Bool {
-        guard usesDurableMotion else { return false }
-        return physicalControl?.barrierHeld == true || controlOperation?.barrierHeld == true
-    }
-
-    var motionBlockedReason: String? {
-        guard usesDurableMotion else { return nil }
-        if validatingMotionAdmission { return nil }
-        guard motionUserID != nil else { return "Sign in again before using durable printer controls." }
-        if motionSubmissionInFlight || hasUnresolvedMotion || hasDurableMotionBarrier {
-            return "The server holds a motion operation. Controls remain unavailable until it releases coordination; leaving this screen does not cancel it."
-        }
-        guard motionCurrentVerified else {
-            return operationReadError ?? "Checking durable motion status. Missing telemetry cannot unlock controls."
-        }
-        guard physicalControl?.supportedOperations.isEmpty == false else {
-            return "Durable motion support is no longer advertised. Refresh printer capabilities before continuing. No legacy motion will be sent."
-        }
-        return nil
-    }
-
-    var motionStatusMessage: String? {
-        guard usesDurableMotion else { return nil }
-        if let reason = motionBlockedReason { return reason }
-        if pendingMotion != nil && !hasUnresolvedMotion {
-            return "The physical motion outcome is unknown. Inspect the printer before another action. The command will not be replayed."
-        }
-        if let operationReadError { return operationReadError }
-        guard let operation = presentedMotionOperation else { return nil }
-        switch operation.state {
-        case .succeeded:
-            return operation.hasConfirmedSuccess
-                ? "Motion queue completion confirmed by the server. Check the machine before further setup."
-                : "The server reports success without motion queue completion evidence. Physical completion is unconfirmed. Inspect the printer before another action; no command will be replayed."
-        case .unknown, .recovering, .recovered:
-            return "The physical motion outcome is unknown. Inspect the printer before another action. The command will not be replayed."
-        case .failed: return operation.failure?.message ?? "The server reports that the motion operation failed."
-        default: return "Motion status: \(operation.state.rawValue). Completion has not been confirmed."
-        }
-    }
-
-    var motionOperationID: UUID? {
-        if physicalControl?.barrierHeld == true { return physicalControl?.operationId }
-        return pendingMotion?.operationID ?? controlOperation?.operationId
-    }
-
-    private var presentedMotionOperation: PrinterControlOperation? {
-        guard controlOperation?.operationId == motionOperationID else { return nil }
-        return controlOperation
-    }
-
-    private var hasMotionUncertainty: Bool {
-        [.unknown, .recovering, .recovered].contains(presentedMotionOperation?.state)
-            || (presentedMotionOperation?.state == .succeeded && presentedMotionOperation?.hasConfirmedSuccess != true)
-            || (pendingMotion != nil && !hasUnresolvedMotion && !motionSubmissionInFlight)
-    }
-
-    /// Presentation only. Locking and completion continue to use authoritative evidence.
-    var motionStatusNeedsAttention: Bool {
-        hasMotionUncertainty || operationReadError != nil
-            || lastError?.command.section == .motion
-            || (motionBlockedReason != nil && !hasUnresolvedMotion && !motionSubmissionInFlight)
-            || [.failed, .recovered].contains(presentedMotionOperation?.state)
-    }
-
-    var motionStatusSummary: String? {
-        guard motionStatusMessage != nil else { return nil }
-        if hasMotionUncertainty {
-            if hasDurableMotionBarrier {
-                return "Motion outcome unconfirmed. Controls remain unavailable while the server holds the operation. No automatic retry."
-            }
-            return "Motion outcome unknown. Inspect the printer before another action. No automatic retry."
-        }
-        if motionSubmissionInFlight { return "Submitting motion. Controls locked until completion." }
-        if lastError?.command.section == .motion { return "Motion blocked. Review motion controls for error details." }
-        if operationReadError != nil {
-            return motionCurrentVerified
-                ? "Motion outcome unknown. Inspect the printer before another action. No automatic retry."
-                : "Motion status unavailable. Controls locked; refresh to check again."
-        }
-        if hasUnresolvedMotion {
-            return presentedMotionOperation?.state == .queued
-                ? "Motion queued. Controls locked until completion."
-                : "Motion in progress. Controls locked until completion."
-        }
-        if motionBlockedReason != nil {
-            if motionUserID == nil { return "Sign in again to check motion status." }
-            if !motionCurrentVerified { return "Checking motion status. Controls locked." }
-            return "Server update required for motion controls."
-        }
-        switch presentedMotionOperation?.state {
-        case .succeeded: return "Motion completed. Check the printer before continuing."
-        case .failed: return "Motion failed. Review details before continuing."
-        case .unknown, .recovering, .recovered:
-            return "Motion outcome unknown. Inspect the printer before another action. No automatic retry."
-        default: return motionStatusMessage
-        }
-    }
-
-    private func rememberMotionAdmission(_ operation: PrinterControlOperation, motion: PendingPrinterMotion) throws {
-        try operation.validate(printerId: printer.id, operationId: motion.operationID)
-        let request = motion.request
-        guard operation.kind == request.kind, operation.x == request.x, operation.y == request.y,
-              operation.z == request.z, operation.f == request.f else { throw NetworkError.invalidResponse }
-        controlOperation = operation
-    }
-
-    static func motionRequest(for command: ControlCommand) -> PrinterControlOperationRequest? {
-        switch command.kind {
-        case .home(let axes):
-            let kind: PrinterControlOperationKind = axes == ["Z"] ? .homeZ : axes == ["X", "Y"] ? .homeXY : .homeAll
-            return .init(kind: kind)
-        case .calibrationHome:
-            return .init(kind: .homeAll)
-        case .jog(let axis, let distance):
-            let axis = axis.uppercased()
-            return .init(kind: .jog, x: axis == "X" ? distance : nil,
-                         y: axis == "Y" ? distance : nil, z: axis == "Z" ? distance : nil,
-                         f: Double(axis == "Z" ? zFeedrateMmMin : xyFeedrateMmMin))
-        case .moveTo(let x, let y, let z, let feedrate):
-            return .init(kind: .moveTo, x: x, y: y, z: z, f: feedrate.map(Double.init))
-        case .calibrationPosition(let target, _):
-            return .init(kind: .moveTo, x: target.x, y: target.y, z: target.z, f: Double(zFeedrateMmMin))
-        case .calibrationAdjust(_, let target):
-            return .init(kind: .moveTo, x: target.x, y: target.y, z: target.z, f: Double(zFeedrateMmMin))
-        default: return nil
-        }
-    }
-
-    private func performMotion(_ command: ControlCommand, request: PrinterControlOperationRequest) async {
-        guard !Task.isCancelled, canControl else {
-            cancelPendingCommand()
-            return
-        }
-        guard physicalControl?.supportedOperations.contains(request.kind) == true else {
-            setError(command: command, message: "Server update required: this durable motion operation is unsupported. No legacy fallback was sent.", isRetryable: false)
-            return
-        }
-        let motion = PendingPrinterMotion(operationID: command.id, request: request)
-        pendingMotion = motion
-        controlOperation = nil
-        hasUnresolvedMotion = true
-        let generation = lifecycleGeneration
-        motionReadID = UUID()
-        isRefreshingControlOperation = false
-        motionSubmissionInFlight = true
-        commandNotice = "Submitting durable motion. Acceptance is not physical completion."
-        // Unstructured task: cancellation of a view task only ends observation.
-        // Neither this task nor any refresh retries a physical request.
-        let task = Task { @MainActor [self, printerService, printer] in
-            try validateMotionAdmission(command)
-            commandWasDispatched = true
-            return try await printerService.submitControlOperation(
-                printerId: printer.id, operationId: motion.operationID, request: request
-            )
-        }
-        let result = await withTaskCancellationHandler {
-            await task.result
-        } onCancel: {
-            Task { @MainActor in
-                guard self.pendingCommand == command else { return }
-                self.cancelPendingCommand()
-            }
-        }
-        motionSubmissionInFlight = false
-        // Once transport settles, the server owns coordination across screens.
-        releaseLease(for: command)
-        if case .failure(let error) = result, !commandWasDispatched {
-            // This is local proof of no send, not an inference from an HTTP error.
-            pendingMotion = nil
-            hasUnresolvedMotion = hasDurableMotionBarrier
-            if canPublishRead(generation) {
-                setError(command: command, message: "No motion was sent. \(error.localizedDescription)", isRetryable: false)
-            } else {
-                pendingCommand = nil
-            }
-            return
-        }
-        guard canPublishRead(generation) else {
-            releaseLease(for: command)
-            return
-        }
-        switch result {
-        case .success(let operation):
-            do { try rememberMotionAdmission(operation, motion: motion) }
-            catch {
-                operationReadError = "The submission response did not match this printer and operation. Status must be checked; no retry was sent."
-            }
-        case .failure:
-            operationReadError = "Submission outcome is unknown. Refresh checks status only; no motion or legacy fallback will be replayed."
-        }
-        await refreshControlOperation()
-    }
-
-    private func validateMotionAdmission(_ command: ControlCommand) throws {
-        guard canControl, motionCurrentVerified, pendingCommand == command,
-              physicalControl?.isExplicitlyUnlocked == true else {
-            throw PrinterControlError.invalidRequest("Controls changed before admission. Refresh and review the printer.")
-        }
-        validatingMotionAdmission = true
-        defer { validatingMotionAdmission = false }
-        let reason: String?
-        switch command.kind {
-        case .moveTo(let x, let y, let z, _):
-            reason = absoluteMoveBlockedReason(x: x, y: y, z: z)
-        case .calibrationHome:
-            guard calibrationCommandID == command.id else { throw CancellationError() }
-            reason = calibrationBlockedReason
-        case .calibrationPosition(let target, _):
-            guard calibrationCommandID == command.id else { throw CancellationError() }
-            reason = calibrationPositionBlockedReason ?? safeMoveReason(target)
-        case .calibrationAdjust(let delta, _):
-            guard calibrationCommandID == command.id else { throw CancellationError() }
-            reason = calibrationAdjustmentBlockedReason(delta: delta)
-        default: reason = nil
-        }
-        if let reason { throw PrinterControlError.invalidRequest(reason) }
-    }
-
-    /// Events, foreground and polling all invalidate into REST reads. Versions
-    /// are opaque; never infer order or completion from a SignalR payload.
-    func observeControlOperations(using signalR: any SignalRServiceProtocol) {
-        guard usesDurableMotion, isActive, accessCheck() == nil,
-              motionEventSubscription == nil else { return }
-        let generation = lifecycleGeneration
-        motionEventSubscription = signalR.onPrinterControlOperationUpdated { [weak self] event in
-            Task { @MainActor [weak self] in
-                guard let self, self.canPublishRead(generation), event.printerId == self.printer.id else { return }
-                await self.handleControlOperationInvalidation(event)
-            }
-        }
-        let connection = signalR.onConnectionStateChanged { [weak self] state in
-            Task { @MainActor [weak self] in
-                guard let self, self.canPublishRead(generation) else { return }
-                self.motionCurrentVerified = false
-                self.motionReadID = UUID()
-                if state == .connected { await self.refreshControlOperation() }
-            }
-        }
-        motionConnectionSubscription = connection.subscription
-    }
-
-    func handleControlOperationInvalidation(_ event: PrinterControlOperationInvalidation) async {
-        guard event.printerId == printer.id, isActive, accessCheck() == nil else { return }
-        motionCurrentVerified = false
-        await refreshControlOperation()
-    }
-
-    func refreshControlOperation() async {
-        guard usesDurableMotion, motionUserID != nil, isActive, accessCheck() == nil,
-              !motionSubmissionInFlight else { return }
-        let generation = lifecycleGeneration
-        let readID = UUID()
-        motionReadID = readID
-        isRefreshingControlOperation = true
-        defer { if motionReadID == readID { isRefreshingControlOperation = false } }
-        do {
-            let current = try await printerService.getCurrentControlOperation(printerId: printer.id)
-            guard canPublishRead(generation), motionReadID == readID, !motionSubmissionInFlight else { return }
-            try current.validate(printerId: printer.id)
-            let projection = current.physicalControl
-            if projection.barrierHeld {
-                physicalControl = projection
-                controlOperation = current.operation
-                hasUnresolvedMotion = true
-                motionCurrentVerified = true
-                operationReadError = nil
-                return
-            }
-            let lookupID = pendingMotion?.operationID ?? controlOperation?.operationId ?? physicalControl?.operationId
-            var operation: PrinterControlOperation?
-            var historyError: String?
-            if let lookupID {
-                do {
-                    let result = try await printerService.getControlOperation(printerId: printer.id, operationId: lookupID)
-                    try result.validate(printerId: printer.id, operationId: lookupID)
-                    if let motion = pendingMotion {
-                        let request = motion.request
-                        guard result.kind == request.kind, result.x == request.x,
-                              result.y == request.y, result.z == request.z, result.f == request.f else {
-                            throw NetworkError.invalidResponse
-                        }
-                    }
-                    if result.barrierHeld || result.isSettled { operation = result }
-                    else { historyError = "Motion history has not settled. The physical outcome is unknown; no command will be replayed." }
-                } catch {
-                    historyError = "Motion history could not be read. The physical outcome is unknown; no command will be replayed."
-                }
-            }
-            guard canPublishRead(generation), motionReadID == readID, !motionSubmissionInFlight else { return }
-            physicalControl = projection
-            if let operation, operation.barrierHeld {
-                controlOperation = operation
-                hasUnresolvedMotion = true
-                motionCurrentVerified = true
-                operationReadError = nil
-                return
-            }
-            hasUnresolvedMotion = false
-            motionCurrentVerified = true
-            operationReadError = historyError
-            if let operation {
-                controlOperation = operation
-                pendingMotion = nil
-                if let identity = commandIdentity {
-                    commandLeases.release(identity, token: operation.operationId)
-                }
-                await settleMotion(operation, generation: generation, readID: readID)
-            } else {
-                controlOperation = nil
-                if let command = pendingCommand, Self.motionRequest(for: command) != nil {
-                    interruptCalibration("Motion outcome is unknown. Cancel calibration and inspect the printer.")
-                    releaseLease(for: command)
-                    pendingCommand = nil
-                    commandNotice = "Motion outcome is unknown. Inspect the printer before another action. No command will be replayed."
-                }
-            }
-            guard canPublishRead(generation), motionReadID == readID, !motionSubmissionInFlight else { return }
-            if projection.isExplicitlyUnlocked, projection.supportedOperations.isEmpty,
-               !hasUnresolvedMotion, !hasDurableMotionBarrier,
-               pendingCommand == nil, commandTask == nil, calibrationLease == nil,
-               commandIdentity.map({ !commandLeases.contains($0) }) == true {
-                // Historical observation IDs are not coordination: only a fresh,
-                // explicitly clear server projection may withdraw durable routing.
-                durableMotionRequired = false
-            }
-        } catch {
-            guard canPublishRead(generation), motionReadID == readID else { return }
-            motionCurrentVerified = false
-            let updateRequired: Bool
-            if case PrinterControlOperationError.updateRequired = error { updateRequired = true }
-            else { updateRequired = false }
-            if updateRequired, pendingMotion == nil {
-                operationReadError = "Server update required: advertised durable control status is unavailable. No legacy motion will be sent."
-            } else {
-                operationReadError = "Motion status could not be verified. Refresh current status before issuing another command. No command will be replayed."
-            }
-        }
-    }
-
-    private func settleMotion(_ operation: PrinterControlOperation, generation: Int, readID: UUID) async {
-        guard let command = pendingCommand, command.id == operation.operationId,
-              Self.motionRequest(for: command) != nil else { return }
-        if operation.hasConfirmedSuccess {
-            if calibrationCommandID == command.id {
-                await refreshSafetyEvidence()
-                guard canPublishRead(generation), motionReadID == readID else { return }
-                let matches: Bool
-                switch command.kind {
-                case .calibrationPosition(let target, _): matches = reportedSafetyPosition == target
-                case .calibrationAdjust(_, let target): matches = reportedSafetyPosition?.z == target.z
-                    && reportedSafetyPosition?.x == calibrationPosition?.x
-                    && reportedSafetyPosition?.y == calibrationPosition?.y
-                default: matches = true
-                }
-                if matches && !commandStateInvalidated {
-                    confirmCalibration(command)
-                } else {
-                    interruptCalibration("Motion completed, but calibration position or observation changed. Cancel and review the machine again.")
-                }
-            }
-            commandNotice = "The server confirmed the motion queue drained. Physical operation succeeded."
-        } else {
-            interruptCalibration("Physical motion completion was not confirmed. Cancel calibration and inspect the machine before starting again.")
-            commandNotice = motionStatusMessage
-        }
-        pendingCommand = nil
-        releaseLease(for: command)
-    }
-
     // MARK: - SignalR Hook
 
     /// View layer calls this when a `printerupdated` SignalR event arrives for
@@ -1753,19 +1331,13 @@ final class PrinterControlsViewModel: ObservableObject {
     /// here), then clears `pendingCommand` **only** when the incoming snapshot
     /// actually confirms — or legitimately invalidates — the in-flight command.
     ///
-    /// The controls surface receives a merged telemetry stream (position,
-    /// temperatures/targets, homed axes, state, online status). Ambient churn
-    /// in an unrelated field must not release the wrong command: temperature
-    /// drift must not clear a pending jog, position noise must not clear a
-    /// pending preheat, measured-temperature drift must not clear a pending
-    /// preheat (only the commanded target counts), and so on. Correlation is a
-    /// targeted diff from the previously cached snapshot to `updated`, scoped
-    /// to the fields the specific command drives.
+    /// Heater target observation remains independent of measured temperature,
+    /// position and homing changes. Direct motion settles at the HTTP response;
+    /// ordinary telemetry never establishes correlated physical completion.
     func handlePrinterUpdate(_ updated: Printer) {
         guard updated.id == printer.id else { return }
         let previous = printer
         printer = updated
-        if updated.physicalControl?.supportedOperations.isEmpty == false { durableMotionRequired = true }
         if previous.configurationRevision != updated.configurationRevision || previous.backend != updated.backend {
             lifecycleGeneration += 1
             invalidateSafety()
@@ -1774,23 +1346,6 @@ final class PrinterControlsViewModel: ObservableObject {
         if previous.isOnline && !updated.isOnline { invalidateSafety() }
         if let review = calibrationReview, updated.rowVersion != review.rowVersion {
             interruptCalibration("Printer revision changed after review. Cancel and refresh; no save was sent.")
-        }
-        if usesDurableMotion {
-            let changedProjection = updated.physicalControl != nil && updated.physicalControl != physicalControl
-            // Telemetry may add a lock, but may never remove one or complete motion.
-            if let projection = updated.physicalControl, projection.barrierHeld {
-                if physicalControl != projection {
-                    motionReadID = UUID()
-                    isRefreshingControlOperation = false
-                }
-                physicalControl = projection
-                hasUnresolvedMotion = true
-                motionCurrentVerified = false
-            }
-            if changedProjection {
-                Task { [weak self] in await self?.refreshControlOperation() }
-            }
-            if let pending = pendingCommand, Self.motionRequest(for: pending) != nil { return }
         }
         if !canControl {
             cancelCalibration()
@@ -1828,8 +1383,9 @@ final class PrinterControlsViewModel: ObservableObject {
         resolves command: ControlCommand
     ) -> Bool {
         switch command.kind {
-        case .jog(let axis, _):
-            return jogAxisMoved(axis: axis, from: previous, to: updated)
+        case .home, .jog, .moveTo:
+            // Ordinary telemetry is not correlated command-completion evidence.
+            return false
         case let .preheat(_, hotendTarget, bedTarget):
             // A preheat/cool-down is confirmed when the snapshot's commanded
             // *targets* satisfy the requested setpoints — never by measured
@@ -1844,38 +1400,12 @@ final class PrinterControlsViewModel: ObservableObject {
         case let .heaterTargets(hotend, bed):
             return (hotend != nil || bed != nil)
                 && targetsSatisfied(hotendTarget: hotend, bedTarget: bed, in: updated)
-        case let .moveTo(x, y, z, _):
-            return (x != nil || y != nil || z != nil)
-                && (x.map { updated.x == $0 } ?? true)
-                && (y.map { updated.y == $0 } ?? true)
-                && (z.map { updated.z == $0 } ?? true)
         case .disableMotors, .extrusion, .filament, .calibrationSave:
             return false
         case .calibrationHome, .calibrationPosition, .calibrationAdjust:
             // Legacy merged fields lack fact timestamps and frame provenance.
             // Calibration confirms only through the versioned status reader.
             return false
-        case .home(let axes):
-            // `homedAxes` is the authoritative homing confirmation; position
-            // resets are a side effect and must not couple homing to jog noise.
-            return previous.homedAxes != updated.homedAxes && homedAxesSatisfied(axes, in: updated)
-        }
-    }
-
-    private static func homedAxesSatisfied(_ axes: [String], in printer: Printer) -> Bool {
-        guard let homed = printer.homedAxes?.uppercased() else { return false }
-        return axes.allSatisfy { homed.contains($0.uppercased()) }
-    }
-
-    private static func jogAxisMoved(axis: String, from previous: Printer, to updated: Printer) -> Bool {
-        switch axis.uppercased() {
-        case "X": return previous.x != updated.x
-        case "Y": return previous.y != updated.y
-        case "Z": return previous.z != updated.z
-        default:
-            return previous.x != updated.x
-                || previous.y != updated.y
-                || previous.z != updated.z
         }
     }
 
@@ -1896,12 +1426,12 @@ final class PrinterControlsViewModel: ObservableObject {
 
     private var commandIdentity: PrinterControlsIdentity? {
         registeredServerID.map {
-            PrinterControlsIdentity(serverID: $0, printerID: printer.id, userID: usesDurableMotion ? motionUserID : nil)
+            PrinterControlsIdentity(serverID: $0, printerID: printer.id)
         }
     }
 
     var isExecuting: Bool {
-        (usesDurableMotion && motionBlockedReason != nil) || pendingCommand != nil || commandIdentity.map {
+        pendingCommand != nil || commandIdentity.map {
             commandLeases.contains($0, excludingWorkflow: calibrationLease)
         } == true
     }
@@ -1917,8 +1447,7 @@ final class PrinterControlsViewModel: ObservableObject {
         if let reason = accessCheck() { return reason }
         if !printer.isOnline { return "Printer is offline." }
         if isPrintingOrPaused { return "Controls are locked while a print is active." }
-        if let reason = motionBlockedReason { return reason }
-        if !validatingMotionAdmission, pendingCommand == nil, isExecuting {
+        if pendingCommand == nil, isExecuting {
             return "Another controls view is waiting for this printer's request outcome. Routine controls remain locked."
         }
         return nil
@@ -1943,16 +1472,11 @@ final class PrinterControlsViewModel: ObservableObject {
             setError(command: command, message: "Homing is unavailable without confirmed backend support.", isRetryable: false)
             return
         }
-        let alreadyHomed = Self.homedAxesSatisfied(axes, in: printer)
         await perform(command, call)
-        if !usesDurableMotion, pendingCommand == command, lastError == nil, alreadyHomed, !telemetryConfirmed {
-            pendingCommand = nil
-            commandNotice = "Homing request accepted. Requested axes were already reported homed; fresh physical completion is not confirmed. Check the machine before moving."
-        }
     }
 
-    /// One pipeline acquires the registered-server/printer lease before any
-    /// dispatch and retains it while this owner awaits matching telemetry.
+    /// Acquire the registered-server/printer lease before dispatch. Direct motion
+    /// releases it at HTTP settlement; heater observation can retain it longer.
     private func beginCommand(_ command: ControlCommand) -> Bool {
         guard !Task.isCancelled else { return false }
         guard pendingCommand == nil else { return false }
@@ -1977,12 +1501,6 @@ final class PrinterControlsViewModel: ObservableObject {
             )
             return false
         }
-        if usesDurableMotion {
-            if let reason = motionBlockedReason {
-                commandNotice = reason
-                return false
-            }
-        }
         guard let identity = commandIdentity,
               let lifetime = commandLeases.acquire(identity, token: command.id, workflow: calibrationLease) else { return false }
         commandLease = (command.id, lifetime)
@@ -2006,10 +1524,6 @@ final class PrinterControlsViewModel: ObservableObject {
     }
 
     private func perform(_ command: ControlCommand, _ call: @escaping @MainActor () async throws -> Void) async {
-        if usesDurableMotion, let request = Self.motionRequest(for: command) {
-            await performMotion(command, request: request)
-            return
-        }
         guard !Task.isCancelled else {
             cancelPendingCommand()
             return
@@ -2045,7 +1559,13 @@ final class PrinterControlsViewModel: ObservableObject {
                 commandNotice = "Request accepted, but waiting was interrupted or controls became unavailable. Physical outcome is unknown; check the machine before another action."
                 return
             }
-            commandNotice = "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
+            switch command.kind {
+            case .home, .jog, .moveTo:
+                pendingCommand = nil
+                commandNotice = "Command accepted. Physical completion is not confirmed; check the printer before another action."
+            default:
+                commandNotice = "Request accepted; waiting for matching telemetry. This does not confirm physical completion."
+            }
         case .failure(let error):
             if error is CancellationError {
                 pendingCommand = nil
@@ -2085,7 +1605,6 @@ final class PrinterControlsViewModel: ObservableObject {
             if pendingCommand != command { releaseLease(for: command) }
         }
         guard pendingCommand == command else { return }
-        if usesDurableMotion, Self.motionRequest(for: command) != nil, hasUnresolvedMotion { return }
         if lastError?.command == command {
             if calibrationCommandID == command.id {
                 calibrationInterrupted = true
