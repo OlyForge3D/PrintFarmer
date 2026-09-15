@@ -430,6 +430,10 @@ jobs:
             cosign download signature "$reference" > "$index_evidence/signature.ndjson"
             cosign download attestation "$reference" > "$index_evidence/attestation.ndjson"
             [[ -s "$index_evidence/signature.ndjson" && -s "$index_evidence/attestation.ndjson" ]]
+            if grep -q $'\r' "$index_evidence/signature.ndjson"; then
+              echo "Cosign signature evidence must use LF line endings: $image/index"
+              exit 1
+            fi
             [[ "$(tail -c 1 "$index_evidence/signature.ndjson" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
               printf '\n' >> "$index_evidence/signature.ndjson"
             cat "$index_evidence/signature.ndjson" "$index_evidence/attestation.ndjson" > "$index_evidence/download.json"
@@ -463,6 +467,10 @@ jobs:
               cosign download signature "$platform_reference" > "$platform_evidence/signature.ndjson"
               cosign download attestation "$platform_reference" > "$platform_evidence/attestation.ndjson"
               [[ -s "$platform_evidence/signature.ndjson" && -s "$platform_evidence/attestation.ndjson" ]]
+              if grep -q $'\r' "$platform_evidence/signature.ndjson"; then
+                echo "Cosign signature evidence must use LF line endings: $image/$platform"
+                exit 1
+              fi
               [[ "$(tail -c 1 "$platform_evidence/signature.ndjson" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
                 printf '\n' >> "$platform_evidence/signature.ndjson"
               cat "$platform_evidence/signature.ndjson" "$platform_evidence/attestation.ndjson" > "$platform_evidence/download.json"
@@ -881,15 +889,32 @@ jobs:
               scope="${entry%% *}"
               subject="${entry#* }"
               reference="ghcr.io/olyforge3d/printfarmer-${image}@${subject}"
-              evidence=".artifacts/release-authorization/crypto-evidence/$image/$scope"
+              if [[ "$scope" == "index" ]]; then
+                evidence=".artifacts/release-authorization/crypto-evidence/$image/index"
+              else
+                evidence=".artifacts/release-authorization/crypto-evidence/$image/platforms/$scope"
+              fi
               env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign verify "$reference" --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
               env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign verify-attestation "$reference" --type spdxjson --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com >/dev/null
-              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download signature "$reference" | jq -sc . | cmp -s "$evidence/signature.bundle.json" - ||
+              signature_download="$(mktemp "$RUNNER_TEMP/activated-signature.XXXXXX")"
+              attestation_download="$(mktemp "$RUNNER_TEMP/activated-attestation.XXXXXX")"
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download signature "$reference" > "$signature_download"
+              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download attestation "$reference" > "$attestation_download"
+              [[ -s "$signature_download" && -s "$attestation_download" ]] ||
+                { echo "Activated Cosign evidence is empty: $image/$scope"; exit 1; }
+              if grep -q $'\r' "$signature_download"; then
+                echo "Activated Cosign signature evidence must use LF line endings: $image/$scope"
+                exit 1
+              fi
+              [[ "$(tail -c 1 "$signature_download" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
+                printf '\n' >> "$signature_download"
+              cmp -s "$evidence/signature.bundle.json" "$signature_download" ||
                 { echo "Activated signature bundle differs: $image/$scope"; exit 1; }
-              env -u GH_TOKEN -u GITHUB_TOKEN DOCKER_CONFIG="$DOCKER_CONFIG" cosign download attestation "$reference" | jq -sc . | cmp -s "$evidence/attestation.bundle.json" - ||
+              cmp -s "$evidence/attestation.bundle.json" "$attestation_download" ||
                 { echo "Activated attestation bundle differs: $image/$scope"; exit 1; }
+              rm -f "$signature_download" "$attestation_download"
             done
           done
       - name: Publish channel-isolated verified image aliases

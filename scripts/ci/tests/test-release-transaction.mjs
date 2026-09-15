@@ -454,8 +454,17 @@ test('publisher uses one reusable-workflow signer identity for every verificatio
   assert.ok(job.indexOf('release-set.mjs tag') < job.indexOf('release-set.mjs alias'));
   assert.ok(job.indexOf('release-set.mjs alias') < job.indexOf('release-control.mjs advance'));
   assert.match(job, /env -u GH_TOKEN -u GITHUB_TOKEN curl --fail/);
-  assert.match(job, /cosign download signature \\"\$reference\\" \| jq -sc/);
-  assert.match(job, /cosign download attestation \\"\$reference\\" \| jq -sc/);
+  assert.match(job, /cp \\"\$index_evidence\/signature\.ndjson\\" \\"\$index_evidence\/signature\.bundle\.json\\"/);
+  assert.match(job, /cp \\"\$index_evidence\/attestation\.ndjson\\" \\"\$index_evidence\/attestation\.bundle\.json\\"/);
+  assert.match(job, /cp \\"\$platform_evidence\/signature\.ndjson\\" \\"\$platform_evidence\/signature\.bundle\.json\\"/);
+  assert.match(job, /cp \\"\$platform_evidence\/attestation\.ndjson\\" \\"\$platform_evidence\/attestation\.bundle\.json\\"/);
+  assert.match(job, /cosign download signature \\"\$reference\\" > \\"\$signature_download\\"/);
+  assert.match(job, /cosign download attestation \\"\$reference\\" > \\"\$attestation_download\\"/);
+  assert.doesNotMatch(job, /cosign download (?:signature|attestation) \\"\$reference\\" \| jq -sc/);
+  assert.match(job, /cmp -s \\"\$evidence\/signature\.bundle\.json\\" \\"\$signature_download\\"/);
+  assert.match(job, /cmp -s \\"\$evidence\/attestation\.bundle\.json\\" \\"\$attestation_download\\"/);
+  assert.match(job, /crypto-evidence\/\$image\/platforms\/\$scope/);
+  assert.equal((job.match(/Cosign signature evidence must use LF line endings/g) ?? []).length, 3);
 });
 
 test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {
