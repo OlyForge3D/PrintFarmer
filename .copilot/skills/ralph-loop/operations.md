@@ -304,6 +304,50 @@ reject without either partial write. Exact replay returns the historical linked 
 changing generation or asserting present liveness. Later completion/resumption must still use
 its own actual job identity; no remote or process-result semantics are changed.
 
+### Reconciliation After Both Tasks Already Completed
+
+An active handoff must not invent active work when the successor finished before accounting
+caught up. For an explicitly authorized exact historical task pair, `complete-local-handoff`
+records both completed tasks atomically. It is a separate command, not a fallback of
+`handoff-local-session` or `complete-local-session`. The old occupied reservation is released
+once, and the previously unaccounted successor gets a permanent **retrospective** job/fence
+and predecessor link, directly in terminal state. No transient free/re-reserved slot or
+fabricated prior reservation exists.
+
+Use the atomic handoff request plus `successor.completion` containing its own
+`taskCompleteEventId`, `turnEndEventId`, `deliveryEventId`, `deliveryContentSha256`, `headSha`,
+`publicationRef` (`refs/pull/N/head`), `workingTreeClean:true`, `allCommitsPushed:true` and
+exact-HEAD `validationEvidence`. These are the successor's existing runtime events, never
+the predecessor's events. The root completion report must identify the new issue and attest
+clean/pushed delivery; the separate successful delivery receipt must follow its assignment
+and precede its completion. Its actual current clean HEAD, admitted-base ancestry and exact
+remote publication are verified in addition to the predecessor's historical proof.
+
+The observation names the authorized successor issue and latest root instruction but must
+now assert `activeWork:false`, `running:false`, `followUpPending:false` with the same fresh
+journal fingerprint and observation timing. All agent turns/hooks/external requests must have
+ended. Later activity or another repurposing rejects the operation. Routine native
+`session.shutdown` receipts may follow completion, but never supply or imply an exit code.
+Never steer the child to create a new report just for accounting.
+
+Native histories may also contain an interrupted runtime epoch during implementation.
+A root routine shutdown immediately followed by root `session.resume` with
+`sessionWasActive:false`, `alreadyInUse:false` and identical runtime cwd starts a new
+turn namespace only when no hook or external request remains pending. The adapter records
+these epoch boundaries and the number of interrupted turns; it does not call them successful
+tasks or process exits. A later real successful root task/end and fresh no-follow-up evidence
+are still mandatory. A matching inactive resume without a preceding shutdown does not clear
+any pending lifecycle state. Resume after the selected final completion is new activity and rejects.
+
+The successor records `sessionCompletion.kind:"app-session-task-retrospective"` and
+`runtimeReportedAdmission:false`, its actual completion timestamps, and a separate
+`accountedAt`. Its newly allocated audit fence was **not** present in the old runtime report:
+do not manufacture or backdate that assertion. The prior task must still report its actual
+old job/fence. Exact replay is historical/audit-only; changed proof and concurrent generation
+changes fail closed. All other reservations and original retirement evidence remain untouched.
+Use the same sole-writer, independent proof verification and after-write effective-union
+checks as the other routes. This is two verified delivered tasks, not abandonment.
+
 ### Legacy Remote Records
 
 Older reservations stored only a digest. `LEGACY_PAYLOAD_REQUIRED` explicitly retains the slot:

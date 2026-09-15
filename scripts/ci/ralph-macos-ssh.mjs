@@ -671,7 +671,7 @@ export async function recordLocalTerminalResult(result, options = {}) {
 const execFileAsync = promisify(execFile);
 const validUuid = (value) => typeof value === 'string' && /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(value);
 const sha256 = (value) => createHash('sha256').update(value).digest('hex');
-const completionHousekeeping = new Set(['hook.start', 'hook.end', 'session.usage_checkpoint', 'assistant.usage']);
+const completionHousekeeping = new Set(['hook.start', 'hook.end', 'session.usage_checkpoint', 'assistant.usage', 'session.shutdown']);
 
 function invalidCompletion(message) {
   throw new RalphMacSshError(message, 'INVALID_SESSION_COMPLETION');
@@ -728,6 +728,9 @@ async function readCompletionJournal(sessionId, sessionStateRoot, value, success
       ids.add(event.id);
       journal.start ??= event;
       const agent = event.agentId ?? 'root';
+      if (event.type === 'session.shutdown' && (agent !== 'root' || event.data?.shutdownType !== 'routine')) {
+        invalidCompletion('Unexpected shutdown receipt cannot establish task completion.');
+      }
       if (event.type === 'user.message' && agent === 'root') journal.latestUserEventId = event.id;
       if (successor && agent === 'root' && event.type === 'tool.execution_start') {
         if (typeof event.data?.toolCallId === 'string') {
@@ -737,6 +740,23 @@ async function readCompletionJournal(sessionId, sessionStateRoot, value, success
       if (journal.task && !journal.assignment && event.id !== value.turnEndEventId &&
           event.id !== successor?.assignmentEventId && !completionHousekeeping.has(event.type)) {
         invalidCompletion('Runtime has resumed or unrecognized activity after task completion.');
+      }
+      if (journal.successorTask && event.id !== successor.completion.turnEndEventId &&
+          !completionHousekeeping.has(event.type)) {
+        invalidCompletion('Activity resumed after the successor completion; retain the slot.');
+      }
+      if (event.type === 'session.resume') {
+        if (agent !== 'root' || event.data?.sessionWasActive !== false || event.data?.alreadyInUse !== false ||
+            event.data?.context?.cwd !== journal.start.data?.context?.cwd || hooks.size || externalRequests.size) {
+          invalidCompletion('Runtime resume lacks a closed host epoch and matching inactive session identity.');
+        }
+        if (journal.last?.type === 'session.shutdown') {
+          journal.epochs ??= [];
+          journal.epochs.push({ shutdownEventId: journal.last.id, resumeEventId: event.id,
+            resumedAt: event.timestamp, interruptedTurnCount: openTurns.size });
+          openTurns.clear();
+          deliveryCalls.clear();
+        }
       }
       if (successor && event.id === successor.deliveryEventId) {
         const content = event.data?.result?.content;
@@ -770,8 +790,20 @@ async function readCompletionJournal(sessionId, sessionStateRoot, value, success
         }
         journal.activity = { id: event.id, timestamp: event.timestamp };
       }
-      if (journal.assignment && event.type === 'session.task_complete' && agent === 'root') {
+      if (journal.assignment && event.type === 'session.task_complete' && agent === 'root' && !successor.completion) {
         invalidCompletion('Successor task already ended; refresh scope rather than pretending it is active.');
+      }
+      if (successor?.completion && event.id === successor.completion.deliveryEventId) {
+        const content = event.data?.result?.content;
+        if (!journal.activity || journal.successorTask || agent !== 'root' ||
+            event.type !== 'tool.execution_complete' || event.data?.success !== true ||
+            !deliveryCalls.has(event.data.toolCallId) || typeof content !== 'string' ||
+            sha256(content) !== successor.completion.deliveryContentSha256 ||
+            !content.includes(successor.completion.headSha)) {
+          invalidCompletion('Successor delivery receipt is not correlated to its own task.');
+        }
+        journal.successorDelivery = { id: event.id, timestamp: event.timestamp, contentSha256: sha256(content),
+          requestEventId: deliveryCalls.get(event.data.toolCallId).id };
       }
       if (event.type === 'assistant.turn_start') {
         if (openTurns.has(agent) || typeof event.data?.turnId !== 'string' || !event.data.turnId) {
@@ -789,6 +821,12 @@ async function readCompletionJournal(sessionId, sessionStateRoot, value, success
           }
           journal.end = event;
         }
+        if (successor?.completion && event.id === successor.completion.turnEndEventId) {
+          if (agent !== 'root' || !journal.successorTask || journal.successorTaskTurnId !== openTurns.get(agent)) {
+            invalidCompletion('Successor turn end is not paired with its own root completion.');
+          }
+          journal.successorEnd = { id: event.id, timestamp: event.timestamp };
+        }
         openTurns.delete(agent);
       }
       if (event.type === 'hook.start' || event.type === 'hook.end') {
@@ -800,7 +838,8 @@ async function readCompletionJournal(sessionId, sessionStateRoot, value, success
         if (event.type === 'hook.start') hooks.set(hookId, agent);
         else {
           hooks.delete(hookId);
-          if (journal.task && !journal.assignment && event.data.success !== true) invalidCompletion('Post-completion hook failed.');
+          if (((journal.task && !journal.assignment) || journal.successorTask) &&
+              event.data.success !== true) invalidCompletion('Post-completion hook failed.');
         }
       }
       if (event.id === value.taskCompleteEventId) {
@@ -822,11 +861,25 @@ async function readCompletionJournal(sessionId, sessionStateRoot, value, success
         journal.task = { id: event.id, timestamp: event.timestamp, summarySha256: sha256(event.data.summary ?? '') };
         journal.taskTurnId = openTurns.get('root');
       }
-      journal.last = { id: event.id, timestamp: event.timestamp };
+      if (successor?.completion && event.id === successor.completion.taskCompleteEventId) {
+        if (!journal.activity || !journal.successorDelivery || agent !== 'root' ||
+            event.type !== 'session.task_complete' || event.data?.success !== true || !openTurns.has('root') ||
+            Date.parse(event.timestamp) <= Date.parse(journal.activity.timestamp) ||
+            typeof event.data.summary !== 'string' ||
+            !new RegExp(`#${successor.job.issue}(?!\\d)`).test(event.data.summary) ||
+            !/working tree clean/i.test(event.data.summary) || !/all commits pushed/i.test(event.data.summary)) {
+          invalidCompletion('Retrospective successor completion lacks its own successful task and delivered-issue proof.');
+        }
+        journal.successorTask = { id: event.id, timestamp: event.timestamp, summarySha256: sha256(event.data.summary) };
+        journal.successorTaskTurnId = openTurns.get('root');
+      }
+      journal.last = { id: event.id, timestamp: event.timestamp, type: event.type };
     }
     if (readError) throw readError;
     if (!journal.task || !journal.end ||
-        (successor ? !journal.assignment || !journal.activity || !journal.delivery : openTurns.size || hooks.size || externalRequests.size)) {
+        (successor ? !journal.assignment || !journal.activity || !journal.delivery : openTurns.size || hooks.size || externalRequests.size) ||
+        (successor?.completion && (!journal.successorTask || !journal.successorEnd ||
+          openTurns.size || hooks.size || externalRequests.size))) {
       invalidCompletion('Runtime completion is missing or turns/hooks remain pending.');
     }
   } catch (error) {
@@ -882,7 +935,9 @@ function validateCompletionObservation(observation, entry, journal, successor) {
   if (observation?.repository !== printFarmerRepository || observation.issue !== (successor?.job.issue ?? entry.issue) ||
       observation.jobId !== entry.jobId || observation.fence !== entry.fence ||
       observation.sessionId !== entry.sessionId ||
-      (successor ? typeof observation.running !== 'boolean' || observation.activeWork !== true ||
+      (successor ? typeof observation.running !== 'boolean' ||
+        (successor.completion ? observation.running !== false || observation.activeWork !== false ||
+          observation.followUpPending !== false : observation.activeWork !== true) ||
         observation.assignmentEventId !== successor.assignmentEventId || observation.successorJobId !== successor.job.jobId ||
         observation.currentAssignmentConfirmed !== true || observation.latestUserEventId !== journal.latestUserEventId
         : observation.running !== false || observation.followUpPending !== false) ||
@@ -931,6 +986,27 @@ export async function recordLocalSessionCompletion({ result, expectedGeneration 
 }
 
 export async function recordLocalSessionHandoff({ result, successor, expectedGeneration }, options = {}) {
+  if (successor?.completion !== undefined) invalidCompletion('Active handoff cannot import a completed successor.');
+  return prepareLocalSessionHandoff({ result, successor, expectedGeneration }, options);
+}
+
+export async function recordLocalCompletedHandoff({ result, successor, expectedGeneration }, options = {}) {
+  const completed = safeJson(successor?.completion, 'Retrospective successor completion');
+  if (!validSha(completed.headSha) || !validUuid(completed.taskCompleteEventId) ||
+      !validUuid(completed.turnEndEventId) || !validUuid(completed.deliveryEventId) ||
+      !/^[0-9a-f]{64}$/.test(completed.deliveryContentSha256 ?? '') ||
+      !/^refs\/pull\/[1-9]\d*\/head$/.test(completed.publicationRef ?? '') ||
+      completed.workingTreeClean !== true || completed.allCommitsPushed !== true ||
+      completed.validationEvidence?.headSha !== completed.headSha || completed.validationEvidence.passed !== true ||
+      typeof completed.validationEvidence.source !== 'string' || !completed.validationEvidence.source.trim() ||
+      completed.validationEvidence.source.length > 4096 || Object.hasOwn(completed, 'exitCode') ||
+      completed.taskCompleteEventId === result?.taskCompleteEventId || completed.turnEndEventId === result?.turnEndEventId) {
+    invalidCompletion('Completed handoff requires separate successful successor events and exact publication/validation proof.');
+  }
+  return prepareLocalSessionHandoff({ result, successor, expectedGeneration }, options);
+}
+
+async function prepareLocalSessionHandoff({ result, successor, expectedGeneration }, options) {
   safeJson(successor, 'Atomic handoff');
   validateRemoteJob(successor.job);
   if (!validUuid(successor.assignmentEventId) || !validUuid(successor.activityEventId) ||
@@ -947,6 +1023,13 @@ export async function recordLocalSessionHandoff({ result, successor, expectedGen
     assignmentEventId: successor.assignmentEventId, activityEventId: successor.activityEventId,
     assignmentSource: successor.assignmentSource, assignmentContentSha256: successor.assignmentContentSha256,
     deliveryEventId: successor.deliveryEventId, deliveryContentSha256: successor.deliveryContentSha256,
+    ...(successor.completion ? { completion: {
+      headSha: successor.completion.headSha, taskCompleteEventId: successor.completion.taskCompleteEventId,
+      turnEndEventId: successor.completion.turnEndEventId, deliveryEventId: successor.completion.deliveryEventId,
+      deliveryContentSha256: successor.completion.deliveryContentSha256, publicationRef: successor.completion.publicationRef,
+      workingTreeClean: true, allCommitsPushed: true,
+      validationEvidence: { headSha: successor.completion.headSha, passed: true, source: successor.completion.validationEvidence.source },
+    } } : {}),
   };
   return recordAppCompletion({ result, successor: canonical, expectedGeneration }, options);
 }
@@ -1006,6 +1089,9 @@ async function recordAppCompletion({ result, successor, expectedGeneration }, op
   const runtime = validateCompletionJournal(journal, value, admitted, snapshot);
   validateCompletionObservation(value.observation, admitted, journal, successor);
   await verifyCompletionGit(runtime.cwd, admitted, value, options.execFile ?? execFileAsync, successor);
+  if (successor?.completion) {
+    await verifyCompletionGit(runtime.cwd, successor.job, successor.completion, options.execFile ?? execFileAsync);
+  }
   await recheckCompletionJournal(journal);
   return mutateLedger(async (ledger) => {
     const entry = inspectEntry(ledger);
@@ -1023,12 +1109,14 @@ async function recordAppCompletion({ result, successor, expectedGeneration }, op
       kind: 'app-session-task', ...proof, evidenceDigest,
       taskCompletedAt: runtime.task.timestamp, turnEndedAt: runtime.end.timestamp,
       journalSha256: journal.digest,
+      ...(journal.epochs ? { runtimeEpochs: journal.epochs } : {}),
       ...(successor ? { historicalDelivery: journal.delivery, assignment: journal.assignment, activity: journal.activity } : {}),
       observation: {
         observedAt: value.observation.observedAt, source: value.observation.source,
         runtimeHeadEventId: value.observation.runtimeHeadEventId, running: value.observation.running,
         ...(successor ? {
-          activeWork: true, successorJobId: successor.job.jobId,
+          activeWork: !successor.completion, ...(successor.completion ? { followUpPending: false } : {}),
+          successorJobId: successor.job.jobId,
           currentAssignmentConfirmed: true, latestUserEventId: journal.latestUserEventId,
         } : { followUpPending: false }),
       },
@@ -1048,6 +1136,20 @@ async function recordAppCompletion({ result, successor, expectedGeneration }, op
         },
       };
       entry.sessionCompletion.successorJobId = next.jobId;
+      if (successor.completion) {
+        next.state = 'completed';
+        next.headSha = successor.completion.headSha;
+        next.workingTreeClean = true;
+        next.allCommitsPushed = true;
+        next.validationEvidence = successor.completion.validationEvidence;
+        next.sessionCompletion = {
+          kind: 'app-session-task-retrospective', accountedAt: entry.updatedAt, runtimeReportedAdmission: false,
+          ...successor.completion, taskCompletedAt: journal.successorTask.timestamp,
+          turnEndedAt: journal.successorEnd.timestamp, historicalDelivery: journal.successorDelivery,
+          journalSha256: journal.digest, predecessorEvidenceDigest: evidenceDigest,
+          observation: entry.sessionCompletion.observation,
+        };
+      }
       ledger.jobs[next.jobId] = next;
       return { completed: entry, successor: next };
     }

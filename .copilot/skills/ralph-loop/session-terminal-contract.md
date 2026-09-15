@@ -35,6 +35,10 @@ If a new issue already resumed in the same session before bookkeeping caught up,
 explicitly authorized atomic `handoff-local-session` may record the old completion and new
 admission together. Keep both task boundaries and never label the later result with the old
 job/fence. See [atomic handoffs](operations.md#atomic-completed-task-to-resumed-task-handoff).
+If both tasks already ended before accounting, the separately authorized
+`complete-local-handoff` records the successor retrospectively from its own existing
+task/turn and publication proof. Its audit fence is allocated now, never claimed to have
+appeared in a historical report. Do not fabricate an active session or restart it for bookkeeping.
 
 ## Admission Identity And Resumed Work
 

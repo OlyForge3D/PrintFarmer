@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
 import test from 'node:test';
-import { activeJobStates, recordLocalSessionCompletion, recordLocalSessionHandoff, recordLocalTerminalResult, reserveLocalJob } from '../ralph-macos-ssh.mjs';
+import { activeJobStates, recordLocalSessionCompletion, recordLocalSessionHandoff, recordLocalCompletedHandoff, recordLocalTerminalResult, reserveLocalJob } from '../ralph-macos-ssh.mjs';
 
 const repository = 'OlyForge3D/PrintFarmer';
 const sessionId = '9667f607-58da-47c2-a2ea-90ee64198dc9';
@@ -492,4 +492,131 @@ test('atomic handoff concurrent CAS permits one winner and never exposes a relea
   assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
   assert.equal(outcomes.find((outcome) => outcome.status === 'rejected').reason.code, 'STALE_LEDGER');
   assert.equal(Object.values((await f.readLedger()).jobs).filter((entry) => activeJobStates.has(entry.state)).length, 2);
+});
+
+async function completedHandoffFixture(t) {
+  const f = await handoffFixture(t);
+  const newHead = 'c'.repeat(40);
+  const content = `${newHead}\trefs/pull/2725/head; clean delivery verified`;
+  const receipt = { id: randomUUID(), type: 'tool.execution_complete', timestamp: timestamp(3_000),
+    data: { success: true, toolCallId: 'new-delivery', result: { content } } };
+  const task = { id: randomUUID(), type: 'session.task_complete', timestamp: timestamp(2_000),
+    data: { success: true, summary: '#2724 delivered. Working tree clean; all commits pushed. Admission marker still pending.' } };
+  const end = { id: randomUUID(), type: 'assistant.turn_end', timestamp: timestamp(1_500), data: { turnId: 'new-task' } };
+  f.events.push({ id: randomUUID(), type: 'tool.execution_start', timestamp: timestamp(3_500),
+    data: { toolCallId: 'new-delivery', toolName: 'powershell' } }, receipt, task, end,
+  { id: randomUUID(), type: 'session.shutdown', timestamp: timestamp(1_000), data: { shutdownType: 'routine' } });
+  f.events.forEach((event, index) => { if (index) event.parentId = f.events[index - 1].id; });
+  f.successor.completion = {
+    headSha: newHead, publicationRef: 'refs/pull/2725/head', workingTreeClean: true, allCommitsPushed: true,
+    taskCompleteEventId: task.id, turnEndEventId: end.id, deliveryEventId: receipt.id,
+    deliveryContentSha256: createHash('sha256').update(content).digest('hex'),
+    validationEvidence: { headSha: newHead, passed: true, source: 'Verified successor CI/test results at exact HEAD.' },
+  };
+  f.git[`merge-base --is-ancestor ${f.successor.job.baseSha} ${newHead}`] = '';
+  f.git['ls-remote --exit-code origin refs/pull/2725/head'] = `${newHead}\trefs/pull/2725/head`;
+  f.git['rev-parse HEAD'] = newHead;
+  const refresh = async () => {
+    await f.refresh();
+    Object.assign(f.result.observation, { activeWork: false, running: false, followUpPending: false });
+  };
+  await refresh();
+  const completePair = (expectedGeneration = 206) =>
+    recordLocalCompletedHandoff({ result: f.result, successor: f.successor, expectedGeneration }, f.options);
+  return { ...f, task, end, newReceipt: receipt, refresh, completePair };
+}
+
+test('completed pair is one atomic historical reconciliation, not fake active work or a fabricated preexisting fence', async (t) => {
+  const f = await completedHandoffFixture(t);
+  const before = await f.readLedger();
+  const result = await f.completePair();
+  const after = await f.readLedger();
+  assert.equal(after.generation, 207);
+  assert.equal(result.completed.state, 'completed');
+  assert.equal(result.successor.state, 'completed');
+  assert.equal(result.successor.fence, 207);
+  assert.equal(result.successor.predecessorJobId, jobId);
+  assert.equal(result.completed.sessionCompletion.taskCompleteEventId, f.result.taskCompleteEventId);
+  assert.equal(result.successor.sessionCompletion.taskCompleteEventId, f.task.id);
+  assert.equal(result.successor.sessionCompletion.kind, 'app-session-task-retrospective');
+  assert.equal(result.successor.sessionCompletion.runtimeReportedAdmission, false);
+  assert.equal(Object.hasOwn(result.completed, 'exitCode'), false);
+  assert.equal(Object.hasOwn(result.successor, 'exitCode'), false);
+  assert.equal(Object.values(after.jobs).filter((entry) => activeJobStates.has(entry.state)).length, 1);
+  for (const id of ['retained', 'retired']) assert.deepEqual(after.jobs[id], before.jobs[id]);
+  assert.deepEqual(await f.completePair(207), result);
+  assert.equal((await f.readLedger()).generation, 207);
+});
+
+test('active handoff cannot implicitly import a completed destination', async (t) => {
+  const f = await completedHandoffFixture(t);
+  await assert.rejects(() => f.handoff(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+  assert.equal((await f.readLedger()).generation, 206);
+});
+
+test('completed pair rejects live, wrong, missing, failed and resumed successor evidence without partial writes', async (t) => {
+  const cases = [
+    ['same task ID', (f) => { f.successor.completion.taskCompleteEventId = f.result.taskCompleteEventId; }],
+    ['same turn end', (f) => { f.successor.completion.turnEndEventId = f.result.turnEndEventId; }],
+    ['wrong reported issue', (f) => { f.task.data.summary = '#27240 complete. Working tree clean; all commits pushed.'; }],
+    ['failed new task', (f) => { f.task.data.success = false; }],
+    ['embedded new task', (f) => { f.task.agentId = randomUUID(); }],
+    ['missing new task', (f) => { f.successor.completion.taskCompleteEventId = randomUUID(); }],
+    ['missing new end', (f) => { f.successor.completion.turnEndEventId = randomUUID(); }],
+    ['wrong new turn', (f) => { f.end.data.turnId = 'old-turn'; }],
+    ['failed new delivery', (f) => { f.newReceipt.data.success = false; }],
+    ['old receipt relabelled new', (f) => { f.successor.completion.deliveryEventId = f.successor.deliveryEventId; }],
+    ['dirty now', (f) => { f.git['status --porcelain=v1 --untracked-files=all'] = ' M actual-new-work'; }],
+    ['unpublished new head', (f) => { f.git['ls-remote --exit-code origin refs/pull/2725/head'] = ''; }],
+    ['failed new validation', (f) => { f.successor.completion.validationEvidence.passed = false; }],
+    ['invented exit', (f) => { f.successor.completion.exitCode = 0; }],
+    ['still running', (f) => { f.result.observation.running = true; }],
+    ['claimed active', (f) => { f.result.observation.activeWork = true; }],
+    ['queued followup', (f) => { f.result.observation.followUpPending = true; }],
+    ['changed current issue', (f) => { f.result.observation.issue = 2727; }],
+    ['later user work', (f) => { f.events.push({ id: randomUUID(), parentId: f.events.at(-1).id,
+      timestamp: timestamp(500), type: 'user.message', data: { content: 'New issue #2727' } }); }],
+    ['unrecognized shutdown', (f) => { f.events.at(-1).data.shutdownType = 'crash'; }],
+  ];
+  for (const [name, change] of cases) await t.test(name, async (subtest) => {
+    const f = await completedHandoffFixture(subtest);
+    change(f);
+    const observation = structuredClone(f.result.observation);
+    await f.writeJournal();
+    Object.assign(f.result.observation, observation, {
+      journalSha256: f.result.observation.journalSha256, runtimeHeadEventId: f.events.at(-1).id,
+    });
+    const before = await readFile(f.ledgerFile, 'utf8');
+    await assert.rejects(() => f.completePair(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+    assert.equal(await readFile(f.ledgerFile, 'utf8'), before);
+  });
+});
+
+test('completed pair concurrent writers release only the single retained slot', async (t) => {
+  const f = await completedHandoffFixture(t);
+  const outcomes = await Promise.allSettled([f.completePair(), f.completePair()]);
+  assert.equal(outcomes.filter((outcome) => outcome.status === 'fulfilled').length, 1);
+  assert.equal(outcomes.find((outcome) => outcome.status === 'rejected').reason.code, 'STALE_LEDGER');
+  assert.equal(Object.values((await f.readLedger()).jobs).filter((entry) => activeJobStates.has(entry.state)).length, 1);
+});
+
+test('native shutdown/resume explicitly starts a fresh runtime epoch without manufacturing task success', async (t) => {
+  for (const kind of ['valid', 'active-old-host', 'wrong-cwd', 'no-shutdown']) await t.test(kind, async (subtest) => {
+    const f = await completedHandoffFixture(subtest);
+    const index = f.events.indexOf(f.newReceipt) - 1;
+    const boundary = [
+      ...(kind === 'no-shutdown' ? [] : [{ type: 'session.shutdown', data: { shutdownType: 'routine' } }]),
+      { type: 'session.resume', data: { sessionWasActive: kind === 'active-old-host', alreadyInUse: false,
+        context: { cwd: kind === 'wrong-cwd' ? path.join(f.root, 'other') : f.root } } },
+      { type: 'assistant.turn_start', data: { turnId: 'new-task', interactionId: f.assignment.data.interactionId } },
+    ].map((event) => ({ ...event, id: randomUUID(), timestamp: timestamp(3_700) }));
+    f.events.splice(index, 0, ...boundary);
+    f.events.forEach((event, position) => { if (position) event.parentId = f.events[position - 1].id; });
+    await f.refresh();
+    if (kind === 'valid') {
+      const recorded = await f.completePair();
+      assert.equal(recorded.completed.sessionCompletion.runtimeEpochs[0].interruptedTurnCount, 1);
+      assert.equal(recorded.successor.exitCode, undefined);
+    } else await assert.rejects(() => f.completePair(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+  });
 });
