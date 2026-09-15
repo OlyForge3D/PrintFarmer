@@ -202,6 +202,11 @@ public interface IPrintersService
     Task<PrinterStatusDto> GetStatusDtoAsync(Guid id, CancellationToken ct);
 
     /// <summary>
+    /// Reads one fresh movement-safety snapshot using the already loaded printer.
+    /// </summary>
+    Task<PrinterStatusDto> GetMovementStatusAsync(Printer printer, CancellationToken ct);
+
+    /// <summary>
     /// Retrieves a single printer as a DTO for API responses.
     /// </summary>
     /// <param name="id">The printer ID</param>

@@ -43,6 +43,10 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
         _logger = logger;
     }
 
+    /// <inheritdoc />
+    public Task<PrinterStatusDto> GetMovementStatusAsync(Printer printer, CancellationToken ct) =>
+        _client.GetMovementStatusAsync(printer, ct);
+
     public async Task<PrinterStatusDto> GetPrinterStatusAsync(Printer printer, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(printer);

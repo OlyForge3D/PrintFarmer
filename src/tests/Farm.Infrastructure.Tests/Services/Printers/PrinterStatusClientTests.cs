@@ -145,6 +145,32 @@ public class PrinterStatusClientTests
     #region Moonraker Status Client Tests
 
     [Fact]
+    public async Task MoonrakerStatusClient_ManualSnapshot_DoesNotFetchCompositeStatus()
+    {
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Name = "Manual snapshot",
+            Credential = PrinterCredential.FromApiKey("fixture-key"),
+        };
+        using var cancellation = new CancellationTokenSource();
+        var observed = new PrinterStatusDto(printer.Id, true, "standby", X: 10, Y: 20, Z: 0);
+        var backend = new Mock<IMoonrakerClient>(MockBehavior.Strict);
+        backend.Setup(client => client.GetMovementStatusAsync(printer, cancellation.Token)).ReturnsAsync(observed);
+        var breakers = new Mock<ICircuitBreakerService>(MockBehavior.Strict);
+        var client = new MoonrakerStatusClient(
+            backend.Object, breakers.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
+
+        PrinterStatusDto result = await client.GetMovementStatusAsync(printer, cancellation.Token);
+
+        Assert.Same(observed, result);
+        backend.Verify(value => value.GetMovementStatusAsync(printer, cancellation.Token), Times.Once);
+        backend.Verify(value => value.GetCompositeStatusAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Never);
+        backend.VerifyNoOtherCalls();
+        breakers.VerifyNoOtherCalls();
+    }
+
+    [Fact]
     public async Task MoonrakerStatusClient_FreshMovementSnapshot_ReplacesMotionOnly()
     {
         var printer = new Printer { Id = Guid.NewGuid(), Name = "Fresh snapshot", ServerUrl = "http://fixture.invalid" };

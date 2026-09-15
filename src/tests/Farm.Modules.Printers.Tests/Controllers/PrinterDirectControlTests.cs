@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -32,7 +33,8 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
             .ReturnsAsync(true);
         printers.Setup(service => service.FindByIdAsync(printerId, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = printerId, Backend = (int)PrinterBackend.Moonraker });
-        printers.Setup(service => service.GetStatusDtoAsync(printerId, It.IsAny<CancellationToken>()))
+        printers.Setup(service => service.GetMovementStatusAsync(
+                It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterStatusDto(printerId, true, "Idle", X: 10, Y: 20, Z: 0));
         await using AppDbContext db = CreateContext();
         await db.Database.EnsureCreatedAsync();
@@ -44,6 +46,342 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
     public async Task DisposeAsync() => await keepAlive.DisposeAsync();
 
     async ValueTask IAsyncDisposable.DisposeAsync() => await DisposeAsync();
+
+    [Theory]
+    [InlineData("success")]
+    [InlineData("false")]
+    [InlineData("exception")]
+    [InlineData("cancel")]
+    [InlineData("timeout")]
+    public async Task EmergencyStopAsync_HeldManualCommand_PreservesFenceForEveryOutcome(string outcome)
+    {
+        await using AppDbContext manualDb = CreateContext();
+        PrinterActuationResult manual = await CreateActuation(manualDb)
+            .AcquireDirectAsync(printerId, userId.ToString(), "home");
+        Assert.True(manual.Success);
+        string before = await ReadDispatchSnapshotAsync();
+        Guid[] originalEvents = await manualDb.QueueDispatchOutbox.Select(row => row.Id).ToArrayAsync();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new DirectControlTestClock();
+        using var caller = new CancellationTokenSource();
+        CancellationToken sendToken = default;
+        printers.Setup(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()))
+            .Returns(async (Guid _, CancellationToken token) =>
+            {
+                sendToken = token;
+                entered.TrySetResult();
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                if (outcome == "exception")
+                {
+                    throw new IOException("Stop response lost");
+                }
+
+                return outcome == "success";
+            });
+        await using AppDbContext stopDb = CreateContext();
+        Task<ActionResult<CommandResult>> pending = CreateController(stopDb, clock)
+            .EmergencyStopAsync(printerId, caller.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            Assert.Equal(before, await ReadDispatchSnapshotAsync());
+            if (outcome == "cancel")
+            {
+                caller.Cancel();
+            }
+            else if (outcome == "timeout")
+            {
+                clock.Advance(TimeSpan.FromSeconds(19));
+                Assert.False(sendToken.IsCancellationRequested);
+                Assert.False(pending.IsCompleted);
+                clock.Advance(TimeSpan.FromSeconds(1));
+            }
+            else
+            {
+                release.TrySetResult();
+            }
+
+            if (outcome == "cancel")
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    () => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+            }
+            else
+            {
+                ActionResult<CommandResult> response = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+                if (outcome == "success")
+                {
+                    CommandResult result = Assert.IsType<CommandResult>(response.Value);
+                    Assert.True(result.Success);
+                    Assert.Contains("accepted", result.Message, StringComparison.OrdinalIgnoreCase);
+                    Assert.Contains("not confirmed", result.Message, StringComparison.OrdinalIgnoreCase);
+                }
+                else
+                {
+                    ObjectResult error = Assert.IsType<ObjectResult>(response.Result);
+                    Assert.Equal(503, error.StatusCode);
+                    CommandResult result = Assert.IsType<CommandResult>(error.Value);
+                    Assert.False(result.Success);
+                    Assert.Contains("unknown", result.Message, StringComparison.OrdinalIgnoreCase);
+                }
+            }
+
+            if (outcome is "cancel" or "timeout")
+            {
+                Assert.True(sendToken.IsCancellationRequested);
+                Assert.False(release.Task.IsCompleted);
+            }
+
+            Assert.Equal(before, await ReadDispatchSnapshotAsync());
+            await using AppDbContext verify = CreateContext();
+            Assert.Equal(originalEvents, await verify.QueueDispatchOutbox.Select(row => row.Id).ToArrayAsync());
+            Assert.False(await verify.QueueDispatchAttempts.AnyAsync());
+            printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+            authorization.Verify(service => service.CanActorAccessPrinterAsync(
+                userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()),
+                Times.Exactly(3));
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+    }
+
+    [Theory]
+    [InlineData("emergency-stop")]
+    [InlineData("stop")]
+    public async Task EmergencyStopAsync_ManualFinishesAndPrintTakesOwnership_StillStopsSelectedPrinter(string route)
+    {
+        await using AppDbContext manualDb = CreateContext();
+        PrinterPhysicalActuationService manualService = CreateActuation(manualDb);
+        PrinterActuationResult manual = await manualService.AcquireDirectAsync(printerId, userId.ToString(), "move");
+        Assert.NotNull(manual.Lease);
+        var reauthorizing = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var resume = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        authorization.SetupSequence(service => service.CanActorAccessPrinterAsync(
+                userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)
+            .Returns(async () =>
+            {
+                reauthorizing.TrySetResult();
+                await resume.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                return true;
+            });
+        printers.Setup(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+        await using AppDbContext stopDb = CreateContext();
+        PrintersController controller = CreateController(stopDb);
+        Task<ActionResult<CommandResult>> pending = route == "stop"
+            ? controller.StopAsync(printerId, default)
+            : controller.EmergencyStopAsync(printerId, default);
+        await reauthorizing.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        string successor;
+        try
+        {
+            await manualService.CompleteDirectAsync(manual.Lease, true);
+            await using AppDbContext nextDb = CreateContext();
+            PrinterDispatchState state = await nextDb.PrinterDispatchStates.SingleAsync();
+            state.ActiveJobId = Guid.NewGuid();
+            state.ActiveDispatchAttemptId = Guid.NewGuid();
+            await SeedBarrierAsync(nextDb, "start", DateTime.UtcNow, state.ActiveDispatchAttemptId);
+            nextDb.PrintJobs.Add(new PrintJob
+            {
+                Id = state.ActiveJobId.Value,
+                Name = "New owner",
+                AssignedPrinterId = printerId,
+                Status = PrintJobStatus.Printing,
+            });
+            await nextDb.SaveChangesAsync();
+            successor = await ReadDispatchSnapshotAsync();
+        }
+        finally
+        {
+            resume.TrySetResult();
+        }
+
+        ActionResult<CommandResult> response = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+        Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
+        Assert.Equal(successor, await ReadDispatchSnapshotAsync());
+        await using AppDbContext verify = CreateContext();
+        Assert.False(await verify.QueueDispatchOutbox.AnyAsync(row =>
+            row.EventType == BackendControlCommandConsumerService.EventType));
+        printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task EmergencyStopAsync_SendBlocked_DoesNotHoldDatabaseWriterLock()
+    {
+        await using AppDbContext seed = CreateContext();
+        await SeedBarrierAsync(seed, "home", DateTime.UtcNow);
+        Guid otherId = Guid.NewGuid();
+        seed.Printers.Add(new Printer { Id = otherId, Name = "Other printer" });
+        await seed.SaveChangesAsync();
+        string before = await ReadDispatchSnapshotAsync();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        printers.Setup(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()))
+            .Returns(async () =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                return true;
+            });
+        await using AppDbContext stopDb = CreateContext();
+        Task<ActionResult<CommandResult>> pending = CreateController(stopDb).EmergencyStopAsync(printerId, default);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            await using AppDbContext writer = CreateContext();
+            Printer other = await writer.Printers.SingleAsync(row => row.Id == otherId);
+            other.Name = "Updated while stop is in flight";
+            await writer.SaveChangesAsync().WaitAsync(TimeSpan.FromSeconds(5));
+            await using AppDbContext reader = CreateContext();
+            Assert.Equal(other.Name, (await reader.Printers.SingleAsync(row => row.Id == otherId)).Name);
+            Assert.False(pending.IsCompleted);
+            Assert.Equal(before, await ReadDispatchSnapshotAsync());
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+
+        Assert.True(Assert.IsType<CommandResult>((await pending.WaitAsync(TimeSpan.FromSeconds(10))).Value).Success);
+        Assert.Equal(before, await ReadDispatchSnapshotAsync());
+        printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task EmergencyStopAsync_SubmitAccessRevokedAfterFenceConflict_DoesNotSend()
+    {
+        await using AppDbContext db = CreateContext();
+        await SeedBarrierAsync(db, "home", DateTime.UtcNow);
+        string before = await ReadDispatchSnapshotAsync();
+        authorization.SetupSequence(service => service.CanActorAccessPrinterAsync(
+                userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true)
+            .ReturnsAsync(false);
+
+        ActionResult<CommandResult> response = await CreateController(db).EmergencyStopAsync(printerId, default);
+
+        Assert.IsType<NotFoundObjectResult>(response.Result);
+        Assert.Equal(before, await ReadDispatchSnapshotAsync());
+        Assert.False(await db.QueueDispatchOutbox.AnyAsync());
+        printers.Verify(service => service.EmergencyStopAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        authorization.Verify(service => service.CanActorAccessPrinterAsync(
+            userId.ToString(), printerId, PrinterGroupAccessLevel.Submit, It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
+    [Fact]
+    public async Task EmergencyStopAsync_ConcurrencyConflict_StopsOnceWithoutTouchingCurrentFence()
+    {
+        await using AppDbContext db = CreateContext();
+        await SeedBarrierAsync(db, "printer_file_delete", DateTime.UtcNow);
+        string before = await ReadDispatchSnapshotAsync();
+        var actuation = new Mock<IPrinterPhysicalActuationService>(MockBehavior.Strict);
+        actuation.Setup(service => service.AcquireDirectAsync(
+                printerId, userId.ToString(), "emergencystop", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterActuationResult(PrinterActuationResultCode.ConcurrencyConflict));
+        printers.Setup(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(true);
+
+        ActionResult<CommandResult> response = await CreateController(db, actuation: actuation.Object)
+            .EmergencyStopAsync(printerId, default);
+
+        Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
+        Assert.Equal(before, await ReadDispatchSnapshotAsync());
+        actuation.Verify(service => service.AcquireDirectAsync(
+            printerId, userId.ToString(), "emergencystop", It.IsAny<CancellationToken>()), Times.Once);
+        actuation.VerifyNoOtherCalls();
+        printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Theory]
+    [InlineData("emergency-stop")]
+    [InlineData("stop")]
+    public async Task EmergencyStopAsync_ActivePrint_QueuesAttemptBoundLifecycleInsteadOfDirectStop(string route)
+    {
+        await using AppDbContext db = CreateContext();
+        var job = new PrintJob
+        {
+            Id = Guid.NewGuid(),
+            Name = "Existing print",
+            AssignedPrinterId = printerId,
+            Status = PrintJobStatus.Printing,
+        };
+        db.PrintJobs.Add(job);
+        (await db.PrinterDispatchStates.SingleAsync()).ActiveJobId = job.Id;
+        await db.SaveChangesAsync();
+        PrintersController controller = CreateController(db);
+
+        ActionResult<CommandResult> response = route == "stop"
+            ? await controller.StopAsync(printerId, default)
+            : await controller.EmergencyStopAsync(printerId, default);
+
+        Assert.True(Assert.IsType<CommandResult>(Assert.IsType<AcceptedResult>(response.Result).Value).Success);
+        QueueDispatchOutbox command = Assert.Single(await db.QueueDispatchOutbox.ToListAsync(),
+            row => row.EventType == BackendControlCommandConsumerService.EventType);
+        QueueDispatchAttempt attempt = Assert.Single(await db.QueueDispatchAttempts.ToListAsync());
+        Assert.Equal(job.Id, attempt.PrintJobId);
+        Assert.Equal(attempt.Id, command.AttemptId);
+        using JsonDocument payload = JsonDocument.Parse(command.PayloadJson);
+        Assert.Equal("emergencystop", payload.RootElement.GetProperty("operation").GetString());
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync();
+        Assert.Equal(command.Id, state.PhysicalControlCommandId);
+        Assert.Equal(attempt.Id, state.PhysicalControlAttemptId);
+        printers.Verify(service => service.EmergencyStopAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task EmergencyStopAsync_IdlePrinter_TimesOutAtTwentySecondsAndRetainsUnknownFence()
+    {
+        var clock = new DirectControlTestClock();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        CancellationToken sendToken = default;
+        printers.Setup(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()))
+            .Returns(async (Guid _, CancellationToken token) =>
+            {
+                sendToken = token;
+                entered.TrySetResult();
+                await release.Task.WaitAsync(TimeSpan.FromSeconds(30));
+                return true;
+            });
+        await using AppDbContext db = CreateContext();
+        Task<ActionResult<CommandResult>> pending = CreateController(db, clock).EmergencyStopAsync(printerId, default);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            clock.Advance(TimeSpan.FromSeconds(19));
+            Assert.False(sendToken.IsCancellationRequested);
+            Assert.False(pending.IsCompleted);
+            clock.Advance(TimeSpan.FromSeconds(1));
+            ActionResult<CommandResult> response = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+            Assert.Equal(503, Assert.IsType<ObjectResult>(response.Result).StatusCode);
+            Assert.True(sendToken.IsCancellationRequested);
+            Assert.False(release.Task.IsCompleted);
+            await using AppDbContext verify = CreateContext();
+            PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync();
+            Assert.NotNull(state.PhysicalControlCommandId);
+            Assert.True(state.PhysicalControlRequiresReconciliation);
+            Assert.Equal("emergencystop", state.PhysicalControlOperation);
+            Assert.False(await verify.QueueDispatchOutbox.AnyAsync(row =>
+                row.EventType == PrinterPhysicalActuationService.EventTypeCompleted));
+            printers.Verify(service => service.EmergencyStopAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+    }
+
+    private async Task<string> ReadDispatchSnapshotAsync()
+    {
+        await using AppDbContext db = CreateContext();
+        PrinterDispatchState state = await db.PrinterDispatchStates.SingleAsync(row => row.PrinterId == printerId);
+        return JsonSerializer.Serialize(db.Entry(state).Properties.ToDictionary(
+            property => property.Metadata.Name, property => property.CurrentValue));
+    }
 
     [Theory]
     [InlineData("success")]
@@ -203,7 +541,8 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
     public async Task ManualMoveAsync_Moonraker_ValidatesFreshDestinationWithoutClearancePolicy(bool absolute)
     {
         var observed = new PrinterStatusDto(printerId, true, "Idle", X: 10, Y: 20, Z: 0);
-        printers.Setup(service => service.GetStatusDtoAsync(printerId, It.IsAny<CancellationToken>())).ReturnsAsync(observed);
+        printers.Setup(service => service.GetMovementStatusAsync(
+            It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>())).ReturnsAsync(observed);
         printers.Setup(service => service.MoveAsync(printerId, 2, null, 0.2, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(PrinterControlOutcome.Ok);
         printers.Setup(service => service.MoveToAsync(printerId, 2, null, 0.2, null, It.IsAny<CancellationToken>()))
@@ -226,7 +565,13 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
             : await controller.MoveAsync(printerId, request, default);
 
         Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
-        printers.Verify(service => service.GetStatusDtoAsync(printerId, It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(service => service.GetMovementStatusAsync(
+            It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(service => service.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        printers.Verify(service => service.MoveAsync(printerId, 2, null, 0.2, null, It.IsAny<CancellationToken>()),
+            absolute ? Times.Never() : Times.Once());
+        printers.Verify(service => service.MoveToAsync(printerId, 2, null, 0.2, null, It.IsAny<CancellationToken>()),
+            absolute ? Times.Once() : Times.Never());
         safety.Verify(service => service.ValidateObservedManualMoveAsync(
             printerId, expected, observed, It.IsAny<CancellationToken>()), Times.Once);
         safety.Verify(service => service.ValidateAsync(
@@ -236,12 +581,92 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
     }
 
     [Theory]
+    [InlineData("home", "exception")]
+    [InlineData("home", "read_timeout")]
+    [InlineData("home", "cancel")]
+    [InlineData("home", "deadline")]
+    [InlineData("move", "exception")]
+    [InlineData("move", "read_timeout")]
+    [InlineData("move", "cancel")]
+    [InlineData("move", "deadline")]
+    public async Task ManualControlAsync_FreshSnapshotFails_ReleasesLeaseWithoutSending(string route, string failure)
+    {
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var clock = new DirectControlTestClock();
+        using var caller = new CancellationTokenSource();
+        printers.Setup(service => service.GetMovementStatusAsync(
+                It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()))
+            .Returns(async (Printer _, CancellationToken token) =>
+            {
+                entered.TrySetResult();
+                await release.Task.WaitAsync(token);
+                if (failure == "read_timeout")
+                {
+                    throw new TaskCanceledException("Snapshot HTTP deadline exceeded");
+                }
+
+                throw new IOException("Snapshot unavailable");
+            });
+        await using AppDbContext db = CreateContext();
+        PrintersController controller = CreateController(db, clock);
+        Task<ActionResult<CommandResult>> pending = route == "home"
+            ? controller.HomeAsync(printerId, caller.Token)
+            : controller.MoveAsync(printerId, new MoveRequest(1, null, null, null), caller.Token);
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        try
+        {
+            if (failure == "cancel")
+            {
+                caller.Cancel();
+            }
+            else if (failure == "deadline")
+            {
+                clock.Advance(TimeSpan.FromMinutes(5));
+            }
+            else
+            {
+                release.TrySetResult();
+            }
+
+            if (failure == "cancel")
+            {
+                await Assert.ThrowsAnyAsync<OperationCanceledException>(
+                    () => pending.WaitAsync(TimeSpan.FromSeconds(10)));
+            }
+            else
+            {
+                ActionResult<CommandResult> response = await pending.WaitAsync(TimeSpan.FromSeconds(10));
+                ObjectResult error = Assert.IsType<ObjectResult>(response.Result);
+                Assert.Equal(503, error.StatusCode);
+                Assert.Equal("printer_safety_evidence_unknown",
+                    Assert.IsType<ProblemDetails>(error.Value).Extensions["code"]);
+            }
+
+            await using AppDbContext verify = CreateContext();
+            PrinterDispatchState state = await verify.PrinterDispatchStates.SingleAsync();
+            Assert.Null(state.PhysicalControlCommandId);
+            Assert.False(state.PhysicalControlRequiresReconciliation);
+            Assert.DoesNotContain(printers.Invocations,
+                invocation => invocation.Method.Name is "SendHomeAsync" or "MoveAsync");
+            printers.Verify(service => service.GetMovementStatusAsync(
+                It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()), Times.Once);
+            printers.Verify(service => service.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        }
+        finally
+        {
+            release.TrySetResult();
+        }
+    }
+
+    [Theory]
     [InlineData("Printing", true)]
     [InlineData("Idle", false)]
     [InlineData("unknown", true)]
     public async Task HomeAsync_FreshStatusNotReady_DoesNotSend(string state, bool online)
     {
-        printers.Setup(service => service.GetStatusDtoAsync(printerId, It.IsAny<CancellationToken>()))
+        printers.Setup(service => service.GetMovementStatusAsync(
+                It.Is<Printer>(printer => printer.Id == printerId), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterStatusDto(printerId, online, state));
         await using AppDbContext db = CreateContext();
         ActionResult<CommandResult> response = await CreateController(db).HomeAsync(printerId, default);
@@ -482,10 +907,12 @@ public sealed class PrinterDirectControlTests : IAsyncLifetime, IAsyncDisposable
     private PrinterPhysicalActuationService CreateActuation(AppDbContext db) =>
         new(db, new DbOutboxSequenceAllocator(), authorization.Object, NullLogger<PrinterPhysicalActuationService>.Instance);
 
-    private PrintersController CreateController(AppDbContext db, TimeProvider? clock = null)
+    private PrintersController CreateController(
+        AppDbContext db, TimeProvider? clock = null, IPrinterPhysicalActuationService? actuation = null)
     {
         PrintersController controller = PrintersControllerControlGuardsTests.CreateController(
-            printers, new Mock<IPrinterStatusCacheReader>(), out _, timeProvider: clock, realActuation: CreateActuation(db));
+            printers, new Mock<IPrinterStatusCacheReader>(), out _, timeProvider: clock,
+            realActuation: actuation ?? CreateActuation(db), resourceAuthorization: authorization);
         controller.HttpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, userId.ToString())], "test"));
         return controller;

@@ -85,17 +85,18 @@ state only for that request and display errors, cancellation, and timeouts
 explicitly. A lost response can mean the command was sent; never automatically
 retry, replay after reconnect, or infer that motion stopped.
 
-Moonraker jog and absolute positioning require fresh authenticated position,
-homing, effective coordinate-frame, and travel-envelope evidence. Manual moves
-do not require the automated workflow's minimum Z clearance; unrelated
-automated-motion protections remain unchanged.
+Moonraker jog and absolute positioning use one fresh authenticated
+movement-safety snapshot, not full composite status enrichment, then one send
+without tracking hops or artificial waits. Homing, effective coordinate-frame,
+and travel-envelope guards remain. Manual moves do not require the automated
+workflow's minimum Z clearance; unrelated automated protections remain unchanged.
 
-The existing emergency-stop route remains available during an in-flight direct
-manual command. It sends a separate authenticated request with a 20-second bound
-and preserves print-start fencing; it neither releases the motion fence nor
-creates a stop receipt.
-Acceptance or an unknown response does not prove the printer physically stopped.
-Active print-owned stops retain their attempt-bound lifecycle path.
+Emergency Stop targets the selected printer even if manual motion has finished
+and new work has started. Existing active-print lifecycle handling remains.
+The direct-fence fallback authenticates printer access, sends once with a
+20-second bound, and leaves every owner's fence unchanged without tracking.
+Acceptance does not prove stationarity; failure or timeout means an unknown
+physical outcome. Inspect the printer; never automatically retry.
 
 **Removed contract:** every `/api/printers/{id}/control-operations` admission,
 receipt, current-state, and recovery route returns `404`. Printer DTOs no longer

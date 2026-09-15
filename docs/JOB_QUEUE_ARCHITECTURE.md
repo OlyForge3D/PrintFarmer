@@ -142,9 +142,11 @@ are removed (`404`). Printer DTOs omit `physicalControl`, and the
 
 **Moonraker transport and protection:** the plugin sends each command once over
 ordinary HTTP using the configured credentials. Jog and absolute movement save
-and restore G-code state without a restore move. Fresh authenticated observation
-of position, homed axes, and the effective coordinate frame is required before
-motion; cached UI coordinates are not safety evidence. The effective offset
+and restore G-code state without a restore move. Movement uses one fresh
+authenticated safety snapshot of position, homed axes, and the effective frame,
+not full composite status enrichment. No tracking admission, receipt, polling,
+or worker hops and no artificial waits precede the direct send. Cached UI
+coordinates are not safety evidence. The effective offset
 includes G92 (`gcode_move.position - gcode_move.gcode_position`), not just
 `homing_origin`.
 
@@ -173,15 +175,13 @@ Calibration still requires fresh homing telemetry from the existing
 proof that the axes are homed. Static backend capabilities are not live homing
 evidence.
 
-**Emergency stop remains available during direct manual motion.** An authorized
-stop uses separate authenticated HTTP with a 20-second bound, without waiting
-for the motion response or creating a tracked stop receipt. Emergency access
-must preserve coordination with a racing print start and must not release the
-motion fence.
-
-The stop result reports acceptance or uncertainty, never proof of physical
-stopping. Uncertain stops are not automatically replayed. Stops for active
-print-owned work continue through the attempt-bound lifecycle path.
+**Emergency Stop targets the selected printer**, even if manual motion finishes
+and new work starts before the stop arrives. Existing active-print lifecycle
+handling remains. The direct-fence fallback checks printer access and sends once
+over separate authenticated HTTP with a 20-second bound, without changing or
+clearing any owner's fence or adding tracking. Acceptance is not proof of
+stationarity; after failure or timeout, inspect the printer. Never automatically
+retry.
 
 **Upgrade requirement:** stop every old API instance and worker before applying
 the `RetireTrackedPrinterMotion` migration for PostgreSQL, SQL Server, or SQLite.

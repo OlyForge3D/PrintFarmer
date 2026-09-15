@@ -1082,6 +1082,15 @@ public class PrintersService(
     }
 #pragma warning restore CS8603
 
+    /// <inheritdoc />
+    public async Task<PrinterStatusDto> GetMovementStatusAsync(Printer printer, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(printer);
+        PrinterStatusDto status = await _statusClientFactory.GetStatusClient(printer.Backend)
+            .GetMovementStatusAsync(printer, ct).ConfigureAwait(false);
+        return PrinterSafetyTelemetryNormalizer.Normalize(status, existing: null, DateTime.UtcNow);
+    }
+
     /// <summary>
     /// Retrieves a printer DTO with full details including current real-time status.
     /// </summary>
@@ -3806,6 +3815,10 @@ public class PrintersService(
 
             return client is ISupportsEmergencyStop emergency &&
                 await emergency.EmergencyStopAsync(p.BackendUrl, p.Credential, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
         }
         catch (Exception ex)
         {

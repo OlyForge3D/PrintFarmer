@@ -15,6 +15,36 @@ namespace Farm.Backend.Plugins.Tests.Backends;
 public sealed class MoonrakerDirectControlTests
 {
     [Theory]
+    [InlineData("move")]
+    [InlineData("moveto")]
+    public async Task ManualJogAsync_FreshSnapshotThenSend_UsesTwoRequestsWithoutReceiptOrPolling(string operation)
+    {
+        using var handler = new JogHandler();
+        using var http = new HttpClient(handler);
+        var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
+        var printer = new Printer
+        {
+            Id = Guid.NewGuid(),
+            Backend = (int)PrinterBackend.Moonraker,
+            ServerUrl = "http://direct-fixture.invalid",
+            Credential = PrinterCredential.FromApiKey("fixture-key"),
+        };
+
+        PrinterStatusDto observed = await client.GetMovementStatusAsync(printer, default);
+        Assert.True(observed.IsOnline);
+        Assert.True(await ExecuteControlAsync(client, operation));
+
+        Assert.Equal(
+            [
+                "GET /printer/objects/query?webhooks=state&print_stats=state&toolhead=homed_axes&gcode_move=position,gcode_position",
+                "POST /printer/gcode/script",
+            ],
+            handler.Requests);
+        Assert.DoesNotContain("M400", handler.Script, StringComparison.Ordinal);
+        Assert.DoesNotContain("printfarmer_motion", handler.Script, StringComparison.Ordinal);
+    }
+
+    [Theory]
     [InlineData(true)]
     [InlineData(false)]
     public async Task GetMovementStatusAsync_AuthenticatedSnapshot_UsesEffectiveFrameNotHomingOrigin(bool hasMachinePosition)
@@ -141,6 +171,39 @@ public sealed class MoonrakerDirectControlTests
             };
         }
 
+    }
+
+    private sealed class JogHandler : HttpMessageHandler
+    {
+        public List<string> Requests { get; } = [];
+        public string? Script { get; private set; }
+
+        protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            Requests.Add($"{request.Method} {request.RequestUri!.PathAndQuery}");
+            Assert.Equal("fixture-key", Assert.Single(request.Headers.GetValues("X-Api-Key")));
+            string response;
+            if (request.Method == HttpMethod.Get)
+            {
+                Assert.Equal("/printer/objects/query", request.RequestUri.AbsolutePath);
+                response = """
+                    {"result":{"status":{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"homed_axes":"xyz"},"gcode_move":{"position":[10,20,0,0],"gcode_position":[10,20,0,0]}}}}
+                    """;
+            }
+            else
+            {
+                Assert.Equal(HttpMethod.Post, request.Method);
+                Assert.Equal("/printer/gcode/script", request.RequestUri.AbsolutePath);
+                using JsonDocument body = JsonDocument.Parse(await request.Content!.ReadAsStringAsync(cancellationToken));
+                Script = body.RootElement.GetProperty("script").GetString();
+                response = """{"result":"ok"}""";
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StringContent(response, Encoding.UTF8, "application/json"),
+            };
+        }
     }
 
     private sealed class SnapshotHandler(bool hasMachinePosition) : HttpMessageHandler

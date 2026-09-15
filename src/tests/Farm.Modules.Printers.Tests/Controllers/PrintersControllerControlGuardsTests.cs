@@ -94,7 +94,7 @@ public class PrintersControllerControlGuardsTests
         var printers = new Mock<IPrintersService>();
         printers.Setup(p => p.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = id, Backend = (int)PrinterBackend.Moonraker });
-        printers.Setup(p => p.GetStatusDtoAsync(id, It.IsAny<CancellationToken>()))
+        printers.Setup(p => p.GetMovementStatusAsync(It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterStatusDto(id, true, "Idle", X: 10, Y: 20, Z: 0));
         printers.Setup(p => p.SendHomeAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
         printers.Setup(p => p.HomeXYAsync(id, It.IsAny<CancellationToken>())).ReturnsAsync(true);
@@ -115,7 +115,12 @@ public class PrintersControllerControlGuardsTests
         };
         Assert.True(Assert.IsType<CommandResult>(response.Value).Success);
         actuation.Verify(a => a.AcquireDirectAsync(id, It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(p => p.GetMovementStatusAsync(
+            It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()), Times.Once);
+        printers.Verify(p => p.GetStatusDtoAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
         Assert.Single(printers.Invocations, invocation => invocation.Method.Name is "SendHomeAsync" or "HomeXYAsync" or "HomeZAsync" or "MoveAsync" or "MoveToAsync");
+        Assert.All(printers.Invocations, invocation => Assert.Contains(invocation.Method.Name,
+            new[] { "FindByIdAsync", "GetMovementStatusAsync", "SendHomeAsync", "HomeXYAsync", "HomeZAsync", "MoveAsync", "MoveToAsync" }));
     }
 
     [Theory]
@@ -130,7 +135,7 @@ public class PrintersControllerControlGuardsTests
         var printers = new Mock<IPrintersService>();
         printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = id, Backend = (int)backend });
-        printers.Setup(p => p.GetStatusDtoAsync(id, It.IsAny<CancellationToken>()))
+        printers.Setup(p => p.GetMovementStatusAsync(It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterStatusDto(id, true, "Idle", X: 10, Y: 20, Z: 0));
         printers.Setup(value => value.MoveAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(PrinterControlOutcome.Ok);
@@ -157,7 +162,7 @@ public class PrintersControllerControlGuardsTests
         var printers = new Mock<IPrintersService>();
         printers.Setup(service => service.FindByIdAsync(id, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Printer { Id = id, Backend = (int)PrinterBackend.Moonraker });
-        printers.Setup(p => p.GetStatusDtoAsync(id, It.IsAny<CancellationToken>()))
+        printers.Setup(p => p.GetMovementStatusAsync(It.Is<Printer>(printer => printer.Id == id), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PrinterStatusDto(id, true, "Idle", X: 10, Y: 20, Z: 0));
         printers.Setup(value => value.MoveAsync(id, 1, null, null, null, It.IsAny<CancellationToken>()))
             .ReturnsAsync(outcome);

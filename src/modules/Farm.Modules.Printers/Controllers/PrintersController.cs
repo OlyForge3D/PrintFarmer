@@ -2671,7 +2671,8 @@ public class PrintersController(
         PrinterSafetyMoveRequest? move = null)
     {
         using var timeout = new CancellationTokenSource(
-            PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
+            operation == "emergencystop" ? TimeSpan.FromSeconds(20) :
+                PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
             timeProvider ?? TimeProvider.System);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         ct = deadline.Token;
@@ -2697,7 +2698,8 @@ public class PrintersController(
         try
         {
             ct.ThrowIfCancellationRequested();
-            bool accepted = await backendCall(ct);
+            Task<bool> send = backendCall(ct);
+            bool accepted = operation == "emergencystop" ? await send.WaitAsync(ct) : await send;
             _telemetryService.RecordPrinterOperation(
                 telemetryOperation,
                 printerId.ToString(),
@@ -2730,7 +2732,7 @@ public class PrintersController(
                 CancellationToken.None);
             if (timeout.IsCancellationRequested)
             {
-                return StatusCode(503, new CommandResult(false, "The command timed out; its motion outcome is unknown. Check the printer before requesting another move."));
+                return StatusCode(503, new CommandResult(false, "The command timed out; its physical outcome is unknown. Check the printer before requesting another command."));
             }
 
             throw;
@@ -3019,9 +3021,9 @@ public class PrintersController(
         {
             ct.ThrowIfCancellationRequested();
             if (PrinterDirectControl.IsManualMotion(lease.Operation) &&
-                (await _printersService.FindByIdAsync(lease.PrinterId, ct))?.Backend == (int)PrinterBackend.Moonraker)
+                await _printersService.FindByIdAsync(lease.PrinterId, ct) is { Backend: (int)PrinterBackend.Moonraker } printer)
             {
-                PrinterStatusDto observed = await _printersService.GetStatusDtoAsync(lease.PrinterId, ct);
+                PrinterStatusDto observed = await _printersService.GetMovementStatusAsync(printer, ct);
                 PrinterSafetyValidationResult manualSafety;
                 if (!observed.IsOnline || observed.State?.ToLowerInvariant() is not ("idle" or "ready" or "standby" or "complete" or "cancelled"))
                 {
@@ -3105,6 +3107,13 @@ public class PrintersController(
             ct.ThrowIfCancellationRequested();
             dispatchAuthorized = true;
             return null;
+        }
+        catch (Exception exception) when (
+            PrinterDirectControl.IsManualMotion(lease.Operation) && !ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(exception, "Unable to validate manual motion for printer {PrinterId}; no command sent", lease.PrinterId);
+            return SafetyProblem(PrinterSafetyValidationResult.Reject(
+                503, "printer_safety_evidence_unknown", "Fresh printer safety evidence is unavailable; no motion command was sent."));
         }
         catch (OperationCanceledException)
         {
@@ -3336,6 +3345,11 @@ public class PrintersController(
                 ct);
         }
 
+        if (direct.Code is PrinterActuationResultCode.FenceConflict or PrinterActuationResultCode.ConcurrencyConflict)
+        {
+            return await StopSelectedPrinterAsync(id, ct);
+        }
+
         return await ExecuteDirectBooleanControlAsync(
             id,
             "emergencystop",
@@ -3343,6 +3357,51 @@ public class PrintersController(
             token => _printersService.EmergencyStopAsync(id, token),
             ct,
             direct);
+    }
+
+    private async Task<ActionResult<CommandResult>> StopSelectedPrinterAsync(Guid id, CancellationToken ct)
+    {
+        if (_queueResourceAuthorization is null)
+        {
+            return StatusCode(503, new CommandResult(false, "Printer authorization is unavailable."));
+        }
+
+        if (!await _queueResourceAuthorization.CanActorAccessPrinterAsync(
+                QueueActorIdentity.Resolve(User), id, PrinterGroupAccessLevel.Submit, ct) ||
+            await _printersService.FindByIdAsync(id, ct) is null)
+        {
+            return NotFound(new CommandResult(false, "Printer not found."));
+        }
+
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(20), timeProvider ?? TimeProvider.System);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        const string unknown = "The emergency-stop outcome is unknown. Check the printer; do not assume it has stopped.";
+        try
+        {
+            deadline.Token.ThrowIfCancellationRequested();
+
+            // Stop targets the printer even if ownership changes; it never settles another command's fence.
+            bool accepted = await _printersService.EmergencyStopAsync(id, deadline.Token).WaitAsync(deadline.Token);
+            _telemetryService.RecordPrinterOperation("emergency_stop", id.ToString(), accepted);
+            return accepted
+                ? new CommandResult(true, "Emergency-stop command accepted; physical stationarity is not confirmed.")
+                : StatusCode(503, new CommandResult(false, unknown));
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            _logger.LogWarning("Emergency stop cancelled with unknown outcome for printer {PrinterId}", id);
+            throw;
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            _logger.LogWarning("Emergency stop timed out with unknown outcome for printer {PrinterId}", id);
+            return StatusCode(503, new CommandResult(false, unknown));
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Emergency stop failed with unknown outcome for printer {PrinterId}", id);
+            return StatusCode(503, new CommandResult(false, unknown));
+        }
     }
 
     /// <summary>
