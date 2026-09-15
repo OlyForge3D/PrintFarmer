@@ -77,12 +77,16 @@ const releaseMetadataFixture = version => {
 const cryptoEvidenceFixture = set => {
   const subject = digest => {
     const predicate = JSON.stringify({ SPDXID: 'SPDXRef-DOCUMENT' });
+    const createdAt = Date.parse(set.identity.created);
+    const integratedTime = Number.isFinite(createdAt)
+      ? Math.max(Math.floor(createdAt / 1000) + 60, 1789426200)
+      : 1789426200;
     const optional = { Subject: publisherWorkflowIdentity, Issuer: 'https://token.actions.githubusercontent.com',
-      certificate: cryptoCertificate, Bundle: { Payload: { integratedTime: 1789426200 } } };
+      certificate: cryptoCertificate, Bundle: { Payload: { integratedTime } } };
     const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } }, optional }]);
     const attestationBytes = JSON.stringify([{ payload: Buffer.from(JSON.stringify({
       subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
-    })).toString('base64') }]);
+    })).toString('base64'), optional }]);
     return {
       signatureBytes,
       attestationBytes,
@@ -102,8 +106,12 @@ const cryptoEvidenceFixture = set => {
       ])),
     },
   ]));
-  const verificationTime = '2026-09-14T23:00:00.000Z';
-  const createdTime = set.identity.buildTime ?? set.identity.created;
+  const rawCreatedTime = set.identity.created;
+  const createdAt = Date.parse(rawCreatedTime);
+  const createdTime = Number.isFinite(createdAt) ? rawCreatedTime : created;
+  const verificationTime = new Date(Math.max(
+    Number.isFinite(createdAt) ? createdAt + 10 * 60_000 : 0, 1789426200 * 1000,
+  )).toISOString();
   return { schema: 1, createdTime, verificationTime, services, sha256: hash({
     schema: 1, createdTime, verificationTime, services,
   }) };
@@ -1410,14 +1418,15 @@ test('well-typed record and admission substitutions cannot break canonical or ha
 });
 
 test('candidate lifecycle rejects expiry, direct publication, deletion without merge-back and version regression', () => {
+  const candidateCreated = '2026-09-14T19:00:00.000Z';
   const candidate = { branch: 'release/v1.2.3', target: '1.2.3', sourceCommit: sha, owner: 'maintainer',
-    qualification: 'reviewed-commit', created, expires: '2026-09-14T20:00:00.000Z' };
-  validateCandidate(candidate, created, 7);
+    qualification: 'reviewed-commit', created: candidateCreated, expires: '2026-09-14T20:00:00.000Z' };
+  validateCandidate(candidate, candidateCreated, 7);
   assert.throws(() => validateCandidate(candidate, '2026-09-15T00:00:00Z', 7), /Expired/);
-  assert.throws(() => validateCandidate({ ...candidate, publish: true }, created, 7), /never publish/);
-  assert.throws(() => validateCandidate({ ...candidate, action: 'delete' }, created, 7), /merge-back/);
+  assert.throws(() => validateCandidate({ ...candidate, publish: true }, candidateCreated, 7), /never publish/);
+  assert.throws(() => validateCandidate({ ...candidate, action: 'delete' }, candidateCreated, 7), /merge-back/);
   validateCandidate({ ...candidate, action: 'delete', abandonmentReason: 'superseded',
-    mergeBack: { development: true, activeCandidates: true, versionDidNotRegress: true } }, created, 7);
+    mergeBack: { development: true, activeCandidates: true, versionDidNotRegress: true } }, candidateCreated, 7);
 });
 
 test('missing live protections fail closed before a publisher operation', async () => {
@@ -1452,7 +1461,7 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   assert.match(docker, /release-control\.mjs consume/);
   assert.doesNotMatch(docker, /^\s+(?:packages|contents): write$/m);
   assert.match(docker, /password: \$\{\{ secrets\.RELEASE_REGISTRY_TOKEN \}\}/);
-  assert.match(docker, /Publish and verify public corresponding-source assets\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
+  assert.match(docker, /Publish and verify public corresponding-source assets\r?\n\s+if: inputs.operation == 'publish'\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
   for (const step of docker.split(/^\s{6}- /m)) {
     if (!/uses: actions\/(?:upload|download)-artifact@/.test(step)) continue;
     const selector = step.match(/^\s{10}(?:name|pattern): (.+)$/m)?.[1];
@@ -2776,7 +2785,8 @@ test('protected release-control abandonment uses App policy verification and Git
       RELEASE_TRANSACTION: JSON.stringify(wrongRun),
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
       RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
-    }, () => {}), /Unexpected API host\/path|Unexpected request|workflow run evidence/, 'wrong approval run');
+    }, () => {}), /Missing fixture object|Unexpected API host\/path|Unexpected request|workflow run evidence/, 'wrong approval run');
+    fixture.approvalEvidence.submitted_at = new Date().toISOString();
     await runReleaseControl('abandon', {
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
