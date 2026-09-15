@@ -110,7 +110,7 @@ export function createSshInvocation(configuration) {
 
 export function createRemoteRequest(job, type = 'dispatch') {
   const request = validateRemoteJob(job, { requireFence: true });
-  if (!['dispatch', 'reconcile', 'terminal'].includes(type)) {
+  if (!['dispatch', 'reconcile', 'terminal', 'abandon-incomplete'].includes(type)) {
     throw new RalphMacSshError('Remote worker request type is invalid.', 'INVALID_REQUEST');
   }
   const serialized = `${JSON.stringify({
@@ -184,6 +184,21 @@ export function parseRemoteWorkerResponse(output, job) {
     const validFailure = response.state !== 'failed' || hasSignal || response.exitCode !== 0;
     if (!validEvidence || !validSuccess || !validFailure) {
       throw new RalphMacSshError('Remote terminal attestation is malformed.', 'MALFORMED_RESPONSE');
+    }
+    return response;
+  }
+  if (response.type === 'abandoned') {
+    const completedAt = Date.parse(response.processCompletedAt);
+    const checkedAt = Date.parse(response.processCheckedAt);
+    const gitFields = ['workingTreeClean', 'allCommitsPushed', 'repositoryIdentityVerified', 'baseAncestor'];
+    if (response.state !== 'abandoned' || response.workerVerified !== true || response.dispatchFenced !== true ||
+        response.processCessationVerified !== true || response.exitCode !== 0 || response.signal !== undefined ||
+        response.failureCode !== 'INCOMPLETE_DELIVERY' || !validSha(response.headSha) ||
+        !Number.isFinite(completedAt) || !Number.isFinite(checkedAt) || checkedAt < completedAt || checkedAt > Date.now() ||
+        gitFields.some((key) => typeof response[key] !== 'boolean') || gitFields.every((key) => response[key]) ||
+        typeof response.validationEvidence !== 'string' || !response.validationEvidence.trim() ||
+        !/^[0-9a-f]{64}$/.test(response.requestDigest ?? '')) {
+      throw new RalphMacSshError('Remote abandonment lacks fenced cessation and incomplete-delivery evidence.', 'MALFORMED_RESPONSE');
     }
     return response;
   }
@@ -731,7 +746,7 @@ async function recordRemoteWorkerResponse(response, options = {}) {
     entry.host = response.host;
     if (response.type === 'accepted') {
       entry.state = 'accepted';
-    } else if (response.type === 'terminal') {
+    } else if (response.type === 'terminal' || response.type === 'abandoned') {
       entry.state = response.state;
       entry.headSha = response.headSha;
       entry.exitCode = response.exitCode;
@@ -742,6 +757,12 @@ async function recordRemoteWorkerResponse(response, options = {}) {
       entry.repositoryIdentityVerified = response.repositoryIdentityVerified;
       entry.baseAncestor = response.baseAncestor;
       entry.workerVerified = true;
+      if (response.type === 'abandoned') {
+        entry.failureCode = response.failureCode;
+        entry.failureReason = 'incomplete-delivery';
+        entry.processCompletedAt = response.processCompletedAt;
+        entry.processCheckedAt = response.processCheckedAt;
+      }
     } else if (response.type === 'failed') {
       entry.state = 'failed';
       entry.failureCode = response.failureCode;
@@ -831,9 +852,10 @@ export async function dispatchMacJob({ job, eligibility, controllerPid }, option
   }
 }
 
-export async function reconcileMacJob({ job, jobId = job?.jobId, legacyIdentity = false }, options = {}) {
+export async function reconcileMacJob({ job, jobId = job?.jobId, legacyIdentity = false, abandonIncomplete = false }, options = {}) {
   const configuration = loadMacSshConfiguration(options);
-  if (!validJobIdentifier(jobId) || typeof legacyIdentity !== 'boolean' || (job && job.jobId !== jobId)) {
+  if (!validJobIdentifier(jobId) || typeof legacyIdentity !== 'boolean' || typeof abandonIncomplete !== 'boolean' ||
+      (job && job.jobId !== jobId)) {
     throw new RalphMacSshError('A matching job identifier is required.', 'INVALID_REQUEST');
   }
   const reservation = await mutateLedger((ledger) => {
@@ -877,8 +899,8 @@ export async function reconcileMacJob({ job, jobId = job?.jobId, legacyIdentity 
   }
   const output = await runSsh(
     createSshInvocation(configuration),
-    reservation.job ? createRemoteRequest(request, 'reconcile') :
-      `${JSON.stringify({ version: 1, type: 'reconcile-ledger', job: request })}\n`,
+    reservation.job ? createRemoteRequest(request, abandonIncomplete ? 'abandon-incomplete' : 'reconcile') :
+      `${JSON.stringify({ version: 1, type: abandonIncomplete ? 'abandon-incomplete-ledger' : 'reconcile-ledger', job: request })}\n`,
     options,
   );
   const response = parseRemoteWorkerResponse(output, request);

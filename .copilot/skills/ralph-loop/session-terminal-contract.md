@@ -24,6 +24,10 @@ Report the current admission `jobId`, `fence` and app `sessionId` with terminal 
 Success requires the verified deliverable and publication evidence above, not merely an idle
 session or a closed issue. Lost local sessions are `abandoned`; worker-attested failures are
 `failed`. Neither is successful completion or permission to clean up evidence.
+An explicitly authorized worker-attested incomplete abandonment is also `abandoned`, even when
+the recorded process exited zero. It requires fresh verified process cessation, incomplete Git
+delivery evidence and a durable launch fence; it never claims the work was delivered and retains
+all unpublished artifacts.
 
 If a terminal session resumes work, Ralph must account it as a new job/fence with an explicit
 terminal predecessor and fresh post-terminal activity evidence. Preserve the old result and use

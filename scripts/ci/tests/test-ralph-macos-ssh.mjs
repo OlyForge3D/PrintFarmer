@@ -197,6 +197,46 @@ test('old worker rejection and timeout retain uncertain entries without falling 
   }
 });
 
+test('remote incomplete abandonment requires trusted fenced cessation proof and is never recorded as delivered', async () => {
+  await reset();
+  const entry = await reserveJob({ job: job(), eligibility }, options());
+  await recordDeliveryIntent(entry.jobId, options());
+  await acknowledgeJob(entry.jobId, liveResponse(entry), options());
+  const response = {
+    ...liveResponse(entry), type: 'abandoned', state: 'abandoned', workerVerified: true,
+    requestDigest: entry.requestDigest, dispatchFenced: true, processCessationVerified: true,
+    failureCode: 'INCOMPLETE_DELIVERY', exitCode: 0, headSha: 'b'.repeat(40),
+    workingTreeClean: false, allCommitsPushed: false, repositoryIdentityVerified: true, baseAncestor: true,
+    processCompletedAt: new Date(Date.now() - 2000).toISOString(),
+    processCheckedAt: new Date(Date.now() - 1000).toISOString(),
+    validationEvidence: 'Stopped with incomplete Git evidence; artifacts retained, not delivered.',
+  };
+  for (const changed of [
+    { ...response, processCessationVerified: false }, { ...response, dispatchFenced: false },
+    { ...response, fence: 999 }, { ...response, requestDigest: 'c'.repeat(64) },
+    { ...response, sessionId: 'wrong-session' }, { ...response, processCompletedAt: undefined },
+    { ...response, processCheckedAt: '2000-01-01' }, { ...response, processCheckedAt: '2099-01-01' },
+    { ...response, workingTreeClean: true, allCommitsPushed: true },
+  ]) {
+    await assert.rejects(() => reconcileMacJob({ jobId: entry.jobId, abandonIncomplete: true }, {
+      ...options(), spawn: workerReply(changed),
+    }));
+    assert.equal((await readLedger()).jobs[entry.jobId].state, 'accepted');
+  }
+  const abandoned = await reconcileMacJob({ jobId: entry.jobId, abandonIncomplete: true }, {
+    ...options(), spawn: workerReply(response, (request) => assert.equal(request.type, 'abandon-incomplete')),
+  });
+  assert.equal(abandoned.state, 'abandoned');
+  assert.equal(abandoned.failureReason, 'incomplete-delivery');
+  assert.equal(abandoned.requestDigest, entry.requestDigest);
+  assert.deepEqual(abandoned.workerAttestation, response);
+  assert.deepEqual(await reconcileMacJob({ jobId: entry.jobId }, {
+    ...options(), spawn: () => assert.fail('Terminal replay cannot dispatch'),
+  }), JSON.parse(JSON.stringify(abandoned)));
+  const manual = await runAdmission('terminal-remote', { result: response });
+  assert.equal(manual.code, 1);
+});
+
 test('existing local handoffs are atomic, idempotent and limited to five, with no new-issue eligibility', async () => {
   await reset();
   const evidence = sessionEvidence('existing-session');

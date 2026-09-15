@@ -192,6 +192,33 @@ configuration. No new dependency is required. Until then, exact-original-payload
 can recover existing old-worker records with correlated live/terminal evidence, but an old
 worker's unfenced no-record response is not sufficient to release capacity.
 
+### Stopped But Incomplete Remote Work
+
+Exit zero does not prove delivery: a stopped job can retain dirty files or lack its exact pushed
+branch. Normal `status-remote` continues to require complete success evidence. Do not rerun an
+implementation merely to manufacture that evidence or free a slot.
+
+When explicitly authorized to abandon incomplete work, use `abandon-incomplete-remote` with the
+existing `jobId` (or exact original `job`); `legacyIdentity:true` is available for a missing payload
+only on a compatible worker. This is a separate opt-in operation, never an automatic status fallback.
+The worker must validate the original job/fence/digests and recorded successful process termination,
+then inspect Git evidence and freshly prove the recorded supervisor/child PIDs and all job-fence,
+launch-token and supervisor-token processes are absent, under the existing job lock. Alive, unknown,
+missing or mismatched evidence blocks release. A fully delivered job must use normal status instead.
+
+The worker durably records `abandoned` / `INCOMPLETE_DELIVERY`, with process timestamps, checked
+cessation, incomplete Git evidence and `dispatchFenced:true`. Delayed dispatch and supervisor launch
+are rejected. Preserve the entire prior worker record, process result, logs, dirty files and Git
+state; no cleanup, reset, push, relaunch or issue-success claim is authorized. Windows records the
+correlated attestation, never a caller-authored terminal claim. Repeated calls return the same
+terminal result. This is not completed, delivered, merged or validated work.
+
+Both abandonment request types require the updated standalone worker; unsupported old workers
+retain the reservation. Rollback must retain all worker records and terminal tombstones. An older
+worker/controller may reject new terminal types, but must not be made compatible by deleting
+evidence or redispatching a terminal job. Replacing the configured worker file does not authorize
+restarting existing supervisors or changing their runtime configuration.
+
 Persist only allowlisted job fields and observation references. Never put credentials, SSH
 configuration, environment contents or secrets in criteria, charter, evidence or ledger data.
 Before enabling remote dispatch, drain or account for legacy Mac Ralph admission so Windows is

@@ -149,9 +149,9 @@ async function createFixture(name) {
   };
 }
 
-function invoke(request, env) {
+function invoke(request, env, args = []) {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, [worker], { env, stdio: ['pipe', 'pipe', 'pipe'] });
+    const child = spawn(process.execPath, [worker, ...args], { env, stdio: ['pipe', 'pipe', 'pipe'] });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => { stdout += chunk; });
@@ -160,6 +160,16 @@ function invoke(request, env) {
     child.once('close', (code) => resolve({ code, stdout, stderr }));
     child.stdin.end(typeof request === 'string' ? request : JSON.stringify(request));
   });
+}
+
+function processGone(pid) {
+  try {
+    process.kill(pid, 0);
+    return false;
+  } catch (error) {
+    if (error.code === 'ESRCH') return true;
+    throw error;
+  }
 }
 
 async function waitForRecord(file, predicate, description) {
@@ -686,6 +696,117 @@ test('ledger-only recovery refuses corrupt stored wire digest and attests a corr
   const corrupt = await invoke(request, fixture.env);
   assert.equal(corrupt.code, 1);
   assert.match(corrupt.stderr, /ledger fence and digests/);
+});
+
+test('explicit abandonment preserves stopped incomplete work and durably fences dispatch and supervisor replays', async () => {
+  const fixture = await createFixture('abandon-incomplete');
+  const env = { ...fixture.env, RALPH_MAC_WORKER_FAKE_PUSH: 'false' };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  assert.equal((await invoke(request, env)).code, 0);
+  const file = path.join(fixture.state, `${fixture.job.jobId}.json`);
+  const before = await waitForRecord(file,
+    (record) => record.state === 'awaiting-terminal-evidence' && processGone(record.supervisorPid),
+    'recorded stopped process');
+  const dirtyFile = path.join(before.worktree, 'README.md');
+  await writeFile(dirtyFile, 'unpublished work must survive abandonment\n');
+  const result = await invoke({ ...request, type: 'abandon-incomplete' }, env);
+  assert.equal(result.code, 0, result.stderr);
+  const response = JSON.parse(result.stdout);
+  assert.equal(response.type, 'abandoned');
+  assert.equal(response.state, 'abandoned');
+  assert.equal(response.failureCode, 'INCOMPLETE_DELIVERY');
+  assert.equal(response.dispatchFenced, true);
+  assert.equal(response.processCessationVerified, true);
+  assert.equal(response.workingTreeClean, false);
+  assert.equal(response.allCommitsPushed, false);
+  assert.equal(response.processCompletedAt, before.processResult.completedAt);
+  const after = JSON.parse(await readFile(file, 'utf8'));
+  for (const [key, value] of Object.entries(before)) {
+    if (key !== 'state' && key !== 'terminal') assert.deepEqual(after[key], value);
+  }
+  assert.deepEqual(after.abandonmentEvidence.processResult, before.processResult);
+  assert.equal(await readFile(dirtyFile, 'utf8'), 'unpublished work must survive abandonment\n');
+  for (const type of ['abandon-incomplete', 'reconcile']) {
+    const replay = await invoke({ ...request, type }, env);
+    assert.equal(replay.code, 0, replay.stderr);
+    assert.deepEqual(JSON.parse(replay.stdout), response);
+  }
+  const identityRequest = { ...ledgerRequest(fixture.job, { sessionId: before.sessionId }), type: 'abandon-incomplete-ledger' };
+  assert.deepEqual(JSON.parse((await invoke(identityRequest, env)).stdout), response);
+  const mismatch = await invoke({
+    ...identityRequest, job: { ...identityRequest.job, sessionId: 'unrelated-session' },
+  }, env);
+  assert.equal(mismatch.code, 1);
+  assert.match(mismatch.stderr, /ledger fence and digests/);
+  const delayed = await invoke(request, env);
+  assert.equal(delayed.code, 1);
+  assert.match(delayed.stderr, /terminally fenced/);
+  const supervisor = await invoke({}, env, ['--run', fixture.job.jobId, before.launchToken]);
+  assert.equal(supervisor.code, 1);
+  assert.match(supervisor.stderr, /Supervisor launch is not owned/);
+  assert.equal((await waitForInvocations(fixture.invocations, 1)).length, 1);
+  assert.equal(await readFile(dirtyFile, 'utf8'), 'unpublished work must survive abandonment\n');
+});
+
+test('abandonment rejects alive, unknown, malformed and mismatched process/job evidence without changing audit', async () => {
+  const fixture = await createFixture('abandon-rejections');
+  const env = { ...fixture.env, RALPH_MAC_WORKER_FAKE_PUSH: 'false', RALPH_MAC_WORKER_FAKE_DELAY_MS: '500' };
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  assert.equal((await invoke(request, env)).code, 0);
+  const file = path.join(fixture.state, `${fixture.job.jobId}.json`);
+  const live = await invoke({ ...request, type: 'abandon-incomplete' }, env);
+  assert.equal(live.code, 1);
+  const before = await waitForRecord(file,
+    (record) => record.state === 'awaiting-terminal-evidence' && processGone(record.supervisorPid),
+    'stopped rejection fixture');
+  const abandon = { ...request, type: 'abandon-incomplete' };
+  const variants = [
+    { ...before, processResult: undefined },
+    { ...before, launchToken: undefined },
+    { ...before, launchToken: 'not-a-worker-token' },
+    { ...before, supervisorPid: undefined },
+    { ...before, supervisorPid: process.pid },
+    { ...before, pid: process.pid },
+    { ...before, processResult: { ...before.processResult, completedAt: '2099-01-01T00:00:00Z' } },
+    { ...before, digest: 'e'.repeat(64) },
+    { ...before, job: { ...before.job, fence: 999 } },
+  ];
+  for (const record of variants) {
+    const serialized = JSON.stringify(record);
+    await writeFile(file, serialized);
+    const blocked = await invoke(abandon, env);
+    assert.equal(blocked.code, 1, 'invalid evidence must never abandon');
+    assert.equal(await readFile(file, 'utf8'), serialized);
+  }
+  await writeFile(file, JSON.stringify(before));
+  for (const pidEvidence of ['unknown', String(process.pid)]) {
+    await writeFile(fixture.pidFile, pidEvidence);
+    const blocked = await invoke(abandon, env);
+    assert.equal(blocked.code, 1);
+    assert.match(blocked.stderr, /Process probe could not|process remains alive/);
+    assert.equal(await readFile(file, 'utf8'), JSON.stringify(before));
+  }
+  const wrongFence = await invoke({ ...abandon, job: { ...fixture.job, fence: 999 } }, env);
+  assert.equal(wrongFence.code, 1);
+  assert.match(wrongFence.stderr, /No matching job/);
+  const missingJob = await invoke({ ...abandon, job: { ...fixture.job, jobId: 'never-dispatched' } }, env);
+  assert.equal(missingJob.code, 1);
+  assert.match(missingJob.stderr, /existing worker termination record/);
+});
+
+test('complete delivery uses normal status and cannot be downgraded to abandoned', async () => {
+  const fixture = await createFixture('abandon-complete');
+  const request = { version: 1, type: 'dispatch', job: fixture.job };
+  assert.equal((await invoke(request, fixture.env)).code, 0);
+  await waitForRecord(path.join(fixture.state, `${fixture.job.jobId}.json`),
+    (record) => record.state === 'awaiting-terminal-evidence' && processGone(record.supervisorPid),
+    'completed process for normal status');
+  const result = await invoke({ ...request, type: 'abandon-incomplete' }, fixture.env);
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /Complete Git evidence/);
+  const normal = await invoke({ ...request, type: 'reconcile' }, fixture.env);
+  assert.equal(normal.code, 0, normal.stderr);
+  assert.equal(JSON.parse(normal.stdout).state, 'completed');
 });
 
 test('reconcile does not attest absence while residual worktree evidence exists', async () => {
