@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { load } from 'js-yaml';
-import { assessOwnerDispatch, readDispatchEvent, validateDispatchAssessment } from '../release-dispatch.mjs';
-import { hash } from '../release-policy.mjs';
+import { assessOwnerDispatch, readDispatchEvent, validateDispatchAssessment,
+  selectPublicationAccess, verifyPublicationAccess } from '../release-dispatch.mjs';
+import { hash, publicationEnvironment } from '../release-policy.mjs';
 
 const repository = 'OlyForge3D/PrintFarmer';
 const workflowCommit = 'a'.repeat(40);
@@ -37,6 +38,10 @@ function fixture() {
   };
   const definition = { id: 9, path: run.path, state: 'active' };
   const permission = { permission: 'admin', role_name: 'admin', user: structuredClone(actor) };
+  const environment = { can_admins_bypass: false,
+    deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    protection_rules: [{ type: 'branch_policy' }] };
+  const policies = { branch_policies: [{ name: 'development', type: 'branch' }] };
   const requests = [];
   const api = async (endpoint, method = 'GET') => {
     requests.push(endpoint);
@@ -44,6 +49,10 @@ function fixture() {
     if (endpoint === 'actions/runs/42') return structuredClone(run);
     if (endpoint === 'actions/workflows/consolidated-release.yml') return structuredClone(definition);
     if (endpoint === 'collaborators/jpapiez/permission') return structuredClone(permission);
+    if (/^environments\/release-(stable|insider)(-owner-dispatch)?$/.test(endpoint)) {
+      return { name: endpoint.slice('environments/'.length), ...structuredClone(environment) };
+    }
+    if (endpoint.endsWith('/deployment-branch-policies')) return structuredClone(policies);
     if (endpoint === 'git/ref/heads/development') return { object: { sha: workflowCommit } };
     if (endpoint === 'git/ref/heads/main') return { object: { sha: sourceCommit } };
     if (endpoint === `compare/${sourceCommit}...${workflowCommit}`) {
@@ -54,7 +63,7 @@ function fixture() {
   const assess = (client = api) => assessOwnerDispatch({
     ...env, RELEASE_TRANSACTION: JSON.stringify(transaction),
   }, client, event);
-  return { env, event, run, definition, transaction, permission, requests, api, assess };
+  return { env, event, run, definition, transaction, permission, requests, api, assess, environment, policies };
 }
 
 test('initial owner dispatch assessment binds exact source, control, operation, run and attempt', async () => {
@@ -248,31 +257,94 @@ test('only the bounded runner event file can supply dispatch inputs', () => {
   }
 });
 
-test('real workflow collects assessment without secrets or bypassing existing environment approval', () => {
+test('real workflow gates every protected route with a blocking no-secret live dispatch boundary', () => {
   const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
-  const job = workflow.jobs.admit;
+  const job = publisher.jobs['dispatch-boundary'];
   const assessment = job.steps.find(step => step.run?.includes('release-dispatch.mjs'));
   assert.ok(assessment);
   assert.equal(job.environment, undefined);
   assert.ok(Object.values(job.permissions).every(value => value === 'read'));
   assert.doesNotMatch(JSON.stringify(job), /secrets\.|private-key|id-token/);
-  assert.equal(assessment.env.RELEASE_TRANSACTION, '${{ steps.select.outputs.transaction }}');
-  assert.equal(assessment.env.RELEASE_OPERATION, "${{ inputs.operation || 'publish' }}");
-  assert.equal(assessment['continue-on-error'], true);
-  const upload = job.steps.find(step => step.id === 'dispatch_assessment_artifact');
-  assert.equal(upload.if, "steps.assess_dispatch.outcome == 'success'");
-  assert.equal(upload['continue-on-error'], true);
-  const unavailable = job.steps.find(step => step.name === 'Report unavailable non-authorizing dispatch assessment');
-  assert.equal(unavailable['continue-on-error'], true);
-  assert.match(unavailable.if, /steps\.assess_dispatch\.outcome != 'success'/);
-  assert.match(unavailable.if, /steps\.dispatch_assessment_artifact\.outcome != 'success'/);
-  assert.match(unavailable.run, /::warning::/);
-  assert.match(unavailable.run, /GITHUB_STEP_SUMMARY/);
-  assert.ok(job.steps.findIndex(step => step.id === 'select') < job.steps.indexOf(assessment));
-  assert.match(publisher.jobs.publish.environment, /release-stable/);
-  assert.match(publisher.jobs.publish.environment, /release-insider/);
-  assert.doesNotMatch(JSON.stringify(publisher), /ownerDispatchEligible/);
-  assert.equal(publisher.jobs.publish.steps.find(step => step.id === 'publisher')
-    .with['permission-administration'], 'read');
+  assert.equal(job.if, undefined);
+  assert.equal(job['continue-on-error'], undefined);
+  assert.ok(job.steps.every(step => step['continue-on-error'] === undefined && step.if === undefined));
+  assert.equal(assessment.env.RELEASE_TRANSACTION, '${{ inputs.transaction }}');
+  assert.equal(assessment.env.RELEASE_OPERATION, '${{ inputs.operation }}');
+  assert.equal(job.steps[0].with.ref, '${{ github.workflow_sha }}');
+  assert.equal(job.outputs.environment, '${{ steps.dispatch.outputs.environment }}');
+  assert.equal(publisher.jobs.publish.needs, 'dispatch-boundary');
+  assert.equal(publisher.jobs.publish.if, undefined);
+  assert.equal(publisher.jobs.publish.environment, '${{ needs.dispatch-boundary.outputs.environment }}');
+  assert.equal(publisher.jobs.publish.env.RELEASE_PUBLICATION_ENVIRONMENT,
+    '${{ needs.dispatch-boundary.outputs.environment }}');
+  const steps = publisher.jobs.publish.steps;
+  const recheck = steps.findIndex(step => step.run === 'node scripts/ci/release-dispatch.mjs verify');
+  const mint = steps.findIndex(step => step.id === 'publisher');
+  assert.ok(recheck >= 0 && recheck < mint);
+  assert.equal(steps[recheck].if, undefined);
+  assert.equal(steps[recheck]['continue-on-error'], undefined);
+  assert.equal(steps[recheck].env.GH_TOKEN, '${{ github.token }}');
+  assert.deepEqual(steps[mint].with, {
+    owner: 'OlyForge3D', repositories: 'PrintFarmer',
+    'app-id': '${{ vars.RELEASE_PUBLISHER_APP_ID }}',
+    'private-key': '${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}',
+    'permission-contents': 'write', 'permission-checks': 'read',
+    'permission-statuses': 'read', 'permission-administration': 'write', 'permission-actions': 'read',
+  });
+  assert.equal(steps[mint]['continue-on-error'], undefined);
+  assert.equal(workflow.jobs.publish.secrets, 'inherit');
+  assert.doesNotMatch(JSON.stringify(workflow.jobs.admit), /release-dispatch|secrets\./);
+});
+
+test('the selected environment must match freshly recomputed authority, not caller claims or old evidence', async () => {
+  const f = fixture();
+  const assess = await f.assess();
+  assert.equal(publicationEnvironment(assess), 'release-stable-owner-dispatch');
+  const env = { ...f.env, RELEASE_TRANSACTION: JSON.stringify(f.transaction),
+    RELEASE_PUBLICATION_ENVIRONMENT: publicationEnvironment(assess) };
+  assert.deepEqual(await verifyPublicationAccess(env, f.api, f.event), assess);
+  for (const environment of [undefined, '', 'release-stable', 'release-insider-owner-dispatch', 'untrusted']) {
+    await assert.rejects(verifyPublicationAccess({ ...env, RELEASE_PUBLICATION_ENVIRONMENT: environment },
+      f.api, f.event), /Publication environment differs/);
+  }
+  f.permission.permission = f.permission.role_name = 'write';
+  await assert.rejects(verifyPublicationAccess(env, f.api, f.event), /Publication environment differs/);
+  const explicit = await verifyPublicationAccess({ ...env, RELEASE_PUBLICATION_ENVIRONMENT: 'release-stable' },
+    f.api, f.event);
+  assert.equal(explicit.ownerDispatchEligible, false);
+});
+
+test('checked-in owner environment migration retains exact branch restrictions without reviewer bypass', () => {
+  const config = JSON.parse(readFileSync('.github/release-owner-dispatch-environments.json', 'utf8'));
+  assert.equal(config.repository, repository);
+  assert.deepEqual(config.environments.map(env => env.name),
+    ['release-stable-owner-dispatch', 'release-insider-owner-dispatch']);
+  for (const environment of config.environments) {
+    assert.deepEqual(environment.settings, {
+      wait_timer: 0, prevent_self_review: false, reviewers: [], can_admins_bypass: false,
+      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
+    });
+
+    test('live environment configuration must be safe before selecting a credential-bearing deployment', async () => {
+      for (const mutate of [
+        f => { delete f.environment.can_admins_bypass; },
+        f => { f.environment.can_admins_bypass = true; },
+        f => { f.environment.deployment_branch_policy.custom_branch_policies = false; },
+        f => { f.environment.deployment_branch_policy.protected_branches = true; },
+        f => { f.policies.branch_policies[0].name = '*'; },
+        f => { f.policies.branch_policies[0].type = 'tag'; },
+        f => { f.policies.branch_policies.push({ name: 'feature/*', type: 'branch' }); },
+        f => { f.environment.protection_rules = []; },
+        f => { f.environment.protection_rules.push({ type: 'required_reviewers' }); },
+        f => { f.environment.protection_rules.push({ type: 'wait_timer' }); },
+      ]) {
+        const f = fixture(); mutate(f);
+        await assert.rejects(selectPublicationAccess({
+          ...f.env, RELEASE_TRANSACTION: JSON.stringify(f.transaction),
+        }, f.api, f.event), /Owner blocker/);
+      }
+    });
+    assert.deepEqual(environment.branchPolicies, [{ name: 'development', type: 'branch' }]);
+  }
 });

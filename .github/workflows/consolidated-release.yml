@@ -76,40 +76,6 @@ jobs:
           set -euo pipefail
           transaction="$(node scripts/ci/release-transaction.mjs select)"
           echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
-      - name: Assess authenticated owner dispatch without changing the approval gate
-        id: assess_dispatch
-        continue-on-error: true
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TRANSACTION: ${{ steps.select.outputs.transaction }}
-          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-          RELEASE_OPERATION: ${{ inputs.operation || 'publish' }}
-          RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
-        run: |
-          set -euo pipefail
-          umask 077
-          node scripts/ci/release-dispatch.mjs > .artifacts/release-transaction/dispatch-assessment.json
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        id: dispatch_assessment_artifact
-        if: steps.assess_dispatch.outcome == 'success'
-        continue-on-error: true
-        with:
-          name: release-dispatch-assessment-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .artifacts/release-transaction/dispatch-assessment.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
-      - name: Report unavailable non-authorizing dispatch assessment
-        continue-on-error: true
-        if: >-
-          always() && (steps.assess_dispatch.outcome != 'success' ||
-          steps.dispatch_assessment_artifact.outcome != 'success')
-        run: |
-          echo "::warning::Dispatch assessment unavailable; existing manual approval remains mandatory."
-          {
-            echo "- Dispatch assessment unavailable; no dispatch authority was granted."
-            echo "- Existing manual approval remains mandatory."
-          } >> "$GITHUB_STEP_SUMMARY"
       - name: Admit immutable release transaction
         if: (inputs.operation || 'publish') == 'publish'
         id: admit

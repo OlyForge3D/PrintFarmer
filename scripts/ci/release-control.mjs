@@ -10,6 +10,7 @@ import {
   verifyAbandonmentApproval, verifyStableQualification,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
+import { verifyPublicationAccess } from './release-dispatch.mjs';
 import {
   privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, readReleaseManifest, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
@@ -91,6 +92,17 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       'Protected publisher App token required; github.token cannot verify Administration or publish');
   }
   const api = githubClient(privileged ? env.RELEASE_PUBLISHER_TOKEN : env.GH_TOKEN);
+  const verifySavedDispatchBinding = record => {
+    requireThat(!record.protection.dispatchAuthorization ||
+      record.protection.dispatchAuthorization.transactionSha256 === hash(transaction),
+    'Signed owner dispatch belongs to a different immutable transaction');
+  };
+  const verifyCurrentProtection = async () => {
+    const access = await verifyPublicationAccess(env, api);
+    return verifyProtection(api, transaction.channel, env.RELEASE_PUBLISHER_APP_ID,
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, undefined,
+      access.ownerDispatchEligible ? access : undefined);
+  };
   const context = runContext(env, transaction);
   if (consumer) {
     requireThat(context.sourceCommit === transaction.sourceCommit,
@@ -98,6 +110,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   }
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
   if (operation === 'recover-abandonment') {
+    await verifyPublicationAccess(env, api);
     const target = env.RELEASE_ABANDONMENT_TARGET;
     requireThat(/^[a-f0-9]{64}$/.test(target || ''), 'Immutable abandonment reservation target is missing or malformed');
     const { state } = await store.read();
@@ -135,9 +148,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     }
     await verifyQualification(true);
     await verifyCanonicalSource(api, branch, selectedHead);
-    const protection = await verifyProtection(api, admission.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+    await verifyCurrentProtection();
     const record = await transact(store, async state => {
+      const protection = await verifyCurrentProtection();
       const existing = validateReservationAdmission(state, admission);
       await verifyQualification(true);
       const qualification = await verifyStableQualification(api, state, admission);
@@ -146,6 +159,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
         // A lost private artifact cannot be reconstructed from public ledger data.
         const saved = readPrivateAuthorization();
         requireThat(hash(saved) === existing.identitySha256, 'Original authorization unavailable; rerun with a new attempt');
+        verifySavedDispatchBinding(saved);
         requireThat(saved.protection.approvalMode === protection.approvalMode,
           'Approval mode changed after reservation; rerun with a new attempt');
         return saved;
@@ -157,6 +171,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       writeAuthorization(reservation.record);
       return reservation.record;
     });
+    await verifyCurrentProtection();
     await ensureSourceTag(api, store, record, transact);
     writeAuthorization(record);
     output('public_identity', JSON.stringify(publicAuthorization(record)));
@@ -165,6 +180,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   }
 
   const record = verifyAuthorization(env, verify);
+  if (operation !== 'abandon') verifySavedDispatchBinding(record);
   if (operation === 'abandon') requireThat(record.channel === 'insider',
     'Only insider reservations may be abandoned');
   if (operation === 'abandon') requireThat(record.channel === transaction.channel,
@@ -202,22 +218,20 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       'Publication preflight transaction binding mismatch');
     const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
     await verifyQualification();
-    await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+    await verifyCurrentProtection();
     const expectedPointer = state.pointers[record.channel]?.manifestEnvelopeSha256 || '';
     output('verified_branch_head', currentBranchHead);
     output('expected_pointer', expectedPointer);
   } else if (operation === 'abandon') {
     requireThat(env.RELEASE_ABANDONMENT_TARGET === record.allocationKey,
       'Immutable abandonment reservation target does not match authorization');
-    const protection = await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
-    const approval = await verifyAbandonmentApproval(api, {
-      runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT,
-    }, record,
-      env.RELEASE_ABANDONMENT_TARGET, env.RELEASE_OWNER_APPROVED_REVIEWERS);
-    const authorization = abandonmentAuthorization(record, protection, approval);
-    await transact(store, async latest => abandon(latest, record, authorization, protection));
+    await transact(store, async latest => {
+      const protection = await verifyCurrentProtection();
+      const approval = await verifyAbandonmentApproval(api, {
+        runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT,
+      }, record, env.RELEASE_ABANDONMENT_TARGET, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+      return abandon(latest, record, abandonmentAuthorization(record, protection, approval), protection);
+    });
   } else if (operation === 'advance') {
     const set = readPrivateJson(privateSetPath);
     const expectedPointer = env.RELEASE_EXPECTED_POINTER ?? '';
@@ -227,14 +241,16 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       'Pointer transaction binding mismatch');
     await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
     await verifyQualification();
-    await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+    await verifyCurrentProtection();
     requireThat(/^[a-f0-9]{40}$/.test(env.RELEASE_VERIFIED_BRANCH_HEAD || ''),
       'Missing publication preflight branch evidence');
     const { serializedManifest, serializedEnvelope } = readReleaseManifest();
     const signed = { serializedManifest, serializedEnvelope };
-    await transact(store, async latest => advance(latest, record, set, signed,
-      await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit), expectedPointer));
+    await transact(store, async latest => {
+      await verifyCurrentProtection();
+      return advance(latest, record, set, signed,
+        await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit), expectedPointer);
+    });
     output('set_hash', hash(writePublicSet(record, set)));
   } else {
     throw new Error(`Unknown operation: ${operation}`);

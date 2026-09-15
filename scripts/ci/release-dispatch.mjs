@@ -1,13 +1,16 @@
 import { closeSync, constants, fstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { githubClient, verifyCanonicalSource } from './release-github.mjs';
-import { hash, repository, requireKeys, requireString, requireThat } from './release-policy.mjs';
+import {
+  hash, publicationEnvironment, repository, requireKeys, requireThat, validateDispatchAssessment,
+  verifyEnvironmentRestrictions,
+} from './release-policy.mjs';
 import { transactionFromEnvironment } from './release-transaction.mjs';
+export { validateDispatchAssessment } from './release-policy.mjs';
 
 const workflowPath = '.github/workflows/consolidated-release.yml';
 const ownerLogin = 'jpapiez';
 const ownerAccountId = 5460061;
-const positivePattern = /^[1-9][0-9]*$/;
 
 function identity(value) {
   requireThat(Number.isSafeInteger(value?.id) && value.id > 0 &&
@@ -24,7 +27,7 @@ function sameIdentity(left, right) {
 export function readDispatchEvent(env = process.env) {
   requireThat(env.RUNNER_TEMP && env.GITHUB_EVENT_PATH,
     'Trusted runner event path is unavailable');
-  // Current hosted Ubuntu runner layout; changes make the audit unavailable, never grant authority.
+  // Pinned hosted Ubuntu runner layout: fail closed if the trusted event mount changes.
   const expected = join(realpathSync(env.RUNNER_TEMP), '_github_workflow', 'event.json');
   requireThat(resolve(env.GITHUB_EVENT_PATH) === expected &&
     realpathSync(env.GITHUB_EVENT_PATH) === expected,
@@ -41,7 +44,6 @@ export function readDispatchEvent(env = process.env) {
   }
 }
 
-// This read-only assessment does not replace an environment approval or grant credentials.
 export async function assessOwnerDispatch(env = process.env, api = githubClient(env.GH_TOKEN),
   event = readDispatchEvent(env)) {
   const transaction = transactionFromEnvironment(env);
@@ -125,35 +127,35 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
   return assessment;
 }
 
-export function validateDispatchAssessment(value) {
-  requireKeys(value, ['kind', 'schema', 'repository', 'transactionSha256', 'workflowCommit',
-    'sourceCommit', 'channel', 'operation', 'reservationTarget', 'runId', 'executionAttempt',
-    'event', 'approvalMode', 'ownerDispatchEligible'], [], 'dispatch assessment');
-  requireThat(value.kind === 'release-dispatch-assessment' && value.schema === 1 &&
-    value.repository === repository && ['stable', 'insider'].includes(value.channel) &&
-    ['publish', 'abandon'].includes(value.operation) &&
-    ['workflow_dispatch', 'schedule'].includes(value.event) &&
-    ['single-maintainer', 'separation-of-duties'].includes(value.approvalMode) &&
-    typeof value.ownerDispatchEligible === 'boolean',
-  'Invalid dispatch assessment');
-  requireString(value.transactionSha256, /^[a-f0-9]{64}$/, 'dispatch transaction hash');
-  for (const field of ['workflowCommit', 'sourceCommit']) {
-    requireString(value[field], /^[a-f0-9]{40}$/, `dispatch ${field}`);
-  }
-  for (const field of ['runId', 'executionAttempt']) {
-    requireString(value[field], positivePattern, `dispatch ${field}`);
-  }
-  requireThat(value.operation === 'publish' ? value.reservationTarget === '' :
-    value.channel === 'insider' && /^[a-f0-9]{64}$/.test(value.reservationTarget),
-  'Invalid dispatch operation binding');
-  requireThat(!value.ownerDispatchEligible || (value.executionAttempt === '1' &&
-    value.event === 'workflow_dispatch' && value.operation === 'publish' &&
-    value.approvalMode === 'single-maintainer'),
-  'Dispatch authority cannot be inherited by another execution path');
-  return value;
+export async function verifyPublicationAccess(env = process.env, api = githubClient(env.GH_TOKEN),
+  event = readDispatchEvent(env)) {
+  const assessment = await assessOwnerDispatch(env, api, event);
+  requireThat(env.RELEASE_PUBLICATION_ENVIRONMENT === publicationEnvironment(assessment),
+    'Publication environment differs from the freshly verified dispatch authority');
+  await verifySelectedEnvironment(api, assessment);
+  return assessment;
+}
+
+async function verifySelectedEnvironment(api, assessment) {
+  const name = publicationEnvironment(assessment);
+  verifyEnvironmentRestrictions(await api(`environments/${name}`),
+    await api(`environments/${name}/deployment-branch-policies`),
+    assessment.channel, assessment.ownerDispatchEligible);
+}
+
+export async function selectPublicationAccess(env = process.env, api = githubClient(env.GH_TOKEN),
+  event = readDispatchEvent(env)) {
+  const assessment = await assessOwnerDispatch(env, api, event);
+  await verifySelectedEnvironment(api, assessment);
+  return assessment;
 }
 
 if (process.argv[1]?.replaceAll('\\', '/').endsWith('/scripts/ci/release-dispatch.mjs')) {
-  assessOwnerDispatch().then(value => process.stdout.write(`${JSON.stringify(value)}\n`))
+  const operation = process.argv[2];
+  requireThat(['select', 'verify'].includes(operation), 'Unknown dispatch authorization operation');
+  (operation === 'verify' ? verifyPublicationAccess() : selectPublicationAccess())
+    .then(value => process.stdout.write(`${JSON.stringify({
+      ...value, publicationEnvironment: publicationEnvironment(value),
+    })}\n`))
     .catch(error => { console.error(error.message); process.exitCode = 1; });
 }

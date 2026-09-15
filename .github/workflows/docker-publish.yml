@@ -34,10 +34,48 @@ env:
   RELEASE_SIGNER_IDENTITY: https://github.com/OlyForge3D/PrintFarmer/.github/workflows/docker-publish.yml@refs/heads/development
 
 jobs:
+  dispatch-boundary:
+    name: Verify publication authority before protected credentials
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      environment: ${{ steps.dispatch.outputs.environment }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: 24
+      - name: Bind live dispatch identity and select the protected route
+        id: dispatch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TRANSACTION: ${{ inputs.transaction }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
+        run: |
+          set -euo pipefail
+          authorization="$(node scripts/ci/release-dispatch.mjs select)"
+          environment="$(printf '%s' "$authorization" | jq -er .publicationEnvironment)"
+          echo "environment=$environment" >> "$GITHUB_OUTPUT"
+          echo "- Publication authorization route: \`$environment\`" >> "$GITHUB_STEP_SUMMARY"
+
   publish:
     name: ${{ inputs.operation == 'abandon' && 'Abandon immutable release reservation' || 'Authorize and publish immutable release' }}
     runs-on: ubuntu-latest
-    environment: ${{ inputs.operation == 'abandon' && 'release-insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider') }}
+    needs: dispatch-boundary
+    environment: ${{ needs.dispatch-boundary.outputs.environment }}
+    env:
+      RELEASE_PUBLICATION_ENVIRONMENT: ${{ needs.dispatch-boundary.outputs.environment }}
+      RELEASE_TRANSACTION: ${{ inputs.transaction }}
+      RELEASE_OPERATION: ${{ inputs.operation }}
+      RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
+      RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
     permissions:
       contents: read
       id-token: write
@@ -123,16 +161,22 @@ jobs:
               --certificate-oidc-issuer https://token.actions.githubusercontent.com \
               ".artifacts/release-authorization/${identity}.json"
           done
+      - name: Revalidate publication route before obtaining protected credentials
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/release-dispatch.mjs verify
       - name: Obtain protected publisher App token
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
         with:
+          owner: OlyForge3D
+          repositories: PrintFarmer
           app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
           private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
           permission-contents: write
           permission-checks: read
           permission-statuses: read
-          permission-administration: read
+          permission-administration: write
           permission-actions: read
       - name: Recover original signed authorization for immutable abandonment
         if: inputs.operation == 'abandon'

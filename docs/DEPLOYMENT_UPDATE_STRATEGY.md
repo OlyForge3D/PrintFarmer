@@ -129,9 +129,11 @@ Private owner publisher-credential provisioning remains separate from the
 automated release path.
 
 **Approval corrections (#2682, #2684):** activation under #2668 requires the
-explicit `RELEASE_APPROVAL_MODE` policy. `single-maintainer`
-requires manual approval by the owner or an explicitly owner-approved user,
-with self-review prevention disabled; its assurance is honestly
+explicit `RELEASE_APPROVAL_MODE` policy. Under #2728/#2729, the initial authenticated
+owner manual server-publication dispatch authorizes the exact transaction in
+`single-maintainer` mode without a second environment approval. Other eligible paths
+retain manual approval by the owner or an explicitly owner-approved user,
+with self-review prevention disabled. Assurance is honestly owner-dispatched or
 owner-confirmed/self-attested, never separation of duties. The alternative
 `separation-of-duties` mode requires self-review prevention and at least one
 eligible reviewer, plus native branch code-owner review and at least one
@@ -142,10 +144,12 @@ conversation resolution and no bypass/force-push/deletion. Both modes retain
 these branch/check controls and require the live environment response to explicitly
 report `can_admins_bypass: false` before reservation; required reviewers alone
 are insufficient. Missing/unknown modes and admission/authorization mode drift
-fail closed. Mode-specific normalized schema 5/v4 claims distinguish
+fail closed. Normalized schema 5/v4 explicit-approval evidence remains readable;
+schema 6/v5 adds signed exact owner-dispatch provenance and sets only the redundant
+`manualApprovalRequired` claim to false. Both distinguish
 `selfAttestedReviewRequired` from `codeOwnerApprovalRequired` and
 `nonSelfApprovalRequired`, include administrator bypass prevention, and expose
-no reviewer identities or raw policy evidence. Earlier evidence fails closed.
+no reviewer identities or raw policy evidence. Older unsupported schemas fail closed.
 The current review producer targets open PR heads, not subsequent squash commits:
 canonical-SHA review evidence remains an explicit #2668 activation prerequisite,
 never a status copied from another SHA or a fabricated independent approver.

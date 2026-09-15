@@ -151,7 +151,7 @@ export function githubRequestUrl(endpoint, method) {
     /^actions\/runs\/[1-9][0-9]*\/approvals$/,
     /^actions\/workflows\/consolidated-release\.yml$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
-    /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
+    /^environments\/release-(?:stable|insider)(?:-owner-dispatch)?(?:\/deployment-branch-policies)?$/,
     /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
   ];
   requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
@@ -451,7 +451,8 @@ export function parseGithubTimestamp(value, description = 'GitHub timestamp') {
   return parsed;
 }
 
-export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit) {
+export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit,
+  dispatchAuthorization) {
   validateApprovalMode(approvalMode);
   const readPolicy = async endpoint => {
     try { return await api(endpoint); }
@@ -472,8 +473,9 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
     requireThat(detail?.id === id, 'Branch ruleset identity changed during verification');
     branchRulesets.push(detail);
   }
-  const environment = await readPolicy(`environments/release-${channel}`);
-  const branchPolicies = await readPolicy(`environments/release-${channel}/deployment-branch-policies`);
+  const environmentName = `release-${channel}${dispatchAuthorization ? '-owner-dispatch' : ''}`;
+  const environment = await readPolicy(`environments/${environmentName}`);
+  const branchPolicies = await readPolicy(`environments/${environmentName}/deployment-branch-policies`);
   const allRulesets = await readPolicy('rulesets?per_page=100');
   requireThat(allRulesets.length < 100, 'Ruleset listing may be truncated');
   const rulesets = [];
@@ -487,7 +489,7 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
     verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies,
-    rulesets };
+    rulesets, ...(dispatchAuthorization ? { dispatchAuthorization } : {}) };
   const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
   if (sourceCommit !== undefined) {
     const required = branchRules.filter(rule => rule.type === 'required_status_checks')

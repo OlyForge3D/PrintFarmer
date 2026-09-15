@@ -687,10 +687,10 @@ test('legacy qualifier and recorder remain reachable without an alternate releas
 test('publisher has exactly one protected deployment containing every credential and mutation', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
   assert.deepEqual(Object.keys(publisher.on.workflow_call.inputs), ['transaction', 'operation', 'reservation_target']);
-  assert.deepEqual(Object.keys(publisher.jobs), ['publish']);
+  assert.deepEqual(Object.keys(publisher.jobs), ['dispatch-boundary', 'publish']);
   const environments = Object.values(publisher.jobs).filter(job => job.environment).map(job => job.environment);
   assert.deepEqual(environments, [
-    "${{ inputs.operation == 'abandon' && 'release-insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider') }}",
+    '${{ needs.dispatch-boundary.outputs.environment }}',
   ]);
   assert.equal(publisher.concurrency.group,
     "release-publication-${{ inputs.operation == 'abandon' && 'insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider') }}");

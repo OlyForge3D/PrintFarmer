@@ -1,12 +1,13 @@
 import assert from 'node:assert/strict';
 import {
-  copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync,
+  copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync,
   symlinkSync, writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
 import { X509Certificate } from 'node:crypto';
-import { dirname, resolve } from 'node:path';
-import test from 'node:test';
+import { dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
+import test, { after } from 'node:test';
 import { sourceReviewFixture } from './fixtures/release-source-review.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import {
@@ -42,6 +43,9 @@ const newerSha = 'b'.repeat(40);
 const anchor = 'c'.repeat(40);
 const workflowControlSha = '9'.repeat(40);
 const currentCanonicalSha = '8'.repeat(40);
+const dispatchFixtureRoot = mkdtempSync(join(tmpdir(), 'printfarmer-dispatch-control-'));
+let dispatchFixtureId = 0;
+after(() => rmSync(dispatchFixtureRoot, { recursive: true, force: true }));
 const created = '2026-09-14T22:40:00.000Z';
 const releaseNotesHash = 'd'.repeat(64);
 const cryptoCertificate = `-----BEGIN CERTIFICATE-----
@@ -2451,8 +2455,8 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
     assert.equal(method, 'GET');
     if (endpoint === `rules/branches/${branch}?per_page=100`) return branchRules;
     if (endpoint === 'rulesets/5') return branchRuleset;
-    if (endpoint === `environments/release-${channel}`) return environment;
-    if (endpoint === `environments/release-${channel}/deployment-branch-policies`) {
+    if (endpoint === `environments/${environment.name}`) return environment;
+    if (endpoint === `environments/${environment.name}/deployment-branch-policies`) {
       return { branch_policies: [{ name: 'development', type: 'branch' }] };
     }
     if (endpoint === 'rulesets?per_page=100') return rulesets;
@@ -2841,7 +2845,7 @@ test('release workflow explicitly wires approval mode and confines reviewer evid
   assert.match(publisher,
     /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ fromJSON\(inputs\.transaction\)\.approvalMode \}\}/);
   assert.match(publisher,
-    /environment: \$\{\{ inputs\.operation == 'abandon' && 'release-insider' \|\| \(fromJSON\(inputs\.transaction\)\.channel == 'stable' && 'release-stable' \|\| 'release-insider'\) \}\}/);
+    /environment: \$\{\{ needs\.dispatch-boundary\.outputs\.environment \}\}/);
   assert.match(publisher,
     /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
   assert.match(admissionJob, /statuses: read/);
@@ -2895,6 +2899,7 @@ test('protected release-control abandonment uses App policy verification and Git
     const fixture = authorizationFixture(state(), { includeAbandonmentProof: true });
     globalThis.fetch = fixture.fetch;
     const identity = await runFixtureControl('authorize', fixture);
+    fixture.setDispatchOperation('abandon', identity.allocationKey);
     const recovered = await runReleaseControl('recover-abandonment', {
       ...fixture.env, RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
     }, () => {});
@@ -2994,7 +2999,6 @@ test('every release artifact upload path is explicitly inventoried, including bo
   const authority = '.github/workflows/consolidated-release.yml';
   const docker = '.github/workflows/docker-publish.yml';
   assert.deepEqual(artifactUploads(authority), [
-    ['.artifacts/release-transaction/dispatch-assessment.json'],
     ['.artifacts/release-transaction/transaction.json'],
     ['.artifacts/release-transaction/qualification.json'],
   ]);
@@ -3188,7 +3192,31 @@ function authorizationFixture(initial = state(), settings = {}) {
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: workflowCommit,
     GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '1', RELEASE_CHANNEL: channel,
     RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
+    GITHUB_ACTOR: 'author', GITHUB_ACTOR_ID: '2', GITHUB_TRIGGERING_ACTOR: 'author',
+    RELEASE_OPERATION: 'publish', RELEASE_PUBLICATION_ENVIRONMENT: `release-${channel}`,
   };
+  const dispatchActor = settings.ownerDispatch
+    ? { id: 5460061, login: 'jpapiez', type: 'User' } : { id: 2, login: 'author', type: 'User' };
+  const dispatchRun = { run_attempt: 1, actor: structuredClone(dispatchActor),
+    triggering_actor: structuredClone(dispatchActor) };
+  const dispatchPermission = { permission: 'admin', role_name: 'admin', user: structuredClone(dispatchActor) };
+  env.GITHUB_ACTOR = env.GITHUB_TRIGGERING_ACTOR = dispatchActor.login;
+  env.GITHUB_ACTOR_ID = String(dispatchActor.id);
+  if (settings.ownerDispatch) {
+    env.RELEASE_PUBLICATION_ENVIRONMENT = environment.name = `release-${channel}-owner-dispatch`;
+    environment.deployment_branch_policy.protected_branches = false;
+    environment.protection_rules = [{ type: 'branch_policy' }];
+  }
+  const runner = join(dispatchFixtureRoot, String(++dispatchFixtureId));
+  mkdirSync(join(runner, '_github_workflow'), { recursive: true });
+  env.RUNNER_TEMP = runner;
+  env.GITHUB_EVENT_PATH = join(runner, '_github_workflow', 'event.json');
+  const dispatchEvent = {
+    ref: 'development', repository: { id: 10, full_name: selected.repository },
+    sender: structuredClone(dispatchActor),
+    inputs: { channel, operation: 'publish', source_sha: sourceCommit },
+  };
+  writeFileSync(env.GITHUB_EVENT_PATH, JSON.stringify(dispatchEvent));
   const transaction = {
     kind: 'release-transaction',
     schema: 2,
@@ -3234,7 +3262,12 @@ function authorizationFixture(initial = state(), settings = {}) {
   }));
   return {
     env, calls, ledgerWrites, environment, branchRules, approvalEvidence, abandonmentJob, abandonmentJobs,
-    transactionJobs, review: canonical,
+    transactionJobs, review: canonical, dispatchRun, dispatchPermission,
+    setDispatchOperation(operation, target = '') {
+      env.RELEASE_OPERATION = dispatchEvent.inputs.operation = operation;
+      env.RELEASE_ABANDONMENT_TARGET = dispatchEvent.inputs.reservation_target = target;
+      writeFileSync(env.GITHUB_EVENT_PATH, JSON.stringify(dispatchEvent));
+    },
     deleteTag() { tag = undefined; },
     setCanonicalHead(value) { canonicalHead = value; },
     setCanonicalComparison(value) { canonicalComparison = value; },
@@ -3264,6 +3297,9 @@ function authorizationFixture(initial = state(), settings = {}) {
       });
       if (endpoint === 'git/ref/heads/release-ledger') return response({ object: { sha: head } });
       if (endpoint === `compare/${sourceCommit}...${canonicalHead}`) return response(canonicalComparison);
+      if (endpoint === `compare/${workflowCommit}...${canonicalHead}`) return response({
+        status: 'ahead', merge_base_commit: { sha: workflowCommit },
+      });
       if (endpoint.startsWith('compare/')) return response({ status: 'ahead' });
       if (endpoint.startsWith('contents/VERSION?')) {
         return response({ encoding: 'base64', content: Buffer.from('v1.2.3\n').toString('base64') });
@@ -3275,22 +3311,22 @@ function authorizationFixture(initial = state(), settings = {}) {
           state: 'active',
         });
       }
+      if (endpoint === 'collaborators/jpapiez/permission') return response(dispatchPermission);
       if (endpoint === 'actions/runs/42') {
         return response({
           id: 42,
           run_attempt: 1,
           path: '.github/workflows/consolidated-release.yml',
           workflow_id: 9,
-          repository: { full_name: selected.repository },
-          head_repository: { full_name: selected.repository },
+          repository: { id: 10, full_name: selected.repository },
+          head_repository: { id: 10, full_name: selected.repository },
           head_branch: 'development',
           head_sha: workflowCommit,
           event: 'workflow_dispatch',
           html_url: qualificationRunUrl,
           status: 'in_progress',
           conclusion: undefined,
-          actor: { login: 'author' },
-          triggering_actor: { login: 'author' },
+          ...dispatchRun,
           check_suite_id: 100,
           run_started_at: qualificationStartedAt,
           updated_at: qualificationCompletedAt,
@@ -3568,6 +3604,92 @@ test(`${channel} ${approvalMode} executes pin, admission, automatic qualificatio
 });
 }
 }
+
+test('owner dispatch authorizes signed publication evidence and live demotion blocks later writes', async () => {
+  const cwd = process.cwd();
+  const root = mkdtempSync(join(dispatchFixtureRoot, 'owner-publication-'));
+  const originalFetch = globalThis.fetch;
+  process.chdir(root);
+  try {
+    const fixture = authorizationFixture(state(), { ownerDispatch: true, approvalMode: 'single-maintainer' });
+    globalThis.fetch = fixture.fetch;
+    const identity = await runFixtureControl('authorize', fixture);
+    validateRecord(identity);
+    assert.equal(identity.protection.schema, 6);
+    assert.equal(identity.protection.approvalAssurance, 'owner-dispatched/self-attested');
+    assert.equal(identity.protection.claims.manualApprovalRequired, false);
+    assert.equal(identity.protection.claims.nonSelfApprovalRequired, false);
+    assert.equal(identity.protection.dispatchAuthorization.transactionSha256,
+      hash(JSON.parse(fixture.env.RELEASE_TRANSACTION)));
+    assert.equal(identity.protection.dispatchAuthorization.sourceCommit, identity.sourceCommit);
+    const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
+    assert.ok(fixture.calls.slice(0, firstWrite).some(call => call.endpoint === 'collaborators/jpapiez/permission'));
+    assert.ok(fixture.calls.slice(0, firstWrite).some(call =>
+      call.endpoint === 'environments/release-insider-owner-dispatch'));
+    for (const update of [{ sourceCommit: 'f'.repeat(40) }, { workflowCommit: 'f'.repeat(40) },
+      { runId: '43' }, { executionAttempt: '2' }, { channel: 'stable' }, { operation: 'abandon' }]) {
+      const changed = structuredClone(identity);
+      Object.assign(changed.protection.dispatchAuthorization, update);
+      const { policyDigest, ...body } = changed.protection;
+      changed.protection.policyDigest = hash(body);
+      assert.throws(() => validateRecord(changed), ReleasePolicyError);
+    }
+    const consumer = { ...fixture.env, RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
+    await runReleaseControl('preflight', consumer, () => {});
+    const changedTransaction = JSON.parse(fixture.env.RELEASE_TRANSACTION);
+    changedTransaction.observedBranchHead = 'f'.repeat(40);
+    await assert.rejects(runReleaseControl('preflight', {
+      ...consumer, RELEASE_TRANSACTION: JSON.stringify(changedTransaction),
+    }, () => {}), /different immutable transaction/);
+    writeAuthorizationSet(identity, completeSet(identity));
+    fixture.dispatchPermission.permission = fixture.dispatchPermission.role_name = 'write';
+    fixture.calls.length = 0;
+    for (const operation of ['authorize', 'preflight', 'advance']) {
+      await assert.rejects(runReleaseControl(operation, {
+        ...consumer, RELEASE_EXPECTED_POINTER: '', RELEASE_VERIFIED_BRANCH_HEAD: sha,
+      }, () => {}), /Publication environment differs/);
+    }
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+    assert.equal(readPrivateJson(authorizationPath).protection.policyDigest, identity.protection.policyDigest);
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('owner role is rechecked inside a losing reservation CAS before retry writes', async () => {
+  const cwd = process.cwd();
+  const root = mkdtempSync(join(dispatchFixtureRoot, 'owner-cas-'));
+  const originalFetch = globalThis.fetch;
+  process.chdir(root);
+  try {
+    const fixture = authorizationFixture(state(), { ownerDispatch: true, approvalMode: 'single-maintainer',
+      advanceOnCas: publicLedger(state()) });
+    let rejectedCas = false;
+    globalThis.fetch = async (url, options) => {
+      if (!rejectedCas && options.method === 'PATCH' && url.endsWith('/git/refs/heads/release-ledger')) {
+        rejectedCas = true;
+        fixture.dispatchPermission.permission = fixture.dispatchPermission.role_name = 'read';
+        fixture.calls.length = 0;
+        const response = await fixture.fetch(url, options);
+        fixture.calls.length = 0;
+        return response;
+      }
+      return fixture.fetch(url, options);
+    };
+    await assert.rejects(runFixtureControl('authorize', fixture), /Publication environment differs/);
+    assert.equal(rejectedCas, true);
+    assert.ok(fixture.calls.every(call => call.method === 'GET'));
+    assert.equal(fixture.ledgerWrites.length, 1, 'Only the losing CAS was attempted');
+    const persisted = await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read();
+    assert.deepEqual(persisted.state.reservations, {});
+  } finally {
+    globalThis.fetch = originalFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
 
 test('executed authority rejects initial and newly advanced stable floors before any source or publication write', async () => {
   const cwd = process.cwd();
@@ -4095,7 +4217,8 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
     const adminCalls = fixture.calls.filter(call => call.admin);
     assert.ok(adminCalls.length >= 8 && adminCalls.every(call => call.publisher));
-    assert.ok(fixture.calls.slice(firstWrite).every(call => !call.admin), 'Protection must precede allocation');
+    assert.ok(fixture.calls.slice(0, firstWrite).some(call => call.admin),
+      'Protection must precede allocation and be checked again before source-tag publication');
     const signedBytes = readFileSync(authorizationPath, 'utf8');
     await runFixtureControl('authorize', fixture);
     assert.equal(readFileSync(authorizationPath, 'utf8'), signedBytes, 'Retry retains original evidence bytes');
@@ -4292,7 +4415,7 @@ test('workflow wiring keeps authorization and every publisher consumer in one pr
   const authority = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
   const publishJob = docker.split('\n  publish:')[1];
-  assert.match(publishJob, /environment: .+release-stable.+release-insider/);
+  assert.match(publishJob, /environment: \$\{\{ needs\.dispatch-boundary\.outputs\.environment \}\}/);
   assert.ok(publishJob.indexOf('actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349') <
     publishJob.indexOf('release-control.mjs authorize'));
   assert.ok(publishJob.indexOf('release-control.mjs authorize') <
