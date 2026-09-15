@@ -278,12 +278,17 @@ public sealed class TrackedMotionRetirementMigrationTests
     {
         Manufacturer manufacturer = context.Manufacturers.Local.FirstOrDefault()
             ?? new Manufacturer { Id = Guid.NewGuid(), Name = "Retirement fixture" };
+        PrinterModel model = context.PrinterModels.Local.FirstOrDefault()
+            ?? new PrinterModel { Id = Guid.NewGuid(), Name = "Retirement model", ManufacturerId = manufacturer.Id, Manufacturer = manufacturer };
         var printer = new Printer
         {
             Id = Guid.NewGuid(),
             Name = $"retirement-{operation}",
+            ServerUrl = $"http://{Guid.NewGuid():N}.example.test",
             ManufacturerId = manufacturer.Id,
             Manufacturer = manufacturer,
+            ModelId = model.Id,
+            Model = model,
         };
         var state = new PrinterDispatchState
         {
