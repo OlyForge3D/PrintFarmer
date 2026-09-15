@@ -148,6 +148,9 @@ single-dispatch pipeline generates them from the bounded previous-release-tag
 to selected-source range, associated merged PRs, the matching `CHANGELOG.md`
 entry, and `release-metadata/<base-version>.json`. They are hashed in the
 signed manifest and presented before either journey installs.
+The `CHANGELOG.md` entry heading must be exactly `## X.Y.Z` or
+`## [X.Y.Z]`, with an optional ` - YYYY-MM-DD` suffix; exactly one canonical
+header may match the release version.
 Every release notes file has Features, Fixes, Breaking changes, Compatibility,
 Migration, Downtime, Backup, and Recovery sections. A release with no
 release-specific change must say `None.` or `N/A` explicitly. Compatibility,

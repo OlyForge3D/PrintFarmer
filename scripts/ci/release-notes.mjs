@@ -80,11 +80,12 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
 
 export function changelogEntry(changelog, version) {
   const canonicalVersion = parseTag(`v${version}`).canonicalVersion;
-  const match = [...changelog.matchAll(
-    /^## \[?(\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?)\]?[^\n]*\n([\s\S]*?)(?=^## |(?![\s\S]))/gm,
-  )].find(([, headingVersion]) => headingVersion === canonicalVersion);
-  requireThat(match, `Release notes require a ${version} CHANGELOG entry`);
-  const entry = match[2].trim();
+  const matches = [...changelog.matchAll(
+    /^## (?:\[(\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?)\]|(\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?))(?: - \d{4}-\d{2}-\d{2})?\r?\n([\s\S]*?)(?=^## |(?![\s\S]))/gm,
+  )].filter(([, bracketedVersion, unbracketedVersion]) =>
+    (bracketedVersion ?? unbracketedVersion) === canonicalVersion);
+  requireThat(matches.length === 1, `Release notes require one ${version} CHANGELOG entry`);
+  const entry = matches[0][3].trim();
   for (const heading of ['Features', 'Fixes', 'Breaking changes']) {
     const section = entry.match(new RegExp(`^### ${heading}\\s*$\\n([\\s\\S]*?)(?=^### |$)`, 'm'));
     requireThat(section && (section[1].trim() === 'None.' || section[1].trim() === 'N/A' || section[1].trim().length > 0),
