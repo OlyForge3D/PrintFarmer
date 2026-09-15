@@ -4426,7 +4426,7 @@ test('executed signing commands preserve signed subjects and never let verificat
     const metadataBytes = readFileSync('release-metadata/1.2.3.json', 'utf8');
     const metadata = JSON.parse(metadataBytes);
     const sourceArtifacts = Object.fromEntries(Object.values(metadata.schemas).map(schema => [
-      schema.artifact, readFileSync(schema.artifact),
+      schema.artifact, Buffer.from(readFileSync(schema.artifact, 'utf8').replaceAll(/\r\n/g, '\n')),
     ]));
     mkdirSync('.artifacts/release-authorization', { recursive: true });
     writeFileSync('.artifacts/release-authorization/source-release-metadata.json', metadataBytes);

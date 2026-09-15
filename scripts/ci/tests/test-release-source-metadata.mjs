@@ -11,18 +11,18 @@ const metadataPath = resolve(root, 'source-release-trust-policy.json');
 const stagedMetadataPath = '.artifacts/release-authorization/source-release-metadata.json';
 const sourceCommit = 'a'.repeat(40);
 
-function metadataAndArtifacts() {
+function metadataAndArtifacts(lineEnding = '\n') {
   const bytes = readFileSync('release-metadata/0.2.3.json', 'utf8');
   const metadata = JSON.parse(bytes);
   return {
     bytes,
     artifacts: Object.fromEntries(Object.values(metadata.schemas).map(schema => [
-      schema.artifact, readFileSync(schema.artifact),
+      schema.artifact, Buffer.from(readFileSync(schema.artifact, 'utf8').replaceAll(/\r\n/g, lineEnding)),
     ])),
   };
 }
 
-test('qualified source metadata binds exact canonical bytes, source commit, and named artifact digests', t => {
+test('qualified source metadata binds exact canonical bytes and LF artifact digests', t => {
   const { bytes, artifacts } = metadataAndArtifacts();
   mkdirSync(resolve('.artifacts/release-authorization'), { recursive: true });
   writeFileSync(stagedMetadataPath, bytes);
@@ -38,6 +38,10 @@ test('qualified source metadata binds exact canonical bytes, source commit, and 
   const changedArtifacts = { ...artifacts };
   changedArtifacts['scripts/docker/configs/security-config.json'] = Buffer.from('altered');
   assert.throws(() => releaseMetadataEvidence(record, bytes, changedArtifacts), ReleasePolicyError);
+
+  const { artifacts: crlfArtifacts } = metadataAndArtifacts('\r\n');
+  assert.throws(() => releaseMetadataEvidence(record, bytes, crlfArtifacts),
+    /Release metadata artifact digest mismatch/);
 });
 
 test('trust policy rejects non-canonical timestamps, duplicate revocations, and revoked signers', t => {
