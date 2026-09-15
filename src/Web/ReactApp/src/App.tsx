@@ -132,6 +132,10 @@ const LazyAdminControlCenterPage = lazy(() =>
   import('@/features/admin/pages/AdminControlCenterPage').then(mod => ({ default: mod.AdminControlCenterPage }))
 );
 
+const LazyInstallerUpdatesPage = lazy(() =>
+  import('@/features/admin/pages/InstallerUpdatesPage').then(mod => ({ default: mod.InstallerUpdatesPage }))
+);
+
 const LazyPartsInventoryPage = lazy(() =>
   import('@/features/parts-inventory/pages/PartsInventoryPage').then(mod => ({
     default: mod.PartsInventoryPage,
@@ -302,7 +306,7 @@ function AuthenticatedAppRoutes() {
         <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="user" />)} />
         {/*
          * Access decision: ApiKeysPage is intentionally NOT gated behind farm_admin.
-         * API key management is a per-user feature — every authenticated user needs
+         * API key management is a per-user feature â€” every authenticated user needs
          * access to create/revoke their own keys. Admins can also reach ApiKeysPage
          * via the User Settings profile section, but the direct /profile/api-keys route
          * must remain open to all authenticated users to avoid a regression.
@@ -323,6 +327,7 @@ function AuthenticatedAppRoutes() {
           <Route index element={lazyRoute(<LazyAdminControlCenterPage />)} />
           <Route path="settings" element={lazyRoute(<LazySettingsShell routeScope="system" />)} />
           <Route path="status" element={<AdminDestinationRoute destinationId="ops-status">{lazyRoute(<LazySystemStatusPage />)}</AdminDestinationRoute>} />
+          <Route path="updates" element={<AdminDestinationRoute destinationId="ops-installer-updates">{lazyRoute(<LazyInstallerUpdatesPage />)}</AdminDestinationRoute>} />
           <Route path="workers" element={<AdminDestinationRoute destinationId="ops-workers">{lazyRoute(<LazyWorkerManagementPage tabQueryParamName="workerTab" embedded />)}</AdminDestinationRoute>} />
           <Route path="login-audit" element={<AdminDestinationRoute destinationId="users-audit">{lazyRoute(<LazyLoginAuditPage embedded />)}</AdminDestinationRoute>} />
           <Route path="data-management" element={<AdminDestinationRoute destinationId="data-management">{lazyRoute(<LazyDataManagementPage embedded />)}</AdminDestinationRoute>} />

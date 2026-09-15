@@ -223,6 +223,20 @@ export const ADMIN_DESTINATIONS: readonly AdminDestination[] = [
     isHubTile: true,
   },
   {
+    id: 'ops-installer-updates',
+    kind: 'operational',
+    label: 'Installation Updates',
+    description: 'Read-only release availability, readiness, and durable update history.',
+    path: '/admin/updates',
+    icon: PackageIcon,
+    group: 'operations',
+    // Read-only inventory is system-settings admin. Execute is separately gated in the page.
+    requiredRole: null,
+    requiredPermission: { resource: 'system_settings', action: 'admin' },
+    keywords: ['updates', 'release', 'installer', 'train', 'readiness', 'auto-update'],
+    isHubTile: true,
+  },
+  {
     id: 'ops-workers',
     kind: 'operational',
     label: 'Workers & Jobs',
