@@ -76,6 +76,24 @@ jobs:
           set -euo pipefail
           transaction="$(node scripts/ci/release-transaction.mjs select)"
           echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
+      - name: Assess authenticated owner dispatch without changing the approval gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TRANSACTION: ${{ steps.select.outputs.transaction }}
+          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OPERATION: ${{ inputs.operation || 'publish' }}
+          RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
+        run: |
+          set -euo pipefail
+          umask 077
+          node scripts/ci/release-dispatch.mjs > .artifacts/release-transaction/dispatch-assessment.json
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-dispatch-assessment-${{ github.run_id }}-${{ github.run_attempt }}
+          path: .artifacts/release-transaction/dispatch-assessment.json
+          include-hidden-files: true
+          if-no-files-found: error
+          retention-days: 30
       - name: Admit immutable release transaction
         if: (inputs.operation || 'publish') == 'publish'
         id: admit

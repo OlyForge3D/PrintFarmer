@@ -789,8 +789,11 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   requireThat(branchRulesets.length === branchRuleIds.length && branchRuleIds.every(id =>
     branchRulesets.filter(rule => rule?.id === id).length === 1), 'Incomplete branch ruleset evidence');
   for (const rule of branchRulesets) {
+    requireThat(Array.isArray(rule.bypass_actors),
+      'Owner blocker: branch bypass evidence unavailable or malformed; ruleset-write visibility is required');
+    requireThat(rule.bypass_actors.length === 0,
+      'Owner blocker: branch policy permits bypass');
     requireThat(rule.enforcement === 'active' && rule.target === 'branch' &&
-      Array.isArray(rule.bypass_actors) && rule.bypass_actors.length === 0 &&
       Array.isArray(rule.conditions?.ref_name?.include) &&
       (rule.conditions.ref_name.include.includes(`refs/heads/${branch}`) ||
         rule.conditions.ref_name.include.includes('~ALL')) &&
@@ -798,7 +801,7 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
       Array.isArray(rule.rules) && rules.filter(item => item.ruleset_id === rule.id).every(item =>
         rule.rules.some(detail => detail.type === item.type &&
           isDeepStrictEqual(detail.parameters ?? {}, item.parameters ?? {}))),
-    'Owner blocker: branch policy permits bypass or changed during verification');
+    'Owner blocker: branch policy scope or rules changed during verification');
   }
   for (const type of ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']) {
     requireThat(rules.some(rule => rule.type === type), `Owner blocker: ${branch} lacks active ${type} rule`);
@@ -854,6 +857,8 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
     'release-tag-creators', 'release-ledger-writer']) {
     const rule = rulesets.find(item => item.name === name && item.enforcement === 'active');
     requireThat(rule, `Owner blocker: active ${name} ruleset missing`);
+    requireThat(Array.isArray(rule.bypass_actors),
+      `Owner blocker: ${name} bypass evidence unavailable or malformed; ruleset-write visibility is required`);
     const tag = name === 'release-canonical-tags' || name === 'release-tag-creators';
     requireThat(rule.target === (tag ? 'tag' : 'branch') &&
       rule.conditions?.ref_name?.include?.includes(tag ? 'refs/tags/v*' : `refs/heads/${ledgerBranch}`) &&

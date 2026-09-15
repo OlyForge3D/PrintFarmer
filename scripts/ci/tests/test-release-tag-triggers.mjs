@@ -2483,6 +2483,34 @@ test('live protection adapter accepts only scoped reviewer-gated environments an
   await assert.rejects(verifyProtection(staleListing, 'insider', '123', 'separation-of-duties'), /active release-canonical-tags/);
 });
 
+test('missing write-visible bypass evidence is distinguished from actual bypass and policy drift', async () => {
+  for (const channel of ['stable', 'insider']) {
+    for (const mode of ['single-maintainer', 'separation-of-duties']) {
+      for (const index of [0, 1, 2, 3, 4]) {
+        for (const missing of [undefined, null, {}, '[]', false]) {
+          const f = protectionFixture(channel, mode);
+          const ruleset = [f.branchRuleset, ...f.rulesets][index];
+          if (missing === undefined) delete ruleset.bypass_actors;
+          else ruleset.bypass_actors = missing;
+          await assert.rejects(verifyProtection(f.api, channel, '123', mode), error => {
+            assert.match(error.message, /bypass evidence unavailable or malformed; ruleset-write visibility/);
+            assert.doesNotMatch(error.message, /permits bypass|raw-policy|raw-reviewer|actor_id/);
+            return true;
+          });
+        }
+      }
+      const f = protectionFixture(channel, mode);
+      f.branchRuleset.bypass_actors = [{ actor_type: 'RepositoryRole', actor_id: 5 }];
+      await assert.rejects(verifyProtection(f.api, channel, '123', mode),
+        /branch policy permits bypass$/);
+      f.branchRuleset.bypass_actors = [];
+      f.branchRuleset.conditions.ref_name.exclude = ['refs/heads/main'];
+      await assert.rejects(verifyProtection(f.api, channel, '123', mode),
+        /branch policy scope or rules changed during verification/);
+    }
+  }
+});
+
 for (const channel of ['stable', 'insider']) {
   for (const mode of ['single-maintainer', 'separation-of-duties']) {
     test(`${channel} ${mode} rejects administrator bypass or unproven bypass policy before reservation`, async () => {
@@ -2966,6 +2994,7 @@ test('every release artifact upload path is explicitly inventoried, including bo
   const authority = '.github/workflows/consolidated-release.yml';
   const docker = '.github/workflows/docker-publish.yml';
   assert.deepEqual(artifactUploads(authority), [
+    ['.artifacts/release-transaction/dispatch-assessment.json'],
     ['.artifacts/release-transaction/transaction.json'],
     ['.artifacts/release-transaction/qualification.json'],
   ]);

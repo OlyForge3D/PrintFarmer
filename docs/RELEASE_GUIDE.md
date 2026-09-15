@@ -987,6 +987,55 @@ needed to qualify; never put credentials in commit comments, issues or artifacts
 
 ### Environment approval and cutover
 
+**Pending combined policy transition (#2728 / #2729).** The owner has requested
+that an authenticated manual release dispatch constitute publication consent
+in single-maintainer mode. This checkout adds a read-only dispatch assessment,
+not activation of that policy: the existing environment review is still required.
+`release-dispatch-assessment-<run>-<attempt>` records exact transaction hash,
+source, workflow commit, channel, operation, run and current execution attempt.
+It deliberately contains no actor identity or credential and is neither a signed
+authorization nor permission to access publication secrets.
+
+The assessment checks the live GitHub run's repository, workflow definition,
+original actor and triggering actor against the trusted runner event and context.
+Only initial manual `publish` by user `jpapiez`, still holding the live `admin`
+role, is eligible. Every rerun requires the existing explicit approval, including
+owner reruns: GitHub reruns use the **original actor's privileges**, not the
+rerunner's. Schedules, non-owner dispatch, abandonment and separation-of-duties
+do not inherit dispatch consent. Foreign repositories, control refs, reusable
+callers, changed operation/source/channel/attempt and spoofed actor inputs reject.
+Exact-tree source review and native nonself code-owner review in separation mode
+are unchanged.
+
+GitHub's [ruleset response](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset)
+exposes `bypass_actors` only with ruleset-write access. Current publisher
+`Administration:read` cannot establish that complete evidence. Missing or
+malformed actor arrays are reported as **unavailable evidence**, separately from
+an actual nonempty bypass or changed rule/scope. They are never treated as empty.
+The historical protected App response from run `35020675092` was not captured;
+owner-token and anonymous read-only reproduction establishes the visibility
+distinction, not that historical payload.
+
+Activation remains blocked on a separate, explicit owner authority decision:
+grant the existing publisher `Administration:write` (accepting that it can alter
+the controls it verifies), or isolate a separately held verifier credential with
+authenticated source/run/current-attempt/operation-bound evidence and fresh
+verification at authorize, preflight, advance and abandonment. Same-job steps
+sharing a write-capable App key are not isolation. Read-only diagnostics and this
+assessment do **not** resolve #2728 or deliver one-click publication.
+
+Do not remove environment reviewers yet. After the authority choice, complete and
+review the credential-boundary workflow, normalized authorization schema,
+explicit-approval fallback and matching configuration transition together.
+Preserve existing environments and secrets, `development`-only branch policies,
+disabled admin bypass, concurrency, signing, receipt lifetimes and pointer checks.
+Parent coordinates live migration only after that reviewed code is ready, then
+verifies a fresh run; no old approval, receipt or run is migration evidence.
+Rollback before activation is simply to revert this assessment-only code; no
+environment, grant or secret changes have been made. Any later activated cutover
+must first restore required reviewers and verify their branch/bypass policies
+before reverting the matching workflow/verifier version.
+
 **Both modes require administrator bypass to be disabled.** In each release
 environment, deselect **Allow administrators to bypass configured protection
 rules**. Read back the environment using the publisher App: the REST
