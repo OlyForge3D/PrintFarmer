@@ -1,14 +1,16 @@
 import assert from 'node:assert/strict';
 import { X509Certificate } from 'node:crypto';
 import test from 'node:test';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { normalizeEvidence, readEvidence, stageEvidence } from '../release-evidence.mjs';
+import { normalizeEvidence, readEvidence, stageEvidence, stageEvidenceFromFiles } from '../release-evidence.mjs';
 
 const digest = `sha256:${'a'.repeat(64)}`;
 const other = `sha256:${'b'.repeat(64)}`;
 const platformDigest = `sha256:${'c'.repeat(64)}`;
 const predicate = { SPDXID: 'SPDXRef-DOCUMENT' };
+const ndjson = (entries, separator = '\n') => `${entries.map(entry => JSON.stringify(entry)).join(separator)}${separator}`;
+const parseNdjson = bytes => bytes.trimEnd().split(/\r?\n/).map(entry => JSON.parse(entry));
 const certificate = `-----BEGIN CERTIFICATE-----
 MIIDITCCAgmgAwIBAgIUJgCnA8pimf4TtHhn54DkRCgUikowDQYJKoZIhvcNAQEL
 BQAwIDEeMBwGA1UEAwwVcmVsZWFzZS1ldmlkZW5jZS10ZXN0MB4XDTI2MDkxNDIy
@@ -99,9 +101,12 @@ function setIntegratedTime(evidence, kind, value) {
   const verification = JSON.parse(evidence[`${kind}Bytes`]);
   verification[0].optional.Bundle.Payload.integratedTime = value;
   evidence[`${kind}Bytes`] = JSON.stringify(verification);
-  const bundle = JSON.parse(evidence[`${kind}BundleBytes`]);
+  const bundleBytes = evidence[`${kind}BundleBytes`];
+  const bundle = bundleBytes.trimStart().startsWith('[') ? JSON.parse(bundleBytes) : parseNdjson(bundleBytes);
   bundle[0].verificationMaterial.tlogEntries[0].integratedTime = value;
-  evidence[`${kind}BundleBytes`] = JSON.stringify(bundle);
+  evidence[`${kind}BundleBytes`] = bundleBytes.trimStart().startsWith('[')
+    ? JSON.stringify(bundle)
+    : ndjson(bundle);
 }
 
 function timedEvidence(signatureTime, attestationTime) {
@@ -119,6 +124,35 @@ test('stages validated index and platform crypto evidence', () => {
     const result = stageEvidence(evidencePath, completeSet, { api: { index: signed(), platforms: { 'linux/amd64': signed() } } }, context);
     assert.equal(result.set.services.api.platforms['linux/amd64'].subject, digest);
     assert.deepEqual(readEvidence(evidencePath, completeSet, context).set, result.set);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('stages exact raw NDJSON partitions from captured evidence files', () => {
+  const root = mkdtempSync(join('.artifacts', 'release-evidence-'));
+  try {
+    const completeSet = { images: { api: { digest, platforms: {} } } };
+    const capture = signed();
+    const signature = JSON.parse(capture.signatureBundleBytes);
+    const attestation = JSON.parse(capture.attestationBundleBytes);
+    const signatureRaw = ndjson(signature, '\r\n');
+    const attestationRaw = ndjson(attestation);
+    const evidenceRoot = join(root, 'crypto-evidence', 'api', 'index');
+    mkdirSync(evidenceRoot, { recursive: true });
+    for (const [name, bytes] of Object.entries({
+      'signature.json': capture.signatureBytes,
+      'attestation.json': capture.attestationBytes,
+      'predicate.json': capture.predicateBytes,
+      'signature.bundle.json': signatureRaw,
+      'attestation.bundle.json': attestationRaw,
+      'download.json': `${signatureRaw}${attestationRaw}`,
+      'signature.verification-time': capture.signatureVerificationTime,
+      'attestation.verification-time': capture.attestationVerificationTime,
+    })) writeFileSync(join(evidenceRoot, name), bytes);
+
+    const result = stageEvidenceFromFiles(join(root, 'release-crypto-evidence.json'), completeSet,
+      join(root, 'crypto-evidence'));
+    assert.equal(result.set.services.api.index.signature.bundle, signatureRaw);
+    assert.equal(result.set.services.api.index.sbom.bundle, attestationRaw);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 test('accepts formatted key-reordered predicate bytes while retaining their raw digest', () => {
@@ -168,7 +202,7 @@ test('rejects legacy download entries even when payload, signature, bundle, and 
   evidence.attestationBundleBytes = JSON.stringify([dsse]);
   evidence.downloadBytes = JSON.stringify([signature, dsse]);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...evidence }),
-    /unknown or ambiguous|incomplete/);
+    /malformed entry|unknown or ambiguous|incomplete/);
 
   const payloadOptionalMutation = structuredClone(evidence);
   const mutatedPayload = JSON.parse(Buffer.from(signature.Payload, 'base64').toString('utf8'));
@@ -177,7 +211,7 @@ test('rejects legacy download entries even when payload, signature, bundle, and 
     ...signature, Payload: Buffer.from(JSON.stringify(mutatedPayload)).toString('base64'),
   }]);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...payloadOptionalMutation }),
-    /unknown or ambiguous|incomplete/);
+    /malformed entry|unknown or ambiguous|incomplete/);
 });
 
 test('retains byte-faithful Cosign v3.0.6 raw capture composition metadata', () => {
@@ -237,8 +271,8 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
       signature: 'native-signature',
     },
   };
-  evidence.signatureBundleBytes = JSON.stringify([nativeSignature]);
-  evidence.attestationBundleBytes = JSON.stringify([{
+  evidence.signatureBundleBytes = ndjson([nativeSignature]);
+  evidence.attestationBundleBytes = ndjson([{
     mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
     verificationMaterial: nativeSignature.verificationMaterial,
     dsseEnvelope: {
@@ -247,39 +281,36 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
       signatures: [{ sig: 'native-signature' }],
     },
   }]);
-  evidence.downloadBytes = JSON.stringify([
-    nativeSignature, ...JSON.parse(evidence.attestationBundleBytes),
-  ]);
+  evidence.downloadBytes = `${evidence.signatureBundleBytes}${evidence.attestationBundleBytes}`;
   assert.doesNotThrow(() => normalizeEvidence({ subject: digest, trust: trust(), ...evidence }));
   for (const [label, mutate] of [
     ['signature', value => { value.messageSignature.signature = 'substituted'; }],
     ['transparency body', value => { value.verificationMaterial.tlogEntries[0].canonicalizedBody = 'substituted'; }],
   ]) {
     const substituted = structuredClone(evidence);
-    mutate(JSON.parse(substituted.signatureBundleBytes)[0]);
-    const bundle = JSON.parse(substituted.signatureBundleBytes);
+    mutate(parseNdjson(substituted.signatureBundleBytes)[0]);
+    const bundle = parseNdjson(substituted.signatureBundleBytes);
     mutate(bundle[0]);
-    substituted.signatureBundleBytes = JSON.stringify(bundle);
-    substituted.downloadBytes = JSON.stringify([
-      ...bundle, ...JSON.parse(substituted.attestationBundleBytes),
-    ]);
+    substituted.signatureBundleBytes = ndjson(bundle);
+    substituted.downloadBytes = `${substituted.signatureBundleBytes}${substituted.attestationBundleBytes}`;
     assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substituted }),
       /differs from verification output/, label);
   }
   const substitutedDsseSignature = structuredClone(evidence);
-  const dsseBundle = JSON.parse(substitutedDsseSignature.attestationBundleBytes);
+  const dsseBundle = parseNdjson(substitutedDsseSignature.attestationBundleBytes);
   dsseBundle[0].dsseEnvelope.signatures[0].sig = 'substituted';
-  substitutedDsseSignature.attestationBundleBytes = JSON.stringify(dsseBundle);
-  substitutedDsseSignature.downloadBytes = JSON.stringify([nativeSignature, ...dsseBundle]);
+  substitutedDsseSignature.attestationBundleBytes = ndjson(dsseBundle);
+  substitutedDsseSignature.downloadBytes =
+    `${substitutedDsseSignature.signatureBundleBytes}${substitutedDsseSignature.attestationBundleBytes}`;
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substitutedDsseSignature }),
     /DSSE download is not the verified attestation|DSSE differs from verification output/);
   const substitutedCertificate = structuredClone(evidence);
-  const certificateBundle = JSON.parse(substitutedCertificate.signatureBundleBytes);
+  const certificateBundle = parseNdjson(substitutedCertificate.signatureBundleBytes);
   certificateBundle[0].verificationMaterial.certificate.rawBytes =
     `A${new X509Certificate(certificate).raw.toString('base64').slice(1)}`;
-  substitutedCertificate.signatureBundleBytes = JSON.stringify(certificateBundle);
-  substitutedCertificate.downloadBytes = JSON.stringify([...certificateBundle,
-    ...JSON.parse(substitutedCertificate.attestationBundleBytes)]);
+  substitutedCertificate.signatureBundleBytes = ndjson(certificateBundle);
+  substitutedCertificate.downloadBytes =
+    `${substitutedCertificate.signatureBundleBytes}${substitutedCertificate.attestationBundleBytes}`;
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substitutedCertificate }),
     /certificate differs from verification output|certificate is malformed/);
   const alternateCertificateBundle = structuredClone(evidence);
@@ -292,12 +323,11 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
   alternateCertificateBundle.attestationVerificationTime = alternateCertificateBundle.signatureVerificationTime;
   assert.ok(Date.parse(alternate.validFrom) <= Date.parse(alternateIntegratedTime) &&
     Date.parse(alternateIntegratedTime) <= Date.parse(alternate.validTo));
-  const alternateCertificateEntry = JSON.parse(alternateCertificateBundle.signatureBundleBytes);
+  const alternateCertificateEntry = parseNdjson(alternateCertificateBundle.signatureBundleBytes);
   alternateCertificateEntry[0].verificationMaterial.certificate.rawBytes = alternate.raw.toString('base64');
-  alternateCertificateBundle.signatureBundleBytes = JSON.stringify(alternateCertificateEntry);
-  alternateCertificateBundle.downloadBytes = JSON.stringify([
-    ...alternateCertificateEntry, ...JSON.parse(alternateCertificateBundle.attestationBundleBytes),
-  ]);
+  alternateCertificateBundle.signatureBundleBytes = ndjson(alternateCertificateEntry);
+  alternateCertificateBundle.downloadBytes =
+    `${alternateCertificateBundle.signatureBundleBytes}${alternateCertificateBundle.attestationBundleBytes}`;
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust({
     createdTime: alternate.validFrom, trustedTime: alternateCertificateBundle.signatureVerificationTime,
   }), ...alternateCertificateBundle }),
@@ -305,11 +335,25 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
 
   for (const [label, field] of [['signature', 'signatureBundleBytes'], ['attestation', 'attestationBundleBytes']]) {
     const storedSubstitution = structuredClone(evidence);
-    const bundle = JSON.parse(storedSubstitution[field]);
+    const bundle = parseNdjson(storedSubstitution[field]);
     bundle[0].verificationMaterial.tlogEntries[0].canonicalizedBody = 'stored-substitution';
-    storedSubstitution[field] = JSON.stringify(bundle);
+    storedSubstitution[field] = ndjson(bundle);
     assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...storedSubstitution }),
       new RegExp(`Stored ${label} bundle does not match partitioned download`));
+  }
+
+  for (const [label, mutate] of [
+    ['whitespace', bytes => bytes.replace('{', '{ ')],
+    ['key order', bytes => {
+      const entry = parseNdjson(bytes)[0];
+      return ndjson([Object.fromEntries(Object.entries(entry).reverse())]);
+    }],
+    ['line endings', bytes => bytes.replaceAll('\n', '\r\n')],
+  ]) {
+    const substituted = structuredClone(evidence);
+    substituted.signatureBundleBytes = mutate(substituted.signatureBundleBytes);
+    assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substituted }),
+      /Stored signature bundle does not match partitioned download/, label);
   }
 
   const wrongIdentity = structuredClone(evidence);

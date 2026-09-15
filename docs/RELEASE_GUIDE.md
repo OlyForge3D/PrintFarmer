@@ -133,6 +133,13 @@ and SPDX attestation results plus their downloaded signature/DSSE bundle
 materials for every index and platform digest. The signed manifest binds the
 exact raw verification, bundle, and predicate byte digests; formatted predicate
 JSON is compared semantically, while its original bytes remain tamper-bound.
+Bundle evidence is persisted as the raw Cosign NDJSON stream, never as a
+reconstructed JSON array. The capture normalizes only a missing final newline
+on the signature stream to one LF before concatenating that stream with the
+attestation stream; all entry bytes and other separators remain unchanged.
+Staging partitions that combined stream at the native signature/attestation
+boundary and requires each persisted bundle byte-for-byte equal to its raw
+partition before hashing or storage.
 Retries and the final pre-alias verification must reproduce those exact
 subject/platform-bound artifacts or publication fails closed.
 

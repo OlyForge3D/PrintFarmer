@@ -429,9 +429,12 @@ jobs:
             date -u +%Y-%m-%dT%H:%M:%S.000Z > "$index_evidence/attestation.verification-time"
             cosign download signature "$reference" > "$index_evidence/signature.ndjson"
             cosign download attestation "$reference" > "$index_evidence/attestation.ndjson"
+            [[ -s "$index_evidence/signature.ndjson" && -s "$index_evidence/attestation.ndjson" ]]
+            [[ "$(tail -c 1 "$index_evidence/signature.ndjson" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
+              printf '\n' >> "$index_evidence/signature.ndjson"
             cat "$index_evidence/signature.ndjson" "$index_evidence/attestation.ndjson" > "$index_evidence/download.json"
-            jq -sc . "$index_evidence/signature.ndjson" > "$index_evidence/signature.bundle.json"
-            jq -sc . "$index_evidence/attestation.ndjson" > "$index_evidence/attestation.bundle.json"
+            cp "$index_evidence/signature.ndjson" "$index_evidence/signature.bundle.json"
+            cp "$index_evidence/attestation.ndjson" "$index_evidence/attestation.bundle.json"
             cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "$index_evidence/predicate.json"
             platform_digests="$(
@@ -459,9 +462,12 @@ jobs:
               date -u +%Y-%m-%dT%H:%M:%S.000Z > "$platform_evidence/attestation.verification-time"
               cosign download signature "$platform_reference" > "$platform_evidence/signature.ndjson"
               cosign download attestation "$platform_reference" > "$platform_evidence/attestation.ndjson"
+              [[ -s "$platform_evidence/signature.ndjson" && -s "$platform_evidence/attestation.ndjson" ]]
+              [[ "$(tail -c 1 "$platform_evidence/signature.ndjson" | od -An -t x1 | tr -d '[:space:]')" == "0a" ]] ||
+                printf '\n' >> "$platform_evidence/signature.ndjson"
               cat "$platform_evidence/signature.ndjson" "$platform_evidence/attestation.ndjson" > "$platform_evidence/download.json"
-              jq -sc . "$platform_evidence/signature.ndjson" > "$platform_evidence/signature.bundle.json"
-              jq -sc . "$platform_evidence/attestation.ndjson" > "$platform_evidence/attestation.bundle.json"
+              cp "$platform_evidence/signature.ndjson" "$platform_evidence/signature.bundle.json"
+              cp "$platform_evidence/attestation.ndjson" "$platform_evidence/attestation.bundle.json"
               cp "source/crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json" \
                 "$platform_evidence/predicate.json"
             done <<< "$platform_digests"

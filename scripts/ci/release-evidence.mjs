@@ -230,25 +230,57 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
 }
 
 function partitionDownload(bytes) {
-  const entries = parseJson(bytes, 'combined Cosign download');
-  requireThat(Array.isArray(entries), 'Combined Cosign download must be an array');
+  requireThat(typeof bytes === 'string' && bytes.length > 0, 'Malformed combined Cosign download');
+  const entries = [];
+  let offset = 0;
+  while (offset < bytes.length) {
+    const newline = bytes.indexOf('\n', offset);
+    const end = newline === -1 ? bytes.length : newline + 1;
+    let record = bytes.slice(offset, end);
+    if (record.endsWith('\n')) record = record.slice(0, -1);
+    if (record.endsWith('\r')) record = record.slice(0, -1);
+    requireThat(record.length > 0 && !record.includes('\r'), 'Malformed combined Cosign download');
+    try {
+      const entry = JSON.parse(record);
+      requireThat(entry && typeof entry === 'object' && !Array.isArray(entry),
+        'Combined Cosign download contains malformed entry');
+      entries.push({ entry, end });
+    } catch (error) {
+      if (error.message === 'Combined Cosign download contains malformed entry') throw error;
+      throw new Error('Malformed combined Cosign download');
+    }
+    offset = end;
+  }
+
   const signatures = [];
   const attestations = [];
   const fingerprints = new Set();
-  for (const entry of entries) {
-    requireThat(entry && typeof entry === 'object' && !Array.isArray(entry),
-      'Combined Cosign download contains malformed entry');
+  let signatureEnd = 0;
+  let attestationStarted = false;
+  for (const { entry, end } of entries) {
     const fingerprint = JSON.stringify(canonicalJson(entry));
     requireThat(!fingerprints.has(fingerprint), 'Combined Cosign download contains duplicate entry');
     fingerprints.add(fingerprint);
     const signature = nativeSignatureBundle(entry);
     const attestation = nativeDsseBundle(entry);
     requireThat(signature !== attestation, 'Combined Cosign download contains unknown or ambiguous entry');
-    (signature ? signatures : attestations).push(entry);
+    if (signature) {
+      requireThat(!attestationStarted, 'Combined Cosign download must group signatures before attestations');
+      signatures.push(entry);
+      signatureEnd = end;
+    } else {
+      attestationStarted = true;
+      attestations.push(entry);
+    }
   }
   requireThat(signatures.length > 0 && attestations.length > 0,
     'Combined Cosign download is incomplete');
-  return { signatures, attestations };
+  return {
+    signatures,
+    attestations,
+    signatureBytes: bytes.slice(0, signatureEnd),
+    attestationBytes: bytes.slice(signatureEnd),
+  };
 }
 
 function validateSignatureDownload(bundle, verification, subject) {
@@ -261,11 +293,6 @@ function validateSignatureDownload(bundle, verification, subject) {
   'Malformed Cosign signature download');
 }
 
-function equivalentEntries(left, right) {
-  const entries = value => Array.isArray(value) ? value : [value];
-  return JSON.stringify(canonicalJson(entries(left))) === JSON.stringify(canonicalJson(entries(right)));
-}
-
 function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
   attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust, downloadBytes) {
   const signatureVerification = verificationEntries(signatureBytes, subject, 'signature');
@@ -274,9 +301,9 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
   const storedSignatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
   const storedAttestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
   if (partitioned) {
-    requireThat(equivalentEntries(storedSignatureBundle, partitioned.signatures),
+    requireThat(signatureBundleBytes === partitioned.signatureBytes,
       'Stored signature bundle does not match partitioned download');
-    requireThat(equivalentEntries(storedAttestationBundle, partitioned.attestations),
+    requireThat(attestationBundleBytes === partitioned.attestationBytes,
       'Stored attestation bundle does not match partitioned download');
   }
   const signatureBundle = partitioned?.signatures ?? storedSignatureBundle;
