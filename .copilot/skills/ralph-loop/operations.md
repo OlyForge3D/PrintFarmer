@@ -186,9 +186,12 @@ under its job lock. A delayed original dispatch cannot start that job afterward.
 
 Old workers reject `reconcile-ledger`; SSH errors, unsupported requests, missing digest responses
 and timeouts are explicit recovery blockers, never absence. Do not fall back to dispatch.
-Deploying the updated `scripts/ci/ralph-macos-worker.mjs` to the configured trusted worker path
-requires separate authorization and must preserve its existing state/worktrees and runtime
-configuration. No new dependency is required. Until then, exact-original-payload status requests
+Deploying the updated `scripts/ci/ralph-macos-worker.mjs` requires separate authorization.
+Identify the standalone JavaScript implementation invoked by the configured worker command;
+preserve any shell wrapper that supplies runtime configuration. Back up the implementation,
+stage and syntax/hash-check the replacement beside it, retain its permissions, and atomically
+replace only that implementation. Preserve existing state/worktrees and runtime configuration.
+No new dependency is required. Until then, exact-original-payload status requests
 can recover existing old-worker records with correlated live/terminal evidence, but an old
 worker's unfenced no-record response is not sufficient to release capacity.
 
@@ -216,7 +219,7 @@ terminal result. This is not completed, delivered, merged or validated work.
 Both abandonment request types require the updated standalone worker; unsupported old workers
 retain the reservation. Rollback must retain all worker records and terminal tombstones. An older
 worker/controller may reject new terminal types, but must not be made compatible by deleting
-evidence or redispatching a terminal job. Replacing the configured worker file does not authorize
+evidence or redispatching a terminal job. Replacing the worker implementation does not authorize
 restarting existing supervisors or changing their runtime configuration.
 
 Persist only allowlisted job fields and observation references. Never put credentials, SSH
