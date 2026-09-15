@@ -17,7 +17,7 @@ function metadataAndArtifacts(lineEnding = '\n') {
   return {
     bytes,
     artifacts: Object.fromEntries(Object.values(metadata.schemas).map(schema => [
-      schema.artifact, Buffer.from(readFileSync(schema.artifact, 'utf8').replaceAll(/\r\n/g, lineEnding)),
+      schema.artifact, Buffer.from(readFileSync(schema.artifact, 'utf8').replaceAll(/\r?\n/g, lineEnding)),
     ])),
   };
 }
