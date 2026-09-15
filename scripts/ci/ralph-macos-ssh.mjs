@@ -188,6 +188,9 @@ export function parseRemoteWorkerResponse(output, job) {
     return response;
   }
   if (response.type === 'failed') {
+    if (response.failureCode === 'JOB_NOT_FOUND' && response.dispatchFenced !== true) {
+      throw new RalphMacSshError('Worker absence is not dispatch-fenced; upgrade the trusted worker or retain the slot.', 'LEGACY_WORKER_REQUIRED');
+    }
     const hasExitCode = Number.isInteger(response.exitCode);
     const hasSignal = validIdentifier(response.signal);
     if (response.state !== 'failed' || response.workerVerified !== true ||
@@ -369,13 +372,41 @@ function assertFreshEligibility(eligibility, job) {
   }
 }
 
-export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000, reservationOwnerPid = process.pid }, options = {}) {
+function validateSessionEvidence(evidence, entry, state, now = Date.now()) {
+  const value = safeJson(evidence, 'Session evidence');
+  const observedAt = Date.parse(value.observedAt);
+  if (value.repository !== printFarmerRepository || value.issue !== entry.issue ||
+      !validIdentifier(value.sessionId) || (entry.sessionId && value.sessionId !== entry.sessionId) ||
+      value.state !== state || !Number.isFinite(observedAt) || observedAt > now || now - observedAt > 300_000 ||
+      typeof value.source !== 'string' || !value.source.trim() || value.source.length > 2048 ||
+      (value.previousJobId !== undefined && (state !== 'active' ||
+        !validJobIdentifier(value.previousJobId) || value.resumedAfterTerminal !== true)) ||
+      (state === 'absent' && (value.fence !== entry.fence || value.liveInventoryChecked !== true ||
+        value.archivedHistoryChecked !== true || value.terminalHistoryChecked !== true))) {
+    throw new RalphMacSshError('Fresh, correlated app inventory/history evidence is required.', 'INVALID_SESSION_EVIDENCE');
+  }
+  return {
+    repository: value.repository, issue: value.issue, sessionId: value.sessionId, state,
+    observedAt: value.observedAt, source: value.source,
+    ...(value.previousJobId ? { previousJobId: value.previousJobId, resumedAfterTerminal: true } : {}),
+    ...(state === 'absent' ? {
+      fence: value.fence, liveInventoryChecked: true, archivedHistoryChecked: true, terminalHistoryChecked: true,
+    } : {}),
+  };
+}
+
+export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000, reservationOwnerPid = process.pid, sessionEvidence }, options = {}) {
   validateRemoteJob(job);
-  assertFreshEligibility(eligibility, job);
+  if (!['local', 'remote'].includes(mode)) throw new RalphMacSshError('Invalid admission mode.', 'INVALID_REQUEST');
+  const handoff = sessionEvidence === undefined ? undefined : validateSessionEvidence(sessionEvidence, job, 'active');
+  if (handoff && mode !== 'local') throw new RalphMacSshError('Only local handoffs may be accounted.', 'INVALID_REQUEST');
+  if (!handoff) assertFreshEligibility(eligibility, job);
+  const immutableJob = JSON.parse(createRemoteRequest({ ...job, fence: Number.MAX_SAFE_INTEGER })).job;
   return mutateLedger((ledger) => {
     const existing = ledger.jobs[job.jobId];
     if (existing) {
-      if (existing.requestDigest !== requestDigest(job) || existing.mode !== mode) {
+      if (existing.requestDigest !== requestDigest(immutableJob) || existing.mode !== mode ||
+          (handoff && (existing.sessionId !== handoff.sessionId || !existing.local))) {
         throw new RalphMacSshError('Job identifier is already fenced to different work.', 'FENCED');
       }
       if (!activeJobStates.has(existing.state)) {
@@ -384,6 +415,22 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
       return existing;
     }
     const active = Object.values(ledger.jobs).filter((entry) => activeJobStates.has(entry.state));
+    if (handoff) {
+      const previous = handoff.previousJobId && ledger.jobs[handoff.previousJobId];
+      if (handoff.previousJobId && (!previous || activeJobStates.has(previous.state) ||
+          previous.mode !== 'local' || previous.sessionId !== handoff.sessionId || previous.issue !== job.issue ||
+          !Number.isFinite(Date.parse(previous.updatedAt)) ||
+          Date.parse(previous.updatedAt) >= Date.parse(handoff.observedAt))) {
+        throw new RalphMacSshError('Resumed handoff must name its terminal predecessor and subsequent live observation.', 'FENCED');
+      }
+      const sessionRecords = Object.values(ledger.jobs).filter((entry) => entry.sessionId === handoff.sessionId ||
+        entry.strandedSessionId === handoff.sessionId);
+      if (sessionRecords.some((entry) => activeJobStates.has(entry.state) || entry.issue !== job.issue ||
+          (entry.strandedSessionId === handoff.sessionId && entry.strandedSessionCleared !== true)) ||
+          (sessionRecords.length > 0 && !previous)) {
+        throw new RalphMacSshError('Session already has a ledger record; reconcile it or explicitly account its resumed handoff.', 'SESSION_OWNED');
+      }
+    }
     if (active.some((entry) => entry.issue === job.issue)) throw new RalphMacSshError('Issue already has an active Ralph job.', 'ISSUE_OWNED');
     // A released stranded kickoff (issue #2621) frees the slot but not the issue: the created
     // session was never observed processing anything, so it may still wake up and work the issue.
@@ -412,9 +459,23 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
       expectedHost: job.expectedHost,
       reservationOwnerPid, reservationExpiresAt: new Date(Date.parse(now) + reservationLeaseMs).toISOString(),
     };
+    entry.job = { ...immutableJob, fence: entry.fence };
+    if (handoff) {
+      entry.state = 'accepted';
+      entry.local = true;
+      entry.sessionId = handoff.sessionId;
+      entry.handoffEvidence = handoff;
+      delete entry.reservationOwnerPid;
+      delete entry.reservationExpiresAt;
+    }
     ledger.jobs[job.jobId] = entry;
     return entry;
   }, options);
+}
+
+export async function accountLocalSession({ job, sessionEvidence }, options = {}) {
+  safeJson(sessionEvidence, 'Existing live session evidence');
+  return reserveJob({ job, mode: 'local', sessionEvidence }, options);
 }
 
 export async function reserveLocalJob({ job, eligibility, now = new Date().toISOString(), controllerPid = process.pid }, options = {}) {
@@ -537,16 +598,20 @@ export async function recoverLocalReservation(jobId, { isOwnerAlive = ownerIsAli
 // uses), it never runs any destructive cleanup of the session's worktree or artifacts, and it
 // keeps the ledger entry (with its sessionId) as a permanent, inspectable audit record distinct
 // from a genuine 'failed' terminal result.
-export async function recoverLostLocalSession(jobId, { sessionAbsent, now = Date.now(), ...options } = {}) {
+export async function recoverLostLocalSession(jobId, { sessionAbsent, sessionEvidence, now = Date.now(), ...options } = {}) {
   if (sessionAbsent !== true) throw new RalphMacSshError('Authoritative session absence is required.', 'INVALID_REQUEST');
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[jobId];
-    if (!entry || entry.mode !== 'local' || !entry.local || !['accepted', 'running'].includes(entry.state) ||
+    if (!entry || entry.mode !== 'local' || !entry.local ||
+        !(['accepted', 'running'].includes(entry.state) || (entry.state === 'abandoned' && entry.failureReason === 'session-lost')) ||
         !validIdentifier(entry.sessionId)) {
       throw new RalphMacSshError('Only an accepted or running local job with a claimed session may be reconciled as abandoned.', 'INVALID_TRANSITION');
     }
+    const evidence = validateSessionEvidence(sessionEvidence, entry, 'absent', now);
+    if (entry.state === 'abandoned') return entry;
     entry.state = 'abandoned';
     entry.failureReason = 'session-lost';
+    entry.sessionAbsenceEvidence = evidence;
     entry.updatedAt = new Date(now).toISOString();
     return entry;
   }, options);
@@ -640,17 +705,24 @@ export async function recoverRemoteDelivery(jobId, { isOwnerAlive = ownerIsAlive
 async function recordRemoteWorkerResponse(response, options = {}) {
   return mutateLedger((ledger) => {
     const entry = ledger.jobs[response.jobId];
+    if (entry?.mode === 'remote' && !activeJobStates.has(entry.state) &&
+        JSON.stringify(entry.workerAttestation) === JSON.stringify(response)) return entry;
     if (!entry || entry.mode !== 'remote' ||
         !['delivery-intent', 'uncertain', 'accepted', 'running'].includes(entry.state)) {
       throw new RalphMacSshError('Worker response has no active remote reservation.', 'INVALID_TRANSITION');
     }
     const sessionMatches = entry.sessionId === undefined || entry.sessionId === response.sessionId;
     const hostMatches = entry.host === undefined || entry.host === response.host;
-    if (response.repository !== printFarmerRepository || response.issue !== entry.issue ||
+    if (response.repository !== printFarmerRepository || response.issue !== entry.issue || response.owner !== entry.owner ||
         response.baseSha !== entry.baseSha || response.fence !== entry.fence ||
+        (entry.expectedHost !== undefined && response.host !== entry.expectedHost) ||
+        (entry.expectedHost === undefined && response.requestDigest !== entry.requestDigest) ||
+        (response.requestDigest !== undefined && response.requestDigest !== entry.requestDigest) ||
         !hostMatches || !validHost(response.host) || !sessionMatches || !validIdentifier(response.sessionId)) {
       throw new RalphMacSshError('Worker response lacks correlated evidence.', 'INVALID_TERMINAL_EVIDENCE');
     }
+    entry.workerAttestation = response;
+    entry.expectedHost = response.host;
     entry.sessionId = response.sessionId;
     entry.host = response.host;
     if (response.type === 'accepted') {
@@ -755,27 +827,62 @@ export async function dispatchMacJob({ job, eligibility, controllerPid }, option
   }
 }
 
-export async function reconcileMacJob({ job }, options = {}) {
+export async function reconcileMacJob({ job, jobId = job?.jobId, legacyIdentity = false }, options = {}) {
   const configuration = loadMacSshConfiguration(options);
-  validateRemoteJob(job);
+  if (!validJobIdentifier(jobId) || typeof legacyIdentity !== 'boolean' || (job && job.jobId !== jobId)) {
+    throw new RalphMacSshError('A matching job identifier is required.', 'INVALID_REQUEST');
+  }
   const reservation = await mutateLedger((ledger) => {
-    const entry = ledger.jobs[job.jobId];
-    if (!entry || entry.mode !== 'remote' || !['accepted', 'running'].includes(entry.state) ||
-        entry.requestDigest !== requestDigest(job)) {
-      throw new RalphMacSshError('Only the matching accepted remote job may be reconciled.', 'INVALID_TRANSITION');
+    const entry = ledger.jobs[jobId];
+    if (!entry || entry.mode !== 'remote' ||
+        !(['accepted', 'running', 'uncertain'].includes(entry.state) || entry.workerAttestation)) {
+      throw new RalphMacSshError('Reconcile an accepted, running or uncertain remote job; recover an expired delivery intent first.', 'INVALID_TRANSITION');
+    }
+    const admittedHost = entry.expectedHost ?? entry.host;
+    if (admittedHost !== undefined && admittedHost !== configuration.expectedHost) {
+      throw new RalphMacSshError('Configured worker host differs from the admitted host.', 'FENCED');
+    }
+    const original = job ?? entry.job;
+    if (original) {
+      validateRemoteJob(original);
+      if (original.jobId !== entry.jobId || original.issue !== entry.issue || original.owner !== entry.owner ||
+          original.baseSha !== entry.baseSha || original.expectedHost !== configuration.expectedHost ||
+          (original.fence !== undefined && original.fence !== entry.fence) ||
+          requestDigest(original) !== entry.requestDigest) {
+        throw new RalphMacSshError('Original job does not match the ledger digest and fence.', 'FENCED');
+      }
+      // A legacy artifact is recoverable only after exact correlation; never reconstruct its prompt.
+      entry.job = JSON.parse(createRemoteRequest({ ...original, fence: entry.fence })).job;
+      entry.expectedHost = original.expectedHost;
+    } else if (!legacyIdentity) {
+      throw new RalphMacSshError('Legacy payload is missing. Supply the exact original job or use legacyIdentity with a compatible trusted worker; retain the slot otherwise.', 'LEGACY_PAYLOAD_REQUIRED');
     }
     return entry;
   }, options);
-  const request = {
-    ...job,
-    fence: reservation.fence,
-    expectedHost: configuration.expectedHost,
+  if (!activeJobStates.has(reservation.state)) return reservation;
+  const request = reservation.job ?? {
+    jobId: reservation.jobId, fence: reservation.fence, repository: reservation.repository,
+    issue: reservation.issue, owner: reservation.owner, baseSha: reservation.baseSha,
+    expectedHost: reservation.expectedHost ?? reservation.host ?? configuration.expectedHost,
+    requestDigest: reservation.requestDigest,
+    sessionId: reservation.sessionId,
+    allowNoRecord: (reservation.expectedHost ?? reservation.host) !== undefined && reservation.sessionId === undefined,
   };
+  if (!reservation.job && !/^[0-9a-f]{64}$/.test(request.requestDigest)) {
+    throw new RalphMacSshError('Legacy ledger digest is invalid.', 'FENCED');
+  }
   const output = await runSsh(
     createSshInvocation(configuration),
-    createRemoteRequest(request, 'reconcile'),
+    reservation.job ? createRemoteRequest(request, 'reconcile') :
+      `${JSON.stringify({ version: 1, type: 'reconcile-ledger', job: request })}\n`,
     options,
   );
   const response = parseRemoteWorkerResponse(output, request);
+  if (!reservation.job && response.requestDigest !== reservation.requestDigest) {
+    throw new RalphMacSshError('Worker did not attest the ledger digest; legacy recovery requires a compatible worker.', 'LEGACY_WORKER_REQUIRED');
+  }
+  if (!reservation.job && response.failureCode === 'JOB_NOT_FOUND' && !request.allowNoRecord) {
+    throw new RalphMacSshError('No-record evidence cannot recover an unknown admitted host or known accepted session.', 'INVALID_TERMINAL_EVIDENCE');
+  }
   return recordRemoteWorkerResponse(response, options);
 }

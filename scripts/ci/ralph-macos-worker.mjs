@@ -80,6 +80,25 @@ function digest(job) {
   return createHash('sha256').update(JSON.stringify(job)).digest('hex');
 }
 
+// Admission digests predate the worker's full-wire digest. Preserve both formats exactly.
+function admissionDigest(job) {
+  return createHash('sha256').update(JSON.stringify({
+    issue: job.issue, owner: job.owner, baseSha: job.baseSha, expectedHost: job.expectedHost, model: job.model,
+    effort: job.effort, agent: job.agent, acceptanceCriteria: job.acceptanceCriteria, charter: job.charter,
+  })).digest('hex');
+}
+
+function validateLedgerIdentity(job) {
+  if (!job || job.repository !== repository || !jobIdentifier(job.jobId) ||
+      !Number.isSafeInteger(job.fence) || job.fence <= 0 || !Number.isSafeInteger(job.issue) || job.issue <= 0 ||
+      !identifier(job.owner) || !sha(job.baseSha) || job.expectedHost !== expectedHost ||
+      typeof job.requestDigest !== 'string' || !/^[0-9a-f]{64}$/.test(job.requestDigest) ||
+      typeof job.allowNoRecord !== 'boolean' ||
+      (job.sessionId !== undefined && !identifier(job.sessionId))) {
+    fail('Malformed ledger reconciliation identity.');
+  }
+}
+
 function fileFor(jobId) {
   return path.join(stateRoot, `${jobId}.json`);
 }
@@ -654,6 +673,7 @@ async function dispatch(job) {
   const prepared = await withJobLock(job.jobId, async () => {
     const existing = await load(job.jobId);
     if (existing) {
+      if (existing.state === 'reconciled-absent') fail('Job identifier was terminally fenced by absence reconciliation.');
       if (existing.digest !== jobDigest) fail('Job identifier is fenced to a different request.');
       return { response: await workerResponse(existing) };
     }
@@ -846,7 +866,7 @@ async function readRequest() {
   } catch {
     fail('Worker request must be one JSON object.');
   }
-  if (!request || request.version !== 1 || !['dispatch', 'reconcile', 'terminal'].includes(request.type)) {
+  if (!request || request.version !== 1 || !['dispatch', 'reconcile', 'terminal', 'reconcile-ledger'].includes(request.type)) {
     fail('Malformed worker request.');
   }
   return request;
@@ -860,24 +880,74 @@ async function main() {
   if (process.argv.length !== 2) fail('Worker accepts requests only on stdin.');
   validateConfiguration();
   const request = await readRequest();
+  if (request.type === 'reconcile-ledger') {
+    validateLedgerIdentity(request.job);
+    const answer = await withJobLock(request.job.jobId, async () => {
+      const record = await load(request.job.jobId);
+      if (!record) {
+        if (request.job.sessionId || !request.job.allowNoRecord) {
+          fail('Missing worker record cannot prove the known session ended or recover an unknown admitted host.');
+        }
+        return recordAbsence(request.job);
+      }
+      if (record.state === 'reconciled-absent') return replayAbsence(record, request.job);
+      validateJob(record.job);
+      if (record.digest !== digest(record.job) || admissionDigest(record.job) !== request.job.requestDigest ||
+          ['jobId', 'fence', 'repository', 'issue', 'owner', 'baseSha', 'expectedHost']
+            .some((key) => record.job[key] !== request.job[key]) ||
+          (request.job.sessionId !== undefined && request.job.sessionId !== record.sessionId)) {
+        fail('Worker record does not match the ledger fence and digests.');
+      }
+      return { ...await workerResponse(record), requestDigest: request.job.requestDigest };
+    });
+    process.stdout.write(`${JSON.stringify(answer)}\n`);
+    return;
+  }
   validateJob(request.job);
   const answer = ['reconcile', 'terminal'].includes(request.type)
     ? await withJobLock(request.job.jobId, async () => {
         const record = await load(request.job.jobId);
         if (!record) {
-          const worktreeExists = await stat(path.join(worktreeRoot, request.job.jobId))
-            .then(() => true, (error) => error.code === 'ENOENT' ? false : Promise.reject(error));
-          const matchingProcesses = await matchingProcessIds(`Ralph job ${request.job.jobId}, fence ${request.job.fence}.`);
-          if (worktreeExists || matchingProcesses.length > 0) {
-            fail('Missing worker state has residual worktree or process evidence.');
-          }
-          return absentResponse(request.job);
+          return recordAbsence(request.job);
         }
+        if (record.state === 'reconciled-absent') return replayAbsence(record, request.job);
         if (record.digest !== digest(request.job)) fail('No matching job to reconcile.');
         return workerResponse(record);
       })
     : await dispatch(request.job);
   process.stdout.write(`${JSON.stringify(answer)}\n`);
+}
+
+async function assertNoResidualJob(job) {
+  const worktreeExists = await stat(path.join(worktreeRoot, job.jobId))
+    .then(() => true, (error) => error.code === 'ENOENT' ? false : Promise.reject(error));
+  const matchingProcesses = await matchingProcessIds(`Ralph job ${job.jobId}, fence ${job.fence}.`);
+  if (worktreeExists || matchingProcesses.length > 0) {
+    fail('Missing worker state has residual worktree or process evidence.');
+  }
+}
+
+function replayAbsence(record, job) {
+  const expectedDigest = job.requestDigest ?? admissionDigest(job);
+  if (record.digest !== digest(record.job) || record.response?.requestDigest !== expectedDigest ||
+      ['jobId', 'fence', 'repository', 'issue', 'owner', 'baseSha', 'expectedHost']
+        .some((key) => record.job[key] !== job[key])) {
+    fail('Absence tombstone does not match the ledger fence and digest.');
+  }
+  return record.response;
+}
+
+async function recordAbsence(job) {
+  await assertNoResidualJob(job);
+  const response = {
+    ...absentResponse(job), requestDigest: job.requestDigest ?? admissionDigest(job), dispatchFenced: true,
+  };
+  // A delayed original dispatch must not start after the controller releases this slot.
+  await persist(job.jobId, {
+    version: 1, state: 'reconciled-absent', job, digest: digest(job), response,
+    reconciledAt: new Date().toISOString(),
+  });
+  return response;
 }
 
 main().catch((error) => {

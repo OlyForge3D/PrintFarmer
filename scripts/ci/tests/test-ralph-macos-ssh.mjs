@@ -6,7 +6,7 @@ import path from 'node:path';
 import { PassThrough } from 'node:stream';
 import test from 'node:test';
 import {
-  RalphMacSshError, acknowledgeJob, acknowledgeLocalJob, clearStrandedKickoff, createRemoteRequest,
+  RalphMacSshError, accountLocalSession, acknowledgeJob, acknowledgeLocalJob, clearStrandedKickoff, createRemoteRequest,
   createSshInvocation, dispatchMacJob, failLocalKickoff,
   loadMacSshConfiguration, markUncertain, parseRemoteAcknowledgement, parseRemoteWorkerResponse, reconcileMacJob,
   recordDeliveryIntent, recordLocalTerminalResult, recoverLocalReservation, recoverLostLocalSession,
@@ -30,10 +30,213 @@ const job = (id = 'job-2605') => ({
 });
 const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false };
 
+const sessionEvidence = (sessionId, state = 'active', fence = 1) => ({
+  repository: eligibility.repository, issue: eligibility.issue, sessionId, state,
+  observedAt: new Date().toISOString(), source: 'app inventory and archived/terminal history query fixture',
+  ...(state === 'absent' ? { fence, liveInventoryChecked: true, archivedHistoryChecked: true, terminalHistoryChecked: true } : {}),
+});
+
+test.after(() => rm(root, { recursive: true, force: true }));
+
 async function reset() {
   await rm(root, { recursive: true, force: true });
   await mkdir(root, { recursive: true });
 }
+
+async function readLedger() {
+  return JSON.parse(await readFile(path.join(root, 'printfarmer-jobs.json'), 'utf8'));
+}
+
+async function legacyEntry({ missingHost = false, accepted = false } = {}) {
+  await reserveJob({ job: job(), eligibility }, options());
+  await recordDeliveryIntent(job().jobId, options());
+  await markUncertain(job().jobId, options());
+  const ledger = await readLedger();
+  const entry = ledger.jobs[job().jobId];
+  delete entry.job;
+  if (missingHost) delete entry.expectedHost;
+  if (accepted) {
+    entry.state = 'accepted';
+    entry.sessionId = 'session-1';
+  }
+  await writeFile(path.join(root, 'printfarmer-jobs.json'), JSON.stringify(ledger));
+  return entry;
+}
+
+function workerReply(response, inspect = () => {}) {
+  return () => {
+    const child = fakeChild();
+    let input = '';
+    child.stdin.on('data', (chunk) => { input += chunk; });
+    child.stdin.on('finish', () => {
+      inspect(JSON.parse(input));
+      child.stdout.end(JSON.stringify(response));
+      child.emit('close', 0);
+    });
+    return child;
+  };
+}
+
+const liveResponse = (entry) => ({
+  version: 1, type: 'accepted', state: 'running', jobId: entry.jobId, fence: entry.fence,
+  repository: entry.repository, issue: entry.issue, owner: entry.owner, baseSha: entry.baseSha,
+  host: 'trusted-mac.local', sessionId: 'session-1',
+});
+
+test('new reservations persist only immutable wire job data and reconcile uncertainty without eligibility', async () => {
+  await reset();
+  const original = { ...job(), ignoredCredential: 'not-persisted' };
+  const reserved = await reserveJob({ job: original, eligibility }, options());
+  original.acceptanceCriteria.push('later caller mutation');
+  assert.deepEqual(reserved.job, JSON.parse(createRemoteRequest({ ...job(), fence: reserved.fence })).job);
+  assert.equal(JSON.stringify(await readLedger()).includes('not-persisted'), false);
+  await recordDeliveryIntent(reserved.jobId, options());
+  await markUncertain(reserved.jobId, options());
+  const accepted = await reconcileMacJob({ jobId: reserved.jobId }, {
+    ...options(), spawn: workerReply(liveResponse(reserved), (request) => {
+      assert.equal(request.type, 'reconcile');
+      assert.deepEqual(request.job, reserved.job);
+    }),
+  });
+  assert.equal(accepted.state, 'accepted');
+});
+
+test('legacy payload imports reject changed fields/fence and accept only exact original digest', async () => {
+  await reset();
+  const entry = await legacyEntry({ missingHost: true });
+  await assert.rejects(() => reconcileMacJob({ jobId: entry.jobId }, options()),
+    (error) => error.code === 'LEGACY_PAYLOAD_REQUIRED');
+  for (const changed of [
+    { ...job(), fence: 999 }, { ...job(), acceptanceCriteria: ['invented'] },
+    { ...job(), expectedHost: 'different.local' }, { ...job(), owner: 'other' },
+  ]) {
+    await assert.rejects(() => reconcileMacJob({ job: changed }, options()), (error) => error.code === 'FENCED');
+  }
+  const result = await reconcileMacJob({ job: { ...job(), fence: entry.fence } }, {
+    ...options(), spawn: workerReply(liveResponse(entry)),
+  });
+  assert.equal(result.state, 'accepted');
+  assert.equal(result.requestDigest, entry.requestDigest);
+  assert.equal(result.expectedHost, job().expectedHost);
+  assert.deepEqual(result.job.acceptanceCriteria, job().acceptanceCriteria);
+});
+
+test('legacy identity requires worker digest attestation and retains live jobs, including missing historical host', async () => {
+  await reset();
+  const entry = await legacyEntry({ missingHost: true, accepted: true });
+  const response = { ...liveResponse(entry), requestDigest: entry.requestDigest };
+  for (const changed of [
+    { ...response, requestDigest: undefined }, { ...response, requestDigest: 'f'.repeat(64) },
+    { ...response, fence: 999 }, { ...response, host: 'wrong.local' },
+    { ...response, sessionId: 'wrong-session' },
+  ]) {
+    await assert.rejects(() => reconcileMacJob({ jobId: entry.jobId, legacyIdentity: true }, {
+      ...options(), spawn: workerReply(changed),
+    }));
+    assert.equal((await readLedger()).jobs[entry.jobId].state, 'accepted');
+  }
+  const result = await reconcileMacJob({ jobId: entry.jobId, legacyIdentity: true }, {
+    ...options(), spawn: workerReply(response, (request) => {
+      assert.equal(request.type, 'reconcile-ledger');
+      assert.equal(request.job.requestDigest, entry.requestDigest);
+      assert.equal(request.job.allowNoRecord, false);
+      assert.equal(request.job.acceptanceCriteria, undefined);
+    }),
+  });
+  assert.equal(result.state, 'accepted');
+  assert.equal(result.expectedHost, 'trusted-mac.local');
+});
+
+test('legacy no-record recovery is failure, fenced, concurrent and idempotent; unknown host is retained', async () => {
+  await reset();
+  const entry = await legacyEntry();
+  const response = {
+    ...liveResponse(entry), requestDigest: entry.requestDigest,
+    type: 'failed', state: 'failed', workerVerified: true,
+    failureCode: 'JOB_NOT_FOUND', dispatchFenced: true, failureMessage: 'Worker verified no record or residual work.',
+    sessionId: 'absent-request',
+  };
+  await assert.rejects(() => reconcileMacJob({ jobId: entry.jobId, legacyIdentity: true }, {
+    ...options(), spawn: workerReply({ ...response, dispatchFenced: undefined }),
+  }), (error) => error.code === 'LEGACY_WORKER_REQUIRED');
+  assert.equal((await readLedger()).jobs[entry.jobId].state, 'uncertain');
+  const requests = Array.from({ length: 3 }, () => reconcileMacJob({ jobId: entry.jobId, legacyIdentity: true }, {
+    ...options(), spawn: workerReply(response),
+  }));
+  const results = await Promise.all(requests);
+  assert.ok(results.every((result) => result.state === 'failed'));
+  assert.deepEqual((await readLedger()).jobs[entry.jobId].workerAttestation, response);
+  const repeated = await reconcileMacJob({ jobId: entry.jobId, legacyIdentity: true }, {
+    ...options(), spawn: () => assert.fail('terminal replay must not send SSH'),
+  });
+  assert.equal(repeated.state, 'failed');
+
+  await reset();
+  await legacyEntry({ missingHost: true });
+  await assert.rejects(() => reconcileMacJob({ jobId: entry.jobId, legacyIdentity: true }, {
+    ...options(), spawn: workerReply(response),
+  }), (error) => error.code === 'INVALID_TERMINAL_EVIDENCE');
+  assert.equal((await readLedger()).jobs[entry.jobId].state, 'uncertain');
+});
+
+test('old worker rejection and timeout retain uncertain entries without falling back to dispatch', async () => {
+  await reset();
+  const entry = await legacyEntry();
+  for (const timeout of [false, true]) {
+    await assert.rejects(() => reconcileMacJob({ jobId: entry.jobId, legacyIdentity: true }, {
+      ...options(), timeoutMs: 10, spawn: () => {
+        const child = fakeChild();
+        if (!timeout) queueMicrotask(() => {
+          child.stderr.end('Malformed worker request.');
+          child.emit('close', 1);
+        });
+        return child;
+      },
+    }));
+    assert.equal((await readLedger()).jobs[entry.jobId].state, 'uncertain');
+  }
+});
+
+test('existing local handoffs are atomic, idempotent and limited to five, with no new-issue eligibility', async () => {
+  await reset();
+  const evidence = sessionEvidence('existing-session');
+  const request = { job: job(), sessionEvidence: evidence };
+  const results = await Promise.all(Array.from({ length: 3 }, () => accountLocalSession(request, options())));
+  assert.ok(results.every((entry) => entry.state === 'accepted' && entry.sessionId === evidence.sessionId));
+  assert.equal(Object.keys((await readLedger()).jobs).length, 1);
+  await assert.rejects(() => accountLocalSession({ job: job('duplicate'), sessionEvidence: evidence }, options()),
+    (error) => error.code === 'SESSION_OWNED');
+  await assert.rejects(() => accountLocalSession({
+    ...request, sessionEvidence: sessionEvidence('wrong-session'),
+  }, options()), (error) => error.code === 'FENCED');
+  await Promise.all(Array.from({ length: 4 }, (_, index) => reserveLocalJob({
+    job: { ...job(`local-${index}`), issue: index + 1 }, eligibility: { ...eligibility, issue: index + 1 },
+  }, options())));
+  await assert.rejects(() => accountLocalSession({
+    job: { ...job('overflow'), issue: 99 }, sessionEvidence: { ...sessionEvidence('overflow-session'), issue: 99 },
+  }, options()), (error) => error.code === 'SLOT_EXHAUSTED');
+});
+
+test('resumed terminal handoff uses a new job/fence and preserves its terminal audit unchanged', async () => {
+  await reset();
+  await reserveLocalJob({ job: job(), eligibility }, options());
+  await acknowledgeLocalJob(job().jobId, 'existing-session', { ...options(), kickoffVerified: true });
+  const terminal = await recordLocalTerminalResult({
+    jobId: job().jobId, sessionId: 'existing-session', headSha: 'b'.repeat(40), exitCode: 0,
+    validationEvidence: 'previous work completed', workingTreeClean: true, allCommitsPushed: true,
+  }, options());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const evidence = {
+    ...sessionEvidence('existing-session'), previousJobId: terminal.jobId, resumedAfterTerminal: true,
+  };
+  const resumed = await accountLocalSession({ job: job('resumed'), sessionEvidence: evidence }, options());
+  assert.equal(resumed.state, 'accepted');
+  assert.notEqual(resumed.fence, terminal.fence);
+  assert.deepEqual((await readLedger()).jobs[terminal.jobId], terminal);
+  assert.equal(resumed.handoffEvidence.previousJobId, terminal.jobId);
+  const duplicate = await runAdmission('account-local-session', { job: job('resumed'), sessionEvidence: evidence });
+  assert.equal(duplicate.code, 0, duplicate.stderr);
+});
 
 function fakeChild() {
   const child = new EventEmitter();
@@ -244,7 +447,7 @@ test('releases an uncertain delivery only from the worker attesting no durable j
       queueMicrotask(() => {
         child.stdout.end(JSON.stringify({
           version: 1, type: 'failed', state: 'failed', workerVerified: true,
-          failureCode: 'JOB_NOT_FOUND',
+          failureCode: 'JOB_NOT_FOUND', dispatchFenced: true,
           failureMessage: 'Mac worker verified that no durable job record exists for this fenced request.',
           jobId: 'job-2605', fence: 1, repository: 'OlyForge3D/PrintFarmer',
           issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40),
@@ -475,8 +678,22 @@ test('lost session: an accepted/running local job with a confirmed-absent sessio
   await assert.rejects(() => recoverLostLocalSession('job-2605', { ...configuration }),
     (error) => error.code === 'INVALID_REQUEST');
 
-  const abandoned = await recoverLostLocalSession('job-2605', { sessionAbsent: true, ...configuration });
+  const evidence = sessionEvidence('session-370ca864', 'absent');
+  for (const changed of [
+    { ...evidence, sessionId: 'wrong-session' }, { ...evidence, fence: 99 },
+    { ...evidence, archivedHistoryChecked: false }, { ...evidence, terminalHistoryChecked: false },
+    { ...evidence, liveInventoryChecked: false }, { ...evidence, observedAt: '2020-01-01' },
+  ]) {
+    await assert.rejects(() => recoverLostLocalSession('job-2605', {
+      sessionAbsent: true, sessionEvidence: changed, ...configuration,
+    }), (error) => error.code === 'INVALID_SESSION_EVIDENCE');
+  }
+  const abandoned = await recoverLostLocalSession('job-2605', { sessionAbsent: true, sessionEvidence: evidence, ...configuration });
   assert.equal(abandoned.state, 'abandoned');
+  assert.deepEqual(abandoned.sessionAbsenceEvidence, evidence);
+  assert.deepEqual(await recoverLostLocalSession('job-2605', {
+    sessionAbsent: true, sessionEvidence: evidence, ...configuration,
+  }), abandoned);
   assert.equal(abandoned.failureReason, 'session-lost');
   // The ledger entry (and its sessionId) is preserved as an audit record, never deleted.
   assert.equal(abandoned.sessionId, 'session-370ca864');
@@ -677,7 +894,7 @@ test('rejects Xcode/CoreSimulator host over-subscription independent of the shar
       queueMicrotask(() => {
         releaseChild.stdout.end(JSON.stringify({
           version: 1, type: 'failed', state: 'failed', workerVerified: true,
-          failureCode: 'JOB_NOT_FOUND',
+          failureCode: 'JOB_NOT_FOUND', dispatchFenced: true,
           failureMessage: 'Mac worker verified that no durable job record exists for this fenced request.',
           jobId: 'job-2605', fence: 1, repository: 'OlyForge3D/PrintFarmer',
           issue: 2605, owner: 'hudson', baseSha: 'a'.repeat(40),
