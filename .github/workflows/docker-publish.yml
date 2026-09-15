@@ -429,6 +429,8 @@ jobs:
             date -u +%Y-%m-%dT%H:%M:%S.000Z > "$index_evidence/attestation.verification-time"
             cosign download signature "$reference" | jq -sc . > "$index_evidence/signature.bundle.json"
             cosign download attestation "$reference" | jq -sc . > "$index_evidence/attestation.bundle.json"
+            (cosign download signature "$reference"; cosign download attestation "$reference") |
+              jq -sc . > "$index_evidence/download.json"
             cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
               "$index_evidence/predicate.json"
             platform_digests="$(
@@ -456,6 +458,8 @@ jobs:
               date -u +%Y-%m-%dT%H:%M:%S.000Z > "$platform_evidence/attestation.verification-time"
               cosign download signature "$platform_reference" | jq -sc . > "$platform_evidence/signature.bundle.json"
               cosign download attestation "$platform_reference" | jq -sc . > "$platform_evidence/attestation.bundle.json"
+              (cosign download signature "$platform_reference"; cosign download attestation "$platform_reference") |
+                jq -sc . > "$platform_evidence/download.json"
               cp "source/crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json" \
                 "$platform_evidence/predicate.json"
             done <<< "$platform_digests"

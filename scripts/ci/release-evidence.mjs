@@ -205,6 +205,7 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
     requireThat(!nativeBundle(rawEntry) || nativeDsseBundle(rawEntry),
       'Malformed native Cosign DSSE attestation bundle');
     const entry = rawEntry?.dsseEnvelope ?? rawEntry;
+    const optional = verification[index]?.optional;
     let statement;
     try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
       throw new Error('Malformed Cosign DSSE payload');
@@ -215,7 +216,35 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
     requireThat(typeof verification[index]?.payload === 'string' &&
       verification[index].payload === entry.payload,
     'Cosign DSSE download is not the verified attestation');
+    if (nativeBundle(rawEntry)) {
+      const certificate = nativeCertificate(rawEntry);
+      requireThat(entry.signatures.length === 1 &&
+        entry.signatures[0].sig === optional?.Bundle?.Payload?.signature &&
+        typeof optional?.certificate === 'string' &&
+        certificate.raw.toString('base64') === new X509Certificate(optional.certificate).raw.toString('base64') &&
+        rawEntry.verificationMaterial.tlogEntries[0]?.canonicalizedBody === optional.Bundle.Payload.canonicalizedBody,
+      'Native Cosign DSSE differs from verification output');
+    }
   }
+}
+
+function partitionDownload(bytes) {
+  const entries = parseJson(bytes, 'combined Cosign download');
+  const signatures = [];
+  const attestations = [];
+  for (const entry of entries) {
+    const signature = nativeSignatureBundle(entry) ||
+      (typeof entry?.Base64Signature === 'string' && typeof entry?.Payload === 'string' &&
+        typeof entry?.Cert === 'string' && entry?.Bundle && !entry.dsseEnvelope);
+    const attestation = nativeDsseBundle(entry) ||
+      (typeof entry?.payload === 'string' && typeof entry?.payloadType === 'string' &&
+        Array.isArray(entry?.signatures) && !entry.messageSignature);
+    requireThat(signature !== attestation, 'Combined Cosign download contains unknown or ambiguous entry');
+    (signature ? signatures : attestations).push(entry);
+  }
+  requireThat(signatures.length > 0 && attestations.length > 0,
+    'Combined Cosign download is incomplete');
+  return { signatures, attestations };
 }
 
 function validateSignatureDownload(bundle, verification, subject) {
@@ -244,11 +273,12 @@ function validateSignatureDownload(bundle, verification, subject) {
 }
 
 function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
-  attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust) {
+  attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust, downloadBytes) {
   const signatureVerification = verificationEntries(signatureBytes, subject, 'signature');
   const attestationVerification = verificationEntries(attestationBytes, subject, 'attestation', predicateBytes);
-  const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
-  const attestationBundle = parseJson(attestationBundleBytes, 'attestation bundle');
+  const partitioned = downloadBytes === undefined ? undefined : partitionDownload(downloadBytes);
+  const signatureBundle = partitioned?.signatures ?? parseJson(signatureBundleBytes, 'signature bundle');
+  const attestationBundle = partitioned?.attestations ?? parseJson(attestationBundleBytes, 'attestation bundle');
   validateSignatureDownload(signatureBundle, signatureVerification, subject);
   validateDsseBundle(attestationBundle, subject, predicateBytes, attestationVerification);
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
@@ -272,10 +302,10 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
 }
 
 export function normalizeEvidence({ subject, signatureBytes, attestationBytes, predicateBytes,
-  signatureBundleBytes, attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust }) {
+  signatureBundleBytes, attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust, downloadBytes }) {
   requireThat(platform === undefined || /^linux\/(?:amd64|arm64)$/.test(platform), 'Invalid evidence platform');
   return evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
-    attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust);
+    attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust, downloadBytes);
 }
 
 export function validateEvidenceSet(set, completeSet, trust) {
@@ -391,6 +421,7 @@ export function stageEvidenceFromFiles(evidencePath, completeSet, root, trust) {
     predicateBytes: readEvidenceFile(join(root, service, scope, 'predicate.json')),
     signatureBundleBytes: readEvidenceFile(join(root, service, scope, 'signature.bundle.json')),
     attestationBundleBytes: readEvidenceFile(join(root, service, scope, 'attestation.bundle.json')),
+    downloadBytes: readEvidenceFile(join(root, service, scope, 'download.json')),
     signatureVerificationTime: readEvidenceFile(join(root, service, scope, 'signature.verification-time')),
     attestationVerificationTime: readEvidenceFile(join(root, service, scope, 'attestation.verification-time')),
   });

@@ -39,7 +39,7 @@ const trust = (overrides = {}) => ({
 });
 function signed(subject = digest, predicateValue = predicate) {
   const verification = {
-    optional: { Subject: signer, Issuer: 'https://token.actions.githubusercontent.com',
+    optional: { Subject: signer, Issuer: 'https://token.actions.githubusercontent.com', certificate,
       Bundle: { Payload: { integratedTime: 1789426200, canonicalizedBody: 'proof', signature: 'native-signature' },
         SignedEntryTimestamp: 'proof' } },
   };
@@ -70,7 +70,7 @@ function signed(subject = digest, predicateValue = predicate) {
         tlogEntries: [{ integratedTime: 1789426200, canonicalizedBody: 'proof' }],
       },
       dsseEnvelope: { payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
-        payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'dsse-signature' }] },
+        payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'native-signature' }] },
     }]),
   };
 }
@@ -189,7 +189,7 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
     dsseEnvelope: {
       payload: Buffer.from(JSON.stringify(statement)).toString('base64'),
       payloadType: 'application/vnd.in-toto+json',
-      signatures: [{ sig: 'native-dsse-signature' }],
+      signatures: [{ sig: 'native-signature' }],
     },
   }]);
   assert.doesNotThrow(() => normalizeEvidence({ subject: digest, trust: trust(), ...evidence }));
@@ -295,7 +295,7 @@ test('rejects legacy signature and attestation verification missing trusted opti
   delete attestationVerification[0].optional;
   legacyAttestation.attestationBytes = JSON.stringify(attestationVerification);
   assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...legacyAttestation }),
-    /Cosign verifier lacks required identity, certificate, or transparency trust material/);
+    /Native Cosign DSSE differs from verification output/);
 });
 
 test('rejects staged signature bundle, subject, predicate, and platform substitutions', () => {

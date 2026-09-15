@@ -83,6 +83,7 @@ const cryptoEvidenceFixture = set => {
       ? Math.max(Math.floor(createdAt / 1000) + 60, 1789426200)
       : 1789426200;
     const optional = { Subject: publisherWorkflowIdentity, Issuer: 'https://token.actions.githubusercontent.com',
+      certificate: cryptoCertificate,
       Bundle: { Payload: { integratedTime, canonicalizedBody: 'proof', signature: 'native-signature' } } };
     const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } }, optional }]);
     const attestationBytes = JSON.stringify([{ payload: Buffer.from(JSON.stringify({
@@ -114,7 +115,7 @@ const cryptoEvidenceFixture = set => {
         dsseEnvelope: { payload: Buffer.from(JSON.stringify({
           subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
         })).toString('base64'), payloadType: 'application/vnd.in-toto+json',
-        signatures: [{ sig: 'dsse-signature' }] },
+        signatures: [{ sig: 'native-signature' }] },
       }]),
     };
   };
