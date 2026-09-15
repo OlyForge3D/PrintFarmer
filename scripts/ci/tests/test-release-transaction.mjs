@@ -317,12 +317,21 @@ test('single authority has direct dependencies, one approval, and no alternate c
     ['admit', 'qualification', 'collect-qualification']);
   assert.equal(workflow.jobs.authorize, undefined);
   assert.deepEqual(Object.keys(workflow.jobs),
-    ['schedule-insider', 'admit', 'qualification', 'collect-qualification', 'publish', 'summary']);
+    ['admit', 'qualification', 'collect-qualification', 'publish', 'summary']);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');
   assert.deepEqual(Object.keys(workflow.jobs.publish.with), ['transaction', 'operation', 'reservation_target']);
   assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
-  assert.match(JSON.stringify(workflow.jobs['schedule-insider']), /--ref development/);
-  assert.doesNotMatch(JSON.stringify(workflow.jobs['schedule-insider']), /mode=/);
+  assert.equal(workflow.jobs.admit.if, undefined);
+  assert.match(workflow.concurrency.group, /inputs\.operation \|\| 'publish'/);
+  assert.match(workflow.jobs.admit.steps.find(step => step.id === 'select').env.RELEASE_CHANNEL,
+    /github\.event_name == 'schedule' && 'insider'/);
+  assert.equal(workflow.jobs.admit.steps.find(step => step.id === 'admit').if,
+    "(inputs.operation || 'publish') == 'publish'");
+  assert.equal(workflow.jobs.qualification.if, "(inputs.operation || 'publish') == 'publish'");
+  assert.equal(workflow.jobs['collect-qualification'].if, "(inputs.operation || 'publish') == 'publish'");
+  assert.match(workflow.jobs.publish.if, /\(inputs\.operation \|\| 'publish'\) == 'abandon'/);
+  assert.equal(workflow.jobs.publish.with.operation, "${{ inputs.operation || 'publish' }}");
+  assert.equal(workflow.jobs.summary.if, 'always()');
   const summary = JSON.stringify(workflow.jobs.summary);
   assert.match(summary, /public_identity|qualification|evidence|publication|source/i);
   assert.doesNotMatch(JSON.stringify(workflow), /RELEASE_MODE/);

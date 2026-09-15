@@ -246,7 +246,10 @@ function partitionDownload(bytes) {
     fingerprints.add(fingerprint);
     const signature = nativeSignatureBundle(entry) ||
       (typeof entry?.Base64Signature === 'string' && typeof entry?.Payload === 'string' &&
-        typeof entry?.Cert === 'string' && entry?.Bundle && !entry.dsseEnvelope);
+        (entry.Cert === null || typeof entry.Cert === 'string' ||
+          (entry.Cert && typeof entry.Cert === 'object' && !Array.isArray(entry.Cert) &&
+            typeof entry.Cert.Raw === 'string')) &&
+        entry.Bundle && !entry.dsseEnvelope);
     const attestation = nativeDsseBundle(entry) ||
       (typeof entry?.payload === 'string' && typeof entry?.payloadType === 'string' &&
         Array.isArray(entry?.signatures) && !entry.messageSignature);
@@ -256,6 +259,31 @@ function partitionDownload(bytes) {
   requireThat(signatures.length > 0 && attestations.length > 0,
     'Combined Cosign download is incomplete');
   return { signatures, attestations };
+}
+
+function legacyCertificate(entry, certificate) {
+  if (entry.Cert === null) return true;
+  if (typeof entry.Cert === 'string') return entry.Cert === certificate;
+  if (!entry.Cert || typeof entry.Cert !== 'object' || Array.isArray(entry.Cert) ||
+    typeof entry.Cert.Raw !== 'string' || entry.Cert.Raw.length === 0) return false;
+  try {
+    return new X509Certificate(Buffer.from(entry.Cert.Raw, 'base64')).raw.toString('base64') ===
+      new X509Certificate(certificate).raw.toString('base64');
+  } catch { return false; }
+}
+
+function verifierPayloadMatches(payload, verification) {
+  if (JSON.stringify(canonicalJson(payload)) === JSON.stringify(canonicalJson(verification))) return true;
+  const stripped = structuredClone(verification);
+  if (!stripped?.optional || typeof stripped.optional !== 'object' || Array.isArray(stripped.optional)) return false;
+  for (const field of ['Subject', 'Issuer', 'certificate', 'Bundle']) delete stripped.optional[field];
+  return JSON.stringify(canonicalJson(payload)) === JSON.stringify(canonicalJson(stripped));
+}
+
+function rekorSignature(bundle) {
+  try {
+    return JSON.parse(Buffer.from(bundle?.Payload?.body ?? '', 'base64').toString('utf8'))?.spec?.signature?.content;
+  } catch { return undefined; }
 }
 
 function validateSignatureDownload(bundle, verification, subject) {
@@ -273,12 +301,15 @@ function validateSignatureDownload(bundle, verification, subject) {
     }
     return typeof entry?.Base64Signature === 'string' && entry.Base64Signature.length > 0 &&
       typeof entry?.Payload === 'string' && entry.Payload.length > 0 &&
-      typeof entry?.Cert === 'string' && entry.Cert.length > 0 &&
       entry.Bundle && typeof entry.Bundle === 'object' &&
-      JSON.stringify(canonicalJson(signedPayload)) === JSON.stringify(canonicalJson(verification[index])) &&
-      entry.Base64Signature === optional?.Bundle?.Payload?.signature &&
-      entry.Cert === optional?.certificate &&
-      JSON.stringify(canonicalJson(entry.Bundle)) === JSON.stringify(canonicalJson(optional?.Bundle));
+      typeof optional?.Subject === 'string' && typeof optional?.Issuer === 'string' &&
+      typeof optional?.certificate === 'string' && optional.certificate.length > 0 &&
+      optional.Bundle && typeof optional.Bundle === 'object' &&
+      verifierPayloadMatches(signedPayload, verification[index]) &&
+      (entry.Base64Signature === optional.Bundle?.Payload?.signature ||
+        entry.Base64Signature === rekorSignature(entry.Bundle)) &&
+      legacyCertificate(entry, optional.certificate) &&
+      JSON.stringify(canonicalJson(entry.Bundle)) === JSON.stringify(canonicalJson(optional.Bundle));
   }),
   'Malformed Cosign signature download');
 }

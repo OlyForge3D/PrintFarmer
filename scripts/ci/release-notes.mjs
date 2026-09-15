@@ -19,6 +19,19 @@ export function validateReleaseNotesMetadata(metadata, version) {
       'Release metadata version does not match the release');
     return validateReleaseNotesMetadata({ schema: 1, version, ...metadata.notes }, version);
   }
+  if (metadata.schema === 3) {
+      const fields = ['schema', 'version', 'releasePaths', 'minimumUpdater', 'components',
+        'schemas', 'migrations', 'operations', 'rollback', 'notes'];
+      requireThat(Object.keys(metadata).length === fields.length && fields.every(field => Object.hasOwn(metadata, field)) &&
+        metadata.version === version && metadata.notes && typeof metadata.notes === 'object' && !Array.isArray(metadata.notes),
+      'Release metadata version does not match the release');
+      const noteFields = ['compatibility', 'migration', 'downtime', 'backup', 'recovery'];
+      requireThat(Object.keys(metadata.notes).length === noteFields.length &&
+        noteFields.every(field => Object.hasOwn(metadata.notes, field)),
+      'Release metadata notes have unknown or missing fields');
+      for (const field of noteFields) requireText(metadata.notes[field], field);
+      return metadata.notes;
+  }
   const fields = ['schema', 'version', 'compatibility', 'migration', 'downtime', 'backup', 'recovery'];
   requireThat(Object.keys(metadata).length === fields.length && fields.every(field => Object.hasOwn(metadata, field)),
     'Release metadata has unknown or missing fields');
@@ -45,7 +58,7 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
     'Release notes contain malformed merged pull request data');
     return `- [#${pr.number}](${pr.url}): ${pr.title.trim().replace(/([\\[\]`])/g, '\\$1')}`;
   });
-  const operational = metadata.schema === 2 ? metadata.notes : metadata;
+  const operational = validateReleaseNotesMetadata(metadata, version.replace(/-(?:insider|beta|rc)\.\d+$/, ''));
   return `## PrintFarmer ${version}\n\nSource commit: ${sourceCommit}\nRelease range: ${previousTag}...${sourceCommit}\n\n` +
     `### Merged pull requests\n\n${entries.join('\n')}\n\n${changelog.trim()}\n\n### Compatibility\n\n${operational.compatibility}\n\n` +
     `### Migration\n\n${operational.migration}\n\n### Downtime\n\n${operational.downtime}\n\n### Backup\n\n${operational.backup}\n\n### Recovery\n\n${operational.recovery}\n`;

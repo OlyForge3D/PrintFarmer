@@ -196,6 +196,19 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
     pullRequests: [], changelog: 'entry', metadata }), /at least one merged pull request/);
 });
 
+test('canonical schema-3 release metadata generates release notes through the shared notes adapter', () => {
+  const metadata = JSON.parse(readFileSync('release-metadata/0.2.3.json', 'utf8'));
+  assert.deepEqual(validateReleaseNotesMetadata(metadata, '0.2.3'), metadata.notes);
+  const notes = releaseNotes({
+    version: '0.2.3', sourceCommit: sha, previousTag: 'v0.2.2',
+    pullRequests: [{ number: 2660, title: 'Signed release publication', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/2660' }],
+    changelog: '### Features\n\n- Signed release publication.\n\n### Fixes\n\n- None.\n\n### Breaking changes\n\n- None.',
+    metadata,
+  });
+  assert.match(notes, /Only the declared source release IDs/);
+  assert.match(notes, /verified provider backup/);
+});
+
 test('closed release metadata is canonical, complete, and digest-bound into the manifest', () => {
   const metadata = releaseMetadataFixture('1.2.3');
   const identity = record();

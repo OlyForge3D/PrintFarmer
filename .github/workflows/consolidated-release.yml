@@ -31,26 +31,11 @@ permissions:
   pull-requests: read
 
 concurrency:
-  group: release-${{ inputs.operation == 'abandon' && 'insider' || (inputs.channel || 'insider') }}
+  group: release-${{ (inputs.operation || 'publish') == 'abandon' && 'insider' || (github.event_name == 'schedule' && 'insider' || inputs.channel) }}
   cancel-in-progress: false
 
 jobs:
-  schedule-insider:
-    if: github.event_name == 'schedule' && github.repository == 'OlyForge3D/PrintFarmer'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: write
-      contents: read
-    steps:
-      - name: Dispatch the fixed release authority on development
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run consolidated-release.yml --repo "$GITHUB_REPOSITORY" \
-            --ref development -f channel=insider
-
   admit:
-    if: github.event_name != 'schedule'
     name: Pin release transaction
     runs-on: ubuntu-latest
     permissions:
@@ -84,7 +69,7 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CHANNEL: ${{ inputs.operation == 'abandon' && 'insider' || inputs.channel }}
+          RELEASE_CHANNEL: ${{ (inputs.operation || 'publish') == 'abandon' && 'insider' || (github.event_name == 'schedule' && 'insider' || inputs.channel) }}
           RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: |
@@ -92,7 +77,7 @@ jobs:
           transaction="$(node scripts/ci/release-transaction.mjs select)"
           echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
       - name: Admit immutable release transaction
-        if: inputs.operation == 'publish'
+        if: (inputs.operation || 'publish') == 'publish'
         id: admit
         env:
           GH_TOKEN: ${{ github.token }}
@@ -109,7 +94,7 @@ jobs:
           retention-days: 30
 
   qualification:
-    if: inputs.operation == 'publish'
+    if: (inputs.operation || 'publish') == 'publish'
     name: Automatic exact-source qualification
     needs: admit
     uses: ./.github/workflows/ci.yml
@@ -121,7 +106,7 @@ jobs:
       source_branch: ${{ needs.admit.outputs.channel == 'stable' && 'main' || 'development' }}
 
   collect-qualification:
-    if: inputs.operation == 'publish'
+    if: (inputs.operation || 'publish') == 'publish'
     name: Collect genuine qualification evidence
     needs: [admit, qualification]
     runs-on: ubuntu-latest
@@ -180,7 +165,7 @@ jobs:
 
   publish:
     if: >-
-      always() && needs.admit.result == 'success' && (inputs.operation == 'abandon' ||
+      always() && needs.admit.result == 'success' && ((inputs.operation || 'publish') == 'abandon' ||
       (needs.qualification.result == 'success' && needs.collect-qualification.result == 'success'))
     name: Approve and execute immutable release operation
     needs: [admit, qualification, collect-qualification]
@@ -192,20 +177,20 @@ jobs:
       id-token: write
     with:
       transaction: ${{ needs.admit.outputs.transaction }}
-      operation: ${{ inputs.operation }}
+      operation: ${{ inputs.operation || 'publish' }}
       reservation_target: ${{ inputs.reservation_target }}
     secrets: inherit
 
   summary:
     name: Release transaction summary
-    if: always() && github.event_name != 'schedule'
+    if: always()
     needs: [admit, qualification, collect-qualification, publish]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
       - name: Write bounded result
         env:
-          CHANNEL: ${{ inputs.channel }}
+          CHANNEL: ${{ github.event_name == 'schedule' && 'insider' || inputs.channel }}
           SOURCE_SHA: ${{ needs.admit.outputs.source_sha }}
           QUALIFICATION: ${{ needs.qualification.result }}
           EVIDENCE: ${{ needs.collect-qualification.result }}

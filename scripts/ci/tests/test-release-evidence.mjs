@@ -204,6 +204,33 @@ test('retains byte-faithful Cosign v3.0.6 raw capture composition metadata', () 
   assert.deepEqual(combinedEntries, [...signatureEntries, ...attestationEntries]);
 });
 
+test('accepts verifier-bound legacy null and object certificates but rejects unrelated raw downloads', () => {
+  const fixtureRoot = join('scripts', 'ci', 'tests', 'fixtures', 'cosign-v3.0.6');
+  const legacyBytes = readFileSync(join(fixtureRoot, 'legacy-signature.ndjson'), 'utf8');
+  const combinedBytes = readFileSync(join(fixtureRoot, 'combined.ndjson'), 'utf8');
+  const legacyEntries = legacyBytes.trim().split(/\r?\n/).map(JSON.parse);
+  const subject = `sha256:${JSON.parse(Buffer.from(legacyEntries[0].Payload, 'base64').toString('utf8'))
+    .critical.image['docker-manifest-digest'].slice(7)}`;
+  const boundCertificate = new X509Certificate(Buffer.from(legacyEntries[1].Cert.Raw, 'base64')).toString();
+  const signatureBytes = JSON.stringify(legacyEntries.map(entry => {
+    const payload = JSON.parse(Buffer.from(entry.Payload, 'base64').toString('utf8'));
+    return { ...payload, optional: { ...payload.optional, Subject: signer,
+      Issuer: 'https://token.actions.githubusercontent.com', certificate: boundCertificate, Bundle: entry.Bundle } };
+  }));
+  const evidence = signed(subject);
+  evidence.signatureBytes = signatureBytes;
+  evidence.signatureBundleBytes = legacyBytes;
+  evidence.downloadBytes = JSON.stringify([...legacyEntries, ...JSON.parse(evidence.attestationBundleBytes)]);
+  assert.doesNotThrow(() => normalizeEvidence({ subject, ...evidence }));
+
+  const unconsumed = signed(subject);
+  unconsumed.signatureBytes = signatureBytes;
+  unconsumed.signatureBundleBytes = legacyBytes;
+  unconsumed.attestationBundleBytes = readFileSync(join(fixtureRoot, 'native-attestation.ndjson'), 'utf8');
+  unconsumed.downloadBytes = combinedBytes;
+  assert.throws(() => normalizeEvidence({ subject, ...unconsumed }), /DSSE|subject|predicate/);
+});
+
 test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => {
   const evidence = signed();
   const statement = JSON.parse(Buffer.from(
