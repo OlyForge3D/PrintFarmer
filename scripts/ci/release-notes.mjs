@@ -21,6 +21,10 @@ function validatedOperationalNotes(notes) {
   return notes;
 }
 
+function escapeMarkdownText(value) {
+  return value.replace(/[\\`*_~[\]<>&]/g, '\\$&');
+}
+
 export function validateReleaseNotesMetadata(metadata, version) {
   requireThat(metadata && typeof metadata === 'object' && !Array.isArray(metadata),
     'Release metadata is malformed');
@@ -48,6 +52,8 @@ export function validateReleaseNotesMetadata(metadata, version) {
 
 export function releaseNotes({ version, sourceCommit, previousTag, pullRequests, changelog, metadata, repository = 'OlyForge3D/PrintFarmer' }) {
   const baseVersion = version.replace(/-(?:insider|beta|rc)\.\d+$/, '');
+  requireThat(typeof repository === 'string' && /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(repository),
+    'Release notes require a canonical repository name');
   requireThat(/^[a-f0-9]{40}$/.test(sourceCommit), 'Release notes require the exact source commit');
   requireThat(typeof previousTag === 'string' && /^v\d+\.\d+\.\d+/.test(previousTag),
     'Release notes require a previous canonical version tag');
@@ -58,11 +64,10 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
   const entries = pullRequests.map(pr => {
     requireThat(Number.isSafeInteger(pr.number) && pr.number > 0 && typeof pr.title === 'string' &&
       pr.title.trim().length > 0 && !/[\r\n]/.test(pr.title) && typeof pr.url === 'string' &&
-      new RegExp(`^https://github\\.com/${repository.replace('/', '\\/')}/pull/[1-9][0-9]*$`).test(pr.url) &&
+      pr.url === `https://github.com/${repository}/pull/${pr.number}` &&
       !/[\r\n]/.test(pr.url),
     'Release notes contain malformed merged pull request data');
-    return `- [#${pr.number}](${pr.url}): ${pr.title.trim()
-      .replaceAll('\\', '\\\\').replace(/([\[\]`])/g, '\\$1')}`;
+    return `- [#${pr.number}](${pr.url}): ${escapeMarkdownText(pr.title.trim())}`;
   });
   const operational = Object.hasOwn(metadata ?? {}, 'schema')
     ? validateReleaseNotesMetadata(metadata, baseVersion)

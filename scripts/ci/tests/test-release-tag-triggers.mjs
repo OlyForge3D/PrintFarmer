@@ -199,13 +199,32 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
 test('release notes escape every Markdown-significant backslash and delimiter in PR titles', () => {
   const notes = releaseNotes({
     version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
-    pullRequests: [{ number: 42, title: 'Path \\ [and]', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42' }],
+    pullRequests: [{
+      number: 42,
+      title: 'Path \\ `code` *bold* _emphasis_ ~strike~ [link] <tag> & entity',
+      url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42',
+    }],
     changelog: 'entry',
     metadata: {
       compatibility: 'Compatible.', migration: 'Migrate.', downtime: 'Restart.', backup: 'Backup.', recovery: 'Recover.',
     },
   });
-  assert.ok(notes.includes('Path \\\\ \\[and\\]'));
+  assert.ok(notes.includes('Path \\\\ \\`code\\` \\*bold\\* \\_emphasis\\_ \\~strike\\~ \\[link\\] \\<tag\\> \\& entity'));
+});
+
+test('release notes reject URLs that do not exactly bind a title to its PR number and repository', () => {
+  assert.throws(() => releaseNotes({
+    version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [{
+      number: 42,
+      title: 'Release-safe change',
+      url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42?unexpected=1',
+    }],
+    changelog: 'entry',
+    metadata: {
+      compatibility: 'Compatible.', migration: 'Migrate.', downtime: 'Restart.', backup: 'Backup.', recovery: 'Recover.',
+    },
+  }), /malformed merged pull request data/);
 });
 
 test('canonical schema-3 release metadata generates release notes through the shared notes adapter', () => {
