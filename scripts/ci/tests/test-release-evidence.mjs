@@ -9,6 +9,7 @@ const digest = `sha256:${'a'.repeat(64)}`;
 const other = `sha256:${'b'.repeat(64)}`;
 const platformDigest = `sha256:${'c'.repeat(64)}`;
 const predicate = { SPDXID: 'SPDXRef-DOCUMENT' };
+mkdirSync('.artifacts', { recursive: true });
 const ndjson = (entries, separator = '\n') => `${entries.map(entry => JSON.stringify(entry)).join(separator)}${separator}`;
 const parseNdjson = bytes => bytes.trimEnd().split(/\r?\n/).map(entry => JSON.parse(entry));
 const certificate = `-----BEGIN CERTIFICATE-----
@@ -343,7 +344,7 @@ test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => 
   }
 
   for (const [label, mutate] of [
-    ['whitespace', bytes => bytes.replace('{', '{ ')],
+    ['whitespace', bytes => bytes.replaceAll('{', '{ ')],
     ['key order', bytes => {
       const entry = parseNdjson(bytes)[0];
       return ndjson([Object.fromEntries(Object.entries(entry).reverse())]);

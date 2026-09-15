@@ -196,6 +196,18 @@ test('release notes derive bounded merged PRs and mandatory version-controlled o
     pullRequests: [], changelog: 'entry', metadata }), /at least one merged pull request/);
 });
 
+test('release notes escape every Markdown-significant backslash and delimiter in PR titles', () => {
+  const notes = releaseNotes({
+    version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [{ number: 42, title: 'Path \\ [and]', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42' }],
+    changelog: 'entry',
+    metadata: {
+      compatibility: 'Compatible.', migration: 'Migrate.', downtime: 'Restart.', backup: 'Backup.', recovery: 'Recover.',
+    },
+  });
+  assert.ok(notes.includes('Path \\\\ \\[and\\]'));
+});
+
 test('canonical schema-3 release metadata generates release notes through the shared notes adapter', () => {
   const metadata = JSON.parse(readFileSync('release-metadata/0.2.3.json', 'utf8'));
   assert.deepEqual(validateReleaseNotesMetadata(metadata, '0.2.3'), metadata.notes);
@@ -242,6 +254,7 @@ test('closed release metadata is canonical, complete, and digest-bound into the 
     const changed = structuredClone(metadata);
     mutate(changed);
     const path = resolve('.artifacts', `invalid-release-metadata-${process.pid}.json`);
+    mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify(changed));
     assert.throws(() => loadReleaseMetadata('1.2.3', path), ReleasePolicyError);
     rmSync(path, { force: true });

@@ -1342,7 +1342,6 @@ export function verifyTag(record, expectedObject, actualTag) {
 
 export function verifyConsumer(record, reservation, context, identitySha256 = reservation?.identitySha256 ?? hash(reservation?.record)) {
   requireThat(!reservation?.abandonment, 'Terminally abandoned reservation cannot be consumed');
-  const stored = reservation?.record;
   requireThat(hash(record) === identitySha256, 'Canonical record was changed');
   validateRecord(record);
   const tag = parseTag(record.sourceTag);

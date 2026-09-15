@@ -61,7 +61,8 @@ export function releaseNotes({ version, sourceCommit, previousTag, pullRequests,
       new RegExp(`^https://github\\.com/${repository.replace('/', '\\/')}/pull/[1-9][0-9]*$`).test(pr.url) &&
       !/[\r\n]/.test(pr.url),
     'Release notes contain malformed merged pull request data');
-    return `- [#${pr.number}](${pr.url}): ${pr.title.trim().replace(/([\\[\]`])/g, '\\$1')}`;
+    return `- [#${pr.number}](${pr.url}): ${pr.title.trim()
+      .replaceAll('\\', '\\\\').replace(/([\[\]`])/g, '\\$1')}`;
   });
   const operational = Object.hasOwn(metadata ?? {}, 'schema')
     ? validateReleaseNotesMetadata(metadata, baseVersion)
