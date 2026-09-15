@@ -34,8 +34,8 @@ The `Eligible`, `Blocked`, `Unknown`, and `NotManaged` readiness lifecycle is a
 pure evidence evaluation. `Eligible` requires a complete signature-verified
 release and fresh, complete compatible observations for every required service,
 including platform, migration head, and worker requirements. Until release
-distribution supplies a verified target, the live API intentionally reports
-`NotManaged`; it does not offer or install software.
+distribution supplies a verified target, an evaluator returns `NotManaged`; the
+live API does not currently emit readiness and does not offer or install software.
 
 Deliver **read-only installed-version inventory first**, followed by compatible
 release alerts. Make an **operator-approved, host-run updater** the first

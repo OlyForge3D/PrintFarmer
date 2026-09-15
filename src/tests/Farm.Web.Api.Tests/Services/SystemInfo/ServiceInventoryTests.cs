@@ -88,6 +88,26 @@ public sealed class ServiceInventoryTests
     }
 
     [Fact]
+    public void Evaluate_SelfReportedOptionalAbsence_ClearsDatabaseMetadata()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            Verified("optional") with
+            {
+                Required = false,
+                ObservationState = InventoryObservationState.NotInstalled,
+                Source = "SelfReport",
+                DatabaseProvider = "SQL Server",
+                MigrationHead = "202609150001_Initial",
+            },
+        ]);
+
+        ServiceReplicaObservationDto service = Assert.Single(result.Services);
+        Assert.Null(service.DatabaseProvider);
+        Assert.Null(service.MigrationHead);
+    }
+
+    [Fact]
     public void Evaluate_SameVersionDifferentReplicaDigests_IsIncompatible()
     {
         ServiceInventoryDto result = Evaluate([Verified("a"), Verified("b") with { PlatformDigest = "sha256:" + new string('c', 64) }]);
@@ -445,7 +465,7 @@ public sealed class ServiceInventoryTests
         ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
 
         Assert.Equal(InventoryEligibility.Unknown, result.State);
-        Assert.Equal("RequiredHostEvidenceMissingOrStale", Assert.Single(result.Reasons));
+        Assert.Equal("RequiredServiceEvidenceMissingOrStale:worker", Assert.Single(result.Reasons));
     }
 
     [Fact]

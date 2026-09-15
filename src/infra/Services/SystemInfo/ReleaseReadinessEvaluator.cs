@@ -28,22 +28,6 @@ public static partial class ReleaseReadinessEvaluator
 
         hops.Add("FreshHostEvidence");
         ServiceReplicaObservationDto[] required = inventory.Services.Where(service => service.Required).ToArray();
-        if (required.Length == 0 || required.Any(service => !HasFreshIndependentEvidence(service, now)))
-        {
-            return Result(InventoryEligibility.Unknown, ["RequiredHostEvidenceMissingOrStale"], hops);
-        }
-
-        if (inventory.CompatibilityState != InventoryCompatibilityState.Compatible || inventory.ChannelState != InventoryChannelState.Observed)
-        {
-            return Result(InventoryEligibility.Blocked, ["InstalledTopologyIncompatible"], hops);
-        }
-
-        hops.Add("TargetCompatibility");
-        if (release.Identity.Channel != inventory.SelectedChannel)
-        {
-            return Result(InventoryEligibility.Blocked, ["TargetChannelDoesNotMatchSelection"], hops);
-        }
-
         if (release.Services.GroupBy(service => service.ServiceId, StringComparer.Ordinal).Any(group => group.Skip(1).Any()))
         {
             return Result(InventoryEligibility.Blocked, ["DuplicateTargetServiceEvidence"], hops);
@@ -91,6 +75,22 @@ public static partial class ReleaseReadinessEvaluator
                     return Result(InventoryEligibility.Blocked, [$"WorkerCompatibilityMismatch:{service.ServiceId}"], hops);
                 }
             }
+        }
+
+        if (required.Length == 0)
+        {
+            return Result(InventoryEligibility.Unknown, ["RequiredHostEvidenceMissingOrStale"], hops);
+        }
+
+        if (inventory.CompatibilityState != InventoryCompatibilityState.Compatible || inventory.ChannelState != InventoryChannelState.Observed)
+        {
+            return Result(InventoryEligibility.Blocked, ["InstalledTopologyIncompatible"], hops);
+        }
+
+        hops.Add("TargetCompatibility");
+        if (release.Identity.Channel != inventory.SelectedChannel)
+        {
+            return Result(InventoryEligibility.Blocked, ["TargetChannelDoesNotMatchSelection"], hops);
         }
 
         return Result(InventoryEligibility.Eligible, [], hops);

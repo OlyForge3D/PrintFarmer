@@ -59,6 +59,8 @@ public static partial class ServiceInventoryEvaluator
                 Identity = null,
                 ObservedChannel = null,
                 ChannelState = InventoryChannelState.Unknown,
+                DatabaseProvider = null,
+                MigrationHead = null,
                 PlatformDigest = null,
                 IndexDigest = null,
                 ManifestDigest = null,
