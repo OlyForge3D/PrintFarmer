@@ -245,6 +245,40 @@ test('resumed terminal handoff uses a new job/fence and preserves its terminal a
   assert.equal(duplicate.code, 0, duplicate.stderr);
 });
 
+test('cross-issue resumed work binds the same terminal session, later evidence, and unique active session and issue', async () => {
+  await reset();
+  await reserveLocalJob({ job: job(), eligibility }, options());
+  await acknowledgeLocalJob(job().jobId, 'existing-session', { ...options(), kickoffVerified: true });
+  const terminal = await recordLocalTerminalResult({
+    jobId: job().jobId, sessionId: 'existing-session', headSha: 'b'.repeat(40), exitCode: 0,
+    validationEvidence: 'original issue completed', workingTreeClean: true, allCommitsPushed: true,
+  }, options());
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const nextJob = { ...job('new-issue-handoff'), issue: 2718 };
+  const evidence = {
+    ...sessionEvidence('existing-session'), issue: 2718, previousJobId: terminal.jobId, resumedAfterTerminal: true,
+  };
+  for (const changed of [
+    { ...evidence, sessionId: 'unrelated-session' },
+    { ...evidence, observedAt: '2020-01-01' },
+    { ...evidence, observedAt: terminal.updatedAt },
+    { ...evidence, resumedAfterTerminal: false },
+  ]) {
+    await assert.rejects(() => accountLocalSession({ job: nextJob, sessionEvidence: changed }, options()),
+      (error) => ['FENCED', 'INVALID_SESSION_EVIDENCE'].includes(error.code));
+  }
+  const resumed = await accountLocalSession({ job: nextJob, sessionEvidence: evidence }, options());
+  assert.equal(resumed.issue, 2718);
+  assert.deepEqual((await readLedger()).jobs[terminal.jobId], terminal);
+  await assert.rejects(() => accountLocalSession({
+    job: { ...job('second-active-session'), issue: 2719 }, sessionEvidence: { ...evidence, issue: 2719 },
+  }, options()), (error) => error.code === 'SESSION_OWNED');
+  await assert.rejects(() => accountLocalSession({
+    job: { ...job('second-active-issue'), issue: 2718 },
+    sessionEvidence: { ...sessionEvidence('different-session'), issue: 2718 },
+  }, options()), (error) => error.code === 'ISSUE_OWNED');
+});
+
 function fakeChild() {
   const child = new EventEmitter();
   child.stdin = new PassThrough();

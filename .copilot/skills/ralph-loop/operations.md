@@ -144,6 +144,10 @@ inventory/history observation reference). Evidence must be at most five minutes 
 For resumed work in a previously terminal session, also supply `previousJobId` and
 `resumedAfterTerminal:true` in evidence, backed by a turn/work observation after that terminal
 record. The old audit remains unchanged; the new job/fence accounts the resumed work.
+A session can resume on a different issue: use the actual current issue from fresh GitHub and
+session evidence, not the historical session title. Cross-issue linkage still requires the
+exact same session ID as the terminal predecessor and verified later work; it never authorizes
+linking an unrelated session or duplicating an active session/issue.
 Send that new job/fence to the existing session for its terminal report; do not resend its kickoff.
 The operation atomically deduplicates sessions/issues and enforces five slots. If accounting fails
 because the ledger is full, retain the untracked session in union capacity and block new dispatches

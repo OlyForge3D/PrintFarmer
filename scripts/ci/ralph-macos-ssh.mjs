@@ -422,14 +422,14 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
     if (handoff) {
       const previous = handoff.previousJobId && ledger.jobs[handoff.previousJobId];
       if (handoff.previousJobId && (!previous || activeJobStates.has(previous.state) ||
-          previous.mode !== 'local' || previous.sessionId !== handoff.sessionId || previous.issue !== job.issue ||
+          previous.mode !== 'local' || previous.sessionId !== handoff.sessionId ||
           !Number.isFinite(Date.parse(previous.updatedAt)) ||
           Date.parse(previous.updatedAt) >= Date.parse(handoff.observedAt))) {
         throw new RalphMacSshError('Resumed handoff must name its terminal predecessor and subsequent live observation.', 'FENCED');
       }
       const sessionRecords = Object.values(ledger.jobs).filter((entry) => entry.sessionId === handoff.sessionId ||
         entry.strandedSessionId === handoff.sessionId);
-      if (sessionRecords.some((entry) => activeJobStates.has(entry.state) || entry.issue !== job.issue ||
+      if (sessionRecords.some((entry) => activeJobStates.has(entry.state) ||
           (entry.strandedSessionId === handoff.sessionId && entry.strandedSessionCleared !== true)) ||
           (sessionRecords.length > 0 && !previous)) {
         throw new RalphMacSshError('Session already has a ledger record; reconcile it or explicitly account its resumed handoff.', 'SESSION_OWNED');
