@@ -70,20 +70,26 @@ and backup readiness. It binds the source and target channels plus the
 channel-policy revision to canonical signed release identity: release/version,
 source tag/branch/commit and authorized branch head, build metadata, OCI labels,
 provenance subject, manifest/index, and every required component platform
-digest. All immutable evidence is hashed. Before artifact transfer, staging
-reacquires a single-installation OS file lock and revalidates current signed
-metadata and the hash. Drift, channel changes, incompatible evidence, incomplete
-component sets, mixed identity, invalid signatures, or digest conflicts reject
-the handoff. Staging adapters receive only the approved immutable plan and
-verified metadata, must retain recovery artifacts, and report failures as
-recoverable while leaving the running release untouched.
+digest. Required components are derived from trusted installation topology,
+never caller-selected. All immutable evidence is hashed. Before artifact
+transfer, staging reacquires a single-installation OS file lock, reconciles the
+operation/idempotency journal, and revalidates current signed metadata and the
+hash. Drift, channel changes, incompatible evidence, incomplete component sets,
+mixed identity, invalid signatures, or digest conflicts reject the handoff.
+Staging adapters receive only the approved immutable plan and verified metadata,
+must retain a verified receipt for every component/platform byte plus the prior
+recovery set and configuration digests, and report failures as recoverable
+while leaving the running release untouched. An unresolved staging intent is
+`NeedsOperator`; this increment never replays, applies, or recovers it.
 
 The append-only JSON-lines operation journal and installation lock are
 host-local files, outside replaced containers and application databases.
 Journal intent is flushed before staging, outcomes are durable and monotonic
-across a process restart, and its redacted records retain only bounded
-operation/actor/reason/outcome identifiers, channel and policy identities,
-canonical release identity, plan hash, and staged/recovery digests. Arbitrary
+across process restarts and concurrent instances through same-process and
+file-system serialization. Blank, gapped, corrupt, or truncated JSONL records
+fail closed. Its redacted records retain only bounded operation/actor/reason/
+outcome identifiers, channel and policy identities, canonical release identity
+in every lifecycle record, plan hash, and staged/recovery digests. Arbitrary
 paths, URLs, commands, and exception text are never journalled. Journal
 corruption is a fail-closed reconciliation condition.
 Issue #2663 owns all transitions after `Staged`, including drain, backup,
