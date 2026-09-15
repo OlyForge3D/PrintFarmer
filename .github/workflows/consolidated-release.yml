@@ -172,8 +172,11 @@ jobs:
     uses: ./.github/workflows/docker-publish.yml
     permissions:
       actions: read
+      checks: read
       contents: read
       packages: read
+      pull-requests: read
+      statuses: read
       id-token: write
     with:
       transaction: ${{ needs.admit.outputs.transaction }}
