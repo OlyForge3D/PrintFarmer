@@ -345,7 +345,7 @@ test('publisher has exactly one protected deployment containing every credential
     "${{ inputs.operation == 'abandon' && 'release-insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider') }}",
   ]);
   assert.equal(publisher.concurrency.group,
-    "release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}");
+    "release-publication-${{ inputs.operation == 'abandon' && 'insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider') }}");
   assert.equal(publisher.jobs.publish.steps[2].with.ref,
     '${{ fromJSON(inputs.transaction).sourceCommit }}');
   const job = JSON.stringify(publisher.jobs.publish);

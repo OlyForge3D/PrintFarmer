@@ -27,7 +27,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}
+  group: release-publication-${{ inputs.operation == 'abandon' && 'insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider') }}
   cancel-in-progress: false
 
 env:

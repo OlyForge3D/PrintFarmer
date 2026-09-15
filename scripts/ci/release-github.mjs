@@ -498,6 +498,8 @@ export async function verifyAbandonmentApproval(api, transaction, record, target
     'Abandonment target does not match the immutable reservation');
   requireString(transaction?.runId, /^[1-9][0-9]*$/, 'abandonment workflow run');
   requireString(transaction?.runAttempt, /^[1-9][0-9]*$/, 'abandonment workflow attempt');
+  requireThat(transaction.runAttempt === '1',
+    'Abandonment is restricted to the initial protected workflow attempt');
   const run = await api(`actions/runs/${transaction.runId}`);
   requireThat(run?.id === Number(transaction.runId) && run.run_attempt === Number(transaction.runAttempt) &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&

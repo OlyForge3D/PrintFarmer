@@ -2793,6 +2793,19 @@ test('protected release-control abandonment uses App policy verification and Git
     }, () => {}), /protected job evidence is missing, ambiguous, or mismatched/, 'ambiguous protected job');
     fixture.abandonmentJobs.pop();
     fixture.calls.length = 0;
+    const stableTransaction = JSON.parse(fixture.env.RELEASE_TRANSACTION);
+    stableTransaction.channel = 'stable';
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_TRANSACTION: JSON.stringify(stableTransaction),
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /Only insider release transactions|Invalid release transaction branch binding/, 'stable transaction cannot abandon');
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env, GITHUB_RUN_ATTEMPT: '2',
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /initial protected workflow attempt/, 'historical approval cannot authorize a rerun');
     for (const [name, mutate] of [
       ['spoofed approver', value => { value.user.login = 'outsider'; }],
       ['wrong environment', value => { value.environments[0].name = 'release-stable'; }],

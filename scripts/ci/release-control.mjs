@@ -68,6 +68,11 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance', 'recover-abandonment', 'abandon'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
   const transaction = transactionFromEnvironment(env);
+  if (operation === 'abandon') {
+    requireThat(transaction.channel === 'insider', 'Only insider release transactions may abandon a reservation');
+    requireThat(env.GITHUB_RUN_ATTEMPT === '1',
+      'Abandonment is restricted to the initial protected workflow attempt');
+  }
   if (['authorize', 'consume', 'preflight', 'advance'].includes(operation)) {
     requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit,
       'Release source identity does not match the pinned release transaction');
@@ -163,6 +168,8 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const record = verifyAuthorization(env, verify);
   if (operation === 'abandon') requireThat(record.channel === 'insider',
     'Only insider reservations may be abandoned');
+  if (operation === 'abandon') requireThat(record.channel === transaction.channel,
+    'Abandonment transaction channel does not match the recovered reservation');
   const { state } = await store.read();
   const entry = state.reservations[record.allocationKey];
   requireThat(entry, 'Unknown release authorization');

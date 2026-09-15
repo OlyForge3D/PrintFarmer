@@ -30,7 +30,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: release-${{ inputs.channel || 'insider' }}
+  group: release-${{ inputs.operation == 'abandon' && 'insider' || (inputs.channel || 'insider') }}
   cancel-in-progress: false
 
 jobs:
