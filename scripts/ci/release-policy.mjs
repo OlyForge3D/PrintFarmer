@@ -656,7 +656,6 @@ export function validateReleaseManifest(manifest) {
     services: evidence.services,
   }, manifest.completeSet, {
     policy: trustPolicy, releaseId: identity.releaseId, createdTime: evidence.trust.createdTime,
-    trustedTime: evidence.trust.verificationTime,
   });
   requireThat(evidence.cryptoEvidence.sha256 === sha256Bytes(JSON.stringify({
     schema: 1, createdTime: evidence.trust.createdTime,

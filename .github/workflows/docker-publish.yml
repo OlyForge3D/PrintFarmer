@@ -421,10 +421,12 @@ jobs:
             cosign verify --output json "$reference" \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/signature.json"
+            date -u +%Y-%m-%dT%H:%M:%S.000Z > "$index_evidence/signature.verification-time"
             cosign verify-attestation --output json "$reference" \
               --type spdxjson \
               --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
               --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$index_evidence/attestation.json"
+            date -u +%Y-%m-%dT%H:%M:%S.000Z > "$index_evidence/attestation.verification-time"
             cosign download signature "$reference" | jq -sc . > "$index_evidence/signature.bundle.json"
             cosign download attestation "$reference" | jq -sc . > "$index_evidence/attestation.bundle.json"
             cp "artifacts/sbom-${image}/printfarmer-${image}-${{ steps.consume.outputs.version }}.spdx.json" \
@@ -446,10 +448,12 @@ jobs:
               cosign verify --output json "$platform_reference" \
                 --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/signature.json"
+              date -u +%Y-%m-%dT%H:%M:%S.000Z > "$platform_evidence/signature.verification-time"
               cosign verify-attestation --output json "$platform_reference" \
                 --type spdxjson \
                 --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
                 --certificate-oidc-issuer https://token.actions.githubusercontent.com > "$platform_evidence/attestation.json"
+              date -u +%Y-%m-%dT%H:%M:%S.000Z > "$platform_evidence/attestation.verification-time"
               cosign download signature "$platform_reference" | jq -sc . > "$platform_evidence/signature.bundle.json"
               cosign download attestation "$platform_reference" | jq -sc . > "$platform_evidence/attestation.bundle.json"
               cp "source/crypto-evidence/platforms/${image}/${platform_suffix}.spdx.json" \
@@ -463,7 +467,6 @@ jobs:
         run: |
           set -euo pipefail
           evidence_path=.artifacts/release-authorization/release-crypto-evidence.json
-          export RELEASE_VERIFICATION_TIME="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
           node scripts/ci/release-set.mjs evidence --evidence "$evidence_path" \
             .artifacts/release-authorization/crypto-evidence
           node scripts/ci/release-set.mjs inspect --evidence "$evidence_path"

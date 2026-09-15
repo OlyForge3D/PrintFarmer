@@ -50,6 +50,8 @@ function signed(subject = digest, predicateValue = predicate) {
     signatureBytes: JSON.stringify([{ critical: { image: { 'docker-manifest-digest': subject } }, ...verification }]),
     attestationBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'), ...verification }]),
     predicateBytes: JSON.stringify(predicateValue),
+    signatureVerificationTime: '2026-09-14T22:50:00.000Z',
+    attestationVerificationTime: '2026-09-14T22:50:00.000Z',
     signatureBundleBytes: JSON.stringify([{
       mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
       verificationMaterial: {
@@ -71,6 +73,22 @@ function signed(subject = digest, predicateValue = predicate) {
         payloadType: 'application/vnd.in-toto+json', signatures: [{ sig: 'dsse-signature' }] },
     }]),
   };
+}
+
+function setIntegratedTime(evidence, kind, value) {
+  const verification = JSON.parse(evidence[`${kind}Bytes`]);
+  verification[0].optional.Bundle.Payload.integratedTime = value;
+  evidence[`${kind}Bytes`] = JSON.stringify(verification);
+  const bundle = JSON.parse(evidence[`${kind}BundleBytes`]);
+  bundle[0].verificationMaterial.tlogEntries[0].integratedTime = value;
+  evidence[`${kind}BundleBytes`] = JSON.stringify(bundle);
+}
+
+function timedEvidence(signatureTime, attestationTime) {
+  const evidence = signed();
+  setIntegratedTime(evidence, 'signature', Math.floor(Date.parse(signatureTime) / 1000) - 600);
+  setIntegratedTime(evidence, 'attestation', Math.floor(Date.parse(attestationTime) / 1000) - 600);
+  return { ...evidence, signatureVerificationTime: signatureTime, attestationVerificationTime: attestationTime };
 }
 test('stages validated index and platform crypto evidence', () => {
   const root = mkdtempSync(join('.artifacts', 'release-evidence-'));
@@ -113,6 +131,40 @@ test('accepts only versioned Cosign signature download formats and rejects forge
     ...JSON.parse(extra.signatureBundleBytes), JSON.parse(extra.signatureBundleBytes)[0],
   ]);
   assert.throws(() => normalizeEvidence({ subject: digest, ...extra }), /signature download/);
+});
+
+test('partitions a genuine mixed Cosign v3 download stream and binds every legacy field', () => {
+  const evidence = signed();
+  const signatureVerification = JSON.parse(evidence.signatureBytes)[0];
+  signatureVerification.optional.certificate = certificate;
+  evidence.signatureBytes = JSON.stringify([signatureVerification]);
+  const attestationVerification = JSON.parse(evidence.attestationBytes)[0];
+  attestationVerification.optional.certificate = certificate;
+  evidence.attestationBytes = JSON.stringify([attestationVerification]);
+  const signature = {
+    Base64Signature: signatureVerification.optional.Bundle.Payload.signature,
+    Payload: Buffer.from(JSON.stringify(signatureVerification)).toString('base64'),
+    Cert: certificate,
+    Bundle: signatureVerification.optional.Bundle,
+  };
+  const dsse = JSON.parse(evidence.attestationBundleBytes)[0].dsseEnvelope;
+  evidence.signatureBundleBytes = JSON.stringify([signature]);
+  evidence.attestationBundleBytes = JSON.stringify([dsse]);
+  assert.doesNotThrow(() => normalizeEvidence({ subject: digest, trust: trust(), ...evidence }));
+  for (const field of ['Base64Signature', 'Payload', 'Cert', 'Bundle']) {
+    const substituted = structuredClone(evidence);
+    const stream = JSON.parse(substituted.signatureBundleBytes);
+    stream[0][field] = field === 'Bundle' ? {} : 'substituted';
+    substituted.signatureBundleBytes = JSON.stringify(stream);
+    assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substituted }),
+      /Malformed Cosign signature download/);
+  }
+  const substitutedDsse = structuredClone(evidence);
+  const stream = JSON.parse(substitutedDsse.attestationBundleBytes);
+  stream[0].payload = Buffer.from(JSON.stringify({ subject: [] })).toString('base64');
+  substitutedDsse.attestationBundleBytes = JSON.stringify(stream);
+  assert.throws(() => normalizeEvidence({ subject: digest, trust: trust(), ...substitutedDsse }),
+    /DSSE|subject/);
 });
 
 test('accepts native Cosign v3 Sigstore v0.3 signature and DSSE bundles', () => {
@@ -185,10 +237,12 @@ test('rejects stale, revoked, substituted, and out-of-window bundle trust before
   try {
     const path = join(root, 'evidence.json');
     assert.doesNotThrow(() => stageEvidence(path, completeSet, collected, trust()));
-    assert.throws(() => stageEvidence(path, completeSet, collected,
-      trust({ trustedTime: '2026-09-14T23:10:01.000Z' })), /expired|revoked/);
-    assert.throws(() => stageEvidence(path, completeSet, collected,
-      trust({ createdTime: '2026-09-14T22:51:00.000Z' })), /expired|revoked/);
+    const staleByItemTime = structuredClone(collected);
+    staleByItemTime.api.index.signatureVerificationTime = '2026-09-14T23:10:01.000Z';
+    assert.throws(() => stageEvidence(path, completeSet, staleByItemTime, trust()), /expired|revoked/);
+    const predating = structuredClone(collected);
+    predating.api.index.signatureVerificationTime = '2026-09-14T22:39:59.000Z';
+    assert.throws(() => stageEvidence(path, completeSet, predating, trust()), /expired|revoked/);
     assert.throws(() => stageEvidence(path, completeSet, collected,
       trust({ policy: { ...trust().policy, revokedReleaseIds: [trust().releaseId] } })), /revoked/);
     assert.throws(() => stageEvidence(path, completeSet, collected,
@@ -201,6 +255,29 @@ test('rejects stale, revoked, substituted, and out-of-window bundle trust before
     assert.throws(() => stageEvidence(path, completeSet, collected, trust({
       policy: { ...trust().policy, signers: [{ ...trust().policy.signers[0], validUntil: '2026-09-01T00:00:00.000Z' }] },
     })), /rotation window/);
+  } finally { rmSync(root, { recursive: true, force: true }); }
+});
+
+test('uses each signature and attestation verification time rather than final evidence completion time', () => {
+  const completeSet = { images: { api: { digest, platforms: {} } } };
+  const root = mkdtempSync(join('.artifacts', 'release-evidence-'));
+  try {
+    const evidencePath = join(root, 'evidence.json');
+    const signatureVerificationTime = '2026-09-14T22:58:00.000Z';
+    const attestationVerificationTime = '2026-09-14T23:28:01.000Z';
+    const collected = { api: { index: timedEvidence(signatureVerificationTime, attestationVerificationTime), platforms: {} } };
+    const result = stageEvidence(evidencePath, completeSet, collected, trust());
+    assert.equal(result.set.services.api.index.signature.verificationTime, signatureVerificationTime);
+    assert.equal(result.set.services.api.index.sbom.verificationTime, attestationVerificationTime);
+    assert.equal(result.set.verificationTime, attestationVerificationTime);
+
+    const stale = structuredClone(collected);
+    stale.api.index.signatureVerificationTime = '2026-09-14T23:20:01.000Z';
+    assert.throws(() => stageEvidence(evidencePath, completeSet, stale, trust()), /expired|revoked/);
+
+    const malformed = structuredClone(collected);
+    malformed.api.index.attestationVerificationTime = 'not-a-timestamp';
+    assert.throws(() => stageEvidence(evidencePath, completeSet, malformed, trust()), /per-entry verification time/);
   } finally { rmSync(root, { recursive: true, force: true }); }
 });
 

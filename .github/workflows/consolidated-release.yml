@@ -28,6 +28,7 @@ on:
 
 permissions:
   contents: read
+  pull-requests: read
 
 concurrency:
   group: release-${{ inputs.operation == 'abandon' && 'insider' || (inputs.channel || 'insider') }}
@@ -83,7 +84,7 @@ jobs:
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
+          RELEASE_CHANNEL: ${{ inputs.operation == 'abandon' && 'insider' || inputs.channel }}
           RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: |

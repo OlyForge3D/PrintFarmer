@@ -117,15 +117,21 @@ function validateVerification(bytes, expectedDigest, type, expectedPredicate) {
   verificationEntries(bytes, expectedDigest, type, expectedPredicate);
 }
 
-function validateBundleTrust(bundle, trust, verification = []) {
+function verificationTime(value) {
+  value = typeof value === 'string' ? value.trim() : value;
+  requireThat(typeof value === 'string' && Number.isFinite(Date.parse(value)) &&
+    new Date(value).toISOString() === value, 'Invalid per-entry verification time');
+  return value;
+}
+
+function validateBundleTrust(bundle, trust, verifiedTime, verification = []) {
   if (trust === undefined) return;
-  const { policy, releaseId, createdTime, trustedTime } = trust;
-  requireThat(policy && typeof releaseId === 'string' && typeof createdTime === 'string' &&
-    typeof trustedTime === 'string',
+  const { policy, releaseId, createdTime } = trust;
+  requireThat(policy && typeof releaseId === 'string' && typeof createdTime === 'string',
     'Missing release evidence trust context');
   const createdAt = Date.parse(createdTime);
-  const trustedAt = Date.parse(trustedTime);
-  requireThat(Number.isFinite(createdAt) && Number.isFinite(trustedAt) && createdAt <= trustedAt &&
+  const trustedAt = Date.parse(verificationTime(verifiedTime));
+  requireThat(Number.isFinite(createdAt) && createdAt <= trustedAt &&
     !policy.revokedReleaseIds.includes(releaseId),
     'Invalid or revoked release evidence time');
     const entries = Array.isArray(bundle) ? bundle : [bundle];
@@ -164,8 +170,16 @@ function validateBundleTrust(bundle, trust, verification = []) {
       integratedAt >= Date.parse(policy.revocationEpoch) &&
       integratedAt <= trustedAt && trustedAt - integratedAt <= policy.certificateMaxAgeSeconds * 1000,
     'Cosign transparency time is expired or revoked');
-    requireThat(nativeBundle(entry), 'Legacy Cosign bundle downloads are unsupported');
-    const certificate = nativeCertificate(entry);
+    let certificate;
+    if (nativeBundle(entry)) {
+      certificate = nativeCertificate(entry);
+    } else {
+      requireThat(typeof trustedOptional?.certificate === 'string' && trustedOptional.certificate.length > 0,
+        'Cosign verifier lacks required identity, certificate, or transparency trust material');
+      try { certificate = new X509Certificate(trustedOptional.certificate); } catch {
+        throw new Error('Cosign bundle certificate is malformed');
+      }
+    }
     requireThat(Date.parse(certificate.validFrom) <= integratedAt &&
       integratedAt <= Date.parse(certificate.validTo) && trustedAt <= Date.parse(certificate.validTo),
     'Cosign bundle certificate is not valid');
@@ -177,7 +191,6 @@ function validateBundleTrust(bundle, trust, verification = []) {
 
 function validateDsseBundle(bundle, subject, predicateBytes, verification) {
   const entries = Array.isArray(bundle) ? bundle : [bundle];
-  requireThat(entries.every(nativeBundle), 'Legacy Cosign DSSE attestation downloads are unsupported');
   requireThat(entries.length > 0 && entries.every(entry => {
     const envelope = entry?.dsseEnvelope ?? entry;
     return typeof envelope?.payload === 'string' &&
@@ -213,13 +226,25 @@ function validateSignatureDownload(bundle, verification, subject) {
       validateNativeSignatureBundle(entry, subject, verification[index]);
       return true;
     }
-    return false;
+    const optional = verification[index]?.optional;
+    let signedPayload;
+    try { signedPayload = JSON.parse(Buffer.from(entry?.Payload ?? '', 'base64').toString('utf8')); } catch {
+      return false;
+    }
+    return typeof entry?.Base64Signature === 'string' && entry.Base64Signature.length > 0 &&
+      typeof entry?.Payload === 'string' && entry.Payload.length > 0 &&
+      typeof entry?.Cert === 'string' && entry.Cert.length > 0 &&
+      entry.Bundle && typeof entry.Bundle === 'object' &&
+      JSON.stringify(canonicalJson(signedPayload)) === JSON.stringify(canonicalJson(verification[index])) &&
+      entry.Base64Signature === optional?.Bundle?.Payload?.signature &&
+      entry.Cert === optional?.certificate &&
+      JSON.stringify(canonicalJson(entry.Bundle)) === JSON.stringify(canonicalJson(optional?.Bundle));
   }),
   'Malformed Cosign signature download');
 }
 
 function evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
-  attestationBundleBytes, platform, trust) {
+  attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust) {
   const signatureVerification = verificationEntries(signatureBytes, subject, 'signature');
   const attestationVerification = verificationEntries(attestationBytes, subject, 'attestation', predicateBytes);
   const signatureBundle = parseJson(signatureBundleBytes, 'signature bundle');
@@ -229,29 +254,35 @@ function evidenceObject(subject, signatureBytes, attestationBytes, predicateByte
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
     (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
-  validateBundleTrust(signatureBundle, trust, signatureVerification);
-  validateBundleTrust(attestationBundle, trust, attestationVerification);
+  if (trust) {
+    verificationTime(signatureVerificationTime);
+    verificationTime(attestationVerificationTime);
+  }
+  validateBundleTrust(signatureBundle, trust, signatureVerificationTime, signatureVerification);
+  validateBundleTrust(attestationBundle, trust, attestationVerificationTime, attestationVerification);
   return {
     subject, ...(platform === undefined ? {} : { platform }),
     signature: { sha256: sha256(signatureBytes), bytes: signatureBytes,
-      bundleSha256: sha256(signatureBundleBytes), bundle: signatureBundleBytes },
+      bundleSha256: sha256(signatureBundleBytes), bundle: signatureBundleBytes,
+      ...(trust ? { verificationTime: signatureVerificationTime } : {}) },
     sbom: { sha256: sha256(attestationBytes), predicateSha256: sha256(predicateBytes), predicate: predicateBytes,
-      bytes: attestationBytes, bundleSha256: sha256(attestationBundleBytes), bundle: attestationBundleBytes },
+      bytes: attestationBytes, bundleSha256: sha256(attestationBundleBytes), bundle: attestationBundleBytes,
+      ...(trust ? { verificationTime: attestationVerificationTime } : {}) },
   };
 }
 
 export function normalizeEvidence({ subject, signatureBytes, attestationBytes, predicateBytes,
-  signatureBundleBytes, attestationBundleBytes, platform, trust }) {
+  signatureBundleBytes, attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust }) {
   requireThat(platform === undefined || /^linux\/(?:amd64|arm64)$/.test(platform), 'Invalid evidence platform');
   return evidenceObject(subject, signatureBytes, attestationBytes, predicateBytes, signatureBundleBytes,
-    attestationBundleBytes, platform, trust);
+    attestationBundleBytes, signatureVerificationTime, attestationVerificationTime, platform, trust);
 }
 
 export function validateEvidenceSet(set, completeSet, trust) {
   const trustedShape = trust === undefined ||
     (Object.keys(set ?? {}).sort().join() === 'createdTime,schema,services,verificationTime' &&
       typeof set.createdTime === 'string' && typeof set.verificationTime === 'string' &&
-      trust.createdTime === set.createdTime && trust.trustedTime === set.verificationTime);
+      trust.createdTime === set.createdTime);
   requireThat(set?.schema === 1 && typeof set.services === 'object' && trustedShape,
   'Invalid release evidence set');
   for (const [service, image] of Object.entries(completeSet.images)) {
@@ -277,11 +308,14 @@ function validateStored(value, digest, platform, trust) {
     Object.keys(value).sort().join() === expectedKeys.sort().join(), 'Invalid evidence entry');
   requireThat(value?.subject === digest && value?.platform === platform, 'Evidence subject/platform mismatch');
   requireThat(value.signature && typeof value.signature === 'object' &&
-    Object.keys(value.signature).sort().join() === 'bundle,bundleSha256,bytes,sha256' &&
+    Object.keys(value.signature).sort().join() ===
+      (trust ? 'bundle,bundleSha256,bytes,sha256,verificationTime' : 'bundle,bundleSha256,bytes,sha256') &&
     typeof value.signature.bytes === 'string' && digestPattern.test(`sha256:${value.signature.sha256}`),
   'Invalid signature bundle evidence');
   requireThat(value.sbom && typeof value.sbom === 'object' &&
-    Object.keys(value.sbom).sort().join() === 'bundle,bundleSha256,bytes,predicate,predicateSha256,sha256' &&
+    Object.keys(value.sbom).sort().join() ===
+      (trust ? 'bundle,bundleSha256,bytes,predicate,predicateSha256,sha256,verificationTime' :
+        'bundle,bundleSha256,bytes,predicate,predicateSha256,sha256') &&
     typeof value.sbom.bytes === 'string' && typeof value.sbom.predicate === 'string' &&
     digestPattern.test(`sha256:${value.sbom.sha256}`) &&
     digestPattern.test(`sha256:${value.sbom.predicateSha256}`),
@@ -302,14 +336,18 @@ function validateStored(value, digest, platform, trust) {
   requireThat((Array.isArray(signatureBundle) ? signatureBundle.length : 1) === signatureVerification.length &&
     (Array.isArray(attestationBundle) ? attestationBundle.length : 1) === attestationVerification.length,
   'Cosign verification/download entry count mismatch');
-  validateBundleTrust(signatureBundle, trust, signatureVerification);
-  validateBundleTrust(attestationBundle, trust, attestationVerification);
+  const signatureTime = value.signature.verificationTime;
+  const attestationTime = value.sbom.verificationTime;
+  if (trust) {
+    verificationTime(signatureTime);
+    verificationTime(attestationTime);
+  }
+  validateBundleTrust(signatureBundle, trust, signatureTime, signatureVerification);
+  validateBundleTrust(attestationBundle, trust, attestationTime, attestationVerification);
 }
 
 export function stageEvidence(evidencePath, completeSet, collected, trust) {
-  const set = { schema: 1, ...(trust ? {
-    createdTime: trust.createdTime, verificationTime: trust.trustedTime,
-  } : {}), services: {} };
+  const set = { schema: 1, ...(trust ? { createdTime: trust.createdTime } : {}), services: {} };
   for (const [service, image] of Object.entries(completeSet.images)) {
     const value = collected[service];
     requireThat(value, `Missing evidence: ${service}`);
@@ -319,6 +357,15 @@ export function stageEvidence(evidencePath, completeSet, collected, trust) {
         platform, normalizeEvidence({ subject: item.digest, platform, trust, ...value.platforms?.[platform] }),
       ])),
     };
+  }
+  if (trust) {
+    const times = Object.values(set.services).flatMap(service => [
+      service.index.signature.verificationTime, service.index.sbom.verificationTime,
+      ...Object.values(service.platforms).flatMap(platform => [
+        platform.signature.verificationTime, platform.sbom.verificationTime,
+      ]),
+    ]);
+    set.verificationTime = new Date(Math.max(...times.map(value => Date.parse(value)))).toISOString();
   }
   validateEvidenceSet(set, completeSet, trust);
   mkdirSync(dirname(evidencePath), { recursive: true });
@@ -344,6 +391,8 @@ export function stageEvidenceFromFiles(evidencePath, completeSet, root, trust) {
     predicateBytes: readEvidenceFile(join(root, service, scope, 'predicate.json')),
     signatureBundleBytes: readEvidenceFile(join(root, service, scope, 'signature.bundle.json')),
     attestationBundleBytes: readEvidenceFile(join(root, service, scope, 'attestation.bundle.json')),
+    signatureVerificationTime: readEvidenceFile(join(root, service, scope, 'signature.verification-time')),
+    attestationVerificationTime: readEvidenceFile(join(root, service, scope, 'attestation.verification-time')),
   });
   const collected = Object.fromEntries(Object.entries(completeSet.images).map(([service, image]) => [
     service,

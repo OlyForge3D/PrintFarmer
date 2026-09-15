@@ -199,7 +199,11 @@ the publisher App token to read the current protected environment approval. The
 immutable abandonment authorization binds the active allocation key, source
 commit, canonical version, channel, original authorization hash, exact current
 workflow run/attempt/job/environment/target, normalized approval time, and a
-current owner-allowlisted approver. GitHub's approval-history response has no
+current owner-allowlisted approver. The allocation key is the explicit approval
+target and is echoed by the dispatch input; it selects the insider protected
+environment and concurrency lane, never a mutable tag or source ref. Abandonment
+is restricted to attempt 1 because GitHub approval history is run-scoped and
+cannot prove an approval belongs to a later rerun attempt. GitHub's approval-history response has no
 approval timestamp, so the normalized time is the authenticated protected
 publisher job start time for the exact run and attempt, which occurs only after
 environment approval. Missing, forged, stale, mismatched, or

@@ -14,7 +14,7 @@ import {
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
   validateRecord, migrateLegacyLedger, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
-  loadReleaseMetadata, releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
+  loadReleaseMetadata, loadReleaseTrustPolicy, releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
@@ -92,6 +92,8 @@ const cryptoEvidenceFixture = set => {
       signatureBytes,
       attestationBytes,
       predicateBytes: predicate,
+      signatureVerificationTime: new Date((integratedTime + 300) * 1000).toISOString(),
+      attestationVerificationTime: new Date((integratedTime + 300) * 1000).toISOString(),
       signatureBundleBytes: JSON.stringify([{
         mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
         verificationMaterial: {
@@ -118,9 +120,13 @@ const cryptoEvidenceFixture = set => {
   };
   const services = Object.fromEntries(Object.entries(set.images).map(([service, image]) => [
     service, {
-      index: normalizeEvidence({ subject: image.digest, ...subject(image.digest) }),
+      index: normalizeEvidence({ subject: image.digest, trust: {
+        policy: loadReleaseTrustPolicy(), releaseId: set.identity.releaseId, createdTime: created,
+      }, ...subject(image.digest) }),
       platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [
-        platform, normalizeEvidence({ subject: value.digest, platform, ...subject(value.digest) }),
+        platform, normalizeEvidence({ subject: value.digest, platform, trust: {
+          policy: loadReleaseTrustPolicy(), releaseId: set.identity.releaseId, createdTime: created,
+        }, ...subject(value.digest) }),
       ])),
     },
   ]));
