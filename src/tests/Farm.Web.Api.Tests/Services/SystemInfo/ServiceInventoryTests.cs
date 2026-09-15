@@ -12,6 +12,12 @@ public sealed class ServiceInventoryTests
     private static readonly string Commit = new('a', 40);
     private static readonly string Digest = "sha256:" + new string('b', 64);
 
+    [Fact]
+    public void ServiceInventory_DefaultEligibility_IsBlocked()
+    {
+        Assert.Equal(InventoryEligibility.Blocked, new ServiceInventoryDto().Eligibility);
+    }
+
     [Theory]
     [InlineData(null)]
     [InlineData("")]
@@ -209,6 +215,36 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.Services[0].Identity);
     }
 
+    [Fact]
+    public void Evaluate_SelfReportedDatabaseMetadata_IsNotIndependentObservation()
+    {
+        ServiceInventoryDto inventory = Evaluate(
+        [
+            Verified("a") with
+            {
+                Source = "SelfReport",
+                DatabaseProvider = "SqlServer",
+                MigrationHead = "202609150001_Initial",
+            },
+        ]);
+
+        ServiceReplicaObservationDto service = Assert.Single(inventory.Services);
+        Assert.Null(service.DatabaseProvider);
+        Assert.Null(service.MigrationHead);
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.NotEqual(InventoryEligibility.Eligible, result.State);
+    }
+
+    [Fact]
+    public void Evaluate_IndependentSqlServerProvider_NormalizesProviderName()
+    {
+        ServiceInventoryDto result = Evaluate([Verified("a") with { DatabaseProvider = "SqlServer" }]);
+
+        Assert.Equal("SQL Server", Assert.Single(result.Services).DatabaseProvider);
+    }
+
     [Theory]
     [InlineData("sha256:bad")]
     [InlineData("")]
@@ -270,7 +306,8 @@ public sealed class ServiceInventoryTests
 
         Assert.Equal(InventoryEligibility.Eligible, result.State);
         Assert.Empty(result.Reasons);
-        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility", "Eligible"], result.Hops);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+        Assert.False(result.Hops is string[]);
     }
 
     [Theory]
@@ -313,6 +350,102 @@ public sealed class ServiceInventoryTests
         Assert.Equal(InventoryEligibility.Unknown, result.State);
         Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(result.Reasons));
         Assert.Equal(Now.AddMinutes(-1), imported.SnapshotExportedAt);
+    }
+
+    [Fact]
+    public void Readiness_DeserializedExportEnvelope_ForcesImportedEvidenceAndPreservesProvenance()
+    {
+        ServiceInventoryDto live = Evaluate([Verified("a")]);
+        InstallationInventorySnapshotDto exported = InstallationInventorySnapshotDto.FromLiveInventory(
+            live,
+            "operator-export",
+            Now.AddMinutes(-1));
+        string json = JsonSerializer.Serialize(exported, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        InstallationInventorySnapshotDto importedEnvelope = JsonSerializer.Deserialize<InstallationInventorySnapshotDto>(
+            json,
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+
+        ServiceInventoryDto imported = importedEnvelope.ToImportedInventory();
+        ServiceReplicaObservationDto service = Assert.Single(imported.Services);
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(imported, Release(null), Now);
+
+        Assert.Equal(InventorySnapshotOrigin.Imported, imported.SnapshotOrigin);
+        Assert.Equal("operator-export", imported.SnapshotSource);
+        Assert.Equal(Now.AddMinutes(-1), imported.SnapshotExportedAt);
+        Assert.Equal(live.Services[0].Source, service.Source);
+        Assert.Equal(live.Services[0].VerifiedAt, service.VerifiedAt);
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_ReleaseTargetAbsentFromInventory_NeverBecomesEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a")]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                .. Release(null).Services,
+                new()
+                {
+                    ServiceId = "frontend",
+                    Platform = "linux/amd64",
+                    PlatformDigest = Digest,
+                },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("RequiredServiceInventoryMissing:frontend", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_RequiredInventoryServiceWithoutReleaseTarget_NeverBecomesEligible()
+    {
+        ServiceReplicaObservationDto frontend = Verified("frontend") with
+        {
+            ServiceId = "frontend",
+            Component = "frontend",
+        };
+        ServiceInventoryDto inventory = Evaluate([Verified("api"), frontend]);
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release(null), Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("MissingTargetService:frontend", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_OfflineTargetWorker_NeverBecomesEligible()
+    {
+        ServiceReplicaObservationDto worker = Verified("worker") with
+        {
+            ServiceId = "worker",
+            Component = "slicer-worker",
+            ObservationState = InventoryObservationState.Unavailable,
+        };
+        ServiceInventoryDto inventory = Evaluate([Verified("api"), worker]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                .. Release(null).Services,
+                new()
+                {
+                    ServiceId = "worker",
+                    Platform = "linux/amd64",
+                    PlatformDigest = Digest,
+                },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("RequiredHostEvidenceMissingOrStale", Assert.Single(result.Reasons));
     }
 
     [Fact]

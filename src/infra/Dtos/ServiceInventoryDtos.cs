@@ -39,8 +39,8 @@ public enum InventoryChannelState
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum InventoryEligibility
 {
-    Eligible,
     Blocked,
+    Eligible,
     Unknown,
     NotManaged,
 }
@@ -253,11 +253,11 @@ public sealed record ServiceInventoryDto
     /// <summary>Safe compatibility reason codes.</summary>
     public IReadOnlyList<string> CompatibilityReasons { get; init; } = [];
 
-    /// <summary>No Eligible state: this read-only increment cannot establish update eligibility.</summary>
-    public InventoryEligibility Eligibility { get; init; } = InventoryEligibility.NotManaged;
+    /// <summary>Read-only inventory does not establish managed eligibility unless an evaluator supplies it.</summary>
+    public InventoryEligibility Eligibility { get; init; } = InventoryEligibility.Blocked;
 
-    /// <summary>No implicit check, enrollment or execution authorization.</summary>
-    public IReadOnlyList<string> EligibilityReasons { get; init; } = ["ReadOnlyInventory"];
+    /// <summary>No implicit check, enrollment, execution, or eligibility authorization.</summary>
+    public IReadOnlyList<string> EligibilityReasons { get; init; } = ["EligibilityNotEvaluated", "ReadOnlyInventory"];
 
     /// <summary>Read-only installation lifecycle derived from supplied signed release evidence.</summary>
     public ReleaseReadinessDto? Readiness { get; init; }
@@ -283,6 +283,53 @@ public enum InventorySnapshotOrigin
 {
     Live,
     Imported,
+}
+
+/// <summary>Portable inventory envelope used to export and classify offline snapshots.</summary>
+public sealed record InstallationInventorySnapshotDto
+{
+    /// <summary>Envelope format version.</summary>
+    public int FormatVersion { get; init; } = 1;
+
+    /// <summary>Snapshots are always imported evidence when read from this envelope.</summary>
+    public InventorySnapshotOrigin SnapshotOrigin { get; init; } = InventorySnapshotOrigin.Imported;
+
+    /// <summary>Original export source.</summary>
+    public string SnapshotSource { get; init; } = string.Empty;
+
+    /// <summary>Original export timestamp.</summary>
+    public DateTimeOffset SnapshotExportedAt { get; init; }
+
+    /// <summary>Inventory evidence captured at export time.</summary>
+    public required ServiceInventoryDto Inventory { get; init; }
+
+    /// <summary>Creates the portable envelope from a locally collected inventory snapshot.</summary>
+    public static InstallationInventorySnapshotDto FromLiveInventory(
+        ServiceInventoryDto inventory,
+        string snapshotSource,
+        DateTimeOffset snapshotExportedAt) =>
+        new()
+        {
+            SnapshotSource = snapshotSource,
+            SnapshotExportedAt = snapshotExportedAt,
+            Inventory = inventory,
+        };
+
+    /// <summary>Classifies deserialized evidence as imported without altering its observation provenance.</summary>
+    public ServiceInventoryDto ToImportedInventory()
+    {
+        if (FormatVersion != 1 || SnapshotOrigin != InventorySnapshotOrigin.Imported)
+        {
+            throw new InvalidOperationException("The installation inventory snapshot format is not supported.");
+        }
+
+        return Inventory with
+        {
+            SnapshotOrigin = InventorySnapshotOrigin.Imported,
+            SnapshotSource = SnapshotSource,
+            SnapshotExportedAt = SnapshotExportedAt,
+        };
+    }
 }
 
 /// <summary>Complete independently verified release evidence consumed by the readiness evaluator.</summary>
@@ -332,6 +379,6 @@ public sealed record ReleaseReadinessDto
     /// <summary>Safe, machine-readable reasons for the result.</summary>
     public IReadOnlyList<string> Reasons { get; init; } = [];
 
-    /// <summary>Ordered verification stages, including failed intermediate checks.</summary>
+    /// <summary>Immutable ordered verification stages completed before the terminal readiness state.</summary>
     public IReadOnlyList<string> Hops { get; init; } = [];
 }

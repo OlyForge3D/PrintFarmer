@@ -18,12 +18,15 @@ Set-StrictMode -Version Latest
 $ErrorActionPreference = 'Stop'
 
 if ($PSCmdlet.ParameterSetName -eq 'Export') {
-    $token = [System.Net.NetworkCredential]::new('', $AccessToken).Password
+    $token = $null
+    $headers = $null
     try {
+        $token = [System.Net.NetworkCredential]::new('', $AccessToken).Password
         $headers = @{ Authorization = "Bearer $token" }
         $response = Invoke-RestMethod -Uri "$($ApiBaseUri.TrimEnd('/'))/api/system/info" -Headers $headers -Method Get
     }
     finally {
+        $headers = $null
         $token = $null
     }
 

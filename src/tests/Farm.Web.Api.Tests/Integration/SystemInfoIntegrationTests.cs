@@ -186,6 +186,8 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         api.GetProperty("platformDigest").ValueKind.Should().Be(JsonValueKind.Null);
         api.GetProperty("indexDigest").ValueKind.Should().Be(JsonValueKind.Null);
         api.GetProperty("manifestDigest").ValueKind.Should().Be(JsonValueKind.Null);
+        api.GetProperty("databaseProvider").ValueKind.Should().Be(JsonValueKind.Null);
+        api.GetProperty("migrationHead").ValueKind.Should().Be(JsonValueKind.Null);
         response.Headers.CacheControl!.NoStore.Should().BeTrue();
         json.RootElement.GetProperty("services")[0].GetProperty("version").ValueKind.Should().Be(JsonValueKind.String);
         json.RootElement.GetProperty("database").GetProperty("migrationHeads").ValueKind.Should().Be(JsonValueKind.Array);

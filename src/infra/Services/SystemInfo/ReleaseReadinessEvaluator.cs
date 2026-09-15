@@ -9,7 +9,6 @@ public static partial class ReleaseReadinessEvaluator
     /// <summary>Returns a fail-closed readiness decision for a target release and inventory snapshot.</summary>
     public static ReleaseReadinessDto Evaluate(ServiceInventoryDto inventory, VerifiedReleaseEvidenceDto? release, DateTimeOffset now)
     {
-        _ = now;
         List<string> hops = ["InventoryRead"];
         if (release is null)
         {
@@ -50,40 +49,55 @@ public static partial class ReleaseReadinessEvaluator
             return Result(InventoryEligibility.Blocked, ["DuplicateTargetServiceEvidence"], hops);
         }
 
-        foreach (ServiceReplicaObservationDto service in inventory.Services.Where(service =>
-                     service.ObservationState == InventoryObservationState.Observed
-                     && (service.Required || release.Services.Any(target => target.ServiceId == service.ServiceId))))
+        foreach (ServiceReplicaObservationDto service in required)
         {
-            ReleaseServiceRequirementDto? target = release.Services.SingleOrDefault(item => item.ServiceId == service.ServiceId);
-            if (target is null)
+            if (!release.Services.Any(target => target.ServiceId == service.ServiceId))
             {
                 return Result(InventoryEligibility.Blocked, [$"MissingTargetService:{service.ServiceId}"], hops);
             }
+        }
 
-            if (!string.Equals(service.Platform, target.Platform, StringComparison.Ordinal)
-                || !Digest().IsMatch(service.PlatformDigest ?? string.Empty)
-                || !Digest().IsMatch(target.PlatformDigest))
+        foreach (ReleaseServiceRequirementDto target in release.Services)
+        {
+            ServiceReplicaObservationDto[] matchingServices = inventory.Services
+                .Where(service => service.ServiceId == target.ServiceId)
+                .ToArray();
+            if (matchingServices.Length == 0)
             {
-                return Result(InventoryEligibility.Blocked, [$"PlatformEvidenceMismatch:{service.ServiceId}"], hops);
+                return Result(InventoryEligibility.Blocked, [$"RequiredServiceInventoryMissing:{target.ServiceId}"], hops);
             }
 
-            if (target.RequiredMigrationHead is not null && !string.Equals(service.MigrationHead, target.RequiredMigrationHead, StringComparison.Ordinal))
+            if (matchingServices.Any(service => !HasFreshIndependentEvidence(service, now)))
             {
-                return Result(InventoryEligibility.Blocked, [$"MigrationHeadMismatch:{service.ServiceId}"], hops);
+                return Result(InventoryEligibility.Unknown, [$"RequiredServiceEvidenceMissingOrStale:{target.ServiceId}"], hops);
             }
 
-            if (target.RequiredEngineVersion is not null && !string.Equals(service.EngineVersion, target.RequiredEngineVersion, StringComparison.Ordinal))
+            foreach (ServiceReplicaObservationDto service in matchingServices)
             {
-                return Result(InventoryEligibility.Blocked, [$"WorkerCompatibilityMismatch:{service.ServiceId}"], hops);
+                if (!string.Equals(service.Platform, target.Platform, StringComparison.Ordinal)
+                    || !Digest().IsMatch(service.PlatformDigest ?? string.Empty)
+                    || !Digest().IsMatch(target.PlatformDigest))
+                {
+                    return Result(InventoryEligibility.Blocked, [$"PlatformMismatchOrInvalidDigestEvidence:{service.ServiceId}"], hops);
+                }
+
+                if (target.RequiredMigrationHead is not null && !string.Equals(service.MigrationHead, target.RequiredMigrationHead, StringComparison.Ordinal))
+                {
+                    return Result(InventoryEligibility.Blocked, [$"MigrationHeadMismatch:{service.ServiceId}"], hops);
+                }
+
+                if (target.RequiredEngineVersion is not null && !string.Equals(service.EngineVersion, target.RequiredEngineVersion, StringComparison.Ordinal))
+                {
+                    return Result(InventoryEligibility.Blocked, [$"WorkerCompatibilityMismatch:{service.ServiceId}"], hops);
+                }
             }
         }
 
-        hops.Add("Eligible");
         return Result(InventoryEligibility.Eligible, [], hops);
     }
 
     private static ReleaseReadinessDto Result(InventoryEligibility state, IReadOnlyList<string> reasons, IReadOnlyList<string> hops) =>
-        new() { State = state, Reasons = reasons, Hops = hops };
+        new() { State = state, Reasons = reasons, Hops = Array.AsReadOnly(hops.ToArray()) };
 
     private static bool HasFreshIndependentEvidence(ServiceReplicaObservationDto service, DateTimeOffset now) =>
         service.ObservationState == InventoryObservationState.Observed

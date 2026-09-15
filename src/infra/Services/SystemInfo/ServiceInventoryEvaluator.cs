@@ -95,6 +95,8 @@ public static partial class ServiceInventoryEvaluator
             Identity = verified ? row.Identity : null,
             VerificationSource = verified ? row.VerificationSource : null,
             VerifiedAt = verified ? row.VerifiedAt : null,
+            DatabaseProvider = row.Source == "SelfReport" ? null : NormalizeDatabaseProvider(row.DatabaseProvider),
+            MigrationHead = row.Source == "SelfReport" ? null : row.MigrationHead,
             PlatformDigest = row.Source == "SelfReport" ? null : NormalizeDigest(row.PlatformDigest),
             IndexDigest = row.Source == "SelfReport" ? null : NormalizeDigest(row.IndexDigest),
             ManifestDigest = row.Source == "SelfReport" ? null : NormalizeDigest(row.ManifestDigest),
@@ -161,6 +163,12 @@ public static partial class ServiceInventoryEvaluator
 
     private static string? NormalizeDigest(string? digest) =>
         digest is not null && Sha256Digest().IsMatch(digest) ? digest : null;
+
+    private static string? NormalizeDatabaseProvider(string? provider) => provider switch
+    {
+        "SQLServer" or "SqlServer" or "SQL Server" => "SQL Server",
+        _ => provider,
+    };
 
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
     private static partial Regex Sha256Digest();

@@ -81,10 +81,6 @@ public class SystemInfoService(
         }
 
         string databaseProvider = NormalizeDatabaseEngine(_db.Database.ProviderName);
-        observations = observations.Select(observation => observation.Component == "api"
-            ? observation with { DatabaseProvider = databaseProvider, MigrationHead = appMigrationHeads.Count == 0 ? null : appMigrationHeads[^1] }
-            : observation).ToList();
-
         return new SystemInfoDto
         {
             Inventory = ServiceInventoryEvaluator.Evaluate(observations, configuration["Deployment:SelectedChannel"], DateTimeOffset.UtcNow),

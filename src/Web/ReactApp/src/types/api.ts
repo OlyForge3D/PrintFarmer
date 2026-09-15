@@ -4969,7 +4969,7 @@ export interface CustomFieldValue {
 export type InventoryObservationState = 'Observed' | 'Stale' | 'Unavailable' | 'Unknown' | 'NotInstalled';
 export type InventoryCompatibilityState = 'Compatible' | 'Incompatible' | 'Unknown' | 'MixedRelease' | 'MixedChannel';
 export type InventoryChannelState = 'Observed' | 'Stale' | 'Unknown' | 'Mismatch' | 'Mixed';
-export type InventoryEligibility = 'Blocked' | 'Unknown' | 'NotManaged';
+export type InventoryEligibility = 'Blocked' | 'Eligible' | 'Unknown' | 'NotManaged';
 
 export interface CanonicalReleaseIdentity {
   canonicalVersion: string | null;
@@ -5003,6 +5003,8 @@ export interface ServiceReplicaObservation {
   applicationVersion: string | null;
   sourceCommit: string | null;
   engineVersion: string | null;
+  databaseProvider: string | null;
+  migrationHead: string | null;
   observationState: InventoryObservationState;
   observedAt: string | null;
   lastSuccessAt: string | null;
@@ -5033,5 +5035,17 @@ export interface ServiceInventory {
   compatibilityReasons: string[];
   eligibility: InventoryEligibility;
   eligibilityReasons: string[];
+  readiness: ReleaseReadiness | null;
+  snapshotOrigin: InventorySnapshotOrigin;
+  snapshotSource: string | null;
+  snapshotExportedAt: string | null;
   services: ServiceReplicaObservation[];
+}
+
+export type InventorySnapshotOrigin = 'Live' | 'Imported';
+
+export interface ReleaseReadiness {
+  state: InventoryEligibility | null;
+  reasons: string[];
+  hops: readonly string[];
 }

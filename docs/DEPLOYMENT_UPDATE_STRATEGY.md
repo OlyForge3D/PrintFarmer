@@ -17,16 +17,18 @@ post_date: "2026-09-12"
 
 `GET /api/system/info` returns the additive, administrator-only `inventory` read
 model. It reports redacted topology/replica observations, running build/digest
-evidence, database provider, and the known migration head for each observed
-context. It never performs host inspection, Docker access, an update check, or
-an installation.
+evidence, and any database provider or migration head independently observed by
+a trusted source. Process self-report does not establish those fields. It never
+performs host inspection, Docker access, an update check, or an installation.
 
 Operators can export that model with
 `scripts/export-installation-inventory.ps1`. The corresponding import mode is
-offline inspection only: it preserves the source and export timestamp and labels
-the result `Imported`. Imported snapshots are never live observations, so they
-remain `Unknown` for installation readiness even if their historical evidence
-was complete.
+offline inspection only: the portable envelope preserves the original source,
+export timestamp, and per-observation verification provenance while conversion
+forces `Imported`. No production API import or readiness assessment output is
+wired in this increment. An imported snapshot is never live evidence, so a
+future readiness assessment must not treat it as eligible even if its historical
+evidence was complete.
 
 The `Eligible`, `Blocked`, `Unknown`, and `NotManaged` readiness lifecycle is a
 pure evidence evaluation. `Eligible` requires a complete signature-verified
