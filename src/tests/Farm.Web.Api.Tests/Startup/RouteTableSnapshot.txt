@@ -712,8 +712,6 @@ POST /api/printers/{id:guid}/toolheads/ensure-mmu -> Farm.Modules.Printers::Farm
 POST /api/printers/{id:guid}/z-offset -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.SaveZOffsetAsync
 POST /api/printers/{id}/location -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrintersController.AssignPrinterToLocationAsync
 POST /api/printers/{printerId:guid}/control-operations -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.SubmitAsync
-POST /api/printers/{printerId:guid}/control-operations/{operationId:guid}/recovery -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.RecoverAsync
-POST /api/printers/{printerId:guid}/control-operations/{operationId:guid}/recovery/complete -> Farm.Modules.Printers::Farm.Modules.Printers.Controllers.PrinterControlOperationsController.CompleteRecoveryAsync
 POST /api/printers/{printerId:guid}/fallback-groups -> Farm.Modules.Inventory::Farm.Modules.Inventory.Controllers.FilamentFallbackGroupsController.CreateAsync
 POST /api/project-templates -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintProjectTemplatesController.CreateTemplateAsync
 POST /api/project-templates/{id:guid}/files -> Farm.Web.Api::Farm.Web.Api.Controllers.PrintProjectTemplatesController.AddFileToTemplateAsync

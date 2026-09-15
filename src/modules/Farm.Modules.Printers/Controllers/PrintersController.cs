@@ -49,6 +49,8 @@ using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.Moonra
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
+using PrinterControlIntent = Farm.Infrastructure.Services.Printers.PrinterControlIntent;
+using PrinterControlOperationService = Farm.Infrastructure.Services.Printers.PrinterControlOperationService;
 using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
 using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
 using PrinterSafetyTelemetryNormalizer = Farm.Infrastructure.Services.Printers.PrinterSafetyTelemetryNormalizer;
@@ -89,7 +91,8 @@ public class PrintersController(
     AppDbContext? appDbContext = null,
     Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null,
     Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null,
-    Farm.Infrastructure.Services.Printers.PrinterControlOperationService? motionControl = null)
+    Farm.Infrastructure.Services.Printers.PrinterControlOperationService? motionControl = null,
+    TimeProvider? timeProvider = null)
     : ControllerBase
 {
     private const int MaxHistoryQueryEntries = 2000;
@@ -2654,6 +2657,11 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        using var timeout = new CancellationTokenSource(
+            PrinterControlIntent.LegacyKind(operation).HasValue ? PrinterControlOperationService.CommandTimeout : Timeout.InfiniteTimeSpan,
+            timeProvider ?? TimeProvider.System);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        ct = deadline.Token;
         ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
         if (asyncRequired is not null)
         {
@@ -2681,6 +2689,7 @@ public class PrintersController(
 
         try
         {
+            ct.ThrowIfCancellationRequested();
             bool accepted = await backendCall(ct);
             _telemetryService.RecordPrinterOperation(
                 telemetryOperation,
@@ -2691,7 +2700,7 @@ public class PrintersController(
                 await _physicalActuationService!.CompleteDirectAsync(
                     begin.Lease,
                     accepted: true,
-                    ct: ct);
+                    ct: CancellationToken.None);
                 return new CommandResult(true, null);
             }
 
@@ -2699,11 +2708,12 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_outcome_unknown",
                 CancellationToken.None);
+            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+                ? "The motion outcome is unknown; check the printer before requesting another move."
+                : "The backend did not prove whether the physical command was applied; reconciliation is required.";
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The backend did not prove whether the physical command was applied; reconciliation is required."));
+                new CommandResult(false, message));
         }
         catch (OperationCanceledException)
         {
@@ -2724,11 +2734,12 @@ public class PrintersController(
                 "Physical operation {Operation} has an unknown outcome on printer {PrinterId}",
                 LogSanitizer.Sanitize(operation),
                 printerId);
+            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+                ? "The motion outcome is unknown; check the printer before requesting another move."
+                : "The physical command outcome is unknown; reconciliation is required.";
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The physical command outcome is unknown; reconciliation is required."));
+                new CommandResult(false, message));
         }
     }
 
@@ -2741,6 +2752,11 @@ public class PrintersController(
         PrinterSafetyOperation? safetyOperation = null,
         PrinterSafetyMoveRequest? move = null)
     {
+        using var timeout = new CancellationTokenSource(
+            PrinterControlIntent.LegacyKind(operation).HasValue ? PrinterControlOperationService.CommandTimeout : Timeout.InfiniteTimeSpan,
+            timeProvider ?? TimeProvider.System);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
+        ct = deadline.Token;
         ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
         if (asyncRequired is not null)
         {
@@ -2768,6 +2784,7 @@ public class PrintersController(
 
         try
         {
+            ct.ThrowIfCancellationRequested();
             Farm.Infrastructure.Services.Printers.PrinterControlOutcome outcome =
                 await backendCall(ct);
             bool accepted =
@@ -2789,7 +2806,7 @@ public class PrintersController(
                     begin.Lease,
                     accepted,
                     accepted ? null : outcome.ToString(),
-                    ct);
+                    CancellationToken.None);
             }
 
             return MapControlOutcome(outcome);
@@ -2808,11 +2825,12 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_exception",
                 CancellationToken.None);
+            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+                ? "The motion outcome is unknown; check the printer before requesting another move."
+                : "The physical command outcome is unknown; reconciliation is required.";
             return StatusCode(
                 StatusCodes.Status503ServiceUnavailable,
-                new CommandResult(
-                    false,
-                    "The physical command outcome is unknown; reconciliation is required."));
+                new CommandResult(false, message));
         }
     }
 
@@ -3345,27 +3363,29 @@ public class PrintersController(
 
                 motionAttemptPrepared = true;
                 PrinterEmergencyStopDelivery delivery = PrinterEmergencyStopDelivery.NotSent;
+                using var timeout = new CancellationTokenSource(PrinterControlOperationService.SenderLease, timeProvider ?? TimeProvider.System);
+                using var senderDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
                 try
                 {
-                    if (!await motionControl.CommitEmergencyStopSendAsync(id, lease, QueueActorIdentity.Resolve(User), ct))
+                    if (!await motionControl.CommitEmergencyStopSendAsync(id, lease, QueueActorIdentity.Resolve(User), senderDeadline.Token))
                     {
                         continue;
                     }
 
-                    ct.ThrowIfCancellationRequested();
+                    senderDeadline.Token.ThrowIfCancellationRequested();
                     delivery = PrinterEmergencyStopDelivery.Unknown;
                     try
                     {
                         emergencyInvoked = true;
-                        bool accepted = await _printersService.EmergencyStopAsync(id, lease.ConfigurationIdentity, ct);
+                        bool accepted = await _printersService.EmergencyStopAsync(id, lease.ConfigurationIdentity, senderDeadline.Token);
                         delivery = accepted ? PrinterEmergencyStopDelivery.Accepted : PrinterEmergencyStopDelivery.Unknown;
                         return StatusCode(accepted ? 200 : 503, new CommandResult(
                             accepted,
-                            accepted ? "Emergency stop accepted; recovery verification is still required." : "Emergency stop outcome unknown; barrier retained."));
+                            accepted ? "Emergency stop accepted." : "Emergency stop outcome unknown; check the printer."));
                     }
                     catch (Exception)
                     {
-                        return StatusCode(503, new CommandResult(false, "Emergency stop delivery is uncertain; isolate all senders before recovery."));
+                        return StatusCode(503, new CommandResult(false, "Emergency stop delivery is uncertain; check the printer."));
                     }
                 }
                 finally
@@ -3382,7 +3402,7 @@ public class PrintersController(
             {
                 return Problem(
                     statusCode: 503,
-                    title: emergencyInvoked ? "Emergency stop evidence is uncertain; barrier retained" : "Emergency stop fence unavailable",
+                    title: emergencyInvoked ? "Emergency stop outcome is uncertain; check the printer" : "Emergency stop fence unavailable",
                     extensions: new Dictionary<string, object?>
                     {
                         ["code"] = emergencyInvoked ? "emergency_stop_outcome_unknown" : "emergency_stop_not_sent",

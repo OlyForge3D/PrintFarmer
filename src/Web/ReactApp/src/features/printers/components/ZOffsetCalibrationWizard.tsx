@@ -35,7 +35,7 @@ export interface ZOffsetCalibrationWizardProps {
 export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 220, bedSizeY = 220 }: ZOffsetCalibrationWizardProps) {
   const queryClient = useQueryClient();
   const motion = usePrinterControlOperation(printer);
-  const { execute: executeMotion, isMoonraker, tracker } = motion;
+  const { execute: executeMotion, usesDurableMotion, tracker } = motion;
   const generation = useRef(0);
   useEffect(() => () => { generation.current++; }, [isOpen, printer.id]);
   const [stepIndex, setStepIndex] = useState(0);
@@ -80,7 +80,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
           toast.error(result.error || 'Motion was not confirmed successful. Calibration has not advanced.');
           return result;
         }
-        if (isMoonraker) {
+        if (usesDurableMotion) {
           const completed = tracker?.getCompletedOperation();
           const completedAt = Date.parse(completed?.completedAtUtc ?? '');
           const printers = await apiClient.getPrinters(true, true);
@@ -113,7 +113,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
         if (generation.current === startedGeneration) setIsCommandRunning(false);
       }
     },
-    [controlsBlocked, executeMotion, isMoonraker, tracker, printer.id]
+    [controlsBlocked, executeMotion, usesDurableMotion, tracker, printer.id]
   );
 
   const handleHomeAxes = useCallback(async () => {
@@ -146,13 +146,13 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
       const newOffset = parseFloat((zOffset + delta).toFixed(3));
       const result = await executeControlAndWait({
         kind: 'MoveTo',
-        ...(isMoonraker ? { x: bedSizeX / 2, y: bedSizeY / 2 } : {}),
+        ...(usesDurableMotion ? { x: bedSizeX / 2, y: bedSizeY / 2 } : {}),
         z: Math.max(0, 10 + newOffset),
         f: 300,
       });
       if (result.success) setZOffset(newOffset);
     },
-    [executeControlAndWait, zOffset, selectedIncrement, isMoonraker, bedSizeX, bedSizeY]
+    [executeControlAndWait, zOffset, selectedIncrement, usesDurableMotion, bedSizeX, bedSizeY]
   );
 
   const handleSave = useCallback(() => {

@@ -15,22 +15,21 @@ export function mountMotionPanel(element: HTMLElement, state: 'Queued' | 'Runnin
     operationId: '22222222-2222-4222-8222-222222222222',
     printerId: '11111111-1111-4111-8111-111111111111',
     kind: 'Jog', x: null, y: 10, z: null, f: null, state, rowVersion: 'fixture-v1',
-    requiresRecovery: state === 'Unknown', barrierHeld: true,
+    requiresRecovery: false, barrierHeld: state !== 'Unknown',
     completionEvidence: 'None', senderIsolation: 'NotRequested', failure: null,
     createdAtUtc: '2026-09-13T00:00:00Z', updatedAtUtc: '2026-09-13T00:00:00Z',
     startedAtUtc: null, completedAtUtc: null,
   };
-  const tracker = new PrinterControlTracker(operation.printerId, 'fixture-only', () => true);
+  const tracker = new PrinterControlTracker(operation.printerId, () => true);
   tracker.refresh = async () => operation;
   const control: PrinterControlOperationController = {
-    isMoonraker: true, blocked: true, checking: false, submitting: false,
+    usesDurableMotion: true, blocked: operation.barrierHeld, checking: false, submitting: false,
     admitting: false, uncertain: false, error: null, saved: null, operation,
-    missingAdmission: false, canRecover: false, canRetryAdmission: false, etag: '"fixture-v1"',
     current: {
-      operation,
+      operation: operation.barrierHeld ? operation : null,
       physicalControl: {
-        barrierHeld: true, supportedOperations: ['Jog'], requiresRecovery: operation.requiresRecovery,
-        operationId: operation.operationId, state: operation.state,
+        barrierHeld: operation.barrierHeld, supportedOperations: ['Jog'], requiresRecovery: false,
+        operationId: operation.barrierHeld ? operation.operationId : null, state: operation.barrierHeld ? operation.state : null,
       },
     },
     tracker,

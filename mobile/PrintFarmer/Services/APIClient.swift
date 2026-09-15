@@ -943,7 +943,8 @@ actor APIClient {
         }
         if isSubmission {
             guard let operation = value as? PrinterControlOperation,
-                  operation.state.isTerminal == (http.statusCode == 200) else {
+                  (http.statusCode == 200 && operation.state.isTerminal)
+                    || (http.statusCode == 202 && operation.barrierHeld) else {
                 throw PrinterControlOperationError.invalidResponse
             }
         }

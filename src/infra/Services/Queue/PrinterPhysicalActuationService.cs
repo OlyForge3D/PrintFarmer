@@ -5,6 +5,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 
@@ -344,6 +345,8 @@ public sealed class PrinterPhysicalActuationService(
                 ct);
         if (state?.PhysicalControlCommandId != lease.CommandId ||
             state.PhysicalControlAttemptId is not null ||
+            (PrinterControlIntent.LegacyKind(lease.Operation).HasValue &&
+             state.PhysicalControlStartedAtUtc <= DateTime.UtcNow - PrinterControlOperationService.CommandTimeout) ||
             !string.Equals(
                 state.PhysicalControlOperation,
                 lease.Operation,
@@ -400,7 +403,7 @@ public sealed class PrinterPhysicalActuationService(
             QueueAuditOutcomes.Unknown,
             EventTypeUnknown,
             failureCode,
-            retainBarrier: true,
+            retainBarrier: lease.AttemptId.HasValue || !PrinterControlIntent.LegacyKind(lease.Operation).HasValue,
             ct);
 
     /// <inheritdoc />
@@ -594,7 +597,8 @@ public sealed class PrinterPhysicalActuationService(
             .SingleOrDefaultAsync(
                 candidate =>
                     candidate.PrinterId == lease.PrinterId &&
-                    candidate.PhysicalControlCommandId == lease.CommandId,
+                    candidate.PhysicalControlCommandId == lease.CommandId &&
+                    candidate.PhysicalControlAttemptId == lease.AttemptId,
                 ct);
         if (state is null)
         {
@@ -602,6 +606,13 @@ public sealed class PrinterPhysicalActuationService(
                 "Physical control completion ignored because its barrier is no longer active: {CommandId}",
                 lease.CommandId);
             return;
+        }
+
+        if (!lease.AttemptId.HasValue && PrinterControlIntent.LegacyKind(lease.Operation).HasValue &&
+            (state.ActiveDispatchAttemptId.HasValue || state.ActiveJobId.HasValue ||
+             await _db.PrintJobs.WhereOccupiesPrinter().AnyAsync(j => j.AssignedPrinterId == lease.PrinterId, ct)))
+        {
+            retainBarrier = true;
         }
 
         if (retainBarrier)

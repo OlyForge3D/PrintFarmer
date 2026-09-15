@@ -136,21 +136,21 @@ cancel physical execution. Reusing the same key, printer, actor and normalized
 intent returns the original operation (`200` when settled); conflicting reuse
 returns `409 idempotency_conflict`. Authorization is checked before replay lookup.
 
-A client journal entry is not proof of server admission. If the POST outcome is
-unknown and the UUID returns `404`, retain the original UUID and intent; an
-unlocked `/current` snapshot does not prove that an earlier request cannot still
-arrive. Recovery endpoints cannot recover a nonexistent server operation.
-With renewed, explicit operator authorization to perform the original motion,
-the client offers **Resume submission** with the **same UUID, actor and exact intent**:
-it either receives the existing receipt or admits the operation once. This is not an
-automatic retry and may initiate motion if the first request never arrived.
-If the operator does not authorize that motion, keep the unresolved journal;
-this API does not provide a cancellation tombstone for an unadmitted UUID.
+If the POST outcome is unknown, clients report that uncertainty and refetch
+authoritative current state without replaying the request. A missing receipt is
+not proof that a delayed request was never admitted. Clients do not keep a
+persistent recovery journal, offer a replay action, or demand attestations before
+ordinary use. Any further movement is a new explicit operator request; database
+admission still coordinates concurrent commands.
 
-Updated clients are required. The five old Moonraker `/home`, `/homexy`, `/homez`,
-`/move`, and `/moveto` routes return `409 async_control_required` without sending
-anything. Other adapters and attempt-bound lifecycle controls retain their
-existing execution paths and share the same physical barrier.
+Updated clients are required. Clients select durable motion from the advertised
+`physicalControl.supportedOperations`, not a backend-name allowlist. For any
+adapter providing durable motion, the old `/home`, `/homexy`, `/homez`, `/move`,
+and `/moveto` routes return `409 async_control_required` without sending
+anything. Adapters without durable motion and attempt-bound lifecycle controls
+retain their existing execution paths and share the same physical barrier.
+OctoPrint manual home/jog passes cancellation through to its HTTP transport and
+does not retry ambiguous writes.
 
 The dedicated worker claims only unsent operations. Private ownership claims and
 heartbeats do not change the public ETag; public transitions have audit/outbox evidence.
@@ -182,7 +182,7 @@ The general `ValidateAsync(AbsoluteMovement, ...)` path retains its verified fin
 minimum-clearance requirement and full target validation. Its legacy non-durable
 controller caller is unchanged; Moonraker legacy routes still reject with
 `async_control_required`. No automated/attempt-bound lifecycle path is routed to
-the manual guard, and lifecycle/recovery safeguards are unchanged. PrintFarmer
+the manual guard, and automated lifecycle safeguards are unchanged. PrintFarmer
 still requires all XYZ axes homed, a known fresh frame and current coordinates
 inside the envelope even for a single-axis manual request; native axis-only or
 out-of-envelope recovery motion is intentionally not enabled by this fix.
@@ -197,8 +197,8 @@ The effective G-code offset is `gcode_move.position - gcode_move.gcode_position`
 from that same response; `homing_origin` alone would incorrectly omit G92 offsets.
 It then sends once over a dedicated persistent WebSocket with exact JSON-RPC
 correlation. One receive loop handles fragmented responses and unrelated
-notifications. Connect and write limits are separate from physical execution:
-there is no elapsed-homing deadline. WebSocket PING/PONG detects dead connections
+notifications. Connect and write limits are separate from the five-minute
+manual command deadline. WebSocket PING/PONG detects dead connections
 without requiring status or homing-progress notifications. Credentials travel in
 the `X-Api-Key` handshake header, never in a WebSocket query string.
 
@@ -207,16 +207,25 @@ coordinate/extrusion/feed state without a
 restore move before draining. Matching success proves `MotionQueueDrained` for
 the current controller queue, not future delayed macros or other external clients.
 Errors after send, partial writes, connection loss and sender failure become
-`Unknown`, retaining the barrier. A crash between marker and actual send is also
+`Unknown`, without an operator-recovery lockout. A crash between marker and actual send is also
 conservatively unknown. A correlated firmware error retains the diagnostic code
 `printer_firmware_rejected` and explicitly warns that motion may have partially
-executed and recovery is required. Raw firmware messages, command payloads,
+executed; it does not require an attestation. Raw firmware messages, command payloads,
 endpoints and credentials are never copied into the receipt. Pre-send failures
 retain diagnostic codes and use fixed, actionable messages (home axes, obtain
 fresh evidence, check configured bounds, or wait for ready/idle status).
 Never replay a send-committed operation. Only unsent
-claims are reclaimable. A late exact response can settle an unknown operation
-only while the same operation still owns the barrier and recovery has not begun.
+claims are reclaimable. Unknown receipts remain historical outcomes, including
+when a late callback arrives. Late callbacks cannot release a successor's
+coordination.
+
+Active sends retain short database ownership plus a locally renewable 20-second
+cancellation lease. Successful owner heartbeats renew only that local lease;
+expired owners cannot renew or pass the pre-send ownership/configuration fence.
+The overall five-minute deadline is not renewed. Cancellation aborts and joins
+the command channel before recording the outcome and releasing coordination.
+The worker cleans up lost-owner manual barriers after 45 seconds without replay.
+Neither cancellation nor expiry claims physical stopping or successful motion.
 
 `GET .../{operationId}` returns the authoritative operation, a strong ETag and
 `Cache-Control: no-store`. `GET .../current` returns `{physicalControl,operation}`.
@@ -232,30 +241,29 @@ printer groups; clients refetch REST after events and reconnects.
 
 **Emergency stop bypasses motion execution.** An authenticated caller with
 `queue:cancel` and printer-submit access can use the existing emergency-stop route
-while motion is Running, Unknown, or Recovering. The server first durably fences
+while a motion sender is active. The server first durably fences
 the exact motion owner into Recovering, then calls Moonraker's dedicated
 `POST /printer/emergency_stop` immediately on separate HTTP transport. It does not
 enqueue M112 through `printer.gcode.script`, wait for the motion socket, or place
-the stop behind a lifecycle start. Acceptance never releases the motion barrier.
-Late motion/stop responses cannot settle a recovered operation or its successor.
+the stop behind a lifecycle start. `Recovering` is now only a transient internal
+sender-cancellation state, not an operator workflow.
+Late motion/stop responses cannot release a successor.
 Each explicit stop has its own durable attempt identity, configuration fingerprint,
 pre-send fence and delivery evidence. A restart or abandoned attempt does not prevent
 a **new explicit** stop; neither admission CAS retries nor restarts replay HTTP.
 If motion settles during admission, the request must acquire a fresh physical fence
 before sending. Callbacks update only their exact attempt and owner.
-HTTP `false`, cancellation, timeout and response loss are **Unknown**, not isolation.
-One accepted stop cannot clear another pending/unknown stop. WebSocket quiescence
-proves only the original motion sender stopped. Service-confirmed recovery requires
-that proof (or an original unsent operation) **and** every emergency attempt to be
-accepted or proven not sent. There is no timer-based sender-isolation inference.
-Externally verified recovery must isolate **all** possible senders, including every
-API process issuing emergency HTTP, before attesting physical clearance. It records
-outstanding attempts as externally isolated in the same exact-owner transaction that
-releases the barrier. Legacy uncertain-stop evidence is retained across migration.
+HTTP `false`, cancellation, timeout and response loss are **Unknown**, not
+physical-stop evidence. Emergency send admission and HTTP use a 20-second bound.
+Coordination waits for the motion sender and currently pending emergency sends,
+not for operator evidence. Abandoned emergency attempts expire after 45 seconds
+and retain Unknown/NotSent delivery records. An unknown completed delivery does
+not create a permanent lockout.
 
 `GET /control-operations/current` is read-only, including for view-only callers:
-an unimported legacy barrier remains held with a null operation. The worker imports
-legacy receipts with audit/outbox evidence; a read never performs that import.
+an unimported legacy barrier briefly appears with a null operation until the
+worker imports and releases it with audit/outbox evidence. A read never performs
+that import.
 
 After successful homing, calibration reads `GET /api/printers/{id}/status`
 (authenticated printer-view access, `Cache-Control: no-store`). This existing
@@ -275,39 +283,23 @@ Read `isEnabled` and `inMaintenance` from the matching
 support and positioning bounds, not live homing facts. There is no separate
 `/verified-safety` endpoint.
 
-Recovery is explicit, not a retry or automatic firmware reset:
+Manual recovery forms and the two recovery POST endpoints have been removed;
+old endpoint calls return `404` without changing the printer. The compatibility
+`requiresRecovery` field is always false. Historical enum values, recovery
+evidence, audit records and idempotency identities remain stored, but do not
+require new evidence or represent successful motion.
 
-1. An authenticated operator with `queue:reconcile` and printer-submit access posts
-   `.../{operationId}/recovery` with the current quoted `If-Match`. It returns
-   `202`, retains the barrier and enters `Recovering`.
-2. The owning worker cancels future sends, aborts/disposes its transport, and joins
-   its I/O before acknowledging `senderIsolation: Confirmed`. An unavailable
-   owner instead requires external verification. Lease expiry is never proof of
-   sender isolation; socket closure is never proof of physical stopping.
-3. `POST .../recovery/complete` requires a fresh `If-Match` and the explicit fields
-   `reason`, `senderIsolation` (`ServiceConfirmed` or `ExternallyVerified`),
-   `senderIsolationEvidence`, `controllerQueueCleared: true`,
-   `physicallyStationary: true`, and `physicalEvidence`.
-   External verification attests that the **original sender process/network**
-   is isolated, not merely that another replica restarted.
-4. The exact operation/barrier and absence of an active dispatch are checked
-   atomically. Recovery evidence, actor, revisions and time are retained.
-   `Recovered` with `OperatorVerifiedRecovery` clears the barrier but does **not**
-   mean the original motion succeeded. Late callbacks cannot clear a successor.
-
-Missing preconditions return `428`, stale revisions `412`, and unmet recovery
-requirements `409`. No recovery endpoint sends movement or reset commands.
-Both recovery endpoints permit non-admin grant holders; the existing administrator
-permission/resource bypass remains unchanged. Missing reconcile permission returns
-`403`; missing printer Submit access returns `404` without changing the barrier.
-Attestation text is limited to 2000 characters per field and 8192 characters
-for the encoded evidence record; oversized evidence is rejected before storage.
-Printer deletion is fenced against unresolved operations, including racing
-admission, so removal cannot erase an uncertain sender's barrier.
-Retained legacy idle home/jog barriers import as `Unknown` under their existing
-command UUID, including missing timestamps; attempt-bound lifecycle/start
-barriers are never adopted. Unresolved operations and idempotency identities are
-not subject to automatic retention deletion.
+The worker automatically releases retained Unknown/Recovering manual receipts
+once no current sender owns them. Legacy idle home/jog/move barriers import as
+Unknown under their original command UUID, including missing timestamps, then
+release without sending. A fresh non-durable manual call is not imported:
+its five-minute send deadline plus a 45-second grace must elapse, unless it
+already recorded an uncertain completed outcome. Direct manual failures release
+their own coordination while retaining unknown audit events. Cleanup never clears attempt-bound control,
+ActiveDispatchAttemptId, ActiveJobId, or a printer occupied by a print job.
+Printer deletion remains fenced against active commands and racing admission,
+not against a released Unknown receipt. No schema migration is needed: existing
+rows are reconciled through the audited lifecycle.
 
 ### Dispatch lifecycle and reconciliation
 

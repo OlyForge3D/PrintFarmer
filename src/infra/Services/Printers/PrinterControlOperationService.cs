@@ -41,7 +41,7 @@ public sealed class PrinterControlException : Exception
 
 public sealed record PrinterEmergencyStopLease(Guid OperationId, Guid AttemptId, string ConfigurationIdentity);
 
-/// <summary>Transactional admission, fencing, observations and explicit operator recovery.</summary>
+/// <summary>Transactional admission, active-command coordination and non-replayable receipts.</summary>
 public sealed class PrinterControlOperationService(
     AppDbContext db,
     IDbOutboxSequenceAllocator sequence,
@@ -51,6 +51,8 @@ public sealed class PrinterControlOperationService(
 {
     public const string EventType = "PrintFarmer.Printer.ControlOperationUpdated.v1";
     public static readonly TimeSpan OwnerLiveness = TimeSpan.FromSeconds(45);
+    public static readonly TimeSpan SenderLease = TimeSpan.FromSeconds(20);
+    public static readonly TimeSpan CommandTimeout = TimeSpan.FromMinutes(5);
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public async Task<PrinterControlOperationDto> AdmitAsync(
@@ -208,7 +210,7 @@ public sealed class PrinterControlOperationService(
             GetMotionCapability(clients, current.Backend)?.SupportedMotionKinds.ToArray() ?? [],
             current.Barrier?.PhysicalControlCommandId.HasValue == true,
             current.Operation?.Id, current.Operation?.State,
-            current.Operation?.RequiresRecovery == true || current.Barrier?.PhysicalControlRequiresReconciliation == true);
+            false);
         return new(projection, current.Operation is null ? null : Map(current.Operation, true));
     }
 
@@ -231,29 +233,6 @@ public sealed class PrinterControlOperationService(
         }
 
         return null;
-    }
-
-    public async Task<PrinterControlOperationDto> BeginRecoveryAsync(
-        Guid printerId, Guid operationId, string revision, string actor, CancellationToken ct)
-    {
-        PrinterControlOperation operation = await LoadOperationAsync(printerId, operationId, ct);
-        RequireRevision(operation, revision);
-        PrinterDispatchState barrier = await LoadBarrierAsync(printerId, ct);
-        RequireOwner(barrier, operation);
-        if (operation.State is not (PrinterControlState.Running or PrinterControlState.Unknown))
-        {
-            throw Error(409, "recovery_prerequisite", "Only running or unknown operations can enter recovery.");
-        }
-
-        operation.RecoveryFromRevision = operation.Revision;
-        operation.RecoveryActorSubject = actor;
-        operation.RecoveryRequestedAtUtc = DateTime.UtcNow;
-        operation.State = PrinterControlState.Recovering;
-        operation.SenderIsolation = operation.OwnerToken.HasValue && operation.OwnerHeartbeatAtUtc > DateTime.UtcNow - OwnerLiveness
-            ? PrinterSenderIsolation.Pending : PrinterSenderIsolation.ExternalVerificationRequired;
-        barrier.PhysicalControlRequiresReconciliation = true;
-        await PersistRecoveryAsync(operation, barrier, actor, "recovery_requested", ct);
-        return Map(operation, true);
     }
 
     private async Task AuthorizeEmergencyActorAsync(Guid printerId, string actor, CancellationToken ct)
@@ -300,7 +279,8 @@ public sealed class PrinterControlOperationService(
                     return null;
                 }
 
-                await PreserveLegacyEmergencyUncertaintyAsync(operation, ct);
+                RequireOwner(barrier, operation);
+                await RequireIdleBarrierAsync(barrier, ct);
                 string identity = PrinterControlIntent.ConfigurationIdentity(printer);
                 db.PrinterEmergencyStopAttempts.Add(new PrinterEmergencyStopAttempt
                 {
@@ -308,14 +288,10 @@ public sealed class PrinterControlOperationService(
                     ConfigurationIdentity = identity, CreatedAtUtc = DateTime.UtcNow,
                     Delivery = PrinterEmergencyStopDelivery.Pending,
                 });
-                operation.RecoveryFromRevision = operation.Revision;
-                operation.RecoveryActorSubject = actor;
-                operation.RecoveryRequestedAtUtc = DateTime.UtcNow;
                 operation.State = PrinterControlState.Recovering;
-                operation.SenderIsolation = PrinterSenderIsolation.ExternalVerificationRequired;
                 operation.FailureCode = "emergency_stop_requested";
-                operation.FailureMessage = "Emergency senders and physical clearance still require verification.";
-                barrier.PhysicalControlRequiresReconciliation = true;
+                operation.FailureMessage = "Emergency stop requested; the motion sender is stopping.";
+                barrier.PhysicalControlRequiresReconciliation = false;
                 db.Entry(printer).Property(p => p.Revision).IsModified = true;
                 db.Entry(barrier).Property(b => b.Revision).IsModified = true;
                 await PersistAsync(operation, barrier, actor, "emergency_stop_requested", ct, attemptId);
@@ -341,13 +317,15 @@ public sealed class PrinterControlOperationService(
             PrinterEmergencyStopAttempt attempt = await db.PrinterEmergencyStopAttempts.SingleAsync(a => a.Id == lease.AttemptId && a.OperationId == operation.Id, ct);
             Printer? printer = await db.Printers.SingleOrDefaultAsync(p => p.Id == printerId, ct);
             if (operation.State != PrinterControlState.Recovering || barrier.PhysicalControlCommandId != operation.Id ||
+                barrier.PhysicalControlAttemptId.HasValue || barrier.ActiveDispatchAttemptId.HasValue || barrier.ActiveJobId.HasValue ||
                 attempt.ActorSubject != actor || attempt.Delivery != PrinterEmergencyStopDelivery.Pending ||
-                attempt.SendCommittedAtUtc.HasValue || printer is null ||
+                attempt.SendCommittedAtUtc.HasValue || attempt.CreatedAtUtc <= DateTime.UtcNow - SenderLease || printer is null ||
                 PrinterControlIntent.ConfigurationIdentity(printer) != lease.ConfigurationIdentity)
             {
                 return false;
             }
 
+            await RequireIdleBarrierAsync(barrier, ct);
             attempt.SendCommittedAtUtc = DateTime.UtcNow;
             db.Entry(printer).Property(p => p.Revision).IsModified = true;
             db.Entry(barrier).Property(b => b.Revision).IsModified = true;
@@ -377,19 +355,23 @@ public sealed class PrinterControlOperationService(
             PrinterControlOperation? operation = await db.PrinterControlOperations.SingleOrDefaultAsync(o => o.Id == lease.OperationId && o.PrinterId == printerId, ct);
             PrinterDispatchState? barrier = await db.PrinterDispatchStates.SingleOrDefaultAsync(s => s.PrinterId == printerId, ct);
             PrinterEmergencyStopAttempt? attempt = await db.PrinterEmergencyStopAttempts.SingleOrDefaultAsync(a => a.Id == lease.AttemptId && a.OperationId == lease.OperationId, ct);
-            if (operation is null || operation.Settled || barrier?.PhysicalControlCommandId != operation.Id ||
-                attempt?.Delivery != PrinterEmergencyStopDelivery.Pending)
+            if (operation is null || barrier is null || attempt?.Delivery != PrinterEmergencyStopDelivery.Pending)
             {
                 return;
             }
 
             attempt.Delivery = delivery;
             attempt.CompletedAtUtc = DateTime.UtcNow;
-            await RefreshSenderIsolationAsync(operation, ct);
-            operation.FailureCode = operation.SenderIsolation == PrinterSenderIsolation.ExternalVerificationRequired
-                ? "emergency_stop_outcome_unknown" : delivery == PrinterEmergencyStopDelivery.Accepted
-                    ? "emergency_stop_accepted" : "emergency_stop_not_sent";
-            db.Entry(barrier).Property(b => b.Revision).IsModified = true;
+            if (barrier.PhysicalControlCommandId == operation.Id)
+            {
+                operation.FailureCode = delivery == PrinterEmergencyStopDelivery.Unknown
+                    ? "emergency_stop_outcome_unknown" : delivery == PrinterEmergencyStopDelivery.Accepted
+                        ? "emergency_stop_accepted" : "emergency_stop_not_sent";
+                operation.FailureMessage = "Motion was interrupted. Check the printer; no command will be replayed.";
+                await ReleaseInactiveManualAsync(operation, barrier, ct);
+                db.Entry(barrier).Property(b => b.Revision).IsModified = true;
+            }
+
             try
             {
                 await PersistAsync(operation, barrier, attempt.ActorSubject, "emergency_stop_delivery_recorded", ct, lease.AttemptId);
@@ -400,81 +382,6 @@ public sealed class PrinterControlOperationService(
                 // Retry evidence persistence only, never the emergency HTTP request.
             }
         }
-    }
-
-    private async Task PreserveLegacyEmergencyUncertaintyAsync(PrinterControlOperation operation, CancellationToken ct)
-    {
-        if (operation.FailureCode == "emergency_stop_outcome_unknown" &&
-            !await db.PrinterEmergencyStopAttempts.AnyAsync(a => a.OperationId == operation.Id, ct))
-        {
-            operation.EmergencyStopInFlight = true;
-        }
-    }
-
-    private async Task RefreshSenderIsolationAsync(PrinterControlOperation operation, CancellationToken ct)
-    {
-        await PreserveLegacyEmergencyUncertaintyAsync(operation, ct);
-        List<PrinterEmergencyStopAttempt> attempts = await db.PrinterEmergencyStopAttempts.Where(a => a.OperationId == operation.Id).ToListAsync(ct);
-        bool unresolved = operation.EmergencyStopInFlight || attempts.Any(a =>
-            a.Delivery is PrinterEmergencyStopDelivery.Pending or PrinterEmergencyStopDelivery.Unknown);
-        operation.SenderIsolation = unresolved ? PrinterSenderIsolation.ExternalVerificationRequired
-            : operation.SenderIsolatedAtUtc.HasValue || (operation.OwnerToken is null && operation.SendCommittedAtUtc is null)
-                ? PrinterSenderIsolation.Confirmed
-                : operation.OwnerHeartbeatAtUtc > DateTime.UtcNow - OwnerLiveness
-                    ? PrinterSenderIsolation.Pending : PrinterSenderIsolation.ExternalVerificationRequired;
-    }
-
-    public async Task<PrinterControlOperationDto> CompleteRecoveryAsync(
-        Guid printerId, Guid operationId, string revision, string actor,
-        PrinterControlRecoveryRequest request, CancellationToken ct)
-    {
-        PrinterControlOperation operation = await LoadOperationAsync(printerId, operationId, ct);
-        RequireRevision(operation, revision);
-        PrinterDispatchState barrier = await LoadBarrierAsync(printerId, ct);
-        RequireOwner(barrier, operation);
-        await RequireIdleBarrierAsync(barrier, ct);
-        await PreserveLegacyEmergencyUncertaintyAsync(operation, ct);
-        List<PrinterEmergencyStopAttempt> emergencyAttempts = await db.PrinterEmergencyStopAttempts.Where(a => a.OperationId == operation.Id).ToListAsync(ct);
-        bool serviceConfirmed = request.SenderIsolation == "ServiceConfirmed" &&
-            operation.SenderIsolation == PrinterSenderIsolation.Confirmed && !operation.EmergencyStopInFlight &&
-            !emergencyAttempts.Any(a => a.Delivery is PrinterEmergencyStopDelivery.Pending or PrinterEmergencyStopDelivery.Unknown);
-        bool externalVerified = request.SenderIsolation == "ExternallyVerified";
-        if (operation.State != PrinterControlState.Recovering ||
-            (!serviceConfirmed && !externalVerified) ||
-            !request.ControllerQueueCleared || !request.PhysicallyStationary ||
-            !EvidenceValid(request.Reason) || !EvidenceValid(request.SenderIsolationEvidence) ||
-            !EvidenceValid(request.PhysicalEvidence))
-        {
-            throw Error(409, "recovery_prerequisite", "Recovery requires sender isolation, queue clearance and independent physical evidence.");
-        }
-
-        string evidence = JsonSerializer.Serialize(request, JsonOptions);
-        if (evidence.Length > 8192)
-        {
-            throw Error(409, "recovery_prerequisite", "Encoded recovery evidence exceeds 8192 characters; provide a concise attestation.");
-        }
-
-        operation.RecoveryEvidenceJson = evidence;
-        operation.RecoveryActorSubject = actor;
-        operation.RecoveryFromRevision = operation.Revision;
-        operation.State = PrinterControlState.Recovered;
-        operation.CompletedAtUtc = DateTime.UtcNow;
-        operation.CompletionEvidence = PrinterControlEvidence.OperatorVerifiedRecovery;
-        if (externalVerified)
-        {
-            operation.EmergencyStopInFlight = false;
-            foreach (PrinterEmergencyStopAttempt attempt in emergencyAttempts.Where(a =>
-                a.Delivery is PrinterEmergencyStopDelivery.Pending or PrinterEmergencyStopDelivery.Unknown))
-            {
-                attempt.Delivery = PrinterEmergencyStopDelivery.ExternallyIsolated;
-                attempt.CompletedAtUtc = DateTime.UtcNow;
-            }
-        }
-
-        // ExternallyVerified is an operator attestation, not a fabricated service acknowledgement.
-        ClearBarrier(barrier);
-        await PersistRecoveryAsync(operation, barrier, actor, "operator_recovered", ct);
-        return Map(operation, false);
     }
 
     public async Task<PrinterControlOperation?> ClaimAsync(Guid id, Guid owner, CancellationToken ct)
@@ -499,8 +406,23 @@ public sealed class PrinterControlOperationService(
     public async Task<bool> CommitSendAsync(Guid id, Guid owner, CancellationToken ct)
     {
         db.ChangeTracker.Clear();
+        await using QueueOutboxTransactionScope transaction = await QueueOutboxTransactionScope.BeginAsync(db, ct);
+        DateTime cutoff = DateTime.UtcNow - SenderLease;
+
+        // Lock the private owner row through the public send transition. ClaimAsync
+        // deliberately leaves the public revision unchanged, so revision CAS alone
+        // cannot fence an owner takeover racing pre-send validation.
+        int fenced = await db.PrinterControlOperations.Where(o => o.Id == id && o.OwnerToken == owner &&
+                o.State == PrinterControlState.Queued && o.SendCommittedAtUtc == null && o.OwnerHeartbeatAtUtc > cutoff)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(o => o.OwnerToken, owner), ct);
+        if (fenced != 1)
+        {
+            return false;
+        }
+
         PrinterControlOperation operation = await db.PrinterControlOperations.SingleAsync(o => o.Id == id, ct);
-        if (operation.OwnerToken != owner || operation.State != PrinterControlState.Queued || operation.SendCommittedAtUtc.HasValue)
+        if (operation.OwnerToken != owner || operation.State != PrinterControlState.Queued || operation.SendCommittedAtUtc.HasValue ||
+            operation.OwnerHeartbeatAtUtc is null || operation.OwnerHeartbeatAtUtc <= DateTime.UtcNow - SenderLease)
         {
             return false;
         }
@@ -527,20 +449,29 @@ public sealed class PrinterControlOperationService(
         operation.OwnerHeartbeatAtUtc = DateTime.UtcNow;
         operation.CorrelationId = operation.Id;
         await PersistAsync(operation, barrier, operation.ActorSubject, "send_committed", ct);
+        await transaction.CommitAsync(ct);
         return true;
     }
 
     public async Task SetOutcomeAsync(Guid id, Guid owner, bool success, string? failure, CancellationToken ct)
     {
+        db.ChangeTracker.Clear();
+        await using QueueOutboxTransactionScope transaction = await QueueOutboxTransactionScope.BeginAsync(db, ct);
+        int fenced = await db.PrinterControlOperations.Where(o => o.Id == id && o.OwnerToken == owner)
+            .ExecuteUpdateAsync(setters => setters.SetProperty(o => o.OwnerToken, owner), ct);
+        if (fenced != 1)
+        {
+            return;
+        }
+
         PrinterControlOperation? operation = await db.PrinterControlOperations.SingleOrDefaultAsync(o => o.Id == id, ct);
-        if (operation is null || operation.OwnerToken != owner || operation.Settled ||
-            operation.State == PrinterControlState.Recovering)
+        if (operation is null || operation.OwnerToken != owner || operation.Settled)
         {
             return;
         }
 
         PrinterDispatchState barrier = await LoadBarrierAsync(operation.PrinterId, ct);
-        if (barrier.PhysicalControlCommandId != operation.Id)
+        if (barrier.PhysicalControlCommandId != operation.Id || barrier.PhysicalControlAttemptId.HasValue)
         {
             return;
         }
@@ -551,18 +482,19 @@ public sealed class PrinterControlOperationService(
             return;
         }
 
-        operation.State = success ? PrinterControlState.Succeeded : notSent ? PrinterControlState.Failed : PrinterControlState.Unknown;
-        operation.CompletionEvidence = success ? PrinterControlEvidence.MotionQueueDrained : notSent ? PrinterControlEvidence.NotSent : PrinterControlEvidence.None;
-        operation.FailureCode = failure;
-        operation.FailureMessage = DescribeFailure(failure, notSent);
-        operation.CompletedAtUtc = operation.Settled ? DateTime.UtcNow : null;
-        barrier.PhysicalControlRequiresReconciliation = !operation.Settled;
-        if (operation.Settled)
+        operation.SenderIsolatedAtUtc = DateTime.UtcNow;
+        if (operation.State != PrinterControlState.Recovering)
         {
-            ClearBarrier(barrier);
+            operation.State = success ? PrinterControlState.Succeeded : notSent ? PrinterControlState.Failed : PrinterControlState.Unknown;
+            operation.CompletionEvidence = success ? PrinterControlEvidence.MotionQueueDrained : notSent ? PrinterControlEvidence.NotSent : PrinterControlEvidence.None;
+            operation.FailureCode = failure;
+            operation.FailureMessage = DescribeFailure(failure, notSent);
+            operation.CompletedAtUtc ??= DateTime.UtcNow;
         }
 
+        await ReleaseInactiveManualAsync(operation, barrier, ct);
         await PersistAsync(operation, barrier, operation.ActorSubject, success ? "succeeded" : notSent ? "not_sent" : "unknown", ct);
+        await transaction.CommitAsync(ct);
     }
 
     // Only server-owned copy may reach receipts/audits. Never forward exception messages,
@@ -577,8 +509,8 @@ public sealed class PrinterControlOperationService(
         if (!notSent)
         {
             return code == "printer_firmware_rejected"
-                ? "Printer firmware rejected the command. Motion may have partially executed; inspect the printer and use explicit recovery. Do not repeat the move."
-                : "Physical outcome is unknown; explicit recovery is required.";
+                ? "Printer firmware rejected the command. Motion may have partially executed; inspect the printer before requesting another move."
+                : "Physical outcome is unknown. Check the printer before requesting another move; this command will not be replayed.";
         }
 
         return code switch
@@ -600,44 +532,49 @@ public sealed class PrinterControlOperationService(
         };
     }
 
-    public async Task MaintainOwnerAsync(Guid id, Guid owner, bool isolated, CancellationToken ct)
+    public async Task<bool> MaintainOwnerAsync(Guid id, Guid owner, bool isolated, CancellationToken ct)
     {
         PrinterControlOperation? operation = await db.PrinterControlOperations.SingleOrDefaultAsync(o => o.Id == id, ct);
         if (operation is null || operation.OwnerToken != owner || operation.Settled)
         {
-            return;
+            return false;
         }
 
-        if (isolated && operation.State == PrinterControlState.Recovering)
+        if (isolated)
         {
-            bool alreadyQuiesced = operation.SenderIsolatedAtUtc.HasValue;
-            bool legacyUncertainty = operation.EmergencyStopInFlight;
-            PrinterSenderIsolation previous = operation.SenderIsolation;
             PrinterDispatchState barrier = await LoadBarrierAsync(operation.PrinterId, ct);
-            RequireOwner(barrier, operation);
-            operation.SenderIsolatedAtUtc ??= DateTime.UtcNow;
-            await RefreshSenderIsolationAsync(operation, ct);
-            if (alreadyQuiesced && previous == operation.SenderIsolation && legacyUncertainty == operation.EmergencyStopInFlight)
+            if (barrier.PhysicalControlCommandId != operation.Id || barrier.PhysicalControlAttemptId.HasValue)
             {
-                return;
+                return false;
             }
 
-            operation.OwnerHeartbeatAtUtc = DateTime.UtcNow;
-            await PersistAsync(operation, barrier, operation.RecoveryActorSubject ?? operation.ActorSubject, "motion_sender_quiesced", ct);
+            operation.SenderIsolatedAtUtc ??= DateTime.UtcNow;
+            await ReleaseInactiveManualAsync(operation, barrier, ct);
+            await PersistAsync(operation, barrier, operation.ActorSubject, "motion_sender_stopped", ct);
+            return true;
         }
         else
         {
-            // Liveness is private sender metadata, not a public operation revision. It must
-            // not invalidate an operator's If-Match every second while they inspect evidence.
+            // Heartbeats do not change the public receipt revision.
             if (db.Database.IsRelational())
             {
-                await db.PrinterControlOperations.Where(o => o.Id == id && o.OwnerToken == owner)
-                    .ExecuteUpdateAsync(setters => setters.SetProperty(o => o.OwnerHeartbeatAtUtc, DateTime.UtcNow), ct);
+                DateTime cutoff = DateTime.UtcNow - SenderLease;
+                return await db.PrinterControlOperations.Where(o => o.Id == id && o.OwnerToken == owner &&
+                        o.OwnerHeartbeatAtUtc > cutoff &&
+                        (o.State == PrinterControlState.Queued || o.State == PrinterControlState.Running ||
+                         o.State == PrinterControlState.Recovering))
+                    .ExecuteUpdateAsync(setters => setters.SetProperty(o => o.OwnerHeartbeatAtUtc, DateTime.UtcNow), ct) == 1;
             }
             else
             {
+                if (operation.OwnerHeartbeatAtUtc is null || operation.OwnerHeartbeatAtUtc <= DateTime.UtcNow - SenderLease)
+                {
+                    return false;
+                }
+
                 operation.OwnerHeartbeatAtUtc = DateTime.UtcNow;
                 await db.SaveChangesAsync(ct);
+                return true;
             }
         }
     }
@@ -646,31 +583,67 @@ public sealed class PrinterControlOperationService(
     {
         DateTime cutoff = DateTime.UtcNow - OwnerLiveness;
         List<PrinterControlOperation> operations = await db.PrinterControlOperations.Where(o =>
-            (o.State == PrinterControlState.Running ||
-             (o.State == PrinterControlState.Recovering && o.SenderIsolation == PrinterSenderIsolation.Pending)) &&
-            (o.OwnerHeartbeatAtUtc == null || o.OwnerHeartbeatAtUtc < cutoff)).ToListAsync(ct);
+            o.State != PrinterControlState.Queued &&
+            (o.SenderIsolatedAtUtc != null || o.OwnerToken == null || o.OwnerHeartbeatAtUtc == null ||
+             o.OwnerHeartbeatAtUtc < cutoff) &&
+            db.PrinterDispatchStates.Any(s => s.PrinterId == o.PrinterId && s.PhysicalControlCommandId == o.Id))
+            .ToListAsync(ct);
         foreach (PrinterControlOperation operation in operations)
         {
             PrinterDispatchState barrier = await LoadBarrierAsync(operation.PrinterId, ct);
-            if (barrier.PhysicalControlCommandId != operation.Id)
+            if (await ReleaseInactiveManualAsync(operation, barrier, ct))
             {
-                continue;
+                await PersistAsync(operation, barrier, operation.ActorSubject, "manual_coordination_released", ct);
             }
-
-            if (operation.State == PrinterControlState.Running)
-            {
-                operation.State = PrinterControlState.Unknown;
-                operation.FailureCode = "sender_unavailable";
-                operation.FailureMessage = "The sender is unavailable; no physical command will be replayed.";
-            }
-            else
-            {
-                operation.SenderIsolation = PrinterSenderIsolation.ExternalVerificationRequired;
-            }
-
-            barrier.PhysicalControlRequiresReconciliation = true;
-            await PersistAsync(operation, barrier, operation.ActorSubject, "sender_unavailable", ct);
         }
+    }
+
+    private async Task<bool> ReleaseInactiveManualAsync(
+        PrinterControlOperation operation, PrinterDispatchState barrier, CancellationToken ct)
+    {
+        if (barrier.PhysicalControlCommandId != operation.Id || barrier.PhysicalControlAttemptId.HasValue ||
+            barrier.ActiveDispatchAttemptId.HasValue || barrier.ActiveJobId.HasValue ||
+            await db.PrintJobs.WhereOccupiesPrinter().AnyAsync(j => j.AssignedPrinterId == operation.PrinterId, ct) ||
+            (operation.OwnerToken.HasValue && operation.SenderIsolatedAtUtc is null &&
+             operation.OwnerHeartbeatAtUtc > DateTime.UtcNow - OwnerLiveness))
+        {
+            return false;
+        }
+
+        List<PrinterEmergencyStopAttempt> pending = await db.PrinterEmergencyStopAttempts.Where(a =>
+            a.OperationId == operation.Id && a.Delivery == PrinterEmergencyStopDelivery.Pending).ToListAsync(ct);
+        pending.RemoveAll(a => a.Delivery != PrinterEmergencyStopDelivery.Pending);
+        if (pending.Any(a => a.CreatedAtUtc > DateTime.UtcNow - OwnerLiveness))
+        {
+            return false;
+        }
+
+        foreach (PrinterEmergencyStopAttempt attempt in pending)
+        {
+            attempt.Delivery = attempt.SendCommittedAtUtc.HasValue
+                ? PrinterEmergencyStopDelivery.Unknown : PrinterEmergencyStopDelivery.NotSent;
+            attempt.CompletedAtUtc = DateTime.UtcNow;
+        }
+
+        if (!operation.Settled)
+        {
+            operation.State = operation.SendCommittedAtUtc.HasValue ? PrinterControlState.Unknown : PrinterControlState.Failed;
+            operation.CompletionEvidence = operation.SendCommittedAtUtc.HasValue ? PrinterControlEvidence.None : PrinterControlEvidence.NotSent;
+            operation.FailureCode ??= "sender_unavailable";
+            operation.FailureMessage ??= "The sender stopped or became unavailable; no physical command will be replayed.";
+        }
+
+        if (operation.State == PrinterControlState.Unknown &&
+            (operation.FailureCode == "emergency_stop_requested" || operation.FailureMessage is null ||
+             operation.FailureMessage.Contains("recovery", StringComparison.OrdinalIgnoreCase) ||
+             operation.FailureMessage.Contains("barrier", StringComparison.OrdinalIgnoreCase)))
+        {
+            operation.FailureMessage = "Physical outcome is unknown. Check the printer before requesting another move; this command will not be replayed.";
+        }
+
+        operation.CompletedAtUtc ??= DateTime.UtcNow;
+        ClearBarrier(barrier);
+        return true;
     }
 
     public async Task ImportLegacyAsync(Guid printerId, CancellationToken ct)
@@ -684,22 +657,15 @@ public sealed class PrinterControlOperationService(
             return;
         }
 
-        PrinterControlKind? kind = barrier.PhysicalControlOperation switch
-        {
-            "home" => PrinterControlKind.HomeAll,
-            "home_xy" => PrinterControlKind.HomeXY,
-            "home_z" => PrinterControlKind.HomeZ,
-            "move" => PrinterControlKind.Jog,
-            "move_to" => PrinterControlKind.MoveTo,
-            _ => null,
-        };
-        if (kind is null || !await db.Printers.AnyAsync(p => p.Id == printerId, ct))
+        PrinterControlKind? kind = PrinterControlIntent.LegacyKind(barrier.PhysicalControlOperation);
+        if (kind is null || !await db.Printers.AnyAsync(p => p.Id == printerId, ct) ||
+            (!barrier.PhysicalControlRequiresReconciliation &&
+             barrier.PhysicalControlStartedAtUtc > DateTime.UtcNow - CommandTimeout - OwnerLiveness))
         {
             return;
         }
 
-        // Historical barrier labels identify uncertain motion, not executable intent.
-        // Recovery must survive plugin loss; only new admission/send consults live support.
+        // Historical labels are audit information, never executable intent.
         var operation = new PrinterControlOperation
         {
             Id = id,
@@ -711,11 +677,11 @@ public sealed class PrinterControlOperationService(
             CreatedAtUtc = barrier.PhysicalControlStartedAtUtc ?? DateTime.UtcNow,
             StartedAtUtc = barrier.PhysicalControlStartedAtUtc,
             SendCommittedAtUtc = barrier.PhysicalControlStartedAtUtc ?? DateTime.UtcNow,
-            SenderIsolation = PrinterSenderIsolation.ExternalVerificationRequired,
             FailureCode = "legacy_outcome_unknown",
-            FailureMessage = "Retained legacy motion barrier requires externally verified recovery.",
+            FailureMessage = "Historical motion outcome is unknown; no command was replayed.",
+            CompletedAtUtc = DateTime.UtcNow,
         };
-        barrier.PhysicalControlRequiresReconciliation = true;
+        ClearBarrier(barrier);
         db.PrinterControlOperations.Add(operation);
 
         // Even an already-reconciling barrier must participate in the import CAS.
@@ -741,19 +707,7 @@ public sealed class PrinterControlOperationService(
         return rows.ToDictionary(row => row.Id, row => new PrinterPhysicalControlDto(
             GetMotionCapability(clients, row.Backend)?.SupportedMotionKinds.ToArray() ?? [],
             row.Barrier?.PhysicalControlCommandId.HasValue == true, row.Operation?.Id, row.Operation?.State,
-            row.Operation?.RequiresRecovery == true || row.Barrier?.PhysicalControlRequiresReconciliation == true));
-    }
-
-    private async Task PersistRecoveryAsync(PrinterControlOperation operation, PrinterDispatchState barrier, string actor, string action, CancellationToken ct)
-    {
-        try
-        {
-            await PersistAsync(operation, barrier, actor, action, ct);
-        }
-        catch (DbUpdateConcurrencyException)
-        {
-            throw Error(412, "stale_recovery", "The operation changed; fetch its current revision.");
-        }
+            false));
     }
 
     private async Task PersistAsync(PrinterControlOperation operation, PrinterDispatchState barrier, string actor, string action, CancellationToken ct, Guid? emergencyAttemptId = null)
@@ -761,8 +715,11 @@ public sealed class PrinterControlOperationService(
         await using QueueOutboxTransactionScope transaction = await QueueOutboxTransactionScope.BeginAsync(db, ct);
         operation.UpdatedAtUtc = DateTime.UtcNow;
         long nextRevision = db.Entry(operation).State == EntityState.Added ? 1 : operation.Revision + 1;
+        string outcome = operation.State is PrinterControlState.Unknown or PrinterControlState.Recovering
+            ? QueueAuditOutcomes.Unknown : operation.State == PrinterControlState.Failed
+                ? QueueAuditOutcomes.Failed : QueueAuditOutcomes.Success;
         QueueAuditWriter.Add(db, actor, QueueAuditOperations.PhysicalControl,
-            operation.RequiresRecovery ? QueueAuditOutcomes.Unknown : QueueAuditOutcomes.Success,
+            outcome,
             nameof(PrinterControlOperation), operation.Id, operation.PrinterId,
             reasonCode: operation.FailureCode, dispatchStateRowVersion: barrier.RowVersion,
             detail: new { operationId = operation.Id, action, revision = nextRevision, operation.RecoveryFromRevision, emergencyAttemptId });
@@ -840,16 +797,6 @@ public sealed class PrinterControlOperationService(
             throw Error(409, "physical_control_barrier", "This operation does not own the current printer barrier.");
         }
     }
-
-    private static void RequireRevision(PrinterControlOperation operation, string revision)
-    {
-        if (revision != $"\"{Convert.ToBase64String(RevisionETag.EncodeBytes(operation.Revision))}\"")
-        {
-            throw Error(412, "stale_recovery", "The operation changed; fetch its current revision.");
-        }
-    }
-
-    private static bool EvidenceValid(string value) => !string.IsNullOrWhiteSpace(value) && value.Length <= 2000;
 
     private static PrinterControlException Error(int status, string code, string message) => new(status, code, message);
 

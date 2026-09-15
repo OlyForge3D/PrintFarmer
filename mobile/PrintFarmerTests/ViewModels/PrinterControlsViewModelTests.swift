@@ -3637,28 +3637,34 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
     }
 
     private var defaults: UserDefaults!
-    private var suite: String!
     private let serverID = UUID()
     private let userID = UUID()
 
     override func setUp() async throws {
-        suite = "DurablePrinterMotion-\(UUID())"
-        defaults = try XCTUnwrap(UserDefaults(suiteName: suite))
+        defaults = .standard
     }
 
     override func tearDown() async throws {
-        defaults.removePersistentDomain(forName: suite)
+        let printer = try TestData.decodePrinter()
+        defaults.removeObject(forKey: "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(printer.id.uuidString)")
         defaults = nil
     }
 
     private func fixture(
         service: MockPrinterService = MockPrinterService(),
         server: UUID? = nil, user: UUID? = nil,
+        backend: PrinterBackend = .moonraker,
+        advertisedOperations: [PrinterControlOperationKind]? = PrinterControlOperationKind.allCases,
         clock: @escaping @Sendable () -> Date = Date.init,
         access: @escaping @MainActor () -> String? = { nil }
     ) async throws -> (PrinterControlsViewModel, MockPrinterService) {
-        var printer = try TestData.decodePrinter()
+        var printer = try TestData.decodePrinter(from: TestJSON.printer.replacingOccurrences(
+            of: "\"backend\": \"Moonraker\"", with: "\"backend\": \"\(backend.rawValue)\""
+        ))
         printer.state = "ready"
+        printer.physicalControl = advertisedOperations.map {
+            .init(supportedOperations: $0, barrierHeld: false, requiresRecovery: false)
+        }
         var caps = PrinterBackendCapabilities.allControlsFixture
         caps.supportsAbsoluteMovement = true
         caps.supportsZOffset = true
@@ -3675,7 +3681,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
             identity: .init(serverID: identity, generation: 0, revision: 0), printerService: service
         )
         let model = PrinterControlsViewModel(
-            composition: composition, printer: printer, clock: clock, motionDefaults: defaults
+            composition: composition, printer: printer, clock: clock
         )
         model.configureAccess(
             serverID: identity,
@@ -3743,6 +3749,271 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         XCTAssertFalse(model.isExecuting)
     }
 
+    func test_heldReceiptsRemainCoordinatedRegardlessOfState() async throws {
+        for state in [PrinterControlOperationState.unknown, .recovering, .recovered, .succeeded, .failed] {
+            for exactReceiptOnly in [false, true] {
+                let (model, service) = try await fixture(server: UUID())
+                admitRunning(service)
+                await model.homeAll()
+                let sent = try XCTUnwrap(service.submittedControlOperations.last)
+                let held = PrinterControlOperation.controlsFixture(
+                    printerID: sent.printerID, operationID: sent.operationID,
+                    request: sent.request, state: state, evidence: .motionQueueDrained, held: true
+                )
+                service.controlOperationToReturn = held
+                service.currentControlOperationToReturn = exactReceiptOnly
+                    ? .init(physicalControl: .init(
+                        supportedOperations: PrinterControlOperationKind.allCases,
+                        barrierHeld: false, requiresRecovery: false
+                    ), operation: nil)
+                    : .controlsFixture(held)
+                await model.refreshControlOperation()
+                XCTAssertNil(model.operationReadError)
+                XCTAssertEqual(model.controlOperation?.state, state)
+                XCTAssertTrue(model.hasUnresolvedMotion)
+                XCTAssertTrue(model.hasDurableMotionBarrier)
+                XCTAssertTrue(model.isExecuting)
+                XCTAssertNotNil(model.motionBlockedReason)
+                XCTAssertFalse(model.controlOperation?.hasConfirmedSuccess == true)
+                await model.jog(axis: "X", distanceMm: 1)
+                XCTAssertEqual(service.submittedControlOperations.count, 1)
+                try await finish(model, service, state: .unknown, evidence: .none)
+                XCTAssertFalse(model.isExecuting)
+                model.deactivate()
+            }
+        }
+    }
+
+    func test_successWithoutQueueDrainEvidenceCannotConfirmOrAdvanceCalibration() async throws {
+        let evidenceCases: [PrinterControlCompletionEvidence?] = [
+            nil, .some(.none), .notSent, .backendRejected, .operatorVerifiedRecovery
+        ]
+        for evidence in evidenceCases {
+            let (model, service) = try await fixture(server: UUID())
+            admitRunning(service)
+            await model.startCalibration()
+            model.beginCalibrationHome()
+            await model.homeForCalibration()
+            let sent = try XCTUnwrap(service.submittedControlOperations.last)
+            var unconfirmed = PrinterControlOperation.controlsFixture(
+                printerID: sent.printerID, operationID: sent.operationID,
+                request: sent.request, state: .succeeded, held: false
+            )
+            unconfirmed.completionEvidence = evidence
+            service.controlOperationToReturn = unconfirmed
+            service.currentControlOperationToReturn = .controlsFixture(unconfirmed)
+            await model.refreshControlOperation()
+            XCTAssertFalse(model.hasUnresolvedMotion)
+            XCTAssertNil(model.motionBlockedReason)
+            XCTAssertNil(model.pendingCommand)
+            XCTAssertEqual(model.calibrationStep, .home)
+            XCTAssertTrue(model.motionStatusNeedsAttention)
+            XCTAssertTrue(model.motionStatusMessage?.contains("unconfirmed") == true)
+            XCTAssertFalse(model.commandNotice?.contains("Physical operation succeeded") == true)
+            XCTAssertFalse(model.motionStatusSummary?.contains("Motion completed") == true)
+            XCTAssertFalse(model.controlOperation?.hasConfirmedSuccess == true)
+            model.cancelCalibration()
+            XCTAssertFalse(model.isExecuting)
+            await model.homeZ()
+            XCTAssertEqual(service.submittedControlOperations.count, 2, "No recovery prerequisite for a new action")
+            try await finish(model, service)
+        }
+    }
+
+    func test_advertisedNonMoonrakerProvidersUseDurableEndpointsOnly() async throws {
+        for backend in [PrinterBackend.octoPrint, .prusaLink, .unknown] {
+            let (model, service) = try await fixture(server: UUID(), backend: backend)
+            XCTAssertTrue(model.usesDurableMotion)
+            admitRunning(service)
+            await model.homeAll()
+            try await finish(model, service)
+            await model.jog(axis: "Z", distanceMm: 1)
+            try await finish(model, service)
+            await model.moveTo(x: 20, y: 30, z: 10, feedrateMmMin: nil)
+            XCTAssertEqual(service.submittedControlOperations.map(\.request.kind), [.homeAll, .jog, .moveTo])
+            XCTAssertNil(service.homeCalledWith)
+            XCTAssertNil(service.moveCalledWith)
+            XCTAssertNil(service.moveToCalledWith)
+            try await finish(model, service)
+            model.deactivate()
+        }
+    }
+
+    func test_withoutAdvertisedDurableCapabilityUsesLegacyRouteForAnyBackend() async throws {
+        let advertisements: [[PrinterControlOperationKind]?] = [nil, []]
+        for backend in [PrinterBackend.moonraker, .octoPrint, .unknown] {
+            for operations in advertisements {
+                let (model, service) = try await fixture(
+                    server: UUID(), backend: backend, advertisedOperations: operations
+                )
+                XCTAssertFalse(model.usesDurableMotion)
+                await model.homeAll()
+                XCTAssertNotNil(service.homeCalledWith)
+                XCTAssertTrue(service.submittedControlOperations.isEmpty)
+                XCTAssertEqual(service.currentControlOperationReadCount, 0)
+                model.deactivate()
+            }
+        }
+    }
+
+    func test_newAdvertisementEnablesDurablePluginWithoutBackendChange() async throws {
+        let (model, service) = try await fixture(backend: .octoPrint, advertisedOperations: nil)
+        XCTAssertFalse(model.usesDurableMotion)
+        var updated = model.printer
+        updated.physicalControl = service.currentControlOperationToReturn.physicalControl
+        let refreshed = expectation(description: "Advertised provider status refreshed")
+        let observation = model.$isRefreshingControlOperation
+            .dropFirst().filter { !$0 }.prefix(1).sink { _ in refreshed.fulfill() }
+        defer { observation.cancel() }
+        model.handlePrinterUpdate(updated)
+        await fulfillment(of: [refreshed], timeout: 5)
+        XCTAssertTrue(model.usesDurableMotion)
+        admitRunning(service)
+        await model.homeZ()
+        XCTAssertEqual(service.submittedControlOperations.map(\.request.kind), [.homeZ])
+        XCTAssertNil(service.homeZCalledWith)
+        try await finish(model, service)
+    }
+
+    private var withdrawnMotionCapability: PrinterCurrentControlOperation {
+        .init(physicalControl: .init(
+            supportedOperations: [], barrierHeld: false, requiresRecovery: false
+        ), operation: nil)
+    }
+
+    func test_authoritativeClearCapabilityWithdrawalRestoresLegacyWithoutRecreation() async throws {
+        let (model, service) = try await fixture(backend: .octoPrint)
+        XCTAssertTrue(model.usesDurableMotion)
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        await model.refreshControlOperation()
+        XCTAssertFalse(model.usesDurableMotion)
+        XCTAssertNil(model.motionBlockedReason)
+        XCTAssertNil(model.operationReadError)
+        await model.homeZ()
+        XCTAssertNotNil(service.homeZCalledWith)
+        XCTAssertTrue(service.submittedControlOperations.isEmpty)
+        model.deactivate()
+    }
+
+    func test_capabilityWithdrawalCannotDowngradeHeldCurrentOrExactReceipt() async throws {
+        let (model, service) = try await fixture()
+        admitRunning(service)
+        await model.homeAll()
+        let sent = try XCTUnwrap(service.submittedControlOperations.last)
+        let held = PrinterControlOperation.controlsFixture(
+            printerID: sent.printerID, operationID: sent.operationID,
+            request: sent.request, state: .unknown, held: true
+        )
+        service.controlOperationToReturn = held
+        service.currentControlOperationToReturn = .init(
+            physicalControl: .init(
+                supportedOperations: [], barrierHeld: true,
+                operationId: held.operationId, state: held.state, requiresRecovery: false
+            ), operation: held
+        )
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.usesDurableMotion)
+        XCTAssertTrue(model.hasDurableMotionBarrier)
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.usesDurableMotion, "A later exact receipt still owns coordination")
+        XCTAssertTrue(model.hasUnresolvedMotion)
+        await model.homeZ()
+        XCTAssertNil(service.homeZCalledWith)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        service.controlOperationToReturn = .controlsFixture(
+            printerID: sent.printerID, operationID: sent.operationID,
+            request: sent.request, state: .unknown, held: false
+        )
+        await model.refreshControlOperation()
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertFalse(model.usesDurableMotion, "Settled history must not become a routing lock")
+        await model.homeZ()
+        XCTAssertNotNil(service.homeZCalledWith)
+        model.deactivate()
+    }
+
+    func test_capabilityWithdrawalWaitsForInFlightAdmissionWithoutReplaying() async throws {
+        let (model, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.submitControlOperationHandler = { _, _, _ in
+            await barrier.arriveAndWait()
+            throw NetworkError.timeout
+        }
+        let submission = Task { await model.homeAll() }
+        await barrier.waitUntilArrived()
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.usesDurableMotion)
+        XCTAssertNotNil(model.pendingCommand)
+        await model.homeZ()
+        XCTAssertNil(service.homeZCalledWith)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        barrier.close()
+        await submission.value
+        XCTAssertFalse(model.usesDurableMotion, "An observation-only ID cannot retain the routing gate")
+        XCTAssertNil(model.pendingCommand)
+        XCTAssertTrue(model.commandNotice?.contains("unknown") == true)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        XCTAssertNil(service.homeZCalledWith)
+    }
+
+    func test_missingOrInvalidCurrentEvidenceNeverDowngradesAdvertisedRouting() async throws {
+        for error in [NetworkError.timeout, .invalidResponse, .notFound] {
+            let (model, service) = try await fixture(server: UUID())
+            var missingTelemetry = model.printer
+            missingTelemetry.physicalControl = nil
+            model.handlePrinterUpdate(missingTelemetry)
+            service.currentControlOperationHandler = { _ in throw error }
+            await model.refreshControlOperation()
+            XCTAssertTrue(model.usesDurableMotion)
+            XCTAssertNotNil(model.motionBlockedReason)
+            await model.homeAll()
+            XCTAssertNil(service.homeCalledWith)
+            XCTAssertTrue(service.submittedControlOperations.isEmpty)
+            service.currentControlOperationHandler = nil
+            service.currentControlOperationToReturn = .init(
+                physicalControl: .init(
+                    supportedOperations: [], barrierHeld: false, operationId: UUID(), requiresRecovery: false
+                ), operation: nil
+            )
+            await model.refreshControlOperation()
+            XCTAssertTrue(model.usesDurableMotion, "Malformed empty capability evidence cannot authorize legacy motion")
+            XCTAssertNotNil(model.operationReadError)
+            model.deactivate()
+        }
+    }
+
+    func test_capabilityWithdrawalRespectsOtherOwnersInFlightLease() async throws {
+        let (original, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.submitControlOperationHandler = { _, _, _ in
+            await barrier.arriveAndWait()
+            throw NetworkError.timeout
+        }
+        let submission = Task { await original.homeAll() }
+        await barrier.waitUntilArrived()
+        service.currentControlOperationToReturn = withdrawnMotionCapability
+        let (other, _) = try await fixture(service: service)
+        XCTAssertTrue(other.usesDurableMotion)
+        XCTAssertTrue(other.isExecuting)
+        await other.homeZ()
+        XCTAssertNil(service.homeZCalledWith)
+        barrier.close()
+        await submission.value
+        await other.refreshControlOperation()
+        XCTAssertFalse(other.usesDurableMotion)
+        XCTAssertFalse(other.isExecuting)
+        await other.homeZ()
+        XCTAssertNotNil(service.homeZCalledWith)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        other.deactivate()
+        original.deactivate()
+    }
+
     func test_allHomeJogAndAbsoluteEntryPointsUseDurableIntentWithoutLegacyFallback() async throws {
         let (model, service) = try await fixture()
         admitRunning(service)
@@ -3783,7 +4054,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         }
     }
 
-    func test_savedPartialMoveToCannotBeResubmittedOrSilentlyBackfilled() async throws {
+    func test_legacySavedPartialMoveToDoesNotRestoreBlockOrReplay() async throws {
         let printer = try TestData.decodePrinter()
         let operationID = UUID()
         let key = "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(printer.id.uuidString)"
@@ -3792,76 +4063,61 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         """.utf8)
         defaults.set(data, forKey: key)
         let (model, service) = try await fixture()
-        XCTAssertNil(model.motionAdmissionResubmissionID)
-        XCTAssertTrue(model.motionBlockedReason?.contains("incomplete XYZ") == true)
-        XCTAssertTrue(model.motionStatusSummary?.contains("incomplete XYZ") == true)
-        XCTAssertTrue(model.motionStatusSummary?.contains("cannot be resubmitted") == true)
-        XCTAssertFalse(model.motionStatusSummary?.contains("Review the saved operation") == true)
-        XCTAssertTrue(model.motionStatusNeedsAttention)
-        await model.resubmitUnconfirmedMotionAdmission(operationID: operationID)
+        XCTAssertNil(model.motionBlockedReason)
+        XCTAssertNil(model.motionStatusSummary)
+        XCTAssertFalse(model.motionStatusNeedsAttention)
         XCTAssertTrue(service.submittedControlOperations.isEmpty)
         XCTAssertNil(service.moveToCalledWith)
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        XCTAssertTrue(model.operationReadError?.contains("could not be verified") == true)
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertNil(model.operationReadError)
         XCTAssertEqual(defaults.data(forKey: key), data)
-        XCTAssertEqual(model.motionOperationID, operationID)
+        XCTAssertNil(model.motionOperationID)
     }
 
-    func test_restoredDifferentIdentityCannotHideKnownUnknownMotion() async throws {
+    func test_legacyJournalCannotOverrideSettledUnknownHistory() async throws {
         let service = MockPrinterService()
-        let printer = try TestData.decodePrinter()
-        let unknown = PrinterControlOperation.controlsFixture(printerID: printer.id, state: .unknown)
-        service.currentControlOperationToReturn = .controlsFixture(unknown)
-        service.controlOperationToReturn = unknown
         let (model, _) = try await fixture(service: service)
-        service.currentControlOperationToReturn = .init(physicalControl: .init(
-            supportedOperations: PrinterControlOperationKind.allCases, barrierHeld: false, requiresRecovery: false
-        ), operation: nil)
-        await model.refreshControlOperation()
+        admitRunning(service)
+        await model.homeAll()
+        try await finish(model, service, state: .unknown, evidence: .none)
         XCTAssertEqual(model.controlOperation?.state, .unknown)
         let restoredID = UUID()
-        let key = "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(printer.id.uuidString)"
+        let key = "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(model.printer.id.uuidString)"
         defaults.set(Data("""
         {"operationID":"\(restoredID.uuidString)","request":{"kind":"HomeAll"}}
         """.utf8), forKey: key)
-        await model.homeAll()
-        XCTAssertEqual(model.motionOperationID, restoredID)
+        await model.refreshControlOperation()
+        XCTAssertNotEqual(model.motionOperationID, restoredID)
         XCTAssertNotEqual(model.controlOperation?.operationId, restoredID)
         XCTAssertTrue(model.motionStatusNeedsAttention)
-        XCTAssertEqual(model.motionStatusSummary, "Motion outcome uncertain. Controls locked. Inspect the printer and use recovery.")
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        XCTAssertTrue(service.submittedControlOperations.isEmpty)
+        XCTAssertEqual(model.motionStatusSummary, "Motion outcome unknown. Inspect the printer before another action. No automatic retry.")
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
     }
 
-    func test_responseLossPersistsIdentityAcrossNavigationAndOnlyReadsOnReopen() async throws {
+    func test_responseLossDoesNotPersistLockOrReplayAcrossNavigation() async throws {
         let (original, service) = try await fixture()
         service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
         await original.homeZ()
         let sent = try XCTUnwrap(service.submittedControlOperations.first)
-        XCTAssertTrue(original.hasUnresolvedMotion)
+        XCTAssertFalse(original.hasUnresolvedMotion)
+        XCTAssertTrue(original.motionStatusNeedsAttention)
+        XCTAssertNil(original.motionBlockedReason)
         original.cancelPendingCommand()
         original.deactivate()
         let replacementService = MockPrinterService()
         replacementService.controlOperationToReturn = .controlsFixture(
             printerID: sent.printerID, operationID: sent.operationID, request: sent.request,
-            state: .unknown, recovery: true
+            state: .unknown, held: false
         )
         let (replacement, _) = try await fixture(service: replacementService)
-        XCTAssertEqual(replacement.motionOperationID, sent.operationID)
-        XCTAssertTrue(replacement.hasUnresolvedMotion)
-        XCTAssertTrue(replacement.motionBlockedReason?.contains("queue:reconcile permission and printer Submit access") == true)
-        XCTAssertNotNil(replacement.motionRecoveryURL)
-        XCTAssertTrue(replacementService.controlOperationReadIDs.contains(sent.operationID))
-        await replacement.homeAll()
+        XCTAssertNil(replacement.motionOperationID)
+        XCTAssertFalse(replacement.hasUnresolvedMotion)
+        XCTAssertNil(replacement.motionBlockedReason)
+        XCTAssertFalse(replacementService.controlOperationReadIDs.contains(sent.operationID))
         XCTAssertTrue(replacementService.submittedControlOperations.isEmpty)
-        replacementService.controlOperationToReturn = .controlsFixture(
-            printerID: sent.printerID, operationID: sent.operationID, request: sent.request,
-            state: .recovered, evidence: .operatorVerifiedRecovery, held: false
-        )
         await replacement.refreshControlOperation()
-        XCTAssertFalse(replacement.isExecuting, "Authoritative recovery also releases an old in-process owner's matching lease")
-        XCTAssertTrue(replacement.motionStatusMessage?.contains("did not succeed") == true)
-        XCTAssertTrue(replacement.motionStatusMessage?.contains("authorized operator") == true)
+        XCTAssertFalse(replacement.isExecuting)
         XCTAssertNil(replacement.lastError)
     }
 
@@ -3920,7 +4176,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         barrier.close()
         await read.value
         XCTAssertEqual(old.motionOperationID, oldID)
-        XCTAssertTrue(old.hasUnresolvedMotion, "Old-generation reads cannot clear a persisted operation")
+        XCTAssertFalse(old.hasUnresolvedMotion, "No historical admission gate survives a current unlocked read")
         XCTAssertNil(otherServer.controlOperation)
         XCTAssertNil(otherUser.controlOperation)
     }
@@ -3961,7 +4217,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
     }
 
     func test_unknownAndRecoveredNeverAdvanceCalibrationButSucceededUsesFreshSafety() async throws {
-        for terminal in [PrinterControlOperationState.recovered, .succeeded] {
+        for terminal in [PrinterControlOperationState.unknown, .recovering, .recovered, .succeeded] {
             let (model, service) = try await fixture(server: UUID())
             admitRunning(service)
             await model.startCalibration()
@@ -3971,16 +4227,10 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
             service.statusToReturn = VerifiedSafetyFixtures.status(id: model.printer.id)
             await model.refreshSafetyEvidence()
             XCTAssertEqual(model.calibrationStep, .home, "Fresh homed axes alone cannot advance durable calibration")
-            let sent = try XCTUnwrap(service.submittedControlOperations.last)
-            service.currentControlOperationToReturn = .controlsFixture(.controlsFixture(
-                printerID: sent.printerID, operationID: sent.operationID, request: sent.request,
-                state: .unknown, recovery: true
-            ))
-            await model.refreshControlOperation()
-            XCTAssertEqual(model.calibrationStep, .home)
-            XCTAssertTrue(model.motionBlockedReason?.contains("isolation") == true)
             try await finish(model, service, state: terminal,
-                             evidence: terminal == .recovered ? .operatorVerifiedRecovery : .motionQueueDrained)
+                             evidence: terminal == .succeeded ? .motionQueueDrained : .none)
+            XCTAssertNil(model.motionBlockedReason)
+            XCTAssertFalse(model.hasUnresolvedMotion)
             XCTAssertEqual(model.calibrationStep, terminal == .succeeded ? .position : .home)
             if terminal == .succeeded {
                 await model.positionForCalibration()
@@ -4020,270 +4270,77 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         XCTAssertNil(service.moveCalledWith)
     }
 
-    func test_explicitAdmissionResubmissionAfterLostBeforeAdmissionPreservesSavedKeyAndIntent() async throws {
-        let (original, service) = try await fixture()
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await original.jog(axis: "Z", distanceMm: -1.001)
-        let saved = try XCTUnwrap(service.submittedControlOperations.first)
-        original.deactivate()
-        let (model, _) = try await fixture(service: service)
-        XCTAssertEqual(model.motionAdmissionResubmissionID, saved.operationID)
-        for _ in 0..<3 { await model.refreshControlOperation() }
-        await model.handleControlOperationInvalidation(.init(
-            printerId: model.printer.id, operationId: saved.operationID, rowVersion: "hint"
-        ))
-        XCTAssertEqual(service.submittedControlOperations.count, 1, "404, reopen and invalidation never submit")
-        XCTAssertTrue(model.hasUnresolvedMotion, "Declining confirmation leaves the gate held")
-
+    func test_unknownOutcomeReleasesCoordinationWithoutReplayOrSuccess() async throws {
+        let (model, service) = try await fixture()
         admitRunning(service)
-        await model.resubmitUnconfirmedMotionAdmission(operationID: saved.operationID)
-        let repeated = try XCTUnwrap(service.submittedControlOperations.last)
+        await model.homeAll()
+        let originalID = model.motionOperationID
+        try await finish(model, service, state: .unknown, evidence: .none)
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertFalse(model.isExecuting)
+        XCTAssertNil(model.motionBlockedReason)
+        XCTAssertEqual(model.controlOperation?.state, .unknown)
+        XCTAssertTrue(model.motionStatusNeedsAttention)
+        XCTAssertTrue(model.motionStatusSummary?.contains("outcome unknown") == true)
+        for _ in 0..<3 { await model.refreshControlOperation() }
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        await model.homeZ()
         XCTAssertEqual(service.submittedControlOperations.count, 2)
-        XCTAssertEqual(repeated.operationID, saved.operationID)
-        XCTAssertEqual(repeated.printerID, saved.printerID)
-        XCTAssertEqual(repeated.request, saved.request)
-        XCTAssertEqual(repeated.request, .init(kind: .jog, z: -1.001, f: 600))
-        XCTAssertTrue(model.hasUnresolvedMotion, "Acceptance still requires terminal REST evidence")
-        XCTAssertNil(model.motionAdmissionResubmissionID)
-        await model.resubmitUnconfirmedMotionAdmission(operationID: saved.operationID)
-        XCTAssertEqual(service.submittedControlOperations.count, 2, "Known admission cannot be resubmitted")
-        XCTAssertNil(service.moveCalledWith)
+        XCTAssertNotEqual(model.motionOperationID, originalID, "A new user action is never a replay")
         try await finish(model, service)
     }
 
-    func test_lostAfterAdmissionExplicitSameKeyReturnsExistingWithoutSecondActuation() async throws {
+    func test_activeCurrentOperationWinsOverUnreadableLocalHistory() async throws {
         let (model, service) = try await fixture()
-        let actuations = HookCounter()
+        admitRunning(service)
+        await model.homeAll()
+        let other = PrinterControlOperation.controlsFixture(printerID: model.printer.id, state: .queued)
+        service.currentControlOperationToReturn = .controlsFixture(other)
         service.controlOperationHandler = { _, _ in throw NetworkError.notFound }
-        service.submitControlOperationHandler = { [service] printerID, operationID, request in
-            if let existing = service.controlOperationToReturn { return existing }
-            _ = await actuations.next()
-            service.controlOperationToReturn = .controlsFixture(
-                printerID: printerID, operationID: operationID, request: request
-            )
+        await model.refreshControlOperation()
+        XCTAssertTrue(model.hasUnresolvedMotion)
+        XCTAssertEqual(model.controlOperation?.operationId, other.operationId)
+        XCTAssertEqual(model.motionOperationID, other.operationId)
+        await model.homeZ()
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+        service.currentControlOperationToReturn = .init(
+            physicalControl: .init(
+                supportedOperations: PrinterControlOperationKind.allCases,
+                barrierHeld: false, requiresRecovery: false
+            ), operation: nil
+        )
+        await model.refreshControlOperation()
+        XCTAssertFalse(model.hasUnresolvedMotion)
+        XCTAssertFalse(model.isExecuting)
+        XCTAssertNil(model.motionBlockedReason)
+        XCTAssertTrue(model.motionStatusNeedsAttention)
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
+    }
+
+    func test_navigationRetainsOnlyInFlightTransportLeaseNotHistoricalLock() async throws {
+        let (original, service) = try await fixture()
+        let barrier = AsyncBarrier()
+        addTeardownBlock { barrier.close() }
+        service.submitControlOperationHandler = { _, _, _ in
+            await barrier.arriveAndWait()
             throw NetworkError.timeout
         }
-        await model.homeXY()
-        let saved = try XCTUnwrap(service.submittedControlOperations.first)
-        XCTAssertEqual(model.motionAdmissionResubmissionID, saved.operationID)
-        await model.resubmitUnconfirmedMotionAdmission(operationID: saved.operationID)
-        let nextActuationNumber = await actuations.next()
-        XCTAssertEqual(nextActuationNumber, 2, "The idempotent fake admitted exactly one physical operation")
-        XCTAssertEqual(service.submittedControlOperations.map(\.operationID), [saved.operationID, saved.operationID])
-        XCTAssertEqual(service.submittedControlOperations.map(\.request), [saved.request, saved.request])
-        XCTAssertNil(model.motionAdmissionResubmissionID, "POST admission knowledge survives a failed GET")
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        model.deactivate()
-        let (reopened, _) = try await fixture(service: service)
-        XCTAssertNil(reopened.motionAdmissionResubmissionID, "Known admission is persisted across navigation")
-        XCTAssertTrue(reopened.hasUnresolvedMotion)
-        service.controlOperationHandler = nil
-        try await finish(reopened, service)
-    }
-
-    func test_terminalAdmissionReplayStillWaitsForCanonicalReadBeforeSuccess() async throws {
-        let (model, service) = try await fixture()
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await model.moveTo(x: -0.0, y: 30.125, z: 10, feedrateMmMin: nil)
-        let saved = try XCTUnwrap(service.submittedControlOperations.first)
-        let terminal = PrinterControlOperation.controlsFixture(
-            printerID: saved.printerID, operationID: saved.operationID, request: saved.request,
-            state: .succeeded, evidence: .motionQueueDrained, held: false
-        )
-        service.submitControlOperationHandler = { [service] _, _, _ in
-            service.controlOperationToReturn = terminal
-            return terminal
-        }
-        let barrier = AsyncBarrier()
-        addTeardownBlock { barrier.close() }
-        let reads = HookCounter()
-        let unlocked = service.currentControlOperationToReturn
-        service.currentControlOperationHandler = { _ in
-            if await reads.next() > 1 { await barrier.arriveAndWait() }
-            return unlocked
-        }
-        let resend = Task { await model.resubmitUnconfirmedMotionAdmission(operationID: saved.operationID) }
+        let submission = Task { await original.homeAll() }
         await barrier.waitUntilArrived()
-        XCTAssertTrue(model.hasUnresolvedMotion, "A terminal POST 200 replay is not direct completion")
-        XCTAssertNil(model.motionAdmissionResubmissionID)
-        XCTAssertEqual(service.submittedControlOperations.last?.request, saved.request)
-        XCTAssertEqual(service.submittedControlOperations.last?.request.x?.sign, saved.request.x?.sign)
+        original.deactivate()
+        let (replacement, _) = try await fixture(service: service)
+        XCTAssertTrue(replacement.isExecuting, "An HTTP request is still in flight")
+        await replacement.homeZ()
+        XCTAssertEqual(service.submittedControlOperations.count, 1)
         barrier.close()
-        await resend.value
-        XCTAssertFalse(model.hasUnresolvedMotion)
-        XCTAssertTrue(service.controlOperationReadIDs.contains(saved.operationID))
-        XCTAssertEqual(service.submittedControlOperations.count, 2)
+        await submission.value
+        await replacement.refreshControlOperation()
+        XCTAssertFalse(replacement.isExecuting)
+        XCTAssertNil(replacement.motionBlockedReason)
+        XCTAssertEqual(service.submittedControlOperations.count, 1, "Navigation never replays")
     }
 
-    func test_explicitAdmissionPreflightDiscoveringUnknownNeverResubmits() async throws {
-        for state in [PrinterControlOperationState.unknown, .recovering] {
-            let (model, service) = try await fixture(server: UUID())
-            service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-            await model.homeAll()
-            let sent = try XCTUnwrap(service.submittedControlOperations.first)
-            service.currentControlOperationToReturn = .controlsFixture(.controlsFixture(
-                printerID: sent.printerID, operationID: sent.operationID, request: sent.request,
-                state: state, recovery: true
-            ))
-            await model.resubmitUnconfirmedMotionAdmission(operationID: sent.operationID)
-            XCTAssertEqual(service.submittedControlOperations.count, 1)
-            XCTAssertEqual(model.controlOperation?.state, state)
-            XCTAssertNil(model.motionAdmissionResubmissionID)
-            XCTAssertTrue(model.motionBlockedReason?.contains("isolation") == true)
-            model.deactivate()
-        }
-    }
-
-    func test_admissionConfirmationCannotCrossAuthorityOrOperationIdentity() async throws {
-        let epoch = AuthEpoch()
-        let (model, service) = try await fixture(access: { epoch.value == 0 ? nil : "Account changed" })
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await model.homeAll()
-        let saved = try XCTUnwrap(model.motionAdmissionResubmissionID)
-        await model.resubmitUnconfirmedMotionAdmission(operationID: UUID())
-        let (otherServer, _) = try await fixture(service: service, server: UUID())
-        let (otherUser, _) = try await fixture(service: service, user: UUID())
-        await otherServer.resubmitUnconfirmedMotionAdmission(operationID: saved)
-        await otherUser.resubmitUnconfirmedMotionAdmission(operationID: saved)
-        XCTAssertEqual(service.submittedControlOperations.count, 1)
-        let barrier = AsyncBarrier()
-        addTeardownBlock { barrier.close() }
-        service.beforeSafetyStatus = { await barrier.arriveAndWait() }
-        let resend = Task { await model.resubmitUnconfirmedMotionAdmission(operationID: saved) }
-        await barrier.waitUntilArrived()
-        epoch.value = 1
-        model.refreshAccess()
-        barrier.close()
-        await resend.value
-        XCTAssertEqual(service.submittedControlOperations.count, 1)
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        XCTAssertNil(model.motionAdmissionResubmissionID)
-    }
-
-    func test_admissionResubmissionPreflightRejectsFreshUnsafeReadiness() async throws {
-        let (model, service) = try await fixture()
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await model.homeZ()
-        let saved = try XCTUnwrap(model.motionAdmissionResubmissionID)
-        service.statusToReturn = VerifiedSafetyFixtures.status(id: model.printer.id, isOnline: false)
-        await model.resubmitUnconfirmedMotionAdmission(operationID: saved)
-        XCTAssertEqual(service.submittedControlOperations.count, 1)
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        XCTAssertNil(service.homeZCalledWith)
-    }
-
-    func test_cancelingExplicitAdmissionPreflightDoesNotSendOrReplay() async throws {
-        let (model, service) = try await fixture()
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await model.homeAll()
-        let saved = try XCTUnwrap(model.motionAdmissionResubmissionID)
-        let barrier = AsyncBarrier()
-        addTeardownBlock { barrier.close() }
-        service.beforeSafetyStatus = { await barrier.arriveAndWait() }
-        let resend = Task { await model.resubmitUnconfirmedMotionAdmission(operationID: saved) }
-        await barrier.waitUntilArrived()
-        resend.cancel()
-        barrier.close()
-        await resend.value
-        XCTAssertEqual(service.submittedControlOperations.count, 1)
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        await model.refreshControlOperation()
-        XCTAssertEqual(service.submittedControlOperations.count, 1)
-    }
-
-    func test_explicitAdmissionLateResponseCannotSettleChangedAuthority() async throws {
-        let epoch = AuthEpoch()
-        let (old, service) = try await fixture(access: { epoch.value == 0 ? nil : "Authentication changed" })
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await old.homeZ()
-        let saved = try XCTUnwrap(old.motionAdmissionResubmissionID)
-        let barrier = AsyncBarrier()
-        addTeardownBlock { barrier.close() }
-        service.submitControlOperationHandler = { [service] printerID, operationID, request in
-            await barrier.arriveAndWait()
-            XCTAssertFalse(Task.isCancelled, "Admitted submission outlives observation")
-            let terminal = PrinterControlOperation.controlsFixture(
-                printerID: printerID, operationID: operationID, request: request,
-                state: .succeeded, evidence: .motionQueueDrained, held: false
-            )
-            service.controlOperationToReturn = terminal
-            return terminal
-        }
-        let resend = Task { await old.resubmitUnconfirmedMotionAdmission(operationID: saved) }
-        await barrier.waitUntilArrived()
-        resend.cancel()
-        epoch.value = 1
-        old.refreshAccess()
-        barrier.close()
-        await resend.value
-        XCTAssertTrue(old.hasUnresolvedMotion)
-        XCTAssertNil(old.controlOperation)
-        XCTAssertEqual(service.submittedControlOperations.count, 2)
-        let (reopened, _) = try await fixture(service: service)
-        XCTAssertFalse(reopened.hasUnresolvedMotion)
-        XCTAssertEqual(reopened.controlOperation?.operationId, saved)
-        XCTAssertEqual(service.submittedControlOperations.count, 2)
-    }
-
-    func test_savedAbsoluteAdmissionRechecksFreshGeometryWithoutChangingIntent() async throws {
-        let (model, service) = try await fixture()
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await model.moveTo(x: 40, y: 30, z: 10, feedrateMmMin: nil)
-        let saved = try XCTUnwrap(service.submittedControlOperations.first)
-        service.statusToReturn = VerifiedSafetyFixtures.status(
-            id: model.printer.id, position: .init(x: 40, y: 30, z: 10)
-        )
-        service.capabilitiesToReturn?.verifiedSafety = nil
-        await model.resubmitUnconfirmedMotionAdmission(operationID: saved.operationID)
-        XCTAssertEqual(service.submittedControlOperations.count, 1)
-        XCTAssertEqual(model.motionOperationID, saved.operationID)
-        XCTAssertTrue(model.hasUnresolvedMotion)
-        XCTAssertNil(service.moveToCalledWith)
-    }
-
-    func test_explicitCalibrationAdmissionOnlyAdvancesAfterCanonicalSuccessAndSafety() async throws {
-        let (model, service) = try await fixture()
-        await model.startCalibration()
-        model.beginCalibrationHome()
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await model.homeForCalibration()
-        let saved = try XCTUnwrap(model.motionAdmissionResubmissionID)
-        admitRunning(service)
-        await model.resubmitUnconfirmedMotionAdmission(operationID: saved)
-        XCTAssertEqual(model.calibrationStep, .home)
-        XCTAssertEqual(service.submittedControlOperations.count, 2)
-        try await finish(model, service)
-        XCTAssertEqual(model.calibrationStep, .position)
-        model.cancelCalibration()
-    }
-
-    func test_newerCurrentReadSupersedesAdmissionConfirmationPreflight() async throws {
-        let (model, service) = try await fixture()
-        service.submitControlOperationHandler = { _, _, _ in throw NetworkError.timeout }
-        await model.homeAll()
-        let saved = try XCTUnwrap(model.motionAdmissionResubmissionID)
-        let unlocked = service.currentControlOperationToReturn
-        let barrier = AsyncBarrier()
-        addTeardownBlock { barrier.close() }
-        service.currentControlOperationHandler = { _ in
-            await barrier.arriveAndWait()
-            return unlocked
-        }
-        let resend = Task { await model.resubmitUnconfirmedMotionAdmission(operationID: saved) }
-        await barrier.waitUntilArrived()
-        service.currentControlOperationHandler = nil
-        service.currentControlOperationToReturn = .init(physicalControl: .init(
-            supportedOperations: PrinterControlOperationKind.allCases,
-            barrierHeld: true, requiresRecovery: true
-        ), operation: nil)
-        await model.refreshControlOperation()
-        barrier.close()
-        await resend.value
-        XCTAssertEqual(service.submittedControlOperations.count, 1)
-        XCTAssertTrue(model.hasUnresolvedMotion)
-    }
-
-    func test_falseBarrierFlagWithUnknownOrPartialProjectionNeverAuthorizesMotion() async throws {
+    func test_historicalTelemetryWithFalseBarrierDoesNotCreateLock() async throws {
         for projection in [
             PrinterPhysicalControl(supportedOperations: [.homeAll], barrierHeld: false,
                                    operationId: UUID(), state: .unknown, requiresRecovery: false),
@@ -4294,9 +4351,9 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
             var telemetry = model.printer
             telemetry.physicalControl = projection
             model.handlePrinterUpdate(telemetry)
-            await model.homeAll()
-            XCTAssertTrue(model.hasUnresolvedMotion)
-            XCTAssertTrue(model.isExecuting)
+            await model.refreshControlOperation()
+            XCTAssertFalse(model.hasUnresolvedMotion)
+            XCTAssertFalse(model.isExecuting)
             XCTAssertTrue(service.submittedControlOperations.isEmpty)
             XCTAssertNil(service.homeCalledWith)
             model.deactivate()
@@ -4346,7 +4403,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         XCTAssertTrue(service.submittedControlOperations.isEmpty)
     }
 
-    func test_unrelatedBarrierReleaseCannotDiscardUnreadableSavedMotion() async throws {
+    func test_unrelatedBarrierReleaseIgnoresUnreadableLegacyJournal() async throws {
         let printer = try TestData.decodePrinter()
         let key = "printer-motion.v1.\(serverID.uuidString).\(userID.uuidString).\(printer.id.uuidString)"
         defaults.set(Data("invalid motion identity".utf8), forKey: key)
@@ -4361,7 +4418,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
             barrierHeld: false, requiresRecovery: false
         ), operation: nil)
         await model.refreshControlOperation()
-        XCTAssertTrue(model.hasUnresolvedMotion)
+        XCTAssertFalse(model.hasUnresolvedMotion)
         XCTAssertNotNil(defaults.data(forKey: key))
         XCTAssertTrue(service.submittedControlOperations.isEmpty)
     }
@@ -4384,7 +4441,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         }
     }
 
-    func test_sameSubjectAuthEpochChangeCannotSettleOldOwnerButReopenReadsSavedIdentity() async throws {
+    func test_sameSubjectAuthEpochChangeCannotPublishOldOutcomeOrRestoreJournal() async throws {
         let epoch = AuthEpoch()
         let (old, service) = try await fixture(access: {
             epoch.value == 0 ? nil : "Authentication changed. Reopen this printer."
@@ -4411,7 +4468,7 @@ final class DurablePrinterMotionControlsTests: XCTestCase {
         XCTAssertTrue(old.hasUnresolvedMotion)
         XCTAssertEqual(old.motionOperationID, operationID)
         let (reopened, _) = try await fixture(service: service)
-        XCTAssertEqual(reopened.controlOperation?.operationId, operationID)
+        XCTAssertNil(reopened.controlOperation?.operationId)
         XCTAssertFalse(reopened.hasUnresolvedMotion)
         XCTAssertFalse(reopened.isExecuting)
         XCTAssertEqual(service.submittedControlOperations.count, 1)

@@ -23,7 +23,7 @@ private actor DemoControlOperationStore {
             x: request.x, y: request.y, z: request.z, f: request.f,
             state: .queued, rowVersion: "demo-1", createdAtUtc: now, updatedAtUtc: now,
             barrierHeld: true, requiresRecovery: false,
-            completionEvidence: .none, senderIsolation: .notRequested
+            completionEvidence: PrinterControlCompletionEvidence.none, senderIsolation: .notRequested
         )
         records[operationId] = operation
         requests[operationId] = request
@@ -47,7 +47,7 @@ private actor DemoControlOperationStore {
             startedAtUtc: old.startedAtUtc ?? updated,
             completedAtUtc: complete ? updated : nil,
             barrierHeld: !complete, requiresRecovery: false,
-            completionEvidence: complete ? .motionQueueDrained : .none,
+            completionEvidence: complete ? .motionQueueDrained : PrinterControlCompletionEvidence.none,
             senderIsolation: .notRequested
         )
         records[operationId] = operation

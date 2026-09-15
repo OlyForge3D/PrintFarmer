@@ -1194,7 +1194,7 @@ public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintCli
 
         try
         {
-            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, allowRetry: false, cancellationToken: ct);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1222,7 +1222,7 @@ public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintCli
 
         try
         {
-            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, allowRetry: false, cancellationToken: ct);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1250,7 +1250,7 @@ public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintCli
 
         try
         {
-            using HttpResponseMessage response = await SendWithRetryAsync(request, cancellationToken: ct);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, allowRetry: false, cancellationToken: ct);
             return response.IsSuccessStatusCode;
         }
         catch (Exception ex)
@@ -1377,7 +1377,10 @@ public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintCli
     /// <param name="z">Z axis movement (mm), optional</param>
     /// <param name="speed">Movement speed (mm/min), optional</param>
     /// <returns>Success status</returns>
-    public async Task<bool> JogAsync(string baseUrl, PrinterCredential? credential, double? x = null, double? y = null, double? z = null, double? speed = null)
+    public Task<bool> JogAsync(string baseUrl, PrinterCredential? credential, double? x = null, double? y = null, double? z = null, double? speed = null)
+        => JogAsync(baseUrl, credential, x, y, z, CancellationToken.None);
+
+    private async Task<bool> JogAsync(string baseUrl, PrinterCredential? credential, double? x, double? y, double? z, CancellationToken ct)
     {
         baseUrl = NormalizeBaseUrl(baseUrl);
         using HttpRequestMessage request = new(HttpMethod.Post, $"{baseUrl}/api/printer/printhead");
@@ -1390,7 +1393,7 @@ public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintCli
 
         try
         {
-            HttpResponseMessage response = await SendWithRetryAsync(request);
+            using HttpResponseMessage response = await SendWithRetryAsync(request, allowRetry: false, cancellationToken: ct);
             if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
             {
                 throw new Farm.Infrastructure.Services.Printers.PrinterBackendBusyException(
@@ -2547,13 +2550,13 @@ public partial class OctoPrintClient(HttpClient httpClient, ILogger<OctoPrintCli
     /// Homes all axes without credentials (ISupportsMovement.SendHomeAsync).
     /// </summary>
     public Task<bool> SendHomeAsync(string baseUrl, CancellationToken ct = default)
-        => SendHomeAsync(baseUrl, (PrinterCredential?)null);
+        => SendHomeAsync(baseUrl, null, ct);
 
     /// <summary>
     /// Moves the printer incrementally (ISupportsMovement.MoveAsync).
     /// </summary>
     public Task<bool> MoveAsync(string baseUrl, double? x = null, double? y = null, double? z = null, double? f = null, PrinterCredential? credential = null, CancellationToken ct = default)
-        => JogAsync(baseUrl, credential, x, y, z, f);
+        => JogAsync(baseUrl, credential, x, y, z, ct);
 
     /// <summary>
     /// Absolute positioning is not supported by OctoPrint (ISupportsMovement.MoveToAsync).

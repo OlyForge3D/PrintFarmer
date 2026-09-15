@@ -2,6 +2,22 @@ import XCTest
 @testable import PrintFarmer
 
 final class PrinterBackendCapabilitiesTests: XCTestCase {
+    func testSettledHistoryDoesNotRequireRecoveryOrCompletionAttestations() throws {
+        for state in [PrinterControlOperationState.unknown, .recovering, .recovered, .succeeded, .failed] {
+            let fixture = PrinterControlOperation.controlsFixture(
+                printerID: TestData.testUUID, state: state, held: false, recovery: true
+            )
+            var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(fixture)) as? [String: Any])
+            json.removeValue(forKey: "completionEvidence")
+            json.removeValue(forKey: "senderIsolation")
+            let operation = try JSONDecoder().decode(PrinterControlOperation.self, from: JSONSerialization.data(withJSONObject: json))
+            XCTAssertNoThrow(try operation.validate(printerId: TestData.testUUID))
+            XCTAssertTrue(operation.isSettled)
+            XCTAssertNil(operation.completionEvidence)
+            XCTAssertNil(operation.senderIsolation)
+        }
+    }
+
     func testMotionProjectionMissingIsDistinctFromExplicitUnlocked() throws {
         let missing = try JSONDecoder().decode(Printer.self, from: Data(TestJSON.printer.utf8))
         XCTAssertNil(missing.physicalControl)
@@ -63,7 +79,7 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         let replay = try await demo.submitControlOperation(printerId: printer.id, operationId: operationId, request: request)
         XCTAssertEqual(queued, replay)
         XCTAssertEqual(queued.state, .queued)
-        XCTAssertFalse(queued.isSafelyComplete)
+        XCTAssertFalse(queued.isSettled)
         do {
             _ = try await demo.submitControlOperation(printerId: printer.id, operationId: operationId, request: .init(kind: .homeZ))
             XCTFail("Conflicting nonce must not create a new operation")
@@ -72,7 +88,7 @@ final class PrinterBackendCapabilitiesTests: XCTestCase {
         XCTAssertEqual(running.state, .running)
         XCTAssertTrue(running.barrierHeld)
         let terminal = try await demo.getControlOperation(printerId: printer.id, operationId: operationId)
-        XCTAssertTrue(terminal.isSafelyComplete)
+        XCTAssertTrue(terminal.isSettled)
         let completedCurrent = try await demo.getCurrentControlOperation(printerId: printer.id)
         XCTAssertNil(completedCurrent.operation)
         XCTAssertNil(completedCurrent.physicalControl.operationId)
