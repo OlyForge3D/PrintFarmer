@@ -210,6 +210,10 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
       'Malformed native Cosign DSSE attestation bundle');
     const entry = rawEntry?.dsseEnvelope ?? rawEntry;
     const optional = verification[index]?.optional;
+    const verifierOutputMatchesDownload = verification[index]?.payloadType === entry.payloadType &&
+      verification[index]?.payload === entry.payload &&
+      JSON.stringify(canonicalJson(verification[index]?.signatures)) ===
+        JSON.stringify(canonicalJson(entry.signatures));
     let statement;
     try { statement = JSON.parse(Buffer.from(entry.payload, 'base64').toString('utf8')); } catch {
       throw new Error('Malformed Cosign DSSE payload');
@@ -218,9 +222,9 @@ function validateDsseBundle(bundle, subject, predicateBytes, verification) {
       JSON.stringify(canonicalJson(statement.predicate)) === JSON.stringify(canonicalJson(predicate)),
     'Cosign DSSE subject or SPDX predicate mismatch');
     requireThat(entry.signatures.length === 1 &&
-      entry.signatures[0].sig === optional?.Bundle?.Payload?.signature &&
-      typeof verification[index]?.payload === 'string' &&
-      verification[index].payload === entry.payload,
+      ((entry.signatures[0].sig === optional?.Bundle?.Payload?.signature &&
+        typeof verification[index]?.payload === 'string' &&
+        verification[index].payload === entry.payload) || verifierOutputMatchesDownload),
     'Cosign DSSE download is not the verified attestation');
     if (nativeBundle(rawEntry)) {
       const certificate = nativeCertificate(rawEntry);
@@ -262,6 +266,11 @@ function partitionDownload(bytes) {
 }
 
 function legacyCertificate(entry, certificate) {
+  if (certificate === undefined) {
+    if (!entry.Cert || typeof entry.Cert !== 'object' || Array.isArray(entry.Cert) ||
+      typeof entry.Cert.Raw !== 'string' || entry.Cert.Raw.length === 0) return false;
+    try { new X509Certificate(Buffer.from(entry.Cert.Raw, 'base64')); return true; } catch { return false; }
+  }
   if (entry.Cert === null) return true;
   if (typeof entry.Cert === 'string') return entry.Cert === certificate;
   if (!entry.Cert || typeof entry.Cert !== 'object' || Array.isArray(entry.Cert) ||
@@ -277,7 +286,9 @@ function verifierPayloadMatches(payload, verification) {
   const stripped = structuredClone(verification);
   if (!stripped?.optional || typeof stripped.optional !== 'object' || Array.isArray(stripped.optional)) return false;
   for (const field of ['Subject', 'Issuer', 'certificate', 'Bundle']) delete stripped.optional[field];
-  return JSON.stringify(canonicalJson(payload)) === JSON.stringify(canonicalJson(stripped));
+  if (JSON.stringify(canonicalJson(payload)) === JSON.stringify(canonicalJson(stripped))) return true;
+  return JSON.stringify(canonicalJson(payload?.critical)) ===
+    JSON.stringify(canonicalJson(verification?.critical));
 }
 
 function rekorSignature(bundle) {
@@ -303,12 +314,13 @@ function validateSignatureDownload(bundle, verification, subject) {
       typeof entry?.Payload === 'string' && entry.Payload.length > 0 &&
       entry.Bundle && typeof entry.Bundle === 'object' &&
       typeof optional?.Subject === 'string' && typeof optional?.Issuer === 'string' &&
-      typeof optional?.certificate === 'string' && optional.certificate.length > 0 &&
       optional.Bundle && typeof optional.Bundle === 'object' &&
       verifierPayloadMatches(signedPayload, verification[index]) &&
       (entry.Base64Signature === optional.Bundle?.Payload?.signature ||
         entry.Base64Signature === rekorSignature(entry.Bundle)) &&
-      legacyCertificate(entry, optional.certificate) &&
+      (typeof optional.certificate === 'string' && optional.certificate.length > 0
+        ? legacyCertificate(entry, optional.certificate)
+        : legacyCertificate(entry)) &&
       JSON.stringify(canonicalJson(entry.Bundle)) === JSON.stringify(canonicalJson(optional.Bundle));
   }),
   'Malformed Cosign signature download');

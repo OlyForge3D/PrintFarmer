@@ -1,0 +1,8 @@
+{
+  "cliVersion": "v3.0.6",
+  "source": "cgr.dev/chainguard/cosign:latest",
+  "digest": "sha256:3a6a968ded3db28f3fb216383389000c78331a38014ef4f163681051a8547722",
+  "captureTime": "2026-09-14T00:00:00Z",
+  "composition": "signature.ndjson bytes, then one LF delimiter if absent, then selected SPDX attestation NDJSON bytes; no JSON reserialization",
+  "attestationSelection": "The exact SPDX line from cosign download attestation output; the pinned digest identifies the captured artifact."
+}

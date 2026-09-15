@@ -219,6 +219,7 @@ test('main-equivalent schema-3 metadata validation passes its closed notes adapt
     metadata: validatedNotes,
   });
   assert.match(notes, /Only the declared source release IDs/);
+  assert.match(notes, /Restore the verified provider backup/);
   assert.throws(() => releaseNotes({
     version: '0.2.3', sourceCommit: sha, previousTag: 'v0.2.2',
     pullRequests: [{ number: 2660, title: 'Signed release publication', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/2660' }],

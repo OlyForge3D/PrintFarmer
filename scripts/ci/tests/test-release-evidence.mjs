@@ -204,6 +204,28 @@ test('retains byte-faithful Cosign v3.0.6 raw capture composition metadata', () 
   assert.deepEqual(combinedEntries, [...signatureEntries, ...attestationEntries]);
 });
 
+test('normalizes coherent legacy-Cosign combined NDJSON bytes against its actual verifier outputs', () => {
+  const fixtureRoot = join('scripts', 'ci', 'tests', 'fixtures', 'cosign-v3.0.6-coherent');
+  const metadata = JSON.parse(readFileSync(join(fixtureRoot, 'metadata.json'), 'utf8'));
+  const signatureBundleBytes = readFileSync(join(fixtureRoot, 'signature.ndjson'), 'utf8');
+  const attestationBundleBytes = readFileSync(join(fixtureRoot, 'attestation-spdx.ndjson'), 'utf8');
+  const downloadBytes = readFileSync(join(fixtureRoot, 'combined.ndjson'), 'utf8');
+  const signatureBytes = readFileSync(join(fixtureRoot, 'signature.verify.json'), 'utf8');
+  const attestationBytes = readFileSync(join(fixtureRoot, 'attestation.verify.json'), 'utf8');
+  const predicateBytes = readFileSync(join(fixtureRoot, 'predicate.json'), 'utf8');
+  const delimiter = signatureBundleBytes.endsWith('\n') ? '' : '\n';
+
+  assert.equal(metadata.cliVersion, 'v3.0.6');
+  assert.equal(downloadBytes, `${signatureBundleBytes}${delimiter}${attestationBundleBytes}`);
+  const normalized = normalizeEvidence({
+    subject: metadata.digest, signatureBytes, attestationBytes, predicateBytes,
+    signatureBundleBytes, attestationBundleBytes, downloadBytes,
+  });
+  assert.equal(normalized.subject, metadata.digest);
+  assert.equal(normalized.signature.bundle, signatureBundleBytes);
+  assert.equal(normalized.sbom.bundle, attestationBundleBytes);
+});
+
 test('accepts verifier-bound legacy null and object certificates but rejects unrelated raw downloads', () => {
   const fixtureRoot = join('scripts', 'ci', 'tests', 'fixtures', 'cosign-v3.0.6');
   const legacyBytes = readFileSync(join(fixtureRoot, 'legacy-signature.ndjson'), 'utf8');
