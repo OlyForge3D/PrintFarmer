@@ -41,24 +41,23 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 
 ### Moonraker motion controls
 
-Homing, jogging, and absolute movement use durable operations. Submitting a
-command is not the same as completing it: the backend tracks the operation
-independently of the client connection, and updated clients retrieve its result
-after reconnecting. A long homing operation is not failed merely because a
-status-poll timeout elapsed.
+Homing, jogging, and absolute movement use direct POST requests to the existing
+`/home`, `/homexy`, `/homez`, `/move`, and `/moveto` printer routes. A successful
+`CommandResult` means ordinary backend acceptance, **not physical completion**.
+Controls remain pending only while their request is in flight, with a five-minute
+direct-command timeout. Errors and timeouts remain explicit; clients never
+automatically replay motion.
 
 Web controls offer **Guided** (the default) and **Expert** presentation. The
 selection is saved to your user account on the backend and follows you across
 devices, including the printer detail card and sidebar. Guided adds inline
 input hints and precautions; Expert keeps those in keyboard- and touch-accessible
 help. Neither mode changes permissions, valid-request requirements, firmware
-protections, duplicate prevention, or emergency-stop access.
+protections, concurrent-command coordination, or emergency-stop access.
 
-The initiating control shows activity immediately. Normal waiting and progress
-stay compact; operation IDs and diagnostic codes are under **Motion technical
-details**. Actual failures and unconfirmed outcomes remain visible in both modes.
-Result checks use server events plus a coalesced one-second polling fallback
-while an operation remains unresolved; polling never resends a movement.
+The initiating control shows request activity immediately. Failures and
+unconfirmed outcomes remain visible in both modes. There are no motion receipts,
+operation IDs, persistent journals, result polling, or recovery forms.
 Absolute GO requires explicit, finite X, Y, and Z targets in millimeters.
 Empty, untouched fields are not errors, and current-position labels do not fill
 in omitted targets.
@@ -69,21 +68,23 @@ position/frame and travel-envelope checks still apply, as do Klipper's configure
 rules. Automated clearance-protected workflows retain their stricter policy.
 This does not enable unhomed-axis movement or out-of-envelope recovery moves.
 
-**Client upgrade required:** update the React frontend and iOS app alongside the
-API. Printers advertising durable motion through
-`physicalControl.supportedOperations` use the control-operations API, regardless
-of backend name. Their legacy motion endpoints reject requests with
-`409 async_control_required` without moving the printer. Backends without that
-capability retain their existing motion endpoints.
+**Coordinated upgrade required:** stop all old API instances and workers before
+backing up and applying the provider migrations; mixed old/new writers are not
+supported. Down migrations are intentionally unsupported; rollback requires the
+pre-upgrade backup and operator reconciliation before restarting old software.
+Update React and iOS alongside the API. All control-operations admission,
+receipt, current-state and recovery routes are removed (`404`), as are printer
+`physicalControl` fields and the motion-operation SignalR event.
 
-If communication is lost after a command may have been sent, its historical
-outcome remains **Unknown** and it is never automatically replayed. Manual
-controls coordinate only while a command sender is active; failures, timeouts
-and restarts do not require recovery forms or operator attestations. Existing
-manual-motion lockouts are cleaned up automatically without clearing print-job
-ownership. Check the physical printer before requesting another move:
-released coordination does not prove the printer stopped.
-See [manual operation coordination](./docs/JOB_QUEUE_ARCHITECTURE.md).
+If communication is lost after a command may have been sent, the audit outcome
+remains **Unknown**. The shared database barrier still coordinates direct
+commands with print dispatch; uncertainty releases manual coordination only
+after backend I/O settles. A crashed direct command's expired barrier can be
+reclaimed by a new explicit direct request after its timeout plus 45 seconds,
+never by replaying the old move or declaring it successful. Print-job ownership
+is preserved. Check the physical printer before requesting another move:
+released coordination does not prove it stopped.
+See [direct manual-motion coordination](./docs/JOB_QUEUE_ARCHITECTURE.md#direct-manual-motion-control).
 
 ## 🚀 Quick Start (2 minutes)
 

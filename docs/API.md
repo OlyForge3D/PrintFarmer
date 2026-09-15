@@ -67,23 +67,45 @@ to the account, not a printer or farm, and is stored on the backend so other
 devices retrieve the same choice.
 
 This field controls web guidance presentation only. It does not change motion
-admission, permissions, firmware limits, duplicate protection, or
+admission, permissions, firmware limits, concurrent-command coordination, or
 emergency-stop behavior. Existing clients may ignore the additional response
 property; no mobile implementation change is required.
 
-### Manual-motion receipts
+## Direct Manual Motion
 
-`POST /api/printers/{id}/control-operations` retains UUID idempotency and
-permission checks. `GET .../{operationId}` and `GET .../current` expose
-active-command coordination through `barrierHeld`. `Unknown` is a final
-historical outcome, not a recovery prerequisite; requests with the same
-idempotency key return that receipt without replaying motion.
+Use `POST /api/printers/{id}/home`, `/homexy`, `/homez`, `/move`, or `/moveto`
+for homing, relative jogging, and absolute positioning. These routes retain
+authorization, printer-resource access checks, and database physical-actuation
+coordination with print dispatch.
 
-The former `.../{operationId}/recovery` and `.../recovery/complete` routes have
-been removed. Old calls return `404` and never submit evidence or issue motion.
-The compatibility `requiresRecovery` field is always `false`. Historical enum
-values and evidence remain readable; updated clients must not infer a lock from
-an old receipt state alone. Update React and iOS together with the API.
+The response is the existing `CommandResult`, not an operation receipt.
+`success: true` means ordinary backend acceptance, **not verified physical
+completion**. The direct request has a five-minute timeout. Clients show pending
+state only for that request and display errors, cancellation, and timeouts
+explicitly. A lost response can mean the command was sent; never automatically
+retry, replay after reconnect, or infer that motion stopped.
+
+Moonraker jog and absolute positioning require fresh authenticated position,
+homing, effective coordinate-frame, and travel-envelope evidence. Manual moves
+do not require the automated workflow's minimum Z clearance; unrelated
+automated-motion protections remain unchanged.
+
+The existing emergency-stop route remains available during an in-flight direct
+manual command. It sends a separate authenticated request with a 20-second bound
+and preserves print-start fencing; it neither releases the motion fence nor
+creates a stop receipt.
+Acceptance or an unknown response does not prove the printer physically stopped.
+Active print-owned stops retain their attempt-bound lifecycle path.
+
+**Removed contract:** every `/api/printers/{id}/control-operations` admission,
+receipt, current-state, and recovery route returns `404`. Printer DTOs no longer
+include `physicalControl`, and `/hubs/printers` no longer publishes
+`printercontroloperationupdated`. There is no motion-operation ID, journal,
+receipt polling, or recovery UI. Historical audits are not a live receipt API.
+
+Update React and iOS together with the API. Stop all old API instances and
+workers before applying the provider migrations to avoid mixed writers.
+See [direct-motion coordination and upgrades](JOB_QUEUE_ARCHITECTURE.md#direct-manual-motion-control).
 
 ## API Contract and Calibration Capabilities
 
