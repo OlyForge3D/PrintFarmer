@@ -355,6 +355,8 @@ jobs:
         run: >-
           node --test scripts/ci/tests/test-release-tag-triggers.mjs
           scripts/ci/tests/test-canonical-qualification.mjs
+          scripts/ci/tests/test-release-evidence.mjs
+          scripts/ci/tests/test-release-source-metadata.mjs
           scripts/ci/tests/test-release-transaction.mjs
           scripts/ci/tests/test-github-evidence-pages.mjs
 

@@ -5,7 +5,8 @@ import {
 import { join } from 'node:path';
 import {
   publisherWorkflowIdentity, requireThat, validateCompleteSet, validateRecord, publicAuthorization,
-  validatePublicAuthorization, writePublicSet,
+  releaseManifest, releaseManifestEnvelope, validatePublicAuthorization, validateReleaseManifest,
+  validateReleaseManifestBytes, validateReleaseManifestEnvelope, writePublicSet, releaseMetadataEvidence,
 } from './release-policy.mjs';
 export { publicAuthorization, writePublicSet } from './release-policy.mjs';
 
@@ -13,9 +14,13 @@ export const authorizationDirectory = '.artifacts/release-authorization';
 export const authorizationPath = `${authorizationDirectory}/release-identity.json`;
 export const authorizationBundle = `${authorizationDirectory}/release-identity.bundle.json`;
 export const privateSetPath = `${authorizationDirectory}/release-set.json`;
+export const manifestPath = `${authorizationDirectory}/release-manifest.json`;
+export const manifestEnvelopePath = `${authorizationDirectory}/release-manifest.envelope.json`;
+export const manifestEnvelopeBundle = `${authorizationDirectory}/release-manifest.envelope.bundle.json`;
 
 function writeAuthorizationFile(path, content) {
-  requireThat([authorizationPath, privateSetPath, 'release-identity.json',
+  requireThat([authorizationPath, privateSetPath, manifestPath, manifestEnvelopePath,
+    'release-identity.json',
     `${authorizationDirectory}/public-identity.json`].includes(path), 'Invalid authorization destination');
   if (path !== 'release-identity.json') {
     for (const directory of ['.artifacts', authorizationDirectory]) {
@@ -81,7 +86,8 @@ export function readPrivateAuthorization() {
 }
 
 export function readPrivateJson(path) {
-  requireThat([authorizationPath, privateSetPath].includes(path), 'Invalid authorization source');
+  requireThat([authorizationPath, privateSetPath, manifestPath, manifestEnvelopePath].includes(path),
+    'Invalid authorization source');
   try { return JSON.parse(readFileSync(path, 'utf8')); }
   catch { throw new Error('Private authorization unavailable or malformed'); }
 }
@@ -93,8 +99,32 @@ export function writeAuthorizationSet(record, set) {
   writeAuthorizationFile(privateSetPath, JSON.stringify(normalized));
 }
 
-export function emitPublicReleaseAssets(record, set, root = '.') {
+export function writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes, cryptoEvidence) {
+  const metadata = releaseMetadataEvidence(record, metadataBytes, sourceArtifactBytes);
+  const manifest = releaseManifest(record, set, undefined, releaseNotesSha256, metadata, cryptoEvidence);
+  const envelope = releaseManifestEnvelope(manifest);
+  validateReleaseManifest(manifest);
+  validateReleaseManifestEnvelope(envelope, manifest);
+  writeAuthorizationFile(manifestPath, JSON.stringify(manifest));
+  writeAuthorizationFile(manifestEnvelopePath, JSON.stringify(envelope));
+  return { manifest, envelope };
+}
+
+export function readReleaseManifest() {
+  const serializedManifest = readFileSync(manifestPath, 'utf8');
+  const serializedEnvelope = readFileSync(manifestEnvelopePath, 'utf8');
+  let envelope;
+  try { envelope = JSON.parse(serializedEnvelope); }
+  catch { throw new Error('Private authorization unavailable or malformed'); }
+  const manifest = validateReleaseManifestBytes(serializedManifest, envelope);
+  return { manifest, envelope, serializedManifest, serializedEnvelope };
+}
+
+export function emitPublicReleaseAssets(record, set, root = '.', releaseNotesSha256, metadataBytes, sourceArtifactBytes, cryptoEvidence) {
   const projected = writePublicSet(record, set);
+  if (metadataBytes !== undefined) {
+    writeReleaseManifest(record, set, releaseNotesSha256, metadataBytes, sourceArtifactBytes, cryptoEvidence);
+  }
   const directory = join(root, 'release-assets');
   mkdirSync(directory, { recursive: true });
   writeFileSync(join(directory, 'release-identity.json'), JSON.stringify(projected.identity));

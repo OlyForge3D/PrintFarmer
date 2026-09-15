@@ -82,15 +82,17 @@
         "node scripts/ci/release-control.mjs authorize",
         "cosign sign-blob --yes",
         "--output \"type=image,name=",
-        "cosign attest --yes --type spdxjson",
+        "cosign attest --yes --new-bundle-format --type spdxjson",
         "--include-npm",
         "IMAGES=(api frontend slicer-host printer-discovery orcaslicer-worker monolith)",
         "Smoke test ARM64 image digests",
         "printfarmer-monolith@${monolith_digest}",
         "Publish and verify public corresponding-source assets",
         "gh release upload \"$VERSION\"",
-        "release_is_draft",
-        "Promote validated digests"
+        "create_args=(release create \"$VERSION\" --draft --verify-tag",
+        "--draft=false --prerelease",
+        "Promote validated immutable image tags",
+        "Advance the complete channel pointer last"
       ],
       "orderedContains": [
         "  publish:",
@@ -101,10 +103,19 @@
         "bash scripts/sync-monorepo-version.sh --check",
         "node scripts/ci/release-control.mjs authorize",
         "cosign sign-blob --yes",
+        "Stage qualified source metadata and canonical artifacts",
         "Build, attest and sign the complete immutable image set",
+        "cosign attest --yes --new-bundle-format --type spdxjson",
+        "Validate complete immutable set and stage verifier evidence",
         "Smoke test ARM64 image digests",
         "Publish and verify public corresponding-source assets",
-        "Promote validated digests"
+        "create_args=(release create \"$VERSION\" --draft --verify-tag",
+        "Promote validated immutable image tags",
+        "Publish and verify signed manifest before mutable aliases",
+        "--draft=false --prerelease",
+        "Reverify the activated public release before aliases",
+        "Publish channel-isolated verified image aliases",
+        "Advance the complete channel pointer last"
       ],
       "notContains": [
         "--clobber",

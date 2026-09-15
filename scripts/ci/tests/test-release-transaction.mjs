@@ -174,6 +174,28 @@ test('selection rejects foreign refs, malformed sources, and workflow substituti
   }
 });
 
+test('trusted scheduled insider publication selects a transaction while untrusted schedule contexts fail closed', async () => {
+  const trustedSchedule = {
+    ...base,
+    GITHUB_EVENT_NAME: 'schedule',
+    RELEASE_CHANNEL: 'insider',
+    RELEASE_SOURCE_SHA: '',
+  };
+  const selected = await selectTransaction(trustedSchedule, apiFixture().api);
+  assert.equal(selected.channel, 'insider');
+  assert.equal(selected.sourceBranch, 'development');
+  for (const overrides of [
+    { GITHUB_REPOSITORY: 'attacker/PrintFarmer' },
+    { GITHUB_REF: 'refs/heads/main' },
+    { GITHUB_WORKFLOW_REF: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main' },
+    { RELEASE_CHANNEL: 'stable' },
+    { RELEASE_SOURCE_SHA: sourceSha },
+  ]) {
+    await assert.rejects(selectTransaction({ ...trustedSchedule, ...overrides }, apiFixture().api),
+      /Untrusted release dispatch|immutable release-control workflow/);
+  }
+});
+
 test('same-run rerun recovers immutable attempt-one transaction and revalidates ancestry', async t => {
   const first = await transaction('stable', sourceSha);
   const cwd = process.cwd();
@@ -312,17 +334,26 @@ test('qualification writer rejects oversized network evidence before writing', a
 
 test('single authority has direct dependencies, one approval, and no alternate ceremony', () => {
   const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
-  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha']);
+  assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha', 'operation', 'reservation_target']);
   assert.deepEqual(workflow.jobs.publish.needs,
     ['admit', 'qualification', 'collect-qualification']);
   assert.equal(workflow.jobs.authorize, undefined);
   assert.deepEqual(Object.keys(workflow.jobs),
-    ['schedule-insider', 'admit', 'qualification', 'collect-qualification', 'publish', 'summary']);
+    ['admit', 'qualification', 'collect-qualification', 'publish', 'summary']);
   assert.equal(workflow.jobs.publish.with.transaction, '${{ needs.admit.outputs.transaction }}');
-  assert.deepEqual(Object.keys(workflow.jobs.publish.with), ['transaction']);
+  assert.deepEqual(Object.keys(workflow.jobs.publish.with), ['transaction', 'operation', 'reservation_target']);
   assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
-  assert.match(JSON.stringify(workflow.jobs['schedule-insider']), /--ref development/);
-  assert.doesNotMatch(JSON.stringify(workflow.jobs['schedule-insider']), /mode=/);
+  assert.equal(workflow.jobs.admit.if, undefined);
+  assert.match(workflow.concurrency.group, /inputs\.operation \|\| 'publish'/);
+  assert.match(workflow.jobs.admit.steps.find(step => step.id === 'select').env.RELEASE_CHANNEL,
+    /github\.event_name == 'schedule' && 'insider'/);
+  assert.equal(workflow.jobs.admit.steps.find(step => step.id === 'admit').if,
+    "(inputs.operation || 'publish') == 'publish'");
+  assert.equal(workflow.jobs.qualification.if, "(inputs.operation || 'publish') == 'publish'");
+  assert.equal(workflow.jobs['collect-qualification'].if, "(inputs.operation || 'publish') == 'publish'");
+  assert.match(workflow.jobs.publish.if, /\(inputs\.operation \|\| 'publish'\) == 'abandon'/);
+  assert.equal(workflow.jobs.publish.with.operation, "${{ inputs.operation || 'publish' }}");
+  assert.equal(workflow.jobs.summary.if, 'always()');
   const summary = JSON.stringify(workflow.jobs.summary);
   assert.match(summary, /public_identity|qualification|evidence|publication|source/i);
   assert.doesNotMatch(JSON.stringify(workflow), /RELEASE_MODE/);
@@ -338,28 +369,40 @@ test('legacy qualifier and recorder remain reachable without an alternate releas
 
 test('publisher has exactly one protected deployment containing every credential and mutation', () => {
   const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
-  assert.deepEqual(Object.keys(publisher.on.workflow_call.inputs), ['transaction']);
+  assert.deepEqual(Object.keys(publisher.on.workflow_call.inputs), ['transaction', 'operation', 'reservation_target']);
   assert.deepEqual(Object.keys(publisher.jobs), ['publish']);
   const environments = Object.values(publisher.jobs).filter(job => job.environment).map(job => job.environment);
   assert.deepEqual(environments, [
-    "${{ fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider' }}",
+    "${{ inputs.operation == 'abandon' && 'release-insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'release-stable' || 'release-insider') }}",
   ]);
   assert.equal(publisher.concurrency.group,
-    "release-publication-${{ fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider' }}");
-  assert.equal(publisher.jobs.publish.steps[1].with.ref,
+    "release-publication-${{ inputs.operation == 'abandon' && 'insider' || (fromJSON(inputs.transaction).channel == 'stable' && 'stable' || 'insider') }}");
+  assert.equal(publisher.jobs.publish.steps[2].with.ref,
     '${{ fromJSON(inputs.transaction).sourceCommit }}');
   const job = JSON.stringify(publisher.jobs.publish);
   assert.doesNotMatch(job, /inputs\.(?:channel|source_sha|approval_mode)/);
+  assert.match(job, /inputs\.operation/);
+  assert.match(job, /inputs\.reservation_target/);
   for (const value of job.matchAll(/"RELEASE_SOURCE_COMMIT":"([^"]+)"/g)) {
-    assert.equal(value[1], '${{ fromJSON(inputs.transaction).sourceCommit }}');
+    assert.ok(['${{ fromJSON(inputs.transaction).sourceCommit }}', '${{ steps.recover_abandonment.outputs.source_sha }}'].includes(value[1]));
   }
   assert.match(job, /RELEASE_PUBLISHER_PRIVATE_KEY/);
   assert.match(job, /RELEASE_REGISTRY_TOKEN/);
   assert.match(job, /release-control\.mjs authorize/);
   assert.match(job, /release-set\.mjs tag/);
+  assert.match(job, /release-set\.mjs alias/);
   assert.match(job, /release-control\.mjs advance/);
   assert.ok(job.indexOf('release-transaction.mjs validate') <
     job.indexOf('actions/create-github-app-token@'));
+});
+
+test('abandonment has a minimal protected path with no source checkout or publication step', () => {
+  const publisher = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  const steps = publisher.jobs.publish.steps;
+  assert.ok(steps.some(step => step.name === 'Record approved immutable reservation abandonment' && step.if === "inputs.operation == 'abandon'"));
+  for (const step of steps.filter(step => step['working-directory'] === 'source' || step.with?.path === 'source')) {
+    assert.match(step.if ?? '', /inputs\.operation == 'publish'/);
+  }
 });
 
 test('publisher completes revocable preflight before registry login and image publication', () => {
@@ -372,12 +415,18 @@ test('publisher completes revocable preflight before registry login and image pu
   assert.ok(named('Validate all revocable controls before publication') < login);
   assert.ok(login < named('Build, attest and sign the complete immutable image set'));
   assert.ok(named('Build, attest and sign the complete immutable image set') <
-    named('Validate complete immutable set'));
-  assert.ok(named('Validate complete immutable set') <
     named('Verify every pushed digest signature and SPDX attestation'));
   assert.ok(named('Verify every pushed digest signature and SPDX attestation') <
+    named('Validate complete immutable set and stage verifier evidence'));
+  assert.ok(named('Validate complete immutable set and stage verifier evidence') <
     named('Publish and verify public corresponding-source assets'));
-  assert.ok(named('Validate complete immutable set') <
+  assert.ok(named('Publish and verify signed manifest before mutable aliases') <
+    named('Reverify the activated public release before aliases'));
+  assert.ok(named('Reverify the activated public release before aliases') <
+    named('Publish channel-isolated verified image aliases'));
+  assert.ok(named('Reverify the activated public release before aliases') <
+    named('Advance the complete channel pointer last'));
+  assert.ok(named('Validate complete immutable set and stage verifier evidence') <
     named('Publish and verify public corresponding-source assets'));
 });
 
@@ -387,15 +436,35 @@ test('publisher uses one reusable-workflow signer identity for every verificatio
     'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/docker-publish.yml@refs/heads/development';
   assert.equal(publisher.env.RELEASE_SIGNER_IDENTITY, expected);
   const job = JSON.stringify(publisher.jobs.publish);
-  assert.equal((job.match(/--certificate-identity \\"?\$RELEASE_SIGNER_IDENTITY/g) || []).length, 3);
-  assert.match(job, /cosign verify \\"\$reference\\"/);
-  assert.match(job, /cosign verify-attestation \\"\$reference\\"/);
+  const verificationCommands = job.split(/cosign verify(?:-attestation|-blob)?/).slice(1);
+  assert.ok(verificationCommands.length >= 5);
+  for (const command of verificationCommands) {
+    const invocation = command.split('cosign ')[0];
+    assert.match(invocation, /--certificate-identity \\"?\$RELEASE_SIGNER_IDENTITY/);
+    assert.match(invocation, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
+  }
+  assert.match(job, /cosign verify --output json \\"\$reference\\"/);
+  assert.match(job, /cosign verify-attestation --output json \\"\$reference\\"/);
   assert.match(job, /--type spdxjson/);
   assert.match(job, /registry_digest/);
-  assert.ok(job.indexOf('cosign verify \\"$reference\\"') <
+  assert.ok(job.indexOf('cosign verify --output json \\"$reference\\"') <
     job.indexOf('release-set.mjs tag'));
-  assert.ok(job.indexOf('cosign verify-attestation \\"$reference\\"') <
+  assert.ok(job.indexOf('cosign verify-attestation --output json \\"$reference\\"') <
     job.indexOf('release-control.mjs advance'));
+  assert.ok(job.indexOf('release-set.mjs tag') < job.indexOf('release-set.mjs alias'));
+  assert.ok(job.indexOf('release-set.mjs alias') < job.indexOf('release-control.mjs advance'));
+  assert.match(job, /env -u GH_TOKEN -u GITHUB_TOKEN curl --fail/);
+  assert.match(job, /cp \\"\$index_evidence\/signature\.ndjson\\" \\"\$index_evidence\/signature\.bundle\.json\\"/);
+  assert.match(job, /cp \\"\$index_evidence\/attestation\.ndjson\\" \\"\$index_evidence\/attestation\.bundle\.json\\"/);
+  assert.match(job, /cp \\"\$platform_evidence\/signature\.ndjson\\" \\"\$platform_evidence\/signature\.bundle\.json\\"/);
+  assert.match(job, /cp \\"\$platform_evidence\/attestation\.ndjson\\" \\"\$platform_evidence\/attestation\.bundle\.json\\"/);
+  assert.match(job, /cosign download signature \\"\$reference\\" > \\"\$signature_download\\"/);
+  assert.match(job, /cosign download attestation \\"\$reference\\" > \\"\$attestation_download\\"/);
+  assert.doesNotMatch(job, /cosign download (?:signature|attestation) \\"\$reference\\" \| jq -sc/);
+  assert.match(job, /cmp -s \\"\$evidence\/signature\.bundle\.json\\" \\"\$signature_download\\"/);
+  assert.match(job, /cmp -s \\"\$evidence\/attestation\.bundle\.json\\" \\"\$attestation_download\\"/);
+  assert.match(job, /crypto-evidence\/\$image\/platforms\/\$scope/);
+  assert.equal((job.match(/Cosign signature evidence must use LF line endings/g) ?? []).length, 3);
 });
 
 test('every docker publisher release-control consumer follows one immutable workflow checkout in its job', () => {
@@ -405,7 +474,10 @@ test('every docker publisher release-control consumer follows one immutable work
     step.uses?.startsWith('actions/checkout@') &&
     step.with?.ref === '${{ fromJSON(inputs.transaction).workflowCommit }}' &&
     step.with?.['persist-credentials'] === false);
-  assert.equal(checkout, 0);
+  assert.equal(checkout, 1);
+  assert.match(steps[0].name, /Verify invoked immutable control before checkout/);
+  assert.match(steps[0].run, /GITHUB_WORKFLOW_SHA/);
+  assert.match(steps[0].run, /repos\/\$GITHUB_REPOSITORY\/git\/commits\/\$workflow_commit/);
   const consumers = steps.flatMap((step, index) =>
     typeof step.run === 'string' && /scripts\/ci\/release-(?:control|set)\.mjs/.test(step.run) ? [index] : []);
   assert.ok(consumers.length >= 5);

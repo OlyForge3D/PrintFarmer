@@ -506,6 +506,62 @@ test('validateLicenseMetadata rejects release gates in the wrong order', async (
   }
 });
 
+test('release publisher metadata rejects omitted signed boundaries and promotion before validation', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publisher-policy-'));
+  try {
+    const policy = JSON.parse(await readFile(
+      path.join(repositoryRoot, 'compliance', 'licensing-policy.json'),
+      'utf8',
+    ));
+    const assertion = structuredClone(policy.metadataAssertions.find(
+      ({ path: assertionPath }) => assertionPath === '.github/workflows/docker-publish.yml',
+    ));
+    assertion.path = 'release.yml';
+    const metadataPolicy = {
+      licenseExpression: 'AGPL-3.0-only',
+      canonicalLicense: { path: 'LICENSE', normalizedSha256: sha256('canonical\n') },
+      decision: { effectiveVersion: 'v0.2.3' },
+      requiredFiles: [],
+      packageManifests: [],
+      metadataAssertions: [assertion],
+      forbiddenFirstPartyDeclarations: [],
+      forbiddenScanPaths: [],
+      exceptions: [],
+    };
+    const publisher = await readFile(path.join(
+      repositoryRoot,
+      '.github',
+      'workflows',
+      'docker-publish.yml',
+    ), 'utf8');
+    const releasePath = path.join(root, 'release.yml');
+    await writeFile(path.join(root, 'LICENSE'), 'canonical\n');
+    await writeFile(path.join(root, 'VERSION'), 'v0.2.3\n');
+
+    for (const boundary of [
+      'cosign attest --yes --new-bundle-format --type spdxjson',
+      'Validate complete immutable set and stage verifier evidence',
+      'create_args=(release create "$VERSION" --draft --verify-tag',
+      '--draft=false --prerelease',
+      'Advance the complete channel pointer last',
+    ]) {
+      await writeFile(releasePath, publisher.replaceAll(boundary, ''));
+      assert.ok((await validateLicenseMetadata(root, metadataPolicy)).some((error) =>
+        error.code === 'METADATA_ASSERTION' || error.code === 'METADATA_ORDER'));
+    }
+
+    const validation = 'Validate complete immutable set and stage verifier evidence';
+    const promotion = 'Promote validated immutable image tags';
+    const unsafeOrder = publisher
+      .replace(promotion, '')
+      .replace(validation, `${promotion}\n${validation}`);
+    await writeFile(releasePath, unsafeOrder);
+    assert.ok(hasCode(await validateLicenseMetadata(root, metadataPolicy), 'METADATA_ORDER'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
 test('validateLicenseMetadata normalizes line endings and rejects changed preserved terms', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-vendored-license-'));
   try {

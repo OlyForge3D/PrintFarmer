@@ -4,43 +4,349 @@ import {
   symlinkSync, writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
+import { X509Certificate } from 'node:crypto';
 import { dirname, resolve } from 'node:path';
 import test from 'node:test';
 import { canonicalAuthorizationFixture } from './fixtures/canonical-qualification.mjs';
 import { canonicalValidationChecks } from '../canonical-qualification.mjs';
 import {
-  admit, advance, allocationKey, compareVersions, components, hash, identityLabels,
+  abandon, abandonmentAuthorization, admit, advance as advancePolicy, allocationKey, compareVersions, components, hash, identityLabels, signedReleasePointer,
   parseTag, parseVersionFile, reserve as reserveRelease, transact, validateCandidate, validateCompleteSet,
   validateLedger, verifyConsumer, verifyTag, verifyProtectionEvidence, hotfixReasonDigest, ReleasePolicyError,
-  validateRecord, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
+  validateRecord, migrateLegacyLedger, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
+  loadReleaseMetadata, loadReleaseTrustPolicy, releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
 import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runReleaseControl, output } from '../release-control.mjs';
-import { inspectCompleteSet, publishImmutableTags } from '../release-set.mjs';
 import {
-  authorizationPath, authorizationBundle, privateSetPath, publicAuthorization, verifyAuthorization,
-  writeAuthorization, writeAuthorizationSet, writePublicSet, emitPublicReleaseAssets, readPrivateJson,
+  inspectCompleteSet, plannedReleaseAliases, publishImmutableTags, publishReleaseAliases,
+  registryTagInspection,
+} from '../release-set.mjs';
+import {
+  authorizationPath, authorizationBundle, manifestEnvelopeBundle, manifestEnvelopePath, manifestPath, privateSetPath,
+  publicAuthorization, verifyAuthorization, writeAuthorization, writeAuthorizationSet, writePublicSet,
+  emitPublicReleaseAssets, readPrivateJson, readReleaseManifest,
 } from '../release-authorization.mjs';
 import {
   qualificationJobNamespace, qualificationLifetimeMs, qualificationPath,
   validateQualificationReceipt,
 } from '../release-transaction.mjs';
 import { publicIdentity, publicIdentityFields } from '../../../src/Web/ReactApp/public-release-identity.mjs';
+import { changelogEntry, releaseNotes, validateReleaseNotesMetadata } from '../release-notes.mjs';
+import { normalizeEvidence } from '../release-evidence.mjs';
 
 const sha = 'a'.repeat(40);
 const newerSha = 'b'.repeat(40);
 const anchor = 'c'.repeat(40);
 const workflowControlSha = '9'.repeat(40);
 const currentCanonicalSha = '8'.repeat(40);
-const created = '2026-09-12T20:00:00.000Z';
+const created = '2026-09-14T22:40:00.000Z';
+const releaseNotesHash = 'd'.repeat(64);
+const cryptoCertificate = `-----BEGIN CERTIFICATE-----
+MIIDITCCAgmgAwIBAgIUJgCnA8pimf4TtHhn54DkRCgUikowDQYJKoZIhvcNAQEL
+BQAwIDEeMBwGA1UEAwwVcmVsZWFzZS1ldmlkZW5jZS10ZXN0MB4XDTI2MDkxNDIy
+NDc0NFoXDTI3MDkxNDIyNDc0NFowIDEeMBwGA1UEAwwVcmVsZWFzZS1ldmlkZW5j
+ZS10ZXN0MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAtZ3XWRa4DU9i
+CHWD3tUhj5Kf2dpXE3+luZikC1/FQti6ZrxeT+6nLihTCdroFpNoXQrT2O3neUFI
+37OOiygQ6Cd8WSRJ+CLt6VIUuTu6ntWbLR3OHEv2wBCAVsL1HWoiUoAuKoOVZEHq
+HwHU+z6BCw/1MhbGDdzgc6tyirAN1WB5NYB8HXjnpfY4DLIvjYr7bLhn2ep5r1QH
+mtM4pN67lgpEYxc6JLMvu5V+Dg3GU6VEX34OGXdmBT3xEQ7T54XJtFgU05OtRHpm
+ME8rqz7U2uGWlPwPKmLin/Hb+o05UskhCNM5x/l/HnD0ggBVPFnhCNaDO18QJs0m
+7CbykcQh+wIDAQABo1MwUTAdBgNVHQ4EFgQUn1N4X6p6NnttpzKqzDvNu/lbyDww
+HwYDVR0jBBgwFoAUn1N4X6p6NnttpzKqzDvNu/lbyDwwDwYDVR0TAQH/BAUwAwEB
+/zANBgkqhkiG9w0BAQsFAAOCAQEAq2mAhPcSnYNlCNYPX/iCn0GSg32RwYUdi2Ap
+2L0lmztFLny0pKiYcwKwIK35+pYSVOr28vRj16SBmZFPdAjUGKnyMVbOKGR6Zggj
+v7m19BoUidStAqQ32L6VT1Qr9CpbqFERXUEzn6AfnP0QoPo6WctYia+sa+FjYlk9
+rQlctU3q0xs/y0h/ZtBMtiCSqoWd/pSr21YrXPLUFQPPKpE1eYfh1Zoc4sWY5xMF
+xhbqlANI3r0ql7hOlLRKsnswTHq4h1xJ/81+BTahCkwGIbvBnO2ddVdZfNeAkNS4
+JvcWVV+jlxUIUkvyi8jjlUzq/l/os6B8crubKZ9z++J4rrlAoA==
+-----END CERTIFICATE-----`;
 const context = (overrides = {}) => ({
   repository: 'OlyForge3D/PrintFarmer', event: 'workflow_dispatch',
   ref: 'refs/heads/development', eventSha: sha,
   workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
   workflowSha: sha, workflowBranch: 'development', buildId: '42', buildAttempt: '1',
   channel: 'insider', ...overrides,
+});
+
+const releaseMetadataFixture = version => {
+  const { trustPolicy, ...metadata } = loadReleaseMetadata('0.2.3');
+  return { ...metadata, version };
+};
+const cryptoEvidenceFixture = set => {
+  const subject = digest => {
+    const predicate = JSON.stringify({ SPDXID: 'SPDXRef-DOCUMENT' });
+    const createdAt = Date.parse(set.identity.created);
+    const integratedTime = Number.isFinite(createdAt)
+      ? Math.max(Math.floor(createdAt / 1000) + 60, 1789426200)
+      : 1789426200;
+    const optional = { Subject: publisherWorkflowIdentity, Issuer: 'https://token.actions.githubusercontent.com',
+      certificate: cryptoCertificate,
+      Bundle: { Payload: { integratedTime, canonicalizedBody: 'proof', signature: 'native-signature' } } };
+    const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } }, optional }]);
+    const attestationBytes = JSON.stringify([{ payload: Buffer.from(JSON.stringify({
+      subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
+    })).toString('base64'), optional }]);
+    return {
+      signatureBytes,
+      attestationBytes,
+      predicateBytes: predicate,
+      signatureVerificationTime: new Date((integratedTime + 300) * 1000).toISOString(),
+      attestationVerificationTime: new Date((integratedTime + 300) * 1000).toISOString(),
+      signatureBundleBytes: JSON.stringify([{
+        mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+        verificationMaterial: {
+          certificate: { rawBytes: new X509Certificate(cryptoCertificate).raw.toString('base64') },
+          tlogEntries: [{ integratedTime, canonicalizedBody: 'proof' }],
+        },
+        messageSignature: {
+          messageDigest: { algorithm: 'SHA2_256', digest: Buffer.from(digest.slice(7), 'hex').toString('base64') },
+          signature: 'native-signature',
+        },
+      }]),
+      attestationBundleBytes: JSON.stringify([{
+        mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+        verificationMaterial: {
+          certificate: { rawBytes: new X509Certificate(cryptoCertificate).raw.toString('base64') },
+          tlogEntries: [{ integratedTime, canonicalizedBody: 'proof' }],
+        },
+        dsseEnvelope: { payload: Buffer.from(JSON.stringify({
+          subject: [{ digest: { sha256: digest.slice(7) } }], predicate: JSON.parse(predicate),
+        })).toString('base64'), payloadType: 'application/vnd.in-toto+json',
+        signatures: [{ sig: 'native-signature' }] },
+      }]),
+    };
+  };
+  const services = Object.fromEntries(Object.entries(set.images).map(([service, image]) => [
+    service, {
+      index: normalizeEvidence({ subject: image.digest, trust: {
+        policy: loadReleaseTrustPolicy(), releaseId: set.identity.releaseId, createdTime: created,
+      }, ...subject(image.digest) }),
+      platforms: Object.fromEntries(Object.entries(image.platforms).map(([platform, value]) => [
+        platform, normalizeEvidence({ subject: value.digest, platform, trust: {
+          policy: loadReleaseTrustPolicy(), releaseId: set.identity.releaseId, createdTime: created,
+        }, ...subject(value.digest) }),
+      ])),
+    },
+  ]));
+  const rawCreatedTime = set.identity.created;
+  const createdAt = Date.parse(rawCreatedTime);
+  const createdTime = Number.isFinite(createdAt) ? rawCreatedTime : created;
+  const verificationTime = new Date(Math.max(
+    Number.isFinite(createdAt) ? createdAt + 10 * 60_000 : 0, 1789426200 * 1000,
+  )).toISOString();
+  return { schema: 1, createdTime, verificationTime, services, sha256: hash({
+    schema: 1, createdTime, verificationTime, services,
+  }) };
+};
+
+const signedManifest = (identity, set) => {
+  const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
+    releaseMetadataFixture(identity.baseVersion), cryptoEvidenceFixture(set));
+  const envelope = releaseManifestEnvelope(manifest);
+  return { serializedManifest: JSON.stringify(manifest), serializedEnvelope: JSON.stringify(envelope) };
+};
+
+const advance = (ledger, identity, set, currentHead, expectedPointer, signed = signedManifest(identity, set)) => {
+  const pointer = signedReleasePointer(identity, signed);
+  const legacySetHash = publicSetHash(set);
+  const priorPointer = Object.values(ledger.pointers)
+    .find(candidate => ledger.reservations[candidate.allocationKey]?.setHash === expectedPointer);
+  const result = advancePolicy(ledger, identity, set, signed, currentHead,
+    expectedPointer === legacySetHash ? pointer.manifestEnvelopeSha256
+      : priorPointer?.manifestEnvelopeSha256 ?? expectedPointer);
+  return { ...result, setHash: legacySetHash };
+};
+
+test('changelog release entry parser handles final, multiple, and literal z content', () => {
+  const entry = heading => `### Features\n\n${heading}\n\n### Fixes\n\nNone.\n\n### Breaking changes\n\nN/A`;
+  assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}`, '1.2.3'), entry('z'));
+  assert.equal(changelogEntry(`## [1.2.3]\n\n${entry('z')}\n\n## [1.2.4]\n\n${entry('later')}`, '1.2.3'), entry('z'));
+  assert.equal(changelogEntry(`## 1.2.3 - 2026-09-14\n\n${entry('dated')}`, '1.2.3'), entry('dated'));
+  assert.equal(changelogEntry(`## [1.2.3] - 2026-09-14\n\n${entry('bracketed date')}`, '1.2.3'), entry('bracketed date'));
+  for (const version of ['1.2.3|1.2.4', '1.2.3.*', '1.2.3\\d', '[1.2.3]']) {
+    assert.throws(() => changelogEntry(`## [1.2.4]\n\n${entry('unrelated')}`, version));
+  }
+  for (const heading of ['## [1.2.3|1.2.4]', '## [1.2.3-malformed]', '## [1.2.3-insider.1]']) {
+    assert.throws(() => changelogEntry(`${heading}\n\n${entry('untrusted')}`, '1.2.3'),
+      /require one 1\.2\.3 CHANGELOG entry/);
+  }
+  assert.throws(() => changelogEntry(
+    `## [1.2.3]\n\n${entry('first')}\n\n## 1.2.3 - 2026-09-14\n\n${entry('second')}`,
+    '1.2.3',
+  ), /require one 1\.2\.3 CHANGELOG entry/);
+});
+
+test('release notes derive bounded merged PRs and mandatory version-controlled operational metadata', () => {
+  const metadata = {
+    schema: 1, version: '1.2.3', compatibility: 'API 1.x is required.', migration: 'Run provider migration.',
+    downtime: 'Restart services.', backup: 'Create a backup.', recovery: 'Restore the backup.',
+  };
+  const notes = releaseNotes({
+    version: '1.2.3-insider.9', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [{ number: 42, title: 'Release-safe change', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42' }],
+    changelog: '### Features\n\n- New capability.\n\n### Fixes\n\n- Fixed behavior.\n\n### Breaking changes\n\n- None.',
+    metadata,
+  });
+
+  assert.match(notes, /Release range: v1\.2\.2\.\.\./);
+  assert.match(notes, /#42/);
+  assert.match(notes, /Run provider migration/);
+  for (const body of ['None.', 'N/A']) {
+    assert.doesNotThrow(() => releaseNotes({
+      version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+      pullRequests: [{ number: 1, title: 'Entry', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/1' }],
+      changelog: `### Features\n\n${body}\n\n### Fixes\n\n${body}\n\n### Breaking changes\n\n${body}`, metadata,
+    }));
+  }
+  for (const field of ['compatibility', 'migration', 'downtime', 'backup', 'recovery']) {
+    assert.throws(() => validateReleaseNotesMetadata({ ...metadata, [field]: '' }, '1.2.3'),
+      new RegExp(`requires ${field}`));
+  }
+  assert.throws(() => releaseNotes({ version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [], changelog: 'entry', metadata }), /at least one merged pull request/);
+});
+
+test('release notes escape every Markdown-significant backslash and delimiter in PR titles', () => {
+  const notes = releaseNotes({
+    version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [{
+      number: 42,
+      title: 'Path \\ `code` *bold* _emphasis_ ~strike~ [link] <tag> & entity',
+      url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42',
+    }],
+    changelog: 'entry',
+    metadata: {
+      compatibility: 'Compatible.', migration: 'Migrate.', downtime: 'Restart.', backup: 'Backup.', recovery: 'Recover.',
+    },
+  });
+  assert.ok(notes.includes('Path \\\\ \\`code\\` \\*bold\\* \\_emphasis\\_ \\~strike\\~ \\[link\\] \\<tag\\> \\& entity'));
+});
+
+test('release notes reject URLs that do not exactly bind a title to its PR number and repository', () => {
+  assert.throws(() => releaseNotes({
+    version: '1.2.3', sourceCommit: sha, previousTag: 'v1.2.2',
+    pullRequests: [{
+      number: 42,
+      title: 'Release-safe change',
+      url: 'https://github.com/OlyForge3D/PrintFarmer/pull/42?unexpected=1',
+    }],
+    changelog: 'entry',
+    metadata: {
+      compatibility: 'Compatible.', migration: 'Migrate.', downtime: 'Restart.', backup: 'Backup.', recovery: 'Recover.',
+    },
+  }), /malformed merged pull request data/);
+});
+
+test('canonical schema-3 release metadata generates release notes through the shared notes adapter', () => {
+  const metadata = JSON.parse(readFileSync('release-metadata/0.2.3.json', 'utf8'));
+  assert.deepEqual(validateReleaseNotesMetadata(metadata, '0.2.3'), metadata.notes);
+  const notes = releaseNotes({
+    version: '0.2.3', sourceCommit: sha, previousTag: 'v0.2.2',
+    pullRequests: [{ number: 2660, title: 'Signed release publication', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/2660' }],
+    changelog: '### Features\n\n- Signed release publication.\n\n### Fixes\n\n- None.\n\n### Breaking changes\n\n- None.',
+    metadata,
+  });
+  assert.match(notes, /Only the declared source release IDs/);
+  assert.match(notes, /verified provider backup/);
+});
+
+test('main-equivalent schema-3 metadata validation passes its closed notes adapter to release notes', () => {
+  const rawMetadata = JSON.parse(readFileSync('release-metadata/0.2.3.json', 'utf8'));
+  const validatedNotes = validateReleaseNotesMetadata(rawMetadata, '0.2.3');
+  const notes = releaseNotes({
+    version: '0.2.3', sourceCommit: sha, previousTag: 'v0.2.2',
+    pullRequests: [{ number: 2660, title: 'Signed release publication', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/2660' }],
+    changelog: '### Features\n\n- Signed release publication.\n\n### Fixes\n\n- None.\n\n### Breaking changes\n\n- None.',
+    metadata: validatedNotes,
+  });
+  assert.match(notes, /Only the declared source release IDs/);
+  assert.match(notes, /Restore the verified provider backup/);
+  assert.throws(() => releaseNotes({
+    version: '0.2.3', sourceCommit: sha, previousTag: 'v0.2.2',
+    pullRequests: [{ number: 2660, title: 'Signed release publication', url: 'https://github.com/OlyForge3D/PrintFarmer/pull/2660' }],
+    changelog: 'entry', metadata: { ...validatedNotes, inferred: 'no' },
+  }), /unknown or missing fields/);
+});
+
+test('closed release metadata is canonical, complete, and digest-bound into the manifest', () => {
+  const metadata = releaseMetadataFixture('1.2.3');
+  const identity = record();
+  const set = completeSet(identity);
+  const manifest = releaseManifest(identity, set, undefined, releaseNotesHash, metadata, cryptoEvidenceFixture(set));
+  assert.equal(manifest.evidence.releaseMetadata.sha256, hash(metadata));
+  assert.equal(manifest.compatibility.releaseMetadata.version, identity.baseVersion);
+  for (const mutate of [
+    value => { value.migrations.postgresql.AppDbContext = 'current-head'; },
+    value => { value.operations.ordered = ['pull', 'verify']; },
+    value => { value.rollback.class = 'supported'; },
+  ]) {
+    const changed = structuredClone(metadata);
+    mutate(changed);
+    const path = resolve('.artifacts', `invalid-release-metadata-${process.pid}.json`);
+    mkdirSync(dirname(path), { recursive: true });
+    writeFileSync(path, JSON.stringify(changed));
+    assert.throws(() => loadReleaseMetadata('1.2.3', path), ReleasePolicyError);
+    rmSync(path, { force: true });
+  }
+});
+
+test('release manifest bytes and envelope reject canonicality and binding substitutions', () => {
+  const identity = record();
+  const set = completeSet(identity);
+  const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
+    releaseMetadataFixture(identity.baseVersion), cryptoEvidenceFixture(set));
+  const envelope = releaseManifestEnvelope(manifest);
+  const serialized = JSON.stringify(manifest);
+  assert.deepEqual(validateReleaseManifestBytes(serialized, envelope), manifest);
+  assert.throws(() => validateReleaseManifestBytes(`${serialized}\n`, envelope), ReleasePolicyError);
+  assert.throws(() => validateReleaseManifestBytes(JSON.stringify({
+    ...manifest, lifecycle: { ...manifest.lifecycle, releaseId: 'insider:9.9.9-insider.1' },
+  }), envelope), ReleasePolicyError);
+  assert.throws(() => validateReleaseManifestEnvelope({
+    ...envelope, manifestSha256: 'f'.repeat(64),
+  }, manifest), ReleasePolicyError);
+  assert.throws(() => validateReleaseManifest({
+  ...manifest,
+  evidence: {
+    ...manifest.evidence,
+    services: {
+      ...manifest.evidence.services,
+      api: {
+        ...manifest.evidence.services.api,
+        index: { ...manifest.evidence.services.api.index, subject: `sha256:${'f'.repeat(64)}` },
+      },
+    },
+  },
+  }), /Evidence subject\/platform mismatch/);
+  for (const mutate of [
+    value => { value.evidence.trust.workflowCommit = newerSha; },
+    value => { value.evidence.trust.policyDigest = 'f'.repeat(64); },
+    value => { value.evidence.trust.createdTime = '2026-09-14T00:00:00.000Z'; },
+  ]) {
+    const changed = structuredClone(manifest);
+    mutate(changed);
+    assert.throws(() => validateReleaseManifest(changed), /Release trust binding mismatch/);
+  }
+  const changedDigest = structuredClone(manifest);
+  changedDigest.evidence.trust.createdTime = identity.buildTime;
+  changedDigest.evidence.cryptoEvidence.sha256 = 'f'.repeat(64);
+  assert.throws(() => validateReleaseManifest(changedDigest),
+    /Invalid release trust evidence fields|Immutable crypto evidence digest mismatch/);
+});
+
+test('every docker publisher bash run block parses', () => {
+  const workflow = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+  const runBlocks = [...workflow.matchAll(/^        run: \|\r?\n((?:          .*(?:\r?\n|$))*)/gm)]
+    .map(([, block]) => block.replace(/^          /gm, ''));
+  assert.ok(runBlocks.length > 0, 'Expected Docker publisher Bash run blocks');
+  const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  for (const runBlock of runBlocks) {
+    const result = spawnSync(shell, ['-n'], { input: runBlock, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  }
 });
 
 test('transaction-bound release operations reject missing transactions before verification or network access', async () => {
@@ -86,7 +392,7 @@ test('admission and authorization reject blank, malformed and invalid transactio
     rmSync(root, { recursive: true, force: true });
   }
 });
-const state = () => ({ schema: 1, anchor, counter: '0', reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
+const state = () => ({ schema: 1, anchor, counter: '0', channelSequences: { insider: '0', stable: '0' }, reservations: {}, identities: {}, pointers: {}, stages: {}, qualifications: {} });
 const hotfixQualification = () => ({
   schema: 1, sourceCommit: sha, reviewed: true, tests: true, compatibility: true,
   migrations: true, recovery: true, mode: 'hotfix',
@@ -109,6 +415,10 @@ function fixtureProtection(channel) {
 }
 const reserve = (ledger, admitted, timestamp, protection = fixtureProtection(admitted.channel), qualification) =>
   reserveRelease(ledger, admitted, timestamp, protection, qualification);
+const abandonmentApproval = (identity, overrides = {}) => ({
+  runId: '42', runAttempt: '1', jobId: '900', environment: 'release-insider',
+  targetReservation: identity.allocationKey, approvedAt: '2026-09-14T22:41:00.000Z', ...overrides,
+});
 const admission = (overrides = {}) => admit(context(overrides), overrides.eventSha || sha, 'v1.2.3\n', '1.2.2');
 const stableAdmission = (baseVersion = '1.2.3', overrides = {}) => admit(context({
   channel: 'stable', ...overrides,
@@ -205,11 +515,13 @@ async function runFixtureControl(operation, fixture, env = fixture.env, verify) 
 }
 function promotionQualification(identity, set, sourceCommit = newerSha) {
   const tree = { schema: 1, originTree: 'd'.repeat(40), sourceTree: 'd'.repeat(40), metadataChanges: [] };
+  const pointer = signedReleasePointer(identity, signedManifest(identity, set));
   return {
     schema: 1, sourceCommit, reviewed: true, tests: true, compatibility: true,
     migrations: true, recovery: true, mode: 'promotion',
     promotionOrigin: { allocationKey: identity.allocationKey, releaseId: identity.releaseId,
-      sourceCommit: identity.sourceCommit, setHash: publicSetHash(set) },
+      sourceCommit: identity.sourceCommit, manifestSha256: pointer.manifestSha256,
+      envelopeSha256: pointer.envelopeSha256 },
     treeEvidence: { ...tree, diffSha256: hash(tree) },
   };
 }
@@ -446,6 +758,7 @@ test('durable reservation reuses identity across same-run attempts and increases
   assert.deepEqual(retry, first);
   const second = await transact(store, state => reserve(state, admission({ buildAttempt: '2' }), created).record);
   assert.deepEqual(second, first);
+  await transact(store, state => advance(state, first, completeSet(first), sha, ''));
   const baseBump = { ...admission({ buildId: '43' }), baseVersion: '1.3.0' };
   const migrated = { ...baseBump, workflowIdentity: 'owner-approved-replacement' };
   assert.throws(() => reserve(state(), migrated, created), /workflow/);
@@ -458,16 +771,79 @@ test('durable reservation reuses identity across same-run attempts and increases
   assert.equal(persisted.reservations[first.allocationKey].record.sequence, '1');
 });
 
-test('concurrent allocators use a real CAS retry boundary and never recycle failed reservations', async () => {
+test('serialized insider allocation rejects overlapping active reservations and never recycles identities', async () => {
   const store = memoryStore();
-  const results = await Promise.all(Array.from({ length: 12 }, (_, index) => transact(store,
+  const results = await Promise.allSettled(Array.from({ length: 12 }, (_, index) => transact(store,
     state => reserve(state, admission({ buildId: String(index + 100) }), created).record)));
-  assert.equal(new Set(results.map(item => item.sequence)).size, 12);
-  assert.equal((await store.read()).state.counter, '12');
+  const accepted = results.filter(result => result.status === 'fulfilled');
+  const rejected = results.filter(result => result.status === 'rejected');
+  assert.equal(accepted.length, 1);
+  assert.equal(rejected.length, 11);
+  assert.ok(rejected.every(result => /Unadvanced insider reservation blocks a new insider allocation/.test(result.reason.message)));
+  assert.equal((await store.read()).state.counter, '1');
   const retry = await transact(store, state => reserve(state, admission({ buildId: '100' }), created).record);
-  assert.equal(retry.sequence, results[0].sequence);
+  assert.equal(retry.sequence, accepted[0].value.sequence);
+  await transact(store, state => advance(state, accepted[0].value, completeSet(accepted[0].value), sha, ''));
   const next = await transact(store, state => reserve(state, admission({ buildId: '999' }), created).record);
-  assert.equal(next.sequence, '13');
+  assert.equal(next.sequence, '2');
+});
+
+test('owner-approved terminal abandonment projects only safe binding fields and consumes identity and sequence', () => {
+  const ledger = state();
+  const first = record(ledger);
+  const approval = abandonmentAuthorization(first, first.protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
+  const terminal = abandon(ledger, first, approval, first.protection);
+  assert.deepEqual(Object.keys(terminal).sort(), [
+    'allocationKey', 'approvalEnvironment', 'approvalJobId', 'approvalRunAttempt', 'approvalRunId', 'approvalTarget',
+    'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
+  ]);
+  const projected = publicLedger(ledger);
+  const persisted = projected.reservations[first.allocationKey].abandonment;
+  assert.deepEqual(persisted, terminal);
+  assert.doesNotMatch(JSON.stringify(projected), /protectionDigest|protection|ownerApprovedReviewer|private/i);
+  const next = record(ledger, { buildId: '43' });
+  assert.equal(next.sequence, '2');
+  assert.notEqual(next.canonicalVersion, first.canonicalVersion);
+  assert.equal(ledger.identities[first.canonicalVersion], first.allocationKey);
+  validateLedger(ledger, anchor);
+});
+
+test('abandonment rejects forged bindings, duplicate terminal transitions, and activated reservations', () => {
+  const ledger = state();
+  const first = record(ledger);
+  const approval = abandonmentAuthorization(first, first.protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
+  for (const mutate of [
+    value => { value.allocationKey = 'f'.repeat(64); },
+    value => { value.sourceCommit = newerSha; },
+    value => { value.canonicalVersion = '1.2.3-insider.9'; },
+    value => { value.channel = 'stable'; },
+    value => { value.identitySha256 = 'f'.repeat(64); },
+    value => { value.protectionDigest = 'f'.repeat(64); },
+  ]) {
+    const forged = structuredClone(approval);
+    mutate(forged);
+    assert.throws(() => abandon(ledger, first, forged, first.protection), /Abandonment authorization/);
+  }
+  abandon(ledger, first, approval, first.protection);
+  assert.throws(() => abandon(ledger, first, approval, first.protection), /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
+
+  const activatedLedger = state();
+  const activated = record(activatedLedger);
+  advance(activatedLedger, activated, completeSet(activated), sha, '');
+  assert.throws(() => abandon(activatedLedger, activated,
+    abandonmentAuthorization(activated, activated.protection, abandonmentApproval(activated), Date.parse('2026-09-14T22:45:00.000Z')), activated.protection),
+  /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
+});
+
+test('pointer advancement rejects a stale expected pointer without another ledger write', async () => {
+  const store = memoryStore();
+  const first = await transact(store, next => reserve(next, admission(), created).record);
+  await transact(store, next => advance(next, first, completeSet(first), sha, ''));
+  const writes = store.writes;
+  const { state: latest } = await store.read();
+  assert.throws(() => advance(latest, first, completeSet(first), sha, 'stale-pointer'),
+    /Channel compare-and-set conflict/);
+  assert.equal(store.writes, writes);
 });
 
 test('every new stable and insider reservation exceeds the historical or current stable floor before persistence', async () => {
@@ -524,9 +900,11 @@ test('exact stable and insider reservation retries survive a later stable floor 
   const insider = record(ledger);
   const admittedStable = stableAdmission();
   const stable = reserve(ledger, admittedStable, created, undefined, hotfixQualification()).record;
+  advance(ledger, stable, completeSet(stable), sha, '');
+  const stablePointer = signedReleasePointer(stable, signedManifest(stable, completeSet(stable)));
   const newer = reserve(ledger, stableAdmission('1.2.4', { buildId: '43' }),
     created, undefined, hotfixQualification()).record;
-  advance(ledger, newer, completeSet(newer), sha, '');
+  advance(ledger, newer, completeSet(newer), sha, stablePointer.manifestEnvelopeSha256);
   for (const original of [ledger, publicLedger(ledger)]) {
     const store = memoryStore(original);
     for (const [admitted, identity] of [[admission(), insider], [admittedStable, stable]]) {
@@ -553,9 +931,15 @@ test('continuity loss, reset and malformed persisted state fail closed', () => {
 
 test('beta/ordinary insider/RC share N and enforce nonregressing SemVer stage progression', () => {
   const ledger = state();
-  assert.equal(record(ledger, { stage: 'beta' }).canonicalVersion, '1.2.3-beta.1');
-  assert.equal(record(ledger, { buildId: '43' }).canonicalVersion, '1.2.3-insider.2');
-  assert.equal(record(ledger, { buildId: '44', stage: 'rc' }).canonicalVersion, '1.2.3-rc.3');
+  const beta = record(ledger, { stage: 'beta' });
+  assert.equal(beta.canonicalVersion, '1.2.3-beta.1');
+  advance(ledger, beta, completeSet(beta), sha, '');
+  const ordinary = record(ledger, { buildId: '43' });
+  assert.equal(ordinary.canonicalVersion, '1.2.3-insider.2');
+  advance(ledger, ordinary, completeSet(ordinary), sha, ledger.pointers.insider.manifestEnvelopeSha256);
+  const rc = record(ledger, { buildId: '44', stage: 'rc' });
+  assert.equal(rc.canonicalVersion, '1.2.3-rc.3');
+  advance(ledger, rc, completeSet(rc), sha, ledger.pointers.insider.manifestEnvelopeSha256);
   assert.throws(() => record(ledger, { buildId: '45' }), /Stage regression/);
   assert.equal(record(ledger, { stage: 'rc' }).canonicalVersion, '1.2.3-rc.4',
     'A distinct run allocates the next RC identity');
@@ -604,27 +988,28 @@ test('source tag is authorized in durable state before public ref creation and n
 
 test('record consumers reject foreign callers while allowing same-run retry attempts', () => {
   const identity = record();
-  verifyConsumer(identity, identity, context());
-  assert.doesNotThrow(() => verifyConsumer(identity, identity, context({ buildAttempt: '2' })));
+  verifyConsumer(identity, { record: identity }, context());
+  assert.doesNotThrow(() => verifyConsumer(identity, { record: identity }, context({ buildAttempt: '2' })));
   for (const override of [{ event: 'push' }, { repository: 'fork/repo' },
     { workflowIdentity: 'caller-forgery' }, { workflowSha: newerSha }]) {
-    assert.throws(() => verifyConsumer(identity, identity, context(override)));
+    assert.throws(() => verifyConsumer(identity, { record: identity }, context(override)));
   }
-  assert.throws(() => verifyConsumer({ ...identity, sourceCommit: newerSha }, identity, context()));
+  assert.throws(() => verifyConsumer({ ...identity, sourceCommit: newerSha }, { record: identity }, context()));
   for (const override of [{ repository: 'fork/repo' }, { releaseId: 'stable:1.2.3' },
     { canonicalVersion: '1.2.4-insider.1' }, { stage: 'rc' }, { allocationKey: 'forged' }]) {
     const malformed = { ...identity, ...override };
-    assert.throws(() => verifyConsumer(malformed, malformed, context()), ReleasePolicyError);
+    assert.throws(() => verifyConsumer(malformed, { record: malformed }, context()), ReleasePolicyError);
   }
 });
 
 test('complete-set CAS accepts forward branch movement but rejects version and byte regressions', async () => {
   const ledger = state();
   const old = record(ledger);
+  const oldPointer = advance(ledger, old, completeSet(old), sha, '');
   const current = record(ledger, { buildId: '43', eventSha: newerSha, workflowSha: newerSha });
   const set = completeSet(current);
   assert.throws(() => validateCompleteSet(current, { ...set, managedEligible: true }), /managed eligibility/);
-  advance(ledger, current, set, newerSha, '');
+  advance(ledger, current, set, newerSha, oldPointer.manifestEnvelopeSha256);
   const previous = structuredClone(ledger.pointers);
   assert.equal(advance(ledger, current, set, 'd'.repeat(40), publicSetHash(set)).setHash, publicSetHash(set));
   assert.throws(() => advance(ledger, old, completeSet(old), 'd'.repeat(40), publicSetHash(set)), /version regression/);
@@ -645,15 +1030,83 @@ test('complete-set CAS accepts forward branch movement but rejects version and b
   assert.equal(advance(ledger, current, set, newerSha, publicSetHash(set)).setHash, publicSetHash(set));
 });
 
-test('two concurrent complete sets cannot both win the same expected pointer', async () => {
+test('durable pointers are closed, signed-byte-bound, and channel-sequenced', () => {
+  const ledger = state();
+  const insider = record(ledger);
+  const insiderSet = completeSet(insider);
+  const insiderSigned = signedManifest(insider, insiderSet);
+  advance(ledger, insider, insiderSet, sha, '', insiderSigned);
+  const pointer = ledger.pointers.insider;
+  assert.deepEqual(Object.keys(pointer).sort(), [
+    'allocationKey', 'canonicalVersion', 'channel', 'envelopeSha256', 'identitySha256',
+    'manifestEnvelopeSha256', 'manifestSha256', 'releaseId', 'sourceCommit', 'stableSequence',
+  ]);
+  assert.equal(pointer.channel, 'insider');
+  assert.equal(ledger.channelSequences.insider, insider.sequence);
+
+  const alteredSet = completeSet(insider);
+  alteredSet.images.api.digest = `sha256:${'f'.repeat(64)}`;
+  assert.throws(() => advance(ledger, insider, alteredSet, sha, pointer.manifestEnvelopeSha256),
+    /Same identity, different bytes/);
+  assert.throws(() => advance(ledger, insider, insiderSet, sha, pointer.manifestEnvelopeSha256, {
+    ...insiderSigned, serializedEnvelope: `${insiderSigned.serializedEnvelope} `,
+  }), /serialization is not canonical/);
+
+  const tampered = structuredClone(ledger);
+  tampered.pointers.insider.manifestSha256 = 'f'.repeat(64);
+  assert.throws(() => validateLedger(tampered, anchor), /pointer binding/);
+  tampered.pointers.insider = { ...ledger.pointers.insider, channel: 'stable' };
+  tampered.pointers.stable = tampered.pointers.insider;
+  delete tampered.pointers.insider;
+  assert.throws(() => validateLedger(tampered, anchor), /pointer/);
+
+  ledger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  advance(ledger, stable, completeSet(stable), newerSha, '', signedManifest(stable, completeSet(stable)));
+  assert.equal(ledger.channelSequences.stable, '1');
+  const replay = structuredClone(ledger);
+  replay.channelSequences.stable = '0';
+  assert.throws(() => validateLedger(replay, anchor), /Stable sequence exceeds durable high-water mark/);
+  const conflicting = structuredClone(ledger);
+  conflicting.pointers.stable.stableSequence = '2';
+  assert.throws(() => validateLedger(conflicting, anchor), /pointer binding|Stable pointer sequence replay/);
+});
+
+test('stable-sequence migration is explicit, deterministic, and rejects signed legacy state', () => {
+  const legacy = state();
+  delete legacy.channelSequences;
+  const migrated = migrateLegacyLedger(legacy, anchor);
+  assert.deepEqual(migrated.channelSequences, { insider: '0', stable: '0' });
+  validateLedger(migrated, anchor);
+
+  const pendingLegacy = state();
+  pendingLegacy.qualifications[sha] = hotfixQualification();
+  const pending = reserve(pendingLegacy, stableAdmission(), created, undefined, hotfixQualification()).record;
+  delete pendingLegacy.channelSequences;
+  const migratedPending = migrateLegacyLedger(pendingLegacy, anchor);
+  assert.deepEqual(migratedPending.channelSequences, { insider: '0', stable: '0' });
+  assert.equal(migratedPending.reservations[pending.allocationKey].stableSequence, '1');
+  assert.equal(migratedPending.reservations[pending.allocationKey].record.stableSequence, '1');
+  validateLedger(migratedPending, anchor);
+
+  const malformed = structuredClone(legacy);
+  malformed.pointers.stable = { allocationKey: 'a'.repeat(64) };
+  assert.throws(() => migrateLegacyLedger(malformed, anchor), /owner recovery/);
+  const signedInsider = state();
+  const insider = record(signedInsider);
+  signedInsider.reservations[insider.allocationKey].tagObject = sha;
+  delete signedInsider.channelSequences;
+  assert.throws(() => migrateLegacyLedger(signedInsider, anchor), /owner recovery/);
+  assert.throws(() => migrateLegacyLedger(state(), anchor), /pre-stable-sequence/);
+});
+
+test('an unadvanced insider reservation blocks overlapping allocations', async () => {
   const ledger = state();
   const a = record(ledger);
-  const b = record(ledger, { buildId: '43' });
-  const store = memoryStore(ledger);
-  const outcomes = await Promise.allSettled([a, b].map(identity => transact(store,
-    state => advance(state, identity, completeSet(identity), sha, ''))));
-  assert.equal(outcomes.filter(result => result.status === 'fulfilled').length, 1);
-  assert.equal(store.writes, 1);
+  assert.throws(() => record(ledger, { buildId: '43' }),
+    /Unadvanced insider reservation blocks a new insider allocation/);
+  advance(ledger, a, completeSet(a), sha, '');
+  assert.doesNotThrow(() => record(ledger, { buildId: '43' }));
 });
 
 test('emitted public identity excludes private and future fields without altering the authorization record', () => {
@@ -676,7 +1129,8 @@ test('emitted public identity excludes private and future fields without alterin
       sourceBranch: identity.sourceBranch, sourceTag: identity.sourceTag,
       sourceCommit: identity.sourceCommit, authorizedBranchHead: identity.authorizedBranchHead,
       buildId: identity.buildId, buildAttempt: identity.buildAttempt,
-      workflowIdentity: identity.workflowIdentity, identitySha256: hash(identity),
+      workflowIdentity: identity.workflowIdentity, stableSequence: identity.stableSequence,
+      identitySha256: hash(identity),
     });
     assert.doesNotMatch(emitted, /protection|ruleset|environment|reviewer|futureAuthorization|private-/);
     assert.deepEqual(JSON.parse(readFileSync(resolve(root, 'release-identity.json'), 'utf8')), publicAuthorization(identity));
@@ -719,7 +1173,7 @@ test('stable and insider frontend outputs copy only canonical public fields and 
   }
 });
 
-test('immutable image publication checks all conflicts before any tag writes and never moves aliases', () => {
+test('immutable image publication checks all conflicts before any tag writes', () => {
   const identity = record();
   const set = completeSet(identity);
   const tags = new Map();
@@ -733,6 +1187,69 @@ test('immutable image publication checks all conflicts before any tag writes and
   tags.set(writes[5], `sha256:${'f'.repeat(64)}`);
   assert.throws(() => publishImmutableTags(identity, set, tag => tags.get(tag), create), /conflict/);
   assert.equal(writes.length, 6);
+});
+
+test('stable aliases advance only to a strictly newer stable record while insider stays isolated', () => {
+  const stableLedger = state();
+  stableLedger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(stableLedger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  const stableSet = completeSet(stable);
+  const tags = new Map();
+  const writes = [];
+  const inspect = tag => tags.get(tag);
+  const create = (tag, digest) => {
+    writes.push(tag);
+    tags.set(tag, { digest: digest.includes('@') ? digest.split('@')[1] : digest, version: stable.canonicalVersion });
+  };
+  const plan = publishReleaseAliases(stable, stableSet, inspect, create);
+  assert.deepEqual(plan.api.map(value => value.tag.split(':').at(-1)),
+    ['1.2.3', 'stable-1.2.3', '1.2', '1', 'latest']);
+  assert.equal(writes.length, Object.keys(components).length * 5);
+  const oldLatest = 'ghcr.io/olyforge3d/printfarmer-api:latest';
+  tags.set(oldLatest, { digest: `sha256:${'f'.repeat(64)}`, version: '1.2.4' });
+  const before = writes.length;
+  publishReleaseAliases(stable, stableSet, inspect, create);
+  assert.equal(writes.length, before, 'Newer stable aliases remain untouched');
+
+  const insider = record();
+  const insiderPlan = plannedReleaseAliases(insider, completeSet(insider));
+  assert.ok(Object.values(insiderPlan).flat().every(value =>
+    value.tag.endsWith(`:${insider.canonicalVersion}`) && value.mutable === false));
+  assert.throws(() => publishReleaseAliases(insider, completeSet(insider),
+    () => ({ digest: `sha256:${'e'.repeat(64)}`, version: '1.2.2' }),
+    () => assert.fail('Insider must not overwrite an immutable tag')), /Immutable image tag conflict/);
+});
+
+test('alias registry parser accepts realistic multi-platform and single-platform Buildx JSON', () => {
+  const digest = `sha256:${'d'.repeat(64)}`;
+  const labels = { 'org.opencontainers.image.version': '1.2.3' };
+  for (const image of [
+    { name: 'ghcr.io/olyforge3d/printfarmer-api:latest', manifest: { digest, mediaType: 'application/vnd.oci.image.index.v1+json' },
+      image: { 'linux/amd64': { config: { Labels: labels } }, 'linux/arm64': { config: { Labels: labels } } } },
+    { name: 'ghcr.io/olyforge3d/printfarmer-orcaslicer-worker:1.2.3', manifest: { digest },
+      image: { config: { Labels: labels }, architecture: 'amd64' } },
+  ]) assert.deepEqual(registryTagInspection(JSON.stringify(image)), { digest, version: '1.2.3' });
+  assert.throws(() => registryTagInspection(JSON.stringify({
+    manifest: { digest }, image: { config: { Labels: { 'org.opencontainers.image.version': '1.2' } } },
+  })), /canonical version label/);
+});
+
+test('an older stable line retains its scoped aliases without moving newer global aliases', () => {
+  const ledger = state();
+  ledger.qualifications[sha] = hotfixQualification();
+  const stable = reserve(ledger, stableAdmission('1.2.3'), created, undefined, hotfixQualification()).record;
+  const set = completeSet(stable);
+  const tags = new Map(Object.keys(components).flatMap(component => [
+    [`ghcr.io/olyforge3d/printfarmer-${component}:1`, { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
+    [`ghcr.io/olyforge3d/printfarmer-${component}:latest`, { digest: `sha256:${'e'.repeat(64)}`, version: '1.3.0' }],
+  ]));
+  const writes = [];
+  const plan = publishReleaseAliases(stable, set, tag => tags.get(tag), (tag, digest) => {
+    writes.push([tag, digest]);
+    tags.set(tag, { digest, version: stable.canonicalVersion });
+  });
+  assert.deepEqual(plan.api.map(item => item.tag.split(':').at(-1)), ['1.2.3', 'stable-1.2.3', '1.2']);
+  assert.ok(writes.every(([tag]) => !tag.endsWith(':1') && !tag.endsWith(':latest')));
 });
 
 test('registry inspection executes complete platform/provenance checks rather than accepting flags', () => {
@@ -762,11 +1279,11 @@ test('stable promotion requires exact-main qualification and never reuses inside
   ledger.qualifications[newerSha] = promotionQualification(insider, set);
   for (const [field, value] of Object.entries({
     allocationKey: 'd'.repeat(64), releaseId: 'insider:1.2.3-insider.99',
-    sourceCommit: newerSha, setHash: 'd'.repeat(64),
+    sourceCommit: newerSha, manifestSha256: 'd'.repeat(64), envelopeSha256: 'd'.repeat(64),
   })) {
     const changed = structuredClone(ledger);
     changed.qualifications[newerSha].promotionOrigin[field] = value;
-    assert.throws(() => reserve(publicLedger(changed), stable, created), /qualified immutable insider set/);
+    assert.throws(() => reserve(publicLedger(changed), stable, created), /qualified immutable insider pointer/);
   }
   assert.throws(() => reserve(ledger, stable, created), /verified at authorization/);
   Object.assign(ledger, publicLedger(ledger));
@@ -988,7 +1505,8 @@ test('well-typed record and admission substitutions cannot break canonical or ha
   const entry = projected.reservations[identity.allocationKey];
   assert.equal(entry.setHash, hash(entry.set), 'Anyone can reproduce the hash from the public set alone');
   assert.notEqual(entry.setHash, hash(set), 'The public set hash must not claim to cover hidden authorization fields');
-  for (const field of ['setHash', 'releaseId', 'canonicalVersion', 'sourceCommit', 'allocationKey']) {
+  for (const field of ['releaseId', 'canonicalVersion', 'sourceCommit', 'allocationKey',
+    'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256']) {
     const changed = structuredClone(projected);
     delete changed.pointers.insider[field];
     assert.throws(() => publicLedger(changed), ReleasePolicyError);
@@ -1006,14 +1524,15 @@ test('well-typed record and admission substitutions cannot break canonical or ha
 });
 
 test('candidate lifecycle rejects expiry, direct publication, deletion without merge-back and version regression', () => {
+  const candidateCreated = '2026-09-14T19:00:00.000Z';
   const candidate = { branch: 'release/v1.2.3', target: '1.2.3', sourceCommit: sha, owner: 'maintainer',
-    qualification: 'reviewed-commit', created, expires: '2026-09-14T20:00:00.000Z' };
-  validateCandidate(candidate, created, 7);
+    qualification: 'reviewed-commit', created: candidateCreated, expires: '2026-09-14T20:00:00.000Z' };
+  validateCandidate(candidate, candidateCreated, 7);
   assert.throws(() => validateCandidate(candidate, '2026-09-15T00:00:00Z', 7), /Expired/);
-  assert.throws(() => validateCandidate({ ...candidate, publish: true }, created, 7), /never publish/);
-  assert.throws(() => validateCandidate({ ...candidate, action: 'delete' }, created, 7), /merge-back/);
+  assert.throws(() => validateCandidate({ ...candidate, publish: true }, candidateCreated, 7), /never publish/);
+  assert.throws(() => validateCandidate({ ...candidate, action: 'delete' }, candidateCreated, 7), /merge-back/);
   validateCandidate({ ...candidate, action: 'delete', abandonmentReason: 'superseded',
-    mergeBack: { development: true, activeCandidates: true, versionDidNotRegress: true } }, created, 7);
+    mergeBack: { development: true, activeCandidates: true, versionDidNotRegress: true } }, candidateCreated, 7);
 });
 
 test('missing live protections fail closed before a publisher operation', async () => {
@@ -1048,7 +1567,7 @@ test('workflow entry points have no direct tag/manual Docker bypass; iOS namespa
   assert.match(docker, /release-control\.mjs consume/);
   assert.doesNotMatch(docker, /^\s+(?:packages|contents): write$/m);
   assert.match(docker, /password: \$\{\{ secrets\.RELEASE_REGISTRY_TOKEN \}\}/);
-  assert.match(docker, /Publish and verify public corresponding-source assets\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
+  assert.match(docker, /Publish and verify public corresponding-source assets\r?\n\s+if: inputs.operation == 'publish'\r?\n\s+working-directory: source\r?\n\s+env:\r?\n\s+GH_TOKEN: \$\{\{ steps\.publisher\.outputs\.token \}\}/);
   for (const step of docker.split(/^\s{6}- /m)) {
     if (!/uses: actions\/(?:upload|download)-artifact@/.test(step)) continue;
     const selector = step.match(/^\s{10}(?:name|pattern): (.+)$/m)?.[1];
@@ -1472,6 +1991,7 @@ test('history rejects valid-schema new reservations at or below the preceding st
         const previous = publicLedger(stableFloorLedger(kind, '1.2.4'));
         const isolated = state();
         isolated.counter = previous.counter;
+        isolated.channelSequences = structuredClone(previous.channelSequences);
         isolated.qualifications[sha] = hotfixQualification();
         const selected = channel === 'stable' ? stableAdmission(baseVersion, { buildId: '43' })
           : { ...admission(), baseVersion };
@@ -1482,6 +2002,7 @@ test('history rejects valid-schema new reservations at or below the preceding st
         Object.assign(changed.identities, added.identities);
         Object.assign(changed.stages, added.stages);
         changed.counter = added.counter;
+        changed.channelSequences = added.channelSequences;
         validateLedger(changed, anchor);
         for (const snapshots of [[previous, changed], [previous, changed, changed]]) {
           await assertHistoryRejected(() => ledgerHistoryFixture(snapshots), identity,
@@ -1504,6 +2025,8 @@ test('every counter edge requires exactly one matching insider reservation and n
     const added = reserve(isolated, admitted, created).record;
     next.reservations[added.allocationKey] = publicLedger(isolated).reservations[added.allocationKey];
     next.identities[added.canonicalVersion] = added.allocationKey;
+    next.channelSequences.insider = (BigInt(next.channelSequences.insider) > BigInt(sequence)
+      ? next.channelSequences.insider : sequence);
     if (!next.stages[baseVersion] || compareVersions(added.canonicalVersion, next.stages[baseVersion]) > 0) {
       next.stages[baseVersion] = added.canonicalVersion;
     }
@@ -1512,7 +2035,15 @@ test('every counter edge requires exactly one matching insider reservation and n
     next.qualifications[sha] = hotfixQualification();
     const admitted = admit(context({ channel: 'stable' }),
     sha, `v${baseVersion}\n`, '1.2.2');
-    reserve(next, admitted, created, undefined, hotfixQualification());
+    if (!Object.values(next.reservations).some(item => item.record.channel === 'stable')) {
+      reserve(next, admitted, created, undefined, hotfixQualification());
+      return;
+    }
+    const isolated = state();
+    isolated.qualifications[sha] = hotfixQualification();
+    const reservation = reserve(isolated, admitted, created, undefined, hotfixQualification());
+    next.reservations[reservation.record.allocationKey] = reservation;
+    next.identities[reservation.record.canonicalVersion] = reservation.record.allocationKey;
   };
   for (const [name, mutate, structurallyValid = true] of [
     ['unbound increment', next => { next.counter = '12'; }],
@@ -1534,7 +2065,7 @@ test('every counter edge requires exactly one matching insider reservation and n
     ['increment with insider and stable allocations', next => {
       next.counter = '12'; addInsider(next, '12'); addStable(next);
     }],
-    ['unchanged counter with two stable allocations', next => { addStable(next); addStable(next, '1.2.4'); }],
+    ['unchanged counter with two stable allocations', next => { addStable(next); addStable(next, '1.2.4'); }, false],
     ['duplicate global sequence on another base', next => { addInsider(next, '11', '99', '1.2.4'); }, false],
     ['new sequence above unchanged counter', next => { addInsider(next, '12'); }, false],
   ]) {
@@ -1565,10 +2096,10 @@ test('valid every-edge allocations preserve seed floors, stable semantics and no
     };
     const insider = append(next => record(next));
     assert.equal(insider.sequence, '9007199254740994');
-    append(next => record(next));
     append(next => { next.reservations[insider.allocationKey].tagObject = 'd'.repeat(40); });
     append(next => { next.reservations[insider.allocationKey].tagPublished = true; });
     append(next => advance(next, insider, completeSet(insider), sha, ''));
+    append(next => record(next));
     append(next => { next.qualifications[sha] = hotfixQualification(); });
     const stableAdmission = admission({ channel: 'stable' });
     const stable = append(next => reserve(next, stableAdmission, created, undefined, hotfixQualification()).record);
@@ -1580,6 +2111,7 @@ test('valid every-edge allocations preserve seed floors, stable semantics and no
     const rcAdmission = admit(context({ buildId: '43', buildAttempt: '2', stage: 'rc' }), sha, 'v1.2.4\n', '1.2.3');
     const rc = append(next => reserve(next, rcAdmission, created).record);
     assert.equal(rc.sequence, '9007199254740995');
+    append(next => advance(next, rc, completeSet(rc), sha, next.pointers.insider.manifestEnvelopeSha256));
     const betaAdmission = admit(context({ buildId: '44', buildAttempt: '3', stage: 'beta' }), sha, 'v1.2.5\n', '1.2.3');
     const beta = append(next => reserve(next, betaAdmission, created).record);
     assert.equal(beta.sequence, '9007199254740996');
@@ -1605,7 +2137,7 @@ for (const mode of ['promotion', 'hotfix']) {
         eventSha: 'f'.repeat(40), workflowSha: 'f'.repeat(40) });
       const alternativeSet = completeSet(alternative);
       advance(seed, alternative, alternativeSet, alternative.sourceCommit, publicSetHash(insiderSet));
-      const promotion = promotionQualification(insider, insiderSet);
+      const promotion = promotionQualification(alternative, alternativeSet);
       const hotfix = { ...hotfixQualification(), sourceCommit: newerSha };
       const qualification = structuredClone(mode === 'promotion' ? promotion : hotfix);
       if (mode === 'promotion') {
@@ -1739,9 +2271,8 @@ test('every continuity invariant is enforced before writes across older history 
     }, /immutable setHash/],
     ['pointer deletion', next => { delete next.pointers.insider; }, /pointer rollback/],
     ['pointer rollback', next => {
-      next.pointers.insider = { releaseId: first.releaseId, canonicalVersion: first.canonicalVersion,
-        sourceCommit: first.sourceCommit, allocationKey: first.allocationKey,
-        setHash: next.reservations[first.allocationKey].setHash };
+      next.pointers.insider = signedReleasePointer(first,
+        signedManifest(first, next.reservations[first.allocationKey].set));
     }, /pointer rollback/],
   ];
   for (const [name, mutate, expected] of mutations) {
@@ -2284,7 +2815,7 @@ test('release workflow explicitly wires approval mode and confines reviewer evid
   assert.match(publisher,
     /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ fromJSON\(inputs\.transaction\)\.approvalMode \}\}/);
   assert.match(publisher,
-    /environment: \$\{\{ fromJSON\(inputs\.transaction\)\.channel == 'stable' && 'release-stable' \|\| 'release-insider' \}\}/);
+    /environment: \$\{\{ inputs\.operation == 'abandon' && 'release-insider' \|\| \(fromJSON\(inputs\.transaction\)\.channel == 'stable' && 'release-stable' \|\| 'release-insider'\) \}\}/);
   assert.match(publisher,
     /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
   assert.match(admissionJob, /statuses: read/);
@@ -2328,6 +2859,92 @@ test('single-maintainer authorization rejects unapproved, automatic and conflict
   } finally { globalThis.fetch = previous; }
 });
 
+test('protected release-control abandonment uses App policy verification and GitHub CAS without exposing authorization data', async () => {
+  const cwd = process.cwd();
+  const root = resolve('.artifacts', `abandon-control-${process.pid}`);
+  const previousFetch = globalThis.fetch;
+  mkdirSync(root, { recursive: true });
+  process.chdir(root);
+  try {
+    const fixture = authorizationFixture(state(), { includeAbandonmentProof: true });
+    globalThis.fetch = fixture.fetch;
+    const identity = await runFixtureControl('authorize', fixture);
+    const recovered = await runReleaseControl('recover-abandonment', {
+      ...fixture.env, RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {});
+    assert.equal(recovered.identitySha256, hash(identity));
+    fixture.abandonmentJob.started_at = new Date().toISOString();
+    fixture.deleteTag();
+    fixture.setCanonicalHead('f'.repeat(40));
+    fixture.abandonmentJobs.push({ ...fixture.abandonmentJob, id: 901 });
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /protected job evidence is missing, ambiguous, or mismatched/, 'ambiguous protected job');
+    fixture.abandonmentJobs.pop();
+    fixture.calls.length = 0;
+    const stableTransaction = JSON.parse(fixture.env.RELEASE_TRANSACTION);
+    stableTransaction.channel = 'stable';
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_TRANSACTION: JSON.stringify(stableTransaction),
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /Only insider release transactions|Invalid release transaction branch binding/, 'stable transaction cannot abandon');
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env, GITHUB_RUN_ATTEMPT: '2',
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /initial protected workflow attempt/, 'historical approval cannot authorize a rerun');
+    for (const [name, mutate] of [
+      ['spoofed approver', value => { value.user.login = 'outsider'; }],
+      ['wrong environment', value => { value.environments[0].name = 'release-stable'; }],
+      ['missing approval', value => { value.state = 'rejected'; }],
+    ]) {
+      const original = structuredClone(fixture.approvalEvidence);
+      mutate(fixture.approvalEvidence);
+      await assert.rejects(runReleaseControl('abandon', {
+        ...fixture.env,
+        RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+        RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+      }, () => {}), /Abandonment requires approval from an allowed owner/, name);
+      Object.assign(fixture.approvalEvidence, original);
+    }
+    const wrongRun = { ...fixture.env, GITHUB_RUN_ID: '43' };
+    await assert.rejects(runReleaseControl('abandon', {
+      ...wrongRun,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /workflow run evidence|Unexpected API host\/path|Missing fixture object/, 'wrong current approval run');
+    await runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {});
+    const persisted = (await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read()).state;
+    const terminal = persisted.reservations[identity.allocationKey].abandonment;
+    assert.deepEqual(Object.keys(terminal).sort(), [
+      'allocationKey', 'approvalEnvironment', 'approvalJobId', 'approvalRunAttempt', 'approvalRunId', 'approvalTarget',
+    'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
+    ]);
+    assert.ok(fixture.calls.some(call => call.admin && call.publisher));
+    assert.ok(fixture.calls.some(call => call.method === 'PATCH' && call.publisher));
+    assert.doesNotMatch(JSON.stringify(fixture.ledgerWrites.at(-1)), /protectionDigest|reviewer|private/i);
+    await assert.rejects(runReleaseControl('abandon', {
+      ...fixture.env,
+      RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
+      RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
+    }, () => {}), /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
+    const subsequent = reserve(persisted, admission({ buildId: '43' }), created).record;
+    assert.equal(subsequent.sequence, '2');
+  } finally {
+    globalThis.fetch = previousFetch;
+    process.chdir(cwd);
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 async function authorizedRecord() {
   const protection = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
   return { ...record(), created: protection.verifiedAt, protection };
@@ -2360,7 +2977,15 @@ test('every release artifact upload path is explicitly inventoried, including bo
       '.artifacts/release-authorization/public-identity.json',
       '.artifacts/release-authorization/public-identity.bundle.json',
     ],
-    [authorizationPath, authorizationBundle, privateSetPath],
+    [
+      manifestPath, manifestEnvelopePath, manifestEnvelopeBundle,
+      '.artifacts/release-authorization/release-crypto-evidence.json',
+      '.artifacts/release-authorization/release-notes.md',
+    ],
+    [
+      authorizationPath, authorizationBundle, privateSetPath,
+      manifestPath, manifestEnvelopePath, manifestEnvelopeBundle,
+    ],
   ]);
   // Keep the call graph closed: a new reusable workflow/action must be inventoried too.
   for (const file of [authority, docker]) {
@@ -2409,9 +3034,9 @@ test('normalized attestation and artifact writers reject raw, unknown and weaken
     const set = completeSet(identity);
     set.futurePrivate = { secret: 'private-value' };
     set.images.api.platforms['linux/amd64'].labels.reviewerId = 'private-value';
-    writeAuthorizationSet(identity, set);
-    assert.doesNotMatch(readFileSync(privateSetPath, 'utf8'), privateFields);
-    assert.deepEqual(JSON.parse(readFileSync(privateSetPath, 'utf8')), completeSet(identity));
+    assert.throws(() => writeAuthorizationSet(identity, set), /public set fields|public set labels/);
+    assert.equal(existsSync(privateSetPath), false);
+    writeAuthorizationSet(identity, completeSet(identity));
     const env = { GITHUB_REPOSITORY: context().repository, GITHUB_REF: context().ref,
       RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)) };
@@ -2530,6 +3155,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
     RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
     RELEASE_ADMITTED_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
+    RELEASE_OWNER_APPROVED_REVIEWERS: '[\"jpapiez\"]',
     GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
     GITHUB_REF: selected.ref, GITHUB_SHA: workflowCommit,
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: workflowCommit,
@@ -2557,6 +3183,13 @@ function authorizationFixture(initial = state(), settings = {}) {
   const qualificationStartedAt = new Date(Date.now() - 4 * 60_000).toISOString();
   const qualificationCompletedAt = new Date(Date.now() - 2 * 60_000).toISOString();
   const qualificationRunUrl = `https://github.com/${selected.repository}/actions/runs/42`;
+  const approvalEvidence = settings.approvalEvidence ?? {
+    state: 'approved', user: { login: 'jpapiez' }, submitted_at: new Date().toISOString(),
+    environments: [{ name: 'release-insider' }],
+  };
+  const abandonmentJob = { id: 900, name: 'Approve and execute immutable release operation / Abandon immutable release reservation', run_id: 42,
+    run_attempt: 1, status: 'in_progress', started_at: qualificationCompletedAt, conclusion: undefined };
+  const abandonmentJobs = [abandonmentJob];
   const transactionJobs = qualificationJobs.map((name, index) => ({
     id: 1000 + index,
     name: `${qualificationJobNamespace} / ${name}`,
@@ -2572,7 +3205,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     html_url: `${qualificationRunUrl}/job/${1000 + index}`,
   }));
   return {
-    env, calls, ledgerWrites, environment, branchRules,
+    env, calls, ledgerWrites, environment, branchRules, approvalEvidence, abandonmentJob, abandonmentJobs,
     deleteTag() { tag = undefined; },
     setCanonicalHead(value) { canonicalHead = value; },
     setCanonicalComparison(value) { canonicalComparison = value; },
@@ -2633,7 +3266,12 @@ function authorizationFixture(initial = state(), settings = {}) {
         });
       }
       if (endpoint === 'actions/runs/42/attempts/1/jobs?per_page=100') {
-        return response({ total_count: transactionJobs.length, jobs: transactionJobs });
+        const jobs = settings.includeAbandonmentProof ? [...transactionJobs, ...abandonmentJobs] : transactionJobs;
+        return response({ total_count: jobs.length, jobs });
+      }
+      if (endpoint === 'actions/runs/42/approvals') {
+        const approvals = settings.includeAbandonmentProof ? [approvalEvidence] : [];
+        return response(approvals);
       }
       if (workflowCommit !== sourceCommit &&
         endpoint.startsWith(`commits/${workflowCommit}/check-runs`)) {
@@ -2840,18 +3478,21 @@ test('executed authority rejects initial and newly advanced stable floors before
         advance(advanced, stable, completeSet(stable), sha, '');
         const fixture = authorizationFixture(publicLedger(initial), { channel, [timing]: publicLedger(advanced) });
         globalThis.fetch = fixture.fetch;
-        await assert.rejects(runFixtureControl('authorize', fixture), /effective stable floor/);
+        await assert.rejects(runFixtureControl('authorize', fixture),
+          channel === 'insider' || timing === 'advanceBeforeAllocation'
+            ? /effective stable floor/
+            : /Unadvanced stable reservation blocks a new stable allocation/);
         const writes = fixture.calls.filter(call => call.method !== 'GET');
-        if (timing === 'advanceBeforeAllocation') {
-          assert.deepEqual(writes, []);
-          assert.equal(existsSync(authorizationPath), false);
-        } else {
-          assert.deepEqual(writes.map(call => call.endpoint),
-            ['git/blobs', 'git/trees', 'git/commits', 'git/refs/heads/release-ledger'],
-            'Only the losing ledger CAS may attempt writes; no retry or source/release/asset writes');
-        }
+        const endpoints = writes.map(call => call.endpoint);
+        assert.ok(endpoints.length === 0 || JSON.stringify(endpoints) === JSON.stringify([
+          'git/blobs', 'git/trees', 'git/commits', 'git/refs/heads/release-ledger',
+        ]), 'Only a losing ledger CAS may be attempted; no retry or source/release/asset writes');
+        if (endpoints.length === 0) assert.equal(existsSync(authorizationPath), false);
         const current = await gitLedger(githubClient(fixture.env.RELEASE_PUBLISHER_TOKEN), anchor).read();
-        assert.deepEqual(current.state, publicLedger(advanced), 'Rejected reservation never reaches the ledger ref');
+        assert.ok(
+          [initial, advanced].some(expected =>
+            JSON.stringify(current.state) === JSON.stringify(publicLedger(expected))),
+          'The rejected reservation may observe only the original or concurrently advanced ledger state');
         assert.equal(current.state.counter, '0');
         rmSync('.artifacts', { recursive: true, force: true });
       }
@@ -2868,9 +3509,11 @@ test('executed authority preserves existing exact reservations after stable adva
   const ledger = stableFloorLedger('historical', '1.2.2');
   const insider = record(ledger);
   const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  advance(ledger, stable, completeSet(stable), sha, '');
+  const stablePointer = signedReleasePointer(stable, signedManifest(stable, completeSet(stable)));
   const newer = reserve(ledger, stableAdmission('1.2.4', { buildId: '43' }),
     created, undefined, hotfixQualification()).record;
-  advance(ledger, newer, completeSet(newer), sha, '');
+  advance(ledger, newer, completeSet(newer), sha, stablePointer.manifestEnvelopeSha256);
   const cwd = process.cwd();
   const root = resolve('.artifacts', `stable-floor-retry-${process.pid}`);
   const savedFetch = globalThis.fetch;
@@ -3047,9 +3690,10 @@ test('every ledger write path removes unknown top-level seed fields without chan
     assert.equal(entry.set.identity.identitySha256, hash(identity));
     assert.deepEqual(entry.set.images, set.images);
     assert.equal(entry.tagPublished, true);
-    assert.equal(persisted.pointers.insider.setHash, publicSetHash(set));
+    assert.equal(persisted.pointers.insider.manifestEnvelopeSha256,
+      signedReleasePointer(identity, signedManifest(identity, set)).manifestEnvelopeSha256);
     assert.deepEqual(fixture.ledgerWrites[4], fixture.ledgerWrites[5]);
-    verifyConsumer(identity, entry.record, context(), entry.identitySha256);
+    verifyConsumer(identity, entry, context(), entry.identitySha256);
   } finally {
     globalThis.fetch = originalFetch;
   }
@@ -3148,7 +3792,7 @@ function addUnknownSetFields(set) {
   }
 }
 
-test('public complete-set projection is closed, canonical and idempotent for private and ledger sets', () => {
+test('public complete sets are closed, canonical and idempotent', () => {
   const seed = state();
   const identity = record(seed);
   const set = completeSet(identity);
@@ -3157,18 +3801,19 @@ test('public complete-set projection is closed, canonical and idempotent for pri
   assert.deepEqual(projected.images, set.images);
   addUnknownSetFields(set);
   const before = JSON.stringify(set);
-  assert.deepEqual(writePublicSet(identity, set), projected);
+  assert.throws(() => writePublicSet(identity, set), /public set/i);
   assert.equal(JSON.stringify(set), before, 'Projection must not mutate hashed input');
   assert.deepEqual(writePublicSet(identity, projected), projected);
   assert.deepEqual(writePublicSet(projected.identity, projected), projected);
-  advance(seed, identity, set, sha, '');
+  advance(seed, identity, completeSet(identity), sha, '');
   const ledger = publicLedger(seed);
   const entry = ledger.reservations[identity.allocationKey];
   assert.deepEqual(writePublicSet(entry.record, entry.set), projected);
   assert.deepEqual(publicLedger(ledger), ledger);
   assert.equal(entry.identitySha256, hash(identity));
-  assert.equal(entry.setHash, publicSetHash(set));
-  assert.equal(ledger.pointers.insider.setHash, publicSetHash(set));
+  assert.equal(entry.setHash, publicSetHash(completeSet(identity)));
+  assert.equal(ledger.pointers.insider.manifestEnvelopeSha256,
+    signedReleasePointer(identity, signedManifest(identity, completeSet(identity))).manifestEnvelopeSha256);
   for (const poison of publicSetPoisons(identity)) {
     for (const original of [completeSet(identity), projected]) {
       const changed = structuredClone(original);
@@ -3222,11 +3867,11 @@ test('every ledger write path rejects poisoned stored public sets before Git blo
   for (const operation of operations) {
     const contaminated = structuredClone(clean);
     addUnknownSetFields(contaminated.reservations[identity.allocationKey].set);
-    let persisted;
+    let calls = 0;
     const adapter = gitLedger(async (endpoint, method, body) => {
+      calls++;
       if (endpoint === `git/commits/${sha}`) return { tree: { sha: anchor } };
       if (endpoint === 'git/blobs') {
-        persisted = JSON.parse(body.content);
         return { sha: anchor };
       }
       if (endpoint === 'git/trees') return { sha: anchor };
@@ -3238,14 +3883,10 @@ test('every ledger write path rejects poisoned stored public sets before Git blo
       assert.deepEqual(body, { sha: newerSha, force: false });
       return {};
     }, anchor);
-    await transact({
+    await assert.rejects(transact({
       read: async () => ({ revision: sha, state: contaminated }), compareAndSet: adapter.compareAndSet,
-    }, operation);
-    assert.doesNotMatch(JSON.stringify(persisted), /futurePrivate|private-value/);
-    assert.deepEqual(persisted.reservations[identity.allocationKey].set, clean.reservations[identity.allocationKey].set);
-    assert.equal(persisted.reservations[identity.allocationKey].identitySha256, hash(identity));
-    assert.equal(persisted.reservations[identity.allocationKey].setHash, publicSetHash(set));
-    assert.deepEqual(publicLedger(persisted), persisted);
+    }, operation), /public set/i);
+    assert.equal(calls, 0, 'Unknown persisted release-set data must block before Git writes');
   }
   t.diagnostic(`${rejected} poisoned-set/transaction combinations rejected before any Git call`);
 });
@@ -3376,6 +4017,9 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     assert.equal(JSON.parse(publicIdentity).identitySha256, hash(identity));
     fixture.calls.length = 0;
     writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+    const manifest = signedManifest(identity, completeSet(identity));
+    writeFileSync(manifestPath, manifest.serializedManifest);
+    writeFileSync(manifestEnvelopePath, manifest.serializedEnvelope);
     fixture.calls.length = 0;
     await runReleaseControl('preflight', {
       ...fixture.env,
@@ -3553,6 +4197,73 @@ test('workflow wiring keeps authorization and every publisher consumer in one pr
   assert.match(readFileSync('.gitignore', 'utf8'), /^\.artifacts\/$/m);
 });
 
+test('source publication executes fail-closed inventory guards before persistent writes', () => {
+  const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
+  const sourcePublication = docker.split('      - name: Publish and verify public corresponding-source assets\n')[1]
+    .split('      - name: Promote validated immutable image tags')[0];
+  assert.match(sourcePublication, /expected_source_assets=\(/);
+  assert.match(sourcePublication, /expected_manifest_assets=\(\n            release-manifest\.json\n            release-manifest\.envelope\.json\n            release-manifest\.envelope\.bundle\.json/);
+  assert.match(sourcePublication,
+    /\[\[ "\$remote_inventory" == "\$expected_source_inventory" \|\|\n             "\$remote_inventory" == "\$expected_complete_inventory" \]\]/);
+
+  const productionFunction = name => {
+    const found = sourcePublication.match(new RegExp(`          ${name}\\(\\) \\{\\n([\\s\\S]*?)\\n          \\}`))?.[0];
+    assert.ok(found, `Expected production ${name} guard`);
+    return found.replace(/^          /gm, '');
+  };
+  const localGuard = productionFunction('validate_local_source_inventory');
+  const existingGuard = productionFunction('validate_preexisting_source_inventory');
+  const createdGuard = productionFunction('verify_new_release_is_empty');
+  const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+  const source = ['source.tar.gz', 'source.json'];
+  const manifest = ['release-manifest.json', 'release-manifest.envelope.json', 'release-manifest.envelope.bundle.json'];
+  const exactInventory = assets => [...assets].sort().join('\n');
+  const executeGuard = ({ local = [], remote = [], operation }) => {
+    const root = resolve('.artifacts', `source-inventory-${process.pid}-${Math.random().toString(16).slice(2)}`);
+    mkdirSync(resolve(root, 'release-assets'), { recursive: true });
+    for (const asset of local) writeFileSync(resolve(root, 'release-assets', asset), 'fixture');
+    const script = `${localGuard}
+${existingGuard}
+${createdGuard}
+expected_source_inventory='source.json
+source.tar.gz'
+expected_complete_inventory='release-manifest.envelope.bundle.json
+release-manifest.envelope.json
+release-manifest.json
+source.json
+source.tar.gz'
+gh() { printf '%s\n' "$REMOTE_INVENTORY"; }
+${operation}`;
+    const result = spawnSync(shell, ['-c', script], {
+      cwd: root,
+      encoding: 'utf8',
+      env: { ...process.env, VERSION: 'v1.2.3', REMOTE_INVENTORY: exactInventory(remote) },
+    });
+    rmSync(root, { recursive: true, force: true });
+    return result;
+  };
+  assert.equal(executeGuard({ operation: 'validate_local_source_inventory' }).status, 0);
+  assert.equal(executeGuard({ local: source, operation: 'validate_local_source_inventory' }).status, 0);
+  assert.notEqual(executeGuard({ local: ['unexpected.txt'], operation: 'validate_local_source_inventory' }).status, 0,
+    'Unexpected local assets block before source construction');
+  assert.equal(executeGuard({ remote: source, operation: 'validate_preexisting_source_inventory' }).status, 0);
+  assert.equal(executeGuard({ remote: [...source, ...manifest], operation: 'validate_preexisting_source_inventory' }).status, 0,
+    'Retry after manifest upload proceeds to manifest verification and pointer advancement');
+  for (const remote of [[], source.slice(1), [...source, manifest[0]], [...source, 'unexpected.txt'], [...source, ...source]]) {
+    assert.notEqual(executeGuard({ remote, operation: 'validate_preexisting_source_inventory' }).status, 0,
+      `Invalid pre-existing inventory is rejected: ${remote.join(',')}`);
+  }
+  assert.equal(executeGuard({ operation: 'verify_new_release_is_empty' }).status, 0);
+  assert.notEqual(executeGuard({ remote: ['concurrent.txt'], operation: 'verify_new_release_is_empty' }).status, 0,
+    'A concurrent asset on a newly created release blocks before upload');
+  const releaseExists = sourcePublication.indexOf('if gh release view "$VERSION" >/dev/null 2>&1; then');
+  const guardInvocation = sourcePublication.indexOf('validate_preexisting_source_inventory', releaseExists);
+  assert.ok(guardInvocation > releaseExists && guardInvocation < sourcePublication.indexOf('gh release upload'),
+    'Existing inventory is validated before any source asset upload');
+  assert.ok(docker.indexOf('Publish and verify signed manifest before mutable aliases') <
+    docker.indexOf('Advance the complete channel pointer last'));
+});
+
 test('signed-artifact verification fails closed without logging payloads or accepting full JSON transport', async () => {
   const root = resolve('.artifacts', `signature-gate-${process.pid}`);
   const cwd = process.cwd();
@@ -3605,6 +4316,10 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   const set = completeSet(identity);
   set.futurePrivate = { value: 'private-future-value' };
   set.images.api.platforms['linux/amd64'].labels.futurePrivate = 'private-label';
+  assert.throws(() => releaseManifest(identity, set, undefined, releaseNotesHash,
+    releaseMetadataFixture(identity.baseVersion)), /public set fields|public set labels/);
+  delete set.futurePrivate;
+  delete set.images.api.platforms['linux/amd64'].labels.futurePrivate;
   advance(ledger, identity, set, sha, '');
   const sanitized = publicLedger(ledger);
   const serialized = JSON.stringify(sanitized);
@@ -3614,14 +4329,44 @@ test('public assets, tag annotations and ledger retain hashes but no private or 
   assert.deepEqual(publicLedger(sanitized), sanitized, 'Public ledger serialization must be idempotent');
   const root = resolve('.artifacts', `public-assets-${process.pid}`);
   try {
-    emitPublicReleaseAssets(identity, set, root);
+    emitPublicReleaseAssets(identity, set, root, releaseNotesHash);
     for (const file of ['release-identity.json', 'release-set.json']) {
       const content = readFileSync(resolve(root, 'release-assets', file), 'utf8');
-      assert.doesNotMatch(content, /protection|rulesets|environment|reviewer|publisher|futurePrivate|private-/);
+      assert.doesNotMatch(content, /rulesets|environment|reviewer|private-publisher|futurePrivate|private-/);
       assert.ok(content.includes(hash(identity)));
     }
     const published = JSON.parse(readFileSync(resolve(root, 'release-assets/release-identity.json'), 'utf8'));
     assert.deepEqual(published, publicAuthorization(identity));
+    assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.json')), false);
+    assert.equal(existsSync(resolve(root, 'release-assets/release-manifest.envelope.json')), false);
+    const manifest = releaseManifest(identity, set, undefined, releaseNotesHash,
+      releaseMetadataFixture(identity.baseVersion), cryptoEvidenceFixture(set));
+    for (const mutate of [
+      value => { value.lifecycle.cadence = 'manual'; },
+      value => { value.provenance.source.commit = newerSha; },
+      value => { value.provenance.workflow.allocationKey = 'invalid'; },
+      value => { value.evidence.services.api.index.signature.subject = newerSha; },
+      value => { value.evidence.services.api.platforms['linux/amd64'].sbom.subject = `sha256:${'f'.repeat(64)}`; },
+      value => { value.compatibility.managedEligible = false; },
+      value => { value.migration.providers.postgresql = 'unknown'; },
+      value => { value.compatibility.updater.fixedSteps.pop(); },
+      value => { value.consumption.publisherApproval = 'host-update'; },
+      value => { value.consumption.autoUpdate.releaseSet = 'other-set'; },
+      value => { value.consumption.autoUpdate.hostPolicy = 'publisher-selected'; },
+      value => { value.unrecognized = true; },
+    ]) {
+      const changed = structuredClone(manifest);
+      mutate(changed);
+      assert.throws(() => validateReleaseManifest(changed), ReleasePolicyError);
+    }
+    for (const completeSet of [undefined, null, [], 'forged']) {
+      assert.throws(() => validateReleaseManifest({ ...manifest, completeSet }),
+        /release manifest (fields|complete set)/);
+    }
+    for (const identity of [undefined, null, [], 'forged']) {
+      assert.throws(() => validateReleaseManifest({ ...manifest, identity }),
+        /release manifest (fields|identity)/);
+    }
     let tag;
     const store = memoryStore(ledger);
     await ensureSourceTag(async (endpoint, method, body) => {
@@ -3654,10 +4399,13 @@ test('the shared public field projection rejects wrong types rather than coercin
   }
 });
 
-test('executed signing and asset-copy commands keep normalized authorization separate from public projection', async () => {
+test('executed signing commands preserve signed subjects and never let verification rewrite bundles', async () => {
   const docker = readFileSync('.github/workflows/docker-publish.yml', 'utf8').replace(/\r\n/g, '\n');
-  const signing = docker.split('      - name: Sign immutable authorization\n')[1]
+  const authorizationSigning = docker.split('      - name: Sign immutable authorization\n')[1]
     .split('      - uses: actions/upload-artifact')[0].split('        run: |\n')[1]
+    .split('\n').map(line => line.replace(/^          /, '')).join('\n');
+  const signing = docker.split('      - name: Sign externally-digested complete release manifest\n')[1]
+    .split('      - name: Persist signed manifest triplet before public upload')[0].split('        run: |\n')[1]
     .split('\n').map(line => line.replace(/^          /, '')).join('\n');
   const publication = docker.split('\n').filter(line =>
     /^\s+cp \.\.\/\.artifacts\/release-authorization\/public-identity/.test(line))
@@ -3666,46 +4414,108 @@ test('executed signing and asset-copy commands keep normalized authorization sep
     'cp ../.artifacts/release-authorization/public-identity.json release-assets/release-identity.json',
     'cp ../.artifacts/release-authorization/public-identity.bundle.json release-assets/release-identity.bundle.json',
   ]);
+  assert.match(docker, /Sign externally-digested complete release manifest/);
+  assert.match(docker, /release-manifest\.envelope\.bundle\.json/);
+  assert.ok(docker.indexOf('Sign externally-digested complete release manifest') >
+    docker.indexOf('Verify every pushed digest signature and SPDX attestation'));
+  assert.ok(docker.indexOf('Sign externally-digested complete release manifest') <
+    docker.indexOf('Publish and verify public corresponding-source assets'));
+  assert.ok(docker.indexOf('Publish and verify public corresponding-source assets') <
+    docker.indexOf('Promote validated immutable image tags'));
+  assert.ok(docker.indexOf('Promote validated immutable image tags') <
+    docker.indexOf('Publish and verify signed manifest before mutable aliases'));
+  assert.ok(docker.indexOf('Publish and verify signed manifest before mutable aliases') <
+    docker.indexOf('Publish channel-isolated verified image aliases'));
+  assert.ok(docker.indexOf('Publish channel-isolated verified image aliases') <
+    docker.indexOf('Advance the complete channel pointer last'));
+  assert.match(docker, /const apiTransportBody = releasedBody\.replace\(\/\\r\\n\/g, "\\n"\)/);
+  assert.match(docker, /gh release view "\$VERSION" --json body > "\$recovered\/release-body\.json"/);
+  assert.match(readFileSync('scripts/ci/release-set.mjs', 'utf8'), /Expected inspect, tag, or alias/);
+  const canonicalNotes = docker.split('      - name: Generate canonical release notes before signing\n')[1]
+    .split('      - name: Validate complete immutable set')[0];
+  assert.match(canonicalNotes, /node \.\.\/scripts\/ci\/release-notes\.mjs/);
+  const generator = readFileSync('scripts/ci/release-notes.mjs', 'utf8');
+  for (const section of ['Features', 'Fixes', 'Breaking changes', 'Compatibility', 'Migration', 'Downtime', 'Backup', 'Recovery']) {
+    assert.match(generator, new RegExp(section));
+  }
+  assert.match(generator, /require.*metadata|Release metadata/);
   const uploadedAuthorizationFiles = artifactUploads('.github/workflows/docker-publish.yml').flat()
     .filter(path => path.startsWith('.artifacts/release-authorization/'));
   const root = resolve('.artifacts', `sign-public-${process.pid}`);
   const cwd = process.cwd();
   mkdirSync(root, { recursive: true });
+  symlinkSync(resolve(cwd, 'scripts'), resolve(root, 'scripts'), 'junction');
+  copyFileSync(resolve(cwd, 'release-trust-policy.json'), resolve(root, 'release-trust-policy.json'));
+  mkdirSync(resolve(root, 'release-metadata'));
+  const fixtureMetadata = readFileSync(resolve(cwd, 'release-metadata', '0.2.3.json'), 'utf8')
+    .replaceAll('0.2.3', '1.2.3');
+  writeFileSync(resolve(root, 'release-metadata', '1.2.3.json'), fixtureMetadata);
   process.chdir(root);
   try {
     const identity = await authorizedRecord();
     writeAuthorization(identity);
     writeAuthorizationSet(identity, completeSet(identity));
-    emitPublicReleaseAssets(identity, completeSet(identity));
-    // Echo the signing input into the mock bundle to detect any wrong-file publication.
+    const metadataBytes = readFileSync('release-metadata/1.2.3.json', 'utf8');
+    const metadata = JSON.parse(metadataBytes);
+    const sourceArtifacts = Object.fromEntries(Object.values(metadata.schemas).map(schema => [
+      schema.artifact, Buffer.from(readFileSync(schema.artifact, 'utf8').replaceAll(/\r\n/g, '\n')),
+    ]));
+    mkdirSync('.artifacts/release-authorization', { recursive: true });
+    writeFileSync('.artifacts/release-authorization/source-release-metadata.json', metadataBytes);
+    const set = completeSet(identity);
+    emitPublicReleaseAssets(identity, set, '.', releaseNotesHash, metadataBytes, sourceArtifacts,
+      cryptoEvidenceFixture(set));
     const mock = `cosign() {
-      local bundle="" source="" previous=""
+      local operation="$1" bundle="" source="" previous=""
+      shift
       for arg in "$@"; do
         if [[ "$previous" == "--bundle" ]]; then bundle="$arg"; fi
         previous="$arg"
         source="$arg"
       done
-      cp "$source" "$bundle"
+      case "$operation" in
+        sign-blob)
+          printf '%s\\n' "$source" >> "$COSIGN_WITNESS"
+          printf 'signed:%s' "$source" > "$bundle"
+          ;;
+        verify-blob)
+          [[ -s "$bundle" && -f "$source" ]]
+          ;;
+        *) return 64 ;;
+      esac
+    }
+    gh() {
+      [[ "$1 $2" == "release view" ]] || return 70
+      [[ "$GH_RELEASE_SCENARIO" == "absent" ]] && return 1
+      return 70
     }\n`;
     const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
+    const witness = resolve(root, 'cosign-subjects.txt');
+    const authorizationResult = spawnSync(shell, ['-c', `${mock}${authorizationSigning}`],
+      { cwd: root, encoding: 'utf8', env: {
+        ...process.env, COSIGN_WITNESS: witness,
+      } });
+    assert.ifError(authorizationResult.error);
+    assert.equal(authorizationResult.status, 0, authorizationResult.stderr);
     const result = spawnSync(shell, ['-c', `${mock}${signing}`],
-      { cwd: root, encoding: 'utf8' });
+      { cwd: root, encoding: 'utf8', env: {
+        ...process.env, VERSION: identity.canonicalVersion, RELEASE_SIGNER_IDENTITY: publisherWorkflowIdentity,
+        RELEASE_PUBLIC_IDENTITY: JSON.stringify(readReleaseManifest().manifest.identity),
+        COSIGN_WITNESS: witness, GH_TOKEN: '', GH_RELEASE_SCENARIO: 'absent', RUNNER_TEMP: resolve(root, 'runner-temp'),
+      } });
     assert.ifError(result.error);
     assert.equal(result.status, 0, result.stderr);
-    copyFileSync('.artifacts/release-authorization/public-identity.json',
-      'release-assets/release-identity.json');
-    copyFileSync('.artifacts/release-authorization/public-identity.bundle.json',
-      'release-assets/release-identity.bundle.json');
     assert.doesNotMatch(result.stdout + result.stderr, /private-publisher|private-future/);
-    const bundle = readFileSync('release-assets/release-identity.bundle.json', 'utf8');
-    assert.deepEqual(JSON.parse(bundle), publicAuthorization(identity));
-    assert.doesNotMatch(bundle, /protection|publisher|futurePrivate|private-/);
-    assert.equal(readFileSync(authorizationBundle, 'utf8'), JSON.stringify(identity));
     assert.equal(readFileSync(authorizationPath, 'utf8'), JSON.stringify(identity));
-    for (const file of uploadedAuthorizationFiles) {
-      assert.ok(existsSync(file), `Missing uploaded authorization artifact: ${file}`);
-      assert.doesNotMatch(readFileSync(file, 'utf8'), privateFields, file);
-    }
+    assert.equal(readFileSync(manifestEnvelopeBundle, 'utf8'),
+      `signed:${manifestEnvelopePath}`);
+    assert.deepEqual(readFileSync(witness, 'utf8').trim().split('\n'), [
+      authorizationPath,
+      '.artifacts/release-authorization/public-identity.json',
+      manifestEnvelopePath,
+    ]);
+    assert.ok(uploadedAuthorizationFiles.includes(manifestEnvelopeBundle));
+    assert.doesNotMatch(readFileSync(manifestEnvelopeBundle, 'utf8'), privateFields);
   } finally {
     process.chdir(cwd);
     rmSync(root, { recursive: true, force: true });

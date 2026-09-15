@@ -1,16 +1,16 @@
 import { execFileSync } from 'node:child_process';
 import {
-  repository, ledgerBranch, requireThat, validateLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
+  repository, ledgerBranch, requireThat, validateLedger, migrateLegacyLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
   validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, validateApprovalMode,
-  releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
+  approvedReviewers, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './github-evidence-pages.mjs';
 
 // Schema 1 contains only these public maps, immutable references and scalar claims.
 export const publicLedgerFields = [
-  'schema', 'anchor', 'counter', 'lastHistoricalStable', 'reservations', 'identities', 'pointers', 'stages', 'qualifications',
+  'schema', 'anchor', 'counter', 'channelSequences', 'lastHistoricalStable', 'reservations', 'identities', 'pointers', 'stages', 'qualifications',
 ];
 
 function publicMap(value, project) {
@@ -26,12 +26,15 @@ function publicReference(value, pattern) {
 const shaPattern = /^[a-f0-9]{40}$/;
 const hashPattern = /^[a-f0-9]{64}$/;
 const sequencePattern = /^[1-9][0-9]*$/;
+export const abandonmentProtectedJobName =
+  'Approve and execute immutable release operation / Abandon immutable release reservation';
 
 function publicReservation(entry, key) {
   publicReference(key, hashPattern);
   const record = entry.record;
   const identitySha256 = publicReference(entry.identitySha256 || hash(record), hashPattern);
-  const result = { admission: { ...entry.admission }, record: publicRecord(record, identitySha256), identitySha256 };
+  const result = { admission: { ...entry.admission }, record: publicRecord(record, identitySha256),
+    identitySha256, stableSequence: publicReference(entry.stableSequence, /^(0|[1-9][0-9]*)$/) };
   if (entry.sequence !== undefined) result.sequence = publicReference(entry.sequence, sequencePattern);
   if (entry.tagObject !== undefined) result.tagObject = publicReference(entry.tagObject, shaPattern);
   if (entry.setHash !== undefined) result.setHash = publicReference(entry.setHash, hashPattern);
@@ -42,6 +45,32 @@ function publicReservation(entry, key) {
   if (entry.set !== undefined) {
     result.set = writePublicSet(record, entry.set, identitySha256);
   }
+  if (entry.abandonment !== undefined) {
+    const abandonment = entry.abandonment;
+    requireKeys(abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
+      'channel', 'identitySha256', 'approvalRunId', 'approvalRunAttempt', 'approvalJobId',
+      'approvalEnvironment', 'approvalTarget', 'ownerApprovedAt'], [], 'public ledger abandonment');
+    requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
+      abandonment.sourceCommit === record.sourceCommit &&
+      abandonment.canonicalVersion === record.canonicalVersion &&
+      abandonment.channel === 'insider' &&
+      abandonment.identitySha256 === identitySha256,
+    'Invalid public ledger abandonment');
+    result.abandonment = {
+      schema: 1,
+      allocationKey: publicReference(abandonment.allocationKey, hashPattern),
+      sourceCommit: publicReference(abandonment.sourceCommit, shaPattern),
+      canonicalVersion: parseTag(`v${abandonment.canonicalVersion}`).canonicalVersion,
+      channel: abandonment.channel,
+      identitySha256: publicReference(abandonment.identitySha256, hashPattern),
+      approvalRunId: publicReference(abandonment.approvalRunId, /^[1-9][0-9]*$/),
+      approvalRunAttempt: publicReference(abandonment.approvalRunAttempt, /^[1-9][0-9]*$/),
+      approvalJobId: publicReference(abandonment.approvalJobId, /^[1-9][0-9]*$/),
+      approvalEnvironment: abandonment.approvalEnvironment,
+      approvalTarget: publicReference(abandonment.approvalTarget, hashPattern),
+      ownerApprovedAt: abandonment.ownerApprovedAt,
+    };
+  }
   return result;
 }
 
@@ -51,6 +80,10 @@ export function publicLedger(state) {
     schema: 1,
     anchor: publicReference(state.anchor, shaPattern),
     counter: publicReference(state.counter, /^(0|[1-9][0-9]*)$/),
+    channelSequences: publicMap(state.channelSequences, (sequence, channel) => {
+      requireThat(['stable', 'insider'].includes(channel), 'Invalid public ledger sequence channel');
+      return publicReference(sequence, /^(0|[1-9][0-9]*)$/);
+    }),
     reservations: publicMap(state.reservations, publicReservation),
     identities: publicMap(state.identities, (key, version) => {
       parseTag(`v${version}`);
@@ -62,13 +95,18 @@ export function publicLedger(state) {
       requireThat(tag.channel === channel && pointer.releaseId === `${channel}:${tag.canonicalVersion}`,
         'Invalid public ledger pointer');
       requireThat(Object.keys(pointer).sort().join() ===
-        ['releaseId', 'canonicalVersion', 'sourceCommit', 'setHash', 'allocationKey'].sort().join(),
+        ['releaseId', 'canonicalVersion', 'channel', 'sourceCommit', 'allocationKey',
+          'identitySha256', 'stableSequence', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'].sort().join(),
       'Unknown public ledger pointer field');
       return {
-        releaseId: pointer.releaseId, canonicalVersion: tag.canonicalVersion,
+        releaseId: pointer.releaseId, canonicalVersion: tag.canonicalVersion, channel,
         sourceCommit: publicReference(pointer.sourceCommit, shaPattern),
-        setHash: publicReference(pointer.setHash, hashPattern),
         allocationKey: publicReference(pointer.allocationKey, hashPattern),
+        identitySha256: publicReference(pointer.identitySha256, hashPattern),
+        stableSequence: publicReference(pointer.stableSequence, /^(0|[1-9][0-9]*)$/),
+        manifestSha256: publicReference(pointer.manifestSha256, hashPattern),
+        envelopeSha256: publicReference(pointer.envelopeSha256, hashPattern),
+        manifestEnvelopeSha256: publicReference(pointer.manifestEnvelopeSha256, hashPattern),
       };
     }),
     stages: publicMap(state.stages ?? {}, (version, base) => {
@@ -106,6 +144,7 @@ export function githubRequestUrl(endpoint, method) {
     /^commits\/[a-f0-9]{40}\/status\?per_page=100$/,
     /^actions\/runs\/[1-9][0-9]*$/,
     /^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/,
+    /^actions\/runs\/[1-9][0-9]*\/approvals$/,
     /^actions\/workflows\/consolidated-release\.yml$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
     /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
@@ -208,7 +247,8 @@ export function gitLedger(api, anchor) {
     requireThat(entry, 'Ledger state is missing; owner recovery required');
     const blob = await api(`git/blobs/${entry.sha}`);
     requireThat(blob.encoding === 'base64', 'Unsupported ledger blob encoding');
-    const state = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+    let state = JSON.parse(Buffer.from(blob.content, 'base64').toString('utf8'));
+    if (!Object.hasOwn(state, 'channelSequences')) state = migrateLegacyLedger(state, anchor);
     requireKeys(state, publicLedgerFields.filter(field => field !== 'lastHistoricalStable'),
       ['lastHistoricalStable'], 'persisted public ledger');
     validateLedger(state, anchor);
@@ -243,7 +283,7 @@ export function gitLedger(api, anchor) {
         JSON.stringify(state.reservations[key]?.admission) === JSON.stringify(reservation.admission) &&
         state.reservations[key]?.identitySha256 === reservation.identitySha256,
         'Ledger lost or changed an immutable reservation');
-      for (const field of ['tagObject', 'tagPublished', 'setHash', 'set']) {
+      for (const field of ['tagObject', 'tagPublished', 'setHash', 'set', 'abandonment']) {
         if (reservation[field] !== undefined) {
           requireThat(JSON.stringify(state.reservations[key]?.[field]) === JSON.stringify(reservation[field]),
             `Ledger lost or changed immutable ${field}`);
@@ -414,6 +454,8 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
     catch (error) {
       throw new Error(`Protection policy read failed${Number.isInteger(error.status) ? `: HTTP ${error.status}` : ''}`);
     }
+
+
   };
   const branch = channel === 'stable' ? 'main' : 'development';
   const branchRules = await readPolicy(`rules/branches/${branch}?per_page=100`);
@@ -451,19 +493,67 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   return normalized;
 }
 
+
+export async function verifyAbandonmentApproval(api, transaction, record, targetReservation,
+  ownerApprovedReviewers, now = Date.now()) {
+  requireThat(record.channel === 'insider' && targetReservation === record.allocationKey,
+    'Abandonment target does not match the immutable reservation');
+  requireString(transaction?.runId, /^[1-9][0-9]*$/, 'abandonment workflow run');
+  requireString(transaction?.runAttempt, /^[1-9][0-9]*$/, 'abandonment workflow attempt');
+  requireThat(transaction.runAttempt === '1',
+    'Abandonment is restricted to the initial protected workflow attempt');
+  const run = await api(`actions/runs/${transaction.runId}`);
+  requireThat(run?.id === Number(transaction.runId) && run.run_attempt === Number(transaction.runAttempt) &&
+    run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
+    run.path === '.github/workflows/consolidated-release.yml' && run.event === 'workflow_dispatch',
+  'Abandonment workflow run evidence is malformed or mismatched');
+  const jobs = await api(`actions/runs/${transaction.runId}/attempts/${transaction.runAttempt}/jobs?per_page=100`);
+  requireThat(jobs?.total_count === jobs.jobs?.length && jobs.jobs.length > 0,
+    'Abandonment workflow job evidence is missing or truncated');
+  const protectedJobs = jobs.jobs.filter(candidate => candidate?.run_id === Number(transaction.runId) &&
+    candidate.run_attempt === Number(transaction.runAttempt) &&
+    candidate.name === abandonmentProtectedJobName &&
+    typeof candidate.started_at === 'string');
+  requireThat(protectedJobs.length === 1, 'Abandonment protected job evidence is missing, ambiguous, or mismatched');
+  const [job] = protectedJobs;
+  requireThat(job && Number.isSafeInteger(job.id) && job.id > 0 &&
+    job.run_id === Number(transaction.runId) && job.run_attempt === Number(transaction.runAttempt),
+  'Abandonment protected job evidence is missing or mismatched');
+  const approvals = await api(`actions/runs/${transaction.runId}/approvals`);
+  requireThat(Array.isArray(approvals) && approvals.length > 0,
+    'Abandonment environment approval evidence is missing or malformed');
+  const allowed = new Set(approvedReviewers(ownerApprovedReviewers));
+  const environment = 'release-insider';
+  const approval = approvals
+    .filter(candidate => candidate?.state === 'approved' &&
+      Array.isArray(candidate.environments) && candidate.environments.length === 1 &&
+      candidate.environments[0]?.name === environment &&
+      allowed.has(candidate.user?.login?.toLowerCase()))
+    [0];
+  requireThat(approval, 'Abandonment requires approval from an allowed owner');
+  // GitHub's approval-history response has no timestamp; protected job start proves approval completed.
+  const approvedAt = parseGithubTimestamp(job.started_at, 'abandonment protected job start timestamp');
+  requireThat(Number.isFinite(now) && approvedAt <= now, 'Abandonment approval is future-dated');
+  return {
+    runId: transaction.runId, runAttempt: transaction.runAttempt, jobId: String(job.id),
+    environment, targetReservation, approvedAt: new Date(approvedAt).toISOString(),
+  };
+}
 export async function ensureSourceTag(api, store, record, transact) {
   validateRecord(record);
   const preflight = state => {
     const projected = publicLedger(state);
     const entry = projected.reservations[record.allocationKey];
     requireThat(entry?.identitySha256 === hash(record) &&
-      hash(entry.record) === hash(publicRecord(record)), 'Source tag authorization mismatch');
+      hash(entry.record) === hash(publicRecord(record)) && !entry.abandonment,
+    'Source tag authorization mismatch or reservation was terminally abandoned');
     return entry;
   };
   // Reserve the annotated object in the ledger BEFORE creating its public ref.
   await transact(store, async state => {
     const authorized = preflight(state).record;
     const entry = state.reservations[record.allocationKey];
+    requireThat(!entry.abandonment, 'Terminally abandoned reservation cannot create a source tag');
     if (entry.tagObject) return;
     requireThat(!await readTag(api, authorized.sourceTag), 'Existing tag has no immutable authorization');
     const tag = await api('git/tags', 'POST', {
@@ -475,6 +565,7 @@ export async function ensureSourceTag(api, store, record, transact) {
   });
   const { state } = await store.read();
   const entry = preflight(state);
+  requireThat(!entry.abandonment, 'Terminally abandoned reservation cannot publish a source tag');
   const expected = entry.tagObject;
   const actual = await readTag(api, entry.record.sourceTag);
   requireThat(!entry.tagPublished || actual,
@@ -483,7 +574,11 @@ export async function ensureSourceTag(api, store, record, transact) {
     await api('git/refs', 'POST', { ref: `refs/tags/${entry.record.sourceTag}`, sha: expected });
   }
   verifyTag(record, expected, await readTag(api, entry.record.sourceTag));
-  await transact(store, state => { state.reservations[record.allocationKey].tagPublished = true; });
+  await transact(store, state => {
+    requireThat(!state.reservations[record.allocationKey].abandonment,
+      'Terminally abandoned reservation cannot mark a source tag published');
+    state.reservations[record.allocationKey].tagPublished = true;
+  });
 }
 
 export async function verifyStableQualification(api, state, admission) {

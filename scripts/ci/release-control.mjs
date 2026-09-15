@@ -1,18 +1,18 @@
 import { appendFileSync, closeSync, constants, fstatSync, lstatSync, openSync, realpathSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
-  admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
+  abandon, abandonmentAuthorization, admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
   identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission, validateApprovalMode,
 } from './release-policy.mjs';
 import {
   command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
   verifyCanonicalSource, verifyProtection,
-  verifyStableQualification, verifyReleaseChecks,
+  verifyAbandonmentApproval, verifyStableQualification, verifyReleaseChecks,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
 import { qualificationClient, verifyCanonicalReleaseEvidence } from './canonical-qualification.mjs';
 import {
-  privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, verifyAuthorization, writeAuthorization, writePublicSet,
+  privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, readReleaseManifest, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
 import {
   readQualificationReceipt, transactionFromEnvironment,
@@ -65,14 +65,19 @@ export function output(name, value) {
 }
 
 export async function runReleaseControl(operation, env = process.env, verify = command) {
-  requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance'].includes(operation), 'Unknown release operation');
+  requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance', 'recover-abandonment', 'abandon'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
   const transaction = transactionFromEnvironment(env);
-  if (operation !== 'admit') {
+  if (operation === 'abandon') {
+    requireThat(transaction.channel === 'insider', 'Only insider release transactions may abandon a reservation');
+    requireThat(env.GITHUB_RUN_ATTEMPT === '1',
+      'Abandonment is restricted to the initial protected workflow attempt');
+  }
+  if (['authorize', 'consume', 'preflight', 'advance'].includes(operation)) {
     requireThat(env.RELEASE_SOURCE_COMMIT === transaction.sourceCommit,
       'Release source identity does not match the pinned release transaction');
   }
-  const privileged = ['authorize', 'preflight', 'advance'].includes(operation);
+  const privileged = ['authorize', 'preflight', 'advance', 'recover-abandonment', 'abandon'].includes(operation);
   if (privileged) {
     requireThat(env.RELEASE_PUBLISHER_TOKEN && env.RELEASE_PUBLISHER_TOKEN !== env.GH_TOKEN,
       'Protected publisher App token required; github.token cannot verify Administration or publish');
@@ -84,6 +89,20 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     'Consumer source identity does not match the pinned release transaction');
   }
   const store = gitLedger(api, env.RELEASE_LEDGER_ANCHOR);
+  if (operation === 'recover-abandonment') {
+    const target = env.RELEASE_ABANDONMENT_TARGET;
+    requireThat(/^[a-f0-9]{64}$/.test(target || ''), 'Immutable abandonment reservation target is missing or malformed');
+    const { state } = await store.read();
+    const reservation = state.reservations[target];
+    requireThat(reservation?.record?.allocationKey === target && reservation.record.channel === 'insider' &&
+      reservation.identitySha256 === reservation.record.identitySha256 && !reservation.set && !reservation.abandonment,
+    'Immutable abandonment reservation is unavailable, activated, or terminal');
+    output('authorization_run_id', reservation.record.buildId);
+    output('authorization_attempt', reservation.record.buildAttempt);
+    output('source_sha', reservation.record.sourceCommit);
+    output('public_identity', JSON.stringify(publicAuthorization(reservation.record)));
+    return reservation.record;
+  }
   if (['admit', 'authorize'].includes(operation)) {
     validateApprovalMode(env.RELEASE_APPROVAL_MODE);
     if (operation === 'authorize') {
@@ -147,17 +166,25 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   }
 
   const record = verifyAuthorization(env, verify);
+  if (operation === 'abandon') requireThat(record.channel === 'insider',
+    'Only insider reservations may be abandoned');
+  if (operation === 'abandon') requireThat(record.channel === transaction.channel,
+    'Abandonment transaction channel does not match the recovered reservation');
   const { state } = await store.read();
   const entry = state.reservations[record.allocationKey];
   requireThat(entry, 'Unknown release authorization');
-  verifyConsumer(record, entry.record, context, entry.identitySha256);
+  requireThat(!entry.abandonment, 'Terminally abandoned reservation cannot be consumed, preflighted, advanced, or recovered');
+  requireThat(entry.identitySha256 === hash(record), 'Release authorization differs from the immutable reservation');
+  if (operation !== 'abandon') verifyConsumer(record, entry, context, entry.identitySha256);
   verifyProtectionEvidence(record.protection, record.channel);
   requireThat(Date.parse(record.protection.verifiedAt) <= Date.parse(record.created),
     'Protection evidence postdates authorization');
-  // Consumer verification binds these public ledger references to the signed artifact.
-  verifyTag(record, entry.tagObject, await readTag(api, entry.record.sourceTag));
-  requireThat(parseTag(record.sourceTag).baseVersion ===
-    (await readVersion(api, entry.record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
+  if (operation !== 'abandon') {
+    // Consumer verification binds these public ledger references to the signed artifact.
+    verifyTag(record, entry.tagObject, await readTag(api, entry.record.sourceTag));
+    requireThat(parseTag(record.sourceTag).baseVersion ===
+      (await readVersion(api, entry.record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
+  }
   if (operation === 'consume') {
     const metadata = emitBuildIdentity(record);
     output('frontend_identity', metadata.frontendIdentity);
@@ -177,13 +204,24 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     const currentBranchHead = await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit);
     await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
-    const expectedPointer = state.pointers[record.channel]?.setHash || '';
+    const expectedPointer = state.pointers[record.channel]?.manifestEnvelopeSha256 || '';
     output('verified_branch_head', currentBranchHead);
     output('expected_pointer', expectedPointer);
+  } else if (operation === 'abandon') {
+    requireThat(env.RELEASE_ABANDONMENT_TARGET === record.allocationKey,
+      'Immutable abandonment reservation target does not match authorization');
+    const protection = await verifyProtection(api, record.channel, env.RELEASE_PUBLISHER_APP_ID,
+      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+    const approval = await verifyAbandonmentApproval(api, {
+      runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT,
+    }, record,
+      env.RELEASE_ABANDONMENT_TARGET, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+    const authorization = abandonmentAuthorization(record, protection, approval);
+    await transact(store, async latest => abandon(latest, record, authorization, protection));
   } else if (operation === 'advance') {
     const set = readPrivateJson(privateSetPath);
     const expectedPointer = env.RELEASE_EXPECTED_POINTER ?? '';
-    requireThat((state.pointers[record.channel]?.setHash || '') === expectedPointer,
+    requireThat((state.pointers[record.channel]?.manifestEnvelopeSha256 || '') === expectedPointer,
       'Channel pointer changed after publication preflight');
     requireThat(transaction.sourceCommit === record.sourceCommit,
       'Pointer transaction binding mismatch');
@@ -192,7 +230,9 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, record.sourceCommit);
     requireThat(/^[a-f0-9]{40}$/.test(env.RELEASE_VERIFIED_BRANCH_HEAD || ''),
       'Missing publication preflight branch evidence');
-    await transact(store, async latest => advance(latest, record, set,
+    const { serializedManifest, serializedEnvelope } = readReleaseManifest();
+    const signed = { serializedManifest, serializedEnvelope };
+    await transact(store, async latest => advance(latest, record, set, signed,
       await verifyCanonicalSource(api, record.sourceBranch, record.sourceCommit), expectedPointer));
     output('set_hash', hash(writePublicSet(record, set)));
   } else {

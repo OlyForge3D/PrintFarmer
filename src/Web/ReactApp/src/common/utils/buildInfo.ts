@@ -1,4 +1,4 @@
-import type { CanonicalReleaseIdentity } from '@/types/api';
+import type { BuildReleaseIdentity } from '@/common/utils/releaseIdentity';
 
 /**
  * Build metadata baked into the frontend bundle at build time.
@@ -11,8 +11,8 @@ import type { CanonicalReleaseIdentity } from '@/types/api';
 export interface BuildInfo {
   commit: string;
   buildTime: string;
-  /** Shared #2668 record embedded in these assets; self-report, not signature verification. */
-  releaseIdentity?: CanonicalReleaseIdentity | null;
+  /** Build authority record embedded in these assets; self-report, not signature verification. */
+  releaseIdentity?: BuildReleaseIdentity | null;
 }
 
 export const buildInfo: BuildInfo = {

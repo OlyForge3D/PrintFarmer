@@ -1,6 +1,10 @@
 import { createHash } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 import { publicIdentityFields } from '../../src/Web/ReactApp/public-release-identity.mjs';
+import { validateEvidenceSet } from './release-evidence.mjs';
 
 export const repository = 'OlyForge3D/PrintFarmer';
 export const workflow = '.github/workflows/consolidated-release.yml';
@@ -17,6 +21,7 @@ const tagPattern = new RegExp(`^v(${basePattern})(?:-(insider|beta|rc)\\.([1-9][
 const shaPattern = /^[a-f0-9]{40}$/;
 const hashPattern = /^[a-f0-9]{64}$/;
 const positivePattern = /^[1-9][0-9]*$/;
+const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
 export const components = {
   api: ['linux/amd64', 'linux/arm64'],
   frontend: ['linux/amd64', 'linux/arm64'],
@@ -43,6 +48,149 @@ export function requireKeys(value, required, optional = [], description = 'relea
   requireThat(required.every(key => Object.hasOwn(value, key)) &&
     Object.keys(value).every(key => [...required, ...optional].includes(key) && value[key] !== undefined),
   `Invalid ${description} fields`);
+}
+
+export function loadReleaseTrustPolicy(path = resolve(repositoryRoot, 'release-trust-policy.json')) {
+  let policy;
+  try { policy = JSON.parse(readFileSync(path, 'utf8')); } catch {
+    throw new ReleasePolicyError('Release trust policy is unavailable or malformed');
+  }
+  requireKeys(policy, ['schema', 'rootIdentity', 'issuer', 'signers', 'certificateMaxAgeSeconds',
+    'revocationEpoch', 'revokedReleaseIds', 'revokedSignerIdentities', 'rotationOverlapSeconds'], [],
+  'release trust policy');
+  requireThat(policy.schema === 1 && policy.rootIdentity === repository &&
+    policy.issuer === 'https://token.actions.githubusercontent.com' &&
+    Number.isSafeInteger(policy.certificateMaxAgeSeconds) && policy.certificateMaxAgeSeconds > 0 &&
+    Number.isSafeInteger(policy.rotationOverlapSeconds) && policy.rotationOverlapSeconds >= 0 &&
+    Array.isArray(policy.signers) && policy.signers.length > 0 &&
+    Array.isArray(policy.revokedReleaseIds) && Array.isArray(policy.revokedSignerIdentities),
+  'Invalid release trust policy');
+  requireTimestamp(policy.revocationEpoch, 'release trust revocation epoch');
+  requireThat(policy.revokedReleaseIds.every(value => typeof value === 'string' &&
+    /^(stable|insider):\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?$/.test(value)) &&
+    new Set(policy.revokedReleaseIds).size === policy.revokedReleaseIds.length &&
+    policy.revokedSignerIdentities.every(value => typeof value === 'string' && value.length > 0) &&
+    new Set(policy.revokedSignerIdentities).size === policy.revokedSignerIdentities.length,
+  'Invalid release trust revocation evidence');
+  const signerWindows = [];
+  for (const signer of policy.signers) {
+    requireKeys(signer, ['identity', 'validFrom', 'validUntil'], [], 'release trust signer');
+    requireTimestamp(signer.validFrom, 'release trust signer validFrom');
+    requireTimestamp(signer.validUntil, 'release trust signer validUntil');
+    requireThat(signer.identity === publisherWorkflowIdentity && !policy.revokedSignerIdentities.includes(signer.identity) &&
+      Date.parse(signer.validFrom) < Date.parse(signer.validUntil),
+      'Invalid release trust signer');
+    signerWindows.push(`${signer.identity}:${signer.validFrom}:${signer.validUntil}`);
+  }
+  requireThat(new Set(signerWindows).size === signerWindows.length, 'Duplicate release trust signer window');
+  const orderedSigners = [...policy.signers].sort((left, right) =>
+    left.validFrom.localeCompare(right.validFrom) || left.identity.localeCompare(right.identity));
+  for (let index = 1; index < orderedSigners.length; index += 1) {
+    const previous = orderedSigners[index - 1];
+    const current = orderedSigners[index];
+    const overlap = Date.parse(previous.validUntil) - Date.parse(current.validFrom);
+    requireThat(overlap >= 0 && overlap <= policy.rotationOverlapSeconds * 1000,
+      'Invalid release trust signer rotation overlap');
+  }
+  requireThat(JSON.stringify(policy) === readFileSync(path, 'utf8').trim(), 'Release trust policy is not canonical');
+  return policy;
+}
+
+const metadataComponentKeys = ['frontend', 'mobile', 'backend', 'workerApplication',
+  'workerEngine', 'workerDistribution', 'workerCapability', 'artifacts'];
+const metadataSchemaKeys = ['configuration', 'storage', 'templates'];
+
+export function sha256Bytes(value) {
+  return createHash('sha256').update(value).digest('hex');
+}
+
+export function loadReleaseMetadata(version, path = resolve(repositoryRoot, 'release-metadata', `${version}.json`)) {
+  let serialized;
+  try { serialized = readFileSync(path, 'utf8'); } catch {
+    throw new ReleasePolicyError('Release metadata is unavailable or malformed');
+  }
+  let metadata;
+  try { metadata = JSON.parse(serialized); } catch {
+    throw new ReleasePolicyError('Release metadata is unavailable or malformed');
+  }
+  requireKeys(metadata, ['schema', 'version', 'releasePaths', 'minimumUpdater', 'components',
+    'schemas', 'migrations', 'operations', 'rollback', 'notes'], [], 'release metadata');
+  requireThat(metadata.schema === 3 && metadata.version === version &&
+    serialized === JSON.stringify(metadata), 'Release metadata is not canonical');
+  requireString(metadata.minimumUpdater, /^\d+\.\d+\.\d+$/, 'release minimum updater');
+  requireKeys(metadata.releasePaths, ['sourceReleaseIds', 'upgradeHops', 'allowedChannelPaths'], [], 'release paths');
+  requireThat(Array.isArray(metadata.releasePaths.sourceReleaseIds) && metadata.releasePaths.sourceReleaseIds.length > 0 &&
+    metadata.releasePaths.sourceReleaseIds.every(value => typeof value === 'string' && /^(stable|insider):\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.[1-9]\d*)?$/.test(value)) &&
+    Array.isArray(metadata.releasePaths.upgradeHops) && metadata.releasePaths.upgradeHops.length > 0 &&
+    metadata.releasePaths.upgradeHops.every(hop => Array.isArray(hop) && hop.length === 2 &&
+      hop.every(value => metadata.releasePaths.sourceReleaseIds.includes(value) || value === `stable:${version}`)) &&
+    Array.isArray(metadata.releasePaths.allowedChannelPaths) && metadata.releasePaths.allowedChannelPaths.length > 0 &&
+    metadata.releasePaths.allowedChannelPaths.every(path => Array.isArray(path) && path.length === 2 &&
+      path.every(channel => channel === 'stable' || channel === 'insider')), 'Invalid release paths');
+  requireKeys(metadata.components, metadataComponentKeys, [], 'release components');
+  for (const [name, component] of Object.entries(metadata.components)) {
+    requireKeys(component, (name.startsWith('worker') && name !== 'workerApplication') || name === 'artifacts'
+      ? [name === 'workerEngine' ? 'orcaslicer' : name === 'workerDistribution' ? 'source' : name === 'workerCapability' ? 'profiles' : 'format', 'platforms']
+      : ['application', 'platforms'], [], 'release component');
+    requireThat(Object.values(component).every(value => Array.isArray(value)
+      ? value.length > 0 && value.every(platform => /^((linux|ios)\/(amd64|arm64))$/.test(platform))
+      : typeof value === 'string' && value.length > 0 && !/^(supported|compatible|current-head|ensure-created)$/i.test(value)),
+    'Invalid release component requirement');
+  }
+  requireKeys(metadata.schemas, metadataSchemaKeys, [], 'release schema requirements');
+  for (const schema of Object.values(metadata.schemas)) {
+    requireKeys(schema, ['artifact', 'sha256', 'read', 'write'], [], 'release schema requirement');
+    requireString(schema.artifact, /^(?:[A-Za-z0-9._-]+\/)*[A-Za-z0-9._-]+$/, 'release schema artifact');
+    requireString(schema.sha256, hashPattern, 'release schema hash');
+    requireThat(Array.isArray(schema.read) && schema.read.length > 0 &&
+      schema.read.every(value => typeof value === 'string' && /^[1-9]\d*$/.test(value)) &&
+      typeof schema.write === 'string' && /^[1-9]\d*$/.test(schema.write), 'Invalid release schema range');
+  }
+  requireKeys(metadata.migrations, ['postgresql', 'sqlserver'], [], 'release migrations');
+  for (const provider of Object.values(metadata.migrations)) {
+    requireKeys(provider, ['AppDbContext', 'SlicerDbContext'], [], 'release provider migrations');
+    for (const head of Object.values(provider)) requireString(head, /^\d{14}_[A-Za-z][A-Za-z0-9]*$/, 'release migration head');
+  }
+  requireKeys(metadata.operations, ['ordered', 'backup', 'pull', 'verify', 'migrate', 'restart'], [], 'release operations');
+  requireThat(isDeepStrictEqual(metadata.operations.ordered, ['backup', 'pull', 'verify', 'migrate', 'restart']) &&
+    Object.entries(metadata.operations).filter(([key]) => key !== 'ordered').every(([, value]) =>
+      typeof value === 'string' && value.length > 0), 'Invalid release operation inputs');
+  requireKeys(metadata.rollback, ['class', 'evidence'], [], 'release rollback');
+  requireThat(['ImagesOnly', 'RestoreRequired', 'ForwardOnly'].includes(metadata.rollback.class) &&
+    typeof metadata.rollback.evidence === 'string' && metadata.rollback.evidence.length > 0, 'Invalid release rollback');
+  requireKeys(metadata.notes, ['compatibility', 'migration', 'downtime', 'backup', 'recovery'], [], 'release notes metadata');
+  for (const value of Object.values(metadata.notes)) requireThat(typeof value === 'string' && value.trim().length > 0, 'Invalid release notes metadata');
+  return metadata;
+}
+
+export function releaseMetadataEvidence(record, serialized, sourceArtifactBytes, capturedSourceCommit = record.sourceCommit) {
+  requireString(record.sourceCommit, shaPattern, 'release metadata source commit');
+  requireThat(capturedSourceCommit === record.sourceCommit,
+    'Release metadata checkout does not match the authorized source commit');
+  requireThat(typeof serialized === 'string' && serialized.length > 0, 'Release metadata bytes are unavailable');
+  let metadata;
+  try { metadata = JSON.parse(serialized); } catch {
+    throw new ReleasePolicyError('Release metadata bytes are malformed');
+  }
+  requireThat(serialized === JSON.stringify(metadata), 'Release metadata bytes are not canonical');
+  const metadataPath = resolve('.artifacts', 'release-authorization', 'source-release-metadata.json');
+  // Reuse the closed-schema loader without allowing the control checkout to supply the bytes.
+  const expected = loadReleaseMetadata(record.baseVersion, metadataPath);
+  requireThat(isDeepStrictEqual(metadata, expected), 'Release metadata parse divergence');
+  requireThat(sourceArtifactBytes && typeof sourceArtifactBytes === 'object', 'Release metadata artifacts are unavailable');
+  for (const schema of Object.values(metadata.schemas)) {
+    const bytes = sourceArtifactBytes[schema.artifact];
+    requireThat(typeof bytes === 'string' || Buffer.isBuffer(bytes), `Release metadata artifact is unavailable: ${schema.artifact}`);
+    requireThat(sha256Bytes(bytes) === schema.sha256,
+      `Release metadata artifact digest mismatch: ${schema.artifact}`);
+  }
+  return {
+    sourceCommit: record.sourceCommit,
+    path: `release-metadata/${record.baseVersion}.json`,
+    sha256: sha256Bytes(serialized),
+    bytes: serialized,
+    metadata,
+  };
 }
 
 export function requireString(value, pattern, description) {
@@ -172,7 +320,8 @@ function recordAdmission(record) {
 export function validateRecord(record, projected = false) {
   const fields = [
     'schema', ...admissionFields, ...channelFields(record), 'releaseId', 'canonicalVersion',
-    'sourceTag', 'allocationKey', 'created', ...(record?.channel === 'insider' ? ['sequence'] : []),
+    'sourceTag', 'allocationKey', 'created', 'stableSequence',
+    ...(record?.channel === 'insider' ? ['sequence'] : []),
     ...(projected ? ['buildTime', 'identitySha256'] : ['protection', ...(record?.channel === 'stable' ? ['qualification'] : [])]),
   ];
   requireKeys(record, fields, [], projected ? 'projected ledger record' : 'authorization');
@@ -183,6 +332,9 @@ export function validateRecord(record, projected = false) {
     record.channel === tag.channel && record.stage === tag.stage && record.sequence === tag.sequence &&
     record.releaseId === `${tag.channel}:${tag.canonicalVersion}` &&
     record.allocationKey === allocationKey(record), 'Invalid canonical record identity');
+  requireString(record.stableSequence, /^(0|[1-9][0-9]*)$/, 'stable release sequence');
+  if (record.channel === 'stable') requireThat(BigInt(record.stableSequence) > 0n,
+    'Stable authorization requires a positive stable sequence');
   requireTimestamp(record.created, 'authorization timestamp');
   if (projected) {
     requireThat(record.buildTime === record.created, 'Invalid projected record timestamp binding');
@@ -223,6 +375,9 @@ export function validatePublicAuthorization(identity) {
   for (const field of ['buildId', 'buildAttempt']) {
     requireString(identity[field], positivePattern, `public authorization ${field}`);
   }
+  requireString(identity.stableSequence, /^(0|[1-9][0-9]*)$/, 'public authorization stable sequence');
+  if (identity.channel === 'stable') requireThat(BigInt(identity.stableSequence) > 0n,
+    'Stable public authorization requires a positive stable sequence');
   requireTimestamp(identity.buildTime, 'authorization timestamp');
   requireString(identity.identitySha256, hashPattern, 'public authorization identity hash');
 }
@@ -250,6 +405,7 @@ export function writePublicSet(record, set, identitySha256) {
   requireString(identitySha256, hashPattern, 'public set identity hash');
   const identity = { ...publicAuthorization(record), identitySha256 };
   requireObject(set, 'public set');
+  requireKeys(set, ['schema', 'identity', 'managedEligible', 'images'], [], 'public set');
   requireThat(set.schema === 1 && set.managedEligible === false, 'Invalid public set schema/eligibility');
   requireObject(set.identity, 'public set identity');
   requireThat(hash(set.identity) === hash(identity) ||
@@ -264,13 +420,16 @@ export function writePublicSet(record, set, identitySha256) {
   for (const [name, expectedPlatforms] of Object.entries(components)) {
     const image = set.images[name];
     requireObject(image, 'public set image');
+    requireKeys(image, ['digest', 'platforms'], [], 'public set image');
     const digest = publicDigest(image.digest);
     requireKeys(image.platforms, expectedPlatforms, [], 'public set platform');
     const platforms = {};
     for (const platform of expectedPlatforms) {
       const value = image.platforms[platform];
       requireObject(value, 'public set platform');
+      requireKeys(value, ['digest', 'labels'], [], 'public set platform');
       requireObject(value.labels, 'public set labels');
+      requireKeys(value.labels, Object.keys(labels), [], 'public set labels');
       for (const [key, expected] of Object.entries(labels)) {
         requireThat(Object.hasOwn(value.labels, key) && value.labels[key] === expected, 'Invalid public set identity label');
       }
@@ -281,13 +440,316 @@ export function writePublicSet(record, set, identitySha256) {
   return { schema: 1, identity, managedEligible: false, images };
 }
 
+function validateManifestCryptoEvidence(evidence, completeSet, trust) {
+  try {
+    validateEvidenceSet(evidence, completeSet, trust);
+  } catch (error) {
+    throw new ReleasePolicyError(error.message);
+  }
+}
+
+export function releaseManifest(record, set, identitySha256, releaseNotesSha256, metadataEvidence, cryptoEvidence) {
+  requireString(releaseNotesSha256, hashPattern, 'release notes hash');
+  const completeSet = writePublicSet(record, set, identitySha256);
+  const maximumExclusive = `${BigInt(completeSet.identity.baseVersion.split('.')[0]) + 1n}.0.0`;
+  const expiresAt = new Date(Date.parse(completeSet.identity.buildTime) + 30 * 24 * 60 * 60 * 1000).toISOString();
+  const qualification = record.channel === 'stable'
+    ? publicLedgerQualification(record.qualification, record.sourceCommit)
+    : undefined;
+  const trustPolicy = loadReleaseTrustPolicy();
+  requireThat(!trustPolicy.revokedReleaseIds.includes(record.releaseId) &&
+    !trustPolicy.revokedSignerIdentities.includes(publisherWorkflowIdentity),
+  'Release signer or release ID is revoked');
+  const signingWindow = trustPolicy.signers.filter(signer => signer.identity === publisherWorkflowIdentity &&
+    Date.parse(signer.validFrom) <= Date.parse(record.created) &&
+    Date.parse(record.created) <= Date.parse(signer.validUntil));
+  requireThat(signingWindow.length === 1, 'Release signer is not valid for the captured authorization time');
+  const releaseMetadata = metadataEvidence?.metadata ?? metadataEvidence ?? loadReleaseMetadata(record.baseVersion);
+  const metadataBytes = metadataEvidence?.bytes ?? JSON.stringify(releaseMetadata);
+  requireThat(metadataEvidence === undefined || !metadataEvidence.metadata || (
+    metadataEvidence.sourceCommit === record.sourceCommit &&
+    metadataEvidence.path === `release-metadata/${record.baseVersion}.json` &&
+    metadataEvidence.sha256 === sha256Bytes(metadataBytes) &&
+    isDeepStrictEqual(metadataEvidence.metadata, releaseMetadata) &&
+    metadataBytes === JSON.stringify(releaseMetadata)),
+  'Release metadata differs from qualified source metadata');
+  requireThat(cryptoEvidence?.schema === 1 && typeof cryptoEvidence.sha256 === 'string' &&
+    hashPattern.test(cryptoEvidence.sha256) && cryptoEvidence.services, 'Missing immutable crypto evidence');
+  requireTimestamp(cryptoEvidence.verificationTime, 'post-sign evidence verification time');
+  requireThat(Date.parse(record.created) <= Date.parse(cryptoEvidence.verificationTime),
+    'Evidence verification predates authorization');
+  requireThat(cryptoEvidence.createdTime === record.created, 'Crypto evidence creation time differs from authorization');
+  validateManifestCryptoEvidence({
+    schema: cryptoEvidence.schema, createdTime: cryptoEvidence.createdTime,
+    verificationTime: cryptoEvidence.verificationTime, services: cryptoEvidence.services,
+  }, completeSet, {
+    policy: trustPolicy, releaseId: record.releaseId, createdTime: record.created,
+    trustedTime: cryptoEvidence.verificationTime,
+  });
+  const directHotfix = qualification?.mode === 'hotfix'
+    ? { mode: 'direct-hotfix', reasonSha256: qualification.reasonSha256 }
+    : undefined;
+  const promotion = qualification?.mode === 'promotion'
+    ? { mode: 'promotion', origin: qualification.promotionOrigin, treeEvidence: qualification.treeEvidence }
+    : undefined;
+  return {
+    schema: 2,
+    identity: completeSet.identity,
+    completeSet,
+    lifecycle: {
+      releaseId: completeSet.identity.releaseId, channel: completeSet.identity.channel,
+      publishedAt: completeSet.identity.buildTime, expiresAt,
+      sequence: completeSet.identity.channel === 'insider'
+        ? parseTag(completeSet.identity.sourceTag).sequence : completeSet.identity.stableSequence,
+      cadence: completeSet.identity.channel === 'insider' ? 'continuous' : 'promoted',
+      releaseNotes: { url: `https://github.com/${repository}/releases/download/${completeSet.identity.sourceTag}/release-notes.md`,
+        sha256: releaseNotesSha256 },
+      signing: { identity: publisherWorkflowIdentity, workflowCommit: record.workflowCommit },
+    },
+    provenance: {
+      source: { tag: record.sourceTag, commit: record.sourceCommit, branch: record.sourceBranch,
+        authorizedBranchHead: record.authorizedBranchHead },
+      workflow: { identity: record.workflowIdentity, commit: record.workflowCommit,
+        buildId: record.buildId, buildAttempt: record.buildAttempt, allocationKey: record.allocationKey },
+      authorization: { identitySha256: completeSet.identity.identitySha256,
+        protectionDigest: record.protection.policyDigest },
+      ...(promotion ?? directHotfix ?? { mode: 'insider' }),
+    },
+    evidence: {
+      schema: 2, trust: { signer: publisherWorkflowIdentity, issuer: trustPolicy.issuer,
+        provenance: 'control-workflow', workflowCommit: record.workflowCommit,
+        policyDigest: record.protection.policyDigest, trustPolicySha256: hash(trustPolicy),
+        createdTime: record.created, verificationTime: cryptoEvidence.verificationTime },
+      releaseMetadata: {
+        schema: releaseMetadata.schema, version: releaseMetadata.version, sha256: sha256Bytes(metadataBytes),
+        sourceCommit: metadataEvidence?.sourceCommit ?? record.sourceCommit,
+        path: metadataEvidence?.path ?? `release-metadata/${record.baseVersion}.json`,
+      },
+      services: cryptoEvidence.services,
+      cryptoEvidence: { schema: 1, sha256: cryptoEvidence.sha256 },
+    },
+    compatibility: {
+      schema: 3, managedEligible: releaseMetadata.releasePaths.allowedChannelPaths.some(path =>
+        path[1] === completeSet.identity.channel), releaseMetadata,
+      api: { minimum: completeSet.identity.baseVersion, maximumExclusive },
+      services: Object.fromEntries(Object.keys(components).map(service => [service, {
+        required: true, platforms: components[service],
+      }])),
+      storage: releaseMetadata.schemas.storage,
+      configuration: { configuration: releaseMetadata.schemas.configuration, templates: releaseMetadata.schemas.templates },
+      updater: { minimum: releaseMetadata.minimumUpdater, strategy: 'digest-pinned', fixedSteps: releaseMetadata.operations.ordered },
+    },
+    consumption: {
+      schema: 1,
+      immutableReleaseSet: 'signed-complete-set',
+      manualUpdate: { releaseSet: 'signed-complete-set', hostAuthorization: 'one-time-manual-approval' },
+      autoUpdate: {
+        releaseSet: 'signed-complete-set',
+        hostAuthorization: 'bounded-administrator-standing-permission',
+        hostPolicy: 'issue-2665-2666',
+      },
+      publisherApproval: 'publication-only',
+    },
+    migration: { schema: 3, managedEligible: releaseMetadata.releasePaths.allowedChannelPaths.some(path =>
+      path[1] === completeSet.identity.channel), providers: releaseMetadata.migrations,
+      operations: releaseMetadata.operations, rollback: releaseMetadata.rollback },
+  };
+}
+
+export function validateReleaseManifest(manifest) {
+  requireKeys(manifest, ['schema', 'identity', 'completeSet', 'lifecycle', 'provenance', 'evidence', 'compatibility', 'consumption', 'migration'],
+    [], 'release manifest');
+  requireThat(manifest.schema === 2, 'Invalid release manifest schema');
+  requireObject(manifest.identity, 'release manifest identity');
+  validatePublicAuthorization(manifest.identity);
+  requireObject(manifest.completeSet, 'release manifest complete set');
+  requireThat(hash(manifest.completeSet.identity) === hash(manifest.identity),
+    'Release manifest identity mismatch');
+  const canonicalSet = writePublicSet(manifest.completeSet.identity, manifest.completeSet,
+    manifest.identity.identitySha256);
+  requireThat(isDeepStrictEqual(manifest.completeSet, canonicalSet),
+    'Release manifest complete set is not canonical');
+  const { identity, lifecycle, provenance, evidence, compatibility, migration } = manifest;
+  requireKeys(lifecycle, ['releaseId', 'channel', 'publishedAt', 'expiresAt', 'sequence', 'cadence', 'releaseNotes', 'signing'], [], 'release lifecycle');
+  const tag = parseTag(identity.sourceTag);
+  const expectedExpiry = new Date(Date.parse(identity.buildTime) + 30 * 24 * 60 * 60 * 1000).toISOString();
+  requireThat(lifecycle.releaseId === identity.releaseId && lifecycle.channel === identity.channel &&
+    lifecycle.publishedAt === identity.buildTime && lifecycle.expiresAt === expectedExpiry &&
+    lifecycle.sequence === (identity.channel === 'insider' ? tag.sequence : identity.stableSequence) &&
+    lifecycle.cadence === (identity.channel === 'insider' ? 'continuous' : 'promoted'),
+  'Invalid release lifecycle binding');
+  requireTimestamp(lifecycle.publishedAt, 'release publication time');
+  requireTimestamp(lifecycle.expiresAt, 'release expiry time');
+  requireKeys(lifecycle.releaseNotes, ['url', 'sha256'], [], 'release notes');
+  requireThat(lifecycle.releaseNotes.url ===
+    `https://github.com/${repository}/releases/download/${identity.sourceTag}/release-notes.md`,
+  'Invalid release notes URL');
+  requireString(lifecycle.releaseNotes.sha256, hashPattern, 'release notes hash');
+  requireKeys(lifecycle.signing, ['identity', 'workflowCommit'], [], 'release signing');
+  requireThat(lifecycle.signing.identity === publisherWorkflowIdentity, 'Invalid release signing identity');
+  requireString(lifecycle.signing.workflowCommit, shaPattern, 'release signing workflow commit');
+  requireKeys(provenance, ['source', 'workflow', 'authorization', 'mode',
+    ...(provenance.mode === 'promotion' ? ['origin', 'treeEvidence'] : provenance.mode === 'direct-hotfix' ? ['reasonSha256'] : [])],
+  [], 'release provenance');
+  requireKeys(provenance.source, ['tag', 'commit', 'branch', 'authorizedBranchHead'], [], 'release source provenance');
+  requireThat(provenance.source.tag === identity.sourceTag && provenance.source.commit === identity.sourceCommit &&
+    provenance.source.branch === identity.sourceBranch && provenance.source.authorizedBranchHead === identity.authorizedBranchHead,
+  'Invalid release source provenance');
+  requireKeys(provenance.workflow, ['identity', 'commit', 'buildId', 'buildAttempt', 'allocationKey'], [], 'release workflow provenance');
+  requireThat(provenance.workflow.identity === identity.workflowIdentity &&
+    provenance.workflow.commit === lifecycle.signing.workflowCommit &&
+    provenance.workflow.buildId === identity.buildId && provenance.workflow.buildAttempt === identity.buildAttempt,
+  'Invalid release workflow provenance');
+  requireString(provenance.workflow.allocationKey, hashPattern, 'release workflow allocation key');
+  requireKeys(provenance.authorization, ['identitySha256', 'protectionDigest'], [], 'release authorization provenance');
+  requireThat(provenance.authorization.identitySha256 === identity.identitySha256, 'Invalid release authorization binding');
+  requireString(provenance.authorization.protectionDigest, hashPattern, 'release protection hash');
+  requireThat(['insider', 'promotion', 'direct-hotfix'].includes(provenance.mode), 'Invalid release provenance mode');
+  if (provenance.mode === 'insider') requireThat(identity.channel === 'insider', 'Stable release requires qualification provenance');
+  if (provenance.mode === 'promotion') {
+    requireThat(identity.channel === 'stable', 'Promotion must be stable');
+    publicLedgerQualification({ schema: 1, sourceCommit: identity.sourceCommit, reviewed: true, tests: true,
+      compatibility: true, migrations: true, recovery: true, mode: 'promotion',
+      promotionOrigin: provenance.origin, treeEvidence: provenance.treeEvidence }, identity.sourceCommit);
+  }
+  if (provenance.mode === 'direct-hotfix') {
+    requireThat(identity.channel === 'stable', 'Direct hotfix must be stable');
+    requireString(provenance.reasonSha256, hashPattern, 'direct hotfix reason');
+  }
+  requireKeys(evidence, ['schema', 'trust', 'releaseMetadata', 'services', 'cryptoEvidence'], [], 'release evidence');
+  requireThat(evidence.schema === 2, 'Invalid release evidence schema');
+  requireKeys(evidence.trust, ['signer', 'issuer', 'provenance', 'workflowCommit', 'policyDigest', 'trustPolicySha256', 'createdTime', 'verificationTime'], [], 'release trust evidence');
+  requireThat(evidence.trust.signer === publisherWorkflowIdentity &&
+    evidence.trust.issuer === 'https://token.actions.githubusercontent.com' &&
+    evidence.trust.provenance === 'control-workflow' &&
+    shaPattern.test(evidence.trust.workflowCommit), 'Invalid release trust identity');
+  requireString(evidence.trust.policyDigest, hashPattern, 'release trust policyDigest');
+  requireTimestamp(evidence.trust.createdTime, 'authorization creation time');
+  requireTimestamp(evidence.trust.verificationTime, 'post-sign evidence verification time');
+  requireThat(evidence.trust.workflowCommit === lifecycle.signing.workflowCommit &&
+    evidence.trust.policyDigest === provenance.authorization.protectionDigest &&
+    evidence.trust.createdTime === identity.buildTime,
+  'Release trust binding mismatch');
+  requireThat(Date.parse(evidence.trust.createdTime) <= Date.parse(evidence.trust.verificationTime),
+    'Evidence verification predates authorization');
+  const trustPolicy = loadReleaseTrustPolicy();
+  requireThat(!trustPolicy.revokedReleaseIds.includes(identity.releaseId) &&
+    !trustPolicy.revokedSignerIdentities.includes(evidence.trust.signer) &&
+    trustPolicy.signers.filter(signer => signer.identity === evidence.trust.signer &&
+      Date.parse(signer.validFrom) <= Date.parse(identity.buildTime) &&
+      Date.parse(identity.buildTime) <= Date.parse(signer.validUntil)).length === 1 &&
+    evidence.trust.trustPolicySha256 === hash(trustPolicy),
+    'Release trust policy hash mismatch');
+  requireKeys(evidence.releaseMetadata, ['schema', 'version', 'sha256', 'sourceCommit', 'path'], [], 'release metadata evidence');
+  const metadata = compatibility.releaseMetadata;
+  requireThat(evidence.releaseMetadata.schema === 3 && evidence.releaseMetadata.version === identity.baseVersion &&
+    evidence.releaseMetadata.sourceCommit === identity.sourceCommit &&
+    evidence.releaseMetadata.path === `release-metadata/${identity.baseVersion}.json` &&
+    evidence.releaseMetadata.sha256 === sha256Bytes(JSON.stringify(metadata)),
+  'Release metadata hash mismatch');
+  requireThat(evidence.cryptoEvidence.schema === 1 && hashPattern.test(evidence.cryptoEvidence.sha256),
+    'Invalid immutable crypto evidence binding');
+  validateManifestCryptoEvidence({
+    schema: evidence.cryptoEvidence.schema,
+    createdTime: evidence.trust.createdTime,
+    verificationTime: evidence.trust.verificationTime,
+    services: evidence.services,
+  }, manifest.completeSet, {
+    policy: trustPolicy, releaseId: identity.releaseId, createdTime: evidence.trust.createdTime,
+  });
+  requireThat(evidence.cryptoEvidence.sha256 === sha256Bytes(JSON.stringify({
+    schema: 1, createdTime: evidence.trust.createdTime,
+    verificationTime: evidence.trust.verificationTime, services: evidence.services,
+  })), 'Immutable crypto evidence digest mismatch');
+  requireKeys(compatibility, ['schema', 'managedEligible', 'releaseMetadata', 'api', 'services', 'storage', 'configuration', 'updater'], [], 'release compatibility');
+  requireThat(compatibility.schema === 3 && compatibility.managedEligible ===
+    metadata.releasePaths.allowedChannelPaths.some(path => path[1] === identity.channel), 'Release compatibility is not eligible');
+  requireKeys(compatibility.api, ['minimum', 'maximumExclusive'], [], 'release API compatibility');
+  parseTag(`v${compatibility.api.minimum}`); parseTag(`v${compatibility.api.maximumExclusive}`);
+  requireThat(compatibility.api.minimum === identity.baseVersion &&
+    compatibility.api.maximumExclusive === `${BigInt(identity.baseVersion.split('.')[0]) + 1n}.0.0`,
+  'Invalid release API compatibility range');
+  requireKeys(compatibility.services, Object.keys(components), [], 'release service compatibility');
+  for (const service of Object.keys(components)) {
+    requireKeys(compatibility.services[service], ['required', 'platforms'], [], 'release service compatibility');
+    requireThat(compatibility.services[service].required === true &&
+      isDeepStrictEqual(compatibility.services[service].platforms, components[service]), 'Invalid release service platforms');
+  }
+
+  requireThat(hash(compatibility.storage) === hash(metadata.schemas.storage), 'Release storage compatibility mismatch');
+  requireKeys(compatibility.configuration, ['configuration', 'templates'], [], 'release configuration compatibility');
+  requireThat(hash(compatibility.configuration.configuration) === hash(metadata.schemas.configuration) &&
+    hash(compatibility.configuration.templates) === hash(metadata.schemas.templates), 'Release configuration compatibility mismatch');
+  requireKeys(compatibility.updater, ['minimum', 'strategy', 'fixedSteps'], [], 'release updater compatibility');
+  requireThat(compatibility.updater.minimum === metadata.minimumUpdater && compatibility.updater.strategy === 'digest-pinned' &&
+    isDeepStrictEqual(compatibility.updater.fixedSteps, metadata.operations.ordered), 'Invalid release updater');
+  requireKeys(manifest.consumption, ['schema', 'immutableReleaseSet', 'manualUpdate', 'autoUpdate', 'publisherApproval'],
+    [], 'release consumption');
+  const { consumption } = manifest;
+  requireThat(consumption.schema === 1 && consumption.immutableReleaseSet === 'signed-complete-set' &&
+    consumption.publisherApproval === 'publication-only', 'Invalid release consumption authority');
+  requireKeys(consumption.manualUpdate, ['releaseSet', 'hostAuthorization'], [], 'manual update consumption');
+  requireThat(consumption.manualUpdate.releaseSet === consumption.immutableReleaseSet &&
+    consumption.manualUpdate.hostAuthorization === 'one-time-manual-approval', 'Invalid manual update consumption');
+  requireKeys(consumption.autoUpdate, ['releaseSet', 'hostAuthorization', 'hostPolicy'], [], 'auto-update consumption');
+  requireThat(consumption.autoUpdate.releaseSet === consumption.immutableReleaseSet &&
+    consumption.autoUpdate.hostAuthorization === 'bounded-administrator-standing-permission' &&
+    consumption.autoUpdate.hostPolicy === 'issue-2665-2666', 'Invalid auto-update consumption');
+  requireKeys(migration, ['schema', 'managedEligible', 'providers', 'operations', 'rollback'], [], 'release migration');
+  requireThat(migration.schema === 3 && migration.managedEligible === compatibility.managedEligible &&
+    hash(migration.providers) === hash(metadata.migrations) && hash(migration.operations) === hash(metadata.operations) &&
+    hash(migration.rollback) === hash(metadata.rollback), 'Release migration metadata binding mismatch');
+  return manifest;
+}
+
+export function releaseManifestEnvelope(manifest) {
+  validateReleaseManifest(manifest);
+  return {
+    schema: 1,
+    releaseId: manifest.identity.releaseId,
+    canonicalVersion: manifest.identity.canonicalVersion,
+    channel: manifest.identity.channel,
+    sourceCommit: manifest.identity.sourceCommit,
+    identitySha256: manifest.identity.identitySha256,
+    manifestSha256: releaseManifestSha256(JSON.stringify(manifest)),
+  };
+}
+
+export function releaseManifestSha256(serializedManifest) {
+  requireThat(typeof serializedManifest === 'string', 'Invalid serialized release manifest');
+  return createHash('sha256').update(serializedManifest).digest('hex');
+}
+
+export function validateReleaseManifestBytes(serializedManifest, envelope) {
+  requireThat(typeof serializedManifest === 'string', 'Invalid serialized release manifest');
+  let manifest;
+  try { manifest = JSON.parse(serializedManifest); } catch {
+    throw new ReleasePolicyError('Malformed serialized release manifest');
+  }
+  requireThat(serializedManifest === JSON.stringify(manifest),
+    'Release manifest serialization is not canonical');
+  validateReleaseManifestEnvelope(envelope, manifest);
+  requireThat(releaseManifestSha256(serializedManifest) === envelope.manifestSha256,
+    'Published release manifest digest mismatch');
+  return manifest;
+}
+
+export function validateReleaseManifestEnvelope(envelope, manifest) {
+  validateReleaseManifest(manifest);
+  requireKeys(envelope, ['schema', 'releaseId', 'canonicalVersion', 'channel', 'sourceCommit',
+    'identitySha256', 'manifestSha256'], [], 'release manifest envelope');
+  const expected = releaseManifestEnvelope(manifest);
+  requireThat(hash(envelope) === hash(expected), 'Release manifest envelope mismatch');
+  return envelope;
+}
+
 export function validateApprovalMode(mode) {
   requireThat(['single-maintainer', 'separation-of-duties'].includes(mode),
     'Owner blocker: RELEASE_APPROVAL_MODE must be single-maintainer or separation-of-duties');
   return mode;
 }
 
-function approvedReviewers(value) {
+export function approvedReviewers(value) {
   if (value === undefined || value === '') return ['jpapiez'];
   let reviewers;
   try { reviewers = JSON.parse(value); } catch {
@@ -475,8 +937,13 @@ export function validateLedger(state, anchor) {
     shaPattern.test(anchor) && state.anchor === anchor,
     'Ledger missing or continuity anchor mismatch: owner recovery required');
   requireString(state.counter, /^(0|[1-9][0-9]*)$/, 'ledger counter');
-  for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications']) {
+  for (const field of ['reservations', 'identities', 'pointers', 'stages', 'qualifications', 'channelSequences']) {
     requireObject(state[field], `public ledger ${field}`);
+  }
+  requireKeys(state.channelSequences, ['insider', 'stable'], [], 'public ledger channel sequences');
+  for (const [channel, sequence] of Object.entries(state.channelSequences)) {
+    requireThat(['insider', 'stable'].includes(channel), 'Invalid public ledger sequence channel');
+    requireString(sequence, /^(0|[1-9][0-9]*)$/, 'public ledger channel sequence');
   }
   if (Object.hasOwn(state, 'lastHistoricalStable')) {
     requireThat(typeof state.lastHistoricalStable === 'string' &&
@@ -489,14 +956,17 @@ export function validateLedger(state, anchor) {
       'Ledger identity continuity violation');
   }
   const sequences = new Set();
+  const stableSequences = new Set();
+  let pendingStableReservations = 0;
+  let highestInsiderSequence = 0n;
   for (const [key, reservation] of Object.entries(state.reservations)) {
     requireString(key, hashPattern, 'ledger allocation key');
     requireObject(reservation, 'public ledger reservation');
     const projected = Object.hasOwn(reservation, 'identitySha256') || Object.hasOwn(reservation.record ?? {}, 'identitySha256');
-    requireKeys(reservation, ['admission', 'record',
+    requireKeys(reservation, ['admission', 'record', 'stableSequence',
       ...(projected ? ['identitySha256'] : []),
       ...(reservation.record?.channel === 'insider' ? ['sequence'] : [])],
-    ['tagObject', 'tagPublished', 'setHash', 'set'], 'public ledger reservation');
+    ['tagObject', 'tagPublished', 'setHash', 'set', 'abandonment'], 'public ledger reservation');
     validateRecord(reservation.record, projected);
     validateAdmission(reservation.admission);
     requireThat(Object.entries(reservation.admission).every(([field, value]) => reservation.record[field] === value),
@@ -505,26 +975,64 @@ export function validateLedger(state, anchor) {
       'Ledger authorization hash mismatch');
     requireThat(reservation.record.allocationKey === key &&
       state.identities[reservation.record.canonicalVersion] === key &&
-      reservation.sequence === reservation.record.sequence, 'Ledger identity continuity violation');
+      reservation.sequence === reservation.record.sequence &&
+      reservation.stableSequence === reservation.record.stableSequence, 'Ledger identity continuity violation');
+    requireString(reservation.stableSequence, /^(0|[1-9][0-9]*)$/, 'ledger stable sequence');
     if (Object.hasOwn(reservation, 'tagObject')) requireString(reservation.tagObject, shaPattern, 'public ledger tag object');
     if (Object.hasOwn(reservation, 'tagPublished')) requireThat(reservation.tagPublished === true &&
       reservation.tagObject, 'Invalid public ledger tag publication claim');
     requireThat(Object.hasOwn(reservation, 'setHash') === Object.hasOwn(reservation, 'set'),
       'Incomplete public ledger set/hash');
+    if (Object.hasOwn(reservation, 'abandonment')) {
+      requireKeys(reservation.abandonment, ['schema', 'allocationKey', 'sourceCommit', 'canonicalVersion',
+        'channel', 'identitySha256', 'approvalRunId', 'approvalRunAttempt', 'approvalJobId',
+        'approvalEnvironment', 'approvalTarget', 'ownerApprovedAt'], [], 'reservation abandonment');
+      const abandonment = reservation.abandonment;
+      requireThat(abandonment.schema === 1 && abandonment.allocationKey === key &&
+        abandonment.sourceCommit === reservation.record.sourceCommit &&
+        abandonment.canonicalVersion === reservation.record.canonicalVersion &&
+        abandonment.channel === reservation.record.channel &&
+        abandonment.identitySha256 === (reservation.identitySha256 ?? hash(reservation.record)) &&
+        hashPattern.test(abandonment.identitySha256) &&
+        positivePattern.test(abandonment.approvalRunId) &&
+        positivePattern.test(abandonment.approvalRunAttempt) &&
+        positivePattern.test(abandonment.approvalJobId) &&
+        abandonment.approvalEnvironment === `release-${reservation.record.channel}` &&
+        abandonment.approvalTarget === key &&
+        typeof abandonment.ownerApprovedAt === 'string' &&
+        Number.isFinite(Date.parse(abandonment.ownerApprovedAt)) &&
+        new Date(abandonment.ownerApprovedAt).toISOString() === abandonment.ownerApprovedAt &&
+        reservation.set === undefined,
+      'Invalid terminal reservation abandonment');
+    }
     if (Object.hasOwn(reservation, 'set')) {
       requireString(reservation.setHash, hashPattern, 'public ledger set hash');
       requireThat(reservation.setHash === hash(writePublicSet(reservation.record, reservation.set,
         reservation.identitySha256 ?? hash(reservation.record))), 'Public set hash mismatch');
     }
     if (reservation.sequence) {
-      requireThat(BigInt(reservation.sequence) <= BigInt(state.counter) &&
+      requireThat(BigInt(reservation.sequence) <= BigInt(state.channelSequences.insider) &&
         !sequences.has(reservation.sequence), 'Ledger sequence continuity violation');
       sequences.add(reservation.sequence);
+      if (BigInt(reservation.sequence) > highestInsiderSequence) {
+        highestInsiderSequence = BigInt(reservation.sequence);
+      }
       requireThat(state.stages[reservation.record.baseVersion] &&
         compareVersions(state.stages[reservation.record.baseVersion], reservation.record.canonicalVersion) >= 0,
       'Ledger stage continuity violation');
     }
     if (reservation.record.channel === 'stable') {
+      requireThat(!stableSequences.has(reservation.stableSequence),
+        'Stable sequence replay, regression, or cross-channel substitution');
+      stableSequences.add(reservation.stableSequence);
+      if (reservation.set === undefined) {
+        pendingStableReservations++;
+        requireThat(reservation.stableSequence === (BigInt(state.channelSequences.stable) + 1n).toString(),
+          'Pending stable reservation is not the next durable stable sequence');
+      } else {
+        requireThat(BigInt(reservation.stableSequence) <= BigInt(state.channelSequences.stable),
+          'Stable sequence exceeds durable high-water mark');
+      }
       const qualification = state.qualifications[reservation.record.sourceCommit];
       publicLedgerQualification(qualification, reservation.record.sourceCommit);
       if (qualification.mode === 'promotion') requireThat(
@@ -541,20 +1049,82 @@ export function validateLedger(state, anchor) {
     requireThat(tag.channel === 'insider' && tag.baseVersion === base && state.identities[version],
       'Invalid public ledger stage');
   }
+  requireThat(BigInt(state.counter) >= highestInsiderSequence &&
+    BigInt(state.channelSequences.insider) >= highestInsiderSequence,
+  'Ledger sequence continuity violation');
+  requireThat(pendingStableReservations <= 1,
+    'Overlapping unadvanced stable reservations are not allowed');
   for (const [channel, pointer] of Object.entries(state.pointers)) {
-    requireKeys(pointer, ['releaseId', 'canonicalVersion', 'sourceCommit', 'setHash', 'allocationKey'],
+    requireKeys(pointer, ['releaseId', 'canonicalVersion', 'channel', 'sourceCommit', 'allocationKey',
+      'identitySha256', 'stableSequence', 'manifestSha256', 'envelopeSha256', 'manifestEnvelopeSha256'],
       [], 'public ledger pointer');
     requireThat(['stable', 'insider'].includes(channel), 'Invalid public ledger pointer channel');
     const reservation = state.reservations[pointer.allocationKey];
     requireThat(reservation?.set && reservation.record.channel === channel &&
-      pointer.setHash === reservation.setHash && pointer.releaseId === reservation.record.releaseId &&
+      pointer.channel === channel && pointer.identitySha256 === (reservation.identitySha256 ?? hash(reservation.record)) &&
+      pointer.releaseId === reservation.record.releaseId &&
       pointer.canonicalVersion === reservation.record.canonicalVersion &&
-      pointer.sourceCommit === reservation.record.sourceCommit, 'Invalid public ledger pointer binding');
+      pointer.sourceCommit === reservation.record.sourceCommit &&
+      pointer.stableSequence === reservation.stableSequence &&
+      [pointer.identitySha256, pointer.manifestSha256, pointer.envelopeSha256, pointer.manifestEnvelopeSha256]
+        .every(value => hashPattern.test(value)) &&
+      pointer.manifestEnvelopeSha256 === hash({
+        manifestSha256: pointer.manifestSha256,
+        envelopeSha256: pointer.envelopeSha256,
+      }), 'Invalid public ledger pointer binding');
+    if (channel === 'stable') {
+      requireThat(pointer.stableSequence === reservation.stableSequence &&
+        pointer.stableSequence === reservation.record.stableSequence &&
+        BigInt(pointer.stableSequence) === BigInt(state.channelSequences.stable) &&
+        BigInt(pointer.stableSequence) > 0n,
+      'Stable pointer sequence replay, regression, or cross-channel substitution');
+    } else {
+      requireThat(BigInt(reservation.record.sequence) <= BigInt(state.channelSequences.insider),
+        'Insider pointer sequence replay, regression, or cross-channel substitution');
+    }
   }
   for (const [sourceCommit, qualification] of Object.entries(state.qualifications)) {
     publicLedgerQualification(qualification, sourceCommit);
     if (qualification.mode === 'promotion') validatePromotionOrigin(state, qualification);
   }
+}
+
+export function migrateLegacyLedger(legacy, anchor) {
+  requireThat(legacy?.schema === 1 && legacy.anchor === anchor && !Object.hasOwn(legacy, 'channelSequences'),
+    'Ledger is not a pre-stable-sequence state');
+  requireKeys(legacy, ['schema', 'anchor', 'counter', 'reservations', 'identities', 'pointers', 'stages', 'qualifications'],
+    ['lastHistoricalStable'], 'legacy public ledger');
+  requireThat(Object.keys(legacy.pointers).length === 0,
+    'Legacy signed pointers require owner recovery; migration cannot replace signed identities');
+  const migrated = structuredClone(legacy);
+  const stableReservations = Object.values(migrated.reservations)
+    .filter(reservation => reservation?.record?.channel === 'stable')
+    .sort((left, right) => compareVersions(left.record.canonicalVersion, right.record.canonicalVersion));
+  requireThat(stableReservations.length <= 1,
+    'Overlapping legacy stable reservations require owner recovery');
+  for (const [index, reservation] of stableReservations.entries()) {
+    const stableSequence = (BigInt(index) + 1n).toString();
+    requireThat(!Object.hasOwn(reservation, 'identitySha256') && !Object.hasOwn(reservation, 'set') &&
+      !Object.hasOwn(reservation, 'tagObject') && !Object.hasOwn(reservation, 'tagPublished'),
+      'Legacy signed reservation requires owner recovery; migration cannot replace signed identities');
+    reservation.stableSequence = stableSequence;
+    reservation.record.stableSequence = stableSequence;
+  }
+  for (const reservation of Object.values(migrated.reservations)) {
+    if (reservation.record.channel !== 'insider') continue;
+    requireThat(!Object.hasOwn(reservation, 'identitySha256') && !Object.hasOwn(reservation, 'set') &&
+      !Object.hasOwn(reservation, 'tagObject') && !Object.hasOwn(reservation, 'tagPublished') &&
+      !Object.hasOwn(reservation, 'abandonment'),
+    'Legacy signed reservation requires owner recovery; migration cannot replace signed identities');
+    reservation.stableSequence = '0';
+    reservation.record.stableSequence = '0';
+  }
+  migrated.channelSequences = {
+    insider: migrated.counter,
+    stable: '0',
+  };
+  validateLedger(migrated, anchor);
+  return migrated;
 }
 
 export function publicLedgerQualification(qualification, sourceCommit) {
@@ -572,20 +1142,26 @@ export function publicLedgerQualification(qualification, sourceCommit) {
   };
   if (qualification.mode === 'promotion') {
     const origin = qualification.promotionOrigin;
-    requireKeys(origin, ['allocationKey', 'releaseId', 'sourceCommit', 'setHash'], [], 'public ledger promotion qualification');
-    for (const field of ['allocationKey', 'setHash']) requireString(origin[field], hashPattern, 'public ledger promotion qualification hash');
+    requireKeys(origin, ['allocationKey', 'releaseId', 'sourceCommit', 'manifestSha256', 'envelopeSha256'],
+      [], 'public ledger promotion qualification');
+    for (const field of ['allocationKey', 'manifestSha256', 'envelopeSha256']) {
+      requireString(origin[field], hashPattern, 'public ledger promotion qualification hash');
+    }
     requireString(origin.sourceCommit, shaPattern, 'public ledger promotion qualification source');
     requireThat(origin && !Array.isArray(origin) &&
-      Object.keys(origin).sort().join() === ['allocationKey', 'releaseId', 'sourceCommit', 'setHash'].sort().join() &&
+      Object.keys(origin).sort().join() ===
+        ['allocationKey', 'releaseId', 'sourceCommit', 'manifestSha256', 'envelopeSha256'].sort().join() &&
       typeof origin.allocationKey === 'string' && /^[a-f0-9]{64}$/.test(origin.allocationKey) &&
-      typeof origin.setHash === 'string' && /^[a-f0-9]{64}$/.test(origin.setHash) &&
+      typeof origin.manifestSha256 === 'string' && /^[a-f0-9]{64}$/.test(origin.manifestSha256) &&
+      typeof origin.envelopeSha256 === 'string' && /^[a-f0-9]{64}$/.test(origin.envelopeSha256) &&
       typeof origin.sourceCommit === 'string' && shaPattern.test(origin.sourceCommit) &&
       typeof origin.releaseId === 'string' && origin.releaseId.startsWith('insider:') &&
       parseTag(`v${origin.releaseId.slice('insider:'.length)}`).channel === 'insider',
     'Invalid public ledger promotion qualification');
     result.promotionOrigin = {
       allocationKey: origin.allocationKey, releaseId: origin.releaseId,
-      sourceCommit: origin.sourceCommit, setHash: origin.setHash,
+      sourceCommit: origin.sourceCommit, manifestSha256: origin.manifestSha256,
+      envelopeSha256: origin.envelopeSha256,
     };
     const evidence = qualification.treeEvidence;
     requireKeys(evidence, ['schema', 'originTree', 'sourceTree', 'metadataChanges', 'diffSha256'],
@@ -622,11 +1198,15 @@ export function hotfixReasonDigest(reason) {
 
 export function validatePromotionOrigin(state, qualification) {
   const origin = qualification.promotionOrigin;
-  const candidate = state.reservations[origin.allocationKey];
-  requireThat(candidate?.set && candidate.setHash === origin.setHash && candidate.record.channel === 'insider' &&
-    candidate.record.sourceCommit === origin.sourceCommit && candidate.record.releaseId === origin.releaseId &&
+  const pointer = state.pointers.insider;
+  const candidate = pointer && state.reservations[pointer.allocationKey];
+  requireThat(candidate?.set && pointer.allocationKey === origin.allocationKey &&
+    pointer.releaseId === origin.releaseId && pointer.sourceCommit === origin.sourceCommit &&
+    pointer.manifestSha256 === origin.manifestSha256 && pointer.envelopeSha256 === origin.envelopeSha256 &&
+    candidate.record.channel === 'insider' && candidate.record.sourceCommit === origin.sourceCommit &&
+    candidate.record.releaseId === origin.releaseId &&
     qualification.sourceCommit !== origin.sourceCommit,
-  'Promotion requires a qualified immutable insider set and a distinct resulting main commit');
+  'Promotion requires a qualified immutable insider pointer and a distinct resulting main commit');
   return candidate;
 }
 
@@ -634,6 +1214,7 @@ export function validateReservationAdmission(state, admission) {
   validateAdmission(admission);
   const existing = state.reservations[allocationKey(admission)];
   if (existing) {
+    requireThat(!existing.abandonment, 'Terminally abandoned reservation cannot be recovered or reused');
     const retryIdentity = value => Object.fromEntries(
       Object.entries(value).filter(([key]) => key !== 'buildAttempt'));
     requireThat(hash(retryIdentity(existing.admission)) === hash(retryIdentity(admission)),
@@ -651,8 +1232,25 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   validateLedger(state, state.anchor);
   const existing = validateReservationAdmission(state, admission);
   if (existing) return existing;
+  if (admission.channel === 'stable') {
+    requireThat(!Object.values(state.reservations).some(reservation =>
+      reservation.record.channel === 'stable' && !reservation.set),
+    'Unadvanced stable reservation blocks a new stable allocation');
+  }
+  if (admission.channel === 'insider') {
+    requireThat(!Object.values(state.reservations).some(reservation =>
+      reservation.record.channel === 'insider' && !reservation.set && !reservation.abandonment),
+    'Unadvanced insider reservation blocks a new insider allocation');
+  }
+
   const key = allocationKey(admission);
-  const sequence = admission.channel === 'insider' ? (BigInt(state.counter) + 1n).toString() : undefined;
+  const sequence = admission.channel === 'insider'
+    ? ((BigInt(state.counter) > BigInt(state.channelSequences.insider)
+      ? BigInt(state.counter) : BigInt(state.channelSequences.insider)) + 1n).toString()
+    : undefined;
+  const stableSequence = admission.channel === 'stable'
+    ? (BigInt(state.channelSequences.stable) + 1n).toString()
+    : state.channelSequences.stable;
   const canonicalVersion = admission.baseVersion + (sequence ? `-${admission.stage}.${sequence}` : '');
   requireThat(!state.identities[canonicalVersion], 'Immutable identity already reserved');
   const previousStage = state.stages?.[admission.baseVersion];
@@ -662,7 +1260,7 @@ export function reserve(state, admission, created, protection, verifiedQualifica
   }
   const record = {
     schema: 1, ...admission, releaseId: `${admission.channel}:${canonicalVersion}`,
-    canonicalVersion, sourceTag: `v${canonicalVersion}`, ...(sequence ? { sequence } : {}),
+    canonicalVersion, sourceTag: `v${canonicalVersion}`, stableSequence, ...(sequence ? { sequence } : {}),
     allocationKey: key, created, protection,
   };
   if (admission.channel === 'stable') {
@@ -672,15 +1270,69 @@ export function reserve(state, admission, created, protection, verifiedQualifica
     record.qualification = qualification;
   }
   validateRecord(record);
-  const reservation = { admission, record, ...(sequence ? { sequence } : {}) };
+  const reservation = { admission, record, stableSequence, ...(sequence ? { sequence } : {}) };
   state.reservations[key] = reservation;
   state.identities[canonicalVersion] = key;
   if (sequence) {
     state.counter = sequence;
+    state.channelSequences.insider = sequence;
     state.stages ??= {};
     state.stages[admission.baseVersion] = canonicalVersion;
   }
   return reservation;
+}
+
+export function abandonmentAuthorization(record, protection, approval, now = Date.now()) {
+  validateRecord(record);
+  requireThat(record.channel === 'insider', 'Only active insider reservations may be abandoned');
+  verifyProtectionEvidence(protection, record.channel);
+  requireKeys(approval, ['runId', 'runAttempt', 'jobId', 'environment', 'targetReservation', 'approvedAt'], [],
+    'abandonment approval');
+  requireThat(positivePattern.test(approval.runId) && positivePattern.test(approval.runAttempt) &&
+    positivePattern.test(approval.jobId) && approval.environment === `release-${record.channel}` &&
+    approval.targetReservation === record.allocationKey, 'Abandonment approval is not bound to the release reservation');
+  const ownerApprovedAt = approval.approvedAt;
+  requireThat(typeof ownerApprovedAt === 'string' && Number.isFinite(Date.parse(ownerApprovedAt)) &&
+    new Date(ownerApprovedAt).toISOString() === ownerApprovedAt, 'Abandonment requires explicit owner approval');
+  const approvedAt = Date.parse(ownerApprovedAt);
+  const createdAt = Date.parse(record.created);
+  const verifiedAt = Date.parse(protection.verifiedAt);
+  requireThat(Number.isFinite(now) && approvedAt >= createdAt && verifiedAt >= createdAt &&
+    approvedAt <= now && now - approvedAt <= 15 * 60 * 1000 &&
+    now - verifiedAt <= 15 * 60 * 1000,
+  'Abandonment approval is stale, future-dated, or predates authorization/protection');
+  return { schema: 1, kind: 'release-reservation-abandonment', allocationKey: record.allocationKey,
+    sourceCommit: record.sourceCommit, canonicalVersion: record.canonicalVersion, channel: record.channel,
+    identitySha256: hash(record), protectionDigest: protection.policyDigest,
+    approvalRunId: approval.runId, approvalRunAttempt: approval.runAttempt, approvalJobId: approval.jobId,
+    approvalEnvironment: approval.environment, approvalTarget: approval.targetReservation, ownerApprovedAt };
+}
+
+export function abandon(state, record, authorization, protection) {
+  validateLedger(state, state.anchor);
+  validateRecord(record);
+  verifyProtectionEvidence(protection, record.channel);
+  requireThat(record.channel === 'insider' && authorization?.schema === 1 &&
+    authorization.kind === 'release-reservation-abandonment' &&
+    authorization.identitySha256 === hash(record) && authorization.allocationKey === record.allocationKey &&
+    authorization.sourceCommit === record.sourceCommit && authorization.canonicalVersion === record.canonicalVersion &&
+    authorization.channel === record.channel && authorization.protectionDigest === protection.policyDigest &&
+    positivePattern.test(authorization.approvalRunId) && positivePattern.test(authorization.approvalRunAttempt) &&
+    positivePattern.test(authorization.approvalJobId) && authorization.approvalEnvironment === `release-${record.channel}` &&
+    authorization.approvalTarget === record.allocationKey &&
+    typeof authorization.ownerApprovedAt === 'string' && Number.isFinite(Date.parse(authorization.ownerApprovedAt)) &&
+    new Date(authorization.ownerApprovedAt).toISOString() === authorization.ownerApprovedAt,
+  'Abandonment authorization is not bound to the active insider reservation');
+  const reservation = state.reservations[record.allocationKey];
+  requireThat(reservation && (reservation.identitySha256 ?? hash(reservation.record)) === hash(record) && !reservation.set &&
+    !reservation.abandonment, 'Reservation cannot be reactivated or abandoned twice');
+  reservation.abandonment = { schema: 1, allocationKey: record.allocationKey, sourceCommit: record.sourceCommit,
+    canonicalVersion: record.canonicalVersion, channel: record.channel,
+    identitySha256: reservation.identitySha256 ?? hash(record),
+    approvalRunId: authorization.approvalRunId, approvalRunAttempt: authorization.approvalRunAttempt,
+    approvalJobId: authorization.approvalJobId, approvalEnvironment: authorization.approvalEnvironment,
+    approvalTarget: authorization.approvalTarget, ownerApprovedAt: authorization.ownerApprovedAt };
+  return reservation.abandonment;
 }
 
 export function verifyTag(record, expectedObject, actualTag) {
@@ -688,7 +1340,8 @@ export function verifyTag(record, expectedObject, actualTag) {
     'Source tag missing, moved, recreated, or not the exact authorized peeled SHA');
 }
 
-export function verifyConsumer(record, stored, context, identitySha256 = hash(stored)) {
+export function verifyConsumer(record, reservation, context, identitySha256 = reservation?.identitySha256 ?? hash(reservation?.record)) {
+  requireThat(!reservation?.abandonment, 'Terminally abandoned reservation cannot be consumed');
   requireThat(hash(record) === identitySha256, 'Canonical record was changed');
   validateRecord(record);
   const tag = parseTag(record.sourceTag);
@@ -725,6 +1378,7 @@ export function identityLabels(record) {
     'org.printfarmer.build-attempt': record.buildAttempt,
     'org.printfarmer.workflow': record.workflowIdentity,
     'org.printfarmer.identity-sha256': hash(record),
+    'org.printfarmer.stable-sequence': record.stableSequence,
   };
 }
 
@@ -738,30 +1392,67 @@ export function validateCompleteSet(record, set) {
   writePublicSet(record, set);
 }
 
-export function advance(state, record, set, currentHead, expectedPointer) {
+export function advance(state, record, set, signed, currentHead, expectedPointer) {
   validateLedger(state, state.anchor);
   validateRecord(record);
   validateCompleteSet(record, set);
   requireString(currentHead, shaPattern, 'verified canonical branch HEAD');
   const reservation = state.reservations[record.allocationKey];
   requireThat(reservation && (reservation.identitySha256 || hash(reservation.record)) === hash(record), 'Unknown authorization');
+  requireThat(!reservation.abandonment, 'Terminally abandoned reservation cannot advance');
   const pointer = state.pointers[record.channel];
-  requireThat((pointer?.setHash || '') === expectedPointer, 'Channel compare-and-set conflict');
+  requireThat((pointer?.manifestEnvelopeSha256 || '') === expectedPointer, 'Channel compare-and-set conflict');
+  const immutablePointer = signedReleasePointer(record, signed);
   const setHash = hash(writePublicSet(record, set));
   if (reservation.setHash) requireThat(reservation.setHash === setHash, 'Same identity, different bytes');
   if (pointer?.releaseId === record.releaseId) {
-    requireThat(pointer.setHash === setHash, 'Same identity, different bytes');
+    requireThat(hash(pointer) === hash(immutablePointer), 'Same identity, different bytes');
     return pointer;
   }
   if (pointer) requireThat(compareVersions(record.canonicalVersion, pointer.canonicalVersion) > 0,
     'Channel version regression');
+  const previousSequence = BigInt(state.channelSequences[record.channel]);
+  requireThat(previousSequence >= 0n, 'Invalid channel sequence');
+  if (record.channel === 'insider') {
+    requireThat(record.sequence === state.channelSequences.insider && BigInt(record.sequence) > 0n,
+      'Insider sequence replay, regression, or cross-channel substitution');
+  } else {
+    requireThat(record.stableSequence === (previousSequence + 1n).toString(),
+      'Stable sequence replay, regression, or cross-channel substitution');
+    state.channelSequences.stable = record.stableSequence;
+  }
   reservation.setHash = setHash;
   reservation.set = set;
-  state.pointers[record.channel] = {
-    releaseId: record.releaseId, canonicalVersion: record.canonicalVersion,
-    sourceCommit: record.sourceCommit, setHash, allocationKey: record.allocationKey,
-  };
+  state.pointers[record.channel] = immutablePointer;
   return state.pointers[record.channel];
+}
+
+export function signedReleasePointer(record, signed) {
+  requireObject(signed, 'signed release artifacts');
+  requireKeys(signed, ['serializedManifest', 'serializedEnvelope'], [], 'signed release artifacts');
+  requireThat(typeof signed.serializedEnvelope === 'string', 'Invalid serialized release manifest envelope');
+  let envelope;
+  try { envelope = JSON.parse(signed.serializedEnvelope); } catch {
+    throw new ReleasePolicyError('Malformed serialized release manifest envelope');
+  }
+  requireThat(signed.serializedEnvelope === JSON.stringify(envelope),
+    'Release manifest envelope serialization is not canonical');
+  const manifest = validateReleaseManifestBytes(signed.serializedManifest, envelope);
+  requireThat(manifest.identity.releaseId === record.releaseId &&
+    manifest.identity.canonicalVersion === record.canonicalVersion &&
+    manifest.identity.channel === record.channel &&
+    manifest.identity.sourceCommit === record.sourceCommit &&
+    manifest.identity.identitySha256 === hash(record) &&
+    manifest.identity.stableSequence === record.stableSequence,
+  'Signed release manifest identity does not match authorization');
+  const manifestSha256 = releaseManifestSha256(signed.serializedManifest);
+  const envelopeSha256 = releaseManifestSha256(signed.serializedEnvelope);
+  return {
+    releaseId: record.releaseId, canonicalVersion: record.canonicalVersion, channel: record.channel,
+    sourceCommit: record.sourceCommit, allocationKey: record.allocationKey, identitySha256: hash(record),
+    stableSequence: record.stableSequence,
+    manifestSha256, envelopeSha256, manifestEnvelopeSha256: hash({ manifestSha256, envelopeSha256 }),
+  };
 }
 
 // A Git ref fast-forward is the transaction. Two sibling commits cannot both win.

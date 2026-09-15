@@ -13,6 +13,33 @@ PrintFarmer's settings and admin UI is a two-layer system:
 This document is the source of truth for how the two layers connect, how new settings
 show up in the UI without any React changes, and where the sharp edges are.
 
+## Personal Profile settings
+
+`/settings?scope=user&tab=profile&sub=preferences` remains the canonical
+Preferences destination, including the user-menu entry and Printables links.
+`SettingsShell` owns the active route; `UserPreferencesPage.tsx` is an
+unreferenced legacy page, not the routed settings shell.
+
+- **Preferences** starts with account settings: Guided/Expert printer-motion
+  guidance, locale, items per page, and Printables username. Guided shows help
+  and hints; Expert collapses them. This shared account preference also applies
+  to printer detail/sidebar shortcuts; it never changes permissions or motion
+  protections. Changes here use the group's **Save Preferences** button.
+- **Appearance** uses `sub=appearance` and contains the existing full theme
+  gallery and live preview, retaining immediate theme selection behavior.
+- API Keys, Notifications, and Passkeys remain sibling subtabs. Other scopes
+  and the default Preferences route are unchanged; no redirect aliases exist
+  for Appearance. Route metadata drives both search and the command palette.
+
+The preferences form uses the existing `/api/settings/user` query/mutation and
+`rowVersion`. Only edited fields are held locally; untouched fields follow the
+shared cache, including changes from printer shortcuts. Saves preserve theme
+and slicer defaults and block overlapping writes for the current authenticated
+account. Drafts clear after a successful save or a successful explicit reload.
+A conflict retains edits until **Reload latest preferences (discard edits)**
+succeeds; that reload discards the drafts and loads the latest preferences before
+saving again. Failed reloads do not discard edits.
+
 ## Routes And Scopes
 
 The settings routes share one engine with route-locked scopes:

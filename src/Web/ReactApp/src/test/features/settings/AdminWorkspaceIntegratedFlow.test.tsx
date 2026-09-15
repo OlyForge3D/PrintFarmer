@@ -611,7 +611,8 @@ describe('Admin workspace integrated flow (#2507)', () => {
   it('preserves personal settings separation and blocks dirty workspace search navigation until the user discards', async () => {
     const personalView = renderWorkspace('/settings?scope=system&tab=general&sub=system');
     expect(screen.queryByRole('combobox', { name: 'Search all settings' })).not.toBeInTheDocument();
-    expect(screen.getByTestId('theme-switcher')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: 'Preferences' })).toHaveAttribute('aria-selected', 'true');
+    expect(screen.queryByTestId('theme-switcher')).not.toBeInTheDocument();
     expect(screen.getByTestId('location-search')).toHaveTextContent('scope=user');
     personalView.unmount();
 

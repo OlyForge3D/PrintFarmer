@@ -566,8 +566,18 @@ test('legacy qualification evidence remains reachable and separate from transact
     control.indexOf("if (operation === 'admit')"));
   assert.doesNotMatch(control, /sourceCommit: transaction\?\.sourceCommit \?\? env\.RELEASE_SOURCE_COMMIT/);
   assert.doesNotMatch(control, /if \(env\.RELEASE_TRANSACTION\) \{[\s\S]*?advance\(/);
-  assert.match(read('.github/workflows/ci.yml'), /test-canonical-qualification\.mjs/);
-  assert.match(read('.github/workflows/ci.yml'), /test-github-evidence-pages\.mjs/);
+  const releaseTagTriggerStep = Object.values(load(read('.github/workflows/ci.yml')).jobs)
+    .flatMap(job => job.steps ?? [])
+    .find(step => step.name === 'Test release tag-trigger policy');
+  assert.ok(releaseTagTriggerStep);
+  for (const suite of [
+    'test-release-tag-triggers.mjs',
+    'test-canonical-qualification.mjs',
+    'test-release-evidence.mjs',
+    'test-release-source-metadata.mjs',
+    'test-release-transaction.mjs',
+    'test-github-evidence-pages.mjs',
+  ]) assert.ok(releaseTagTriggerStep.run.includes(suite), `${suite} must run in CI`);
 });
 
 test('trusted release qualification and canonical manual refs exclusively own canonical check names', () => {

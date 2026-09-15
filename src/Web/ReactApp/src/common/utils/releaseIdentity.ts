@@ -1,13 +1,18 @@
 import type { CanonicalReleaseIdentity, PromotionOrigin } from '@/types/api';
 
+export type BuildReleaseIdentity = CanonicalReleaseIdentity & {
+  stableSequence: string;
+};
+
 /** Copies the release authority's build record. Reject inconsistent commit bindings; never derive identity. */
-export function readReleaseIdentity(value: string | undefined, sourceCommit: string): CanonicalReleaseIdentity | null {
+export function readReleaseIdentity(value: string | undefined, sourceCommit: string): BuildReleaseIdentity | null {
   if (!value) return null;
   const record: unknown = JSON.parse(value);
   if (!record || typeof record !== 'object' || Array.isArray(record)) throw new Error('Release identity must be an object.');
   const input = record as Record<string, unknown>;
   const keys = ['canonicalVersion', 'baseVersion', 'channel', 'releaseId', 'sourceTag', 'sourceBranch',
-    'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'allocationIdentity'] as const;
+    'sourceCommit', 'authorizedBranchHead', 'buildId', 'buildAttempt', 'workflowIdentity', 'stableSequence',
+    'allocationIdentity'] as const;
   for (const key of keys) {
     if (typeof input[key] !== 'string' || !input[key]) throw new Error(`Release identity is missing ${key}.`);
   }
@@ -24,5 +29,5 @@ export function readReleaseIdentity(value: string | undefined, sourceCommit: str
     if (promotionKeys.some(key => typeof promotion[key] !== 'string' || !promotion[key])) throw new Error('Incomplete promotion origin.');
     promotionOrigin = Object.fromEntries(promotionKeys.map(key => [key, promotion[key]])) as unknown as PromotionOrigin;
   }
-  return { ...identity, promotionOrigin } as unknown as CanonicalReleaseIdentity;
+  return { ...identity, promotionOrigin } as BuildReleaseIdentity;
 }
