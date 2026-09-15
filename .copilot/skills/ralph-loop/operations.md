@@ -323,6 +323,23 @@ clean/pushed delivery; the separate successful delivery receipt must follow its 
 and precede its completion. Its actual current clean HEAD, admitted-base ancestry and exact
 remote publication are verified in addition to the predecessor's historical proof.
 
+For this retrospective route, `successor.job` contains **only** `jobId`, `repository`,
+`issue`, `owner`, `baseSha` and nonempty `acceptanceCriteria`. Model, effort, agent and
+expected remote host were not necessarily assigned when the local session was reused;
+do not guess them. They are absent from the immutable local job and its audit states
+`dispatchMetadataRecorded:false`. Normal active admission and remote validators are unchanged.
+
+Persistent sessions may have earlier successful delivery-ready or no-op review checkpoints.
+Declare every relevant earlier root completion in chronological `priorTaskCompleteEventIds`
+on `result` and, for the second task, `successor.completion`. The default empty list asserts
+there were none. Each checkpoint must succeed inside its own paired root turn on the correct
+side of assignment; failed, undeclared, missing, duplicate, overlapping or unordered
+checkpoints reject. Earlier events before this admission belong to historical tasks, not
+these lists. The adapter retains checkpoint IDs, timestamps, summary hashes and paired turn
+ends in the evidence digest and replay audit. Checkpoints never replace final delivery or
+terminal proof. Selected delivery receipts consume unique root tool starts; the successor's
+start must occur after its own assignment/activity, not in the predecessor's task.
+
 The observation names the authorized successor issue and latest root instruction but must
 now assert `activeWork:false`, `running:false`, `followUpPending:false` with the same fresh
 journal fingerprint and observation timing. All agent turns/hooks/external requests must have

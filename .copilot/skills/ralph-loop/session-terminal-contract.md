@@ -39,6 +39,10 @@ If both tasks already ended before accounting, the separately authorized
 `complete-local-handoff` records the successor retrospectively from its own existing
 task/turn and publication proof. Its audit fence is allocated now, never claimed to have
 appeared in a historical report. Do not fabricate an active session or restart it for bookkeeping.
+Unrecorded dispatch model/effort/agent/host metadata stays absent, explicitly marked unknown
+in the retrospective audit. Earlier successful task checkpoints must be explicitly enumerated
+on the correct task side with paired runtime turns; undeclared or failed completions reject.
+Checkpoints never substitute for the selected final delivery proof.
 
 ## Admission Identity And Resumed Work
 

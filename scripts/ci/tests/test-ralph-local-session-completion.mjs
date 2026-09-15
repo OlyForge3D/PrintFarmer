@@ -496,6 +496,7 @@ test('atomic handoff concurrent CAS permits one winner and never exposes a relea
 
 async function completedHandoffFixture(t) {
   const f = await handoffFixture(t);
+  for (const key of ['expectedHost', 'model', 'effort', 'agent']) delete f.successor.job[key];
   const newHead = 'c'.repeat(40);
   const content = `${newHead}\trefs/pull/2725/head; clean delivery verified`;
   const receipt = { id: randomUUID(), type: 'tool.execution_complete', timestamp: timestamp(3_000),
@@ -540,6 +541,8 @@ test('completed pair is one atomic historical reconciliation, not fake active wo
   assert.equal(result.successor.sessionCompletion.taskCompleteEventId, f.task.id);
   assert.equal(result.successor.sessionCompletion.kind, 'app-session-task-retrospective');
   assert.equal(result.successor.sessionCompletion.runtimeReportedAdmission, false);
+  assert.equal(result.successor.sessionCompletion.dispatchMetadataRecorded, false);
+  for (const key of ['expectedHost', 'model', 'effort', 'agent']) assert.equal(Object.hasOwn(result.successor.job, key), false);
   assert.equal(Object.hasOwn(result.completed, 'exitCode'), false);
   assert.equal(Object.hasOwn(result.successor, 'exitCode'), false);
   assert.equal(Object.values(after.jobs).filter((entry) => activeJobStates.has(entry.state)).length, 1);
@@ -618,5 +621,99 @@ test('native shutdown/resume explicitly starts a fresh runtime epoch without man
       assert.equal(recorded.completed.sessionCompletion.runtimeEpochs[0].interruptedTurnCount, 1);
       assert.equal(recorded.successor.exitCode, undefined);
     } else await assert.rejects(() => f.completePair(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+  });
+
+});
+
+function insertCheckpoint(f, side) {
+  const finalId = side === 'old' ? f.result.taskCompleteEventId : f.successor.completion.taskCompleteEventId;
+  const index = f.events.findIndex((event) => event.id === finalId);
+  const turnId = side === 'old' ? 'turn-1' : 'new-task';
+  const checkpoint = { id: randomUUID(), type: 'session.task_complete', timestamp: f.events[index - 1].timestamp,
+    data: { success: true, summary: 'Reviewed delivery checkpoint; final accounting has not happened.' } };
+  const pairedEnd = { id: randomUUID(), type: 'assistant.turn_end', timestamp: checkpoint.timestamp, data: { turnId } };
+  f.events.splice(index, 0, checkpoint, pairedEnd,
+    { id: randomUUID(), type: 'assistant.turn_start', timestamp: checkpoint.timestamp, data: { turnId } });
+  f.events.forEach((event, position) => { if (position) event.parentId = f.events[position - 1].id; });
+  const proof = side === 'old' ? f.result : f.successor.completion;
+  proof.priorTaskCompleteEventIds = [checkpoint.id];
+  return { checkpoint, pairedEnd, proof };
+}
+
+test('explicit successful checkpoints preserve separate paired-turn audit and bind replay', async (t) => {
+  const f = await completedHandoffFixture(t);
+  const old = insertCheckpoint(f, 'old');
+  const next = insertCheckpoint(f, 'new');
+  await f.refresh();
+  const recorded = await f.completePair();
+  for (const [entry, checkpoint] of [[recorded.completed, old], [recorded.successor, next]]) {
+    assert.equal(entry.sessionCompletion.checkpoints[0].id, checkpoint.checkpoint.id);
+    assert.equal(entry.sessionCompletion.checkpoints[0].turnEndEventId, checkpoint.pairedEnd.id);
+    assert.equal(entry.sessionCompletion.checkpoints[0].summarySha256.length, 64);
+  }
+  assert.deepEqual(await f.completePair(207), recorded);
+  old.proof.priorTaskCompleteEventIds = [];
+  await assert.rejects(() => f.completePair(207), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+});
+
+test('completion checkpoints reject missing, failed, unlisted, cross-side and ambiguous boundaries', async (t) => {
+  for (const side of ['old', 'new']) for (const kind of
+    ['undeclared', 'failed', 'missing', 'duplicate', 'wrong-side', 'final-reused', 'unpaired', 'unordered']) {
+    await t.test(`${side}: ${kind}`, async (subtest) => {
+      const f = await completedHandoffFixture(subtest);
+      const { checkpoint, pairedEnd, proof } = insertCheckpoint(f, side);
+      if (kind === 'undeclared') delete proof.priorTaskCompleteEventIds;
+      if (kind === 'failed') checkpoint.data.success = false;
+      if (kind === 'missing') proof.priorTaskCompleteEventIds = [randomUUID()];
+      if (kind === 'duplicate') proof.priorTaskCompleteEventIds.push(checkpoint.id);
+      if (kind === 'wrong-side') {
+        delete proof.priorTaskCompleteEventIds;
+        (side === 'old' ? f.successor.completion : f.result).priorTaskCompleteEventIds = [checkpoint.id];
+      }
+      if (kind === 'final-reused') proof.priorTaskCompleteEventIds = [proof.taskCompleteEventId];
+      if (kind === 'unpaired') pairedEnd.data.turnId = 'another-turn';
+      if (kind === 'unordered') proof.priorTaskCompleteEventIds = [randomUUID(), checkpoint.id];
+      await f.refresh();
+      await assert.rejects(() => f.completePair(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+      assert.equal((await f.readLedger()).generation, 206);
+    });
+  }
+});
+
+test('successor delivery cannot reuse old, consumed or pre-assignment tool lifecycles', async (t) => {
+  for (const kind of ['duplicate-start', 'old-start', 'pre-activity-start', 'consumed-receipt', 'missing-start']) {
+    await t.test(kind, async (subtest) => {
+      const f = await completedHandoffFixture(subtest);
+      const index = f.events.indexOf(f.newReceipt) - 1;
+      const start = f.events[index];
+      if (kind === 'duplicate-start') start.data.toolCallId = 'recorded-delivery';
+      if (kind === 'old-start') {
+        f.events.splice(index, 1);
+        start.timestamp = f.events[1].timestamp;
+        f.events.splice(2, 0, start);
+      }
+      if (kind === 'pre-activity-start') {
+        f.events.splice(index, 1);
+        start.timestamp = f.assignment.timestamp;
+        f.events.splice(f.events.indexOf(f.activity), 0, start);
+      }
+      if (kind === 'consumed-receipt') {
+        f.events.splice(index + 1, 0, { ...structuredClone(f.newReceipt), id: randomUUID() });
+      }
+      if (kind === 'missing-start') f.events.splice(index, 1);
+      f.events.forEach((event, position) => { if (position) event.parentId = f.events[position - 1].id; });
+      await f.refresh();
+      await assert.rejects(() => f.completePair(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+      assert.equal((await f.readLedger()).generation, 206);
+    });
+  }
+});
+
+test('retrospective work identity never accepts guessed dispatch metadata', async (t) => {
+  for (const key of ['model', 'effort', 'agent', 'expectedHost']) await t.test(key, async (subtest) => {
+    const f = await completedHandoffFixture(subtest);
+    f.successor.job[key] = 'guessed';
+    await assert.rejects(() => f.completePair(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+    assert.equal((await f.readLedger()).generation, 206);
   });
 });
