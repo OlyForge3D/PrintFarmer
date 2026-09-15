@@ -449,6 +449,10 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
           (sessionRecords.length > 0 && !previous)) {
         throw new RalphMacSshError('Session already has a ledger record; reconcile it or explicitly account its resumed handoff.', 'SESSION_OWNED');
       }
+      if (sessionRecords.some((entry) => !Number.isFinite(Date.parse(entry.updatedAt)) ||
+          Date.parse(entry.updatedAt) >= Date.parse(handoff.observedAt))) {
+        throw new RalphMacSshError('Live handoff evidence must postdate every terminal record for this session.', 'FENCED');
+      }
     }
     if (active.some((entry) => entry.issue === job.issue)) throw new RalphMacSshError('Issue already has an active Ralph job.', 'ISSUE_OWNED');
     // A released stranded kickoff (issue #2621) frees the slot but not the issue: the created

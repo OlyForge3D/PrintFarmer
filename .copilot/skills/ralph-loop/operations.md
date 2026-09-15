@@ -148,6 +148,8 @@ A session can resume on a different issue: use the actual current issue from fre
 session evidence, not the historical session title. Cross-issue linkage still requires the
 exact same session ID as the terminal predecessor and verified later work; it never authorizes
 linking an unrelated session or duplicating an active session/issue.
+The observation must postdate every terminal record for that session, not merely the named
+predecessor; selecting an older predecessor cannot revive activity that subsequently ended.
 Send that new job/fence to the existing session for its terminal report; do not resend its kickoff.
 The operation atomically deduplicates sessions/issues and enforces five slots. If accounting fails
 because the ledger is full, retain the untracked session in union capacity and block new dispatches

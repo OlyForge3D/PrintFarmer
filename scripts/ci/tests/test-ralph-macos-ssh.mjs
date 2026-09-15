@@ -319,6 +319,44 @@ test('cross-issue resumed work binds the same terminal session, later evidence, 
   }, options()), (error) => error.code === 'ISSUE_OWNED');
 });
 
+test('an older predecessor cannot admit activity that a later terminal record already ended', async () => {
+  await reset();
+  const sessionId = 'resumed-session';
+  await reserveLocalJob({ job: job(), eligibility }, options());
+  await acknowledgeLocalJob(job().jobId, sessionId, { ...options(), kickoffVerified: true });
+  const terminal = (jobId) => recordLocalTerminalResult({
+    jobId, sessionId, headSha: 'b'.repeat(40), exitCode: 0,
+    validationEvidence: 'verified completed work', workingTreeClean: true, allCommitsPushed: true,
+  }, options());
+  const first = await terminal(job().jobId);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const second = await accountLocalSession({
+    job: job('second-job'), sessionEvidence: {
+      ...sessionEvidence(sessionId), previousJobId: first.jobId, resumedAfterTerminal: true,
+    },
+  }, options());
+  const supersededObservation = sessionEvidence(sessionId);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const latest = await terminal(second.jobId);
+  const before = await readLedger();
+  await assert.rejects(() => accountLocalSession({
+    job: job('third-job'), sessionEvidence: {
+      ...supersededObservation, previousJobId: first.jobId, resumedAfterTerminal: true,
+    },
+  }, options()), (error) => error.code === 'FENCED');
+  assert.deepEqual(await readLedger(), before);
+  await new Promise((resolve) => setTimeout(resolve, 5));
+  const next = await accountLocalSession({
+    job: job('third-job'), sessionEvidence: {
+      ...sessionEvidence(sessionId), previousJobId: latest.jobId, resumedAfterTerminal: true,
+    },
+  }, options());
+  assert.equal(next.state, 'accepted');
+  const after = await readLedger();
+  assert.deepEqual(after.jobs[first.jobId], before.jobs[first.jobId]);
+  assert.deepEqual(after.jobs[latest.jobId], before.jobs[latest.jobId]);
+});
+
 function fakeChild() {
   const child = new EventEmitter();
   child.stdin = new PassThrough();
