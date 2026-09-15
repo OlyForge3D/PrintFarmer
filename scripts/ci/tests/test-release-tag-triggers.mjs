@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {
-  copyFileSync, existsSync, linkSync, mkdirSync, readFileSync, readdirSync, rmSync,
+  closeSync, constants, copyFileSync, existsSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, rmSync,
   symlinkSync, writeFileSync,
 } from 'node:fs';
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -3490,7 +3490,17 @@ test(`${channel} ${approvalMode} executes pin, admission, automatic qualificatio
   fixture.transactionJobs.push(...completedJobs);
   const receipt = await qualifyTransaction(transaction, api);
   mkdirSync(dirname(qualificationPath), { recursive: true });
-  const saveReceipt = value => writeFileSync(qualificationPath, JSON.stringify(value));
+  const saveFixture = (path, value) => {
+    assert.ok([qualificationPath, privateSetPath].includes(path));
+    const descriptor = openSync(path,
+      constants.O_WRONLY | constants.O_CREAT | constants.O_TRUNC | constants.O_NOFOLLOW, 0o600);
+    try {
+      writeFileSync(descriptor, JSON.stringify(value));
+    } finally {
+      closeSync(descriptor);
+    }
+  };
+  const saveReceipt = value => saveFixture(qualificationPath, value);
   saveReceipt({ ...receipt, transaction: { ...transaction, sourceCommit: newerSha } });
   await assert.rejects(runReleaseControl('authorize', fixture.env), /another release transaction/);
   saveReceipt({ ...receipt, checkedAt: new Date(Date.now() - 60 * 60_000).toISOString(),
@@ -3520,7 +3530,7 @@ test(`${channel} ${approvalMode} executes pin, admission, automatic qualificatio
   assert.ok(fixture.calls.every(call => call.method === 'GET'));
   fixture.review.status.state = 'failure';
   await assert.rejects(runReleaseControl('preflight', consumer, () => {}), /Untrusted source review/);
-  writeFileSync(privateSetPath, JSON.stringify(completeSet(identity)));
+  saveFixture(privateSetPath, completeSet(identity));
   await assert.rejects(runReleaseControl('advance', {
     ...consumer, RELEASE_EXPECTED_POINTER: '', RELEASE_VERIFIED_BRANCH_HEAD: sha,
   }, () => {}), /Untrusted source review/);
