@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Slicer.Module.Data;
@@ -20,7 +20,6 @@ public sealed class SlicerServiceInventorySource(SlicerDbContext? db, ILogger<Sl
 
         try
         {
-            // Deliberately exclude host, API key, tags and arbitrary metadata from the public projection.
             var registrations = await db.SlicerServices.AsNoTracking().OrderBy(row => row.Id)
                 .Select(row => new { row.Id, row.Version, row.LastSeen, row.Status, row.CapabilitiesJson })
                 .ToListAsync(cancellationToken);
@@ -29,15 +28,26 @@ public sealed class SlicerServiceInventorySource(SlicerDbContext? db, ILogger<Sl
                 return [Missing(InventoryObservationState.NotInstalled, "NoRegisteredOptionalWorkers")];
             }
 
+            string? migrationHead = await GetMigrationHeadAsync(cancellationToken);
+            string databaseProvider = NormalizeProvider(db.Database.ProviderName);
             return registrations.Select(row =>
             {
                 (string? build, string? commit) = ReadApplicationBuild(row.CapabilitiesJson);
                 DateTimeOffset observedAt = new(DateTime.SpecifyKind(row.LastSeen, DateTimeKind.Utc));
                 return new ServiceReplicaObservationDto
                 {
-                    ServiceId = "slicer-worker", InstanceId = row.Id.ToString(), Component = "slicer-worker", Required = false,
-                    ApplicationVersion = build, SourceCommit = commit, EngineVersion = ApplicationBuildObservation.Parse(row.Version).Version,
-                    ObservedAt = observedAt, LastSuccessAt = observedAt, Source = "SelfReport",
+                    ServiceId = "slicer-worker",
+                    InstanceId = row.Id.ToString(),
+                    Component = "slicer-worker",
+                    Required = false,
+                    ApplicationVersion = build,
+                    SourceCommit = commit,
+                    EngineVersion = ApplicationBuildObservation.Parse(row.Version).Version,
+                    DatabaseProvider = databaseProvider,
+                    MigrationHead = migrationHead,
+                    ObservedAt = observedAt,
+                    LastSuccessAt = observedAt,
+                    Source = "SelfReport",
                     ObservationState = row.Status == "Offline" ? InventoryObservationState.Unavailable : InventoryObservationState.Observed,
                     ReasonCode = build is null ? "LegacyRegistrationHasNoApplicationBuild" : "RegistrationNotDigestAttestation",
                 };
@@ -50,13 +60,35 @@ public sealed class SlicerServiceInventorySource(SlicerDbContext? db, ILogger<Sl
         }
     }
 
+    private async Task<string?> GetMigrationHeadAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return (await db!.Database.GetAppliedMigrationsAsync(cancellationToken)).LastOrDefault();
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger.LogWarning(ex, "Unable to read slicer migration head");
+            return null;
+        }
+    }
+
+    private static string NormalizeProvider(string? provider) => provider?.Contains("SqlServer", StringComparison.OrdinalIgnoreCase) == true
+        ? "SqlServer"
+        : provider?.Contains("Npgsql", StringComparison.OrdinalIgnoreCase) == true
+            ? "PostgreSQL"
+            : provider?.Contains("Sqlite", StringComparison.OrdinalIgnoreCase) == true ? "SQLite" : "Unknown";
+
     private static ServiceReplicaObservationDto Missing(InventoryObservationState state, string reason) => new()
     {
-        ServiceId = "slicer-worker", Component = "slicer-worker", Required = false,
-        ObservationState = state, Source = "LocalRegistry", ReasonCode = reason,
+        ServiceId = "slicer-worker",
+        Component = "slicer-worker",
+        Required = false,
+        ObservationState = state,
+        Source = "LocalRegistry",
+        ReasonCode = reason,
     };
 
-    // Only this allowlisted application field is consumed. Existing engine/container claims do not attest the app image.
     private static (string? Version, string? Commit) ReadApplicationBuild(string? capabilities)
     {
         if (string.IsNullOrWhiteSpace(capabilities))

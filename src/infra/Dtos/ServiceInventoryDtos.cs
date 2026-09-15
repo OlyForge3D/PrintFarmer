@@ -1,4 +1,4 @@
-using System.Text.Json.Serialization;
+﻿using System.Text.Json.Serialization;
 
 namespace Farm.Infrastructure.Dtos;
 
@@ -39,6 +39,7 @@ public enum InventoryChannelState
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum InventoryEligibility
 {
+    Eligible,
     Blocked,
     Unknown,
     NotManaged,
@@ -152,6 +153,14 @@ public sealed record ServiceReplicaObservationDto
     [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
     public string? EngineVersion { get; init; }
 
+    /// <summary>Normalized provider for the database used by this component, when independently observed.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? DatabaseProvider { get; init; }
+
+    /// <summary>Applied migration head for the component's database context, never a target schema claim.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? MigrationHead { get; init; }
+
     /// <summary>Freshness or absence of the observation.</summary>
     public InventoryObservationState ObservationState { get; init; } = InventoryObservationState.Unknown;
 
@@ -250,6 +259,79 @@ public sealed record ServiceInventoryDto
     /// <summary>No implicit check, enrollment or execution authorization.</summary>
     public IReadOnlyList<string> EligibilityReasons { get; init; } = ["ReadOnlyInventory"];
 
+    /// <summary>Read-only installation lifecycle derived from supplied signed release evidence.</summary>
+    public ReleaseReadinessDto? Readiness { get; init; }
+
+    /// <summary>Whether the snapshot was collected locally or imported for offline inspection.</summary>
+    public InventorySnapshotOrigin SnapshotOrigin { get; init; } = InventorySnapshotOrigin.Live;
+
+    /// <summary>Original source of an imported snapshot; null for local observations.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? SnapshotSource { get; init; }
+
+    /// <summary>Original export time for an imported snapshot; never replaced by import time.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public DateTimeOffset? SnapshotExportedAt { get; init; }
+
     /// <summary>All reported replicas, including absent optional topology slots.</summary>
     public IReadOnlyList<ServiceReplicaObservationDto> Services { get; init; } = [];
+}
+
+/// <summary>Distinguishes live host observations from offline imported evidence.</summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum InventorySnapshotOrigin
+{
+    Live,
+    Imported,
+}
+
+/// <summary>Complete independently verified release evidence consumed by the readiness evaluator.</summary>
+public sealed record VerifiedReleaseEvidenceDto
+{
+    /// <summary>Whether the complete coordinated release set has a valid signature.</summary>
+    public bool SignatureVerified { get; init; }
+
+    /// <summary>Whether all required services have immutable target entries.</summary>
+    public bool IsComplete { get; init; }
+
+    /// <summary>Canonical target identity authenticated by the signed release manifest.</summary>
+    public CanonicalReleaseIdentityDto? Identity { get; init; }
+
+    /// <summary>Immutable release manifest digest.</summary>
+    public string? ManifestDigest { get; init; }
+
+    /// <summary>Per-service target requirements from the signed release manifest.</summary>
+    public IReadOnlyList<ReleaseServiceRequirementDto> Services { get; init; } = [];
+}
+
+/// <summary>One immutable target requirement from a signed coordinated release.</summary>
+public sealed record ReleaseServiceRequirementDto
+{
+    /// <summary>Required logical service identifier.</summary>
+    public string ServiceId { get; init; } = string.Empty;
+
+    /// <summary>Target operating system and architecture.</summary>
+    public string Platform { get; init; } = string.Empty;
+
+    /// <summary>Target immutable platform digest.</summary>
+    public string PlatformDigest { get; init; } = string.Empty;
+
+    /// <summary>Required source migration head for this service's context.</summary>
+    public string? RequiredMigrationHead { get; init; }
+
+    /// <summary>Required worker engine version when this is a slicer worker.</summary>
+    public string? RequiredEngineVersion { get; init; }
+}
+
+/// <summary>Evidence-based installation lifecycle. This read model never performs installation.</summary>
+public sealed record ReleaseReadinessDto
+{
+    /// <summary>Nullable only when no release-readiness assessment was requested.</summary>
+    public InventoryEligibility? State { get; init; }
+
+    /// <summary>Safe, machine-readable reasons for the result.</summary>
+    public IReadOnlyList<string> Reasons { get; init; } = [];
+
+    /// <summary>Ordered verification stages, including failed intermediate checks.</summary>
+    public IReadOnlyList<string> Hops { get; init; } = [];
 }

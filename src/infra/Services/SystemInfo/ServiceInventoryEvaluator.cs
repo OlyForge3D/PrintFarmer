@@ -1,4 +1,4 @@
-using System.Text.RegularExpressions;
+﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.SystemStatus;
@@ -56,9 +56,14 @@ public static partial class ServiceInventoryEvaluator
         {
             return row with
             {
-                Identity = null, ObservedChannel = null, ChannelState = InventoryChannelState.Unknown,
-                PlatformDigest = null, IndexDigest = null, ManifestDigest = null,
-                VerificationSource = null, VerifiedAt = null,
+                Identity = null,
+                ObservedChannel = null,
+                ChannelState = InventoryChannelState.Unknown,
+                PlatformDigest = null,
+                IndexDigest = null,
+                ManifestDigest = null,
+                VerificationSource = null,
+                VerifiedAt = null,
             };
         }
 

@@ -1,5 +1,5 @@
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
-using System.Text.Json;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
 using Xunit;
@@ -250,12 +250,69 @@ public sealed class ServiceInventoryTests
     {
         PromotionOriginDto promotion = new()
         {
-            ReleaseId = "insider:1.2.3-insider.10", CanonicalVersion = "1.2.3-insider.10", SourceCommit = new string('c', 40),
-            ManifestDigest = Digest, Evidence = "qualification-10",
+            ReleaseId = "insider:1.2.3-insider.10",
+            CanonicalVersion = "1.2.3-insider.10",
+            SourceCommit = new string('c', 40),
+            ManifestDigest = Digest,
+            Evidence = "qualification-10",
         };
         ServiceReplicaObservationDto original = Verified("a");
         ServiceInventoryDto result = Evaluate([original with { Identity = original.Identity! with { PromotionOrigin = promotion } }]);
         Assert.Equal(promotion, result.Services[0].Identity!.PromotionOrigin);
+    }
+
+    [Fact]
+    public void Readiness_CompleteFreshComposeEvidence_IsEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }]);
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.Equal(InventoryEligibility.Eligible, result.State);
+        Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility", "Eligible"], result.Hops);
+    }
+
+    [Theory]
+    [InlineData("stale")]
+    [InlineData("incomplete")]
+    [InlineData("schema")]
+    [InlineData("platform")]
+    [InlineData("missing-service")]
+    public void Readiness_InvalidOrIncompleteEvidence_NeverBecomesEligible(string caseName)
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }]);
+        VerifiedReleaseEvidenceDto release = Release("202609150001_Initial");
+        (inventory, release) = caseName switch
+        {
+            "stale" => (inventory with { Services = [inventory.Services[0] with { ObservedAt = Now.AddMinutes(-2) }] }, release),
+            "incomplete" => (inventory, release with { IsComplete = false }),
+            "schema" => (inventory, Release("202609150002_Next")),
+            "platform" => (inventory with { Services = [inventory.Services[0] with { Platform = "linux/arm64" }] }, release),
+            _ => (inventory, release with { Services = [] }),
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.NotEqual(InventoryEligibility.Eligible, result.State);
+        Assert.NotEmpty(result.Reasons);
+    }
+
+    [Fact]
+    public void Readiness_ImportedSnapshot_PreservesProvenanceAndRemainsUnknown()
+    {
+        ServiceInventoryDto imported = Evaluate([Verified("a")]) with
+        {
+            SnapshotOrigin = InventorySnapshotOrigin.Imported,
+            SnapshotSource = "operator-export",
+            SnapshotExportedAt = Now.AddMinutes(-1),
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(imported, Release(null), Now);
+
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("ImportedSnapshotIsNotLiveObservation", Assert.Single(result.Reasons));
+        Assert.Equal(Now.AddMinutes(-1), imported.SnapshotExportedAt);
     }
 
     [Fact]
@@ -284,18 +341,59 @@ public sealed class ServiceInventoryTests
         string version = channel == "stable" ? "1.2.3" : "1.2.3-insider.10";
         return new()
         {
-            ServiceId = "api", InstanceId = instance, Component = "api", Required = true,
-            ApplicationVersion = version, SourceCommit = Commit, Source = "VerifiedImport",
-            ObservationState = InventoryObservationState.Observed, ObservedAt = Now, LastSuccessAt = Now,
-            VerificationSource = "LocalVerifiedImport", VerifiedAt = Now, Platform = "linux/amd64",
-            PlatformDigest = Digest, ManifestDigest = Digest,
+            ServiceId = "api",
+            InstanceId = instance,
+            Component = "api",
+            Required = true,
+            ApplicationVersion = version,
+            SourceCommit = Commit,
+            Source = "VerifiedImport",
+            ObservationState = InventoryObservationState.Observed,
+            ObservedAt = Now,
+            LastSuccessAt = Now,
+            VerificationSource = "LocalVerifiedImport",
+            VerifiedAt = Now,
+            Platform = "linux/amd64",
+            PlatformDigest = Digest,
+            ManifestDigest = Digest,
             Identity = new()
             {
-                CanonicalVersion = version, BaseVersion = "1.2.3", ReleaseId = $"{channel}:{version}", Channel = channel,
-                SourceCommit = Commit, AuthorizedBranchHead = Commit, SourceBranch = channel == "stable" ? "main" : "development",
-                SourceTag = $"v{version}", BuildId = "100", BuildAttempt = "1", WorkflowIdentity = "authoritative-workflow",
+                CanonicalVersion = version,
+                BaseVersion = "1.2.3",
+                ReleaseId = $"{channel}:{version}",
+                Channel = channel,
+                SourceCommit = Commit,
+                AuthorizedBranchHead = Commit,
+                SourceBranch = channel == "stable" ? "main" : "development",
+                SourceTag = $"v{version}",
+                BuildId = "100",
+                BuildAttempt = "1",
+                WorkflowIdentity = "authoritative-workflow",
                 AllocationIdentity = "reservation-10",
             },
         };
     }
+
+    private static VerifiedReleaseEvidenceDto Release(string? migrationHead) => new()
+    {
+        SignatureVerified = true,
+        IsComplete = true,
+        ManifestDigest = Digest,
+        Identity = new()
+        {
+            Channel = "stable",
+            CanonicalVersion = "1.2.4",
+            ReleaseId = "stable:1.2.4",
+        },
+        Services =
+        [
+            new()
+            {
+                ServiceId = "api",
+                Platform = "linux/amd64",
+                PlatformDigest = Digest,
+                RequiredMigrationHead = migrationHead,
+            },
+        ],
+    };
 }
