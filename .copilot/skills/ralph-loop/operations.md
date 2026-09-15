@@ -223,9 +223,12 @@ tests/acceptance criteria before attesting it. Neither PR closure nor task succe
 Acquire sole-writer ownership, read the journal fingerprint, then freshly observe the app's
 running and queued/follow-up state without waking the child. Observation must be no more than
 60 seconds old and at least as recent as the journal tail. Do not reuse an old app snapshot.
-Under the ledger lock the adapter rechecks generation, identity, chronology and all evidence;
-after Git verification it re-reads the journal and rechecks observation freshness. Changed or
-unavailable evidence fails explicitly without releasing a slot. Refresh evidence before retrying.
+The adapter streams and validates the full runtime lifecycle and verifies Git outside the ledger
+lock, then streams a hash-only journal recheck. It never materializes the whole journal as one
+string. Under the short ledger lock it rechecks generation, identity, chronology, observation
+freshness and the journal's filesystem identity/size/nanosecond modification metadata. Changed
+or unavailable evidence fails explicitly without releasing a slot. Other admission operations
+are not locked out during network or journal scanning. Refresh evidence before retrying.
 
 **Trust and race boundary:** the journal is host-owned local runtime evidence, not authenticated
 by caller prose, and not a cryptographic attestation against another process with the same OS

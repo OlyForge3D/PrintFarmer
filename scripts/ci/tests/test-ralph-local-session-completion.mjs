@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile, open } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawn } from 'node:child_process';
@@ -172,6 +172,10 @@ test('runtime evidence rejects forged prose, failure, wrong identity, chronology
     ['later tool activity', (f) => { f.events[4].type = 'tool.execution_start'; }],
     ['unknown lifecycle event', (f) => { f.events[4].type = 'session.unknown'; }],
     ['pending hook', (f) => { f.events[4].type = 'hook.start'; f.events[4].data.hookInvocationId = 'pending'; }],
+    ['pre-task broken chain', (f) => { f.events[1].parentId = randomUUID(); }],
+    ['pre-task timestamp regression', (f) => { f.events[1].timestamp = timestamp(15_000); }],
+    ['pre-task unmatched hook end', (f) => { f.events[1].type = 'hook.end'; f.events[1].data.hookInvocationId = 'unknown'; }],
+    ['missing hook ID', (f) => { f.events[4].type = 'hook.start'; }],
   ];
   for (const [name, change] of cases) await t.test(name, async (subtest) => {
     const f = await fixture(subtest);
@@ -182,6 +186,57 @@ test('runtime evidence rejects forged prose, failure, wrong identity, chronology
     await assert.rejects(() => f.complete(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
     assert.equal(await readFile(f.ledgerFile, 'utf8'), before);
   });
+});
+
+test('pending/duplicate pre-task hooks and already ended turns cannot authorize task completion', async (t) => {
+  for (const kind of ['pending-hook', 'duplicate-hook', 'ended-turn']) await t.test(kind, async (subtest) => {
+    const f = await fixture(subtest);
+    const extra = kind === 'ended-turn'
+      ? [{ type: 'assistant.turn_end', data: { turnId: 'turn-1' } }]
+      : Array.from({ length: kind === 'duplicate-hook' ? 2 : 1 }, () => ({ type: 'hook.start', data: { hookInvocationId: 'hook-1' } }));
+    f.events.splice(2, 0, ...extra.map((event) => ({ ...event, id: randomUUID(), timestamp: f.events[1].timestamp })));
+    f.events.forEach((event, index) => { if (index) event.parentId = f.events[index - 1].id; });
+    await f.writeJournal();
+    await assert.rejects(() => f.complete(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
+    assert.equal((await f.readLedger()).generation, 206);
+  });
+});
+
+test('completed hooks that cross task completion remain verifiable', async (t) => {
+  const f = await fixture(t);
+  f.events.splice(2, 0, { id: randomUUID(), type: 'hook.start', data: { hookInvocationId: 'cross-task' }, timestamp: f.events[1].timestamp });
+  f.events.push({ id: randomUUID(), type: 'hook.end', data: { hookInvocationId: 'cross-task', success: true }, timestamp: f.events.at(-1).timestamp });
+  f.events.forEach((event, index) => { if (index) event.parentId = f.events[index - 1].id; });
+  await f.writeJournal();
+  assert.equal((await f.complete()).state, 'completed');
+});
+
+test('large multi-chunk journals stream successfully without whole-file materialization', async (t) => {
+  const f = await fixture(t);
+  const file = await open(f.journalFile, 'w');
+  const hash = createHash('sha256');
+  const write = async (event) => {
+    const line = JSON.stringify(event) + '\n';
+    hash.update(line);
+    await file.write(line);
+  };
+  try {
+    await write(f.events[0]);
+    let parentId = f.events[0].id;
+    for (let index = 0; index < 128; index += 1) {
+      const event = { id: randomUUID(), parentId, timestamp: f.events[0].timestamp,
+        type: 'session.info', data: { content: 'x'.repeat(256 * 1024) } };
+      await write(event);
+      parentId = event.id;
+    }
+    f.events[1].parentId = parentId;
+    for (const event of f.events.slice(1)) await write(event);
+  } finally {
+    await file.close();
+  }
+  f.result.observation.journalSha256 = hash.digest('hex');
+  f.result.observation.observedAt = timestamp(0);
+  assert.equal((await f.complete()).state, 'completed');
 });
 
 test('missing or partially written journals retain accounting', async (t) => {
@@ -224,6 +279,25 @@ test('journal or observation races during Git verification fail closed under the
     await assert.rejects(() => f.complete(), (error) => error.code === 'INVALID_SESSION_COMPLETION');
     assert.equal((await f.readLedger()).generation, 206);
   });
+});
+
+test('another ledger operation succeeds during network verification and fences the stale completion', async (t) => {
+  const f = await fixture(t);
+  const execute = f.options.execFile;
+  f.options.execFile = async (...args) => {
+    if (args[1].includes('ls-remote')) {
+      await recordLocalTerminalResult({
+        jobId: 'retained', sessionId: f.ledger.jobs.retained.sessionId, headSha,
+        exitCode: 0, workingTreeClean: true, allCommitsPushed: true, validationEvidence: 'Other job actual process result.',
+      }, f.options);
+    }
+    return execute(...args);
+  };
+  await assert.rejects(() => f.complete(), (error) => error.code === 'STALE_LEDGER');
+  const ledger = await f.readLedger();
+  assert.equal(ledger.jobs.retained.state, 'completed');
+  assert.equal(ledger.jobs[jobId].state, 'accepted');
+  assert.equal(ledger.generation, 207);
 });
 
 test('existing process terminal-local still requires a real integer and retains its original result shape', async (t) => {
