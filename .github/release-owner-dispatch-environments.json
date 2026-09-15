@@ -1,0 +1,33 @@
+{
+  "repository": "OlyForge3D/PrintFarmer",
+  "environments": [
+    {
+      "name": "release-stable-owner-dispatch",
+      "settings": {
+        "wait_timer": 0,
+        "prevent_self_review": false,
+        "reviewers": [],
+        "can_admins_bypass": false,
+        "deployment_branch_policy": {
+          "protected_branches": false,
+          "custom_branch_policies": true
+        }
+      },
+      "branchPolicies": [{ "name": "development", "type": "branch" }]
+    },
+    {
+      "name": "release-insider-owner-dispatch",
+      "settings": {
+        "wait_timer": 0,
+        "prevent_self_review": false,
+        "reviewers": [],
+        "can_admins_bypass": false,
+        "deployment_branch_policy": {
+          "protected_branches": false,
+          "custom_branch_policies": true
+        }
+      },
+      "branchPolicies": [{ "name": "development", "type": "branch" }]
+    }
+  ]
+}
