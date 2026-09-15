@@ -83,7 +83,6 @@ const cryptoEvidenceFixture = set => {
       ? Math.max(Math.floor(createdAt / 1000) + 60, 1789426200)
       : 1789426200;
     const optional = { Subject: publisherWorkflowIdentity, Issuer: 'https://token.actions.githubusercontent.com',
-      certificate: cryptoCertificate,
       Bundle: { Payload: { integratedTime, canonicalizedBody: 'proof', signature: 'native-signature' } } };
     const signatureBytes = JSON.stringify([{ critical: { image: { 'docker-manifest-digest': digest } }, optional }]);
     const attestationBytes = JSON.stringify([{ payload: Buffer.from(JSON.stringify({
@@ -93,8 +92,17 @@ const cryptoEvidenceFixture = set => {
       signatureBytes,
       attestationBytes,
       predicateBytes: predicate,
-      signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: cryptoCertificate,
-        Bundle: optional.Bundle }]),
+      signatureBundleBytes: JSON.stringify([{
+        mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+        verificationMaterial: {
+          certificate: { rawBytes: new X509Certificate(cryptoCertificate).raw.toString('base64') },
+          tlogEntries: [{ integratedTime, canonicalizedBody: 'proof' }],
+        },
+        messageSignature: {
+          messageDigest: { algorithm: 'SHA2_256', digest: Buffer.from(digest.slice(7), 'hex').toString('base64') },
+          signature: 'native-signature',
+        },
+      }]),
       attestationBundleBytes: JSON.stringify([{
         mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
         verificationMaterial: {
@@ -3096,7 +3104,7 @@ function authorizationFixture(initial = state(), settings = {}) {
     state: 'approved', user: { login: 'jpapiez' }, submitted_at: new Date().toISOString(),
     environments: [{ name: 'release-insider' }],
   };
-  const abandonmentJob = { id: 900, name: 'Protected release publication / Abandon immutable release reservation', run_id: 42,
+  const abandonmentJob = { id: 900, name: 'Approve and execute immutable release operation / Abandon immutable release reservation', run_id: 42,
     run_attempt: 1, status: 'in_progress', started_at: qualificationCompletedAt, conclusion: undefined };
   const abandonmentJobs = [abandonmentJob];
   const transactionJobs = qualificationJobs.map((name, index) => ({

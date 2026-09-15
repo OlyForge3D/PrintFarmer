@@ -39,7 +39,7 @@ const trust = (overrides = {}) => ({
 });
 function signed(subject = digest, predicateValue = predicate) {
   const verification = {
-    optional: { Subject: signer, Issuer: 'https://token.actions.githubusercontent.com', certificate,
+    optional: { Subject: signer, Issuer: 'https://token.actions.githubusercontent.com',
       Bundle: { Payload: { integratedTime: 1789426200, canonicalizedBody: 'proof', signature: 'native-signature' },
         SignedEntryTimestamp: 'proof' } },
   };
@@ -50,8 +50,17 @@ function signed(subject = digest, predicateValue = predicate) {
     signatureBytes: JSON.stringify([{ critical: { image: { 'docker-manifest-digest': subject } }, ...verification }]),
     attestationBytes: JSON.stringify([{ payload: Buffer.from(JSON.stringify(statement)).toString('base64'), ...verification }]),
     predicateBytes: JSON.stringify(predicateValue),
-    signatureBundleBytes: JSON.stringify([{ SignedPayload: 'signed-payload', Cert: certificate,
-      Bundle: verification.optional.Bundle }]),
+    signatureBundleBytes: JSON.stringify([{
+      mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
+      verificationMaterial: {
+        certificate: { rawBytes: new X509Certificate(certificate).raw.toString('base64') },
+        tlogEntries: [{ integratedTime: 1789426200, canonicalizedBody: 'proof' }],
+      },
+      messageSignature: {
+        messageDigest: { algorithm: 'SHA2_256', digest: Buffer.from(subject.slice(7), 'hex').toString('base64') },
+        signature: 'native-signature',
+      },
+    }]),
     attestationBundleBytes: JSON.stringify([{
       mediaType: 'application/vnd.dev.sigstore.bundle.v0.3+json',
       verificationMaterial: {
@@ -185,11 +194,8 @@ test('rejects stale, revoked, substituted, and out-of-window bundle trust before
     assert.throws(() => stageEvidence(path, completeSet, collected,
       trust({ policy: { ...trust().policy, revokedSignerIdentities: [signer] } })), /untrusted|revoked/);
     const altered = structuredClone(collected);
-    const alteredVerification = JSON.parse(altered.api.index.signatureBytes);
-    alteredVerification[0].optional.certificate = 'not-a-certificate';
-    altered.api.index.signatureBytes = JSON.stringify(alteredVerification);
     const alteredDownload = JSON.parse(altered.api.index.signatureBundleBytes);
-    alteredDownload[0].Cert = 'not-a-certificate';
+    alteredDownload[0].verificationMaterial.certificate.rawBytes = 'not-a-certificate';
     altered.api.index.signatureBundleBytes = JSON.stringify(alteredDownload);
     assert.throws(() => stageEvidence(path, completeSet, altered, trust()), /certificate/);
     assert.throws(() => stageEvidence(path, completeSet, collected, trust({

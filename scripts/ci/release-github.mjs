@@ -26,6 +26,8 @@ function publicReference(value, pattern) {
 const shaPattern = /^[a-f0-9]{40}$/;
 const hashPattern = /^[a-f0-9]{64}$/;
 const sequencePattern = /^[1-9][0-9]*$/;
+export const abandonmentProtectedJobName =
+  'Approve and execute immutable release operation / Abandon immutable release reservation';
 
 function publicReservation(entry, key) {
   publicReference(key, hashPattern);
@@ -510,8 +512,7 @@ export async function verifyAbandonmentApproval(api, transaction, record, target
     'Abandonment workflow job evidence is missing or truncated');
   const protectedJobs = jobs.jobs.filter(candidate => candidate?.run_id === Number(transaction.runId) &&
     candidate.run_attempt === Number(transaction.runAttempt) &&
-    candidate.name?.startsWith('Protected release publication / ') &&
-    candidate.name?.endsWith('Abandon immutable release reservation') &&
+    candidate.name === abandonmentProtectedJobName &&
     typeof candidate.started_at === 'string');
   requireThat(protectedJobs.length === 1, 'Abandonment protected job evidence is missing, ambiguous, or mismatched');
   const [job] = protectedJobs;

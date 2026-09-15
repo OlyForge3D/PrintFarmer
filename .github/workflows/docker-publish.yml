@@ -151,10 +151,15 @@ jobs:
         run: |
           set -euo pipefail
           gh run download "$AUTHORIZATION_RUN_ID" --name release-authorization-1 --dir .artifacts/release-authorization
-          cosign verify-blob --bundle .artifacts/release-authorization/release-identity.bundle.json \
-            --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            .artifacts/release-authorization/release-identity.json
+          expected_authorization_assets="$(printf '%s\n' public-identity.bundle.json public-identity.json release-identity.bundle.json release-identity.json | sort)"
+          [[ "$(find .artifacts/release-authorization -maxdepth 1 -type f -printf '%f\n' | sort)" == "$expected_authorization_assets" ]] ||
+            { echo "Authorization recovery artifact is incomplete or contains unexpected files"; exit 1; }
+          for identity in release-identity public-identity; do
+            cosign verify-blob --bundle ".artifacts/release-authorization/${identity}.bundle.json" \
+              --certificate-identity "$RELEASE_SIGNER_IDENTITY" \
+              --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+              ".artifacts/release-authorization/${identity}.json"
+          done
       - name: Record approved immutable reservation abandonment
         if: inputs.operation == 'abandon'
         env:
@@ -187,10 +192,10 @@ jobs:
         run: |
           set -euo pipefail
           umask 077
-          cosign sign-blob --yes \
+          cosign sign-blob --yes --new-bundle-format \
             --bundle .artifacts/release-authorization/release-identity.bundle.json \
             .artifacts/release-authorization/release-identity.json
-          cosign sign-blob --yes \
+          cosign sign-blob --yes --new-bundle-format \
             --bundle .artifacts/release-authorization/public-identity.bundle.json \
             .artifacts/release-authorization/public-identity.json
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
@@ -333,8 +338,8 @@ jobs:
               --version "$RELEASE_VERSION" \
               --revision "$source_sha" \
               "${extra[@]}"
-            cosign attest --yes --type spdxjson --predicate "$sbom" "${repository}@${digest}"
-            cosign sign --yes "${repository}@${digest}"
+            cosign attest --yes --new-bundle-format --type spdxjson --predicate "$sbom" "${repository}@${digest}"
+            cosign sign --yes --new-bundle-format "${repository}@${digest}"
             platform_digests="$(
               docker buildx imagetools inspect "${repository}@${digest}" --raw |
                 jq -r '.manifests[]
@@ -355,8 +360,8 @@ jobs:
                 --version "$RELEASE_VERSION" \
                 --revision "$source_sha" \
                 "${extra[@]}"
-              cosign attest --yes --type spdxjson --predicate "$platform_sbom" "${repository}@${platform_digest}"
-              cosign sign --yes "${repository}@${platform_digest}"
+              cosign attest --yes --new-bundle-format --type spdxjson --predicate "$platform_sbom" "${repository}@${platform_digest}"
+              cosign sign --yes --new-bundle-format "${repository}@${platform_digest}"
             done <<< "$platform_digests"
           }
           build_component api api-runtime linux/amd64,linux/arm64
