@@ -22,43 +22,20 @@ async function mountFixture(page: Page, content: string) {
   });
 }
 
-async function mountMotionFixture(page: Page, state: 'Queued' | 'Running' | 'Unknown' = 'Queued') {
-  await mountFixture(page, `fixture.mountMotionPanel(document.getElementById('motion-root'), ${JSON.stringify(state)});`);
-  await expect(page.getByRole('region', { name: 'Motion status' })).toBeVisible();
-}
-
 async function mountCoordinateFixture(page: Page) {
   await mountFixture(page, `fixture.mountCoordinates(document.getElementById('motion-root'));`);
   await expect(page.getByRole('region', { name: 'Detail coordinates' })).toBeVisible();
 }
 
 test.describe('Printer motion feedback without physical commands', () => {
-  test('routine progress keeps diagnostics collapsed and keyboard-accessible', async ({ page }) => {
+  test('direct controls have no tracking status or recovery panel', async ({ page }) => {
     const errors: string[] = [];
     page.on('pageerror', error => errors.push(error.message));
-    await mountMotionFixture(page);
-    await expect(page.getByRole('status')).toHaveText('Motion: Jog: waiting to start');
-    await expect(page.getByText(/Do not repeat/)).toHaveCount(0);
-    const operationId = page.getByText('Operation: 22222222-2222-4222-8222-222222222222');
-    await expect(operationId).not.toBeVisible();
-    const details = page.getByText('Motion technical details', { exact: true });
-    await details.focus();
-    await page.keyboard.press('Enter');
-    await expect(operationId).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Recheck motion status' })).toBeVisible();
-    await page.keyboard.press('Enter');
-    await expect(operationId).not.toBeVisible();
+    await mountCoordinateFixture(page);
+    await expect(page.getByRole('region', { name: 'Motion status' })).toHaveCount(0);
+    await expect(page.getByText(/Motion Ready|Motion technical details|Operation ID/)).toHaveCount(0);
+    await expect(page.getByRole('button', { name: /recover|retry|recheck motion/i })).toHaveCount(0);
     expect(errors).toEqual([]);
-  });
-
-  test('unknown outcomes retain honest warnings without recovery or retry controls', async ({ page }) => {
-    await mountMotionFixture(page, 'Unknown');
-    await expect(page.getByRole('status')).toHaveText('Motion: Jog: outcome unknown');
-    await expect(page.getByText(/Do not repeat this movement/)).toBeVisible();
-    await expect(page.getByRole('button', { name: 'Recheck motion status' })).toBeVisible();
-    await expect(page.getByText(/queue:reconcile|authorized operator/)).toHaveCount(0);
-    await expect(page.getByRole('button', { name: /recover|retry|re-submit/i })).toHaveCount(0);
-    await expect(page.getByRole('checkbox')).toHaveCount(0);
   });
 
   for (const viewportWidth of [1280, 320]) {

@@ -10,12 +10,9 @@ import { PrinterDetailsSidebar } from '@/features/printers/components/PrinterDet
 const mockExecute = vi.fn();
 const mockToastError = vi.fn();
 let mockBlocked = false;
-let mockMoonraker = true;
-vi.mock('@/features/printers/hooks/use-printer-control-operation', () => ({
-  usePrinterControlOperation: () => ({
-    execute: mockExecute, usesDurableMotion: mockMoonraker, blocked: mockBlocked,
-    saved: null, operation: null, current: null, error: null, tracker: null,
-    uncertain: false, checking: mockBlocked, submitting: false, admitting: false,
+vi.mock('@/features/printers/hooks/use-printer-movement', () => ({
+  usePrinterMovement: () => ({
+    execute: mockExecute, blocked: mockBlocked,
   }),
 }));
 vi.mock('@/common/hooks/usePrinterDisplay', () => ({ usePrinterDisplay: (printer: Printer) => printer }));
@@ -114,7 +111,6 @@ function render(element: ReactElement) {
 beforeEach(() => {
   accountMode = 'Guided';
   mockBlocked = false;
-  mockMoonraker = true;
   mockExecute.mockReset();
   mockToastError.mockReset();
 });
@@ -152,7 +148,7 @@ describe.each<Surface>(['detail', 'sidebar'])('%s initiating motion controls', s
     expect(initiating).toBeEnabled();
   });
 
-  it('does not mark any initiating button busy during initial availability checking', () => {
+  it('does not mark another initiating button busy while a shared request is pending', () => {
     mockBlocked = true;
     const { container } = render(<Controls surface={surface} />);
     expect(screen.getByRole('button', { name: 'Home all axes' })).toBeDisabled();
@@ -160,16 +156,15 @@ describe.each<Surface>(['detail', 'sidebar'])('%s initiating motion controls', s
     expect(mockExecute).not.toHaveBeenCalled();
   });
 
-  it('preserves relative GO intents without filling blank axes', async () => {
-    mockMoonraker = false;
+  it('requires all coordinates for direct absolute GO without tracking UI', async () => {
     mockExecute.mockResolvedValue({ success: true });
     render(<Controls surface={surface} />);
-    fireEvent.change(screen.getByLabelText('X movement amount'), { target: { value: '12' } });
-    fireEvent.change(screen.getByLabelText('Z movement amount'), { target: { value: '-3' } });
-    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'GO by movement amounts' })));
-    expect(mockExecute).toHaveBeenCalledTimes(2);
-    expect(mockExecute).toHaveBeenNthCalledWith(1, { kind: 'Jog', x: 12 });
-    expect(mockExecute).toHaveBeenNthCalledWith(2, { kind: 'Jog', z: -3 });
+    fireEvent.change(screen.getByLabelText('X absolute target'), { target: { value: '12' } });
+    expect(screen.getByRole('button', { name: 'GO to absolute position' })).toBeDisabled();
+    expect(screen.queryByText(/Motion Ready|Operation ID|Recheck status|Recovery required/i)).not.toBeInTheDocument();
+    fillCoordinates();
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'GO to absolute position' })));
+    expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: 'MoveTo', x: 120, y: 130, z: 15 });
   });
 
   it('retains the shared motion lock and stop access when switching to Expert', async () => {
@@ -217,12 +212,10 @@ it('synchronizes actual detail/sidebar modes and keeps both coordinate rows', as
   expect(mockExecute).not.toHaveBeenCalled();
 });
 
-it('preserves the actual sidebar relative per-axis Enter behavior', async () => {
-  mockMoonraker = false;
+it('sends one direct absolute command from sidebar Enter', async () => {
   mockExecute.mockResolvedValue({ success: true });
   render(<Controls surface="sidebar" />);
-  fireEvent.change(screen.getByLabelText('X movement amount'), { target: { value: '12' } });
-  fireEvent.change(screen.getByLabelText('Y movement amount'), { target: { value: '5' } });
-  await act(async () => fireEvent.keyDown(screen.getByLabelText('Y movement amount'), { key: 'Enter' }));
-  expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: 'Jog', y: 5 });
+  fillCoordinates();
+  await act(async () => fireEvent.keyDown(screen.getByLabelText('Y absolute target'), { key: 'Enter' }));
+  expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: 'MoveTo', x: 120, y: 130, z: 15 });
 });

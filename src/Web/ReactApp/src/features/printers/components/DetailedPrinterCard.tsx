@@ -29,8 +29,7 @@ import { resolveMaterialLoadout } from '@/features/printers/utils/materialLoadou
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
 import { MovementControlSection } from '@/features/printers/components/MovementControlSection';
-import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
-import { PrinterControlOperationPanel } from '@/features/printers/components/PrinterControlOperationPanel';
+import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 import { FilamentControlSection } from '@/features/printers/components/FilamentControlSection';
 import type { ZOffsetCalibrationWizardProps } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
@@ -146,7 +145,7 @@ function formatFilament(grams: number): string {
 // re-renders when its own printer's data actually changed.
 export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ printer, backendCapabilities, onEdit }: DetailedPrinterCardProps) {
   const queryClient = useQueryClient();
-  const motion = usePrinterControlOperation(printer);
+  const motion = usePrinterMovement(printer);
   const { ready: spoolmanReady } = useSpoolmanConfigured();
   const mmuStatus = (printer as PrinterDisplay).mmuStatus;
   // Snapmaker U1's AMS-equivalent is surfaced through its own UI elsewhere, so the
@@ -1050,7 +1049,6 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
 
       {/* Move and Control Section */}
       <div className="mb-2">
-          <PrinterControlOperationPanel control={motion} />
           <MovementControlSection
             moveX={moveX}
             moveY={moveY}
@@ -1078,7 +1076,7 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
             onExtrudeSpeedChange={setExtrudeSpeed}
             onMove={handleMove}
             onHome={handleHome}
-            onMoveTo={motion.usesDurableMotion ? handleMoveTo : undefined}
+            onMoveTo={handleMoveTo}
             onDisableMotors={() => handleControlAction('disable-motors')}
             onExtrude={handleExtrude}
             rightContent={

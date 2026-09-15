@@ -33,7 +33,6 @@ const periodicSelfHealIntervalMs = 60_000;
 const printerActuationOnlyEventTypeSubstrings = [
   'BedClear',
   'BackendControl',
-  'PhysicalControl',
 ] as const;
 
 function isPrinterActuationOnlyEventType(eventType: string | undefined | null): boolean {

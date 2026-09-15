@@ -18,8 +18,7 @@ import { PrinterBackend, type ApiError, type MoveRequest, type Printer, type Pri
 import { PrinterHistoryModal } from '@/features/printers/components/PrinterHistoryModal';
 import { PrinterFilesModal } from '@/features/printers/components/PrinterFilesModal';
 import { TemperatureControlSection } from '@/features/printers/components/TemperatureControlSection';
-import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
-import { PrinterControlOperationPanel } from '@/features/printers/components/PrinterControlOperationPanel';
+import { usePrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 import {
   canCancel,
   canCooldown,
@@ -172,7 +171,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
   // Only fetch if printer prop is not provided
   const shouldFetch = !printerProp && !!printerId;
   const { data: apiPrinter, isLoading, refetch } = usePrinter(shouldFetch ? printerId : '');
-  const motion = usePrinterControlOperation(printerProp ?? apiPrinter);
+  const motion = usePrinterMovement(printerProp ?? apiPrinter);
   const { data: autoDispatchStatus } = useAutoDispatchStatus(printerId ?? '');
   const queryClient = useQueryClient();
   const { ready: spoolmanReady } = useSpoolmanConfigured();
@@ -1242,18 +1241,17 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             <div className="text-[10px] uppercase text-pf-text-secondary font-bold tracking-wide mb-1">Step Size</div>
             <MoveDistanceSlider value={step} onChange={setStep} disabled={!canSetStepNow} />
           </div>
-          <PrinterControlOperationPanel control={motion} />
           <PrinterCoordinateRow
             values={{ X: moveX, Y: moveY, Z: moveZ }}
             positions={{ X: lastKnownX, Y: lastKnownY, Z: lastKnownZ }}
             onChange={(axis, value) => ({ X: setMoveX, Y: setMoveY, Z: setMoveZ })[axis](value)}
             disabled={movementActionPending || !canManualMoveNow}
             onMove={handleMove}
-            onMoveTo={motion.usesDurableMotion ? handleMoveTo : undefined}
+            onMoveTo={handleMoveTo}
             perAxisEnter
             goTitle="Move to entered coordinates"
           />
-          <PrinterMotionHelp absolute={motion.usesDurableMotion} />
+          <PrinterMotionHelp absolute />
         </CollapsibleSection>
 
         {/* Temperatures Section */}

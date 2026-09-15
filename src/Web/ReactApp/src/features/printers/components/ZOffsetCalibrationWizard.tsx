@@ -7,9 +7,8 @@ import { Button, Card, Alert, ProgressBar } from '@/common/components/ui';
 import { apiClient } from '@/services/api';
 import { mutationErrorMessage } from '@/common/utils/mutationError';
 import { queryKeys } from '@/common/hooks/useApi';
-import type { CommandResult, Printer, PrinterBackendString, PrinterControlIntent } from '@/types/api';
-import { usePrinterControlOperation } from '@/features/printers/hooks/use-printer-control-operation';
-import { PrinterControlOperationPanel } from '@/features/printers/components/PrinterControlOperationPanel';
+import type { CommandResult, Printer, PrinterBackendString } from '@/types/api';
+import { usePrinterMovement, type PrinterMovement } from '@/features/printers/hooks/use-printer-movement';
 
 const WIZARD_STEPS = [
   'Introduction',
@@ -34,8 +33,8 @@ export interface ZOffsetCalibrationWizardProps {
 
 export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 220, bedSizeY = 220 }: ZOffsetCalibrationWizardProps) {
   const queryClient = useQueryClient();
-  const motion = usePrinterControlOperation(printer);
-  const { execute: executeMotion, usesDurableMotion, tracker } = motion;
+  const motion = usePrinterMovement(printer);
+  const { execute: executeMotion } = motion;
   const generation = useRef(0);
   useEffect(() => () => { generation.current++; }, [isOpen, printer.id]);
   const [stepIndex, setStepIndex] = useState(0);
@@ -69,7 +68,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
   });
 
   const executeControlAndWait = useCallback(
-    async (intent: PrinterControlIntent): Promise<CommandResult> => {
+    async (intent: PrinterMovement): Promise<CommandResult> => {
       if (controlsBlocked) return { success: false };
       const startedGeneration = generation.current;
       setIsCommandRunning(true);
@@ -77,49 +76,24 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
         const result = await executeMotion(intent);
         if (generation.current !== startedGeneration) return { success: false };
         if (!result.success) {
-          toast.error(result.error || 'Motion was not confirmed successful. Calibration has not advanced.');
+          toast.error(result.error || 'Movement command was not accepted. Calibration has not advanced.');
           return result;
-        }
-        if (usesDurableMotion) {
-          const completed = tracker?.getCompletedOperation();
-          const completedAt = Date.parse(completed?.completedAtUtc ?? '');
-          const printers = await apiClient.getPrinters(true, true);
-          const configuration = printers.find(candidate => candidate.id === printer.id);
-          const status = await apiClient.getPrinterStatus(printer.id);
-          await tracker?.refresh();
-          if (generation.current !== startedGeneration) return { success: false };
-          const homed = status.safetyTelemetry?.homedAxes;
-          const observedAt = Date.parse(homed?.observedAtUtc ?? '');
-          const now = Date.now();
-          const axes = Array.isArray(homed?.value) && homed.value.every(axis => typeof axis === 'string')
-            ? homed.value.map(axis => axis.toLowerCase()) : [];
-          if (completed?.state !== 'Succeeded' || completed.completionEvidence !== 'MotionQueueDrained' ||
-            !Number.isFinite(completedAt) || configuration?.isEnabled !== true || configuration.inMaintenance !== false ||
-            status.id !== printer.id || status.isOnline !== true ||
-            !['idle', 'ready', 'standby', 'operational'].includes(status.state?.toLowerCase() ?? '') ||
-            !homed || !Number.isFinite(homed.staleAfterSeconds) || homed.staleAfterSeconds <= 0 ||
-            !Number.isFinite(observedAt) || observedAt < completedAt || observedAt > now ||
-            now - observedAt > homed.staleAfterSeconds * 1000 ||
-            !['x', 'y', 'z'].every(axis => axes.includes(axis)) ||
-            !tracker || tracker.isBlocked()) {
-            throw new Error('Motion finished, but fresh printer safety checks are not satisfied. Calibration has not advanced.');
-          }
         }
         return result;
       } catch (error) {
-        if (generation.current === startedGeneration) toast.error(mutationErrorMessage(error, 'Calibration motion is uncertain. Recheck before continuing.'));
+        if (generation.current === startedGeneration) toast.error(mutationErrorMessage(error, 'Movement request failed. Check the printer before sending another command.'));
         return { success: false };
       } finally {
         if (generation.current === startedGeneration) setIsCommandRunning(false);
       }
     },
-    [controlsBlocked, executeMotion, usesDurableMotion, tracker, printer.id]
+    [controlsBlocked, executeMotion]
   );
 
   const handleHomeAxes = useCallback(async () => {
     const result = await executeControlAndWait({ kind: 'HomeAll' });
     if (result.success) {
-      toast.success('Axes homed successfully');
+      toast.success('Homing command accepted. Wait for the axes to stop before continuing.');
       setStepIndex(2);
     }
   }, [executeControlAndWait]);
@@ -135,7 +109,7 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
       f: 3000,
     });
     if (result.success) {
-      toast.success('Moved to bed center');
+      toast.success('Center movement command accepted. Verify the position before adjusting.');
       setStepIndex(3);
     }
   }, [executeControlAndWait, bedSizeX, bedSizeY]);
@@ -146,13 +120,12 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
       const newOffset = parseFloat((zOffset + delta).toFixed(3));
       const result = await executeControlAndWait({
         kind: 'MoveTo',
-        ...(usesDurableMotion ? { x: bedSizeX / 2, y: bedSizeY / 2 } : {}),
         z: Math.max(0, 10 + newOffset),
         f: 300,
       });
       if (result.success) setZOffset(newOffset);
     },
-    [executeControlAndWait, zOffset, selectedIncrement, usesDurableMotion, bedSizeX, bedSizeY]
+    [executeControlAndWait, zOffset, selectedIncrement]
   );
 
   const handleSave = useCallback(() => {
@@ -239,7 +212,9 @@ export function ZOffsetCalibrationWizard({ isOpen, onClose, printer, bedSizeX = 
   return (
     <Modal isOpen={isOpen} onClose={handleClose} title="Z-Offset Calibration" size="lg" footer={footer}>
       <div className="space-y-4">
-        <PrinterControlOperationPanel control={motion} />
+        <Alert variant="warning">
+          Commands are accepted, not confirmed physically complete. Wait for the printer to stop and verify its position before continuing.
+        </Alert>
         <ProgressBar value={progressPercent} className="mb-2" />
         <div className="text-sm text-pf-text-secondary mb-4">
           Step {stepIndex + 1} of {WIZARD_STEPS.length}: {currentStep}
