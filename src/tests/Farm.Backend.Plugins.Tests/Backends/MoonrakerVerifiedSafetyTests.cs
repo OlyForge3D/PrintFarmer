@@ -169,14 +169,14 @@ public sealed class MoonrakerVerifiedSafetyTests
         {
             Assert.Equal(HttpMethod.Get, request.Method);
             requests.Add(request.RequestUri!);
-            if (axesJson == "failure" && request.RequestUri!.Query.Contains("toolhead=position,homed_axes", StringComparison.Ordinal))
+            if (axesJson == "failure" && request.RequestUri!.Query.Contains("homed_axes", StringComparison.Ordinal))
             {
                 return new HttpResponseMessage(HttpStatusCode.BadGateway);
             }
 
             string axesField = axesJson is "missing" or "failure" ? string.Empty : $",\"homed_axes\":{axesJson}";
             return JsonResponse("""
-                {"result":{"status":{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"position":[1,2,3]AXES_FIELD},"gcode_move":{"gcode_position":[11,22,33,0],"homing_origin":[10,20,30,0]}}}}
+                {"result":{"status":{"webhooks":{"state":"ready"},"print_stats":{"state":"standby"},"toolhead":{"position":[1,2,3]AXES_FIELD},"gcode_move":{"position":[21,42,63,0],"gcode_position":[11,22,33,0],"homing_origin":[10,20,30,0]}}}}
                 """.Replace("AXES_FIELD", axesField, StringComparison.Ordinal));
         });
         using var http = new HttpClient(handler);
@@ -191,18 +191,19 @@ public sealed class MoonrakerVerifiedSafetyTests
             new Printer { Id = Guid.NewGuid(), Name = "Safety fixture", ServerUrl = "http://fixture.invalid", BackendPort = 7125 }, default);
         Assert.Contains(requests, uri => uri.Query.Contains("toolhead=position,homed_axes", StringComparison.Ordinal));
         Assert.Contains(requests, uri => uri.Query.Contains("toolhead=position,homed_axes&gcode_move=gcode_position", StringComparison.Ordinal));
-        if (axesJson != "failure")
+        Assert.Contains(requests, uri => uri.Query.Contains("toolhead=homed_axes&gcode_move=position,gcode_position", StringComparison.Ordinal));
+        if (observed)
         {
             Assert.Equal(11, status.X);
             Assert.Equal(22, status.Y);
             Assert.Equal(33, status.Z);
         }
 
-        SafetyAxesTelemetryFactDto fact = Assert.IsType<PrinterSafetyTelemetryDto>(status.SafetyTelemetry).HomedAxes;
+        SafetyAxesTelemetryFactDto fact = (status.SafetyTelemetry ?? PrinterSafetyTelemetryDto.Empty).HomedAxes;
         Assert.Equal(15, fact.StaleAfterSeconds);
-        Assert.Equal("moonraker:toolhead.homed_axes", fact.Source);
         if (observed)
         {
+            Assert.Equal("moonraker:toolhead.homed_axes", fact.Source);
             DateTime timestamp = Assert.IsType<DateTime>(fact.ObservedAtUtc);
             Assert.InRange(timestamp, before, DateTime.UtcNow);
             Assert.Equal(axesJson == "\"xyz\"" ? ["x", "y", "z"] : Array.Empty<string>(), fact.Value);
@@ -216,7 +217,14 @@ public sealed class MoonrakerVerifiedSafetyTests
         }
 
         using JsonDocument wire = JsonDocument.Parse(JsonSerializer.Serialize(status, new JsonSerializerOptions(JsonSerializerDefaults.Web)));
-        Assert.True(wire.RootElement.GetProperty("safetyTelemetry").GetProperty("homedAxes").TryGetProperty("staleAfterSeconds", out _));
+        if (status.SafetyTelemetry is not null)
+        {
+            Assert.True(wire.RootElement.GetProperty("safetyTelemetry").GetProperty("homedAxes").TryGetProperty("staleAfterSeconds", out _));
+        }
+        else
+        {
+            Assert.False(status.IsOnline);
+        }
     }
 
     [Fact]
@@ -505,7 +513,10 @@ public sealed class MoonrakerVerifiedSafetyTests
             ct: CancellationToken.None);
 
         Assert.True(result);
-        Assert.Contains("\"script\":\"G90\\nG0 X10 Y20 Z5 F1200\"", body);
+        using JsonDocument document = JsonDocument.Parse(body!);
+        Assert.Equal(
+            "SAVE_GCODE_STATE NAME=printfarmer_manual\nG90\nG0 X10 Y20 Z5 F1200\nRESTORE_GCODE_STATE NAME=printfarmer_manual MOVE=0",
+            document.RootElement.GetProperty("script").GetString());
     }
 
     private static HttpResponseMessage JsonResponse(string json) =>

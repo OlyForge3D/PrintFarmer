@@ -145,6 +145,68 @@ public class PrinterStatusClientTests
     #region Moonraker Status Client Tests
 
     [Fact]
+    public async Task MoonrakerStatusClient_FreshMovementSnapshot_ReplacesMotionOnly()
+    {
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "Fresh snapshot", ServerUrl = "http://fixture.invalid" };
+        var composite = new PrinterCompositeStatus(true, "printing", 0.5, "part.gcode", null, null, null,
+            X: 999, Y: 999, Z: 999, HotendTemp: 200, BedTemp: 60, HotendTarget: 210, BedTarget: 65,
+            PrintTimeLeftSeconds: 30, HomedAxes: "", HomedAxesObservedAtUtc: DateTime.UtcNow.AddHours(-1));
+        var telemetry = PrinterSafetyTelemetryDto.Empty with
+        {
+            HomedAxes = new SafetyAxesTelemetryFactDto(["x", "y", "z"], DateTime.UtcNow, 15, "snapshot"),
+            CoordinateOriginOffsetMm = new SafetyVectorTelemetryFactDto(new(10, 20, 30), DateTime.UtcNow, 15, "snapshot"),
+        };
+        var movement = new PrinterStatusDto(printer.Id, true, "standby", X: 1, Y: 2, Z: 3,
+            HomedAxes: "xyz", SafetyTelemetry: telemetry);
+        var backend = new Mock<IMoonrakerClient>(MockBehavior.Strict);
+        backend.Setup(client => client.GetCompositeStatusAsync(printer.BackendUrl, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(composite);
+        backend.Setup(client => client.GetMovementStatusAsync(printer, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(movement);
+        var breakers = new Mock<ICircuitBreakerService>();
+        breakers.Setup(service => service.GetCircuitBreaker(It.IsAny<string>(), null, null, null)).Returns(new CircuitBreaker());
+        var client = new MoonrakerStatusClient(backend.Object, breakers.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
+
+        PrinterStatusDto status = await client.GetPrinterStatusAsync(printer, default);
+
+        Assert.Equal("standby", status.State);
+        Assert.Equal(1, status.X);
+        Assert.Equal(2, status.Y);
+        Assert.Equal(3, status.Z);
+        Assert.Equal("xyz", status.HomedAxes);
+        Assert.Same(telemetry, status.SafetyTelemetry);
+        Assert.Equal(0.5, status.Progress);
+        Assert.Equal("part.gcode", status.JobName);
+        Assert.Equal(200, status.HotendTemp);
+        Assert.Equal(60, status.BedTemp);
+        Assert.Equal(30, status.PrintTimeLeftSeconds);
+        backend.Verify(client => client.GetMovementStatusAsync(printer, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task MoonrakerStatusClient_MovementSnapshotFails_DoesNotReuseCompositeMotion()
+    {
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "Missing snapshot", ServerUrl = "http://fixture.invalid" };
+        var backend = new Mock<IMoonrakerClient>();
+        backend.Setup(client => client.GetCompositeStatusAsync(printer.BackendUrl, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterCompositeStatus(true, "standby", null, null, null, null, null, X: 10, Y: 20, Z: 30));
+        backend.Setup(client => client.GetMovementStatusAsync(printer, It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("Snapshot unavailable"));
+        var breakers = new Mock<ICircuitBreakerService>();
+        breakers.Setup(service => service.GetCircuitBreaker(It.IsAny<string>(), null, null, null)).Returns(new CircuitBreaker());
+        var client = new MoonrakerStatusClient(backend.Object, breakers.Object, CreateSpoolProvider(), NullLogger<MoonrakerStatusClient>.Instance);
+
+        PrinterStatusDto status = await client.GetPrinterStatusAsync(printer, default);
+
+        Assert.False(status.IsOnline);
+        Assert.Null(status.X);
+        Assert.Null(status.Y);
+        Assert.Null(status.Z);
+        Assert.Null(status.HomedAxes);
+        Assert.Null(status.SafetyTelemetry);
+    }
+
+    [Fact]
     public void MoonrakerStatusClient_SupportsCorrectBackend()
     {
         // Arrange

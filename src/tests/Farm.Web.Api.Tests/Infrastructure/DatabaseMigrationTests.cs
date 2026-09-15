@@ -70,7 +70,8 @@ public sealed class DatabaseMigrationTests
             "20260912181957_AddDurablePrinterControlOperations",
             "20260912193436_FenceMotionEmergencyStops",
             "20260912202053_TrackEmergencyStopSenders",
-            "20260914014156_AddUserPrinterControlMode");
+            "20260914014156_AddUserPrinterControlMode",
+            "20260915042413_RetireTrackedPrinterMotion");
         second.LegacySchemaBaselined.Should().BeFalse();
         second.AppliedMigrations.Should().BeEquivalentTo(first.AppliedMigrations);
         (await context.Database.GetPendingMigrationsAsync()).Should().BeEmpty();
@@ -718,7 +719,8 @@ public sealed class DatabaseMigrationTests
             "20260912181957_AddDurablePrinterControlOperations",
             "20260912193436_FenceMotionEmergencyStops",
             "20260912202053_TrackEmergencyStopSenders",
-            "20260914014156_AddUserPrinterControlMode");
+            "20260914014156_AddUserPrinterControlMode",
+            "20260915042413_RetireTrackedPrinterMotion");
         startupStatus.IsDatabaseSchemaReady.Should().BeTrue();
         startupStatus.Phase.Should().Be(StartupPhase.Ready);
     }
@@ -1267,6 +1269,7 @@ public sealed class DatabaseMigrationTests
                 "20260912193408_FenceMotionEmergencyStops",
                 "20260912202024_TrackEmergencyStopSenders",
                 "20260913232205_AddUserPrinterControlMode",
+                "20260915042301_RetireTrackedPrinterMotion",
             ]
             :
             [
@@ -1302,6 +1305,7 @@ public sealed class DatabaseMigrationTests
                 "20260912193422_FenceMotionEmergencyStops",
                 "20260912202039_TrackEmergencyStopSenders",
                 "20260913232205_AddUserPrinterControlMode",
+                "20260915042335_RetireTrackedPrinterMotion",
             ];
         _ = coreMigrations.Should().Equal(expectedCoreMigrations,
             $"the {provider} core migration set must apply in the exact recorded order, including provider-specific schema guarantees");

@@ -54,6 +54,9 @@ public interface IMoonrakerClient : IBackendClient
 
     Task<PrinterCompositeStatus> GetCompositeStatusAsync(Uri baseUrl, CancellationToken ct = default);
 
+    /// <summary>Reads current movement coordinates, effective frame, homing and readiness in one authenticated response.</summary>
+    Task<PrinterStatusDto> GetMovementStatusAsync(Printer printer, CancellationToken ct);
+
     #endregion
 
     #region Camera Operations

@@ -6,8 +6,8 @@ namespace Farm.Infrastructure.Tests.Services.Printers;
 public sealed class PrinterControlOwnershipTests
 {
     [Theory]
-    [InlineData(typeof(PrinterControlOperationService))]
-    [InlineData(typeof(PrinterControlOperationWorker))]
+    [InlineData(typeof(PrintersService))]
+    [InlineData(typeof(Farm.Infrastructure.Services.Queue.PrinterPhysicalActuationService))]
     [InlineData(typeof(PrinterBackendCapabilitiesService))]
     public void SharedControlService_ConstructorDependencies_AreBackendNeutral(Type serviceType)
     {
@@ -30,18 +30,21 @@ public sealed class PrinterControlOwnershipTests
             .Should().BeNull();
         assembly.GetType("Farm.Infrastructure.Services.Printers.IMoonrakerMotionChannelFactory")
             .Should().BeNull();
-        Type? intent = assembly.GetType("Farm.Infrastructure.Services.Printers.PrinterControlIntent");
-        intent.Should().NotBeNull();
-        intent!.GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Static)
-            .Should().NotContain(method => method.Name == "BuildScript");
+        assembly.GetType("Farm.Infrastructure.Services.Printers.PrinterControlIntent")
+            .Should().BeNull();
     }
 
     [Fact]
-    public void DurableMotionChannel_ExecuteContract_AcceptsSemanticIntentNotFirmwareScript()
+    public void SharedAssembly_RemovedTrackingRuntime_IsAbsent()
     {
-        MethodInfo? execute = typeof(IPrinterMotionChannel).GetMethod(nameof(IPrinterMotionChannel.ExecuteAsync));
-        execute.Should().NotBeNull();
-        execute!.GetParameters().Select(parameter => parameter.ParameterType)
-            .Should().Equal(typeof(Guid), typeof(PrinterControlRequest), typeof(CancellationToken));
+        Assembly assembly = typeof(PrintersService).Assembly;
+        assembly.GetType("Farm.Infrastructure.Services.Printers.PrinterControlOperationService")
+            .Should().BeNull();
+        assembly.GetType("Farm.Infrastructure.Services.Printers.PrinterControlOperationWorker")
+            .Should().BeNull();
+        assembly.GetType("Farm.Infrastructure.Services.Printers.IPrinterMotionChannel")
+            .Should().BeNull();
+        assembly.GetType("Farm.Infrastructure.ISupportsDurableMotion")
+            .Should().BeNull();
     }
 }

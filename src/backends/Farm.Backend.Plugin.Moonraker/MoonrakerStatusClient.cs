@@ -56,36 +56,29 @@ public class MoonrakerStatusClient : IPrinterStatusClient, IManagedSpoolProvider
             PrinterCompositeStatus status = await breaker.ExecuteAsync(
                 async ct => await _client.GetCompositeStatusAsync(printer.BackendUrl, ct),
                 ct);
+            PrinterStatusDto movement = await _client.GetMovementStatusAsync(printer, ct);
 
             _logger.LogInformation("[Moonraker] Status received for {PrinterName}: IsOnline={StatusIsOnline}, State={StatusState}", printer.Name, status.IsOnline, status.State);
 
             return new PrinterStatusDto(
                 Id: printer.Id,
-                IsOnline: status.IsOnline,
-                State: status.State,
+                IsOnline: movement.IsOnline,
+                State: movement.State,
                 Progress: status.Progress,
                 JobName: status.JobName,
                 ThumbnailUrl: status.ThumbnailUrl,
                 CameraStreamUrl: status.CameraStreamUrl,
                 CameraSnapshotUrl: status.CameraSnapshotUrl,
-                X: status.X,
-                Y: status.Y,
-                Z: status.Z,
+                X: movement.X,
+                Y: movement.Y,
+                Z: movement.Z,
                 HotendTemp: status.HotendTemp,
                 BedTemp: status.BedTemp,
                 HotendTarget: status.HotendTarget,
                 BedTarget: status.BedTarget,
                 PrintTimeLeftSeconds: status.PrintTimeLeftSeconds,
-                HomedAxes: status.HomedAxes,
-                SafetyTelemetry: PrinterSafetyTelemetryDto.Empty with
-                {
-                    HomedAxes = new SafetyAxesTelemetryFactDto(
-                        status.HomedAxes?.Where(char.IsAsciiLetter)
-                            .Select(axis => char.ToLowerInvariant(axis).ToString()).Distinct(StringComparer.Ordinal).ToArray(),
-                        status.HomedAxesObservedAtUtc,
-                        PrinterSafetyTelemetryDto.DefaultStaleAfterSeconds,
-                        "moonraker:toolhead.homed_axes"),
-                });
+                HomedAxes: movement.HomedAxes,
+                SafetyTelemetry: movement.SafetyTelemetry);
         }
         catch (OperationCanceledException)
         {

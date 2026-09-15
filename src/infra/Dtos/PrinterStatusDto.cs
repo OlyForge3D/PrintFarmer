@@ -35,8 +35,7 @@ public record PrinterStatusDto(
     double? PrintTimeLeftSeconds = null,
     int? SpeedMultiplier = null,
     string? HomedAxes = null,
-    PrinterSafetyTelemetryDto? SafetyTelemetry = null,
-    PrinterPhysicalControlDto? PhysicalControl = null)
+    PrinterSafetyTelemetryDto? SafetyTelemetry = null)
 {
     /// <summary>
     /// Returns a copy with FileName derived from JobName (path stripped) and JobName preserved as-is.

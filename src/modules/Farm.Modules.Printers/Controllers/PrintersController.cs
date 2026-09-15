@@ -41,7 +41,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using IPrinterVersionCache = Farm.Infrastructure.Services.Printers.IPrinterVersionCache;
-using ISupportsDurableMotion = Farm.Infrastructure.Services.Printers.ISupportsDurableMotion;
 using MmuControlAction = Farm.Infrastructure.Services.Printers.MmuControlAction;
 using MmuControlProtocol = Farm.Infrastructure.Services.Printers.MmuControlProtocol;
 using MmuControlRequest = Farm.Infrastructure.Services.Printers.MmuControlRequest;
@@ -49,8 +48,7 @@ using MoonrakerEndpointResolution = Farm.Infrastructure.Services.Printers.Moonra
 using MoonrakerOnboardingResolver = Farm.Infrastructure.Services.Printers.MoonrakerOnboardingResolver;
 using PerToolAttributionCapability = Farm.Infrastructure.Services.Printers.PerToolAttributionCapability;
 using PrinterControlException = Farm.Infrastructure.Services.Printers.PrinterControlException;
-using PrinterControlIntent = Farm.Infrastructure.Services.Printers.PrinterControlIntent;
-using PrinterControlOperationService = Farm.Infrastructure.Services.Printers.PrinterControlOperationService;
+using PrinterDirectControl = Farm.Infrastructure.Services.Printers.PrinterDirectControl;
 using PrinterSafetyMoveRequest = Farm.Infrastructure.Services.Printers.PrinterSafetyMoveRequest;
 using PrinterSafetyOperation = Farm.Infrastructure.Services.Printers.PrinterSafetyOperation;
 using PrinterSafetyTelemetryNormalizer = Farm.Infrastructure.Services.Printers.PrinterSafetyTelemetryNormalizer;
@@ -91,7 +89,6 @@ public class PrintersController(
     AppDbContext? appDbContext = null,
     Farm.Infrastructure.Services.Printers.IPrinterCacheInvalidator? printerCacheInvalidator = null,
     Farm.Infrastructure.Services.Printers.IPrinterSafetyGuard? printerSafetyGuard = null,
-    Farm.Infrastructure.Services.Printers.PrinterControlOperationService? motionControl = null,
     TimeProvider? timeProvider = null)
     : ControllerBase
 {
@@ -2614,12 +2611,18 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
+        if (!IsValidMove(req))
+        {
+            return BadRequest(new CommandResult(false, "Provide at least one finite axis and a positive finite feedrate when supplied."));
+        }
+
         return await ExecuteDirectOutcomeControlAsync(
             id,
             "move",
             "move",
             token => _printersService.MoveAsync(id, req.X, req.Y, req.Z, req.F, token),
-            ct);
+            ct,
+            move: new PrinterSafetyMoveRequest(req.X, req.Y, req.Z));
     }
 
     [HttpPost("{id:guid}/moveto")]
@@ -2637,6 +2640,11 @@ public class PrintersController(
             return BadRequest("Request body is required.");
         }
 
+        if (!IsValidMove(req))
+        {
+            return BadRequest(new CommandResult(false, "Provide at least one finite axis and a positive finite feedrate when supplied."));
+        }
+
         return await ExecuteDirectOutcomeControlAsync(
             id,
             "move_to",
@@ -2646,6 +2654,11 @@ public class PrintersController(
             PrinterSafetyOperation.AbsoluteMovement,
             new PrinterSafetyMoveRequest(req.X, req.Y, req.Z));
     }
+
+    private static bool IsValidMove(MoveRequest request) =>
+        (request.X.HasValue || request.Y.HasValue || request.Z.HasValue) &&
+        new[] { request.X, request.Y, request.Z, request.F }.All(value => !value.HasValue || double.IsFinite(value.Value)) &&
+        (!request.F.HasValue || request.F.Value > 0);
 
     private async Task<ActionResult<CommandResult>> ExecuteDirectBooleanControlAsync(
         Guid printerId,
@@ -2658,16 +2671,10 @@ public class PrintersController(
         PrinterSafetyMoveRequest? move = null)
     {
         using var timeout = new CancellationTokenSource(
-            PrinterControlIntent.LegacyKind(operation).HasValue ? PrinterControlOperationService.CommandTimeout : Timeout.InfiniteTimeSpan,
+            PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
             timeProvider ?? TimeProvider.System);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         ct = deadline.Token;
-        ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
-        if (asyncRequired is not null)
-        {
-            return asyncRequired;
-        }
-
         PrinterActuationResult begin = acquired ?? await BeginPhysicalControlAsync(
             printerId,
             operation,
@@ -2708,7 +2715,7 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_outcome_unknown",
                 CancellationToken.None);
-            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+            string message = PrinterDirectControl.IsManualMotion(operation)
                 ? "The motion outcome is unknown; check the printer before requesting another move."
                 : "The backend did not prove whether the physical command was applied; reconciliation is required.";
             return StatusCode(
@@ -2721,6 +2728,11 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_cancelled_after_send",
                 CancellationToken.None);
+            if (timeout.IsCancellationRequested)
+            {
+                return StatusCode(503, new CommandResult(false, "The command timed out; its motion outcome is unknown. Check the printer before requesting another move."));
+            }
+
             throw;
         }
         catch (Exception exception)
@@ -2734,7 +2746,7 @@ public class PrintersController(
                 "Physical operation {Operation} has an unknown outcome on printer {PrinterId}",
                 LogSanitizer.Sanitize(operation),
                 printerId);
-            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+            string message = PrinterDirectControl.IsManualMotion(operation)
                 ? "The motion outcome is unknown; check the printer before requesting another move."
                 : "The physical command outcome is unknown; reconciliation is required.";
             return StatusCode(
@@ -2753,16 +2765,10 @@ public class PrintersController(
         PrinterSafetyMoveRequest? move = null)
     {
         using var timeout = new CancellationTokenSource(
-            PrinterControlIntent.LegacyKind(operation).HasValue ? PrinterControlOperationService.CommandTimeout : Timeout.InfiniteTimeSpan,
+            PrinterDirectControl.IsManualMotion(operation) ? PrinterDirectControl.CommandTimeout : Timeout.InfiniteTimeSpan,
             timeProvider ?? TimeProvider.System);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
         ct = deadline.Token;
-        ActionResult? asyncRequired = await RejectLegacyMotionAsync(printerId, operation, ct);
-        if (asyncRequired is not null)
-        {
-            return asyncRequired;
-        }
-
         PrinterActuationResult begin = await BeginPhysicalControlAsync(
             printerId,
             operation,
@@ -2799,6 +2805,10 @@ public class PrintersController(
                     begin.Lease,
                     "backend_unreachable",
                     CancellationToken.None);
+                if (PrinterDirectControl.IsManualMotion(operation))
+                {
+                    return StatusCode(503, new CommandResult(false, "The motion outcome is unknown; check the printer before requesting another move."));
+                }
             }
             else
             {
@@ -2817,15 +2827,23 @@ public class PrintersController(
                 begin.Lease,
                 "backend_control_cancelled_after_send",
                 CancellationToken.None);
+            if (timeout.IsCancellationRequested)
+            {
+                return StatusCode(503, new CommandResult(false, "The command timed out; its motion outcome is unknown. Check the printer before requesting another move."));
+            }
+
             throw;
         }
-        catch (Exception) when (!ct.IsCancellationRequested)
+        catch (Exception exception)
         {
             await _physicalActuationService!.MarkDirectUnknownAsync(
                 begin.Lease,
                 "backend_control_exception",
                 CancellationToken.None);
-            string message = PrinterControlIntent.LegacyKind(operation).HasValue
+            _logger.LogWarning(
+                "Physical operation {Operation} has an unknown outcome on printer {PrinterId} ({ExceptionType})",
+                LogSanitizer.Sanitize(operation), printerId, exception.GetType().Name);
+            string message = PrinterDirectControl.IsManualMotion(operation)
                 ? "The motion outcome is unknown; check the printer before requesting another move."
                 : "The physical command outcome is unknown; reconciliation is required.";
             return StatusCode(
@@ -2969,73 +2987,6 @@ public class PrintersController(
         }
     }
 
-    private async Task<ActionResult?> RejectLegacyMotionAsync(Guid printerId, string operation, CancellationToken ct)
-    {
-        if (operation is not ("home" or "home_xy" or "home_z" or "move" or "move_to"))
-        {
-            return null;
-        }
-
-        if (!await CanAccessPrinterAsync(printerId, PrinterGroupAccessLevel.Submit, ct))
-        {
-            return NotFound();
-        }
-
-        AppDbContext? db = ResolveAppDbContext();
-        int? backend = db is null
-            ? (await _printersService.FindByIdAsync(printerId, ct))?.Backend
-            : await db.Printers.AsNoTracking().Where(p => p.Id == printerId).Select(p => (int?)p.Backend).SingleOrDefaultAsync(ct);
-        if (backend is null)
-        {
-            return null;
-        }
-
-        Farm.Infrastructure.Contracts.Printers.IBackendClient? client;
-        try
-        {
-            client = _backendClientFactory.GetClient((PrinterBackend)backend.Value);
-        }
-        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
-        {
-            _logger.LogWarning("Cannot resolve motion backend {Backend}: {ErrorType}", backend.Value, ex.GetType().Name);
-            return UnsupportedMotion();
-        }
-
-        if (client is null)
-        {
-            return UnsupportedMotion();
-        }
-
-        if (client is not ISupportsDurableMotion durableMotion)
-        {
-            return null;
-        }
-
-        PrinterControlKind kind = operation switch
-        {
-            "home" => PrinterControlKind.HomeAll,
-            "home_xy" => PrinterControlKind.HomeXY,
-            "home_z" => PrinterControlKind.HomeZ,
-            "move" => PrinterControlKind.Jog,
-            "move_to" => PrinterControlKind.MoveTo,
-            _ => throw new InvalidOperationException("Unexpected motion operation."),
-        };
-        if (!durableMotion.SupportedMotionKinds.Contains(kind))
-        {
-            return UnsupportedMotion();
-        }
-
-        return Problem(statusCode: 409, title: "Updated client required",
-            detail: "Use control-operations for this backend's motion.",
-            extensions: new Dictionary<string, object?> { ["code"] = "async_control_required" });
-
-        ActionResult UnsupportedMotion() => Problem(
-            statusCode: StatusCodes.Status422UnprocessableEntity,
-            title: "Printer operation unsupported",
-            detail: "The backend did not provide the required motion capability.",
-            extensions: new Dictionary<string, object?> { ["code"] = "printer_operation_unsupported" });
-    }
-
     private async Task<PrinterActuationResult> BeginPhysicalControlAsync(
         Guid printerId,
         string operation,
@@ -3067,6 +3018,41 @@ public class PrintersController(
         try
         {
             ct.ThrowIfCancellationRequested();
+            if (PrinterDirectControl.IsManualMotion(lease.Operation) &&
+                (await _printersService.FindByIdAsync(lease.PrinterId, ct))?.Backend == (int)PrinterBackend.Moonraker)
+            {
+                PrinterStatusDto observed = await _printersService.GetStatusDtoAsync(lease.PrinterId, ct);
+                PrinterSafetyValidationResult manualSafety;
+                if (!observed.IsOnline || observed.State?.ToLowerInvariant() is not ("idle" or "ready" or "standby" or "complete" or "cancelled"))
+                {
+                    manualSafety = PrinterSafetyValidationResult.Reject(
+                        409, "printer_busy", "The printer must report ready and idle before a manual command.");
+                }
+                else if (move is not null)
+                {
+                    PrinterSafetyMoveRequest target = lease.Operation == "move"
+                        ? new PrinterSafetyMoveRequest(observed.X + (move.X ?? 0), observed.Y + (move.Y ?? 0), observed.Z + (move.Z ?? 0))
+                        : move;
+                    manualSafety = _printerSafetyGuard is null
+                        ? PrinterSafetyValidationResult.Reject(503, "printer_safety_evidence_unknown", "The printer safety guard is unavailable.")
+                        : await _printerSafetyGuard.ValidateObservedManualMoveAsync(lease.PrinterId, target, observed, ct);
+                }
+                else
+                {
+                    manualSafety = PrinterSafetyValidationResult.Allowed;
+                }
+
+                if (!manualSafety.Success)
+                {
+                    await _physicalActuationService!.CompleteDirectAsync(lease, false, manualSafety.Code, CancellationToken.None);
+                    leaseSettled = true;
+                    return SafetyProblem(manualSafety);
+                }
+
+                // Manual positioning uses travel/homing limits, not automated workflow clearance.
+                safetyOperation = null;
+            }
+
             if (safetyOperation.HasValue)
             {
                 if (_printerSafetyGuard is null)
@@ -3340,82 +3326,7 @@ public class PrintersController(
     [ProducesResponseType(500)]
     public async Task<ActionResult<CommandResult>> EmergencyStopAsync(Guid id, CancellationToken ct)
     {
-        PrinterActuationResult direct = new(PrinterActuationResultCode.FenceConflict);
-        bool motionAttemptPrepared = false;
-        bool emergencyInvoked = false;
-        for (int admission = 0; admission < 4; admission++)
-        {
-            direct = await BeginPhysicalControlAsync(id, "emergencystop", ct);
-            if (direct.Code != PrinterActuationResultCode.FenceConflict || motionControl is null)
-            {
-                break;
-            }
-
-            try
-            {
-                var lease = await motionControl.PrepareEmergencyStopAsync(id, QueueActorIdentity.Resolve(User), ct);
-                if (lease is null)
-                {
-                    // A concurrently completed motion may have released the barrier.
-                    // Re-acquire the ordinary physical fence, never send without one.
-                    continue;
-                }
-
-                motionAttemptPrepared = true;
-                PrinterEmergencyStopDelivery delivery = PrinterEmergencyStopDelivery.NotSent;
-                using var timeout = new CancellationTokenSource(PrinterControlOperationService.SenderLease, timeProvider ?? TimeProvider.System);
-                using var senderDeadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
-                try
-                {
-                    if (!await motionControl.CommitEmergencyStopSendAsync(id, lease, QueueActorIdentity.Resolve(User), senderDeadline.Token))
-                    {
-                        continue;
-                    }
-
-                    senderDeadline.Token.ThrowIfCancellationRequested();
-                    delivery = PrinterEmergencyStopDelivery.Unknown;
-                    try
-                    {
-                        emergencyInvoked = true;
-                        bool accepted = await _printersService.EmergencyStopAsync(id, lease.ConfigurationIdentity, senderDeadline.Token);
-                        delivery = accepted ? PrinterEmergencyStopDelivery.Accepted : PrinterEmergencyStopDelivery.Unknown;
-                        return StatusCode(accepted ? 200 : 503, new CommandResult(
-                            accepted,
-                            accepted ? "Emergency stop accepted." : "Emergency stop outcome unknown; check the printer."));
-                    }
-                    catch (Exception)
-                    {
-                        return StatusCode(503, new CommandResult(false, "Emergency stop delivery is uncertain; check the printer."));
-                    }
-                }
-                finally
-                {
-                    await motionControl.FinishEmergencyStopAsync(id, lease, delivery, CancellationToken.None);
-                }
-            }
-            catch (PrinterControlException exception)
-            {
-                return Problem(statusCode: exception.Status, title: exception.Message,
-                    extensions: new Dictionary<string, object?> { ["code"] = exception.Code });
-            }
-            catch (DbUpdateException)
-            {
-                return Problem(
-                    statusCode: 503,
-                    title: emergencyInvoked ? "Emergency stop outcome is uncertain; check the printer" : "Emergency stop fence unavailable",
-                    extensions: new Dictionary<string, object?>
-                    {
-                        ["code"] = emergencyInvoked ? "emergency_stop_outcome_unknown" : "emergency_stop_not_sent",
-                    });
-            }
-        }
-
-        if (motionAttemptPrepared && direct.Code == PrinterActuationResultCode.FenceConflict)
-        {
-            return Problem(statusCode: 503, title: "Emergency stop was not sent; the physical fence kept changing",
-                extensions: new Dictionary<string, object?> { ["code"] = "emergency_stop_not_sent" });
-        }
-
+        PrinterActuationResult direct = await BeginPhysicalControlAsync(id, "emergencystop", ct);
         if (direct.Code == PrinterActuationResultCode.PrinterBusy)
         {
             return await QueueLifecycleControlAsync(
