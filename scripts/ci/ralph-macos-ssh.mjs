@@ -853,7 +853,7 @@ export async function dispatchMacJob({ job, eligibility, controllerPid }, option
       createRemoteRequest(request, reconciling ? 'reconcile' : 'dispatch'),
       options,
     );
-      const response = parseRemoteWorkerResponse(output, request);
+    const response = parseRemoteWorkerResponse(output, request);
     return recordRemoteWorkerResponse(response, options);
   } catch (error) {
     await markUncertain(request.jobId, options);
