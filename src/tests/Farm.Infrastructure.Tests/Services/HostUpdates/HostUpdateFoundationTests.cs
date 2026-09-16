@@ -87,6 +87,13 @@ public sealed class HostUpdateFoundationTests
     }
 
     [Fact]
+    public async Task PlanAsync_MalformedUpdaterVersions_RejectsWithoutThrowing()
+    {
+        Assert.Contains("updater_version_invalid", (await CreateSut(inspector: new Inspector(Installation() with { UpdaterVersion = "not-a-version" })).PlanAsync(Request(), default)).Reasons);
+        Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata(minimumUpdater: "not-a-version"))).PlanAsync(Request(), default)).Reasons);
+    }
+
+    [Fact]
     public async Task StageAsync_DowngradeWithoutExplicitAuthorization_Rejects()
     {
         HostUpdateFoundation sut = CreateSut(new Provider(Metadata(sequence: 1)), inspector: new Inspector(Installation() with { CurrentSequence = 2 }));
@@ -105,7 +112,10 @@ public sealed class HostUpdateFoundationTests
             await Assert.ThrowsAsync<InvalidDataException>(() => journal.AppendAsync(HostUpdateJournalEntry.Staged(plan, Metadata(), HostUpdateStageResult.Staged(Receipt(Metadata()))), default));
             HostUpdatePlanResult planned = await CreateSut().PlanAsync(Request(), default);
             await journal.AppendAsync(HostUpdateJournalEntry.Planned(plan.Request, Metadata(), planned), default);
-            Assert.Single(await HostUpdateJournalInspection.ReadSnapshotAsync(plan.InstallationId, directory, default));
+            HostUpdatePlan secondPlan = plan with { Request = plan.Request with { OperationId = "operation-2", IdempotencyKey = "key-2", Nonce = "nonce-2" } };
+            await journal.AppendAsync(HostUpdateJournalEntry.Planned(secondPlan.Request, Metadata(), planned), default);
+            await Assert.ThrowsAsync<InvalidDataException>(() => journal.AppendAsync(HostUpdateJournalEntry.Staged(plan, Metadata(), HostUpdateStageResult.Staged(Receipt(Metadata()))), default));
+            Assert.Equal(2, (await HostUpdateJournalInspection.ReadSnapshotAsync(plan.InstallationId, directory, default)).Count);
             await Assert.ThrowsAsync<ArgumentException>(() => HostUpdateJournalInspection.ReadSnapshotAsync("../bad", directory, default));
         }
         finally
@@ -132,7 +142,7 @@ public sealed class HostUpdateFoundationTests
     private sealed class Provider(SignedReleaseMetadata metadata) : IHostUpdateMetadataProvider { public SignedReleaseMetadata CurrentMetadata { get; set; } = metadata; public Task<SignedReleaseMetadata> GetCurrentAsync(string channel, CancellationToken ct) => Task.FromResult(CurrentMetadata); }
     private sealed class Inspector(HostInstallationEvidence value) : IHostUpdateInspector { public HostInstallationEvidence Value { get; set; } = value; public Task<HostInstallationEvidence> InspectAsync(string installationId, CancellationToken ct) => Task.FromResult(Value); }
     private sealed class Compatibility : IHostUpdateCompatibilityEvaluator { public IReadOnlyList<string> Evaluate(HostInstallationEvidence installation, SignedReleaseMetadata metadata) => []; }
-    private sealed class AuthorizationEvaluator : IHostUpdateAuthorizationEvaluator { public bool IsAuthorized(HostUpdateAuthorization authorization, HostUpdatePlan plan, HostInstallationEvidence installation, SignedReleaseMetadata metadata) => authorization.IsStructurallyValidFor(plan) && (metadata.Sequence >= installation.CurrentSequence || authorization.ExplicitDowngradeAllowed); }
+    private sealed class AuthorizationEvaluator : IHostUpdateAuthorizationEvaluator { public bool IsAuthorized(HostUpdateAuthorization authorization, HostUpdatePlan plan, HostInstallationEvidence installation, SignedReleaseMetadata metadata) => authorization.IsStructurallyValidFor(plan); }
     private sealed class MemoryJournal : IHostUpdateJournal { public List<HostUpdateJournalEntry> Entries { get; } = []; public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) { Entries.Add(entry with { Revision = Entries.Count + 1 }); return Task.CompletedTask; } public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostUpdateJournalEntry>>(Entries); }
     private sealed class Lock : IHostUpdateInstallationLock { public Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct) => Task.FromResult<IAsyncDisposable>(new Lease()); private sealed class Lease : IAsyncDisposable { public ValueTask DisposeAsync() => ValueTask.CompletedTask; } }
     private sealed class Stager(bool valid = true) : IHostUpdateStager { public int Calls { get; private set; } public Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct) { Calls++; return Task.FromResult(valid ? Receipt(metadata) : Receipt(metadata) with { ManifestDigest = Digest("wrong") }); } }

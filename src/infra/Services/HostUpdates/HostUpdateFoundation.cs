@@ -73,14 +73,14 @@ public sealed class HostUpdateFoundation(
                 return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.NeedsOperator("plan_or_metadata_changed"), ct);
             }
 
-            if (metadata.Sequence < installation.CurrentSequence && !authorization.ExplicitDowngradeAllowed)
-            {
-                return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.Rejected("downgrade_not_authorized"), ct);
-            }
-
             if (!authorizationEvaluator.IsAuthorized(authorization, plan, installation, metadata))
             {
                 return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.Rejected("authorization_invalid"), ct);
+            }
+
+            if (metadata.Sequence < installation.CurrentSequence && !authorization.ExplicitDowngradeAllowed)
+            {
+                return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.Rejected("downgrade_not_authorized"), ct);
             }
 
             await journal.AppendAsync(HostUpdateJournalEntry.Approved(plan, metadata, authorization), ct);
@@ -114,8 +114,9 @@ public sealed class HostUpdateFoundation(
     private HostUpdatePlanResult Evaluate(HostUpdatePlanRequest request, HostInstallationEvidence installation, SignedReleaseMetadata metadata)
     {
         List<string> reasons = [.. installation.Validate(request.InstallationId), .. metadata.ValidateFor(installation, request)];
-        reasons.AddRange(compatibilityEvaluator.Evaluate(installation, metadata).All(HostUpdateValidation.IsRejectionCode)
-            ? compatibilityEvaluator.Evaluate(installation, metadata)
+        IReadOnlyList<string> compatibilityReasons = compatibilityEvaluator.Evaluate(installation, metadata);
+        reasons.AddRange(compatibilityReasons.All(HostUpdateValidation.IsRejectionCode)
+            ? compatibilityReasons
             : ["compatibility_evidence_invalid"]);
         reasons.Sort(StringComparer.Ordinal);
         return new(reasons.Count == 0, ComputePlanHash(request, installation, metadata), metadata.Identity.ManifestDigest, metadata.Identity,
@@ -296,7 +297,9 @@ public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool S
             reasons.Add("release_identity_invalid");
         }
 
-        if (HostUpdateValidation.CompareSemanticVersions(installation.UpdaterVersion, MinimumUpdaterVersion) < 0)
+        if (HostUpdateValidation.TryParseSemanticVersion(installation.UpdaterVersion, out Version installedUpdater) &&
+            HostUpdateValidation.TryParseSemanticVersion(MinimumUpdaterVersion, out Version minimumUpdater) &&
+            installedUpdater.CompareTo(minimumUpdater) < 0)
         {
             reasons.Add("updater_too_old");
         }
@@ -431,7 +434,8 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
             await using FileStream lease = await AcquireLeaseAsync(ct);
             IReadOnlyList<HostUpdateJournalEntry> entries = await ReadUnsafeAsync(ct);
-            if (!HostUpdateValidation.IsLifecycleTransition(entries.Count == 0 ? null : entries[^1], entry))
+            HostUpdateJournalEntry? previous = entries.LastOrDefault(existing => HostUpdateValidation.HasSameOperation(existing, entry));
+            if (!HostUpdateValidation.IsLifecycleTransition(previous, entry))
             {
                 throw new InvalidDataException("Journal lifecycle transition is invalid.");
             }
@@ -480,7 +484,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             {
                 HostUpdateJournalEntry? entry = string.IsNullOrWhiteSpace(line) ? null : JsonSerializer.Deserialize<HostUpdateJournalEntry>(line, SerializerOptions);
                 if (entry is null || entry.Revision != entries.Count + 1 || !HostUpdateValidation.IsJournalEntry(entry) ||
-                    !HostUpdateValidation.IsLifecycleTransition(entries.LastOrDefault(), entry))
+                    !HostUpdateValidation.IsLifecycleTransition(entries.LastOrDefault(existing => HostUpdateValidation.HasSameOperation(existing, entry)), entry))
                 {
                     throw new InvalidDataException("Journal record is invalid.");
                 }
@@ -523,8 +527,24 @@ internal static class HostUpdateValidation
     public static bool HashesEqual(string? left, string? right) => IsHexHash(left) && IsHexHash(right) &&
         CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left!), Convert.FromHexString(right!));
     public static bool DigestsEqual(string? left, string? right) => IsDigest(left) && IsDigest(right) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left![7..]), Convert.FromHexString(right![7..]));
-    public static bool IsSemanticVersion(string? value) => Version.TryParse(value?.Split(['-', '+'])[0], out Version? version) && version.Major >= 0 && version.Minor >= 0 && version.Build >= 0 && version.Revision is -1;
-    public static int CompareSemanticVersions(string left, string right) => Version.Parse(left.Split(['-', '+'])[0]).CompareTo(Version.Parse(right.Split(['-', '+'])[0]));
+    public static bool IsSemanticVersion(string? value) => TryParseSemanticVersion(value, out _);
+    public static bool TryParseSemanticVersion(string? value, out Version version)
+    {
+        version = new Version(0, 0, 0);
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return false;
+        }
+
+        string core = value.Split(['-', '+'])[0];
+        if (!Version.TryParse(core, out Version? parsed) || parsed is null || parsed.Major < 0 || parsed.Minor < 0 || parsed.Build < 0 || parsed.Revision is not -1)
+        {
+            return false;
+        }
+
+        version = parsed;
+        return true;
+    }
     public static bool IsReleaseIdentity(CanonicalReleaseIdentity? identity, string channel) => identity is not null && IsIdentifier(identity.ReleaseId) && IsSemanticVersion(identity.Version) &&
         IsChannel(identity.Channel) && identity.Channel == channel && IsIdentifier(identity.SourceTag) && ((channel == "stable" && identity.SourceBranch == "main") ||
         (channel == "insider" && identity.SourceBranch == "development")) && IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
@@ -539,8 +559,10 @@ internal static class HostUpdateValidation
           IsReleaseIdentity(snapshot.Receipt.Identity, snapshot.TargetChannel) && IsReleaseIdentity(snapshot.Receipt.PriorReleaseIdentity, snapshot.Receipt.PriorReleaseIdentity.Channel) &&
           IsDigest(snapshot.Receipt.ManifestDigest) && IsDigest(snapshot.Receipt.PreviousSetDigest) && IsDigest(snapshot.Receipt.PreviousConfigurationDigest)) ||
          (entry.State != HostUpdateLifecycle.Staged && snapshot.Receipt is null));
+    public static bool HasSameOperation(HostUpdateJournalEntry left, HostUpdateJournalEntry right) =>
+        left.Snapshot.InstallationId == right.Snapshot.InstallationId && left.OperationId == right.OperationId && left.IdempotencyKey == right.IdempotencyKey;
     public static bool IsLifecycleTransition(HostUpdateJournalEntry? previous, HostUpdateJournalEntry current) =>
-        previous is null ? current.State == HostUpdateLifecycle.Planned : previous.OperationId != current.OperationId ||
+        previous is null ? current.State == HostUpdateLifecycle.Planned :
         (previous.State, current.State) is (HostUpdateLifecycle.Planned, HostUpdateLifecycle.Approved or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator) or
         (HostUpdateLifecycle.Approved, HostUpdateLifecycle.Staging or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator) or
         (HostUpdateLifecycle.Staging, HostUpdateLifecycle.Staged or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator);
