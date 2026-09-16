@@ -9,6 +9,7 @@ import {
 } from './release-github.mjs';
 import {
   releaseRequiredChecks, repository, requireKeys, requireString, requireThat, validateApprovalMode,
+  requireOwnerReleaseMode,
 } from './release-policy.mjs';
 
 export const qualificationPath = '.artifacts/release-transaction/qualification.json';
@@ -91,12 +92,11 @@ function readBoundedJson(path, description) {
 }
 
 export async function selectTransaction(env = process.env, api = githubClient(env.GH_TOKEN)) {
-  const scheduled = env.GITHUB_EVENT_NAME === 'schedule';
   requireThat(env.GITHUB_REPOSITORY === repository &&
-    (env.GITHUB_EVENT_NAME === 'workflow_dispatch' || scheduled) &&
-    (!scheduled || (env.RELEASE_CHANNEL === 'insider' && !env.RELEASE_SOURCE_SHA?.trim())),
+    env.GITHUB_EVENT_NAME === 'workflow_dispatch',
   'Untrusted release dispatch');
-  requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'run attempt');
+  requireThat(env.GITHUB_RUN_ATTEMPT === '1', 'Reruns are unsupported; use a fresh owner manual dispatch');
+  requireOwnerReleaseMode(env.RELEASE_APPROVAL_MODE);
   const channel = env.RELEASE_CHANNEL;
   const branch = channelBranch(channel);
   requireString(env.GITHUB_SHA, shaPattern, 'workflow commit');
@@ -105,21 +105,6 @@ export async function selectTransaction(env = process.env, api = githubClient(en
     env.GITHUB_WORKFLOW_REF === `${repository}/${controlWorkflow}@refs/heads/development` &&
     env.GITHUB_WORKFLOW_SHA === env.GITHUB_SHA,
   'Dispatch must use the immutable release-control workflow on development');
-  if (env.GITHUB_RUN_ATTEMPT !== '1') {
-    let recovered;
-    try {
-      recovered = validateTransaction(readBoundedJson(transactionPath, 'Recovery transaction'));
-    } catch {
-      throw new Error('Rerun recovery transaction is missing or malformed');
-    }
-    requireThat(recovered.runId === env.GITHUB_RUN_ID && recovered.runAttempt === '1' &&
-      recovered.channel === channel &&
-      recovered.workflowCommit === env.GITHUB_WORKFLOW_SHA &&
-      recovered.approvalMode === env.RELEASE_APPROVAL_MODE,
-    'Rerun recovery transaction does not match the immutable original dispatch');
-    await verifyCanonicalSource(api, recovered.sourceBranch, recovered.sourceCommit);
-    return recovered;
-  }
   const observedBranchHead = await branchHead(api, branch);
   const requested = env.RELEASE_SOURCE_SHA?.trim();
   let sourceCommit = observedBranchHead;
@@ -211,7 +196,8 @@ export async function verifyTransactionQualification(
   executionAttempt = process.env.GITHUB_RUN_ATTEMPT || transaction.runAttempt,
 ) {
   validateTransaction(transaction);
-  requireString(executionAttempt, positivePattern, 'qualification execution attempt');
+  requireThat(executionAttempt === '1', 'Reruns are unsupported; use a fresh owner manual dispatch');
+  requireOwnerReleaseMode(transaction.approvalMode);
   const currentHead = await verifyCanonicalSource(api, transaction.sourceBranch, transaction.sourceCommit);
   const run = await api(`actions/runs/${transaction.runId}`);
   const definition = await api('actions/workflows/consolidated-release.yml');
@@ -221,7 +207,7 @@ export async function verifyTransactionQualification(
     definition.path === controlWorkflow && definition.state === 'active' &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
     run.head_branch === 'development' && run.head_sha === transaction.workflowCommit &&
-    ['workflow_dispatch', 'schedule'].includes(run.event) && run.html_url ===
+    run.event === 'workflow_dispatch' && run.html_url ===
       `https://github.com/${repository}/actions/runs/${transaction.runId}` &&
     ['in_progress', 'completed'].includes(run.status) &&
     (run.status !== 'completed' || run.conclusion === 'success'),
@@ -402,10 +388,10 @@ export function transactionFromEnvironment(env = process.env) {
     env.GITHUB_WORKFLOW_SHA === transaction.workflowCommit &&
     env.GITHUB_WORKFLOW_REF === transaction.workflowIdentity &&
     env.GITHUB_REF === 'refs/heads/development' &&
-    ['workflow_dispatch', 'schedule'].includes(env.GITHUB_EVENT_NAME) &&
-    (env.GITHUB_EVENT_NAME !== 'schedule' || transaction.channel === 'insider'),
+    env.GITHUB_EVENT_NAME === 'workflow_dispatch',
   'Release transaction does not belong to the executing trusted workflow');
-  requireString(env.GITHUB_RUN_ATTEMPT, positivePattern, 'execution attempt');
+  requireThat(env.GITHUB_RUN_ATTEMPT === '1', 'Reruns are unsupported; use a fresh owner manual dispatch');
+  requireOwnerReleaseMode(transaction.approvalMode);
   return transaction;
 }
 

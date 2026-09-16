@@ -199,16 +199,14 @@ test('transaction consumers reject cross-run and caller substitutions before tru
   ]) assert.throws(() => transactionFromEnvironment({ ...env, ...override }), /executing trusted workflow/);
 });
 
-test('trusted scheduled insider publication selects a transaction while untrusted schedule contexts fail closed', async () => {
+test('scheduled publication is rejected before source selection', async () => {
   const trustedSchedule = {
     ...base,
     GITHUB_EVENT_NAME: 'schedule',
     RELEASE_CHANNEL: 'insider',
     RELEASE_SOURCE_SHA: '',
   };
-  const selected = await selectTransaction(trustedSchedule, apiFixture().api);
-  assert.equal(selected.channel, 'insider');
-  assert.equal(selected.sourceBranch, 'development');
+  await assert.rejects(selectTransaction(trustedSchedule, () => assert.fail('No network')), /Untrusted release dispatch/);
   for (const overrides of [
     { GITHUB_REPOSITORY: 'attacker/PrintFarmer' },
     { GITHUB_REF: 'refs/heads/main' },
@@ -221,7 +219,7 @@ test('trusted scheduled insider publication selects a transaction while untruste
   }
 });
 
-test('same-run rerun recovers immutable attempt-one transaction and revalidates ancestry', async t => {
+test('same-run rerun is rejected even with the original immutable transaction artifact', async t => {
   const first = await transaction('stable', sourceSha);
   const cwd = process.cwd();
   const scratch = resolve('.artifacts', `transaction-recovery-${randomUUID()}`);
@@ -232,23 +230,12 @@ test('same-run rerun recovers immutable attempt-one transaction and revalidates 
     rmSync(scratch, { recursive: true, force: true });
   });
   writeFileSync(transactionPath, `${JSON.stringify(first.value)}\n`);
-  const recovered = await selectTransaction({
-    ...base,
-    GITHUB_RUN_ATTEMPT: '2',
-    RELEASE_CHANNEL: 'stable',
-    RELEASE_SOURCE_SHA: sourceSha,
-  }, first.fixture.api);
-  assert.deepEqual(recovered, first.value);
-  first.fixture.values.set(`compare/${sourceSha}...${sourceSha}`,
-    { status: 'diverged', merge_base_commit: { sha: workflowSha } });
-  first.fixture.values.set('git/ref/heads/main', { object: { sha: movedHead } });
-  first.fixture.values.set(`compare/${sourceSha}...${movedHead}`,
-    { status: 'diverged', merge_base_commit: { sha: workflowSha } });
   await assert.rejects(selectTransaction({
     ...base,
     GITHUB_RUN_ATTEMPT: '2',
     RELEASE_CHANNEL: 'stable',
-  }, first.fixture.api), /trusted canonical branch history/);
+    RELEASE_SOURCE_SHA: sourceSha,
+  }, () => assert.fail('No network')), /Reruns/);
 });
 
 test('qualification binds namespaced jobs to this run, attempt, app, suite and source checks', async () => {
@@ -274,7 +261,7 @@ test('qualification binds namespaced jobs to this run, attempt, app, suite and s
 test('automatic qualification accepts a reviewed squash tree without any prior canonical status or build checks', async () => {
   const reviewed = 'e'.repeat(40);
   for (const channel of ['stable', 'insider']) {
-    for (const mode of ['single-maintainer', 'separation-of-duties']) {
+    for (const mode of ['single-maintainer']) {
       const { value, fixture } = await transaction(channel, '', reviewed);
       value.approvalMode = mode;
       fixture.values.delete(`commits/${sourceSha}/status?per_page=100`);
@@ -316,7 +303,7 @@ function statusTransport(fixture, reviewedHead, statuses, changePage = () => {})
 
 test('real release transport collects individual creator provenance through full and terminal status pages', async () => {
   for (const channel of ['stable', 'insider']) {
-    for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+    for (const approvalMode of ['single-maintainer']) {
       for (const count of [1, 100, 101, 200, 201]) {
         const reviewed = 'e'.repeat(40);
         const { value, fixture } = await transaction(channel, '', reviewed);
@@ -423,48 +410,28 @@ test('squash qualification fails closed for source, review, tree and transaction
   }
 });
 
-test('single-maintainer requires genuine review but only separation-of-duties requires non-self native code-owner review', async () => {
+test('single-maintainer requires genuine review and release launch rejects separation mode', async () => {
   const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
   fixture.values.set('pulls/60/reviews?per_page=100', []);
   await qualifyTransaction(value, fixture.api, now);
   value.approvalMode = 'separation-of-duties';
-  await assert.rejects(qualifyTransaction(value, fixture.api, now), /non-self code-owner/);
-  const review = { id: 70, commit_id: fixture.review.pull.head.sha,
-    user: { login: 'native-reviewer' }, state: 'APPROVED', submitted_at: '2026-09-13T19:00:00Z' };
-  fixture.values.set('pulls/60/reviews?per_page=100', [review]);
-  await qualifyTransaction(value, fixture.api, now);
-  for (const login of ['author', 'native-reviewer']) {
-    fixture.values.get('actions/runs/42').actor.login = login;
-    if (login === 'native-reviewer') {
-      await assert.rejects(qualifyTransaction(value, fixture.api, now), /non-self code-owner/);
-    }
-  }
-  fixture.values.get('actions/runs/42').actor.login = 'author';
-  fixture.values.get('collaborators/native-reviewer/permission').permission = 'read';
-  await assert.rejects(qualifyTransaction(value, fixture.api, now), /live write permission/);
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /must be single-maintainer/);
 });
 
-test('same-run reattempt requires fresh qualification jobs from that attempt and preserves original source', async () => {
+test('fresh qualification jobs cannot authorize a same-run reattempt', async () => {
   const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
   fixture.values.get('actions/runs/42').run_attempt = 2;
   fixture.values.set('actions/runs/42/attempts/2/jobs?per_page=100',
     { total_count: fixture.jobs.length, jobs: fixture.jobs });
-  await assert.rejects(verifyTransactionQualification(value, fixture.api, now, '2'), /qualification job/);
+  await assert.rejects(verifyTransactionQualification(value, fixture.api, now, '2'), /Reruns/);
   fixture.jobs.forEach(job => { job.run_attempt = 2; });
-  const receipt = await verifyTransactionQualification(value, fixture.api, now, '2');
-  assert.equal(receipt.run.attempt, '2');
-  assert.equal(receipt.transaction.runAttempt, '1');
-  assert.equal(receipt.transaction.sourceCommit, sourceSha);
+  await assert.rejects(verifyTransactionQualification(value, fixture.api, now, '2'), /Reruns/);
 });
 
-test('scheduled insider qualification collects the current full-safe job set and exact-tree review', async () => {
+test('scheduled insider qualification is rejected even with passing full-safe evidence', async () => {
   const { value, fixture } = await transaction('insider', '', 'e'.repeat(40));
   fixture.values.get('actions/runs/42').event = 'schedule';
-  const receipt = await qualifyTransaction(value, fixture.api, now);
-  assert.equal(receipt.jobs.length, jobNames.length);
-  assert.ok(receipt.sourceEvidence.checks.filter(check => check.checkId)
-    .every(check => check.satisfiedBy === 'transaction-job' && check.runId === value.runId &&
-      check.runAttempt === '1' && check.workflowCommit === workflowSha));
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /Untrusted/);
 });
 
 test('unmapped required checks still need latest exact-source evidence without repeating collection', async () => {
@@ -499,7 +466,7 @@ test('a stale native owner does not mask another fresh eligible owner approval',
   const reviews = fixture.values.get('pulls/60/reviews?per_page=100');
   reviews.unshift({ ...reviews[0], id: 69, user: { login: 'stale-owner' },
     submitted_at: '2026-09-12T18:00:00Z' });
-  await qualifyTransaction(value, fixture.api, now);
+  await assert.rejects(qualifyTransaction(value, fixture.api, now), /must be single-maintainer/);
 });
 
 test('qualification receipt freshness rejects expiry, future, malformed lifetime and delayed approval', async () => {
@@ -585,7 +552,7 @@ test('qualification writer rejects oversized network evidence before writing', a
   assert.equal(existsSync(qualificationPath), false);
 });
 
-test('single authority has direct dependencies, one approval, and no alternate ceremony', () => {
+test('single authority has direct dependencies, explicit inputs, and no alternate ceremony', () => {
   const workflow = load(readFileSync('.github/workflows/consolidated-release.yml', 'utf8'));
   assert.deepEqual(Object.keys(workflow.on.workflow_dispatch.inputs), ['channel', 'source_sha', 'operation', 'reservation_target']);
   assert.deepEqual(workflow.jobs.publish.needs,
@@ -597,15 +564,15 @@ test('single authority has direct dependencies, one approval, and no alternate c
   assert.deepEqual(Object.keys(workflow.jobs.publish.with), ['transaction', 'operation', 'reservation_target']);
   assert.equal(workflow.jobs.publish.with.verified_branch_head, undefined);
   assert.equal(workflow.jobs.admit.if, undefined);
-  assert.match(workflow.concurrency.group, /inputs\.operation \|\| 'publish'/);
-  assert.match(workflow.jobs.admit.steps.find(step => step.id === 'select').env.RELEASE_CHANNEL,
-    /github\.event_name == 'schedule' && 'insider'/);
+  assert.equal(workflow.concurrency.group, 'release-${{ inputs.channel }}');
+  assert.equal(workflow.jobs.admit.steps.find(step => step.id === 'select').env.RELEASE_CHANNEL,
+    '${{ inputs.channel }}');
   assert.equal(workflow.jobs.admit.steps.find(step => step.id === 'admit').if,
-    "(inputs.operation || 'publish') == 'publish'");
-  assert.equal(workflow.jobs.qualification.if, "(inputs.operation || 'publish') == 'publish'");
-  assert.equal(workflow.jobs['collect-qualification'].if, "(inputs.operation || 'publish') == 'publish'");
-  assert.match(workflow.jobs.publish.if, /\(inputs\.operation \|\| 'publish'\) == 'abandon'/);
-  assert.equal(workflow.jobs.publish.with.operation, "${{ inputs.operation || 'publish' }}");
+    "inputs.operation == 'publish'");
+  assert.equal(workflow.jobs.qualification.if, "inputs.operation == 'publish'");
+  assert.equal(workflow.jobs['collect-qualification'].if, "inputs.operation == 'publish'");
+  assert.match(workflow.jobs.publish.if, /inputs\.operation == 'abandon'/);
+  assert.equal(workflow.jobs.publish.with.operation, "${{ inputs.operation }}");
   assert.equal(workflow.jobs.summary.if, 'always()');
   const summary = JSON.stringify(workflow.jobs.summary);
   assert.match(summary, /public_identity|qualification|evidence|publication|source/i);

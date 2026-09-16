@@ -17,7 +17,7 @@ import {
   validateRecord, migrateLegacyLedger, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks, publisherWorkflowIdentity,
   loadReleaseMetadata, loadReleaseTrustPolicy, releaseManifest, releaseManifestEnvelope, validateReleaseManifest, validateReleaseManifestBytes, validateReleaseManifestEnvelope,
 } from '../release-policy.mjs';
-import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection,
+import { ensureSourceTag, githubClient, githubRequestUrl, gitLedger, publicLedger, publicLedgerFields, readTag, readVersion, verifyProtection as verifyLiveProtection,
   parseGithubTimestamp, verifyStableQualification, verifyReleaseChecks } from '../release-github.mjs';
 import { buildMetadata, emitBuildIdentity } from '../release-metadata.mjs';
 import { runReleaseControl, output } from '../release-control.mjs';
@@ -402,18 +402,18 @@ const hotfixQualification = () => ({
   migrations: true, recovery: true, mode: 'hotfix',
   reasonSha256: hotfixReasonDigest('Emergency recovery fix cannot wait for the next insider qualification.'),
 });
-function fixtureProtection(channel) {
+function fixtureProtection(channel, mode = 'separation-of-duties') {
   const payload = {
     schema: 5, repository: context().repository, channel, branch: channel === 'stable' ? 'main' : 'development',
     verifiedAt: created, policyProfile: 'printfarmer-release-protection/v4',
-    approvalMode: 'separation-of-duties', approvalAssurance: 'non-self-review-enforced',
+    approvalMode: mode, approvalAssurance: mode === 'single-maintainer' ? 'owner-confirmed/self-attested' : 'non-self-review-enforced',
     claims: { ...Object.fromEntries([
       'branchDeletionBlocked', 'branchRewritesBlocked', 'pullRequestRequired',
       'branchBypassBlocked', 'conversationResolutionRequired', 'selfAttestedReviewRequired',
       'requiredChecksEnforced', 'canonicalEnvironmentBranchOnly', 'manualApprovalRequired',
       'environmentAdminBypassBlocked',
       'canonicalTagsImmutable', 'ledgerContinuityProtected', 'exclusiveApprovedPublisher',
-    ].map(claim => [claim, true])), codeOwnerApprovalRequired: true, nonSelfApprovalRequired: true },
+    ].map(claim => [claim, true])), codeOwnerApprovalRequired: mode === 'separation-of-duties', nonSelfApprovalRequired: mode === 'separation-of-duties' },
   };
   return { ...payload, policyDigest: hash(payload) };
 }
@@ -423,6 +423,17 @@ const abandonmentApproval = (identity, overrides = {}) => ({
   runId: '42', runAttempt: '1', jobId: '900', environment: 'release-insider',
   targetReservation: identity.allocationKey, approvedAt: '2026-09-14T22:41:00.000Z', ...overrides,
 });
+function abandonmentProtection(identity) {
+  const { policyDigest, ...payload } = fixtureProtection('insider');
+  Object.assign(payload, { schema: 6, policyProfile: 'printfarmer-release-protection/v5',
+    approvalMode: 'single-maintainer', approvalAssurance: 'owner-dispatched/self-attested',
+    dispatchAuthorization: dispatchAssessment('insider', {
+      operation: 'abandon', reservationTarget: identity.allocationKey,
+    }) });
+  Object.assign(payload.claims, { manualApprovalRequired: false, codeOwnerApprovalRequired: false,
+    nonSelfApprovalRequired: false });
+  return { ...payload, policyDigest: hash(payload) };
+}
 const admission = (overrides = {}) => admit(context(overrides), overrides.eventSha || sha, 'v1.2.3\n', '1.2.2');
 const stableAdmission = (baseVersion = '1.2.3', overrides = {}) => admit(context({
   channel: 'stable', ...overrides,
@@ -746,7 +757,7 @@ test('admission denies untrusted events, caller spoofing, source drift and swapp
   assert.equal(store.writes, 0);
   assert.throws(() => admit(context(), newerSha, 'v1.2.3', '1.2.2'), /HEAD/);
   assert.throws(() => admit(context(), sha, 'v1.2.2', '1.2.2'), /exceed/);
-  assert.equal(admission({ event: 'schedule' }).channel, 'insider');
+  assert.throws(() => admission({ event: 'schedule' }), /Event cannot authorize/);
   const stable = context({
     channel: 'stable',
     requestedTag: 'v1.2.3',
@@ -795,8 +806,9 @@ test('serialized insider allocation rejects overlapping active reservations and 
 test('owner-approved terminal abandonment projects only safe binding fields and consumes identity and sequence', () => {
   const ledger = state();
   const first = record(ledger);
-  const approval = abandonmentAuthorization(first, first.protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
-  const terminal = abandon(ledger, first, approval, first.protection);
+  const protection = abandonmentProtection(first);
+  const approval = abandonmentAuthorization(first, protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
+  const terminal = abandon(ledger, first, approval, protection);
   assert.deepEqual(Object.keys(terminal).sort(), [
     'allocationKey', 'approvalEnvironment', 'approvalJobId', 'approvalRunAttempt', 'approvalRunId', 'approvalTarget',
     'canonicalVersion', 'channel', 'identitySha256', 'ownerApprovedAt', 'schema', 'sourceCommit',
@@ -815,7 +827,8 @@ test('owner-approved terminal abandonment projects only safe binding fields and 
 test('abandonment rejects forged bindings, duplicate terminal transitions, and activated reservations', () => {
   const ledger = state();
   const first = record(ledger);
-  const approval = abandonmentAuthorization(first, first.protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
+  const protection = abandonmentProtection(first);
+  const approval = abandonmentAuthorization(first, protection, abandonmentApproval(first), Date.parse('2026-09-14T22:45:00.000Z'));
   for (const mutate of [
     value => { value.allocationKey = 'f'.repeat(64); },
     value => { value.sourceCommit = newerSha; },
@@ -826,16 +839,16 @@ test('abandonment rejects forged bindings, duplicate terminal transitions, and a
   ]) {
     const forged = structuredClone(approval);
     mutate(forged);
-    assert.throws(() => abandon(ledger, first, forged, first.protection), /Abandonment authorization/);
+    assert.throws(() => abandon(ledger, first, forged, protection), /Abandonment authorization/);
   }
-  abandon(ledger, first, approval, first.protection);
-  assert.throws(() => abandon(ledger, first, approval, first.protection), /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
+  abandon(ledger, first, approval, protection);
+  assert.throws(() => abandon(ledger, first, approval, protection), /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
 
   const activatedLedger = state();
   const activated = record(activatedLedger);
   advance(activatedLedger, activated, completeSet(activated), sha, '');
   assert.throws(() => abandon(activatedLedger, activated,
-    abandonmentAuthorization(activated, activated.protection, abandonmentApproval(activated), Date.parse('2026-09-14T22:45:00.000Z')), activated.protection),
+    abandonmentAuthorization(activated, abandonmentProtection(activated), abandonmentApproval(activated), Date.parse('2026-09-14T22:45:00.000Z')), abandonmentProtection(activated)),
   /(cannot be reactivated or abandoned twice|Terminally abandoned reservation)/);
 });
 
@@ -993,7 +1006,7 @@ test('source tag is authorized in durable state before public ref creation and n
 test('record consumers reject foreign callers while allowing same-run retry attempts', () => {
   const identity = record();
   verifyConsumer(identity, { record: identity }, context());
-  assert.doesNotThrow(() => verifyConsumer(identity, { record: identity }, context({ buildAttempt: '2' })));
+  assert.throws(() => verifyConsumer(identity, { record: identity }, context({ buildAttempt: '2' })), /Unauthorized consumer/);
   for (const override of [{ event: 'push' }, { repository: 'fork/repo' },
     { workflowIdentity: 'caller-forgery' }, { workflowSha: newerSha }]) {
     assert.throws(() => verifyConsumer(identity, { record: identity }, context(override)));
@@ -1543,7 +1556,7 @@ test('missing live protections fail closed before a publisher operation', async 
   const calls = [];
   await assert.rejects(verifyProtection(async (endpoint, method = 'GET') => {
     calls.push({ endpoint, method }); return [];
-  }, 'insider', '123', 'separation-of-duties'), /Owner blocker/);
+  }, 'insider', '123', 'single-maintainer'), /Owner blocker/);
   assert.ok(calls.length > 0);
   assert.ok(calls.every(call => call.method === 'GET'));
 });
@@ -2417,7 +2430,7 @@ test('history traversal never trusts a truncated compare list or skips old edges
     /counter rollback/, 'rollback beyond the first 1000 snapshots');
 });
 
-function protectionFixture(channel = 'insider', approvalMode = 'separation-of-duties') {
+function protectionFixture(channel = 'insider', approvalMode = 'single-maintainer') {
   const branch = channel === 'stable' ? 'main' : 'development';
   const names = ['release-canonical-tags', 'release-ledger-continuity', 'release-tag-creators', 'release-ledger-writer'];
   const rulesets = names.map((name, id) => ({
@@ -2430,13 +2443,8 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
   }));
   const environment = { name: `release-${channel}`, privateMarker: 'raw-environment-sentinel',
     can_admins_bypass: false,
-    deployment_branch_policy: { custom_branch_policies: true },
-    protection_rules: [{ type: 'required_reviewers', prevent_self_review: true,
-      reviewers: [{ type: 'User', reviewer: { id: 7, login: 'raw-reviewer-sentinel' } }] }] };
-  if (approvalMode === 'single-maintainer') {
-    environment.protection_rules[0].prevent_self_review = false;
-    environment.protection_rules[0].reviewers[0].reviewer.login = 'jpapiez';
-  }
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+    protection_rules: [{ type: 'branch_policy' }] };
   const branchRules = [
     { type: 'deletion' }, { type: 'non_fast_forward' },
     { type: 'pull_request', parameters: {
@@ -2457,7 +2465,7 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
     if (endpoint === 'rulesets/5') return branchRuleset;
     if (endpoint === `environments/${environment.name}`) return environment;
     if (endpoint === `environments/${environment.name}/deployment-branch-policies`) {
-      return { branch_policies: [{ name: 'development', type: 'branch' }] };
+      return { total_count: 1, branch_policies: [{ name: 'development', type: 'branch' }] };
     }
     if (endpoint === 'rulesets?per_page=100') return rulesets;
     if (endpoint.startsWith('rulesets/')) return rulesets.find(rule => rule.id === Number(endpoint.split('/')[1]));
@@ -2466,30 +2474,44 @@ function protectionFixture(channel = 'insider', approvalMode = 'separation-of-du
   return { api, environment, rulesets, branchRules, branchRuleset };
 }
 
-test('live protection adapter accepts only scoped reviewer-gated environments and exclusive publisher rules', async () => {
+function dispatchAssessment(channel = 'insider', overrides = {}) {
+  return {
+    kind: 'release-dispatch-assessment', schema: 1, repository: context().repository,
+    transactionSha256: 'd'.repeat(64), workflowCommit: sha, sourceCommit: sha,
+    channel, operation: 'publish', reservationTarget: '', runId: '42', executionAttempt: '1',
+    event: 'workflow_dispatch', approvalMode: 'single-maintainer', ownerDispatchEligible: true,
+    ...overrides,
+  };
+}
+
+function verifyProtection(api, channel, appId, mode, assessment = dispatchAssessment(channel)) {
+  return verifyLiveProtection(api, channel, appId, mode, assessment);
+}
+
+test('live protection adapter accepts only owner-dispatched environments and exclusive publisher rules', async () => {
   const { api, environment, rulesets } = protectionFixture();
-  const evidence = await verifyProtection(api, 'insider', '123', 'separation-of-duties');
-  assert.equal(evidence.schema, 5);
+  const evidence = await verifyProtection(api, 'insider', '123', 'single-maintainer');
+  assert.equal(evidence.schema, 6);
   verifyProtectionEvidence(evidence, 'insider');
-  assert.equal(evidence.claims.nonSelfApprovalRequired, true);
+  assert.equal(evidence.claims.nonSelfApprovalRequired, false);
   assert.doesNotMatch(JSON.stringify(evidence), /rulesets|environment"|reviewers|publisherAppId|actor_id/);
   assert.throws(() => verifyProtectionEvidence(evidence, 'stable'), /mismatched/);
-  await assert.rejects(verifyProtection(api, 'insider', '999', 'separation-of-duties'), /approved publisher app/);
-  environment.protection_rules[0].prevent_self_review = false;
-  await assert.rejects(verifyProtection(api, 'insider', '123', 'separation-of-duties'), /self-review setting/);
-  environment.protection_rules[0].prevent_self_review = true;
+  await assert.rejects(verifyProtection(api, 'insider', '999', 'single-maintainer'), /approved publisher app/);
+  environment.protection_rules.push({ type: 'required_reviewers' });
+  await assert.rejects(verifyProtection(api, 'insider', '123', 'single-maintainer'), /without second approval/);
+  environment.protection_rules.pop();
   rulesets[0].bypass_actors.push({ actor_type: 'RepositoryRole', actor_id: 5 });
-  await assert.rejects(verifyProtection(api, 'insider', '123', 'separation-of-duties'), /continuity bypass/);
+  await assert.rejects(verifyProtection(api, 'insider', '123', 'single-maintainer'), /continuity bypass/);
   rulesets[0].bypass_actors = [];
   const staleListing = async endpoint => endpoint === 'rulesets?per_page=100'
     ? rulesets.map(rule => ({ ...rule, enforcement: 'active' })) : api(endpoint);
   rulesets[0].enforcement = 'disabled';
-  await assert.rejects(verifyProtection(staleListing, 'insider', '123', 'separation-of-duties'), /active release-canonical-tags/);
+  await assert.rejects(verifyProtection(staleListing, 'insider', '123', 'single-maintainer'), /active release-canonical-tags/);
 });
 
 test('missing write-visible bypass evidence is distinguished from actual bypass and policy drift', async () => {
   for (const channel of ['stable', 'insider']) {
-    for (const mode of ['single-maintainer', 'separation-of-duties']) {
+    for (const mode of ['single-maintainer']) {
       for (const index of [0, 1, 2, 3, 4]) {
         for (const missing of [undefined, null, {}, '[]', false]) {
           const f = protectionFixture(channel, mode);
@@ -2516,7 +2538,7 @@ test('missing write-visible bypass evidence is distinguished from actual bypass 
 });
 
 for (const channel of ['stable', 'insider']) {
-  for (const mode of ['single-maintainer', 'separation-of-duties']) {
+  for (const mode of ['single-maintainer']) {
     test(`${channel} ${mode} rejects administrator bypass or unproven bypass policy before reservation`, async () => {
       const previous = globalThis.fetch;
       try {
@@ -2540,14 +2562,14 @@ for (const channel of ['stable', 'insider']) {
       } finally { globalThis.fetch = previous; }
     });
 
-    test(`${channel} ${mode} requires manual approval and binds honest public-safe claims`, async () => {
+    test(`${channel} ${mode} requires owner dispatch and binds honest public-safe claims`, async () => {
       const fixture = protectionFixture(channel, mode);
       const evidence = await verifyProtection(fixture.api, channel, '123', mode);
       verifyProtectionEvidence(evidence, channel);
       assert.equal(evidence.approvalMode, mode);
       assert.equal(evidence.approvalAssurance,
-        mode === 'single-maintainer' ? 'owner-confirmed/self-attested' : 'non-self-review-enforced');
-      assert.equal(evidence.claims.manualApprovalRequired, true);
+        'owner-dispatched/self-attested');
+      assert.equal(evidence.claims.manualApprovalRequired, false);
       assert.equal(evidence.claims.environmentAdminBypassBlocked, true);
       assert.equal(evidence.claims.nonSelfApprovalRequired, mode === 'separation-of-duties');
       assert.equal(evidence.claims.codeOwnerApprovalRequired, mode === 'separation-of-duties');
@@ -2555,10 +2577,9 @@ for (const channel of ['stable', 'insider']) {
       assert.doesNotMatch(JSON.stringify(evidence), /jpapiez|raw-reviewer|reviewers|publisherAppId|actor_id/);
       const original = structuredClone(fixture.environment.protection_rules);
       for (const rules of [undefined, [], [original[0], original[0]],
-        [{ ...original[0], reviewers: [] }], [{ ...original[0], reviewers: [{}] }],
-        [{ ...original[0], reviewers: [{ type: 'User', reviewer: { id: 0, login: 'jpapiez' } }] }],
-        [{ ...original[0], prevent_self_review: undefined }],
-        [{ ...original[0], prevent_self_review: mode === 'single-maintainer' }]]) {
+        [{ type: 'required_reviewers', reviewers: [] }],
+        [original[0], { type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 5460061, login: 'jpapiez' } }] }],
+        [original[0], { type: 'wait_timer' }]]) {
         fixture.environment.protection_rules = rules;
         await assert.rejects(verifyProtection(fixture.api, channel, '123', mode), /Owner blocker/);
       }
@@ -2567,7 +2588,7 @@ for (const channel of ['stable', 'insider']) {
         item => { delete item.approvalMode; },
         item => { item.approvalMode = 'unknown'; },
         item => { item.approvalAssurance = 'independent-approval'; },
-        item => { item.claims.manualApprovalRequired = false; },
+        item => { item.claims.manualApprovalRequired = true; },
         item => { item.claims.environmentAdminBypassBlocked = false; },
         item => { delete item.claims.environmentAdminBypassBlocked; },
         item => { item.claims.nonSelfApprovalRequired = !item.claims.nonSelfApprovalRequired; },
@@ -2591,33 +2612,17 @@ for (const channel of ['stable', 'insider']) {
   }
 }
 
-test('single-maintainer accepts only owner-approved users and never fingerprints their identities', async () => {
+test('current live policy rejects missing owner dispatch and unsupported multi-actor mode', async () => {
   const fixture = protectionFixture('insider', 'single-maintainer');
-  const rule = fixture.environment.protection_rules[0];
-  const first = await verifyProtection(fixture.api, 'insider', '123', 'single-maintainer');
-  const owner = structuredClone(rule.reviewers[0]);
-  const other = { type: 'User', reviewer: { id: 99, login: 'private-delegate' } };
-  for (const reviewers of [[other], [owner, other],
-    [{ type: 'Team', reviewer: { id: 8, slug: 'private-team' } }]]) {
-    rule.reviewers = reviewers;
-    await assert.rejects(verifyProtection(fixture.api, 'insider', '123', 'single-maintainer'),
-      /explicitly owner-approved/);
+  for (const invalid of [undefined, {}, { ...dispatchAssessment(), ownerDispatchEligible: false }]) {
+    await assert.rejects(verifyLiveProtection(fixture.api, 'insider', '123', 'single-maintainer', invalid));
   }
-  rule.reviewers = [other];
-  const second = await verifyProtection(fixture.api, 'insider', '123', 'single-maintainer', '["private-delegate"]');
-  const { policyDigest: ignoredFirst, verifiedAt: firstTime, ...a } = first;
-  const { policyDigest: ignoredSecond, verifiedAt: secondTime, ...b } = second;
-  assert.deepEqual(a, b);
-  assert.doesNotMatch(JSON.stringify(second), /private-delegate|jpapiez/);
-  rule.reviewers = [owner];
-  for (const invalid of ['private-delegate', '[]', '{}', 'null', '[""]', '[7]', '["bad\\nlogin"]']) {
-    await assert.rejects(verifyProtection(fixture.api, 'insider', '123', 'single-maintainer', invalid),
-      error => error.message === 'Owner blocker: invalid owner-approved reviewer configuration');
-  }
+  await assert.rejects(verifyProtection(fixture.api, 'insider', '123', 'separation-of-duties'),
+    /must be single-maintainer/);
 });
 
 for (const channel of ['stable', 'insider']) {
-  for (const mode of ['single-maintainer', 'separation-of-duties']) {
+  for (const mode of ['single-maintainer']) {
     test(`${channel} ${mode} branch policies fail closed without writes on missing, malformed or bypassed controls`, async () => {
       const previous = globalThis.fetch;
       const mutations = [
@@ -2725,7 +2730,7 @@ test('legacy exact-SHA required-check adapter rejects malformed or failing statu
       } },
   ];
   try {
-    for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+    for (const approvalMode of ['single-maintainer']) {
         for (const mutation of mutations) {
           const fixture = authorizationFixture(state(), { approvalMode, ...mutation });
           globalThis.fetch = fixture.fetch;
@@ -2809,7 +2814,7 @@ test('read-only admission does not require a pre-existing canonical qualificatio
       globalThis.fetch = fixture.fetch;
       await runReleaseControl('admit', fixture.env);
       assert.ok(fixture.calls.every(call => call.method === 'GET'));
-      assert.ok(fixture.calls.every(call => !/actions\/|commits\/.*\/(?:status|check-runs)/.test(call.endpoint)));
+      assert.ok(fixture.calls.every(call => !/\/jobs\?|commits\/.*\/(?:status|check-runs)/.test(call.endpoint)));
     }
   } finally {
     globalThis.fetch = previous;
@@ -2846,8 +2851,7 @@ test('release workflow explicitly wires approval mode and confines reviewer evid
     /RELEASE_ADMITTED_APPROVAL_MODE: \$\{\{ fromJSON\(inputs\.transaction\)\.approvalMode \}\}/);
   assert.match(publisher,
     /environment: \$\{\{ needs\.dispatch-boundary\.outputs\.environment \}\}/);
-  assert.match(publisher,
-    /RELEASE_OWNER_APPROVED_REVIEWERS: \$\{\{ secrets\.RELEASE_OWNER_APPROVED_REVIEWERS \}\}/);
+  assert.doesNotMatch(publisher, /RELEASE_OWNER_APPROVED_REVIEWERS/);
   assert.match(admissionJob, /statuses: read/);
   assert.match(publisher, /permission-statuses: read/);
 });
@@ -2856,7 +2860,7 @@ test('authorization fails closed on missing, invalid or divergent admitted appro
   const previous = globalThis.fetch;
   globalThis.fetch = () => assert.fail('Approval-mode divergence must fail before network access');
   try {
-    for (const mode of ['single-maintainer', 'separation-of-duties']) {
+    for (const mode of ['single-maintainer']) {
       const fixture = authorizationFixture(state(), { approvalMode: mode });
       for (const admittedMode of [undefined, '', 'unknown', `${mode} `,
         mode === 'single-maintainer' ? 'separation-of-duties' : 'single-maintainer']) {
@@ -2874,9 +2878,9 @@ test('single-maintainer authorization rejects unapproved, automatic and conflict
   try {
     for (const mutateEnvironment of [
       env => { env.protection_rules = []; },
-      env => { env.protection_rules[0].reviewers = []; },
-      env => { env.protection_rules[0].reviewers[0].reviewer.login = 'unapproved'; },
-      env => { env.protection_rules[0].prevent_self_review = true; },
+      env => { env.protection_rules.push({ type: 'required_reviewers', reviewers: [] }); },
+      env => { env.protection_rules.push({ type: 'required_reviewers', reviewers: [{ type: 'User', reviewer: { id: 5460061, login: 'jpapiez' } }] }); },
+      env => { env.protection_rules.push({ type: 'wait_timer' }); },
       env => { env.deployment_branch_policy.custom_branch_policies = false; },
     ]) {
       const fixture = authorizationFixture(state(), { approvalMode: 'single-maintainer', mutateEnvironment });
@@ -2927,20 +2931,19 @@ test('protected release-control abandonment uses App policy verification and Git
       ...fixture.env, GITHUB_RUN_ATTEMPT: '2',
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
       RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
-    }, () => {}), /initial protected workflow attempt/, 'historical approval cannot authorize a rerun');
+    }, () => {}), /Reruns/, 'historical approval cannot authorize a rerun');
     for (const [name, mutate] of [
-      ['spoofed approver', value => { value.user.login = 'outsider'; }],
-      ['wrong environment', value => { value.environments[0].name = 'release-stable'; }],
-      ['missing approval', value => { value.state = 'rejected'; }],
+      ['demoted owner', value => { value.permission = 'write'; }],
+      ['reclaimed owner login', value => { value.user.id = 8; }],
     ]) {
-      const original = structuredClone(fixture.approvalEvidence);
-      mutate(fixture.approvalEvidence);
+      const original = structuredClone(fixture.dispatchPermission);
+      mutate(fixture.dispatchPermission);
       await assert.rejects(runReleaseControl('abandon', {
         ...fixture.env,
         RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
         RELEASE_ABANDONMENT_TARGET: identity.allocationKey,
-      }, () => {}), /Abandonment requires approval from an allowed owner/, name);
-      Object.assign(fixture.approvalEvidence, original);
+      }, () => {}), /administrator permission|permission evidence/, name);
+      Object.assign(fixture.dispatchPermission, original);
     }
     const wrongRun = { ...fixture.env, GITHUB_RUN_ID: '43' };
     await assert.rejects(runReleaseControl('abandon', {
@@ -2961,6 +2964,7 @@ test('protected release-control abandonment uses App policy verification and Git
     ]);
     assert.ok(fixture.calls.some(call => call.admin && call.publisher));
     assert.ok(fixture.calls.some(call => call.method === 'PATCH' && call.publisher));
+    assert.ok(!fixture.calls.some(call => call.endpoint.endsWith('/approvals')));
     assert.doesNotMatch(JSON.stringify(fixture.ledgerWrites.at(-1)), /protectionDigest|reviewer|private/i);
     await assert.rejects(runReleaseControl('abandon', {
       ...fixture.env,
@@ -2977,7 +2981,7 @@ test('protected release-control abandonment uses App policy verification and Git
 });
 
 async function authorizedRecord() {
-  const protection = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
+  const protection = fixtureProtection('insider');
   return { ...record(), created: protection.verifiedAt, protection };
 }
 
@@ -3086,7 +3090,7 @@ test('normalized attestation and artifact writers reject raw, unknown and weaken
 });
 
 test('stable artifact qualification retains pass claims but never owner free text or reviewer identities', async () => {
-  const protection = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
+  const protection = fixtureProtection('insider');
   const { policyDigest: ignored, ...payload } = {
     ...protection, channel: 'stable', branch: 'main',
   };
@@ -3119,15 +3123,13 @@ test('stable artifact qualification retains pass claims but never owner free tex
 
 test('raw policy identity changes do not affect normalized digests and API errors cannot disclose raw payloads', async () => {
   const fixture = protectionFixture();
-  const first = await verifyProtection(fixture.api, 'insider', '123', 'separation-of-duties');
-  fixture.environment.protection_rules[0].reviewers = [
-    { type: 'User', reviewer: { id: 999, login: 'another-private-reviewer' } },
-  ];
+  const first = await verifyProtection(fixture.api, 'insider', '123', 'single-maintainer');
+  fixture.environment.privateMarker = 'another-private-environment';
   for (const rule of fixture.rulesets) {
     rule.privateMarker = 'changed-private-rule';
     if (rule.bypass_actors.length) rule.bypass_actors[0].actor_id = 456;
   }
-  const second = await verifyProtection(fixture.api, 'insider', '456', 'separation-of-duties');
+  const second = await verifyProtection(fixture.api, 'insider', '456', 'single-maintainer');
   const { policyDigest: ignoredFirst, verifiedAt: firstTime, ...a } = first;
   const { policyDigest: ignoredSecond, verifiedAt: secondTime, ...b } = second;
   assert.deepEqual(a, b, 'No raw policy data or identity fingerprint may survive normalization');
@@ -3137,7 +3139,7 @@ test('raw policy identity changes do not affect normalized digests and API error
     await assert.rejects(verifyProtection(async endpoint => {
       if (endpoint.startsWith(endpointPrefix)) throw new Error('raw-reviewer-sentinel private-value');
       return fixture.api(endpoint);
-    }, 'insider', '456', 'separation-of-duties'), error => error.message === 'Protection policy read failed');
+    }, 'insider', '456', 'single-maintainer'), error => error.message === 'Protection policy read failed');
   }
 });
 
@@ -3184,9 +3186,8 @@ function authorizationFixture(initial = state(), settings = {}) {
   const env = {
     GH_TOKEN: 'github-fixture', RELEASE_PUBLISHER_TOKEN: 'publisher-fixture',
     RELEASE_PUBLISHER_APP_ID: '123', RELEASE_LEDGER_ANCHOR: anchor,
-    RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
-    RELEASE_ADMITTED_APPROVAL_MODE: settings.approvalMode ?? 'separation-of-duties',
-    RELEASE_OWNER_APPROVED_REVIEWERS: '[\"jpapiez\"]',
+    RELEASE_APPROVAL_MODE: settings.approvalMode ?? 'single-maintainer',
+    RELEASE_ADMITTED_APPROVAL_MODE: settings.approvalMode ?? 'single-maintainer',
     GITHUB_REPOSITORY: selected.repository, GITHUB_EVENT_NAME: selected.event,
     GITHUB_REF: selected.ref, GITHUB_SHA: workflowCommit,
     GITHUB_WORKFLOW_REF: selected.workflowIdentity, GITHUB_WORKFLOW_SHA: workflowCommit,
@@ -3195,18 +3196,19 @@ function authorizationFixture(initial = state(), settings = {}) {
     GITHUB_ACTOR: 'author', GITHUB_ACTOR_ID: '2', GITHUB_TRIGGERING_ACTOR: 'author',
     RELEASE_OPERATION: 'publish', RELEASE_PUBLICATION_ENVIRONMENT: `release-${channel}`,
   };
-  const dispatchActor = settings.ownerDispatch
+  const dispatchActor = settings.ownerDispatch !== false
     ? { id: 5460061, login: 'jpapiez', type: 'User' } : { id: 2, login: 'author', type: 'User' };
   const dispatchRun = { run_attempt: 1, actor: structuredClone(dispatchActor),
     triggering_actor: structuredClone(dispatchActor) };
   const dispatchPermission = { permission: 'admin', role_name: 'admin', user: structuredClone(dispatchActor) };
   env.GITHUB_ACTOR = env.GITHUB_TRIGGERING_ACTOR = dispatchActor.login;
   env.GITHUB_ACTOR_ID = String(dispatchActor.id);
-  if (settings.ownerDispatch) {
-    env.RELEASE_PUBLICATION_ENVIRONMENT = environment.name = `release-${channel}-owner-dispatch`;
+  if (settings.ownerDispatch !== false) {
+    env.RELEASE_PUBLICATION_ENVIRONMENT = environment.name = `release-${channel}`;
     environment.deployment_branch_policy.protected_branches = false;
     environment.protection_rules = [{ type: 'branch_policy' }];
   }
+  settings.mutateEnvironment?.(environment);
   const runner = join(dispatchFixtureRoot, String(++dispatchFixtureId));
   mkdirSync(join(runner, '_github_workflow'), { recursive: true });
   env.RUNNER_TEMP = runner;
@@ -3523,7 +3525,7 @@ test('executed admission and authorization use identical immutable transaction b
 });
 
 for (const channel of ['stable', 'insider']) {
-for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+for (const approvalMode of ['single-maintainer']) {
 test(`${channel} ${approvalMode} executes pin, admission, automatic qualification, authorization and consumption without canonical status`, async t => {
   const cwd = process.cwd();
   const root = resolve('.artifacts', `automatic-qualification-${process.pid}-${channel}-${approvalMode}`);
@@ -3554,7 +3556,7 @@ test(`${channel} ${approvalMode} executes pin, admission, automatic qualificatio
   const completedJobs = fixture.transactionJobs.splice(0);
   await runReleaseControl('admit', fixture.env);
   assert.ok(fixture.calls.every(call => call.method === 'GET'));
-  assert.ok(fixture.calls.every(call => !/actions\/|\/status\?|\/check-runs\?/.test(call.endpoint)),
+  assert.ok(fixture.calls.every(call => !/\/jobs\?|\/status\?|\/check-runs\?/.test(call.endpoint)),
     'Admission cannot depend on evidence from its downstream jobs');
   await assert.rejects(runReleaseControl('authorize', fixture.env), /receipt unavailable/);
   await assert.rejects(qualifyTransaction(transaction, api), /qualification job/);
@@ -3625,7 +3627,7 @@ test('owner dispatch authorizes signed publication evidence and live demotion bl
     const firstWrite = fixture.calls.findIndex(call => call.method !== 'GET');
     assert.ok(fixture.calls.slice(0, firstWrite).some(call => call.endpoint === 'collaborators/jpapiez/permission'));
     assert.ok(fixture.calls.slice(0, firstWrite).some(call =>
-      call.endpoint === 'environments/release-insider-owner-dispatch'));
+      call.endpoint === 'environments/release-insider'));
     for (const update of [{ sourceCommit: 'f'.repeat(40) }, { workflowCommit: 'f'.repeat(40) },
       { runId: '43' }, { executionAttempt: '2' }, { channel: 'stable' }, { operation: 'abandon' }]) {
       const changed = structuredClone(identity);
@@ -3647,7 +3649,7 @@ test('owner dispatch authorizes signed publication evidence and live demotion bl
     for (const operation of ['authorize', 'preflight', 'advance']) {
       await assert.rejects(runReleaseControl(operation, {
         ...consumer, RELEASE_EXPECTED_POINTER: '', RELEASE_VERIFIED_BRANCH_HEAD: sha,
-      }, () => {}), /Publication environment differs/);
+      }, () => {}), /administrator permission/);
     }
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
     assert.equal(readPrivateJson(authorizationPath).protection.policyDigest, identity.protection.policyDigest);
@@ -3678,7 +3680,7 @@ test('owner role is rechecked inside a losing reservation CAS before retry write
       }
       return fixture.fetch(url, options);
     };
-    await assert.rejects(runFixtureControl('authorize', fixture), /Publication environment differs/);
+    await assert.rejects(runFixtureControl('authorize', fixture), /administrator permission/);
     assert.equal(rejectedCas, true);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
     assert.equal(fixture.ledgerWrites.length, 1, 'Only the losing CAS was attempted');
@@ -3749,8 +3751,8 @@ test('executed authority rejects initial and newly advanced stable floors before
 
 test('executed authority preserves existing exact reservations after stable advances above their base', async () => {
   const ledger = stableFloorLedger('historical', '1.2.2');
-  const insider = record(ledger);
-  const stable = reserve(ledger, stableAdmission(), created, undefined, hotfixQualification()).record;
+  const insider = reserve(ledger, admission(), created, fixtureProtection('insider', 'single-maintainer')).record;
+  const stable = reserve(ledger, stableAdmission(), created, fixtureProtection('stable', 'single-maintainer'), hotfixQualification()).record;
   advance(ledger, stable, completeSet(stable), sha, '');
   const stablePointer = signedReleasePointer(stable, signedManifest(stable, completeSet(stable)));
   const newer = reserve(ledger, stableAdmission('1.2.4', { buildId: '43' }),
@@ -4163,7 +4165,7 @@ test('public ledger schema rejects malformed maps and typed references; stable o
   assert.throws(() => publicLedger({ ...ledger, lastHistoricalStable: '1.2.3-insider.1' }), /stable floor/);
 });
 
-for (const approvalMode of ['single-maintainer', 'separation-of-duties']) {
+for (const approvalMode of ['single-maintainer']) {
 test(`${approvalMode} control flow keeps github.token read-only and requires App verification before any writes`, async () => {
   const fixture = authorizationFixture(state(), { approvalMode });
   const originalFetch = globalThis.fetch;
@@ -4233,7 +4235,7 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
       RELEASE_APPROVAL_MODE: changedMode,
       RELEASE_ADMITTED_APPROVAL_MODE: changedMode,
     }),
-      /Approval mode changed after transaction selection/);
+      /RELEASE_APPROVAL_MODE must be single-maintainer/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
     fixture.environment.protection_rules = originalRules;
     fixture.branchRules[2].parameters = originalBranchPolicy;
@@ -4291,7 +4293,8 @@ test(`${approvalMode} control flow keeps github.token read-only and requires App
     writeFileSync(authorizationPath, JSON.stringify(changed));
     await assert.rejects(runReleaseControl('consume', consumer, verify), /differs from public identity/);
     writeFileSync(authorizationPath, signedBytes);
-    await assert.doesNotReject(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }, verify));
+    await assert.rejects(runReleaseControl('consume', { ...consumer, GITHUB_RUN_ATTEMPT: '2' }, verify),
+      /Reruns are unsupported/);
     fixture.deleteTag();
     await assert.rejects(runReleaseControl('consume', consumer, verify), /tag missing/);
     assert.ok(fixture.calls.every(call => call.method === 'GET'));
@@ -4367,11 +4370,11 @@ test('publication preflight accepts canonical ancestry and rejects branch drift 
 });
 
 test('missing, malformed and weakened signed protection evidence always fails closed', async () => {
-  const evidence = await verifyProtection(protectionFixture().api, 'insider', '123', 'separation-of-duties');
+  const evidence = await verifyProtection(protectionFixture().api, 'insider', '123', 'single-maintainer');
   for (const mutate of [
     item => { item.schema = 0; }, item => { item.repository = 'fork/repo'; },
     item => { item.verifiedAt = 'invalid'; }, item => { item.branchRules = []; },
-    item => { item.claims.nonSelfApprovalRequired = false; }, item => { delete item.claims.canonicalTagsImmutable; },
+    item => { item.claims.nonSelfApprovalRequired = true; }, item => { delete item.claims.canonicalTagsImmutable; },
     item => { item.policyProfile = 'unknown/v1'; },
     item => { item.policyDigest = '0'.repeat(64); },
     item => { item.verifiedAt = '2026-09-12T20:00:01.000Z'; },
@@ -4399,7 +4402,7 @@ test('missing, malformed and weakened signed protection evidence always fails cl
       ...fixture.env,
       RELEASE_PUBLIC_IDENTITY: JSON.stringify(publicAuthorization(identity)),
       RELEASE_PUBLISHER_TOKEN: undefined,
-      RELEASE_TRANSACTION: JSON.stringify(releaseTransaction({ ...identity, protection: fixtureProtection('insider') })),
+      RELEASE_TRANSACTION: JSON.stringify(releaseTransaction({ ...identity, protection: fixtureProtection('insider', 'single-maintainer') })),
       RELEASE_SOURCE_COMMIT: identity.sourceCommit,
     }, () => {}), /authorization fields/);
     assert.ok(fixture.calls.every(call => !call.admin && call.method === 'GET'));

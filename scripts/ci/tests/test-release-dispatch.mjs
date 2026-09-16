@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -41,7 +42,7 @@ function fixture() {
   const environment = { can_admins_bypass: false,
     deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
     protection_rules: [{ type: 'branch_policy' }] };
-  const policies = { branch_policies: [{ name: 'development', type: 'branch' }] };
+  const policies = { total_count: 1, branch_policies: [{ name: 'development', type: 'branch' }] };
   const requests = [];
   const api = async (endpoint, method = 'GET') => {
     requests.push(endpoint);
@@ -49,7 +50,7 @@ function fixture() {
     if (endpoint === 'actions/runs/42') return structuredClone(run);
     if (endpoint === 'actions/workflows/consolidated-release.yml') return structuredClone(definition);
     if (endpoint === 'collaborators/jpapiez/permission') return structuredClone(permission);
-    if (/^environments\/release-(stable|insider)(-owner-dispatch)?$/.test(endpoint)) {
+    if (/^environments\/release-(stable|insider)$/.test(endpoint)) {
       return { name: endpoint.slice('environments/'.length), ...structuredClone(environment) };
     }
     if (endpoint.endsWith('/deployment-branch-policies')) return structuredClone(policies);
@@ -110,11 +111,11 @@ test('a reclaimed owner login does not match the pinned owner account', async ()
     actor.id = 8;
   }
   f.env.GITHUB_ACTOR_ID = '8';
-  assert.equal((await f.assess()).ownerDispatchEligible, false);
+  await assert.rejects(f.assess(), /immutable owner/);
   assert.ok(!f.requests.includes('collaborators/jpapiez/permission'));
 });
 
-test('schedule, non-owner, reruns, abandonment and separation require the existing approval path', async () => {
+test('schedule, non-owner, reruns and separation reject without any environment access', async () => {
   const changes = [
     f => {
       f.env.GITHUB_EVENT_NAME = f.run.event = 'schedule';
@@ -138,19 +139,31 @@ test('schedule, non-owner, reruns, abandonment and separation require the existi
     f => {
       f.transaction.approvalMode = f.env.RELEASE_APPROVAL_MODE = 'separation-of-duties';
     },
-    f => {
-      f.env.RELEASE_OPERATION = f.event.inputs.operation = 'abandon';
-      f.env.RELEASE_ABANDONMENT_TARGET = f.event.inputs.reservation_target = 'c'.repeat(64);
-      f.transaction.channel = 'insider'; f.transaction.sourceBranch = 'development';
-    },
   ];
   for (const mutate of changes) {
     const f = fixture();
     mutate(f);
-    const assessment = await f.assess();
-    assert.equal(assessment.ownerDispatchEligible, false);
+    await assert.rejects(f.assess());
     assert.ok(!f.requests.includes('collaborators/jpapiez/permission'));
+    assert.ok(!f.requests.some(endpoint => endpoint.startsWith('environments/')));
   }
+});
+
+test('explicit abandonment is authorized only by the owner dispatch bound to its reservation', async () => {
+  const f = fixture();
+  f.env.RELEASE_OPERATION = f.event.inputs.operation = 'abandon';
+  f.env.RELEASE_ABANDONMENT_TARGET = f.event.inputs.reservation_target = 'c'.repeat(64);
+  f.transaction.channel = f.event.inputs.channel = 'insider'; f.transaction.sourceBranch = 'development';
+  const assessment = await f.assess();
+  assert.equal(assessment.ownerDispatchEligible, true);
+  assert.equal(assessment.operation, 'abandon');
+  assert.equal(assessment.reservationTarget, 'c'.repeat(64));
+  assert.equal(publicationEnvironment(assessment), 'release-insider');
+  f.event.inputs.channel = 'stable';
+  await assert.rejects(f.assess(), /Dispatch channel/);
+  f.event.inputs.channel = 'insider';
+  f.env.RELEASE_ABANDONMENT_TARGET = 'd'.repeat(64);
+  await assert.rejects(f.assess(), /Executing operation/);
 });
 
 test('original actor privileges cannot launder a non-owner rerun into owner consent', async () => {
@@ -158,9 +171,9 @@ test('original actor privileges cannot launder a non-owner rerun into owner cons
   f.env.GITHUB_RUN_ATTEMPT = '2'; f.run.run_attempt = 2;
   f.run.triggering_actor = { id: 8, login: 'maintainer', type: 'User' };
   f.env.GITHUB_TRIGGERING_ACTOR = 'maintainer';
-  assert.equal((await f.assess()).ownerDispatchEligible, false);
+  await assert.rejects(f.assess(), /Reruns/);
   f.env.GITHUB_TRIGGERING_ACTOR = 'jpapiez';
-  await assert.rejects(f.assess(), /Runner actor claims/);
+  await assert.rejects(f.assess(), /Reruns/);
 });
 
 test('actor spoofing, workflow substitution and changed transaction inputs fail closed', async () => {
@@ -204,7 +217,7 @@ test('live owner demotion denies eligibility; missing, spoofed or inaccessible r
   for (const role of ['read', 'triage', 'write', 'maintain']) {
     const f = fixture();
     f.permission.permission = f.permission.role_name = role;
-    assert.equal((await f.assess()).ownerDispatchEligible, false);
+    await assert.rejects(f.assess(), /administrator permission/);
   }
   for (const mutate of [
     f => { delete f.permission.user; },
@@ -228,7 +241,7 @@ test('assessment is closed and cannot claim inherited dispatch consent', async (
     { schema: 2 }, { executionAttempt: '2' }, { event: 'schedule' },
     { approvalMode: 'separation-of-duties' }, { actor: 'jpapiez' },
     { transactionSha256: '' }, { sourceCommit: '' }, { runId: '0' },
-    { operation: 'abandon', reservationTarget: 'c'.repeat(64), channel: 'insider' },
+    { operation: 'abandon', reservationTarget: '', channel: 'insider' },
   ]) {
     assert.throws(() => validateDispatchAssessment({ ...original, ...update }));
   }
@@ -294,39 +307,61 @@ test('real workflow gates every protected route with a blocking no-secret live d
   });
   assert.equal(steps[mint]['continue-on-error'], undefined);
   assert.equal(workflow.jobs.publish.secrets, 'inherit');
-  assert.doesNotMatch(JSON.stringify(workflow.jobs.admit), /release-dispatch|secrets\./);
+  assert.doesNotMatch(JSON.stringify(workflow.jobs.admit), /secrets\./);
+  assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
+  assert.deepEqual(Object.keys(publisher.on), ['workflow_call']);
+  assert.doesNotMatch(JSON.stringify(publisher), /RELEASE_OWNER_APPROVED_REVIEWERS|Recover immutable authorization bytes/);
+  assert.doesNotMatch(JSON.stringify(workflow), /Recover immutable original transaction|schedule/);
 });
 
 test('the selected environment must match freshly recomputed authority, not caller claims or old evidence', async () => {
   const f = fixture();
   const assess = await f.assess();
-  assert.equal(publicationEnvironment(assess), 'release-stable-owner-dispatch');
+  assert.equal(publicationEnvironment(assess), 'release-stable');
   const env = { ...f.env, RELEASE_TRANSACTION: JSON.stringify(f.transaction),
     RELEASE_PUBLICATION_ENVIRONMENT: publicationEnvironment(assess) };
   assert.deepEqual(await verifyPublicationAccess(env, f.api, f.event), assess);
-  for (const environment of [undefined, '', 'release-stable', 'release-insider-owner-dispatch', 'untrusted']) {
+  for (const environment of [undefined, '', 'release-stable-owner-dispatch', 'release-insider', 'untrusted']) {
     await assert.rejects(verifyPublicationAccess({ ...env, RELEASE_PUBLICATION_ENVIRONMENT: environment },
       f.api, f.event), /Publication environment differs/);
   }
   f.permission.permission = f.permission.role_name = 'write';
-  await assert.rejects(verifyPublicationAccess(env, f.api, f.event), /Publication environment differs/);
-  const explicit = await verifyPublicationAccess({ ...env, RELEASE_PUBLICATION_ENVIRONMENT: 'release-stable' },
-    f.api, f.event);
-  assert.equal(explicit.ownerDispatchEligible, false);
+  await assert.rejects(verifyPublicationAccess(env, f.api, f.event), /administrator permission/);
 });
 
-test('checked-in owner environment migration retains exact branch restrictions without reviewer bypass', () => {
-  const config = JSON.parse(readFileSync('.github/release-owner-dispatch-environments.json', 'utf8'));
-  assert.equal(config.repository, repository);
-  assert.deepEqual(config.environments.map(env => env.name),
-    ['release-stable-owner-dispatch', 'release-insider-owner-dispatch']);
-  for (const environment of config.environments) {
-    assert.deepEqual(environment.settings, {
-      wait_timer: 0, prevent_self_review: false, reviewers: [], can_admins_bypass: false,
-      deployment_branch_policy: { protected_branches: false, custom_branch_policies: true },
-    });
+test('extra environment migration is removed rather than copying credentials', () => {
+  assert.equal(existsSync('.github/release-owner-dispatch-environments.json'), false);
+});
 
-    test('live environment configuration must be safe before selecting a credential-bearing deployment', async () => {
+test('registry mutation CLIs reject unsupported runtime context before signature or registry commands', () => {
+  for (const operation of ['tag', 'alias']) {
+    for (const overrides of [
+      { GITHUB_RUN_ATTEMPT: '2' },
+      { GITHUB_EVENT_NAME: 'schedule' },
+      { GITHUB_WORKFLOW_REF: `${repository}/.github/workflows/untrusted.yml@refs/heads/development` },
+    ]) {
+      const f = fixture();
+      const result = spawnSync(process.execPath, ['scripts/ci/release-set.mjs', operation], {
+        encoding: 'utf8',
+        env: { ...process.env, ...f.env, RELEASE_TRANSACTION: JSON.stringify(f.transaction), ...overrides },
+      });
+      assert.equal(result.status, 1);
+      assert.match(result.stderr, /Reruns are unsupported|does not belong to the executing trusted workflow/);
+      assert.doesNotMatch(result.stderr, /cosign|docker|ENOENT/);
+    }
+  }
+  const workflow = load(readFileSync('.github/workflows/docker-publish.yml', 'utf8'));
+  for (const operation of ['tag', 'alias']) {
+    const step = workflow.jobs.publish.steps.find(step => step.run === `node scripts/ci/release-set.mjs ${operation}`);
+    assert.equal(step.env.GH_TOKEN, '${{ github.token }}');
+    assert.equal(step.env.RELEASE_PUBLISHER_TOKEN, '${{ steps.publisher.outputs.token }}');
+    assert.equal(step.env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
+    assert.equal(step.env.RELEASE_LEDGER_ANCHOR, '${{ vars.RELEASE_LEDGER_ANCHOR }}');
+    assert.equal(step.env.RELEASE_SOURCE_COMMIT, '${{ fromJSON(inputs.transaction).sourceCommit }}');
+  }
+});
+
+test('live environment configuration must be safe before selecting a credential-bearing deployment', async () => {
       for (const mutate of [
         f => { delete f.environment.can_admins_bypass; },
         f => { f.environment.can_admins_bypass = true; },
@@ -335,6 +370,10 @@ test('checked-in owner environment migration retains exact branch restrictions w
         f => { f.policies.branch_policies[0].name = '*'; },
         f => { f.policies.branch_policies[0].type = 'tag'; },
         f => { f.policies.branch_policies.push({ name: 'feature/*', type: 'branch' }); },
+        f => { delete f.policies.total_count; },
+        f => { f.policies.total_count = 2; },
+        f => { delete f.policies.branch_policies; },
+        f => { delete f.environment.protection_rules; },
         f => { f.environment.protection_rules = []; },
         f => { f.environment.protection_rules.push({ type: 'required_reviewers' }); },
         f => { f.environment.protection_rules.push({ type: 'wait_timer' }); },
@@ -344,7 +383,4 @@ test('checked-in owner environment migration retains exact branch restrictions w
           ...f.env, RELEASE_TRANSACTION: JSON.stringify(f.transaction),
         }, f.api, f.event), /Owner blocker/);
       }
-    });
-    assert.deepEqual(environment.branchPolicies, [{ name: 'development', type: 'branch' }]);
-  }
 });
