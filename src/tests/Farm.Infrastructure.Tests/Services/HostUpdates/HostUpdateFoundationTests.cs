@@ -163,6 +163,24 @@ public sealed class HostUpdateFoundationTests
             Assert.Contains("release_identity_invalid", result.Reasons);
         }
 
+        foreach (string channel in new[] { "beta", "insider", "rc" })
+        {
+            CanonicalReleaseIdentity prerelease = Identity() with
+            {
+                Channel = channel,
+                Version = $"1.0.0-{channel}.1",
+                ReleaseId = $"{channel}:1.0.0-{channel}.1",
+                OciReleaseLabel = $"{channel}:1.0.0-{channel}.1",
+                OciVersionLabel = $"1.0.0-{channel}.1",
+                SourceTag = $"v1.0.0-{channel}.1",
+                SourceBranch = "development",
+            };
+            HostUpdatePlanRequest request = Request() with { SourceChannel = channel, TargetChannel = channel };
+
+            Assert.True((await CreateSut(new Provider(Metadata() with { Channel = channel, Identity = prerelease })).PlanAsync(request, default)).IsEligible);
+            Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with { Channel = channel, Identity = prerelease with { Version = $"1.0.0-{channel}.0" } })).PlanAsync(request, default)).Reasons);
+        }
+
         CanonicalReleaseIdentity insider = Identity() with
         {
             Channel = "insider",
@@ -173,9 +191,15 @@ public sealed class HostUpdateFoundationTests
             SourceTag = "v1.0.0-insider.1",
             SourceBranch = "development",
         };
-        HostUpdatePlanResult insiderResult = await CreateSut(new Provider(Metadata() with { Channel = "insider", Identity = insider })).PlanAsync(Request() with { SourceChannel = "insider", TargetChannel = "insider" }, default);
-        Assert.True(insiderResult.IsEligible);
-        Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with { Channel = "insider", Identity = insider with { Version = "1.0.0-insider.0" } })).PlanAsync(Request() with { SourceChannel = "insider", TargetChannel = "insider" }, default)).Reasons);
+        HostUpdatePlanRequest insiderRequest = Request() with { SourceChannel = "insider", TargetChannel = "insider" };
+        Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with { Channel = "insider", Identity = insider with
+        {
+            Version = "1.0.0-insider.01",
+            ReleaseId = "insider:1.0.0-insider.01",
+            OciReleaseLabel = "insider:1.0.0-insider.01",
+            OciVersionLabel = "1.0.0-insider.01",
+            SourceTag = "v1.0.0-insider.01",
+        } })).PlanAsync(insiderRequest, default)).Reasons);
     }
 
     [Fact]

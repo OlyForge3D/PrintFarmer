@@ -618,7 +618,7 @@ public sealed class FileHostUpdateInstallationLock(string hostStateDirectory) : 
 
 internal static class HostUpdateValidation
 {
-    private static readonly HashSet<string> Channels = ["stable", "insider"];
+    private static readonly HashSet<string> Channels = ["stable", "beta", "insider", "rc"];
     private static readonly HashSet<string> Providers = ["postgres", "sqlserver"];
     public const string RedactedComponent = "redacted";
     public const string RedactedPlatform = "redacted";
@@ -653,7 +653,7 @@ internal static class HostUpdateValidation
     public static bool IsReleaseIdentity(CanonicalReleaseIdentity? identity, string channel) => identity is not null && IsChannel(channel) &&
         IsCanonicalReleaseVersion(identity.Version, channel) && identity.ReleaseId == $"{channel}:{identity.Version}" &&
         IsChannel(identity.Channel) && identity.Channel == channel && identity.SourceTag == $"v{identity.Version}" && ((channel == "stable" && identity.SourceBranch == "main") ||
-        (channel == "insider" && identity.SourceBranch == "development")) && IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
+        (channel is "beta" or "insider" or "rc" && identity.SourceBranch == "development")) && IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
         IsIdentifier(identity.BuildMetadata) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel && IsDigest(identity.ProvenanceSubjectDigest) &&
         IsDigest(identity.ManifestDigest) && IsDigest(identity.IndexDigest);
     /// <summary>Accepts only the release-channel version grammar used in immutable publication identities.</summary>
@@ -664,7 +664,14 @@ internal static class HostUpdateValidation
             return false;
         }
 
-        string suffix = channel == "stable" ? string.Empty : "-insider.";
+        string suffix = channel switch
+        {
+            "stable" => string.Empty,
+            "beta" => "-beta.",
+            "insider" => "-insider.",
+            "rc" => "-rc.",
+            _ => string.Empty,
+        };
         string core = suffix.Length == 0 ? value : value[..Math.Max(0, value.IndexOf('-'))];
         if (!IsCanonicalVersionCore(core))
         {
