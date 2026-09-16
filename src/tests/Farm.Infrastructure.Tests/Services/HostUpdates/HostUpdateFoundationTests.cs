@@ -80,6 +80,49 @@ public sealed class HostUpdateFoundationTests
     }
 
     [Fact]
+    public async Task StageAsync_RebuildsTrustedJournalPlanAndRejectsMismatchedIdentityReuse()
+    {
+        Stager stager = new();
+        HostUpdateFoundation sut = CreateSut(stager: stager);
+        HostUpdatePlan plan = await EligiblePlanAsync(sut);
+        HostUpdatePlan forged = plan with { Request = plan.Request with { ActorId = "attacker" } };
+        Assert.True((await sut.StageAsync(forged, Authorization(plan), default)).IsStaged);
+        Assert.Equal("operator_1", stager.LastPlan!.Request.ActorId);
+        Assert.Equal("operation_identity_conflict", (await sut.StageAsync(plan with { Request = plan.Request with { IdempotencyKey = "other-key" } }, Authorization(plan), default)).Code);
+    }
+
+    [Fact]
+    public async Task StageAsync_PersistedReceiptMustMatchTrustedSnapshotAndExactDuplicateDoesNotRestage()
+    {
+        MemoryJournal journal = new();
+        Stager stager = new();
+        HostUpdateFoundation sut = CreateSut(stager: stager, journal: journal);
+        HostUpdatePlan plan = await EligiblePlanAsync(sut);
+        HostUpdateStageResult first = await sut.StageAsync(plan, Authorization(plan), default);
+        HostUpdateStageResult duplicate = await sut.StageAsync(plan, Authorization(plan), default);
+        Assert.Same(first.Receipt, duplicate.Receipt);
+        Assert.Equal(1, stager.Calls);
+        int stagedIndex = journal.Entries.FindIndex(entry => entry.State == HostUpdateLifecycle.Staged);
+        journal.Entries[stagedIndex] = journal.Entries[stagedIndex] with
+        {
+            Snapshot = journal.Entries[stagedIndex].Snapshot with
+            {
+                Receipt = first.Receipt! with { ComponentPlatformDigests = Digests(("api/linux-x64", Digest("api"))) },
+            },
+        };
+        Assert.Equal("staged_receipt_untrusted", (await sut.StageAsync(plan, Authorization(plan), default)).Code);
+    }
+
+    [Fact]
+    public async Task PlanAsync_NullNestedRuntimeEvidenceRejectsWithoutThrowing()
+    {
+        HostUpdateFoundation sut = CreateSut(inspector: new Inspector(Installation() with { RequiredComponents = null!, PriorReleaseIdentity = null! }));
+        Assert.Contains("topology_invalid", (await sut.PlanAsync(Request(), default)).Reasons);
+        Assert.Contains("installation_identity_invalid", (await sut.PlanAsync(Request() with { OperationId = "operation-2", IdempotencyKey = "key-2", Nonce = "nonce-2" }, default)).Reasons);
+        Assert.False(new HostUpdatePlan(null!, Hash("plan"), Identity(), null!, null!).IsValid);
+    }
+
+    [Fact]
     public async Task PlanAsync_EqualDigestConflictAndMinimumUpdater_Rejects()
     {
         Assert.Contains("release_sequence_conflict", (await CreateSut(new Provider(Metadata() with { Identity = Identity() with { ManifestDigest = Digest("other") } })).PlanAsync(Request(), default)).Reasons);
@@ -145,5 +188,5 @@ public sealed class HostUpdateFoundationTests
     private sealed class AuthorizationEvaluator : IHostUpdateAuthorizationEvaluator { public bool IsAuthorized(HostUpdateAuthorization authorization, HostUpdatePlan plan, HostInstallationEvidence installation, SignedReleaseMetadata metadata) => authorization.IsStructurallyValidFor(plan); }
     private sealed class MemoryJournal : IHostUpdateJournal { public List<HostUpdateJournalEntry> Entries { get; } = []; public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) { Entries.Add(entry with { Revision = Entries.Count + 1 }); return Task.CompletedTask; } public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostUpdateJournalEntry>>(Entries); }
     private sealed class Lock : IHostUpdateInstallationLock { public Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct) => Task.FromResult<IAsyncDisposable>(new Lease()); private sealed class Lease : IAsyncDisposable { public ValueTask DisposeAsync() => ValueTask.CompletedTask; } }
-    private sealed class Stager(bool valid = true) : IHostUpdateStager { public int Calls { get; private set; } public Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct) { Calls++; return Task.FromResult(valid ? Receipt(metadata) : Receipt(metadata) with { ManifestDigest = Digest("wrong") }); } }
+    private sealed class Stager(bool valid = true) : IHostUpdateStager { public int Calls { get; private set; } public HostUpdatePlan? LastPlan { get; private set; } public Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct) { Calls++; LastPlan = plan; return Task.FromResult(valid ? Receipt(metadata) : Receipt(metadata) with { ManifestDigest = Digest("wrong") }); } }
 }
