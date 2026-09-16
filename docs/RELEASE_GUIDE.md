@@ -88,9 +88,9 @@ a second person's approval. Release launch supports only `single-maintainer`;
 approval evidence remains verifiable without changing its original claims.
 
 By owner decision, release validation is limited to automated tests,
-static analysis, code review, and fail-closed checks. No rehearsal or alternate
-live diagnostic workflow, mode, environment, receipt, fixture, probe, or
-operator ceremony exists.
+static analysis, code review, and fail-closed checks. There is no general rehearsal
+or alternate publication path. The narrowly authorized, single-use
+[tag diagnostic for #2736](#one-shot-tag-diagnostic-2736) is not release authority.
 
 `release-stable` and `release-insider` are the only release environments. Retain
 their credentials and history; remove only redundant approval gates after the
@@ -115,6 +115,84 @@ version, stage, tag, or allocator input.
 Stable is the installation default. Insider requires separate administrator
 opt-in and a reduced-stability warning; running a release workflow does not
 enroll or update any host. Versions and channels do not prove compatibility.
+
+## One-shot tag diagnostic #2736
+
+[`diagnose-release-tag-2736.yml`](../.github/workflows/diagnose-release-tag-2736.yml)
+is a temporary, owner-only exception for **one request**, not a release or
+reservation recovery. It has no inputs and runs only from `development`.
+The fixed request is `POST git/refs` for `refs/tags/v0.2.3-insider.1` at annotated
+object `68b1513644bf62265b8797240f56520c1e6d5600`, whose tag and direct commit
+binding must match source `a9253ae4d8578934ee27903d39ae69e2dc1cf769` and failed
+run `35046281532`, attempt 1. An already-existing ref fails closed, even when exact.
+No new allocation, ledger read/write, signing, qualification, tests, builds,
+containers, assets, releases, aliases or pointers run in this workflow.
+
+The parent coordinator owns merge permission and the single live invocation.
+Before invoking, read-only checks must establish:
+
+1. The reviewed PR is merged and its implementation is present on `development`.
+   The workflow is active at that path and has **zero** previous runs.
+   Do not use a dispatch as a dry run: even a failed or cancelled admission spends
+   the workflow's first-run slot.
+2. No `consolidated-release.yml` run is queued, requested, pending, waiting or in
+   progress, for **either** channel. Keep publishers quiescent throughout the
+   diagnostic; start no canonical run until it stops.
+3. The owner still authorizes possible **permanent tag creation**. The fixed ref
+   remains absent and the annotation/source binding is unchanged. Existing
+   `release-insider`, owner mode and App `4927270` / installation `161288519`
+   are unchanged; no extra permissions or copied secrets are authorized.
+
+Only after those checks and approved merge, the parent may perform the one
+invocation as `jpapiez` (not performed by the implementation session):
+
+```shell
+gh workflow run diagnose-release-tag-2736.yml --repo OlyForge3D/PrintFarmer --ref development
+```
+
+The no-secret boundary verifies the live owner account and administrator role,
+run/workflow/control identity, complete history, environment, source binding and
+publisher quiescence. The protected job repeats these checks before obtaining
+the same pinned publisher App token with exactly the existing permissions.
+Before the POST it rechecks history/quiescence and live protection twice, using
+the canonical protection validators without manufacturing a release transaction
+or signed authority. Additional active tag/push rules fail closed for review;
+no claim is made that an unknown rule or Workflows permission cannot matter.
+
+**One-shot enforcement:** the live API must report `run_number: 1` and
+`run_attempt: 1`, matching the runner, and complete unfiltered history must contain
+only that run. Failures, cancellations and prior blocked dispatches are not
+filtered out. Run number 2 fails even if earlier history was deleted. Pagination,
+missing or inconsistent evidence fails closed. This relies on GitHub's
+[per-workflow monotonic run number](https://docs.github.com/en/actions/reference/workflows-and-actions/variables)
+and normal workflow identity continuity; it is **not tamper-proof against the
+repository owner deleting/recreating the workflow or changing its code**.
+Never rename/recreate/reset it to obtain another first run.
+
+The diagnostic has a private workflow concurrency group; only its request job,
+after read-only admission, takes the canonical `release-insider` group with
+`cancel-in-progress: false`. This does not cancel a running publisher, but GitHub
+can replace a pending concurrency slot. A publisher arriving between admission
+and lock acquisition can still lose that pending slot. Stable has a different
+lock, and an API snapshot is not atomic exclusion. The quiescence prerequisite
+above is essential; this is not a global-lock redesign.
+
+The client performs at most one POST, including on HTTP 422 or a transport error,
+then only an exact ref/type/object read-back on success. Failure diagnostics use
+the existing 8 KiB bounded sanitizer; unknown transport/runtime details are
+omitted. No raw policy, annotation, response body, URL, header or credential is
+emitted by diagnostic code. The unchanged pinned token action owns its own
+mint/revocation logging; that third-party logging is outside this sanitizer.
+Do not enable debug tracing or echo token-action outputs.
+
+Read the final request step's bounded result. Verified success says **tag created
+only; reservation remains incomplete**, never recovered/published. A timeout,
+transport loss or failed verification can leave tag creation uncertain: inspect
+read-only, never retry. A 422 category is evidence from this new request, not a
+reconstruction of the discarded original body. Preserve that distinction.
+After **any first attempt**, retire/remove this diagnostic workflow and its
+single-purpose script in a reviewed change. Do not rerun or redispatch; retirement
+does not abandon or repair the unresolved reservation.
 
 ## Signed release-set consumer contract
 

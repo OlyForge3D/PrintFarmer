@@ -811,6 +811,15 @@ export function verifyEnvironmentRestrictions(environment, policies, channel) {
 }
 
 export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode) {
+  verifyReleaseProtectionRules(evidence, channel, publisherAppId, approvalMode);
+  const { dispatchAuthorization } = evidence;
+  validateDispatchAssessment(dispatchAuthorization);
+  requireThat(dispatchAuthorization.ownerDispatchEligible === true &&
+    dispatchAuthorization.channel === channel && dispatchAuthorization.approvalMode === approvalMode,
+  'Owner dispatch protection evidence does not match the release policy');
+}
+
+export function verifyReleaseProtectionRules(evidence, channel, publisherAppId, approvalMode) {
   requireOwnerReleaseMode(approvalMode);
   const branch = channel === 'stable' ? 'main' : 'development';
   requireThat(evidence?.schema === 1 && evidence.repository === repository &&
@@ -820,12 +829,8 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   'Missing or mismatched publisher protection evidence');
   const {
     branchRules: rules, branchRulesets, environment, branchPolicies: policies,
-    rulesets, dispatchAuthorization,
+    rulesets,
   } = evidence;
-  validateDispatchAssessment(dispatchAuthorization);
-  requireThat(dispatchAuthorization.ownerDispatchEligible === true &&
-    dispatchAuthorization.channel === channel && dispatchAuthorization.approvalMode === approvalMode,
-  'Owner dispatch protection evidence does not match the release policy');
   requireThat(Array.isArray(rules) && rules.length > 0 && rules.length < 100 &&
     rules.every(rule => rule && typeof rule.type === 'string' &&
       Number.isSafeInteger(rule.ruleset_id) && rule.ruleset_id > 0) &&
