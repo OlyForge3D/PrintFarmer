@@ -26,3 +26,14 @@ export function inventory(overrides: Partial<ServiceInventory> = {}): ServiceInv
     snapshotExportedAt: null, services: [replica()], ...overrides,
   };
 }
+
+
+/** Divergent host evidence: management is not established, but readiness still blocks updates. */
+export function blockedReadinessInventory(): ServiceInventory {
+  return inventory({ eligibility: 'NotManaged', compatibilityState: 'Compatible', readiness: { state: 'Blocked', reasons: ['Host maintenance is required'], hops: [] } });
+}
+
+/** Replica evidence is observed, not a target; distinct identities must remain conflicting observations. */
+export function conflictingReplicaInventory(): ServiceInventory {
+  return inventory({ snapshotOrigin: 'Imported', snapshotSource: 'support-export', snapshotExportedAt: '2026-09-12T13:00:00Z', services: [replica({ instanceId: 'replica-a', identity }), replica({ instanceId: 'replica-b', observationState: 'Stale', identity: { ...identity, releaseId: 'stable:1.2.4', sourceCommit: 'c'.repeat(40) } })] });
+}

@@ -1274,3 +1274,8 @@ does not create issues or mutate graph relationships.
     immutable identity and qualified main rebuild promotion are mandatory.
     No permanent release channels; short-lived stabilization lifecycle and
     merge-back are settled. Operational owners/expiry limits remain gated.
+
+
+## Admin update surface
+
+`/admin/updates` is a read-only, permission-gated release-availability surface until the constrained executor and scheduler acceptance contracts are present. It distinguishes selected policy, observed installation, and proposed target; missing or disconnected observation is **Unknown**, never completion. Its disabled Update now and Auto-update controls do not issue host commands, bypass reauthentication/origin protections, or grant view users execution. Future executor integration must bind confirmation and history to immutable release identity, manifest digest, policy revision, plan, expiry, and idempotency key; drift invalidates approval.
