@@ -1,4 +1,3 @@
-﻿using System.Collections.Concurrent;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -6,7 +5,6 @@ using System.Text.Json.Serialization;
 
 #pragma warning disable CA1859 // Journal reconciliation deliberately exposes read-only collections.
 #pragma warning disable CA1849 // The journal must synchronously commit its durable write before returning.
-#pragma warning disable IDISP007 // File leases own streams created by their factory.
 #pragma warning disable SA1107 // Closed record contracts retain concise declarations.
 #pragma warning disable SA1136 // Adjacent bounded contracts are intentionally grouped.
 #pragma warning disable SA1408 // Closed validation predicates retain direct composition.
@@ -45,13 +43,12 @@ public sealed class HostUpdateFoundation(
         if (installation is null || metadata is null)
         {
             HostUpdatePlanResult rejected = HostUpdatePlanResult.Rejected("trusted_evidence_invalid");
-            await journal.AppendAsync(HostUpdateJournalEntry.Planned(request, metadata, rejected), ct);
-            return rejected;
+            return await RecordPlanResultAsync(request, metadata, rejected, ct);
         }
 
-        HostUpdatePlanResult result = Evaluate(request, installation, metadata);
-        await journal.AppendAsync(HostUpdateJournalEntry.Planned(request, metadata, result), ct);
-        return result;
+        SignedReleaseMetadata projectedMetadata = ProjectMetadata(metadata, installation);
+        HostUpdatePlanResult result = Evaluate(request, installation, projectedMetadata);
+        return await RecordPlanResultAsync(request, projectedMetadata, result, ct);
     }
 
     /// <summary>Revalidates enrolled evidence and metadata under the installation lock before byte staging.</summary>
@@ -80,6 +77,7 @@ public sealed class HostUpdateFoundation(
                 return HostUpdateStageResult.NeedsOperator("trusted_evidence_invalid");
             }
 
+            metadata = ProjectMetadata(metadata, installation);
             HostUpdatePlanResult refreshed = Evaluate(trustedRequest, installation, metadata);
             HostUpdatePlan trustedPlan = new(trustedRequest, refreshed.PlanHash, metadata.Identity, refreshed.RequiredComponents, installation);
             if (!refreshed.IsEligible || !HostUpdateValidation.HashesEqual(plan.PlanHash, refreshed.PlanHash))
@@ -93,7 +91,8 @@ public sealed class HostUpdateFoundation(
                 return reconciled;
             }
 
-            if (!authorizationEvaluator.IsAuthorized(authorization, trustedPlan, installation, metadata))
+            if (!authorization.IsStructurallyValidFor(trustedPlan) ||
+                !authorizationEvaluator.IsAuthorized(authorization, trustedPlan, installation, metadata))
             {
                 return await RecordFailureAsync(trustedPlan, metadata, HostUpdateStageResult.Rejected("authorization_invalid"), ct);
             }
@@ -115,13 +114,34 @@ public sealed class HostUpdateFoundation(
             await journal.AppendAsync(HostUpdateJournalEntry.Staged(trustedPlan, metadata, completed), ct);
             return completed;
         }
-        catch (IOException)
+        catch (HostUpdateInstallationBusyException)
         {
             return HostUpdateStageResult.Rejected("installation_busy");
+        }
+        catch (IOException)
+        {
+            return HostUpdateStageResult.NeedsOperator("journal_io_failure");
         }
         catch (InvalidDataException)
         {
             return HostUpdateStageResult.NeedsOperator("journal_unreconciled");
+        }
+    }
+
+    private async Task<HostUpdatePlanResult> RecordPlanResultAsync(HostUpdatePlanRequest request, SignedReleaseMetadata? metadata, HostUpdatePlanResult result, CancellationToken ct)
+    {
+        try
+        {
+            await journal.AppendAsync(HostUpdateJournalEntry.Planned(request, metadata, result), ct);
+            return result;
+        }
+        catch (IOException)
+        {
+            return HostUpdatePlanResult.Rejected("journal_io_failure");
+        }
+        catch (InvalidDataException)
+        {
+            return HostUpdatePlanResult.Rejected("journal_unreconciled");
         }
     }
 
@@ -139,6 +159,10 @@ public sealed class HostUpdateFoundation(
         }
 
         List<string> reasons = [.. installation.Validate(request.InstallationId), .. metadata.ValidateFor(installation, request)];
+        if (!string.Equals(request.SourceChannel, installation.PriorReleaseIdentity?.Channel, StringComparison.Ordinal))
+        {
+            reasons.Add("source_channel_mismatch");
+        }
         CanonicalReleaseIdentity? identity = HostUpdateValidation.IsReleaseIdentity(metadata.Identity, request.TargetChannel)
             ? metadata.Identity
             : null;
@@ -193,6 +217,21 @@ public sealed class HostUpdateFoundation(
             return HostUpdateStageResult.NeedsOperator("operation_conflict");
         }
 
+        if (matching.Count == 0)
+        {
+            return null;
+        }
+
+        bool hasOtherUnreconciledOperation = entries
+            .Where(entry => entry.Snapshot.InstallationId == plan.InstallationId && !HostUpdateValidation.HasSameOperation(entry, matching[0]))
+            .GroupBy(entry => (entry.OperationId, entry.IdempotencyKey))
+            .Select(group => group.Last())
+            .Any(entry => entry.State is HostUpdateLifecycle.Staging or HostUpdateLifecycle.NeedsOperator or HostUpdateLifecycle.Staged);
+        if (hasOtherUnreconciledOperation)
+        {
+            return HostUpdateStageResult.NeedsOperator("installation_operation_unreconciled");
+        }
+
         HostUpdateJournalEntry latest = matching[^1];
         return latest.State switch
         {
@@ -208,6 +247,17 @@ public sealed class HostUpdateFoundation(
 
     private static string ComputePlanHash(HostUpdatePlanRequest request, HostInstallationEvidence installation, SignedReleaseMetadata metadata) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', request.CanonicalValue, installation.CanonicalValue, metadata.CanonicalValue))));
+
+    private static SignedReleaseMetadata ProjectMetadata(SignedReleaseMetadata metadata, HostInstallationEvidence installation) =>
+        metadata with
+        {
+            ComponentPlatformDigests = installation.RequiredComponents is null
+                ? new Dictionary<string, string>()
+                : installation.RequiredComponents
+                    .Select(component => $"{component}/{installation.Platform}")
+                    .Where(key => metadata.ComponentPlatformDigests?.ContainsKey(key) == true)
+                    .ToDictionary(key => key, key => metadata.ComponentPlatformDigests![key], StringComparer.Ordinal),
+        };
 }
 
 /// <summary>Collects current, trusted enrollment evidence for one fixed installation.</summary>
@@ -330,7 +380,7 @@ public sealed record HostUpdateAuthorization(string ActorId, string Nonce, strin
     private bool HasValidPolicyState() => Kind switch
     {
         HostUpdateAuthorizationKind.Manual => !StandingPolicyActive && !StandingPolicyRevoked,
-        HostUpdateAuthorizationKind.StandingPolicy => StandingPolicyActive && !StandingPolicyRevoked && SourceChannel == TargetChannel,
+        HostUpdateAuthorizationKind.StandingPolicy => StandingPolicyActive && !StandingPolicyRevoked && !ExplicitDowngradeAllowed && SourceChannel == TargetChannel,
         _ => false,
     };
 }
@@ -491,31 +541,32 @@ public static class HostUpdateJournalInspection
 {
     public static async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadSnapshotAsync(string installationId, string hostStateDirectory, CancellationToken ct)
     {
-        if (!HostUpdateValidation.IsIdentifier(installationId) || string.IsNullOrWhiteSpace(hostStateDirectory) || !Path.IsPathFullyQualified(hostStateDirectory))
+        if (!HostUpdateValidation.IsIdentifier(installationId) || !HostUpdateValidation.IsHostLocalStateDirectory(hostStateDirectory))
         {
-            throw new ArgumentException("A valid installation identifier and absolute host state directory are required.");
+            throw new ArgumentException("A valid installation identifier and host-local state directory are required.");
         }
 
-        return (await new FileHostUpdateJournal(hostStateDirectory).ReadAsync(ct)).Where(entry => entry.Snapshot.InstallationId == installationId).ToList();
+        return (await FileHostUpdateJournal.ReadExistingAsync(hostStateDirectory, ct)).Where(entry => entry.Snapshot.InstallationId == installationId).ToList();
     }
 }
 
 /// <summary>Serializes validated journal revisions with same-process and OS-visible leases.</summary>
 public sealed class FileHostUpdateJournal : IHostUpdateJournal
 {
-    private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
     private readonly string journalPath;
     private readonly string lockPath;
-    private readonly SemaphoreSlim gate;
 
     public FileHostUpdateJournal(string hostStateDirectory)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(hostStateDirectory);
+        if (!HostUpdateValidation.IsHostLocalStateDirectory(hostStateDirectory))
+        {
+            throw new ArgumentException("A host-local fully-qualified state directory is required.", nameof(hostStateDirectory));
+        }
+
         string root = Path.GetFullPath(hostStateDirectory);
         journalPath = Path.Combine(root, "host-update.journal.jsonl");
         lockPath = Path.Combine(root, "host-update.journal.lock");
-        gate = Gates.GetOrAdd(journalPath, _ => new SemaphoreSlim(1, 1));
     }
 
     public async Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct)
@@ -526,40 +577,46 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             throw new InvalidDataException("Journal record is invalid.");
         }
 
-        await gate.WaitAsync(ct);
-        try
+        Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
+        await using FileStream lease = await AcquireLeaseAsync(ct);
+        IReadOnlyList<HostUpdateJournalEntry> entries = await ReadUnsafeAsync(ct);
+        HostUpdateJournalEntry? previous = entries.LastOrDefault(existing => HostUpdateValidation.HasSameOperation(existing, entry));
+        if (!HostUpdateValidation.IsLifecycleTransition(previous, entry))
         {
-            Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
-            await using FileStream lease = await AcquireLeaseAsync(ct);
-            IReadOnlyList<HostUpdateJournalEntry> entries = await ReadUnsafeAsync(ct);
-            HostUpdateJournalEntry? previous = entries.LastOrDefault(existing => HostUpdateValidation.HasSameOperation(existing, entry));
-            if (!HostUpdateValidation.IsLifecycleTransition(previous, entry))
-            {
-                throw new InvalidDataException("Journal lifecycle transition is invalid.");
-            }
-
-            HostUpdateJournalEntry durable = entry with { Revision = checked((entries.Count == 0 ? 0 : entries[^1].Revision) + 1) };
-            await using FileStream stream = new(journalPath, new FileStreamOptions
-            {
-                Mode = FileMode.OpenOrCreate,
-                Access = FileAccess.Write,
-                Share = FileShare.Read,
-                Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
-            });
-            stream.Seek(0, SeekOrigin.End);
-            await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(durable, SerializerOptions) + "\n"), ct);
-            await stream.FlushAsync(ct);
-            stream.Flush(flushToDisk: true);
+            throw new InvalidDataException("Journal lifecycle transition is invalid.");
         }
-        finally { gate.Release(); }
+
+        HostUpdateJournalEntry durable = entry with { Revision = checked((entries.Count == 0 ? 0 : entries[^1].Revision) + 1) };
+        await using FileStream stream = new(journalPath, new FileStreamOptions
+        {
+            Mode = FileMode.OpenOrCreate,
+            Access = FileAccess.Write,
+            Share = FileShare.Read,
+            Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
+        });
+        stream.Seek(0, SeekOrigin.End);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(durable, SerializerOptions) + "\n"), ct);
+        await stream.FlushAsync(ct);
+        stream.Flush(flushToDisk: true);
     }
 
     public async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct)
     {
-        await gate.WaitAsync(ct);
-        try
-        { Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!); await using FileStream lease = await AcquireLeaseAsync(ct); return await ReadUnsafeAsync(ct); }
-        finally { gate.Release(); }
+        Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
+        await using FileStream lease = await AcquireLeaseAsync(ct);
+        return await ReadUnsafeAsync(ct);
+    }
+
+    /// <summary>Reads an existing journal without creating state, directories, or a lock file.</summary>
+    public static async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadExistingAsync(string hostStateDirectory, CancellationToken ct)
+    {
+        if (!HostUpdateValidation.IsHostLocalStateDirectory(hostStateDirectory))
+        {
+        throw new ArgumentException("A host-local fully-qualified state directory is required.", nameof(hostStateDirectory));
+        }
+
+        string path = Path.Combine(Path.GetFullPath(hostStateDirectory), "host-update.journal.jsonl");
+        return !File.Exists(path) ? [] : await ReadContentsAsync(await File.ReadAllTextAsync(path, ct));
     }
 
     private async Task<FileStream> AcquireLeaseAsync(CancellationToken ct)
@@ -579,8 +636,17 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             return [];
         }
 
-        string contents = await File.ReadAllTextAsync(journalPath, ct);
-        if (contents.Length == 0 || !contents.EndsWith('\n'))
+        return await ReadContentsAsync(await File.ReadAllTextAsync(journalPath, ct));
+    }
+
+    private static Task<IReadOnlyList<HostUpdateJournalEntry>> ReadContentsAsync(string contents)
+    {
+        if (contents.Length == 0)
+        {
+            return Task.FromResult<IReadOnlyList<HostUpdateJournalEntry>>([]);
+        }
+
+        if (!contents.EndsWith('\n'))
         {
             throw new InvalidDataException("Journal is incomplete.");
         }
@@ -601,7 +667,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             }
             catch (JsonException exception) { throw new InvalidDataException("Journal record is corrupt.", exception); }
         }
-        return entries;
+        return Task.FromResult<IReadOnlyList<HostUpdateJournalEntry>>(entries);
     }
 }
 
@@ -610,14 +676,27 @@ public sealed class FileHostUpdateInstallationLock : IHostUpdateInstallationLock
 {
     private readonly string hostStateDirectory;
 
-    public FileHostUpdateInstallationLock(string hostStateDirectory)
+    private readonly TimeSpan acquisitionTimeout;
+
+    public FileHostUpdateInstallationLock(string hostStateDirectory, TimeSpan? acquisitionTimeout = null)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(hostStateDirectory);
+        if (!HostUpdateValidation.IsHostLocalStateDirectory(hostStateDirectory))
+        {
+            throw new ArgumentException("A host-local fully-qualified state directory is required.", nameof(hostStateDirectory));
+        }
+
+        if (acquisitionTimeout is { } timeout && timeout <= TimeSpan.Zero)
+        {
+            throw new ArgumentOutOfRangeException(nameof(acquisitionTimeout));
+        }
+
         this.hostStateDirectory = Path.GetFullPath(hostStateDirectory);
+        this.acquisitionTimeout = acquisitionTimeout ?? TimeSpan.FromSeconds(30);
     }
 
-    public Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct)
+    public async Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct)
     {
+        ct.ThrowIfCancellationRequested();
         if (!HostUpdateValidation.IsIdentifier(installationId))
         {
             throw new ArgumentException("Installation identifier is invalid.", nameof(installationId));
@@ -625,7 +704,26 @@ public sealed class FileHostUpdateInstallationLock : IHostUpdateInstallationLock
 
         Directory.CreateDirectory(hostStateDirectory);
         string path = Path.Combine(hostStateDirectory, $"{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installationId)))}.lock");
-        return Task.FromResult<IAsyncDisposable>(new FileLease(path));
+        DateTimeOffset deadline = DateTimeOffset.UtcNow + acquisitionTimeout;
+        TimeSpan delay = TimeSpan.FromMilliseconds(25);
+        while (true)
+        {
+            try
+            {
+                return new FileLease(path);
+            }
+            catch (IOException exception) when (IsLockContention(exception))
+            {
+                TimeSpan remaining = deadline - DateTimeOffset.UtcNow;
+                if (remaining <= TimeSpan.Zero)
+                {
+                    throw new HostUpdateInstallationBusyException(installationId, exception);
+                }
+
+                await Task.Delay(delay <= remaining ? delay : remaining, ct);
+                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 500));
+            }
+        }
     }
 
     private sealed class FileLease : IAsyncDisposable
@@ -636,7 +734,14 @@ public sealed class FileHostUpdateInstallationLock : IHostUpdateInstallationLock
 
         public ValueTask DisposeAsync() => stream.DisposeAsync();
     }
+
+    private static bool IsLockContention(IOException exception) => (exception.HResult & 0xFFFF) is 32 or 33;
 }
+
+#pragma warning disable CA1032 // This internal sentinel distinguishes bounded lock contention from journal I/O failures.
+internal sealed class HostUpdateInstallationBusyException(string installationId, IOException innerException)
+    : IOException($"The installation lock for '{installationId}' is busy.", innerException);
+#pragma warning restore CA1032
 
 internal static class HostUpdateValidation
 {
@@ -645,7 +750,12 @@ internal static class HostUpdateValidation
     public const string RedactedComponent = "redacted";
     public const string RedactedPlatform = "redacted";
     public const string RedactedDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
-    public static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 128 } && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
+    public static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 128 } && value is not "." and not ".." && value[0] != '.' &&
+        value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
+    public static bool IsHostLocalStateDirectory(string? value) => value is not null && Path.IsPathFullyQualified(value) &&
+        !value.StartsWith(@"\\", StringComparison.Ordinal) && !value.StartsWith(@"\??\", StringComparison.Ordinal) &&
+        value.Length >= 3 && char.IsAsciiLetter(value[0]) && value[1] == ':' && value[2] is '\\' or '/' &&
+        value[3..].Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries).All(segment => segment is not "." and not "..");
     public static bool IsChannel(string? value) => value is not null && Channels.Contains(value);
     public static bool IsProvider(string? value) => value is not null && Providers.Contains(value);
     public static bool IsDigest(string? value) => value is { Length: 71 } && value.StartsWith("sha256:", StringComparison.Ordinal) && value[7..].All(Uri.IsHexDigit);
