@@ -163,22 +163,40 @@ public sealed class HostUpdateFoundationTests
             Assert.Contains("release_identity_invalid", result.Reasons);
         }
 
-        foreach (string channel in new[] { "beta", "insider", "rc" })
+        foreach (string prereleaseLabel in new[] { "insider", "beta", "rc" })
         {
             CanonicalReleaseIdentity prerelease = Identity() with
             {
-                Channel = channel,
-                Version = $"1.0.0-{channel}.1",
-                ReleaseId = $"{channel}:1.0.0-{channel}.1",
-                OciReleaseLabel = $"{channel}:1.0.0-{channel}.1",
-                OciVersionLabel = $"1.0.0-{channel}.1",
-                SourceTag = $"v1.0.0-{channel}.1",
+                Channel = "insider",
+                Version = $"1.0.0-{prereleaseLabel}.1",
+                ReleaseId = $"insider:1.0.0-{prereleaseLabel}.1",
+                OciReleaseLabel = $"insider:1.0.0-{prereleaseLabel}.1",
+                OciVersionLabel = $"1.0.0-{prereleaseLabel}.1",
+                SourceTag = $"v1.0.0-{prereleaseLabel}.1",
                 SourceBranch = "development",
             };
-            HostUpdatePlanRequest request = Request() with { SourceChannel = channel, TargetChannel = channel };
+            HostUpdatePlanRequest request = Request() with { SourceChannel = "insider", TargetChannel = "insider" };
 
-            Assert.True((await CreateSut(new Provider(Metadata() with { Channel = channel, Identity = prerelease })).PlanAsync(request, default)).IsEligible);
-            Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with { Channel = channel, Identity = prerelease with { Version = $"1.0.0-{channel}.0" } })).PlanAsync(request, default)).Reasons);
+            Assert.True((await CreateSut(new Provider(Metadata() with { Channel = "insider", Identity = prerelease })).PlanAsync(request, default)).IsEligible);
+            Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with
+            {
+                Channel = "insider",
+                Identity = prerelease with
+                {
+                    Version = $"1.0.0-{prereleaseLabel}.0",
+                    ReleaseId = $"insider:1.0.0-{prereleaseLabel}.0",
+                    OciReleaseLabel = $"insider:1.0.0-{prereleaseLabel}.0",
+                    OciVersionLabel = $"1.0.0-{prereleaseLabel}.0",
+                    SourceTag = $"v1.0.0-{prereleaseLabel}.0",
+                },
+            })).PlanAsync(request, default)).Reasons);
+        }
+
+        foreach (string channel in new[] { "beta", "rc" })
+        {
+            HostUpdatePlanRequest request = Request() with { SourceChannel = channel, TargetChannel = channel };
+            Assert.False(request.IsValid);
+            Assert.Contains("request_invalid", (await CreateSut().PlanAsync(request, default)).Reasons);
         }
 
         CanonicalReleaseIdentity insider = Identity() with
