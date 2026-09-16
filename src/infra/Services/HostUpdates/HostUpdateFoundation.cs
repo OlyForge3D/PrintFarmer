@@ -4,28 +4,33 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-#pragma warning disable CA1859 // Reconciliation intentionally exposes read-only journal collections.
-#pragma warning disable IDISP007 // File leases own streams created by their factories.
-#pragma warning disable SA1136 // Closed lifecycle values are intentionally compact.
-#pragma warning disable SA1408 // Closed validation predicates retain direct boolean composition.
-#pragma warning disable SA1501 // Guard clauses are intentionally concise.
-#pragma warning disable SA1502 // Immutable contracts are intentionally concise.
-#pragma warning disable SA1503 // Guard clauses are intentionally concise.
+#pragma warning disable CA1859 // Journal reconciliation deliberately exposes read-only collections.
+#pragma warning disable IDISP007 // File leases own streams created by their factory.
+#pragma warning disable SA1107 // Closed record contracts retain concise declarations.
+#pragma warning disable SA1136 // Adjacent bounded contracts are intentionally grouped.
+#pragma warning disable SA1408 // Closed validation predicates retain direct composition.
+#pragma warning disable SA1501 // Bounded guards intentionally remain concise.
+#pragma warning disable SA1502 // Bounded validation predicates intentionally remain concise.
+#pragma warning disable SA1503 // Closed validation guards remain concise.
+#pragma warning disable SA1513 // Adjacent bounded contracts are intentionally grouped.
 #pragma warning disable SA1514 // Adjacent bounded contracts are intentionally grouped.
 #pragma warning disable SA1516 // Adjacent bounded contracts are intentionally grouped.
-#pragma warning disable SA1513 // Compact validation helpers use conventional final braces.
+#pragma warning disable SA1519 // Closed validation guards remain concise.
+#pragma warning disable S3878 // Span-compatible delimiter arrays avoid ambiguous string.Split overloads.
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>Provides only host-local preflight, receipt-verified staging, and journal reconciliation.</summary>
 public sealed class HostUpdateFoundation(
+    IHostUpdateInspector inspector,
     IHostUpdateMetadataProvider metadataProvider,
     IHostUpdateCompatibilityEvaluator compatibilityEvaluator,
+    IHostUpdateAuthorizationEvaluator authorizationEvaluator,
     IHostUpdateStager stager,
     IHostUpdateJournal journal,
     IHostUpdateInstallationLock installationLock)
 {
-    /// <summary>Creates a hash-bound plan from fresh trusted installation evidence and release metadata.</summary>
+    /// <summary>Creates a plan from fresh, enrolled installation evidence rather than caller evidence.</summary>
     public async Task<HostUpdatePlanResult> PlanAsync(HostUpdatePlanRequest request, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -34,13 +39,14 @@ public sealed class HostUpdateFoundation(
             return HostUpdatePlanResult.Rejected("request_invalid");
         }
 
+        HostInstallationEvidence installation = await inspector.InspectAsync(request.InstallationId, ct);
         SignedReleaseMetadata metadata = await metadataProvider.GetCurrentAsync(request.TargetChannel, ct);
-        HostUpdatePlanResult result = Evaluate(request, metadata);
+        HostUpdatePlanResult result = Evaluate(request, installation, metadata);
         await journal.AppendAsync(HostUpdateJournalEntry.Planned(request, metadata, result), ct);
         return result;
     }
 
-    /// <summary>Revalidates evidence under the installation lock and stages no more than the immutable plan.</summary>
+    /// <summary>Revalidates enrolled evidence and metadata under the installation lock before byte staging.</summary>
     public async Task<HostUpdateStageResult> StageAsync(HostUpdatePlan plan, HostUpdateAuthorization authorization, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(plan);
@@ -53,35 +59,40 @@ public sealed class HostUpdateFoundation(
         try
         {
             await using IAsyncDisposable lease = await installationLock.AcquireAsync(plan.InstallationId, ct);
-            IReadOnlyList<HostUpdateJournalEntry> entries = await journal.ReadAsync(ct);
-            HostUpdateStageResult? reconciliation = Reconcile(entries, plan);
-            if (reconciliation is not null)
+            HostUpdateStageResult? reconciled = Reconcile(await journal.ReadAsync(ct), plan);
+            if (reconciled is not null)
             {
-                return reconciliation;
+                return reconciled;
             }
 
-            if (!authorization.IsValidFor(plan))
-            {
-                return await RecordFailureAsync(plan, HostUpdateStageResult.Rejected("authorization_invalid"), ct);
-            }
-
-            await journal.AppendAsync(HostUpdateJournalEntry.Approved(plan, authorization), ct);
+            HostInstallationEvidence installation = await inspector.InspectAsync(plan.InstallationId, ct);
             SignedReleaseMetadata metadata = await metadataProvider.GetCurrentAsync(plan.TargetChannel, ct);
-            HostUpdatePlanResult refreshed = Evaluate(plan.Request, metadata);
+            HostUpdatePlanResult refreshed = Evaluate(plan.Request, installation, metadata);
             if (!refreshed.IsEligible || !HostUpdateValidation.HashesEqual(plan.PlanHash, refreshed.PlanHash))
             {
-                return await RecordFailureAsync(plan, HostUpdateStageResult.Rejected("plan_or_metadata_changed"), ct);
+                return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.NeedsOperator("plan_or_metadata_changed"), ct);
             }
 
+            if (metadata.Sequence < installation.CurrentSequence && !authorization.ExplicitDowngradeAllowed)
+            {
+                return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.Rejected("downgrade_not_authorized"), ct);
+            }
+
+            if (!authorizationEvaluator.IsAuthorized(authorization, plan, installation, metadata))
+            {
+                return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.Rejected("authorization_invalid"), ct);
+            }
+
+            await journal.AppendAsync(HostUpdateJournalEntry.Approved(plan, metadata, authorization), ct);
             await journal.AppendAsync(HostUpdateJournalEntry.StagingIntent(plan, metadata), ct);
             HostUpdateStagingReceipt receipt = await stager.StageAsync(plan, metadata, ct);
-            if (!receipt.IsValidFor(plan, metadata))
+            if (!receipt.IsValidFor(plan, metadata, installation))
             {
-                return await RecordFailureAsync(plan, HostUpdateStageResult.RecoverableFailure("staging_receipt_invalid"), ct);
+                return await RecordFailureAsync(plan, metadata, HostUpdateStageResult.NeedsOperator("staging_receipt_invalid"), ct);
             }
 
             HostUpdateStageResult completed = HostUpdateStageResult.Staged(receipt);
-            await journal.AppendAsync(HostUpdateJournalEntry.Staged(plan, completed), ct);
+            await journal.AppendAsync(HostUpdateJournalEntry.Staged(plan, metadata, completed), ct);
             return completed;
         }
         catch (IOException)
@@ -94,25 +105,26 @@ public sealed class HostUpdateFoundation(
         }
     }
 
-    private async Task<HostUpdateStageResult> RecordFailureAsync(HostUpdatePlan plan, HostUpdateStageResult result, CancellationToken ct)
+    private async Task<HostUpdateStageResult> RecordFailureAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateStageResult result, CancellationToken ct)
     {
-        await journal.AppendAsync(HostUpdateJournalEntry.Failed(plan, result), ct);
+        await journal.AppendAsync(HostUpdateJournalEntry.Failed(plan, metadata, result), ct);
         return result;
     }
 
-    private HostUpdatePlanResult Evaluate(HostUpdatePlanRequest request, SignedReleaseMetadata metadata)
+    private HostUpdatePlanResult Evaluate(HostUpdatePlanRequest request, HostInstallationEvidence installation, SignedReleaseMetadata metadata)
     {
-        List<string> reasons = [.. request.Installation.Validate(), .. metadata.ValidateFor(request)];
-        IReadOnlyList<string> compatibilityReasons = compatibilityEvaluator.Evaluate(request.Installation, metadata);
-        reasons.AddRange(compatibilityReasons.All(HostUpdateValidation.IsRejectionCode) ? compatibilityReasons : ["compatibility_evidence_invalid"]);
+        List<string> reasons = [.. installation.Validate(request.InstallationId), .. metadata.ValidateFor(installation, request)];
+        reasons.AddRange(compatibilityEvaluator.Evaluate(installation, metadata).All(HostUpdateValidation.IsRejectionCode)
+            ? compatibilityEvaluator.Evaluate(installation, metadata)
+            : ["compatibility_evidence_invalid"]);
         reasons.Sort(StringComparer.Ordinal);
-        return new(reasons.Count == 0, ComputePlanHash(request, metadata), metadata.Identity.ManifestDigest, metadata.Identity, request.Installation.RequiredComponents, reasons);
+        return new(reasons.Count == 0, ComputePlanHash(request, installation, metadata), metadata.Identity.ManifestDigest, metadata.Identity,
+            installation.RequiredComponents, reasons, installation);
     }
 
     private static HostUpdateStageResult? Reconcile(IReadOnlyList<HostUpdateJournalEntry> entries, HostUpdatePlan plan)
     {
-        IReadOnlyList<HostUpdateJournalEntry> matching = entries.Where(entry =>
-            entry.Snapshot.InstallationId == plan.InstallationId &&
+        IReadOnlyList<HostUpdateJournalEntry> matching = entries.Where(entry => entry.Snapshot.InstallationId == plan.InstallationId &&
             (entry.OperationId == plan.OperationId || entry.IdempotencyKey == plan.IdempotencyKey)).ToList();
         if (matching.Count == 0)
         {
@@ -128,61 +140,73 @@ public sealed class HostUpdateFoundation(
         return latest.State switch
         {
             HostUpdateLifecycle.Staged when latest.Snapshot.Receipt is { } receipt => HostUpdateStageResult.Staged(receipt),
-            HostUpdateLifecycle.Staging => HostUpdateStageResult.NeedsOperator("staging_intent_unresolved"),
-            HostUpdateLifecycle.NeedsOperator or HostUpdateLifecycle.RolledBack => HostUpdateStageResult.NeedsOperator("operation_unreconciled"),
+            HostUpdateLifecycle.Staging or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator or HostUpdateLifecycle.RolledBack =>
+                HostUpdateStageResult.NeedsOperator("operation_unreconciled"),
             _ => null,
         };
     }
 
-    private static string ComputePlanHash(HostUpdatePlanRequest request, SignedReleaseMetadata metadata) =>
-        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', request.CanonicalValue, metadata.CanonicalValue))));
+    private static string ComputePlanHash(HostUpdatePlanRequest request, HostInstallationEvidence installation, SignedReleaseMetadata metadata) =>
+        Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(string.Join('\n', request.CanonicalValue, installation.CanonicalValue, metadata.CanonicalValue))));
 }
 
-/// <summary>Provides the fixed host-local evidence collection surface; it accepts no command, URL, or path.</summary>
-public interface IHostUpdateInspector
-{
-    /// <summary>Collects current bounded evidence for the enrolled installation.</summary>
-    Task<HostInstallationEvidence> InspectAsync(string installationId, CancellationToken ct);
-}
+/// <summary>Collects current, trusted enrollment evidence for one fixed installation.</summary>
+public interface IHostUpdateInspector { Task<HostInstallationEvidence> InspectAsync(string installationId, CancellationToken ct); }
+/// <summary>Gets current signed metadata for one fixed release channel.</summary>
+public interface IHostUpdateMetadataProvider { Task<SignedReleaseMetadata> GetCurrentAsync(string channel, CancellationToken ct); }
+/// <summary>Evaluates fixed compatibility evidence without controlling a host.</summary>
+public interface IHostUpdateCompatibilityEvaluator { IReadOnlyList<string> Evaluate(HostInstallationEvidence installation, SignedReleaseMetadata metadata); }
+/// <summary>Validates trusted manual or standing authorization at the issuer/evaluator boundary.</summary>
+public interface IHostUpdateAuthorizationEvaluator { bool IsAuthorized(HostUpdateAuthorization authorization, HostUpdatePlan plan, HostInstallationEvidence installation, SignedReleaseMetadata metadata); }
+/// <summary>Stages only verified immutable bytes and recovery assets.</summary>
+public interface IHostUpdateStager { Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct); }
+/// <summary>Acquires one exclusive host-local lease for a trusted installation.</summary>
+public interface IHostUpdateInstallationLock { Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct); }
+/// <summary>Persists and reads the append-only host-local operation journal.</summary>
+public interface IHostUpdateJournal { Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct); Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct); }
 
-/// <summary>Represents the complete trusted topology observed on one host installation.</summary>
+/// <summary>Trusted installation, topology, prior-release, and capacity evidence.</summary>
 public sealed record HostInstallationEvidence(
-    string InstallationId, string TrustedInstallationFingerprint, string SourceTargetFingerprint, string TopologyFingerprint,
-    string Platform, IReadOnlySet<string> RequiredComponents, int ReplicaCount, int RemoteWorkerCount, string WorkerInventoryFingerprint,
-    string Provider, string SchemaFingerprint, string ConfigurationFingerprint, string UpdaterVersion, string ResourceFingerprint,
-    long AvailableDiskBytes, long RequiredDiskBytes, long RecoveryCapacityBytes, bool WithinMaintenanceWindow, bool RegistryReady, bool BackupDestinationReady)
+    string InstallationId, string TrustedInstallationFingerprint, string TopologyFingerprint, string Platform, IReadOnlySet<string> RequiredComponents,
+    string Provider, string SchemaFingerprint, string ConfigurationFingerprint, string UpdaterVersion, long CurrentSequence,
+    CanonicalReleaseIdentity PriorReleaseIdentity, string PriorSetDigest, long AvailableDiskBytes, long RequiredDiskBytes, bool WithinMaintenanceWindow,
+    bool RegistryReady, bool BackupDestinationReady)
 {
-    /// <summary>Gets immutable evidence used by plan hashing.</summary>
-    public string CanonicalValue => string.Join('|', InstallationId, TrustedInstallationFingerprint, SourceTargetFingerprint, TopologyFingerprint, Platform,
-        string.Join(',', RequiredComponents.OrderBy(value => value, StringComparer.Ordinal)), ReplicaCount, RemoteWorkerCount, WorkerInventoryFingerprint,
-        Provider, SchemaFingerprint, ConfigurationFingerprint, UpdaterVersion, ResourceFingerprint, AvailableDiskBytes, RequiredDiskBytes,
-        RecoveryCapacityBytes, WithinMaintenanceWindow, RegistryReady, BackupDestinationReady);
+    /// <summary>Gets the immutable plan-hash representation.</summary>
+    public string CanonicalValue => string.Join('|', InstallationId, TrustedInstallationFingerprint, TopologyFingerprint, Platform,
+        string.Join(',', RequiredComponents.OrderBy(value => value, StringComparer.Ordinal)), Provider, SchemaFingerprint, ConfigurationFingerprint,
+        UpdaterVersion, CurrentSequence, PriorReleaseIdentity.CanonicalValue, PriorSetDigest, AvailableDiskBytes, RequiredDiskBytes,
+        WithinMaintenanceWindow, RegistryReady, BackupDestinationReady);
 
-    /// <summary>Returns stable codes for missing, stale, or insufficient host evidence.</summary>
-    public IReadOnlyList<string> Validate()
+    /// <summary>Returns rejection codes for invalid or stale enrolled evidence.</summary>
+    public IReadOnlyList<string> Validate(string expectedInstallationId)
     {
         List<string> reasons = [];
-        if (!HostUpdateValidation.IsIdentifier(InstallationId) || !HostUpdateValidation.IsDigest(TrustedInstallationFingerprint) || !HostUpdateValidation.IsDigest(SourceTargetFingerprint))
+        if (!HostUpdateValidation.IsIdentifier(InstallationId) || !string.Equals(InstallationId, expectedInstallationId, StringComparison.Ordinal) ||
+            !HostUpdateValidation.IsDigest(TrustedInstallationFingerprint))
         {
             reasons.Add("installation_untrusted");
         }
 
-        if (!HostUpdateValidation.IsDigest(TopologyFingerprint) || !HostUpdateValidation.IsIdentifier(Platform) || RequiredComponents.Count == 0 || RequiredComponents.Any(component => !HostUpdateValidation.IsIdentifier(component)) || !HostUpdateValidation.IsDigest(WorkerInventoryFingerprint) || ReplicaCount < 1 || RemoteWorkerCount < 0)
+        if (!HostUpdateValidation.IsDigest(TopologyFingerprint) || !HostUpdateValidation.IsIdentifier(Platform) || RequiredComponents.Count == 0 ||
+            RequiredComponents.Any(component => !HostUpdateValidation.IsIdentifier(component)))
         {
             reasons.Add("topology_invalid");
         }
 
-        if (!HostUpdateValidation.IsProvider(Provider) || !HostUpdateValidation.IsDigest(SchemaFingerprint) || !HostUpdateValidation.IsDigest(ConfigurationFingerprint))
+        if (!HostUpdateValidation.IsProvider(Provider) || !HostUpdateValidation.IsDigest(SchemaFingerprint) ||
+            !HostUpdateValidation.IsDigest(ConfigurationFingerprint) || !HostUpdateValidation.IsReleaseIdentity(PriorReleaseIdentity, PriorReleaseIdentity.Channel) ||
+            !HostUpdateValidation.IsDigest(PriorSetDigest) || CurrentSequence < 1)
         {
-            reasons.Add("schema_or_provider_invalid");
+            reasons.Add("installation_identity_invalid");
         }
 
-        if (!HostUpdateValidation.IsVersion(UpdaterVersion))
+        if (!HostUpdateValidation.IsSemanticVersion(UpdaterVersion))
         {
             reasons.Add("updater_version_invalid");
         }
 
-        if (!HostUpdateValidation.IsDigest(ResourceFingerprint) || AvailableDiskBytes < RequiredDiskBytes || RecoveryCapacityBytes < RequiredDiskBytes)
+        if (AvailableDiskBytes < RequiredDiskBytes)
         {
             reasons.Add("resources_insufficient");
         }
@@ -206,74 +230,55 @@ public sealed record HostInstallationEvidence(
     }
 }
 
-/// <summary>Constrained planning input that contains no caller-selected components or executable values.</summary>
-public sealed record HostUpdatePlanRequest(string OperationId, string IdempotencyKey, string ActorId, string Nonce, string ReasonCode, string SourceChannel, string TargetChannel, string ChannelPolicyRevision, HostInstallationEvidence Installation)
+/// <summary>Constrained caller input. Installation details are always obtained through the inspector.</summary>
+public sealed record HostUpdatePlanRequest(string OperationId, string IdempotencyKey, string ActorId, string Nonce, string ReasonCode, string SourceChannel, string TargetChannel, string ChannelPolicyRevision, string InstallationId)
 {
-    /// <summary>Gets a canonical form used by the immutable plan hash.</summary>
-    public string CanonicalValue => string.Join('|', OperationId, IdempotencyKey, ActorId, Nonce, ReasonCode, SourceChannel, TargetChannel, ChannelPolicyRevision, Installation.CanonicalValue);
-
-    /// <summary>Gets whether the closed request contract is safe to evaluate.</summary>
+    /// <summary>Gets canonical caller input for the plan hash.</summary>
+    public string CanonicalValue => string.Join('|', OperationId, IdempotencyKey, ActorId, Nonce, ReasonCode, SourceChannel, TargetChannel, ChannelPolicyRevision, InstallationId);
+    /// <summary>Gets whether the fixed non-executable input is safe to inspect.</summary>
     public bool IsValid => HostUpdateValidation.IsIdentifier(OperationId) && HostUpdateValidation.IsIdentifier(IdempotencyKey) &&
         HostUpdateValidation.IsIdentifier(ActorId) && HostUpdateValidation.IsIdentifier(Nonce) && HostUpdateValidation.IsRejectionCode(ReasonCode) &&
-        HostUpdateValidation.IsChannel(SourceChannel) && HostUpdateValidation.IsChannel(TargetChannel) && HostUpdateValidation.IsIdentifier(ChannelPolicyRevision);
+        HostUpdateValidation.IsChannel(SourceChannel) && HostUpdateValidation.IsChannel(TargetChannel) &&
+        HostUpdateValidation.IsIdentifier(ChannelPolicyRevision) && HostUpdateValidation.IsIdentifier(InstallationId);
 }
 
 /// <summary>An immutable topology-derived staging plan.</summary>
-public sealed record HostUpdatePlan(HostUpdatePlanRequest Request, string PlanHash, CanonicalReleaseIdentity Identity, IReadOnlySet<string> RequiredComponents)
+public sealed record HostUpdatePlan(HostUpdatePlanRequest Request, string PlanHash, CanonicalReleaseIdentity Identity, IReadOnlySet<string> RequiredComponents, HostInstallationEvidence Installation)
 {
-    /// <summary>Gets the operation identifier.</summary>
     public string OperationId => Request.OperationId;
-    /// <summary>Gets the idempotency identifier.</summary>
     public string IdempotencyKey => Request.IdempotencyKey;
-    /// <summary>Gets the trusted installation identifier.</summary>
-    public string InstallationId => Request.Installation.InstallationId;
-    /// <summary>Gets the chosen target channel.</summary>
+    public string InstallationId => Installation.InstallationId;
     public string TargetChannel => Request.TargetChannel;
-    /// <summary>Gets whether this is a bounded valid plan.</summary>
-    public bool IsValid => Request.IsValid && HostUpdateValidation.IsHexHash(PlanHash) &&
-        HostUpdateValidation.IsReleaseIdentity(Identity, TargetChannel) && RequiredComponents.SetEquals(Request.Installation.RequiredComponents);
+    public bool IsValid => Request.IsValid && HostUpdateValidation.IsHexHash(PlanHash) && HostUpdateValidation.IsReleaseIdentity(Identity, TargetChannel) &&
+        RequiredComponents.SetEquals(Installation.RequiredComponents) && Installation.Validate(Request.InstallationId).Count == 0;
 }
 
-/// <summary>Bounded host policy authorization for exactly one plan.</summary>
-public sealed record HostUpdateAuthorization(string ActorId, string Nonce, string InstallationId, string PlanHash, string SourceChannel, string TargetChannel, string ChannelPolicyRevision, DateTimeOffset ExpiresAt, HostUpdateAuthorizationKind Kind, bool InsiderWarningAcknowledged, bool StandingPolicyActive)
+/// <summary>Bounded authorization accepted only through a trusted evaluator.</summary>
+public sealed record HostUpdateAuthorization(string ActorId, string Nonce, string InstallationId, string PlanHash, string SourceChannel, string TargetChannel,
+    string ChannelPolicyRevision, DateTimeOffset ExpiresAt, HostUpdateAuthorizationKind Kind, bool InsiderWarningAcknowledged, bool StandingPolicyActive,
+    bool StandingPolicyRevoked, bool ExplicitDowngradeAllowed)
 {
-    /// <summary>Returns whether the policy authorization remains current and safe for the plan.</summary>
-    public bool IsValidFor(HostUpdatePlan plan) =>
-        ExpiresAt > DateTimeOffset.UtcNow && HostUpdateValidation.IsIdentifier(ActorId) && HostUpdateValidation.IsIdentifier(Nonce) &&
-        HostUpdateValidation.IsHexHash(PlanHash) && HostUpdateValidation.HashesEqual(PlanHash, plan.PlanHash) &&
+    /// <summary>Checks the closed authorization shape before an evaluator accepts it.</summary>
+    public bool IsStructurallyValidFor(HostUpdatePlan plan) => Enum.IsDefined(Kind) && ExpiresAt > DateTimeOffset.UtcNow &&
+        HostUpdateValidation.IsIdentifier(ActorId) && HostUpdateValidation.IsIdentifier(Nonce) && HostUpdateValidation.HashesEqual(PlanHash, plan.PlanHash) &&
         ActorId == plan.Request.ActorId && Nonce == plan.Request.Nonce && InstallationId == plan.InstallationId &&
         SourceChannel == plan.Request.SourceChannel && TargetChannel == plan.TargetChannel && ChannelPolicyRevision == plan.Request.ChannelPolicyRevision &&
         (TargetChannel != "insider" || InsiderWarningAcknowledged) &&
-        (Kind == HostUpdateAuthorizationKind.Manual || (StandingPolicyActive && SourceChannel == TargetChannel));
+        (Kind == HostUpdateAuthorizationKind.Manual ? !StandingPolicyActive && !StandingPolicyRevoked :
+            StandingPolicyActive && !StandingPolicyRevoked && SourceChannel == TargetChannel);
 }
 
-/// <summary>Identifies an explicit manual approval or a revocable non-transition standing policy.</summary>
+/// <summary>Identifies exactly the manual and non-transition standing authorization forms.</summary>
 public enum HostUpdateAuthorizationKind { Manual, StandingPolicy }
 
-/// <summary>Returns the fresh plan outcome including topology-derived required components.</summary>
-public sealed record HostUpdatePlanResult(bool IsEligible, string PlanHash, string ManifestDigest, CanonicalReleaseIdentity? Identity, IReadOnlySet<string> RequiredComponents, IReadOnlyList<string> Reasons)
+/// <summary>Contains immutable signed release identity, component bytes, and updater compatibility.</summary>
+public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool SignatureVerified, CanonicalReleaseIdentity Identity,
+    IReadOnlyDictionary<string, string> ComponentPlatformDigests, string MinimumUpdaterVersion)
 {
-    /// <summary>Creates a redacted invalid-request outcome without a hash or release identity.</summary>
-    public static HostUpdatePlanResult Rejected(string code) => new(false, string.Empty, string.Empty, null, new HashSet<string>(StringComparer.Ordinal), [code]);
-}
-
-/// <summary>Canonical immutable identity carried by every journal lifecycle record.</summary>
-public sealed record CanonicalReleaseIdentity(string ReleaseId, string Version, string SourceTag, string SourceBranch, string SourceCommit, string AuthorizedBranchHead, string BuildMetadata, string OciReleaseLabel, string OciVersionLabel, string ProvenanceSubjectDigest, string ManifestDigest, string IndexDigest)
-{
-    /// <summary>Gets the canonical immutable identity representation.</summary>
-    public string CanonicalValue => string.Join('|', ReleaseId, Version, SourceTag, SourceBranch, SourceCommit, AuthorizedBranchHead, BuildMetadata, OciReleaseLabel, OciVersionLabel, ProvenanceSubjectDigest, ManifestDigest, IndexDigest);
-}
-
-/// <summary>Signed metadata that independently declares every topology-selected component and platform digest.</summary>
-public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool SignatureVerified, CanonicalReleaseIdentity Identity, IReadOnlyDictionary<string, string> ComponentPlatformDigests)
-{
-    /// <summary>Gets components derived from release topology rather than supplied by callers.</summary>
-    public IReadOnlySet<string> RequiredComponents => ComponentPlatformDigests.Keys.Select(key => key.Split('/', 2)[0]).ToHashSet(StringComparer.Ordinal);
-    /// <summary>Gets immutable metadata used by plan hashing.</summary>
-    public string CanonicalValue => string.Join('|', Channel, Sequence, SignatureVerified, Identity.CanonicalValue, string.Join(',', ComponentPlatformDigests.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}")));
-
-    /// <summary>Returns stable codes for an invalid target-channel release set.</summary>
-    public IReadOnlyList<string> ValidateFor(HostUpdatePlanRequest request)
+    public string CanonicalValue => string.Join('|', Channel, Sequence, SignatureVerified, Identity.CanonicalValue, MinimumUpdaterVersion,
+        string.Join(',', ComponentPlatformDigests.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}")));
+    /// <summary>Returns release-set, version, and updater rejection codes.</summary>
+    public IReadOnlyList<string> ValidateFor(HostInstallationEvidence installation, HostUpdatePlanRequest request)
     {
         List<string> reasons = [];
         if (!SignatureVerified)
@@ -286,19 +291,24 @@ public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool S
             reasons.Add("channel_mismatch");
         }
 
-        if (!HostUpdateValidation.IsReleaseIdentity(Identity, request.TargetChannel))
+        if (!HostUpdateValidation.IsReleaseIdentity(Identity, request.TargetChannel) || Sequence < 1 || !HostUpdateValidation.IsSemanticVersion(MinimumUpdaterVersion))
         {
             reasons.Add("release_identity_invalid");
         }
 
-        if (Sequence <= 0 || string.CompareOrdinal(Identity.Version, "0.0.0") <= 0)
+        if (HostUpdateValidation.CompareSemanticVersions(installation.UpdaterVersion, MinimumUpdaterVersion) < 0)
         {
-            reasons.Add("release_version_invalid");
+            reasons.Add("updater_too_old");
         }
 
-        foreach (string component in request.Installation.RequiredComponents)
+        if (Sequence == installation.CurrentSequence && !HostUpdateValidation.DigestsEqual(Identity.ManifestDigest, installation.PriorReleaseIdentity.ManifestDigest))
         {
-            if (!ComponentPlatformDigests.TryGetValue($"{component}/{request.Installation.Platform}", out string? digest) || !HostUpdateValidation.IsDigest(digest))
+            reasons.Add("release_sequence_conflict");
+        }
+
+        foreach (string component in installation.RequiredComponents)
+        {
+            if (!ComponentPlatformDigests.TryGetValue($"{component}/{installation.Platform}", out string? digest) || !HostUpdateValidation.IsDigest(digest))
             {
                 reasons.Add("release_set_incomplete");
             }
@@ -308,70 +318,88 @@ public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool S
     }
 }
 
-/// <summary>Gets fresh signed metadata for a fixed trusted channel.</summary>
-public interface IHostUpdateMetadataProvider { Task<SignedReleaseMetadata> GetCurrentAsync(string channel, CancellationToken ct); }
-/// <summary>Evaluates fixed deployment compatibility without controlling a host.</summary>
-public interface IHostUpdateCompatibilityEvaluator { IReadOnlyList<string> Evaluate(HostInstallationEvidence installation, SignedReleaseMetadata metadata); }
-/// <summary>Stages only the plan's verified immutable bytes and prior recovery set.</summary>
-public interface IHostUpdateStager { Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct); }
-/// <summary>Acquires one exclusive host-local lease for a trusted installation.</summary>
-public interface IHostUpdateInstallationLock { Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct); }
-
-/// <summary>Verified receipt binding each selected component byte plus prior recovery configuration.</summary>
-public sealed record HostUpdateStagingReceipt(bool IsComplete, string Code, string ManifestDigest, IReadOnlyDictionary<string, string> ComponentPlatformDigests, string PreviousSetDigest, string PreviousConfigurationDigest)
+/// <summary>Canonical immutable release identity, including its channel.</summary>
+public sealed record CanonicalReleaseIdentity(string ReleaseId, string Version, string Channel, string SourceTag, string SourceBranch, string SourceCommit,
+    string AuthorizedBranchHead, string BuildMetadata, string OciReleaseLabel, string OciVersionLabel, string ProvenanceSubjectDigest, string ManifestDigest, string IndexDigest)
 {
-    /// <summary>Verifies the receipt against the locked plan and current signed metadata.</summary>
-    public bool IsValidFor(HostUpdatePlan plan, SignedReleaseMetadata metadata) =>
-        IsComplete && Code == "staged" && HostUpdateValidation.DigestsEqual(ManifestDigest, metadata.Identity.ManifestDigest) &&
-        HostUpdateValidation.IsDigest(PreviousSetDigest) && HostUpdateValidation.IsDigest(PreviousConfigurationDigest) &&
-        ComponentPlatformDigests.Count == plan.RequiredComponents.Count &&
-        plan.RequiredComponents.All(component => ComponentPlatformDigests.TryGetValue($"{component}/{plan.Request.Installation.Platform}", out string? digest) &&
-            metadata.ComponentPlatformDigests.TryGetValue($"{component}/{plan.Request.Installation.Platform}", out string? expected) &&
-            HostUpdateValidation.DigestsEqual(digest, expected));
+    public string CanonicalValue => string.Join('|', ReleaseId, Version, Channel, SourceTag, SourceBranch, SourceCommit, AuthorizedBranchHead, BuildMetadata,
+        OciReleaseLabel, OciVersionLabel, ProvenanceSubjectDigest, ManifestDigest, IndexDigest);
 }
 
-/// <summary>Reports only a completed receipt, recoverable no-apply failure, or operator-required reconciliation.</summary>
+/// <summary>Reports fresh planning output derived exclusively from trusted evidence.</summary>
+public sealed record HostUpdatePlanResult(bool IsEligible, string PlanHash, string ManifestDigest, CanonicalReleaseIdentity? Identity,
+    IReadOnlySet<string> RequiredComponents, IReadOnlyList<string> Reasons, HostInstallationEvidence? Installation)
+{
+    public static HostUpdatePlanResult Rejected(string code) => new(false, string.Empty, string.Empty, null, new HashSet<string>(), [code], null);
+}
+
+/// <summary>Verified staging receipt binding current bytes and the inspected prior release/configuration identity.</summary>
+public sealed record HostUpdateStagingReceipt(bool IsComplete, string Code, CanonicalReleaseIdentity Identity, string ManifestDigest,
+    IReadOnlyDictionary<string, string> ComponentPlatformDigests, CanonicalReleaseIdentity PriorReleaseIdentity, string PreviousSetDigest, string PreviousConfigurationDigest)
+{
+    public bool IsValidFor(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostInstallationEvidence installation) =>
+        IsComplete && Code == "staged" && Identity == metadata.Identity && PriorReleaseIdentity == installation.PriorReleaseIdentity &&
+        HostUpdateValidation.DigestsEqual(ManifestDigest, metadata.Identity.ManifestDigest) &&
+        HostUpdateValidation.DigestsEqual(PreviousSetDigest, installation.PriorSetDigest) &&
+        HostUpdateValidation.DigestsEqual(PreviousConfigurationDigest, installation.ConfigurationFingerprint) &&
+        ComponentPlatformDigests.Count == plan.RequiredComponents.Count && plan.RequiredComponents.All(component =>
+            ComponentPlatformDigests.TryGetValue($"{component}/{installation.Platform}", out string? actual) &&
+            metadata.ComponentPlatformDigests.TryGetValue($"{component}/{installation.Platform}", out string? expected) &&
+            HostUpdateValidation.DigestsEqual(actual, expected));
+}
+
+/// <summary>Reports completed staging, recoverable failure, or explicit operator intervention.</summary>
 public sealed record HostUpdateStageResult(bool IsStaged, bool IsRecoverableFailure, bool RequiresOperator, string Code, HostUpdateStagingReceipt? Receipt)
 {
-    /// <summary>Creates a verified staged result.</summary>
     public static HostUpdateStageResult Staged(HostUpdateStagingReceipt receipt) => new(true, false, false, "staged", receipt);
-    /// <summary>Creates a recoverable pre-apply staging failure.</summary>
-    public static HostUpdateStageResult RecoverableFailure(string code) => new(false, true, false, HostUpdateValidation.IsRejectionCode(code) ? code : "staging_failed", null);
-    /// <summary>Creates a policy or evidence rejection.</summary>
-    public static HostUpdateStageResult Rejected(string code) => new(false, false, false, HostUpdateValidation.IsRejectionCode(code) ? code : "rejected", null);
-    /// <summary>Creates a fail-closed result requiring explicit operator reconciliation.</summary>
-    public static HostUpdateStageResult NeedsOperator(string code) => new(false, false, true, HostUpdateValidation.IsRejectionCode(code) ? code : "needs_operator", null);
+    public static HostUpdateStageResult RecoverableFailure(string code) => new(false, true, false, code, null);
+    public static HostUpdateStageResult Rejected(string code) => new(false, false, false, code, null);
+    public static HostUpdateStageResult NeedsOperator(string code) => new(false, false, true, code, null);
 }
 
-/// <summary>Persists and reads an append-only, redacted host-local operation journal.</summary>
-public interface IHostUpdateJournal { Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct); Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct); }
-/// <summary>Defines the typed lifecycle without authorizing apply or recovery behavior.</summary>
+/// <summary>Defines the durable foundation lifecycle; this issue does not execute apply or recovery.</summary>
 public enum HostUpdateLifecycle { Planned, Approved, Staging, Staged, Failed, RolledBack, NeedsOperator }
 
-/// <summary>Redacted durable lifecycle evidence for a single installation operation.</summary>
-public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset RecordedAt, string OperationId, string IdempotencyKey, HostUpdateLifecycle State, string Code, bool Recoverable, HostUpdateJournalSnapshot Snapshot)
+/// <summary>Redacted durable lifecycle evidence. Identities always originate from verified metadata.</summary>
+public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset RecordedAt, string OperationId, string IdempotencyKey, HostUpdateLifecycle State,
+    string Code, bool Recoverable, HostUpdateJournalSnapshot Snapshot)
 {
-    /// <summary>Records a fresh preflight outcome.</summary>
-    public static HostUpdateJournalEntry Planned(HostUpdatePlanRequest request, SignedReleaseMetadata metadata, HostUpdatePlanResult result) => Create(request, metadata.Identity, HostUpdateLifecycle.Planned, result.IsEligible ? "eligible" : result.Reasons[0], false, result.PlanHash, null);
-    /// <summary>Records a bounded approval.</summary>
-    public static HostUpdateJournalEntry Approved(HostUpdatePlan plan, HostUpdateAuthorization authorization) => Create(plan.Request, plan.Identity, HostUpdateLifecycle.Approved, authorization.Kind == HostUpdateAuthorizationKind.Manual ? "manual_authorized" : "standing_policy_authorized", false, plan.PlanHash, null);
-    /// <summary>Records durable intent immediately before staging bytes.</summary>
+    public static HostUpdateJournalEntry Planned(HostUpdatePlanRequest request, SignedReleaseMetadata metadata, HostUpdatePlanResult result) =>
+        Create(request, HostUpdateValidation.IsReleaseIdentity(metadata.Identity, request.TargetChannel) ? metadata.Identity : null,
+            HostUpdateLifecycle.Planned, result.IsEligible ? "eligible" : result.Reasons[0], false, result.PlanHash, null);
+    public static HostUpdateJournalEntry Approved(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateAuthorization authorization) =>
+        Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Approved, authorization.Kind == HostUpdateAuthorizationKind.Manual ? "manual_authorized" : "standing_policy_authorized", false, plan.PlanHash, null);
     public static HostUpdateJournalEntry StagingIntent(HostUpdatePlan plan, SignedReleaseMetadata metadata) => Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Staging, "intent", false, plan.PlanHash, null);
-    /// <summary>Records the verified receipt and retained prior recovery set.</summary>
-    public static HostUpdateJournalEntry Staged(HostUpdatePlan plan, HostUpdateStageResult result) => Create(plan.Request, plan.Identity, HostUpdateLifecycle.Staged, result.Code, false, plan.PlanHash, result.Receipt);
-    /// <summary>Records a redacted rejection or recoverable outcome.</summary>
-    public static HostUpdateJournalEntry Failed(HostUpdatePlan plan, HostUpdateStageResult result) => Create(plan.Request, plan.Identity, result.RequiresOperator ? HostUpdateLifecycle.NeedsOperator : HostUpdateLifecycle.Failed, result.Code, result.IsRecoverableFailure, plan.PlanHash, null);
+    public static HostUpdateJournalEntry Staged(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateStageResult result) => Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Staged, result.Code, false, plan.PlanHash, result.Receipt);
+    public static HostUpdateJournalEntry Failed(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateStageResult result) =>
+        Create(plan.Request, HostUpdateValidation.IsReleaseIdentity(metadata.Identity, plan.TargetChannel) ? metadata.Identity : null,
+            result.RequiresOperator ? HostUpdateLifecycle.NeedsOperator : HostUpdateLifecycle.Failed, result.Code, result.IsRecoverableFailure, plan.PlanHash, null);
 
-    private static HostUpdateJournalEntry Create(HostUpdatePlanRequest request, CanonicalReleaseIdentity? identity, HostUpdateLifecycle state, string code, bool recoverable, string planHash, HostUpdateStagingReceipt? receipt) =>
-        new(0, DateTimeOffset.UtcNow, request.OperationId, request.IdempotencyKey, state, code, recoverable,
-            new(request.Installation.InstallationId, request.ActorId, request.Nonce, request.ReasonCode, request.SourceChannel, request.TargetChannel,
-                request.ChannelPolicyRevision, planHash, identity, receipt));
+    private static HostUpdateJournalEntry Create(HostUpdatePlanRequest request, CanonicalReleaseIdentity? identity, HostUpdateLifecycle state, string code,
+        bool recoverable, string planHash, HostUpdateStagingReceipt? receipt) => new(0, DateTimeOffset.UtcNow, request.OperationId, request.IdempotencyKey,
+            state, code, recoverable, new(request.InstallationId, request.ActorId, request.Nonce, request.ReasonCode, request.SourceChannel,
+                request.TargetChannel, request.ChannelPolicyRevision, planHash, identity, receipt));
 }
 
-/// <summary>Contains only bounded identifiers, canonical identity, and verified receipt digests.</summary>
-public sealed record HostUpdateJournalSnapshot(string InstallationId, string ActorId, string Nonce, string ReasonCode, string SourceChannel, string TargetChannel, string ChannelPolicyRevision, string PlanHash, CanonicalReleaseIdentity? Identity, HostUpdateStagingReceipt? Receipt);
+/// <summary>Contains redacted identifiers and immutable verification evidence only.</summary>
+public sealed record HostUpdateJournalSnapshot(string InstallationId, string ActorId, string Nonce, string ReasonCode, string SourceChannel,
+    string TargetChannel, string ChannelPolicyRevision, string PlanHash, CanonicalReleaseIdentity? Identity, HostUpdateStagingReceipt? Receipt);
 
-/// <summary>Serializes revisions with both a same-process gate and an OS-visible journal lease.</summary>
+/// <summary>Provides a fixed-operation, host-local read-only journal inspection surface.</summary>
+public static class HostUpdateJournalInspection
+{
+    public static async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadSnapshotAsync(string installationId, string hostStateDirectory, CancellationToken ct)
+    {
+        if (!HostUpdateValidation.IsIdentifier(installationId) || string.IsNullOrWhiteSpace(hostStateDirectory) || !Path.IsPathFullyQualified(hostStateDirectory))
+        {
+            throw new ArgumentException("A valid installation identifier and absolute host state directory are required.");
+        }
+
+        return (await new FileHostUpdateJournal(hostStateDirectory).ReadAsync(ct)).Where(entry => entry.Snapshot.InstallationId == installationId).ToList();
+    }
+}
+
+/// <summary>Serializes validated journal revisions with same-process and OS-visible leases.</summary>
 public sealed class FileHostUpdateJournal : IHostUpdateJournal
 {
     private static readonly ConcurrentDictionary<string, SemaphoreSlim> Gates = new(StringComparer.Ordinal);
@@ -380,7 +408,6 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
     private readonly string lockPath;
     private readonly SemaphoreSlim gate;
 
-    /// <summary>Initializes a journal beneath a host-owned state directory.</summary>
     public FileHostUpdateJournal(string hostStateDirectory)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(hostStateDirectory);
@@ -390,35 +417,36 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
         gate = Gates.GetOrAdd(journalPath, _ => new SemaphoreSlim(1, 1));
     }
 
-    /// <inheritdoc />
     public async Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        if (!HostUpdateValidation.IsJournalEntry(entry))
+        {
+            throw new InvalidDataException("Journal record is invalid.");
+        }
+
         await gate.WaitAsync(ct);
         try
         {
             Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
             await using FileStream lease = await AcquireLeaseAsync(ct);
             IReadOnlyList<HostUpdateJournalEntry> entries = await ReadUnsafeAsync(ct);
+            if (!HostUpdateValidation.IsLifecycleTransition(entries.Count == 0 ? null : entries[^1], entry))
+            {
+                throw new InvalidDataException("Journal lifecycle transition is invalid.");
+            }
+
             HostUpdateJournalEntry durable = entry with { Revision = checked((entries.Count == 0 ? 0 : entries[^1].Revision) + 1) };
-            byte[] bytes = Encoding.UTF8.GetBytes(JsonSerializer.Serialize(durable, SerializerOptions) + "\n");
-            await using FileStream stream = new(journalPath, new FileStreamOptions { Mode = FileMode.Append, Access = FileAccess.Write, Share = FileShare.Read, Options = FileOptions.WriteThrough });
-            await stream.WriteAsync(bytes, ct);
-            await stream.FlushAsync(ct);
+            await File.AppendAllTextAsync(journalPath, JsonSerializer.Serialize(durable, SerializerOptions) + "\n", ct);
         }
         finally { gate.Release(); }
     }
 
-    /// <inheritdoc />
     public async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct)
     {
         await gate.WaitAsync(ct);
         try
-        {
-            Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
-            await using FileStream lease = await AcquireLeaseAsync(ct);
-            return await ReadUnsafeAsync(ct);
-        }
+        { Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!); await using FileStream lease = await AcquireLeaseAsync(ct); return await ReadUnsafeAsync(ct); }
         finally { gate.Release(); }
     }
 
@@ -427,8 +455,8 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
         while (true)
         {
             try
-            { return new FileStream(lockPath, new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None, Options = FileOptions.WriteThrough }); }
-            catch (IOException) { await Task.Delay(TimeSpan.FromMilliseconds(25), ct); }
+            { return new FileStream(lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); }
+            catch (IOException) { await Task.Delay(25, ct); }
         }
     }
 
@@ -448,15 +476,11 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
         List<HostUpdateJournalEntry> entries = [];
         foreach (string line in contents.Split('\n', StringSplitOptions.None)[..^1])
         {
-            if (string.IsNullOrWhiteSpace(line))
-            {
-                throw new InvalidDataException("Journal contains a blank record.");
-            }
-
             try
             {
-                HostUpdateJournalEntry? entry = JsonSerializer.Deserialize<HostUpdateJournalEntry>(line, SerializerOptions);
-                if (entry is null || entry.Revision != entries.Count + 1 || !HostUpdateValidation.IsJournalEntry(entry))
+                HostUpdateJournalEntry? entry = string.IsNullOrWhiteSpace(line) ? null : JsonSerializer.Deserialize<HostUpdateJournalEntry>(line, SerializerOptions);
+                if (entry is null || entry.Revision != entries.Count + 1 || !HostUpdateValidation.IsJournalEntry(entry) ||
+                    !HostUpdateValidation.IsLifecycleTransition(entries.LastOrDefault(), entry))
                 {
                     throw new InvalidDataException("Journal record is invalid.");
                 }
@@ -465,7 +489,6 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             }
             catch (JsonException exception) { throw new InvalidDataException("Journal record is corrupt.", exception); }
         }
-
         return entries;
     }
 }
@@ -473,7 +496,6 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
 /// <summary>Acquires a host-local exclusive installation file lease.</summary>
 public sealed class FileHostUpdateInstallationLock(string hostStateDirectory) : IHostUpdateInstallationLock
 {
-    /// <inheritdoc />
     public Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct)
     {
         if (!HostUpdateValidation.IsIdentifier(installationId))
@@ -481,12 +503,10 @@ public sealed class FileHostUpdateInstallationLock(string hostStateDirectory) : 
             throw new ArgumentException("Installation identifier is invalid.", nameof(installationId));
         }
 
-        ct.ThrowIfCancellationRequested();
         Directory.CreateDirectory(hostStateDirectory);
         string path = Path.Combine(hostStateDirectory, $"{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installationId)))}.lock");
-        return Task.FromResult<IAsyncDisposable>(new FileLease(new FileStream(path, new FileStreamOptions { Mode = FileMode.OpenOrCreate, Access = FileAccess.ReadWrite, Share = FileShare.None, Options = FileOptions.WriteThrough })));
+        return Task.FromResult<IAsyncDisposable>(new FileLease(new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)));
     }
-
     private sealed class FileLease(FileStream stream) : IAsyncDisposable { public ValueTask DisposeAsync() => stream.DisposeAsync(); }
 }
 
@@ -497,31 +517,31 @@ internal static class HostUpdateValidation
     public static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 128 } && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
     public static bool IsChannel(string? value) => value is not null && Channels.Contains(value);
     public static bool IsProvider(string? value) => value is not null && Providers.Contains(value);
-    public static bool IsVersion(string? value) => value is { Length: > 0 and <= 64 } && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '.' or '-' or '+');
     public static bool IsDigest(string? value) => value is { Length: 71 } && value.StartsWith("sha256:", StringComparison.Ordinal) && value[7..].All(Uri.IsHexDigit);
     public static bool IsHexHash(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
     public static bool IsRejectionCode(string? value) => value is { Length: > 0 and <= 80 } && value.All(character => char.IsLower(character) || char.IsDigit(character) || character == '_');
-    public static bool HashesEqual(string? left, string? right)
-    {
-        if (!IsHexHash(left) || !IsHexHash(right))
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left!), Convert.FromHexString(right!));
-    }
-
-    public static bool DigestsEqual(string? left, string? right)
-    {
-        if (!IsDigest(left) || !IsDigest(right))
-        {
-            return false;
-        }
-
-        return CryptographicOperations.FixedTimeEquals(
-            Convert.FromHexString(left![7..]),
-            Convert.FromHexString(right![7..]));
-    }
-    public static bool IsReleaseIdentity(CanonicalReleaseIdentity identity, string channel) => identity is not null && IsIdentifier(identity.ReleaseId) && IsVersion(identity.Version) && IsIdentifier(identity.SourceTag) && ((channel == "stable" && identity.SourceBranch == "main") || (channel == "insider" && identity.SourceBranch == "development")) && IsHexHash(identity.SourceCommit) && IsHexHash(identity.AuthorizedBranchHead) && identity.SourceCommit == identity.AuthorizedBranchHead && IsIdentifier(identity.BuildMetadata) && IsIdentifier(identity.OciReleaseLabel) && IsVersion(identity.OciVersionLabel) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel && IsDigest(identity.ProvenanceSubjectDigest) && IsDigest(identity.ManifestDigest) && IsDigest(identity.IndexDigest);
-    public static bool IsJournalEntry(HostUpdateJournalEntry entry) => IsIdentifier(entry.OperationId) && IsIdentifier(entry.IdempotencyKey) && Enum.IsDefined(entry.State) && IsRejectionCode(entry.Code) && entry.Snapshot is { } snapshot && IsIdentifier(snapshot.InstallationId) && IsIdentifier(snapshot.ActorId) && IsIdentifier(snapshot.Nonce) && IsRejectionCode(snapshot.ReasonCode) && IsChannel(snapshot.SourceChannel) && IsChannel(snapshot.TargetChannel) && IsIdentifier(snapshot.ChannelPolicyRevision) && IsHexHash(snapshot.PlanHash) && (snapshot.Identity is null || IsReleaseIdentity(snapshot.Identity, snapshot.TargetChannel)) && (snapshot.Receipt is null || snapshot.Receipt.IsComplete && IsDigest(snapshot.Receipt.PreviousSetDigest) && IsDigest(snapshot.Receipt.PreviousConfigurationDigest));
+    public static bool HashesEqual(string? left, string? right) => IsHexHash(left) && IsHexHash(right) &&
+        CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left!), Convert.FromHexString(right!));
+    public static bool DigestsEqual(string? left, string? right) => IsDigest(left) && IsDigest(right) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left![7..]), Convert.FromHexString(right![7..]));
+    public static bool IsSemanticVersion(string? value) => Version.TryParse(value?.Split(['-', '+'])[0], out Version? version) && version.Major >= 0 && version.Minor >= 0 && version.Build >= 0 && version.Revision is -1;
+    public static int CompareSemanticVersions(string left, string right) => Version.Parse(left.Split(['-', '+'])[0]).CompareTo(Version.Parse(right.Split(['-', '+'])[0]));
+    public static bool IsReleaseIdentity(CanonicalReleaseIdentity? identity, string channel) => identity is not null && IsIdentifier(identity.ReleaseId) && IsSemanticVersion(identity.Version) &&
+        IsChannel(identity.Channel) && identity.Channel == channel && IsIdentifier(identity.SourceTag) && ((channel == "stable" && identity.SourceBranch == "main") ||
+        (channel == "insider" && identity.SourceBranch == "development")) && IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
+        IsIdentifier(identity.BuildMetadata) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel && IsDigest(identity.ProvenanceSubjectDigest) &&
+        IsDigest(identity.ManifestDigest) && IsDigest(identity.IndexDigest);
+    public static bool IsJournalEntry(HostUpdateJournalEntry entry) => IsIdentifier(entry.OperationId) && IsIdentifier(entry.IdempotencyKey) && Enum.IsDefined(entry.State) &&
+        IsRejectionCode(entry.Code) && entry.Snapshot is { } snapshot && IsIdentifier(snapshot.InstallationId) && IsIdentifier(snapshot.ActorId) &&
+        IsIdentifier(snapshot.Nonce) && IsRejectionCode(snapshot.ReasonCode) && IsChannel(snapshot.SourceChannel) && IsChannel(snapshot.TargetChannel) &&
+        IsIdentifier(snapshot.ChannelPolicyRevision) && (string.IsNullOrEmpty(snapshot.PlanHash) || IsHexHash(snapshot.PlanHash)) &&
+        (snapshot.Identity is null || IsReleaseIdentity(snapshot.Identity, snapshot.TargetChannel)) &&
+        ((entry.State == HostUpdateLifecycle.Staged && snapshot.Receipt is not null && snapshot.Receipt.IsComplete &&
+          IsReleaseIdentity(snapshot.Receipt.Identity, snapshot.TargetChannel) && IsReleaseIdentity(snapshot.Receipt.PriorReleaseIdentity, snapshot.Receipt.PriorReleaseIdentity.Channel) &&
+          IsDigest(snapshot.Receipt.ManifestDigest) && IsDigest(snapshot.Receipt.PreviousSetDigest) && IsDigest(snapshot.Receipt.PreviousConfigurationDigest)) ||
+         (entry.State != HostUpdateLifecycle.Staged && snapshot.Receipt is null));
+    public static bool IsLifecycleTransition(HostUpdateJournalEntry? previous, HostUpdateJournalEntry current) =>
+        previous is null ? current.State == HostUpdateLifecycle.Planned : previous.OperationId != current.OperationId ||
+        (previous.State, current.State) is (HostUpdateLifecycle.Planned, HostUpdateLifecycle.Approved or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator) or
+        (HostUpdateLifecycle.Approved, HostUpdateLifecycle.Staging or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator) or
+        (HostUpdateLifecycle.Staging, HostUpdateLifecycle.Staged or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator);
 }

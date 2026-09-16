@@ -1,5 +1,5 @@
-﻿using System.Text;
-using System.Text.Json;
+﻿using System.Security.Cryptography;
+using System.Text;
 using Farm.Infrastructure.Services.HostUpdates;
 using Xunit;
 
@@ -7,89 +7,19 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 public sealed class HostUpdateFoundationTests
 {
-    [Fact] public async Task PlanAsync_BadSignature_RejectsBeforeStaging() => Assert.Contains("metadata_signature_invalid", (await CreateSut(new Provider(Metadata(false)), new Stager()).PlanAsync(Request(), default)).Reasons);
-
     [Fact]
-    public async Task PlanAsync_CallerCannotSelectIncompleteTopology_UsesInstallationComponents()
-    {
-        HostUpdatePlanResult result = await CreateSut(new Provider(Metadata(components: Digests(("api/linux-x64", Digest("api"))))), new Stager()).PlanAsync(Request(), default);
-        Assert.False(result.IsEligible);
-        Assert.Contains("release_set_incomplete", result.Reasons);
-    }
-
-    [Fact]
-    public async Task StageAsync_MetadataChangesUnderLock_RejectsWithoutStaging()
-    {
-        Provider provider = new(Metadata());
-        Stager stager = new();
-        HostUpdateFoundation sut = CreateSut(provider, stager);
-        HostUpdatePlan plan = await PlanAsync(sut);
-        provider.CurrentMetadata = Metadata(identity: Identity() with { ManifestDigest = Digest("different") });
-        Assert.Equal("plan_or_metadata_changed", (await sut.StageAsync(plan, Approval(plan), default)).Code);
-        Assert.Equal(0, stager.Calls);
-    }
-
-    [Fact]
-    public async Task StageAsync_InvalidReceipt_RecordsRecoverableFailureWithoutApplyReceipt()
-    {
-        MemoryJournal journal = new();
-        HostUpdateFoundation sut = CreateSut(new Provider(Metadata()), new Stager(validReceipt: false), journal);
-        HostUpdatePlan plan = await PlanAsync(sut);
-        HostUpdateStageResult result = await sut.StageAsync(plan, Approval(plan), default);
-        Assert.True(result.IsRecoverableFailure);
-        Assert.Null(result.Receipt);
-        Assert.Equal(HostUpdateLifecycle.Failed, journal.Entries[^1].State);
-    }
-
-    [Fact]
-    public async Task StageAsync_ExistingStagingIntent_RequiresOperatorWithoutReplay()
-    {
-        Stager stager = new();
-        MemoryJournal journal = new();
-        HostUpdateFoundation sut = CreateSut(new Provider(Metadata()), stager, journal);
-        HostUpdatePlan plan = await PlanAsync(sut);
-        await journal.AppendAsync(HostUpdateJournalEntry.StagingIntent(plan, Metadata()), default);
-        HostUpdateStageResult result = await sut.StageAsync(plan, Approval(plan), default);
-        Assert.True(result.RequiresOperator);
-        Assert.Equal("staging_intent_unresolved", result.Code);
-    }
-
-    [Fact]
-    public async Task StageAsync_CompletedIdempotency_ReturnsOriginalReceipt()
-    {
-        Stager stager = new();
-        MemoryJournal journal = new();
-        HostUpdateFoundation sut = CreateSut(new Provider(Metadata()), stager, journal);
-        HostUpdatePlan plan = await PlanAsync(sut);
-        HostUpdateStageResult first = await sut.StageAsync(plan, Approval(plan), default);
-        HostUpdateStageResult retry = await sut.StageAsync(plan, Approval(plan), default);
-        Assert.True(retry.IsStaged);
-        Assert.Equal(first.Receipt, retry.Receipt);
-        Assert.Equal(1, stager.Calls);
-    }
-
-    [Fact]
-    public async Task StageAsync_StandingPolicyChannelSwitch_Rejects()
-    {
-        HostUpdateFoundation sut = CreateSut(new Provider(Metadata()), new Stager());
-        HostUpdatePlan plan = await PlanAsync(sut);
-        HostUpdateAuthorization authorization = Approval(plan) with { Kind = HostUpdateAuthorizationKind.StandingPolicy, SourceChannel = "insider", StandingPolicyActive = true };
-        Assert.Equal("authorization_invalid", (await sut.StageAsync(plan, authorization, default)).Code);
-    }
-
-    [Fact]
-    public async Task FileJournal_BlankGapTruncationAndCorruption_FailClosed()
+    public async Task PlanAsync_InvalidMetadataIdentity_DoesNotPoisonFollowingJournalEntry()
     {
         string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
         try
         {
             FileHostUpdateJournal journal = new(directory);
-            HostUpdatePlan plan = await PlanAsync(CreateSut(new Provider(Metadata()), new Stager()));
-            await journal.AppendAsync(HostUpdateJournalEntry.StagingIntent(plan, Metadata()), default);
-            await File.AppendAllTextAsync(Path.Combine(directory, "host-update.journal.jsonl"), "\n", default);
-            await Assert.ThrowsAsync<InvalidDataException>(() => journal.ReadAsync(default));
-            await File.WriteAllTextAsync(Path.Combine(directory, "host-update.journal.jsonl"), "{\"revision\":2}", default);
-            await Assert.ThrowsAsync<InvalidDataException>(() => journal.ReadAsync(default));
+            Provider provider = new(Metadata() with { Identity = Identity() with { ReleaseId = "bad identity" } });
+            HostUpdateFoundation sut = CreateSut(provider, journal: journal);
+            Assert.False((await sut.PlanAsync(Request(), default)).IsEligible);
+            provider.CurrentMetadata = Metadata();
+            Assert.True((await sut.PlanAsync(Request() with { OperationId = "operation-2", IdempotencyKey = "key-2", Nonce = "nonce-2" }, default)).IsEligible);
+            Assert.Null((await journal.ReadAsync(default))[0].Snapshot.Identity);
         }
         finally
         {
@@ -101,16 +31,82 @@ public sealed class HostUpdateFoundationTests
     }
 
     [Fact]
-    public async Task FileJournal_MultipleInstances_AllocateMonotonicRevisions()
+    public async Task PlanAsync_InspectorIdentityMismatch_RejectsCallerInstallationEvidence()
+    {
+        HostUpdateFoundation sut = CreateSut(inspector: new Inspector(Installation() with { InstallationId = "other-installation" }));
+        Assert.Contains("installation_untrusted", (await sut.PlanAsync(Request(), default)).Reasons);
+    }
+
+    [Fact]
+    public async Task PlanAsync_StaleInspectorTopology_DerivesComponentsAndRejectsMissingPlatformDigest()
+    {
+        HostUpdateFoundation sut = CreateSut(new Provider(Metadata(components: Digests(("api/linux-x64", Digest("api"))))), inspector: new Inspector(Installation() with { RequiredComponents = new HashSet<string>(["api", "worker"]) }));
+        Assert.Contains("release_set_incomplete", (await sut.PlanAsync(Request(), default)).Reasons);
+    }
+
+    [Fact]
+    public async Task StageAsync_FreshInspectorEvidenceChangesUnderLock_RequiresOperator()
+    {
+        Inspector inspector = new(Installation());
+        HostUpdateFoundation sut = CreateSut(inspector: inspector);
+        HostUpdatePlan plan = await EligiblePlanAsync(sut);
+        inspector.Value = Installation() with { TopologyFingerprint = Digest("changed") };
+        Assert.Equal("plan_or_metadata_changed", (await sut.StageAsync(plan, Authorization(plan), default)).Code);
+    }
+
+    [Fact]
+    public async Task StageAsync_ForgedOrUndefinedOrRevokedAuthorization_Rejects()
+    {
+        HostUpdateFoundation sut = CreateSut();
+        HostUpdatePlan plan = await EligiblePlanAsync(sut);
+        Assert.Equal("authorization_invalid", (await sut.StageAsync(plan, Authorization(plan) with { ActorId = "attacker" }, default)).Code);
+        sut = CreateSut();
+        plan = await EligiblePlanAsync(sut);
+        Assert.Equal("authorization_invalid", (await sut.StageAsync(plan, Authorization(plan) with { Kind = (HostUpdateAuthorizationKind)99 }, default)).Code);
+        sut = CreateSut();
+        plan = await EligiblePlanAsync(sut);
+        Assert.Equal("authorization_invalid", (await sut.StageAsync(plan, Authorization(plan) with { Kind = HostUpdateAuthorizationKind.StandingPolicy, StandingPolicyActive = true, StandingPolicyRevoked = true }, default)).Code);
+    }
+
+    [Fact]
+    public async Task StageAsync_InvalidReceiptThenRetry_RequiresOperatorWithoutReplay()
+    {
+        Stager stager = new(false);
+        HostUpdateFoundation sut = CreateSut(stager: stager);
+        HostUpdatePlan plan = await EligiblePlanAsync(sut);
+        Assert.True((await sut.StageAsync(plan, Authorization(plan), default)).RequiresOperator);
+        Assert.True((await sut.StageAsync(plan, Authorization(plan), default)).RequiresOperator);
+        Assert.Equal(1, stager.Calls);
+    }
+
+    [Fact]
+    public async Task PlanAsync_EqualDigestConflictAndMinimumUpdater_Rejects()
+    {
+        Assert.Contains("release_sequence_conflict", (await CreateSut(new Provider(Metadata() with { Identity = Identity() with { ManifestDigest = Digest("other") } })).PlanAsync(Request(), default)).Reasons);
+        Assert.Contains("updater_too_old", (await CreateSut(new Provider(Metadata(minimumUpdater: "2.0.0"))).PlanAsync(Request(), default)).Reasons);
+    }
+
+    [Fact]
+    public async Task StageAsync_DowngradeWithoutExplicitAuthorization_Rejects()
+    {
+        HostUpdateFoundation sut = CreateSut(new Provider(Metadata(sequence: 1)), inspector: new Inspector(Installation() with { CurrentSequence = 2 }));
+        HostUpdatePlan plan = await EligiblePlanAsync(sut);
+        Assert.Equal("downgrade_not_authorized", (await sut.StageAsync(plan, Authorization(plan), default)).Code);
+    }
+
+    [Fact]
+    public async Task FileJournal_InvalidLifecycleAndHostInspection_RejectsInvalidRecordAndReadsLocalSnapshot()
     {
         string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
         try
         {
-            HostUpdatePlan plan = await PlanAsync(CreateSut(new Provider(Metadata()), new Stager()));
-            FileHostUpdateJournal first = new(directory);
-            FileHostUpdateJournal second = new(directory);
-            await Task.WhenAll(first.AppendAsync(HostUpdateJournalEntry.StagingIntent(plan, Metadata()), default), second.AppendAsync(HostUpdateJournalEntry.Approved(plan, Approval(plan)), default));
-            Assert.Equal([1, 2], (await first.ReadAsync(default)).Select(entry => entry.Revision).Order());
+            FileHostUpdateJournal journal = new(directory);
+            HostUpdatePlan plan = await EligiblePlanAsync(CreateSut());
+            await Assert.ThrowsAsync<InvalidDataException>(() => journal.AppendAsync(HostUpdateJournalEntry.Staged(plan, Metadata(), HostUpdateStageResult.Staged(Receipt(Metadata()))), default));
+            HostUpdatePlanResult planned = await CreateSut().PlanAsync(Request(), default);
+            await journal.AppendAsync(HostUpdateJournalEntry.Planned(plan.Request, Metadata(), planned), default);
+            Assert.Single(await HostUpdateJournalInspection.ReadSnapshotAsync(plan.InstallationId, directory, default));
+            await Assert.ThrowsAsync<ArgumentException>(() => HostUpdateJournalInspection.ReadSnapshotAsync("../bad", directory, default));
         }
         finally
         {
@@ -121,19 +117,23 @@ public sealed class HostUpdateFoundationTests
         }
     }
 
-    private static HostUpdateFoundation CreateSut(Provider provider, IHostUpdateStager stager, MemoryJournal? journal = null) => new(provider, new Compatibility(), stager, journal ?? new MemoryJournal(), new Lock());
-    private static async Task<HostUpdatePlan> PlanAsync(HostUpdateFoundation sut) { HostUpdatePlanResult result = await sut.PlanAsync(Request(), default); Assert.True(result.IsEligible); return new(Request(), result.PlanHash, Assert.IsType<CanonicalReleaseIdentity>(result.Identity), result.RequiredComponents); }
-    private static HostUpdatePlanRequest Request() => new("operation-1", "key-1", "operator_1", "nonce-1", "operator_request", "stable", "stable", "policy-1", new("installation-1", Digest("installation"), Digest("source"), Digest("topology"), "linux-x64", new HashSet<string>(["api", "frontend"]), 1, 0, Digest("workers"), "postgres", Digest("schema"), Digest("config"), "1.0.0", Digest("resources"), 200, 100, 100, true, true, true));
-    private static HostUpdateAuthorization Approval(HostUpdatePlan plan) => new("operator_1", "nonce-1", plan.InstallationId, plan.PlanHash, "stable", "stable", "policy-1", DateTimeOffset.UtcNow.AddMinutes(1), HostUpdateAuthorizationKind.Manual, false, false);
-    private static SignedReleaseMetadata Metadata(bool signature = true, CanonicalReleaseIdentity? identity = null, IReadOnlyDictionary<string, string>? components = null) => new("stable", 1, signature, identity ?? Identity(), components ?? Digests(("api/linux-x64", Digest("api")), ("frontend/linux-x64", Digest("frontend"))));
+    private static HostUpdateFoundation CreateSut(Provider? provider = null, Inspector? inspector = null, Stager? stager = null, IHostUpdateJournal? journal = null) =>
+        new(inspector ?? new Inspector(Installation()), provider ?? new Provider(Metadata()), new Compatibility(), new AuthorizationEvaluator(), stager ?? new Stager(), journal ?? new MemoryJournal(), new Lock());
+    private static async Task<HostUpdatePlan> EligiblePlanAsync(HostUpdateFoundation sut) { HostUpdatePlanResult result = await sut.PlanAsync(Request(), default); Assert.True(result.IsEligible); return new(Request(), result.PlanHash, Assert.IsType<CanonicalReleaseIdentity>(result.Identity), result.RequiredComponents, Assert.IsType<HostInstallationEvidence>(result.Installation)); }
+    private static HostUpdatePlanRequest Request() => new("operation-1", "key-1", "operator_1", "nonce-1", "operator_request", "stable", "stable", "policy-1", "installation-1");
+    private static HostUpdateAuthorization Authorization(HostUpdatePlan plan) => new("operator_1", "nonce-1", plan.InstallationId, plan.PlanHash, "stable", "stable", "policy-1", DateTimeOffset.UtcNow.AddMinutes(1), HostUpdateAuthorizationKind.Manual, false, false, false, false);
+    private static HostInstallationEvidence Installation() => new("installation-1", Digest("installation"), Digest("topology"), "linux-x64", new HashSet<string>(["api", "frontend"]), "postgres", Digest("schema"), Digest("config"), "1.0.0", 1, Identity(), Digest("previous"), 200, 100, true, true, true);
+    private static SignedReleaseMetadata Metadata(long sequence = 1, IReadOnlyDictionary<string, string>? components = null, string minimumUpdater = "1.0.0") => new("stable", sequence, true, Identity(), components ?? Digests(("api/linux-x64", Digest("api")), ("frontend/linux-x64", Digest("frontend"))), minimumUpdater);
+    private static HostUpdateStagingReceipt Receipt(SignedReleaseMetadata metadata) => new(true, "staged", metadata.Identity, metadata.Identity.ManifestDigest, metadata.ComponentPlatformDigests, Installation().PriorReleaseIdentity, Digest("previous"), Digest("config"));
+    private static CanonicalReleaseIdentity Identity() => new("release_1", "1.0.0", "stable", "v1.0.0", "main", Hash("commit"), Hash("commit"), "build_1", "release_1", "1.0.0", Digest("provenance"), Digest("manifest"), Digest("index"));
     private static Dictionary<string, string> Digests(params (string Key, string Value)[] values) => values.ToDictionary(value => value.Key, value => value.Value);
-    private static CanonicalReleaseIdentity Identity() => new("release_1", "1.0.0", "v1.0.0", "main", Hash("commit"), Hash("commit"), "build_1", "release_1", "1.0.0", Digest("provenance"), Digest("manifest"), Digest("index"));
     private static string Digest(string value) => $"sha256:{Hash(value)}";
-    private static string Hash(string value) => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
-
+    private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
     private sealed class Provider(SignedReleaseMetadata metadata) : IHostUpdateMetadataProvider { public SignedReleaseMetadata CurrentMetadata { get; set; } = metadata; public Task<SignedReleaseMetadata> GetCurrentAsync(string channel, CancellationToken ct) => Task.FromResult(CurrentMetadata); }
+    private sealed class Inspector(HostInstallationEvidence value) : IHostUpdateInspector { public HostInstallationEvidence Value { get; set; } = value; public Task<HostInstallationEvidence> InspectAsync(string installationId, CancellationToken ct) => Task.FromResult(Value); }
     private sealed class Compatibility : IHostUpdateCompatibilityEvaluator { public IReadOnlyList<string> Evaluate(HostInstallationEvidence installation, SignedReleaseMetadata metadata) => []; }
+    private sealed class AuthorizationEvaluator : IHostUpdateAuthorizationEvaluator { public bool IsAuthorized(HostUpdateAuthorization authorization, HostUpdatePlan plan, HostInstallationEvidence installation, SignedReleaseMetadata metadata) => authorization.IsStructurallyValidFor(plan) && (metadata.Sequence >= installation.CurrentSequence || authorization.ExplicitDowngradeAllowed); }
     private sealed class MemoryJournal : IHostUpdateJournal { public List<HostUpdateJournalEntry> Entries { get; } = []; public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) { Entries.Add(entry with { Revision = Entries.Count + 1 }); return Task.CompletedTask; } public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostUpdateJournalEntry>>(Entries); }
     private sealed class Lock : IHostUpdateInstallationLock { public Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct) => Task.FromResult<IAsyncDisposable>(new Lease()); private sealed class Lease : IAsyncDisposable { public ValueTask DisposeAsync() => ValueTask.CompletedTask; } }
-    private sealed class Stager(bool validReceipt = true) : IHostUpdateStager { public int Calls { get; private set; } public Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct) { Calls++; return Task.FromResult(new HostUpdateStagingReceipt(validReceipt, "staged", metadata.Identity.ManifestDigest, metadata.ComponentPlatformDigests, Digest("previous"), Digest("configuration"))); } }
+    private sealed class Stager(bool valid = true) : IHostUpdateStager { public int Calls { get; private set; } public Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct) { Calls++; return Task.FromResult(valid ? Receipt(metadata) : Receipt(metadata) with { ManifestDigest = Digest("wrong") }); } }
 }

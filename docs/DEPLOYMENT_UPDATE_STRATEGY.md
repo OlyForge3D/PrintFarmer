@@ -56,6 +56,17 @@ Target updater contracts, routes and remaining delivery increments are
 
 ### Host updater foundation (#2662)
 
+The foundation accepts only bounded identifiers from a caller. It obtains installation,
+topology, current release/configuration, and required-component evidence from the
+trusted host inspector during planning and again while holding the installation lock.
+Planning and staging records use the validated metadata identity (or no identity for
+invalid metadata), never a caller-provided identity. A complete staging receipt binds
+every topology-selected platform digest plus the immutable target manifest and inspected
+prior release/configuration identity; failed or incomplete staging requires operator
+reconciliation and is never replayed. The host-local read-only journal inspection
+operation works while the API is stopped and accepts only a validated installation ID
+and absolute host state directory.
+
 The shared host-updater foundation implements only the `Planned`, `Approved`,
 and `Staged` boundary. It is one host-local engine for future operator-triggered
 one-time requests and administrator-enabled standing policies; neither caller
