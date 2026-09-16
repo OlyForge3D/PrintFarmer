@@ -629,6 +629,218 @@ test('release API client permits only canonical repository routes and rejects re
   }
 });
 
+async function failedGithubResponse(response, endpoint = 'git/refs', method = 'POST') {
+  let calls = 0;
+  let failure;
+  const api = githubClient('fixture-secret-token', async (url, options) => {
+    calls++;
+    assert.equal(url, githubRequestUrl(endpoint, method));
+    assert.equal(options.method, method);
+    assert.equal(options.redirect, 'error');
+    return response;
+  });
+  await assert.rejects(api(endpoint, method, method === 'GET' ? undefined : { ref: 'fixture-secret-payload' }), error => {
+    failure = error;
+    assert.equal(error.status, response.status);
+    assert.equal(error.cause, undefined);
+    assert.deepEqual(Object.keys(error).sort(), ['diagnostics', 'status']);
+    assert.match(error.message, new RegExp(`HTTP ${response.status}; `));
+    assert.deepEqual(JSON.parse(error.message.split('; ')[1]), error.diagnostics);
+    const output = `${error.message}\n${error.stack}\n${JSON.stringify(error)}`;
+    assert.doesNotMatch(output, /fixture-secret|https:|Authorization|documentation_url|\x1b/);
+    assert.ok(error.message.length < 2200, 'Diagnostic output has a fixed small bound');
+    return true;
+  });
+  assert.equal(calls, 1, 'No retry or failure-triggered request');
+  return failure;
+}
+
+test('GitHub failures preserve all documented validation codes without arbitrary response data', async () => {
+  for (const code of ['missing', 'missing_field', 'invalid', 'already_exists', 'unprocessable', 'custom']) {
+    const failure = await failedGithubResponse(new Response(JSON.stringify({
+      message: 'Validation Failed',
+      errors: [{ resource: 'Reference', field: 'ref', code, message: 'fixture-secret-custom',
+        value: 'fixture-secret-value', headers: { Authorization: 'fixture-secret-header' } }],
+      documentation_url: 'https://fixture-secret.invalid',
+      token: 'fixture-secret-body',
+      policy: { actors: 'fixture-secret-policy' },
+    }), { status: 422 }));
+    assert.deepEqual(failure.diagnostics, {
+      bodyState: 'parsed', messageCategory: 'validation-failed',
+      errors: [{ resource: 'Reference', field: 'ref', code, messageCategory: 'unknown-redacted' }],
+      errorsState: 'complete',
+    });
+  }
+});
+
+test('GitHub refusal categories require recognized evidence, never status alone', async () => {
+  const workflow = 'refusing to allow a GitHub App to create or update workflow `.github/workflows/fixture-secret.yml` without `workflows` permission';
+  const categories = [
+    ['Validation Failed', 'validation-failed'],
+    ['Not Found', 'not-found'],
+    ['Bad credentials', 'bad-credentials'],
+    ['Resource not accessible by integration', 'permission-denied'],
+    ['Resource not accessible by personal access token', 'permission-denied'],
+    ['Reference already exists', 'already-exists'],
+    ['Reference update failed', 'reference-update-failed'],
+    ['Update is not a fast forward', 'not-fast-forward'],
+    ['Internal Server Error', 'server-error'],
+    ['Service Unavailable', 'server-error'],
+    [workflow, 'workflow-permission-denied'],
+    ['fixture-secret-unknown', 'unknown-redacted'],
+  ];
+  for (const [message, expected] of categories) {
+    const { diagnostics } = await failedGithubResponse(new Response(JSON.stringify({
+      message, errors: [{ code: 'custom', resource: 'Reference', field: 'sha', message }],
+    }), { status: 422 }));
+    assert.equal(diagnostics.messageCategory, expected);
+    assert.equal(diagnostics.errors[0].messageCategory, expected);
+  }
+  for (const message of [
+    `${workflow} fixture-secret-suffix`, workflow.replace('fixture-secret', 'fixture-secret\r\n'),
+    workflow.replace('fixture-secret', '\x1b[31mfixture-secret'),
+    'Validation Failed\r\nfixture-secret', 'Resource not accessible by integration fixture-secret',
+  ]) {
+    const { diagnostics } = await failedGithubResponse(new Response(JSON.stringify({ message }), { status: 422 }));
+    assert.equal(diagnostics.messageCategory, 'unknown-redacted');
+  }
+});
+
+test('GitHub failures redact unknown, nested and wrongly typed fields with bounded entries', async () => {
+  for (const value of [undefined, null, false, 17, [], { nested: 'fixture-secret' },
+    'fixture-secret', 'Reference\r\nfixture-secret', '\x1b[31mfixture-secret', '__proto__', 'toString']) {
+    const { diagnostics } = await failedGithubResponse(new Response(JSON.stringify({
+      message: value, errors: Array.from({ length: 10 }, () => ({
+        code: value, resource: value, field: value, message: value,
+      })),
+    }), { status: 403 }));
+    assert.equal(diagnostics.messageCategory, 'unknown-redacted');
+    assert.equal(diagnostics.errorsState, 'truncated');
+    assert.equal(diagnostics.errors.length, 8);
+    for (const entry of diagnostics.errors) assert.deepEqual(entry, {
+      code: 'unknown-redacted', resource: 'unknown-redacted', field: 'unknown-redacted',
+      messageCategory: 'unknown-redacted',
+    });
+  }
+  const { diagnostics } = await failedGithubResponse(new Response(JSON.stringify({
+    errors: [null, 'fixture-secret', [], 1, { code: 'invalid', field: 'sha', resource: 'Reference' }],
+  }), { status: 422 }));
+  assert.equal(diagnostics.errorsState, 'complete');
+  assert.equal(diagnostics.errors[0].code, 'unknown-redacted');
+  assert.equal(diagnostics.errors[4].code, 'invalid');
+});
+
+test('GitHub failures explicitly report malformed and absent diagnostic shapes', async () => {
+  for (const [body, bodyState] of [
+    ['', 'empty'], ['<html>fixture-secret</html>', 'invalid-json'],
+    ['{"message":"fixture-secret"', 'invalid-json'],
+    ['null', 'malformed'], ['[]', 'malformed'], ['42', 'malformed'],
+    ['"fixture-secret"', 'malformed'],
+    ['['.repeat(2000) + '"fixture-secret"' + ']'.repeat(2000), 'malformed'],
+  ]) {
+    const { diagnostics } = await failedGithubResponse(new Response(body, { status: 500 }));
+    assert.deepEqual(diagnostics, { bodyState, messageCategory: 'unknown-redacted', errors: [], errorsState: 'omitted' });
+  }
+  const invalidUtf8 = await failedGithubResponse(new Response(new Uint8Array([0xff]), { status: 500 }));
+  assert.equal(invalidUtf8.diagnostics.bodyState, 'invalid-json');
+  const absent = await failedGithubResponse(new Response('{}', { status: 422 }));
+  assert.equal(absent.diagnostics.errorsState, 'absent');
+  const deep = await failedGithubResponse(new Response(
+    '{"message":' + '['.repeat(2000) + '"fixture-secret"' + ']'.repeat(2000) + '}', { status: 422 }));
+  assert.equal(deep.diagnostics.messageCategory, 'unknown-redacted');
+  for (const errors of [null, {}, 'fixture-secret', false, 42]) {
+    const failure = await failedGithubResponse(new Response(JSON.stringify({ errors }), { status: 422 }));
+    assert.equal(failure.diagnostics.errorsState, 'malformed');
+    assert.deepEqual(failure.diagnostics.errors, []);
+  }
+});
+
+test('GitHub error streams cap bytes at 8 KiB and cancel overflow without parsing a prefix', async () => {
+  const valid = JSON.stringify({ message: 'Validation Failed' });
+  for (const [size, expected] of [[8192, 'parsed'], [8193, 'oversized']]) {
+    const { diagnostics } = await failedGithubResponse(new Response(valid.padEnd(size), { status: 422 }));
+    assert.equal(diagnostics.bodyState, expected);
+  }
+  const multibyte = await failedGithubResponse(new Response(
+    JSON.stringify({ message: 'fixture-secret', ignored: 'é'.repeat(4096) }), { status: 422 }));
+  assert.equal(multibyte.diagnostics.bodyState, 'oversized', 'Limit is UTF-8 bytes, not string length');
+  for (const chunks of [
+    [new Uint8Array(8193), new Uint8Array(1)],
+    [new TextEncoder().encode(valid.padEnd(8192)), new Uint8Array(1), new Uint8Array(1)],
+  ]) {
+    let reads = 0;
+    let cancelled = false;
+    const stream = new ReadableStream({
+      pull(controller) { controller.enqueue(chunks[reads++]); },
+      cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
+    const { diagnostics } = await failedGithubResponse(new Response(stream, { status: 422 }));
+    assert.equal(diagnostics.bodyState, 'oversized');
+    assert.equal(diagnostics.messageCategory, 'unknown-redacted');
+    assert.equal(reads, chunks.length - 1, 'Never read another chunk after overflow');
+    assert.equal(cancelled, true);
+    assert.equal(stream.locked, false);
+  }
+});
+
+test('GitHub body-reader failures never replace HTTP status or leak exception causes', async () => {
+  for (const status of [403, 404, 409, 422, 429, 500, 502, 503]) {
+    const stream = new ReadableStream({
+      pull(controller) { controller.error(new Error('fixture-secret-read', { cause: 'fixture-secret-cause' })); },
+    }, { highWaterMark: 0 });
+    const failure = await failedGithubResponse(new Response(stream, { status }));
+    assert.equal(failure.diagnostics.bodyState, 'read-failed');
+    assert.equal(stream.locked, false);
+    const ordinary = await failedGithubResponse(new Response('{"message":"fixture-secret"}', { status }));
+    assert.equal(ordinary.diagnostics.messageCategory, 'unknown-redacted', 'Status is not evidence of a specific cause');
+  }
+  const missing = await failedGithubResponse(new Response(undefined, { status: 422 }));
+  assert.equal(missing.diagnostics.bodyState, 'unavailable');
+  const stream = new ReadableStream({
+    pull(controller) { controller.enqueue(new Uint8Array(8193)); },
+    cancel() { throw new Error('fixture-secret-cancel'); },
+  }, { highWaterMark: 0 });
+  const cancellation = await failedGithubResponse(new Response(stream, { status: 422 }));
+  assert.equal(cancellation.diagnostics.bodyState, 'read-failed');
+  assert.equal(stream.locked, false);
+});
+
+test('GitHub failure endpoint templates hide parameters and protection paths', async () => {
+  for (const [endpoint, method, target] of [
+    ['git/refs', 'POST', 'git/refs'],
+    ['git/refs/heads/release-ledger', 'PATCH', 'git/refs/heads/{branch}'],
+    ['git/ref/tags/v1.2.3-insider.1', 'GET', 'git/ref/tags/{tag}'],
+    [`git/commits/${sha}`, 'GET', 'git/commits/{sha}'],
+    [`contents/.github/CODEOWNERS?ref=${sha}`, 'GET', 'contents/{path}'],
+    ['collaborators/fixture-secret/permission', 'GET', 'collaborators/{login}/permission'],
+    ['rulesets/123', 'GET', 'protection policy'],
+    ['environments/release-insider/deployment-branch-policies', 'GET', 'protection policy'],
+    ['actions/runs/123/attempts/2/jobs?per_page=100', 'GET', 'actions/runs/{run}/attempts/{attempt}/jobs'],
+  ]) {
+    const failure = await failedGithubResponse(new Response('{}', { status: 403 }), endpoint, method);
+    assert.ok(failure.message.startsWith(`GitHub ${method} ${target}: HTTP 403; `));
+    assert.doesNotMatch(failure.message, /CODEOWNERS|release-insider|release-ledger|v1\.2\.3|123/);
+  }
+});
+
+test('GitHub diagnostics preserve tag 404 handling and reject redirects without following them', async () => {
+  for (const status of [404, 403, 409, 422, 429, 500]) {
+    let calls = 0;
+    const api = githubClient('fixture-secret-token', async () => {
+      calls++;
+      return new Response('{"message":"Not Found"}', { status });
+    });
+    if (status === 404) assert.equal(await readTag(api, 'v1.2.3'), undefined);
+    else await assert.rejects(readTag(api, 'v1.2.3'), error => error.status === status);
+    assert.equal(calls, 1);
+  }
+  await failedGithubResponse(new Response('{}', { status: 302,
+    headers: { location: 'https://fixture-secret.invalid' } }));
+  const redirected = new Response('{}', { status: 200 });
+  Object.defineProperty(redirected, 'redirected', { value: true });
+  await failedGithubResponse(redirected);
+});
+
 test('workflow outputs require a runner-owned regular command file and single-line framing', () => {
   const root = resolve('.artifacts', `output-boundary-${process.pid}`);
   const runner = resolve(root, 'runner');

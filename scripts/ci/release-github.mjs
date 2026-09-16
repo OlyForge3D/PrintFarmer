@@ -171,6 +171,115 @@ export function githubRequestUrl(endpoint, method) {
   return requestUrl.href;
 }
 
+function diagnosticEndpoint(endpoint) {
+  if (/^(rules\/|rulesets|environments\/)/.test(endpoint)) return 'protection policy';
+  const templates = [
+    [/^git\/ref\/heads\//, 'git/ref/heads/{branch}'],
+    [/^git\/ref\/tags\//, 'git/ref/tags/{tag}'],
+    [/^git\/refs\/heads\//, 'git/refs/heads/{branch}'],
+    [/^git\/commits\//, 'git/commits/{sha}'],
+    [/^git\/blobs\//, 'git/blobs/{sha}'],
+    [/^git\/tags\//, 'git/tags/{sha}'],
+    [/^git\/trees\//, 'git/trees/{sha}'],
+    [/^compare\//, 'compare/{base}...{head}'],
+    [/^contents\//, 'contents/{path}'],
+    [/^commits\/[^/]+\/check-runs/, 'commits/{sha}/check-runs'],
+    [/^commits\/[^/]+\/statuses/, 'commits/{sha}/statuses'],
+    [/^commits\/[^/]+\/status/, 'commits/{sha}/status'],
+    [/^commits\/[^/]+\/pulls/, 'commits/{sha}/pulls'],
+    [/^pulls\/[^/]+\/reviews/, 'pulls/{number}/reviews'],
+    [/^pulls\//, 'pulls/{number}'],
+    [/^collaborators\//, 'collaborators/{login}/permission'],
+    [/^actions\/runs\/[^/]+\/attempts\//, 'actions/runs/{run}/attempts/{attempt}/jobs'],
+    [/^actions\/runs\/[^/]+\/approvals/, 'actions/runs/{run}/approvals'],
+    [/^actions\/runs\//, 'actions/runs/{run}'],
+    [/^actions\/workflows\//, 'actions/workflows/{workflow}'],
+  ];
+  if (['git/blobs', 'git/trees', 'git/commits', 'git/tags', 'git/refs'].includes(endpoint)) return endpoint;
+  return templates.find(([pattern]) => pattern.test(endpoint))?.[1] ?? 'unknown-redacted';
+}
+
+function diagnosticMessage(message) {
+  const categories = new Map([
+    ['Validation Failed', 'validation-failed'],
+    ['Not Found', 'not-found'],
+    ['Bad credentials', 'bad-credentials'],
+    ['Resource not accessible by integration', 'permission-denied'],
+    ['Resource not accessible by personal access token', 'permission-denied'],
+    ['Reference already exists', 'already-exists'],
+    ['Reference update failed', 'reference-update-failed'],
+    ['Update is not a fast forward', 'not-fast-forward'],
+    ['Internal Server Error', 'server-error'],
+    ['Service Unavailable', 'server-error'],
+  ]);
+  if (categories.has(message)) return categories.get(message);
+  // Match a refusal shape, not a guessed cause inferred from HTTP status.
+  if (typeof message === 'string' &&
+    /^refusing to allow a GitHub App to create or update workflow `[^`\r\n\x00-\x1f\x7f]+` without `workflows` permission$/.test(message)) {
+    return 'workflow-permission-denied';
+  }
+  return 'unknown-redacted';
+}
+
+async function githubFailureDiagnostics(response) {
+  const omitted = bodyState => ({ bodyState, messageCategory: 'unknown-redacted', errors: [], errorsState: 'omitted' });
+  let bytes;
+  try {
+    if (!response.body) return omitted('unavailable');
+    const reader = response.body.getReader();
+    try {
+      const buffer = new Uint8Array(8192);
+      let size = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) {
+          await reader.cancel();
+          return omitted('read-failed');
+        }
+        if (value.byteLength > buffer.byteLength - size) {
+          await reader.cancel();
+          return omitted('oversized');
+        }
+        buffer.set(value, size);
+        size += value.byteLength;
+      }
+      bytes = buffer.subarray(0, size);
+    } finally {
+      reader.releaseLock();
+    }
+  } catch {
+    // Never attach a body-reader exception: its message/cause may contain secrets.
+    return omitted('read-failed');
+  }
+  if (bytes.byteLength === 0) return omitted('empty');
+  let data;
+  try {
+    data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    return omitted('invalid-json');
+  }
+  const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!object(data)) return omitted('malformed');
+  const recognized = (value, allowed) => allowed.includes(value) ? value : 'unknown-redacted';
+  const errors = Array.isArray(data.errors) ? data.errors.slice(0, 8).map(entry => ({
+    code: recognized(object(entry) ? entry.code : undefined,
+      ['missing', 'missing_field', 'invalid', 'already_exists', 'unprocessable', 'custom']),
+    resource: recognized(object(entry) ? entry.resource : undefined,
+      ['Reference', 'Commit', 'Tree', 'Blob', 'Tag', 'Repository']),
+    field: recognized(object(entry) ? entry.field : undefined,
+      ['ref', 'sha', 'force', 'tree', 'parents', 'content', 'encoding', 'tag', 'object', 'type', 'message', 'name', 'email']),
+    messageCategory: diagnosticMessage(object(entry) ? entry.message : undefined),
+  })) : [];
+  return {
+    bodyState: 'parsed',
+    messageCategory: diagnosticMessage(data.message),
+    errors,
+    errorsState: data.errors === undefined ? 'absent' : !Array.isArray(data.errors) ? 'malformed'
+      : data.errors.length > 8 ? 'truncated' : 'complete',
+  };
+}
+
 export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
   requireThat(token, 'Missing GitHub credential');
   return async (endpoint, method = 'GET', body) => {
@@ -183,9 +292,10 @@ export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
         }, body: body ? JSON.stringify(body) : undefined,
       });
       if (!response.ok || response.redirected) {
-        const target = /^(rules\/|rulesets|environments\/)/.test(endpoint) ? 'protection policy' : endpoint;
-        const error = new Error(`GitHub ${method} ${target}: HTTP ${response.status}`);
+        const diagnostics = await githubFailureDiagnostics(response);
+        const error = new Error(`GitHub ${method} ${diagnosticEndpoint(endpoint)}: HTTP ${response.status}; ${JSON.stringify(diagnostics)}`);
         error.status = response.status;
+        error.diagnostics = diagnostics;
         throw error;
       }
       return { data: response.status === 204 ? undefined : await response.json(), link: response.headers.get('link') };
