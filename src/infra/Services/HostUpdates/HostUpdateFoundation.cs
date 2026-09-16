@@ -178,8 +178,7 @@ public sealed class HostUpdateFoundation(
     private async Task<HostUpdateStageResult> RecordFailureAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateStageResult result,
         HostUpdateAuthorization? authorization, CancellationToken ct)
     {
-        await journal.AppendAsync(HostUpdateJournalEntry.Failed(plan, metadata, result, authorization), ct);
-        return result;
+        return await TryAppendAsync(HostUpdateJournalEntry.Failed(plan, metadata, result, authorization), "journal_failure_append_failure", ct) ?? result;
     }
 
     private async Task<HostUpdateStageResult> RecordStagingFailureAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, string code, CancellationToken ct)
@@ -596,7 +595,7 @@ public sealed record HostUpdateJournalSnapshot(string InstallationId, string Act
 public sealed record HostUpdateAuthorizationAudit(
     string ActorId, string Nonce, string InstallationId, string PlanHash, string SourceChannel, string TargetChannel,
     string ChannelPolicyRevision, string Kind, bool Accepted, bool InsiderWarningAcknowledged, bool ExplicitDowngradeAllowed,
-    DateTimeOffset ExpiresAt, bool StandingPolicyActive, bool StandingPolicyRevoked)
+    DateTimeOffset? ExpiresAt, bool StandingPolicyActive, bool StandingPolicyRevoked)
 {
     public static HostUpdateAuthorizationAudit? Create(HostUpdateAuthorization? authorization, bool accepted) => authorization is null
         ? null
@@ -612,7 +611,7 @@ public sealed record HostUpdateAuthorizationAudit(
             accepted,
             authorization.InsiderWarningAcknowledged,
             authorization.ExplicitDowngradeAllowed,
-            authorization.ExpiresAt,
+            authorization.ExpiresAt == default ? null : authorization.ExpiresAt,
             authorization.StandingPolicyActive,
             authorization.StandingPolicyRevoked);
 }
@@ -634,7 +633,6 @@ public static class HostUpdateJournalInspection
 /// <summary>Serializes validated journal revisions with same-process and OS-visible leases.</summary>
 public sealed class FileHostUpdateJournal : IHostUpdateJournal
 {
-    private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
     private readonly string journalPath;
     private readonly string lockPath;
     private readonly TimeSpan acquisitionTimeout;
@@ -688,7 +686,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
         });
         stream.Seek(0, SeekOrigin.End);
-        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(durable, SerializerOptions) + "\n"), ct);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(durable, HostUpdateValidation.JournalSerializerOptions) + "\n"), ct);
         await stream.FlushAsync(ct);
         stream.Flush(flushToDisk: true);
     }
@@ -749,7 +747,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
         {
             try
             {
-                HostUpdateJournalEntry? entry = string.IsNullOrWhiteSpace(line) ? null : JsonSerializer.Deserialize<HostUpdateJournalEntry>(line, SerializerOptions);
+                HostUpdateJournalEntry? entry = string.IsNullOrWhiteSpace(line) ? null : JsonSerializer.Deserialize<HostUpdateJournalEntry>(line, HostUpdateValidation.JournalSerializerOptions);
                 if (entry is null || entry.Revision != entries.Count + 1 || !HostUpdateValidation.IsJournalEntry(entry) ||
                     !HostUpdateValidation.HashesEqual(entry.IntegrityHash, HostUpdateValidation.ComputeJournalIntegrityHash(entry, entries.LastOrDefault()?.IntegrityHash)) ||
                     !HostUpdateValidation.IsLifecycleTransition(entries.LastOrDefault(existing => HostUpdateValidation.HasSameOperation(existing, entry)), entry))
@@ -860,6 +858,7 @@ internal static class HostUpdateFileLease
 
 internal static class HostUpdateValidation
 {
+    internal static readonly JsonSerializerOptions JournalSerializerOptions = new(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } };
     private static readonly HashSet<string> Channels = ["stable", "insider"];
     private static readonly HashSet<string> Providers = ["postgres", "sqlserver"];
     public const string RedactedComponent = "redacted";
@@ -924,7 +923,7 @@ internal static class HostUpdateValidation
     public static string ComputeJournalIntegrityHash(HostUpdateJournalEntry entry, string? previousHash)
     {
         HostUpdateJournalEntry canonical = entry with { IntegrityHash = string.Empty };
-        string payload = JsonSerializer.Serialize(canonical, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+        string payload = JsonSerializer.Serialize(canonical, JournalSerializerOptions);
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{previousHash ?? string.Empty}\n{payload}")));
     }
     public static bool DigestsEqual(string? left, string? right) => IsDigest(left) && IsDigest(right) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left![7..]), Convert.FromHexString(right![7..]));
@@ -1016,7 +1015,7 @@ internal static class HostUpdateValidation
     private static bool HasValidAuthorizationAudit(HostUpdateJournalEntry entry, HostUpdateJournalSnapshot snapshot) =>
         entry.State == HostUpdateLifecycle.Approved
             ? snapshot.AuthorizationAudit is { Accepted: true } accepted && HasValidAuthorizationAuditTuple(accepted) &&
-                accepted.Kind is "manual" or "standingpolicy" && HasValidAcceptedPolicy(accepted)
+                accepted.Kind is "manual" or "standingpolicy" && accepted.ExpiresAt > entry.RecordedAt && HasValidAcceptedPolicy(accepted)
             : entry.Code is "authorization_invalid" or "downgrade_not_authorized"
                 ? snapshot.AuthorizationAudit is { Accepted: false } rejected && HasValidAuthorizationAuditTuple(rejected)
                 : snapshot.AuthorizationAudit is null;
@@ -1024,7 +1023,7 @@ internal static class HostUpdateValidation
         IsIdentifier(audit.ActorId) && IsIdentifier(audit.Nonce) && IsIdentifier(audit.InstallationId) && IsHexHash(audit.PlanHash) &&
         (IsChannel(audit.SourceChannel) || audit.SourceChannel == "redacted") &&
         (IsChannel(audit.TargetChannel) || audit.TargetChannel == "redacted") &&
-        IsIdentifier(audit.ChannelPolicyRevision) && audit.ExpiresAt != default;
+        IsIdentifier(audit.ChannelPolicyRevision) && (!audit.Accepted || audit.ExpiresAt is not null);
     private static bool HasValidAcceptedPolicy(HostUpdateAuthorizationAudit audit) => audit.Kind switch
     {
         "manual" => !audit.StandingPolicyActive && !audit.StandingPolicyRevoked,

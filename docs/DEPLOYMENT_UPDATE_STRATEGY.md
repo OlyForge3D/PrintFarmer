@@ -95,21 +95,26 @@ while leaving the running release untouched. An unresolved staging intent is
 `NeedsOperator`; this increment never replays, applies, or recovers it.
 
 The append-only JSON-lines operation journal and installation lock are
-host-local files, outside replaced containers and application databases. State
-directories use only the current OS's local absolute-path grammar (a
+host-local files, outside replaced containers and application databases. The
+configured state directory supplies that host-local root. State directories use
+only the current OS's local absolute-path grammar (a
 drive-rooted local path on Windows or a POSIX absolute path on Unix); UNC,
 device, foreign-platform, relative, and traversal paths are rejected. Both
 locks use the same bounded exponential contention retry and timeout behavior.
 Journal intent is flushed before staging, outcomes are durable and monotonic
 across process restarts and concurrent instances through same-process and
-file-system serialization. Blank, gapped, corrupt, or truncated JSONL records
-fail closed, as does a JSON-valid record whose deterministic hash chain no
-longer matches. Trusted plan identity remains separate from an authorization
+file-system serialization. JSON-valid per-record mutations and blank, gapped,
+corrupt, partial, or non-terminated JSONL records fail closed, as does a record
+whose deterministic hash chain no longer matches. The hash chain does not
+detect deletion of an otherwise valid complete tail. Trusted plan identity
+remains separate from an authorization
 attempt audit: accepted and rejected attempts retain sanitized bounded
 presented actor, nonce, installation, plan-hash, source/target-channel and
 policy-revision values without replacing the trusted-plan fields. Arbitrary
 paths, URLs, commands, exception text, and malformed policy values are never
-journalled. Journal corruption is a fail-closed reconciliation condition.
+journalled. A missing audit expiry explicitly records a rejected, invalid or
+default presented expiry; accepted authorization records require a future
+expiry. Journal corruption is a fail-closed reconciliation condition.
 Issue #2663 owns all transitions after `Staged`, including drain, backup,
 migration, apply, verification, and recovery. Issue #2666 owns request
 integration and scheduling.

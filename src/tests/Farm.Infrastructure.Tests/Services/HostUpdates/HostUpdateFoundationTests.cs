@@ -512,6 +512,16 @@ public sealed class HostUpdateFoundationTests
     }
 
     [Fact]
+    public async Task StageAsync_FailureJournalAppendFailure_RequiresJournalSpecificOperatorAction()
+    {
+        FailingFailedAppendJournal journal = new();
+        HostUpdateFoundation sut = CreateSut(journal: journal);
+        HostUpdatePlan plan = await EligiblePlanAsync(sut);
+
+        Assert.Equal("journal_failure_append_failure", (await sut.StageAsync(plan, Authorization(plan) with { ActorId = "attacker" }, default)).Code);
+    }
+
+    [Fact]
     public async Task FileJournal_AuthorizationAudit_RoundTripsAcceptedAndRejectedOutcomes()
     {
         string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
@@ -546,6 +556,33 @@ public sealed class HostUpdateFoundationTests
             Assert.True(accepted.StandingPolicyActive);
             Assert.False(accepted.StandingPolicyRevoked);
             Assert.True(accepted.Accepted);
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task FileJournal_DefaultExpirationRejectedAuthorizationPersistsNullableExpirationAudit()
+    {
+        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+        try
+        {
+            FileHostUpdateJournal journal = new(directory);
+            HostUpdateFoundation sut = CreateSut(journal: journal);
+            HostUpdatePlan plan = await EligiblePlanAsync(sut);
+
+            Assert.Equal("authorization_invalid", (await sut.StageAsync(plan, Authorization(plan) with { ExpiresAt = default }, default)).Code);
+
+            HostUpdateJournalEntry entry = Assert.Single(await new FileHostUpdateJournal(directory).ReadAsync(default), candidate => candidate.Code == "authorization_invalid");
+            HostUpdateAuthorizationAudit audit = Assert.IsType<HostUpdateAuthorizationAudit>(entry.Snapshot.AuthorizationAudit);
+            Assert.False(audit.Accepted);
+            Assert.Null(audit.ExpiresAt);
+            Assert.Equal(plan.Request.ActorId, audit.ActorId);
+            Assert.Equal(plan.Request.Nonce, audit.Nonce);
+            Assert.Equal(plan.InstallationId, audit.InstallationId);
+            Assert.Equal(plan.PlanHash, audit.PlanHash);
         }
         finally
         {
@@ -658,6 +695,7 @@ public sealed class HostUpdateFoundationTests
     private sealed class PermissiveAuthorizationEvaluator : IHostUpdateAuthorizationEvaluator { public bool IsAuthorized(HostUpdateAuthorization authorization, HostUpdatePlan plan, HostInstallationEvidence installation, SignedReleaseMetadata metadata) => true; }
     private sealed class MemoryJournal : IHostUpdateJournal { public List<HostUpdateJournalEntry> Entries { get; } = []; public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) { Entries.Add(entry with { Revision = Entries.Count + 1 }); return Task.CompletedTask; } public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => Task.FromResult<IReadOnlyList<HostUpdateJournalEntry>>(Entries); }
     private sealed class FailingStagedAppendJournal : IHostUpdateJournal { private readonly MemoryJournal inner = new(); public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => inner.ReadAsync(ct); public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) => entry.State == HostUpdateLifecycle.Staged ? Task.FromException(new IOException()) : inner.AppendAsync(entry, ct); }
+    private sealed class FailingFailedAppendJournal : IHostUpdateJournal { private readonly MemoryJournal inner = new(); public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => inner.ReadAsync(ct); public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) => entry.State == HostUpdateLifecycle.Failed ? Task.FromException(new IOException()) : inner.AppendAsync(entry, ct); }
     private sealed class ThrowingJournal(Exception exception) : IHostUpdateJournal { public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) => Task.FromException(exception); public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => Task.FromException<IReadOnlyList<HostUpdateJournalEntry>>(exception); }
     private sealed class Lock : IHostUpdateInstallationLock { public Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct) => Task.FromResult<IAsyncDisposable>(new Lease()); private sealed class Lease : IAsyncDisposable { public ValueTask DisposeAsync() => ValueTask.CompletedTask; } }
     private sealed class Stager(bool valid = true) : IHostUpdateStager { public int Calls { get; private set; } public HostUpdatePlan? LastPlan { get; private set; } public Task<HostUpdateStagingReceipt> StageAsync(HostUpdatePlan plan, SignedReleaseMetadata metadata, CancellationToken ct) { Calls++; LastPlan = plan; return Task.FromResult(valid ? Receipt(metadata) : Receipt(metadata) with { ManifestDigest = Digest("wrong") }); } }
