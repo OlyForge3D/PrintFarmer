@@ -132,9 +132,14 @@ The parent coordinator owns merge permission and the single live invocation.
 Before invoking, read-only checks must establish:
 
 1. The reviewed PR is merged and its implementation is present on `development`.
-   The workflow is active at that path and has **zero** previous runs.
+   The original workflow ID `359999367` is active at that unchanged path and has
+   **exactly one** previous run: `35159038922`, number 1 / attempt 1 at
+   `c517cea2a78e176b2cec436986290c8a767fba04`. Its read-only admission failed;
+   request job `105005305468` was skipped with no steps. Boundary job
+   `105005241763` must still show the exact failed `Read-only admission` step,
+   successful setup and unchanged terminal job/step evidence.
    Do not use a dispatch as a dry run: even a failed or cancelled admission spends
-   the workflow's first-run slot.
+   the single successor slot explicitly authorized in #2739.
 2. No `consolidated-release.yml` run is queued, requested, pending, waiting or in
    progress, for **either** channel. Keep publishers quiescent throughout the
    diagnostic; start no canonical run until it stops.
@@ -150,6 +155,13 @@ invocation as `jpapiez` (not performed by the implementation session):
 gh workflow run diagnose-release-tag-2736.yml --repo OlyForge3D/PrintFarmer --ref development
 ```
 
+The original diagnostic failed before minting or POST because its environment-free
+boundary required an environment-scoped App variable. #2739 corrects that scope
+without copying variables or secrets: the boundary uses fixed public App ID
+`4927270`; only the protected `release-insider` job explicitly resolves the
+existing `vars.RELEASE_PUBLISHER_APP_ID` and validates it before the unchanged
+pinned token action. A missing or wrong protected value fails before minting.
+
 The no-secret boundary verifies the live owner account and administrator role,
 run/workflow/control identity, complete history, environment, source binding and
 publisher quiescence. The protected job repeats these checks before obtaining
@@ -159,11 +171,14 @@ the canonical protection validators without manufacturing a release transaction
 or signed authority. Additional active tag/push rules fail closed for review;
 no claim is made that an unknown rule or Workflows permission cannot matter.
 
-**One-shot enforcement:** the live API must report `run_number: 1` and
+**Bounded successor enforcement:** the live API must report `run_number: 2` and
 `run_attempt: 1`, matching the runner, and complete unfiltered history must contain
-only that run. Failures, cancellations and prior blocked dispatches are not
-filtered out. Run number 2 fails even if earlier history was deleted. Pagination,
-missing or inconsistent evidence fails closed. This relies on GitHub's
+exactly that run plus the prior run above. The prior run is re-read live and
+its attempt-specific jobs must prove the exact admission failure and skipped
+request, not merely an overall failed conclusion. First/third runs, any rerun,
+deleted, extra, missing, malformed or incomplete run/job evidence fail closed.
+This is not a generic retry mechanism. Complete pagination is required.
+This relies on GitHub's
 [per-workflow monotonic run number](https://docs.github.com/en/actions/reference/workflows-and-actions/variables)
 and normal workflow identity continuity; it is **not tamper-proof against the
 repository owner deleting/recreating the workflow or changing its code**.
@@ -190,7 +205,7 @@ only; reservation remains incomplete**, never recovered/published. A timeout,
 transport loss or failed verification can leave tag creation uncertain: inspect
 read-only, never retry. A 422 category is evidence from this new request, not a
 reconstruction of the discarded original body. Preserve that distinction.
-After **any first attempt**, retire/remove this diagnostic workflow and its
+After **any successor attempt**, retire/remove this diagnostic workflow and its
 single-purpose script in a reviewed change. Do not rerun or redispatch; retirement
 does not abandon or repair the unresolved reservation.
 

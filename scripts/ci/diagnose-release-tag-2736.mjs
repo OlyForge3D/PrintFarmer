@@ -12,27 +12,70 @@ export const diagnostic = Object.freeze({
   failedRun: '35046281532',
   appId: '4927270',
   installationId: '161288519',
+  workflowId: 359999367,
+  priorRun: 35159038922,
+  priorSource: 'c517cea2a78e176b2cec436986290c8a767fba04',
 });
 const historyEndpoint = 'actions/workflows/diagnose-release-tag-2736.yml/runs?per_page=100';
 let requestSpent = false;
 
+function sameRun(entry, run) {
+  return ['id', 'run_number', 'run_attempt', 'workflow_id', 'path', 'head_sha', 'head_branch',
+    'event', 'status', 'conclusion'].every(key => entry?.[key] === run[key]) &&
+    ['actor', 'triggering_actor'].every(key =>
+      ['id', 'login', 'type'].every(field => entry?.[key]?.[field] === run[key][field])) &&
+    ['repository', 'head_repository'].every(key =>
+      ['id', 'full_name'].every(field => entry?.[key]?.[field] === run[key][field]));
+}
+
+async function verifyPriorAdmission(api, run) {
+  const prior = await api(`actions/runs/${diagnostic.priorRun}`);
+  requireThat(prior?.id === diagnostic.priorRun && prior.run_number === 1 && prior.run_attempt === 1 &&
+    prior.workflow_id === diagnostic.workflowId && prior.path === diagnostic.workflow &&
+    prior.head_sha === diagnostic.priorSource && prior.head_branch === 'development' &&
+    prior.event === 'workflow_dispatch' && prior.status === 'completed' && prior.conclusion === 'failure' &&
+    ['repository', 'head_repository'].every(key =>
+      prior[key]?.full_name === repository && prior[key]?.id === run.repository.id) &&
+    ['actor', 'triggering_actor'].every(key =>
+      ['id', 'login', 'type'].every(field => prior[key]?.[field] === run.actor[field])),
+  'Exact prior diagnostic run must remain an initial terminal admission failure');
+  const evidence = await api(`actions/runs/${diagnostic.priorRun}/attempts/1/jobs?per_page=100`);
+  const boundary = evidence?.jobs?.find(job => job?.id === 105005241763);
+  const request = evidence?.jobs?.find(job => job?.id === 105005305468);
+  requireThat(evidence?.total_count === 2 && Array.isArray(evidence.jobs) && evidence.jobs.length === 2 &&
+    boundary?.name === 'Verify owner and first-run boundary without publisher credentials' &&
+    boundary.conclusion === 'failure' &&
+    request?.name === 'Attempt the single fixed tag request and stop' && request.conclusion === 'skipped' &&
+    [boundary, request].every(job => job.run_id === diagnostic.priorRun && job.run_attempt === 1 &&
+      job.head_sha === diagnostic.priorSource && job.status === 'completed') &&
+    Array.isArray(request.steps) && request.steps.length === 0 &&
+    Array.isArray(boundary.steps) && isDeepStrictEqual(boundary.steps.map(step =>
+      [step?.number, step?.name, step?.status, step?.conclusion]), [
+      [1, 'Set up job', 'completed', 'success'],
+      [2, 'Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'completed', 'success'],
+      [3, 'Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'completed', 'success'],
+      [4, 'Read-only admission', 'completed', 'failure'],
+      [7, 'Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'completed', 'skipped'],
+      [8, 'Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'completed', 'success'],
+      [9, 'Complete job', 'completed', 'success'],
+    ]),
+  'Exact prior jobs must prove read-only admission failed and the request was skipped');
+  return prior;
+}
+
 async function verifyOneShot(env, api, event) {
   requireOwnerReleaseMode(env.RELEASE_APPROVAL_MODE);
-  requireThat(env.RELEASE_PUBLISHER_APP_ID === diagnostic.appId,
-    'Diagnostic publisher App must remain the existing approved App');
   requireKeys(event.inputs ?? {}, [], [], 'diagnostic inputs');
   const run = await verifyOwnerRun(env, api, event, diagnostic.workflow);
-  requireThat(run.run_number === 1 && env.GITHUB_RUN_NUMBER === '1',
-    'Diagnostic is retired after its first dispatch, including failure or cancellation');
+  requireThat(run.workflow_id === diagnostic.workflowId && run.id !== diagnostic.priorRun &&
+    run.run_number === 2 && env.GITHUB_RUN_NUMBER === '2',
+  'Diagnostic permits only the authorized successor on the original workflow, including failure or cancellation');
+  const prior = await verifyPriorAdmission(api, run);
   const history = await api(historyEndpoint);
-  const entry = history?.workflow_runs?.[0];
-  requireThat(history?.total_count === 1 && Array.isArray(history.workflow_runs) &&
-    history.workflow_runs.length === 1 &&
-    ['id', 'run_number', 'run_attempt', 'workflow_id', 'path', 'head_sha', 'head_branch',
-      'event', 'status'].every(key => entry?.[key] === run[key]) &&
-    ['actor', 'triggering_actor'].every(key =>
-      ['id', 'login', 'type'].every(field => entry?.[key]?.[field] === run[key][field])),
-  'Diagnostic history must be complete and contain only this first initial run');
+  requireThat(history?.total_count === 2 && Array.isArray(history.workflow_runs) &&
+    history.workflow_runs.length === 2 && [run, prior].every(expected =>
+      history.workflow_runs.filter(entry => sameRun(entry, expected)).length === 1),
+  'Diagnostic history must contain exactly the authorized successor and preserved prior run');
   return run;
 }
 
@@ -75,6 +118,12 @@ export async function preflightDiagnostic(env, api, event) {
   await verifyNoPublishers(api);
 }
 
+export async function preflightProtectedDiagnostic(env, api, event) {
+  requireThat(env.RELEASE_PUBLISHER_APP_ID === diagnostic.appId,
+    'Diagnostic publisher App must remain the existing approved App');
+  await preflightDiagnostic(env, api, event);
+}
+
 async function protectionSnapshot(api, env) {
   const evidence = await readReleaseProtection(api, 'insider', diagnostic.appId);
   verifyReleaseProtectionRules(evidence, 'insider', diagnostic.appId, env.RELEASE_APPROVAL_MODE);
@@ -101,7 +150,7 @@ export async function executeDiagnostic(env, readApi, publisherApi, event) {
   requireThat(env.RELEASE_PUBLICATION_ENVIRONMENT === 'release-insider' &&
     env.RELEASE_PUBLISHER_INSTALLATION_ID === diagnostic.installationId,
   'Diagnostic requires the existing insider environment and publisher installation');
-  await preflightDiagnostic(env, readApi, event);
+  await preflightProtectedDiagnostic(env, readApi, event);
   const protection = await protectionSnapshot(publisherApi, env);
   await verifyBinding(publisherApi);
   requireThat(isDeepStrictEqual(await protectionSnapshot(publisherApi, env), protection),
@@ -124,12 +173,12 @@ export function diagnosticFailure(error) {
 
 async function main(env) {
   const operation = process.argv[2];
-  requireThat(['preflight', 'request'].includes(operation) && process.argv.length === 3,
+  requireThat(['preflight', 'protected-preflight', 'request'].includes(operation) && process.argv.length === 3,
     'Unknown diagnostic operation');
   const event = readDispatchEvent(env);
   const readApi = githubClient(env.GH_TOKEN);
-  if (operation === 'preflight') {
-    await preflightDiagnostic(env, readApi, event);
+  if (operation !== 'request') {
+    await (operation === 'preflight' ? preflightDiagnostic : preflightProtectedDiagnostic)(env, readApi, event);
     return 'Read-only diagnostic boundary passed; no tag request made.';
   }
   return executeDiagnostic(env, readApi, githubClient(env.RELEASE_PUBLISHER_TOKEN), event);

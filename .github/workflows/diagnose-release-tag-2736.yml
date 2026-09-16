@@ -13,11 +13,10 @@ concurrency:
 
 env:
   RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-  RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
 
 jobs:
   boundary:
-    name: Verify owner and first-run boundary without publisher credentials
+    name: Verify owner and successor boundary without publisher credentials
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -39,6 +38,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     environment: release-insider
+    env:
+      RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
     concurrency:
       group: release-insider
       cancel-in-progress: false
@@ -53,7 +54,7 @@ jobs:
       - name: Recheck before publisher credentials
         env:
           GH_TOKEN: ${{ github.token }}
-        run: node scripts/ci/diagnose-release-tag-2736.mjs preflight
+        run: node scripts/ci/diagnose-release-tag-2736.mjs protected-preflight
       - name: Obtain existing protected publisher token
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
