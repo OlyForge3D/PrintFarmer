@@ -6,6 +6,10 @@
 
 ### Fixes
 
+- Add the owner-authorized, fixed-target one-shot tag diagnostic for #2736;
+  success creates only the tag and leaves the release reservation incomplete.
+- Release GitHub failures preserve bounded, sanitized validation and permission
+  diagnostics without changing request or recovery behavior (#2734).
 - Publication keeps the release draft until its signed manifest is verified.
 - Automatic release qualification runs after read-only admission, with genuine
   same-transaction checks and exact-tree reviewed-PR evidence before publication.

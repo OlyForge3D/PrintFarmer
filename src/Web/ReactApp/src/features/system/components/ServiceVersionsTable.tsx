@@ -66,12 +66,19 @@ export function ServiceVersionsTable({ inventory }: { inventory: ServiceInventor
           <div><dt>Selected channel</dt><dd>{inventory.selectedChannel} ({inventory.selectionSource})</dd></div>
           <div><dt>Observed channel</dt><dd>{inventory.observedChannel ?? UNKNOWN} — {inventory.channelState}</dd></div>
           <div><dt>Target channel</dt><dd>{inventory.targetChannel ?? 'Unknown — no release checks'}</dd></div>
-          <div><dt>Compatibility</dt><dd>{displayedCompatibility}: {assetSkew ? 'CachedFrontendMismatch' : inventory.compatibilityReasons.join(', ')}</dd></div>
+          <div><dt>Observed compatibility state</dt><dd>{inventory.compatibilityState}</dd></div>
+          <div><dt>Observed compatibility reasons</dt><dd>{Array.isArray(inventory.compatibilityReasons) && inventory.compatibilityReasons.length > 0 ? inventory.compatibilityReasons.join(', ') : UNKNOWN}</dd></div>
+          <div><dt>Effective frontend compatibility</dt><dd>{displayedCompatibility}: {assetSkew ? 'CachedFrontendMismatch' : Array.isArray(inventory.compatibilityReasons) && inventory.compatibilityReasons.length > 0 ? inventory.compatibilityReasons.join(', ') : UNKNOWN}</dd></div>
           <div><dt>Normal update eligibility</dt><dd>{displayedEligibility}: {assetSkew ? 'CachedFrontendMismatch, ReadOnlyInventory' : inventory.eligibilityReasons.join(', ')}</dd></div>
           <div><dt>Inventory collected</dt><dd>{timestamp(inventory.collectedAt)}</dd></div>
         </dl>
         {insider && <Alert type="warning" title="Insider channel">{INSIDER_WARNING}</Alert>}
         {inventory.compatibilityState === 'MixedChannel' && <Alert type="error" title="Mixed channels — blocked / unsafe">Stable and insider applications are not a healthy compatible update set.</Alert>}
+        {(inventory.compatibilityState === 'MixedRelease' || inventory.compatibilityState === 'Incompatible') && (
+          <Alert type="error" title="Observed compatibility conflict">
+            Observed compatibility is {inventory.compatibilityState}: {Array.isArray(inventory.compatibilityReasons) && inventory.compatibilityReasons.length > 0 ? inventory.compatibilityReasons.join(', ') : UNKNOWN}. This is observed deployment state, not a proposed target.
+          </Alert>
+        )}
         <section aria-label="Loaded frontend assets" className="space-y-2">
           <h4 className="font-semibold">Loaded frontend assets</h4>
           <p className="break-all">Source commit: {assetCommit ?? UNKNOWN}. Build time: {timestamp(buildInfo.buildTime)}.</p>
@@ -91,7 +98,7 @@ export function ServiceVersionsTable({ inventory }: { inventory: ServiceInventor
             <TableHeaderCell scope="row"><span>{service.component}</span><br /><span className="break-all">{service.instanceId ?? 'No observed replica'}</span><br />{service.required ? 'Required' : 'Optional'}</TableHeaderCell>
             <TableCell>Application build: {service.applicationVersion ?? UNKNOWN}<br />Engine: {service.engineVersion ?? UNKNOWN}</TableCell>
             <TableCell>{service.observationState}<br />{service.reasonCode}<br />Source: {service.source}<br />Last observation: {timestamp(service.observedAt)}<br />Last success: {timestamp(service.lastSuccessAt)}</TableCell>
-            <TableCell>{service.observedChannel ?? UNKNOWN} — {service.channelState}<br />{service.compatibilityState}<br />{service.compatibilityReasons.join(', ')}</TableCell>
+            <TableCell>{service.observedChannel ?? UNKNOWN} — {service.channelState}<br />{service.compatibilityState}<br />{Array.isArray(service.compatibilityReasons) && service.compatibilityReasons.length > 0 ? service.compatibilityReasons.join(', ') : UNKNOWN}</TableCell>
             <TableCell><EvidenceDetails service={service} /></TableCell>
           </TableRow>)}</TableBody>
         </Table>

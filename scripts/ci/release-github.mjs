@@ -2,8 +2,8 @@ import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, migrateLegacyLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
-  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, validateApprovalMode,
-  approvedReviewers, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
+  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, requireOwnerReleaseMode,
+  validateDispatchAssessment, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './github-evidence-pages.mjs';
@@ -149,10 +149,12 @@ export function githubRequestUrl(endpoint, method) {
     /^actions\/runs\/[1-9][0-9]*$/,
     /^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/,
     /^actions\/runs\/[1-9][0-9]*\/approvals$/,
-    /^actions\/workflows\/consolidated-release\.yml$/,
+    /^actions\/workflows\/(?:consolidated-release|diagnose-release-tag-2736)\.yml$/,
+    /^actions\/workflows\/diagnose-release-tag-2736\.yml\/runs\?per_page=100$/,
+    /^actions\/workflows\/consolidated-release\.yml\/runs\?status=(?:queued|in_progress|waiting|pending|requested)&per_page=100$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
-    /^environments\/release-(?:stable|insider)(?:-owner-dispatch)?(?:\/deployment-branch-policies)?$/,
-    /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
+    /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
+    /^rulesets(?:\/[1-9][0-9]*|\?per_page=100(?:&includes_parents=true)?)$/,
   ];
   requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
     (method === 'POST' && ['git/blobs', 'git/trees', 'git/commits', 'git/tags', 'git/refs'].includes(endpoint)) ||
@@ -171,6 +173,117 @@ export function githubRequestUrl(endpoint, method) {
   return requestUrl.href;
 }
 
+function diagnosticEndpoint(endpoint) {
+  if (/^(rules\/|rulesets|environments\/)/.test(endpoint)) return 'protection policy';
+  const templates = [
+    [/^git\/ref\/heads\//, 'git/ref/heads/{branch}'],
+    [/^git\/ref\/tags\//, 'git/ref/tags/{tag}'],
+    [/^git\/refs\/heads\//, 'git/refs/heads/{branch}'],
+    [/^git\/commits\//, 'git/commits/{sha}'],
+    [/^git\/blobs\//, 'git/blobs/{sha}'],
+    [/^git\/tags\//, 'git/tags/{sha}'],
+    [/^git\/trees\//, 'git/trees/{sha}'],
+    [/^compare\//, 'compare/{base}...{head}'],
+    [/^contents\//, 'contents/{path}'],
+    [/^commits\/[^/]+\/check-runs/, 'commits/{sha}/check-runs'],
+    [/^commits\/[^/]+\/statuses/, 'commits/{sha}/statuses'],
+    [/^commits\/[^/]+\/status/, 'commits/{sha}/status'],
+    [/^commits\/[^/]+\/pulls/, 'commits/{sha}/pulls'],
+    [/^pulls\/[^/]+\/reviews/, 'pulls/{number}/reviews'],
+    [/^pulls\//, 'pulls/{number}'],
+    [/^collaborators\//, 'collaborators/{login}/permission'],
+    [/^actions\/runs\/[^/]+\/attempts\//, 'actions/runs/{run}/attempts/{attempt}/jobs'],
+    [/^actions\/runs\/[^/]+\/approvals/, 'actions/runs/{run}/approvals'],
+    [/^actions\/runs\//, 'actions/runs/{run}'],
+    [/^actions\/workflows\//, 'actions/workflows/{workflow}'],
+  ];
+  if (['git/blobs', 'git/trees', 'git/commits', 'git/tags', 'git/refs'].includes(endpoint)) return endpoint;
+  return templates.find(([pattern]) => pattern.test(endpoint))?.[1] ?? 'unknown-redacted';
+}
+
+function diagnosticMessage(message) {
+  const categories = new Map([
+    ['Validation Failed', 'validation-failed'],
+    ['Not Found', 'not-found'],
+    ['Bad credentials', 'bad-credentials'],
+    ['Resource not accessible by integration', 'permission-denied'],
+    ['Resource not accessible by personal access token', 'permission-denied'],
+    ['Reference already exists', 'already-exists'],
+    ['Reference update failed', 'reference-update-failed'],
+    ['Update is not a fast forward', 'not-fast-forward'],
+    ['Internal Server Error', 'server-error'],
+    ['Service Unavailable', 'server-error'],
+  ]);
+  if (categories.has(message)) return categories.get(message);
+  // Match a refusal shape, not a guessed cause inferred from HTTP status.
+  if (typeof message === 'string' &&
+    /^refusing to allow a GitHub App to create or update workflow `[^`\r\n\x00-\x1f\x7f]+` without `workflows` permission$/.test(message)) {
+    return 'workflow-permission-denied';
+  }
+  return 'unknown-redacted';
+}
+
+async function githubFailureDiagnostics(response) {
+  const omitted = bodyState => ({ bodyState, messageCategory: 'unknown-redacted', errors: [], errorsState: 'omitted' });
+  let bytes;
+  try {
+    if (!response.body) return omitted('unavailable');
+    const reader = response.body.getReader();
+    try {
+      const buffer = new Uint8Array(8192);
+      let size = 0;
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        if (!(value instanceof Uint8Array)) {
+          await reader.cancel();
+          return omitted('read-failed');
+        }
+        if (value.byteLength > buffer.byteLength - size) {
+          await reader.cancel();
+          return omitted('oversized');
+        }
+        buffer.set(value, size);
+        size += value.byteLength;
+      }
+      bytes = buffer.subarray(0, size);
+    } finally {
+      reader.releaseLock();
+    }
+  } catch {
+    // Never attach a body-reader exception: its message/cause may contain secrets.
+    return omitted('read-failed');
+  }
+  if (bytes.byteLength === 0) return omitted('empty');
+  let data;
+  try {
+    data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    return omitted('invalid-json');
+  }
+  const object = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+  if (!object(data)) return omitted('malformed');
+  const recognized = (value, allowed) => allowed.includes(value) ? value : 'unknown-redacted';
+  const errors = Array.isArray(data.errors) ? data.errors.slice(0, 8).map(entry => ({
+    code: recognized(object(entry) ? entry.code : undefined,
+      ['missing', 'missing_field', 'invalid', 'already_exists', 'unprocessable', 'custom']),
+    resource: recognized(object(entry) ? entry.resource : undefined,
+      ['Reference', 'Commit', 'Tree', 'Blob', 'Tag', 'Repository']),
+    field: recognized(object(entry) ? entry.field : undefined,
+      ['ref', 'sha', 'force', 'tree', 'parents', 'content', 'encoding', 'tag', 'object', 'type', 'message', 'name', 'email']),
+    messageCategory: diagnosticMessage(object(entry) ? entry.message : undefined),
+  })) : [];
+  return {
+    bodyState: 'parsed',
+    messageCategory: diagnosticMessage(data.message),
+    errors,
+    errorsState: data.errors === undefined ? 'absent' : !Array.isArray(data.errors) ? 'malformed'
+      : data.errors.length > 8 ? 'truncated' : 'complete',
+  };
+}
+
+export class GithubReleaseRequestError extends Error {}
+
 export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
   requireThat(token, 'Missing GitHub credential');
   return async (endpoint, method = 'GET', body) => {
@@ -183,9 +296,10 @@ export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
         }, body: body ? JSON.stringify(body) : undefined,
       });
       if (!response.ok || response.redirected) {
-        const target = /^(rules\/|rulesets|environments\/)/.test(endpoint) ? 'protection policy' : endpoint;
-        const error = new Error(`GitHub ${method} ${target}: HTTP ${response.status}`);
+        const diagnostics = await githubFailureDiagnostics(response);
+        const error = new GithubReleaseRequestError(`GitHub ${method} ${diagnosticEndpoint(endpoint)}: HTTP ${response.status}; ${JSON.stringify(diagnostics)}`);
         error.status = response.status;
+        error.diagnostics = diagnostics;
         throw error;
       }
       return { data: response.status === 204 ? undefined : await response.json(), link: response.headers.get('link') };
@@ -451,9 +565,23 @@ export function parseGithubTimestamp(value, description = 'GitHub timestamp') {
   return parsed;
 }
 
-export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit,
-  dispatchAuthorization) {
-  validateApprovalMode(approvalMode);
+export async function verifyProtection(api, channel, publisherAppId, approvalMode, dispatchAuthorization, sourceCommit) {
+  requireOwnerReleaseMode(approvalMode);
+  validateDispatchAssessment(dispatchAuthorization);
+  requireThat(dispatchAuthorization.ownerDispatchEligible && dispatchAuthorization.channel === channel,
+    'Live owner dispatch is required for protection verification');
+  const evidence = await readReleaseProtection(api, channel, publisherAppId);
+  evidence.dispatchAuthorization = dispatchAuthorization;
+  const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode);
+  if (sourceCommit !== undefined) {
+    const required = evidence.branchRules.filter(rule => rule.type === 'required_status_checks')
+      .flatMap(rule => rule.parameters.required_status_checks);
+    await verifyReleaseChecks(api, sourceCommit, required);
+  }
+  return normalized;
+}
+
+export async function readReleaseProtection(api, channel, publisherAppId) {
   const readPolicy = async endpoint => {
     try { return await api(endpoint); }
     catch (error) {
@@ -473,11 +601,11 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
     requireThat(detail?.id === id, 'Branch ruleset identity changed during verification');
     branchRulesets.push(detail);
   }
-  const environmentName = `release-${channel}${dispatchAuthorization ? '-owner-dispatch' : ''}`;
+  const environmentName = `release-${channel}`;
   const environment = await readPolicy(`environments/${environmentName}`);
   const branchPolicies = await readPolicy(`environments/${environmentName}/deployment-branch-policies`);
   const allRulesets = await readPolicy('rulesets?per_page=100');
-  requireThat(allRulesets.length < 100, 'Ruleset listing may be truncated');
+  requireThat(Array.isArray(allRulesets) && allRulesets.length < 100, 'Ruleset listing malformed or truncated');
   const rulesets = [];
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
@@ -489,55 +617,40 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
     verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies,
-    rulesets, ...(dispatchAuthorization ? { dispatchAuthorization } : {}) };
-  const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
-  if (sourceCommit !== undefined) {
-    const required = branchRules.filter(rule => rule.type === 'required_status_checks')
-      .flatMap(rule => rule.parameters.required_status_checks);
-    await verifyReleaseChecks(api, sourceCommit, required);
-  }
-  return normalized;
+    rulesets };
+  return evidence;
 }
 
 
 export async function verifyAbandonmentApproval(api, transaction, record, targetReservation,
-  ownerApprovedReviewers, now = Date.now()) {
+  dispatchAuthorization, now = Date.now()) {
+  validateDispatchAssessment(dispatchAuthorization);
+  requireThat(dispatchAuthorization.ownerDispatchEligible &&
+    dispatchAuthorization.operation === 'abandon' && dispatchAuthorization.channel === 'insider' &&
+    dispatchAuthorization.reservationTarget === targetReservation &&
+    dispatchAuthorization.runId === transaction?.runId &&
+    dispatchAuthorization.executionAttempt === transaction?.runAttempt,
+  'Abandonment requires the exact fresh owner dispatch');
   requireThat(record.channel === 'insider' && targetReservation === record.allocationKey,
     'Abandonment target does not match the immutable reservation');
   requireString(transaction?.runId, /^[1-9][0-9]*$/, 'abandonment workflow run');
   requireString(transaction?.runAttempt, /^[1-9][0-9]*$/, 'abandonment workflow attempt');
   requireThat(transaction.runAttempt === '1',
     'Abandonment is restricted to the initial protected workflow attempt');
-  const run = await api(`actions/runs/${transaction.runId}`);
-  requireThat(run?.id === Number(transaction.runId) && run.run_attempt === Number(transaction.runAttempt) &&
-    run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
-    run.path === '.github/workflows/consolidated-release.yml' && run.event === 'workflow_dispatch',
-  'Abandonment workflow run evidence is malformed or mismatched');
   const jobs = await api(`actions/runs/${transaction.runId}/attempts/${transaction.runAttempt}/jobs?per_page=100`);
-  requireThat(jobs?.total_count === jobs.jobs?.length && jobs.jobs.length > 0,
+  requireThat(Array.isArray(jobs?.jobs) && jobs.total_count === jobs.jobs.length && jobs.jobs.length > 0,
     'Abandonment workflow job evidence is missing or truncated');
   const protectedJobs = jobs.jobs.filter(candidate => candidate?.run_id === Number(transaction.runId) &&
     candidate.run_attempt === Number(transaction.runAttempt) &&
     candidate.name === abandonmentProtectedJobName &&
-    typeof candidate.started_at === 'string');
+    candidate.status === 'in_progress' && typeof candidate.started_at === 'string');
   requireThat(protectedJobs.length === 1, 'Abandonment protected job evidence is missing, ambiguous, or mismatched');
   const [job] = protectedJobs;
   requireThat(job && Number.isSafeInteger(job.id) && job.id > 0 &&
     job.run_id === Number(transaction.runId) && job.run_attempt === Number(transaction.runAttempt),
   'Abandonment protected job evidence is missing or mismatched');
-  const approvals = await api(`actions/runs/${transaction.runId}/approvals`);
-  requireThat(Array.isArray(approvals) && approvals.length > 0,
-    'Abandonment environment approval evidence is missing or malformed');
-  const allowed = new Set(approvedReviewers(ownerApprovedReviewers));
   const environment = 'release-insider';
-  const approval = approvals
-    .filter(candidate => candidate?.state === 'approved' &&
-      Array.isArray(candidate.environments) && candidate.environments.length === 1 &&
-      candidate.environments[0]?.name === environment &&
-      allowed.has(candidate.user?.login?.toLowerCase()))
-    [0];
-  requireThat(approval, 'Abandonment requires approval from an allowed owner');
-  // GitHub's approval-history response has no timestamp; protected job start proves approval completed.
+  // The live dispatch is authority; the active protected job bounds its execution window.
   const approvedAt = parseGithubTimestamp(job.started_at, 'abandonment protected job start timestamp');
   requireThat(Number.isFinite(now) && approvedAt <= now, 'Abandonment approval is future-dated');
   return {

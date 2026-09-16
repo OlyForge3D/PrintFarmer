@@ -467,16 +467,16 @@ Server releases use one [branch-bound release workflow](docs/RELEASE_GUIDE.md):
 stable from `main`, explicitly opted-in insider from `development`. Release
 activation requires owner-approved protections and allocator continuity.
 The normal form exposes only the channel and an optional full source SHA; one
-approval on `release-stable` or `release-insider` covers the complete protected
+owner manual dispatch using existing `release-stable` or `release-insider` covers the complete protected
 publication transaction. No rehearsal or alternate live diagnostic path exists;
 validation uses automated tests, static analysis, code review, and fail-closed checks.
 Set an explicit [release approval mode](docs/RELEASE_GUIDE.md#explicit-release-approval-configuration):
-single-maintainer (owner-confirmed/self-attested) or separation-of-duties;
-both require manual environment approval with administrator bypass disabled.
+`single-maintainer` (owner-dispatched/self-attested), with no second environment
+approval and administrator bypass disabled. Non-owner/scheduled runs and reruns
+are rejected; necessary insider abandonment requires a fresh explicit owner dispatch.
 Single-maintainer uses PR-only flow, exact-SHA self-attested review/build checks,
 resolved conversations and no branch bypass/force-push/deletion, without an
-unsatisfiable native approval count. Separation-of-duties additionally requires
-native code-owner and non-self approval. Owner confirmation is not independent
+unsatisfiable native approval count. Owner confirmation is not independent
 authorization. Canonical release SHAs need their own genuine review evidence;
 PR-head statuses cannot be copied to later squash/merge commits.
 `consolidated-release.yml` automatically runs exact-source qualification before

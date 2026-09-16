@@ -241,14 +241,14 @@ export function hash(value) {
 export function admit(context, selectedHead, versionText, lastStable) {
   requireObject(context, 'release admission context');
   requireThat(context.repository === repository, 'Untrusted repository');
-  requireThat(['workflow_dispatch', 'schedule'].includes(context.event), 'Event cannot authorize publication');
+  requireThat(context.event === 'workflow_dispatch', 'Event cannot authorize publication');
   requireThat(context.workflowIdentity === `${repository}/${workflow}@refs/heads/development`,
     'Untrusted workflow/caller identity');
   requireString(context.workflowSha, shaPattern, 'workflow commit');
   if (context.observedBranchHead === undefined) {
     requireThat(context.workflowSha === context.eventSha, 'Workflow SHA mismatch');
   }
-  const channel = context.event === 'schedule' ? 'insider' : context.channel;
+  const channel = context.channel;
   const sourceBranch = channel === 'stable' ? 'main' : 'development';
   requireThat(['stable', 'insider'].includes(channel), 'Invalid channel');
   requireThat(context.ref === 'refs/heads/development', 'Release control must run from development');
@@ -264,7 +264,6 @@ export function admit(context, selectedHead, versionText, lastStable) {
   const stage = channel === 'stable' ? undefined : (context.stage || 'insider');
   requireThat(!stage || ['insider', 'beta', 'rc'].includes(stage), 'Unsupported stage');
   requireThat(channel !== 'stable' || !context.stage, 'Stable cannot select a stage');
-  requireThat(context.event !== 'schedule' || stage === 'insider', 'Schedule only supports ordinary insider');
   if (channel === 'insider' && lastStable) {
     requireThat(compareVersions(baseVersion, lastStable) > 0, 'Development base must exceed published stable');
   }
@@ -756,16 +755,9 @@ export function validateApprovalMode(mode) {
   return mode;
 }
 
-export function approvedReviewers(value) {
-  if (value === undefined || value === '') return ['jpapiez'];
-  let reviewers;
-  try { reviewers = JSON.parse(value); } catch {
-    throw new ReleasePolicyError('Owner blocker: invalid owner-approved reviewer configuration');
-  }
-  requireThat(Array.isArray(reviewers) && reviewers.length > 0 && reviewers.every(login =>
-    typeof login === 'string' && /^[a-z\d](?:[a-z\d-]{0,37}[a-z\d])?$/i.test(login) && !/[\r\n]/.test(login)),
-  'Owner blocker: invalid owner-approved reviewer configuration');
-  return ['jpapiez', ...reviewers.map(login => login.toLowerCase())];
+export function requireOwnerReleaseMode(mode) {
+  requireThat(mode === 'single-maintainer',
+    'Owner blocker: RELEASE_APPROVAL_MODE must be single-maintainer for release operations');
 }
 
 export function validateDispatchAssessment(value) {
@@ -790,7 +782,7 @@ export function validateDispatchAssessment(value) {
     value.channel === 'insider' && hashPattern.test(value.reservationTarget),
   'Invalid dispatch operation binding');
   requireThat(!value.ownerDispatchEligible || (value.executionAttempt === '1' &&
-    value.event === 'workflow_dispatch' && value.operation === 'publish' &&
+    value.event === 'workflow_dispatch' &&
     value.approvalMode === 'single-maintainer'),
   'Dispatch authority cannot be inherited by another execution path');
   return value;
@@ -798,35 +790,37 @@ export function validateDispatchAssessment(value) {
 
 export function publicationEnvironment(assessment) {
   validateDispatchAssessment(assessment);
-  return `release-${assessment.channel}${assessment.ownerDispatchEligible ? '-owner-dispatch' : ''}`;
+  requireThat(assessment.ownerDispatchEligible, 'Only a verified owner manual dispatch authorizes release access');
+  return `release-${assessment.channel}`;
 }
 
-function eligibleReviewer(entry) {
-  return entry && ['User', 'Team'].includes(entry.type) &&
-    Number.isSafeInteger(entry.reviewer?.id) && entry.reviewer.id > 0 &&
-    typeof entry.reviewer[entry.type === 'User' ? 'login' : 'slug'] === 'string' &&
-    entry.reviewer[entry.type === 'User' ? 'login' : 'slug'].length > 0;
-}
-
-export function verifyEnvironmentRestrictions(environment, policies, channel, ownerDispatch = false) {
-  requireThat(environment?.name === `release-${channel}${ownerDispatch ? '-owner-dispatch' : ''}` &&
+export function verifyEnvironmentRestrictions(environment, policies, channel) {
+  requireThat(environment?.name === `release-${channel}` &&
     environment.deployment_branch_policy?.custom_branch_policies === true,
   'Owner blocker: publishing environment lacks branch restrictions');
   requireThat(environment.can_admins_bypass === false,
     'Owner blocker: publishing environment must explicitly disable administrator bypass');
-  requireThat(policies?.branch_policies?.length === 1 &&
+  requireThat(policies?.total_count === 1 && Array.isArray(policies.branch_policies) &&
+    policies.branch_policies.length === 1 &&
     policies.branch_policies[0].name === 'development' && policies.branch_policies[0].type === 'branch',
   'Owner blocker: publishing environment must allow only the immutable release-control branch');
-  if (ownerDispatch) {
-    requireThat(environment.deployment_branch_policy.protected_branches === false &&
-      Array.isArray(environment.protection_rules) && environment.protection_rules.length === 1 &&
-      environment.protection_rules[0].type === 'branch_policy',
-    'Owner blocker: owner-dispatch environment must have only its branch protection rule');
-  }
+  requireThat(environment.deployment_branch_policy.protected_branches === false &&
+    Array.isArray(environment.protection_rules) && environment.protection_rules.length === 1 &&
+    environment.protection_rules[0]?.type === 'branch_policy',
+  'Owner blocker: release environment must have only its branch protection rule, without second approval');
 }
 
-export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers) {
-  validateApprovalMode(approvalMode);
+export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode) {
+  verifyReleaseProtectionRules(evidence, channel, publisherAppId, approvalMode);
+  const { dispatchAuthorization } = evidence;
+  validateDispatchAssessment(dispatchAuthorization);
+  requireThat(dispatchAuthorization.ownerDispatchEligible === true &&
+    dispatchAuthorization.channel === channel && dispatchAuthorization.approvalMode === approvalMode,
+  'Owner dispatch protection evidence does not match the release policy');
+}
+
+export function verifyReleaseProtectionRules(evidence, channel, publisherAppId, approvalMode) {
+  requireOwnerReleaseMode(approvalMode);
   const branch = channel === 'stable' ? 'main' : 'development';
   requireThat(evidence?.schema === 1 && evidence.repository === repository &&
     ['stable', 'insider'].includes(channel) && evidence.channel === channel && evidence.branch === branch &&
@@ -835,14 +829,8 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   'Missing or mismatched publisher protection evidence');
   const {
     branchRules: rules, branchRulesets, environment, branchPolicies: policies,
-    rulesets, dispatchAuthorization,
+    rulesets,
   } = evidence;
-  if (dispatchAuthorization !== undefined) {
-    validateDispatchAssessment(dispatchAuthorization);
-    requireThat(dispatchAuthorization.ownerDispatchEligible === true &&
-      dispatchAuthorization.channel === channel && dispatchAuthorization.approvalMode === approvalMode,
-    'Owner dispatch protection evidence does not match the release policy');
-  }
   requireThat(Array.isArray(rules) && rules.length > 0 && rules.length < 100 &&
     rules.every(rule => rule && typeof rule.type === 'string' &&
       Number.isSafeInteger(rule.ruleset_id) && rule.ruleset_id > 0) &&
@@ -869,15 +857,13 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   for (const type of ['deletion', 'non_fast_forward', 'pull_request', 'required_status_checks']) {
     requireThat(rules.some(rule => rule.type === type), `Owner blocker: ${branch} lacks active ${type} rule`);
   }
-  const separation = approvalMode === 'separation-of-duties';
   for (const { parameters: policy } of rules.filter(rule => rule.type === 'pull_request')) {
-    requireThat(policy && policy.require_code_owner_review === separation &&
+    requireThat(policy && policy.require_code_owner_review === false &&
       Number.isSafeInteger(policy.required_approving_review_count) &&
-      (separation ? policy.required_approving_review_count >= 1 : policy.required_approving_review_count === 0) &&
-      policy.required_approving_review_count <= 6 &&
+      policy.required_approving_review_count === 0 &&
       policy.required_review_thread_resolution === true &&
       typeof policy.require_last_push_approval === 'boolean' &&
-      (!policy.require_last_push_approval || separation) &&
+      policy.require_last_push_approval === false &&
       policy.dismiss_stale_reviews_on_push === true,
     'Owner blocker: branch PR review policy conflicts with approval mode or lacks conversation resolution');
   }
@@ -893,24 +879,7 @@ export function verifyRawProtectionEvidence(evidence, channel, publisherAppId, a
   }
   requireThat(releaseRequiredChecks.every(context => requiredContexts.has(context)),
     'Owner blocker: required release checks or squad/pre-pr-verdict status missing');
-  verifyEnvironmentRestrictions(environment, policies, channel, Boolean(dispatchAuthorization));
-  const reviewerRules = Array.isArray(environment.protection_rules)
-    ? environment.protection_rules.filter(rule => rule.type === 'required_reviewers') : [];
-  if (!dispatchAuthorization) {
-    requireThat(reviewerRules.length === 1 && Array.isArray(reviewerRules[0].reviewers) &&
-      reviewerRules[0].reviewers.length > 0 && reviewerRules[0].reviewers.every(eligibleReviewer),
-    'Owner blocker: publishing environment requires manual approval by eligible reviewers');
-    const reviewerRule = reviewerRules[0];
-    requireThat(reviewerRule.prevent_self_review === (approvalMode === 'separation-of-duties'),
-      'Owner blocker: publishing environment self-review setting conflicts with approval mode');
-    if (approvalMode === 'single-maintainer') {
-      const approved = approvedReviewers(ownerApprovedReviewers);
-      // GitHub accepts any one listed reviewer, so every possible approver must be owner-approved.
-      requireThat(reviewerRule.reviewers.every(entry => entry.type === 'User' &&
-        approved.includes(entry.reviewer.login.toLowerCase())),
-      'Owner blocker: publishing environment reviewers must be explicitly owner-approved users');
-    }
-  }
+  verifyEnvironmentRestrictions(environment, policies, channel);
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
     const rule = rulesets.find(item => item.name === name && item.enforcement === 'active');
@@ -951,19 +920,17 @@ function approvalAssurance(mode, dispatch = false) {
   return mode === 'single-maintainer' ? 'owner-confirmed/self-attested' : 'non-self-review-enforced';
 }
 
-export function normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers) {
-  verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
+export function normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode) {
+  verifyRawProtectionEvidence(evidence, channel, publisherAppId, approvalMode);
   // Digest only public claims, never low-entropy actor IDs or raw API payloads.
   const attestation = {
-    schema: evidence.dispatchAuthorization ? 6 : 5, repository, channel, branch: evidence.branch,
+    schema: 6, repository, channel, branch: evidence.branch,
     verifiedAt: evidence.verifiedAt,
-    policyProfile: evidence.dispatchAuthorization ? 'printfarmer-release-protection/v5' : protectionProfile,
-    approvalMode, approvalAssurance: approvalAssurance(approvalMode, Boolean(evidence.dispatchAuthorization)),
+    policyProfile: 'printfarmer-release-protection/v5',
+    approvalMode, approvalAssurance: approvalAssurance(approvalMode, true),
     claims: { ...Object.fromEntries(protectionClaims.map(claim => [claim, true])),
-      manualApprovalRequired: !evidence.dispatchAuthorization,
-      codeOwnerApprovalRequired: approvalMode === 'separation-of-duties',
-      nonSelfApprovalRequired: approvalMode === 'separation-of-duties' },
-    ...(evidence.dispatchAuthorization ? { dispatchAuthorization: evidence.dispatchAuthorization } : {}),
+      manualApprovalRequired: false, codeOwnerApprovalRequired: false, nonSelfApprovalRequired: false },
+    dispatchAuthorization: evidence.dispatchAuthorization,
   };
   return { ...attestation, policyDigest: hash(attestation) };
 }
@@ -1365,6 +1332,11 @@ export function abandonmentAuthorization(record, protection, approval, now = Dat
   verifyProtectionEvidence(protection, record.channel);
   requireKeys(approval, ['runId', 'runAttempt', 'jobId', 'environment', 'targetReservation', 'approvedAt'], [],
     'abandonment approval');
+  const dispatch = protection.dispatchAuthorization;
+  requireThat(dispatch?.ownerDispatchEligible && dispatch.operation === 'abandon' &&
+    dispatch.reservationTarget === record.allocationKey && dispatch.runId === approval.runId &&
+    dispatch.executionAttempt === approval.runAttempt,
+  'Abandonment requires the exact fresh owner dispatch');
   requireThat(positivePattern.test(approval.runId) && positivePattern.test(approval.runAttempt) &&
     positivePattern.test(approval.jobId) && approval.environment === `release-${record.channel}` &&
     approval.targetReservation === record.allocationKey, 'Abandonment approval is not bound to the release reservation');
@@ -1389,6 +1361,12 @@ export function abandon(state, record, authorization, protection) {
   validateLedger(state, state.anchor);
   validateRecord(record);
   verifyProtectionEvidence(protection, record.channel);
+  const dispatch = protection.dispatchAuthorization;
+  requireThat(dispatch?.ownerDispatchEligible && dispatch.operation === 'abandon' &&
+    dispatch.reservationTarget === record.allocationKey &&
+    dispatch.runId === authorization?.approvalRunId &&
+    dispatch.executionAttempt === authorization?.approvalRunAttempt,
+  'Abandonment requires the exact fresh owner dispatch');
   requireThat(record.channel === 'insider' && authorization?.schema === 1 &&
     authorization.kind === 'release-reservation-abandonment' &&
     authorization.identitySha256 === hash(record) && authorization.allocationKey === record.allocationKey &&
@@ -1439,7 +1417,7 @@ export function verifyConsumer(record, reservation, context, identitySha256 = re
     record.sourceBranch === (record.channel === 'stable' ? 'main' : 'development') &&
     ['stable', 'insider'].includes(record.channel) &&
     context.buildId === record.buildId &&
-    ['workflow_dispatch', 'schedule'].includes(context.event),
+    context.buildAttempt === '1' && context.event === 'workflow_dispatch',
   'Unauthorized consumer/caller/run/attempt');
 }
 

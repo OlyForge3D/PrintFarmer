@@ -358,6 +358,8 @@ jobs:
           scripts/ci/tests/test-release-evidence.mjs
           scripts/ci/tests/test-release-source-metadata.mjs
           scripts/ci/tests/test-release-transaction.mjs
+          scripts/ci/tests/test-release-dispatch.mjs
+          scripts/ci/tests/test-diagnose-release-tag-2736.mjs
           scripts/ci/tests/test-github-evidence-pages.mjs
 
       - name: Test daily development image-set policy

@@ -184,17 +184,17 @@ automated release path.
 **Approval corrections (#2682, #2684):** activation under #2668 requires the
 explicit `RELEASE_APPROVAL_MODE` policy. Under #2728/#2729, the initial authenticated
 owner manual server-publication dispatch authorizes the exact transaction in
-`single-maintainer` mode without a second environment approval. Other eligible paths
-retain manual approval by the owner or an explicitly owner-approved user,
-with self-review prevention disabled. Assurance is honestly owner-dispatched or
-owner-confirmed/self-attested, never separation of duties. The alternative
-`separation-of-duties` mode requires self-review prevention and at least one
-eligible reviewer, plus native branch code-owner review and at least one
-non-self native PR approval. Single-maintainer instead requires zero native
+`single-maintainer` mode without a second environment approval. Under #2732,
+only fresh owner manual dispatch is supported, using the existing `release-stable`
+and `release-insider` credentials/history. Non-owner runs, schedules and reruns are
+rejected rather than routed to reviewer fallback. Explicit insider abandonment is
+also bound to a fresh owner dispatch and immutable reservation target.
+Assurance is honestly owner-dispatched/self-attested, never separation of duties.
+Single-maintainer requires zero native
 approvals and no code-owner/last-push approval requirement; its PR-only branch
 flow uses the exact-SHA `squad/pre-pr-verdict` status and build checks,
-conversation resolution and no bypass/force-push/deletion. Both modes retain
-these branch/check controls and require the live environment response to explicitly
+conversation resolution and no bypass/force-push/deletion. These branch/check
+controls remain mandatory, and the live environment response must explicitly
 report `can_admins_bypass: false` before reservation; required reviewers alone
 are insufficient. Missing/unknown modes and admission/authorization mode drift
 fail closed. Normalized schema 5/v4 explicit-approval evidence remains readable;
@@ -323,7 +323,8 @@ unknown; do not relabel it from the selected channel.
   and no unreviewed force-push/tag replacement. Release-policy/workflow changes
   need designated-owner review; record allowed actors and bypass policy.
   Publication must verify trusted repository, resolved commit and branch
-  relationship at runtime for push, tag, manual, scheduled and reusable calls.
+  relationship at runtime. Only a fresh owner manual dispatch is accepted;
+  pushes, tags, schedules, reruns and direct reusable calls are rejected.
   A matching tag name alone cannot prove origin. Fork/PR/feature-branch events
   never acquire publishing/signing authority. Short-lived stabilization
   branches may merge into `main` and back to `development`, never publish.
@@ -422,8 +423,8 @@ the immutable authorized SHA stays valid without chasing the branch.
 | Branch push | Development may admit insider through the allocator; main may validate but cannot publish stable aliases without an authorized exact stable tag. Release/feature/PR/fork refs never publish. |
 | Tag push | Strict grammar, VERSION/base equality, peeled tag SHA equals approved source SHA, trusted branch-at-authorization evidence and publisher identity. Direct unauthorized tags fail even when their commit is reachable from main. |
 | Manual dispatch | Canonical selected branch/channel only; resolve once, validate VERSION and tag request, allocate insider N centrally. Caller-supplied suffix/ref/sequence is not authority. |
-| Schedule | Trusted workflow revision selects/pins development HEAD explicitly; default-branch event context is not provenance. Stable scheduled publication is denied. |
-| Reusable call or retry | Validate trusted caller and the same immutable authorization record; no bypass via supplied channel/SHA. Reruns obey allocator immutability and stale-pointer rules; moved/deleted/recreated tags fail verification. |
+| Schedule | Rejected for both channels; publication requires a fresh owner manual dispatch. |
+| Reusable call or retry | Only the canonical owner dispatch may call the publisher. Retry byte-identical work inside the active first attempt; a rerun is rejected and needs a fresh owner dispatch. Moved/deleted/recreated tags fail verification. |
 
 All gates run read-only before write/signing authority. Restrict branch, tag
 creation/deletion/update and publishing environment permissions; require
@@ -1196,7 +1197,7 @@ production validation runs are implied by this design document.
 | --- | --- |
 | Stable tag on development/feature/fork, manual wrong ref, reusable caller spoof | Denied before publication credentials or artifacts; main ancestry and exact VERSION/tag match required. #2668 |
 | Insider request from main; malformed or stale VERSION; mismatched tag | Denied; only development plus the approved derivation publishes insider. #2668 |
-| Run retry, attempt change, old-run rerun, counter reset, concurrent pointer writes | Same allocation key reuses N; new attempt reserves greater N. No reuse/reset/overwrite; stale source or lower canonical version cannot advance a pointer. #2668/#2660 |
+| Run retry, attempt change, old-run rerun, counter reset, concurrent pointer writes | Byte-identical active-attempt retries retain N. Reruns are rejected; fresh owner dispatch allocates a new insider identity. Explicit owner abandonment consumes the old identity permanently. No reuse/reset/overwrite; stale source or lower canonical version cannot advance a pointer. #2732/#2668/#2660 |
 | Supported insider versus malformed or `ios/` tags and numeric edge cases | Preserve namespace isolation; define stricter numeric/allocator validation separately. Current regexes do not reject zero/leading zeros. #2668/#2660 |
 | Bare release, release/vX.Y.Z or arbitrary release refs | Candidate validation only; no signing/publication. Verify owner/expiry, main exact tag, reviewed merge-back, abandonment and deletion evidence. #2668 |
 | Main moves between admission/tag/build; tag is moved or recreated | Reject pre-authorization drift; after authorization build only recorded exact SHA and verify immutable tag. Ancestry alone is insufficient. #2668 |
@@ -1327,3 +1328,8 @@ does not create issues or mutate graph relationships.
     immutable identity and qualified main rebuild promotion are mandatory.
     No permanent release channels; short-lived stabilization lifecycle and
     merge-back are settled. Operational owners/expiry limits remain gated.
+
+
+## Admin update surface
+
+`/admin/updates` is a read-only, permission-gated release-availability surface until the constrained executor and scheduler acceptance contracts are present. It distinguishes selected policy, observed installation, and proposed target; missing or disconnected observation is **Unknown**, never completion. Its disabled Update now and Auto-update controls do not issue host commands, bypass reauthentication/origin protections, or grant view users execution. Future executor integration must bind confirmation and history to immutable release identity, manifest digest, policy revision, plan, expiry, and idempotency key; drift invalidates approval.

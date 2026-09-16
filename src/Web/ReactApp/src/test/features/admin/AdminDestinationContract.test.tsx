@@ -16,6 +16,7 @@ import { SystemStatusPage } from '@/features/system/pages/SystemStatusPage';
 import { WorkerManagementPage } from '@/features/slicer/pages/WorkerManagementPage';
 import { LoginAuditPage } from '@/features/admin/pages/LoginAuditPage';
 import { DataManagementPage } from '@/features/admin/pages/DataManagementPage';
+import { InstallerUpdatesPage } from '@/features/admin/pages/InstallerUpdatesPage';
 import { resolveSettingsNavigationTarget } from '@/features/settings/settings-navigation';
 import { GlobalCommandPaletteProvider } from '@/features/settings/components/GlobalCommandPaletteProvider';
 
@@ -202,6 +203,7 @@ function renderShellAt(path: string) {
 const STANDALONE_RENDERERS: Record<string, () => void> = {
   ...Object.fromEntries([
     ['ops-status', '/admin/status', <SystemStatusPage />],
+    ['ops-installer-updates', '/admin/updates', <InstallerUpdatesPage />],
     ['ops-workers', '/admin/workers', <WorkerManagementPage tabQueryParamName="workerTab" embedded />],
     ['users-audit', '/admin/login-audit', <LoginAuditPage embedded />],
     ['data-management', '/admin/data-management', <DataManagementPage embedded />],

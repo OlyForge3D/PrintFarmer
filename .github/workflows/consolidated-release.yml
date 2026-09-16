@@ -23,15 +23,13 @@ on:
         description: Immutable insider reservation allocation key required only for abandonment
         type: string
         required: false
-  schedule:
-    - cron: '27 9 * * *'
 
 permissions:
   contents: read
   pull-requests: read
 
 concurrency:
-  group: release-${{ (inputs.operation || 'publish') == 'abandon' && 'insider' || (github.event_name == 'schedule' && 'insider' || inputs.channel) }}
+  group: release-${{ inputs.channel }}
   cancel-in-progress: false
 
 jobs:
@@ -57,19 +55,11 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - name: Recover immutable original transaction for a same-run rerun
-        if: github.run_attempt > 1
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh run download "$GITHUB_RUN_ID"
-          --name "release-transaction-${GITHUB_RUN_ID}-1"
-          --dir .artifacts/release-transaction
       - name: Resolve and bind canonical source once
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CHANNEL: ${{ (inputs.operation || 'publish') == 'abandon' && 'insider' || (github.event_name == 'schedule' && 'insider' || inputs.channel) }}
+          RELEASE_CHANNEL: ${{ inputs.channel }}
           RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
         run: |
@@ -77,13 +67,15 @@ jobs:
           transaction="$(node scripts/ci/release-transaction.mjs select)"
           echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
       - name: Admit immutable release transaction
-        if: (inputs.operation || 'publish') == 'publish'
+        if: inputs.operation == 'publish'
         id: admit
         env:
           GH_TOKEN: ${{ github.token }}
           RELEASE_TRANSACTION: ${{ steps.select.outputs.transaction }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+          RELEASE_OPERATION: ${{ inputs.operation }}
+          RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
         run: node scripts/ci/release-control.mjs admit
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -94,7 +86,7 @@ jobs:
           retention-days: 30
 
   qualification:
-    if: (inputs.operation || 'publish') == 'publish'
+    if: inputs.operation == 'publish'
     name: Automatic exact-source qualification
     needs: admit
     uses: ./.github/workflows/ci.yml
@@ -106,7 +98,7 @@ jobs:
       source_branch: ${{ needs.admit.outputs.channel == 'stable' && 'main' || 'development' }}
 
   collect-qualification:
-    if: (inputs.operation || 'publish') == 'publish'
+    if: inputs.operation == 'publish'
     name: Collect genuine qualification evidence
     needs: [admit, qualification]
     runs-on: ubuntu-latest
@@ -166,7 +158,7 @@ jobs:
 
   publish:
     if: >-
-      always() && needs.admit.result == 'success' && ((inputs.operation || 'publish') == 'abandon' ||
+      always() && needs.admit.result == 'success' && (inputs.operation == 'abandon' ||
       (needs.qualification.result == 'success' && needs.collect-qualification.result == 'success'))
     name: Approve and execute immutable release operation
     needs: [admit, qualification, collect-qualification]
@@ -181,7 +173,7 @@ jobs:
       id-token: write
     with:
       transaction: ${{ needs.admit.outputs.transaction }}
-      operation: ${{ inputs.operation || 'publish' }}
+      operation: ${{ inputs.operation }}
       reservation_target: ${{ inputs.reservation_target }}
     secrets: inherit
 
@@ -194,7 +186,7 @@ jobs:
     steps:
       - name: Write bounded result
         env:
-          CHANNEL: ${{ github.event_name == 'schedule' && 'insider' || inputs.channel }}
+          CHANNEL: ${{ inputs.channel }}
           SOURCE_SHA: ${{ needs.admit.outputs.source_sha }}
           QUALIFICATION: ${{ needs.qualification.result }}
           EVIDENCE: ${{ needs.collect-qualification.result }}
@@ -218,6 +210,6 @@ jobs:
             echo "- canonical identity: \`${PUBLIC_IDENTITY:-not-authorized}\`"
             echo "- published set digest: \`${PUBLISHED_SET_DIGEST:-not-published}\`"
             if [ "$PUBLICATION" != success ]; then
-              echo "- action: inspect the failed admission, qualification, approval, authorization, or publication job above; no secret values are included here"
+              echo "- action: inspect the failed admission, qualification, authorization, or publication job above; no secret values are included here"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
