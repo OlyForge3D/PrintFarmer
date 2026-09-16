@@ -293,7 +293,7 @@ public sealed class HostUpdateFoundation(
                 HostUpdateValidation.SnapshotMatchesTrustedPlan(latest.Snapshot, plan, metadata, installation) &&
                 receipt.IsValidFor(plan, metadata, installation) => HostUpdateStageResult.Staged(receipt),
             HostUpdateLifecycle.Staged => HostUpdateStageResult.NeedsOperator("staged_receipt_untrusted"),
-            HostUpdateLifecycle.Staging or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator or HostUpdateLifecycle.RolledBack =>
+            HostUpdateLifecycle.Approved or HostUpdateLifecycle.Staging or HostUpdateLifecycle.Failed or HostUpdateLifecycle.NeedsOperator or HostUpdateLifecycle.RolledBack =>
                 HostUpdateStageResult.NeedsOperator("operation_unreconciled"),
             _ => null,
         };
@@ -528,13 +528,12 @@ public sealed record HostUpdateStagingReceipt(bool IsComplete, string Code, Cano
             HostUpdateValidation.DigestsEqual(actual, expected));
 }
 
-/// <summary>Reports completed staging, recoverable failure, or explicit operator intervention.</summary>
-public sealed record HostUpdateStageResult(bool IsStaged, bool IsRecoverableFailure, bool RequiresOperator, string Code, HostUpdateStagingReceipt? Receipt)
+/// <summary>Reports completed staging, rejection, or explicit operator intervention.</summary>
+public sealed record HostUpdateStageResult(bool IsStaged, bool RequiresOperator, string Code, HostUpdateStagingReceipt? Receipt)
 {
-    public static HostUpdateStageResult Staged(HostUpdateStagingReceipt receipt) => new(true, false, false, "staged", receipt);
-    public static HostUpdateStageResult RecoverableFailure(string code) => new(false, true, false, code, null);
-    public static HostUpdateStageResult Rejected(string code) => new(false, false, false, code, null);
-    public static HostUpdateStageResult NeedsOperator(string code) => new(false, false, true, code, null);
+    public static HostUpdateStageResult Staged(HostUpdateStagingReceipt receipt) => new(true, false, "staged", receipt);
+    public static HostUpdateStageResult Rejected(string code) => new(false, false, code, null);
+    public static HostUpdateStageResult NeedsOperator(string code) => new(false, true, code, null);
 }
 
 /// <summary>Defines the durable foundation lifecycle; this issue does not execute apply or recovery.</summary>
@@ -542,25 +541,25 @@ public enum HostUpdateLifecycle { Planned, Approved, Staging, Staged, Failed, Ro
 
 /// <summary>Redacted durable lifecycle evidence. Identities always originate from verified metadata.</summary>
 public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset RecordedAt, string OperationId, string IdempotencyKey, HostUpdateLifecycle State,
-    string Code, bool Recoverable, HostUpdateJournalSnapshot Snapshot)
+    string Code, HostUpdateJournalSnapshot Snapshot, string IntegrityHash = "")
 {
     public static HostUpdateJournalEntry Planned(HostUpdatePlanRequest request, SignedReleaseMetadata? metadata, HostUpdatePlanResult result) =>
         Create(request, metadata is not null && HostUpdateValidation.IsReleaseIdentity(metadata.Identity, request.TargetChannel) ? metadata.Identity : null,
-            HostUpdateLifecycle.Planned, result.IsEligible ? "eligible" : result.Reasons[0], false, result.PlanHash, null, result.Installation,
+            HostUpdateLifecycle.Planned, result.IsEligible ? "eligible" : result.Reasons[0], result.PlanHash, null, result.Installation,
             result.RequiredComponents, metadata?.ComponentPlatformDigests);
     public static HostUpdateJournalEntry Approved(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateAuthorization authorization) =>
-        Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Approved, authorization.Kind == HostUpdateAuthorizationKind.Manual ? "manual_authorized" : "standing_policy_authorized", false, plan.PlanHash, null, plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests, authorization);
+        Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Approved, authorization.Kind == HostUpdateAuthorizationKind.Manual ? "manual_authorized" : "standing_policy_authorized", plan.PlanHash, null, plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests, authorization);
     public static HostUpdateJournalEntry StagingIntent(HostUpdatePlan plan, SignedReleaseMetadata metadata) =>
-        Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Staging, "intent", false, plan.PlanHash, null, plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests);
+        Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Staging, "intent", plan.PlanHash, null, plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests);
     public static HostUpdateJournalEntry Staged(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateStageResult result) =>
-        Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Staged, result.Code, false, plan.PlanHash, result.Receipt, plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests);
+        Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Staged, result.Code, plan.PlanHash, result.Receipt, plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests);
     public static HostUpdateJournalEntry Failed(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateStageResult result, HostUpdateAuthorization? authorization = null) =>
         Create(plan.Request, HostUpdateValidation.IsReleaseIdentity(metadata.Identity, plan.TargetChannel) ? metadata.Identity : null,
-            result.RequiresOperator ? HostUpdateLifecycle.NeedsOperator : HostUpdateLifecycle.Failed, result.Code, result.IsRecoverableFailure, plan.PlanHash, null,
+            result.RequiresOperator ? HostUpdateLifecycle.NeedsOperator : HostUpdateLifecycle.Failed, result.Code, plan.PlanHash, null,
             plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests, authorization);
 
     private static HostUpdateJournalEntry Create(HostUpdatePlanRequest request, CanonicalReleaseIdentity? identity, HostUpdateLifecycle state, string code,
-        bool recoverable, string planHash, HostUpdateStagingReceipt? receipt, HostInstallationEvidence? installation = null,
+        string planHash, HostUpdateStagingReceipt? receipt, HostInstallationEvidence? installation = null,
         IReadOnlySet<string>? requiredComponents = null, IReadOnlyDictionary<string, string>? componentPlatformDigests = null,
         HostUpdateAuthorization? authorization = null)
     {
@@ -580,10 +579,10 @@ public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset Record
             ? componentPlatformDigests!
             : new Dictionary<string, string> { [$"{HostUpdateValidation.RedactedComponent}/{HostUpdateValidation.RedactedPlatform}"] = HostUpdateValidation.RedactedDigest };
 
-        return new(0, DateTimeOffset.UtcNow, request.OperationId, request.IdempotencyKey, state, code, recoverable,
+        return new(0, DateTimeOffset.UtcNow, request.OperationId, request.IdempotencyKey, state, code,
             new(request.InstallationId, request.ActorId, request.Nonce, request.ReasonCode, request.SourceChannel,
                 request.TargetChannel, request.ChannelPolicyRevision, planHash, identity, receipt, topologyFingerprint, components, platform, digests,
-                HostUpdateAuthorizationAudit.Create(authorization)));
+                HostUpdateAuthorizationAudit.Create(authorization, state == HostUpdateLifecycle.Approved)));
     }
 }
 
@@ -595,17 +594,25 @@ public sealed record HostUpdateJournalSnapshot(string InstallationId, string Act
 
 /// <summary>Contains bounded, redacted authorization policy evidence for lifecycle audit.</summary>
 public sealed record HostUpdateAuthorizationAudit(
-    string Kind, bool InsiderWarningAcknowledged, bool ExplicitDowngradeAllowed, DateTimeOffset ExpiresAt,
-    string ChannelPolicyRevision, bool StandingPolicyActive, bool StandingPolicyRevoked)
+    string ActorId, string Nonce, string InstallationId, string PlanHash, string SourceChannel, string TargetChannel,
+    string ChannelPolicyRevision, string Kind, bool Accepted, bool InsiderWarningAcknowledged, bool ExplicitDowngradeAllowed,
+    DateTimeOffset ExpiresAt, bool StandingPolicyActive, bool StandingPolicyRevoked)
 {
-    public static HostUpdateAuthorizationAudit? Create(HostUpdateAuthorization? authorization) => authorization is null
+    public static HostUpdateAuthorizationAudit? Create(HostUpdateAuthorization? authorization, bool accepted) => authorization is null
         ? null
         : new(
+            HostUpdateValidation.SafeIdentifier(authorization.ActorId),
+            HostUpdateValidation.SafeIdentifier(authorization.Nonce),
+            HostUpdateValidation.SafeIdentifier(authorization.InstallationId),
+            HostUpdateValidation.SafeHash(authorization.PlanHash),
+            HostUpdateValidation.SafeChannel(authorization.SourceChannel),
+            HostUpdateValidation.SafeChannel(authorization.TargetChannel),
+            HostUpdateValidation.SafeIdentifier(authorization.ChannelPolicyRevision),
             Enum.IsDefined(authorization.Kind) ? authorization.Kind.ToString().ToLowerInvariant() : "invalid",
+            accepted,
             authorization.InsiderWarningAcknowledged,
             authorization.ExplicitDowngradeAllowed,
             authorization.ExpiresAt,
-            authorization.ChannelPolicyRevision,
             authorization.StandingPolicyActive,
             authorization.StandingPolicyRevoked);
 }
@@ -667,7 +674,12 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             throw new InvalidDataException("Journal lifecycle transition is invalid.");
         }
 
-        HostUpdateJournalEntry durable = entry with { Revision = checked((entries.Count == 0 ? 0 : entries[^1].Revision) + 1) };
+        HostUpdateJournalEntry durable = entry with
+        {
+            Revision = checked((entries.Count == 0 ? 0 : entries[^1].Revision) + 1),
+            IntegrityHash = string.Empty,
+        };
+        durable = durable with { IntegrityHash = HostUpdateValidation.ComputeJournalIntegrityHash(durable, entries.Count == 0 ? null : entries[^1].IntegrityHash) };
         await using FileStream stream = new(journalPath, new FileStreamOptions
         {
             Mode = FileMode.OpenOrCreate,
@@ -739,6 +751,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             {
                 HostUpdateJournalEntry? entry = string.IsNullOrWhiteSpace(line) ? null : JsonSerializer.Deserialize<HostUpdateJournalEntry>(line, SerializerOptions);
                 if (entry is null || entry.Revision != entries.Count + 1 || !HostUpdateValidation.IsJournalEntry(entry) ||
+                    !HostUpdateValidation.HashesEqual(entry.IntegrityHash, HostUpdateValidation.ComputeJournalIntegrityHash(entry, entries.LastOrDefault()?.IntegrityHash)) ||
                     !HostUpdateValidation.IsLifecycleTransition(entries.LastOrDefault(existing => HostUpdateValidation.HasSameOperation(existing, entry)), entry))
                 {
                     throw new InvalidDataException("Journal record is invalid.");
@@ -852,6 +865,11 @@ internal static class HostUpdateValidation
     public const string RedactedComponent = "redacted";
     public const string RedactedPlatform = "redacted";
     public const string RedactedDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
+    public const string RedactedHash = "0000000000000000000000000000000000000000000000000000000000000000";
+    private const int WindowsSharingViolation = 32;
+    private const int WindowsLockViolation = 33;
+    private const int LinuxTryAgain = 11;
+    private const int MacOsTryAgain = 35;
     public static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 128 } && value is not "." and not ".." && value[0] != '.' &&
         value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
     public static bool IsHostLocalStateDirectory(string? value)
@@ -863,10 +881,27 @@ internal static class HostUpdateValidation
             return false;
         }
 
-        bool windowsRoot = value.Length >= 3 && char.IsAsciiLetter(value[0]) && value[1] == ':' && value[2] is '\\' or '/';
-        bool unixRoot = value[0] == '/';
-        return (windowsRoot || unixRoot) &&
-            value.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries).All(segment => segment is not "." and not "..");
+        bool isWindows = OperatingSystem.IsWindows();
+        bool acceptedGrammar = isWindows
+            ? value.Length >= 3 && char.IsAsciiLetter(value[0]) && value[1] == ':' && value[2] is '\\' or '/'
+            : value[0] == '/' && !value.StartsWith("//", StringComparison.Ordinal);
+        if (!acceptedGrammar || value.Split(['\\', '/'], StringSplitOptions.RemoveEmptyEntries).Any(segment => segment is "." or ".."))
+        {
+            return false;
+        }
+
+        try
+        {
+            string fullPath = Path.GetFullPath(value);
+            return Path.IsPathFullyQualified(value) && Path.IsPathFullyQualified(fullPath) &&
+                (isWindows
+                    ? fullPath.Length >= 3 && char.IsAsciiLetter(fullPath[0]) && fullPath[1] == ':' && fullPath[2] is '\\' or '/'
+                    : fullPath[0] == '/' && !fullPath.StartsWith("//", StringComparison.Ordinal));
+        }
+        catch (Exception exception) when (exception is ArgumentException or NotSupportedException or PathTooLongException)
+        {
+            return false;
+        }
     }
     public static bool IsChannel(string? value) => value is not null && Channels.Contains(value);
     public static bool IsProvider(string? value) => value is not null && Providers.Contains(value);
@@ -874,9 +909,24 @@ internal static class HostUpdateValidation
     public static bool IsHexHash(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
     public static bool IsRejectionCode(string? value) => value is { Length: > 0 and <= 80 } &&
         value.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '_');
-    public static bool IsLockContention(IOException exception) => (exception.HResult & 0xFFFF) is 32 or 33;
+    public static bool IsLockContention(IOException exception)
+    {
+        int errorCode = exception.HResult & 0xFFFF;
+        return OperatingSystem.IsWindows()
+            ? errorCode is WindowsSharingViolation or WindowsLockViolation
+            : OperatingSystem.IsMacOS() ? errorCode == MacOsTryAgain : errorCode == LinuxTryAgain;
+    }
     public static bool HashesEqual(string? left, string? right) => IsHexHash(left) && IsHexHash(right) &&
         CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left!), Convert.FromHexString(right!));
+    public static string SafeIdentifier(string? value) => IsIdentifier(value) ? value! : RedactedComponent;
+    public static string SafeHash(string? value) => IsHexHash(value) ? value! : RedactedHash;
+    public static string SafeChannel(string? value) => IsChannel(value) ? value! : "redacted";
+    public static string ComputeJournalIntegrityHash(HostUpdateJournalEntry entry, string? previousHash)
+    {
+        HostUpdateJournalEntry canonical = entry with { IntegrityHash = string.Empty };
+        string payload = JsonSerializer.Serialize(canonical, new JsonSerializerOptions(JsonSerializerDefaults.Web) { Converters = { new JsonStringEnumConverter() } });
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{previousHash ?? string.Empty}\n{payload}")));
+    }
     public static bool DigestsEqual(string? left, string? right) => IsDigest(left) && IsDigest(right) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left![7..]), Convert.FromHexString(right![7..]));
     public static bool IsSemanticVersion(string? value) => TryParseSemanticVersion(value, out _);
     public static bool TryParseSemanticVersion(string? value, out Version version)
@@ -962,12 +1012,25 @@ internal static class HostUpdateValidation
         snapshot.RequiredComponents.All(IsIdentifier) && snapshot.ComponentPlatformDigests is not null &&
         snapshot.ComponentPlatformDigests.Count == snapshot.RequiredComponents.Count &&
         snapshot.RequiredComponents.All(component => snapshot.ComponentPlatformDigests.TryGetValue($"{component}/{snapshot.Platform}", out string? digest) && IsDigest(digest)) &&
-        HasValidReceipt(entry.State, snapshot) && HasValidAuthorizationAudit(entry, snapshot);
+        (string.IsNullOrEmpty(entry.IntegrityHash) || IsHexHash(entry.IntegrityHash)) && HasValidReceipt(entry.State, snapshot) && HasValidAuthorizationAudit(entry, snapshot);
     private static bool HasValidAuthorizationAudit(HostUpdateJournalEntry entry, HostUpdateJournalSnapshot snapshot) =>
-        entry.State != HostUpdateLifecycle.Approved && entry.Code is not "authorization_invalid" and not "downgrade_not_authorized"
-            ? snapshot.AuthorizationAudit is null
-            : snapshot.AuthorizationAudit is { } audit && audit.Kind is "manual" or "standingpolicy" or "invalid" &&
-                IsIdentifier(audit.ChannelPolicyRevision) && audit.ExpiresAt != default;
+        entry.State == HostUpdateLifecycle.Approved
+            ? snapshot.AuthorizationAudit is { Accepted: true } accepted && HasValidAuthorizationAuditTuple(accepted) &&
+                accepted.Kind is "manual" or "standingpolicy" && HasValidAcceptedPolicy(accepted)
+            : entry.Code is "authorization_invalid" or "downgrade_not_authorized"
+                ? snapshot.AuthorizationAudit is { Accepted: false } rejected && HasValidAuthorizationAuditTuple(rejected)
+                : snapshot.AuthorizationAudit is null;
+    private static bool HasValidAuthorizationAuditTuple(HostUpdateAuthorizationAudit audit) =>
+        IsIdentifier(audit.ActorId) && IsIdentifier(audit.Nonce) && IsIdentifier(audit.InstallationId) && IsHexHash(audit.PlanHash) &&
+        (IsChannel(audit.SourceChannel) || audit.SourceChannel == "redacted") &&
+        (IsChannel(audit.TargetChannel) || audit.TargetChannel == "redacted") &&
+        IsIdentifier(audit.ChannelPolicyRevision) && audit.ExpiresAt != default;
+    private static bool HasValidAcceptedPolicy(HostUpdateAuthorizationAudit audit) => audit.Kind switch
+    {
+        "manual" => !audit.StandingPolicyActive && !audit.StandingPolicyRevoked,
+        "standingpolicy" => audit.StandingPolicyActive && !audit.StandingPolicyRevoked && !audit.ExplicitDowngradeAllowed && audit.SourceChannel == audit.TargetChannel,
+        _ => false,
+    };
     private static bool HasValidReceipt(HostUpdateLifecycle state, HostUpdateJournalSnapshot snapshot)
     {
         if (state != HostUpdateLifecycle.Staged)
