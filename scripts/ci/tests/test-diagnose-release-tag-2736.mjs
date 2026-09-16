@@ -3,12 +3,13 @@ import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { load } from 'js-yaml';
 import { githubClient } from '../release-github.mjs';
-import { diagnostic, diagnosticFailure, preflightDiagnostic } from '../diagnose-release-tag-2736.mjs';
+import { diagnostic, diagnosticFailure, preflightDiagnostic, preflightProtectedDiagnostic } from '../diagnose-release-tag-2736.mjs';
 import { protectionFixture } from './fixtures/release-protection.mjs';
 
 let instance = 0;
 const fresh = () => import(`../diagnose-release-tag-2736.mjs?test=${instance++}`);
 const historyPath = 'actions/workflows/diagnose-release-tag-2736.yml/runs?per_page=100';
+const priorJobsPath = `actions/runs/${diagnostic.priorRun}/attempts/1/jobs?per_page=100`;
 const tagPath = 'git/ref/tags/v0.2.3-insider.1';
 const repository = 'OlyForge3D/PrintFarmer';
 const control = 'a'.repeat(40);
@@ -21,17 +22,35 @@ function fixture() {
     GITHUB_REPOSITORY: repository, GITHUB_EVENT_NAME: 'workflow_dispatch',
     GITHUB_REF: 'refs/heads/development', GITHUB_SHA: control, GITHUB_WORKFLOW_SHA: control,
     GITHUB_WORKFLOW_REF: `${repository}/${diagnostic.workflow}@refs/heads/development`,
-    GITHUB_RUN_ID: '42', GITHUB_RUN_NUMBER: '1', GITHUB_RUN_ATTEMPT: '1',
+    GITHUB_RUN_ID: '42', GITHUB_RUN_NUMBER: '2', GITHUB_RUN_ATTEMPT: '1',
     GITHUB_ACTOR: actor.login, GITHUB_ACTOR_ID: String(actor.id), GITHUB_TRIGGERING_ACTOR: actor.login,
-    RELEASE_APPROVAL_MODE: 'single-maintainer', RELEASE_PUBLISHER_APP_ID: diagnostic.appId,
+    RELEASE_APPROVAL_MODE: 'single-maintainer',
     RELEASE_PUBLICATION_ENVIRONMENT: 'release-insider',
     RELEASE_PUBLISHER_INSTALLATION_ID: diagnostic.installationId,
   };
-  const run = { id: 42, run_number: 1, run_attempt: 1, workflow_id: 9, path: diagnostic.workflow,
+  const run = { id: 42, run_number: 2, run_attempt: 1, workflow_id: diagnostic.workflowId, path: diagnostic.workflow,
     head_sha: control, head_branch: 'development', repository: repo, head_repository: repo,
     event: 'workflow_dispatch', status: 'in_progress', actor, triggering_actor: actor };
   const event = { ref: 'development', repository: repo, sender: actor, inputs: {} };
-  const definition = { id: 9, path: diagnostic.workflow, state: 'active' };
+  const definition = { id: diagnostic.workflowId, path: diagnostic.workflow, state: 'active' };
+  const prior = { ...run, id: diagnostic.priorRun, run_number: 1, head_sha: diagnostic.priorSource,
+    status: 'completed', conclusion: 'failure' };
+  const jobs = [
+    { id: 105005241763, run_id: diagnostic.priorRun, run_attempt: 1, head_sha: diagnostic.priorSource,
+      name: 'Verify owner and first-run boundary without publisher credentials',
+      status: 'completed', conclusion: 'failure', steps: [
+        [1, 'Set up job', 'success'],
+        [2, 'Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'success'],
+        [3, 'Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'success'],
+        [4, 'Read-only admission', 'failure'],
+        [7, 'Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'skipped'],
+        [8, 'Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'success'],
+        [9, 'Complete job', 'success'],
+      ].map(([number, name, conclusion]) => ({ number, name, conclusion, status: 'completed' })) },
+    { id: 105005305468, run_id: diagnostic.priorRun, run_attempt: 1, head_sha: diagnostic.priorSource,
+      name: 'Attempt the single fixed tag request and stop',
+      status: 'completed', conclusion: 'skipped', steps: [] },
+  ];
   const original = { ...run, id: Number(diagnostic.failedRun),
     path: '.github/workflows/consolidated-release.yml', head_sha: diagnostic.source,
     status: 'completed', conclusion: 'failure' };
@@ -60,9 +79,11 @@ function fixture() {
     }
     let data;
     if (endpoint === 'actions/runs/42') data = run;
+    else if (endpoint === `actions/runs/${diagnostic.priorRun}`) data = prior;
+    else if (endpoint === priorJobsPath) data = { total_count: 2, jobs };
     else if (endpoint === `actions/runs/${diagnostic.failedRun}`) data = original;
     else if (endpoint === 'actions/workflows/diagnose-release-tag-2736.yml') data = definition;
-    else if (endpoint === historyPath) data = { total_count: 1, workflow_runs: [run] };
+    else if (endpoint === historyPath) data = { total_count: 2, workflow_runs: [run, prior] };
     else if (endpoint.startsWith('actions/workflows/consolidated-release.yml/runs?')) {
       data = { total_count: 0, workflow_runs: [] };
     } else if (endpoint === 'collaborators/jpapiez/permission') {
@@ -79,7 +100,8 @@ function fixture() {
     } else data = await policy.api(endpoint);
     return Response.json(data);
   });
-  return { env, run, event, original, definition, tag, policy, overrides, requests,
+  return { env, run, prior, jobs, event, original, definition, tag, policy, overrides, requests,
+    get protectedEnv() { return { ...env, RELEASE_PUBLISHER_APP_ID: diagnostic.appId }; },
     read: client('read'), publisher: client('publisher') };
 }
 
@@ -96,15 +118,21 @@ test('actual YAML is owner boundary then one fixed request using existing creden
   assert.equal(canonical.concurrency['cancel-in-progress'], false);
   assert.deepEqual(Object.keys(workflow.jobs), ['boundary', 'request']);
   assert.equal(workflow.jobs.boundary.environment, undefined);
+  assert.equal(workflow.env.RELEASE_PUBLISHER_APP_ID, undefined);
+  assert.equal(workflow.jobs.boundary.env?.RELEASE_PUBLISHER_APP_ID, undefined);
   assert.doesNotMatch(JSON.stringify(workflow.jobs.boundary), /secrets\.|id-token|PUBLISHER_TOKEN/);
   const request = workflow.jobs.request;
   assert.equal(request.needs, 'boundary');
   assert.equal(request.environment, 'release-insider');
+  assert.equal(request.env?.RELEASE_PUBLISHER_APP_ID, undefined);
   assert.deepEqual(request.concurrency, { group: 'release-insider', 'cancel-in-progress': false });
   assert.equal(request.concurrency.group, canonical.concurrency.group.replace('${{ inputs.channel }}', 'insider'));
   assert.equal(publisher.concurrency['cancel-in-progress'], false);
   const mint = request.steps.findIndex(step => step.id === 'publisher');
-  assert.equal(request.steps[mint - 1].run, 'node scripts/ci/diagnose-release-tag-2736.mjs preflight');
+  assert.equal(workflow.jobs.boundary.steps.at(-1).run, 'node scripts/ci/diagnose-release-tag-2736.mjs preflight');
+  assert.equal(request.steps[mint - 1].run, 'node scripts/ci/diagnose-release-tag-2736.mjs protected-preflight');
+  assert.equal(request.steps[mint - 1].env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
+  assert.equal(request.steps.at(-1).env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
   assert.deepEqual(request.steps[mint].with, publisher.jobs.publish.steps.find(step => step.id === 'publisher').with);
   assert.equal(request.steps[mint].uses, publisher.jobs.publish.steps.find(step => step.id === 'publisher').uses);
   assert.equal(request.steps.length, mint + 2);
@@ -127,10 +155,38 @@ test('actual YAML is owner boundary then one fixed request using existing creden
 
 test('read-only boundary binds original run and annotation without ledger or protected credentials', async () => {
   const f = fixture();
+  assert.equal(f.env.RELEASE_PUBLISHER_APP_ID, undefined);
   await preflightDiagnostic(f.env, f.read, f.event);
   assert.ok(f.requests.every(item => item.label === 'read' && item.method === 'GET'));
   assert.ok(f.requests.some(item => item.endpoint === `git/tags/${diagnostic.tagObject}`));
   assert.doesNotMatch(JSON.stringify(f.requests), /release-ledger|git\/blobs|git\/trees/);
+});
+
+test('separate job scopes admit absent repository App ID but reject missing/wrong protected values before mint', async () => {
+  const workflow = load(readFileSync('.github/workflows/diagnose-release-tag-2736.yml', 'utf8'));
+  const f = fixture();
+  await preflightDiagnostic(f.env, f.read, f.event);
+  for (const value of [diagnostic.appId, undefined, '', '123']) {
+    const protectedEnv = { ...f.env };
+    const preflight = workflow.jobs.request.steps.find(step => step.run?.endsWith(' protected-preflight'));
+    assert.equal(preflight.env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
+    protectedEnv.RELEASE_PUBLISHER_APP_ID = value;
+    let minted = false;
+    const beforeMint = async () => {
+      await preflightProtectedDiagnostic(protectedEnv, f.read, f.event);
+      minted = true;
+    };
+    if (value === diagnostic.appId) {
+      await beforeMint();
+      assert.equal(minted, true);
+    } else {
+      await assert.rejects(beforeMint(), /approved App/);
+      assert.equal(minted, false);
+      const module = await fresh();
+      await assert.rejects(module.executeDiagnostic(protectedEnv, f.read, f.publisher, f.event), /approved App/);
+    }
+    assert.ok(f.requests.every(item => item.method === 'GET' && item.label === 'read'));
+  }
 });
 
 test('negative owner, workflow, control, original source, tag and environment bindings fail before credentials', async () => {
@@ -153,7 +209,6 @@ test('negative owner, workflow, control, original source, tag and environment bi
     f => { f.run.status = 'completed'; f.run.conclusion = 'cancelled'; },
     f => { f.env.GITHUB_EVENT_NAME = f.run.event = 'schedule'; },
     f => { f.env.RELEASE_APPROVAL_MODE = 'separation-of-duties'; },
-    f => { f.env.RELEASE_PUBLISHER_APP_ID = '123'; },
     f => { f.event.inputs = { source_sha: diagnostic.source }; },
     f => { f.original.run_attempt = 2; },
     f => { f.original.head_sha = control; },
@@ -175,16 +230,20 @@ test('negative owner, workflow, control, original source, tag and environment bi
   }
 });
 
-test('reruns and run-number two remain denied even if all earlier history was deleted', async () => {
+test('first/third runs, attempts two and recreated workflow identities are denied before history', async () => {
   for (const mutate of [
     f => { f.env.GITHUB_RUN_ATTEMPT = '2'; f.run.run_attempt = 2; },
-    f => { f.env.GITHUB_RUN_NUMBER = '2'; f.run.run_number = 2; },
-    f => { f.run.run_number = 2; },
+    f => { f.env.GITHUB_RUN_NUMBER = '1'; f.run.run_number = 1; },
+    f => { f.env.GITHUB_RUN_NUMBER = '3'; f.run.run_number = 3; },
+    f => { f.run.run_number = 1; },
+    f => { f.run.run_attempt = 2; },
+    f => { f.definition.id = f.run.workflow_id = 10; },
     f => { delete f.run.run_number; },
   ]) {
     const f = fixture(); mutate(f);
     await assert.rejects(preflightDiagnostic(f.env, f.read, f.event));
     assert.equal(f.requests.some(item => item.endpoint === historyPath), false);
+    assert.ok(f.requests.every(item => item.method === 'GET'));
   }
 });
 
@@ -199,11 +258,72 @@ test('complete history includes prior failures/cancellations and denies extra, m
     const f = fixture(); f.overrides.set(historyPath, history);
     await assert.rejects(preflightDiagnostic(f.env, f.read, f.event));
   }
+  for (const history of [
+    f => ({ total_count: 1, workflow_runs: [f.run] }),
+    f => ({ total_count: 2, workflow_runs: [f.run, f.run] }),
+    f => ({ total_count: 2, workflow_runs: [f.run, { ...f.prior, run_attempt: 2 }] }),
+    f => ({ total_count: 3, workflow_runs: [f.run, f.prior, { ...f.run, id: 43 }] }),
+    f => ({ total_count: 2, workflow_runs: [f.run, { ...f.prior, actor: undefined }] }),
+    f => ({ total_count: 2, workflow_runs: [f.run, { ...f.prior, repository: undefined }] }),
+  ]) {
+    const f = fixture(); f.overrides.set(historyPath, history(f));
+    const module = await fresh();
+    await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event), /history|evidence/);
+    assert.ok(f.requests.every(item => item.method === 'GET' && item.label === 'read'));
+  }
   for (const conclusion of ['cancelled', 'failure', 'success', 'skipped', 'timed_out']) {
     const f = fixture();
     f.overrides.set(historyPath, { total_count: 2,
       workflow_runs: [f.run, { ...f.run, id: 41, status: 'completed', conclusion }] });
     await assert.rejects(preflightDiagnostic(f.env, f.read, f.event), /history/);
+  }
+});
+
+test('prior source/run/job/step evidence is exact, complete and proves no request; every rejection makes zero writes', async () => {
+  const changes = [
+    f => { f.prior.id++; },
+    f => { f.prior.head_sha = control; },
+    f => { f.prior.run_attempt = 2; },
+    f => { f.prior.run_number = 2; },
+    f => { f.prior.workflow_id++; },
+    f => { f.prior.path = '.github/workflows/other.yml'; },
+    f => { f.prior.repository = { full_name: repository, id: 1 }; },
+    f => { f.prior.actor = { ...f.prior.actor, id: 1 }; },
+    ...['cancelled', 'success', 'skipped'].map(conclusion => f => { f.prior.conclusion = conclusion; }),
+    f => { f.prior.status = 'in_progress'; },
+    ...['failure', 'success', 'cancelled'].map(conclusion => f => { f.jobs[1].conclusion = conclusion; }),
+    f => { f.jobs[1].status = 'in_progress'; },
+    f => { f.jobs[1].steps = [{ name: 'Obtain existing protected publisher token' }]; },
+    f => { f.jobs[0].conclusion = 'success'; },
+    f => { f.jobs[0].steps[3].conclusion = 'success'; },
+    f => { f.jobs[0].steps[2].conclusion = 'failure'; },
+    f => { f.jobs[0].steps[3].name = 'Other failure'; },
+    f => { f.jobs[0].steps[3].status = 'in_progress'; },
+    f => { f.jobs[0].steps.pop(); },
+    f => { f.jobs[0].steps.push({ name: 'Unexpected request' }); },
+    ...[0, 1].flatMap(index => [
+      f => { f.jobs[index].id++; },
+      f => { f.jobs[index].name = 'Unrelated job'; },
+      f => { f.jobs[index].head_sha = control; },
+      f => { f.jobs[index].run_id++; },
+      f => { f.jobs[index].run_attempt = 2; },
+      f => { delete f.jobs[index].steps; },
+    ]),
+    ...[
+      {}, { total_count: 2, jobs: [] }, { total_count: 0, jobs: [] },
+      { total_count: 2, jobs: [undefined, {}] },
+    ].map(response => f => { f.overrides.set(priorJobsPath, response); }),
+    f => { f.jobs.push({ ...f.jobs[1], id: 123 }); },
+    f => { f.overrides.set(`actions/runs/${diagnostic.priorRun}`,
+      Response.json({ message: sentinel }, { status: 404 })); },
+    f => { f.overrides.set(priorJobsPath, Response.json({ message: sentinel }, { status: 403 })); },
+  ];
+  for (const change of changes) {
+    const f = fixture(); change(f);
+    const module = await fresh();
+    await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event),
+      undefined, change.toString());
+    assert.ok(f.requests.every(item => item.method === 'GET' && item.label === 'read'));
   }
 });
 
@@ -249,7 +369,7 @@ test('wrong installation, environment, weakened or changing live protection prev
   ]) {
     const f = fixture(); mutate(f);
     const module = await fresh();
-    await assert.rejects(module.executeDiagnostic(f.env, f.read, f.publisher, f.event));
+    await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event));
     assert.ok(f.requests.every(item => item.method === 'GET'));
   }
 });
@@ -261,26 +381,44 @@ test('new history or publisher immediately before POST prevents all mutation', a
     f.overrides.set(path, () => {
       calls++;
       return path === historyPath
-        ? { total_count: calls === 1 ? 1 : 2, workflow_runs: calls === 1 ? [f.run] : [f.run, { ...f.run, id: 43 }] }
+        ? { total_count: calls === 1 ? 2 : 3, workflow_runs: calls === 1 ? [f.run, f.prior] : [f.run, f.prior, { ...f.run, id: 43 }] }
         : { total_count: calls === 1 ? 0 : 1, workflow_runs: calls === 1 ? [] : [{ id: 43 }] };
     });
     const module = await fresh();
-    await assert.rejects(module.executeDiagnostic(f.env, f.read, f.publisher, f.event));
+    await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event));
+    assert.ok(f.requests.every(item => item.method === 'GET'));
+  }
+});
+
+test('prior rerun or request-job evidence changing immediately before POST prevents mutation', async () => {
+  for (const path of [`actions/runs/${diagnostic.priorRun}`, priorJobsPath]) {
+    const f = fixture();
+    let calls = 0;
+    f.overrides.set(path, () => {
+      calls++;
+      return path === priorJobsPath
+        ? { total_count: 2, jobs: [f.jobs[0], { ...f.jobs[1], conclusion: calls === 1 ? 'skipped' : 'success' }] }
+        : { ...f.prior, run_attempt: calls === 1 ? 1 : 2 };
+    });
+    const module = await fresh();
+    await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event), /prior/);
+    assert.equal(calls, 2);
     assert.ok(f.requests.every(item => item.method === 'GET'));
   }
 });
 
 test('success makes only the exact POST, verifies the ref and stops without release recovery', async () => {
   const f = fixture();
+  f.overrides.set(historyPath, { total_count: 2, workflow_runs: [f.prior, f.run] });
   const module = await fresh();
-  const result = await module.executeDiagnostic(f.env, f.read, f.publisher, f.event);
+  const result = await module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event);
   assert.match(result, /Tag created only/);
   assert.match(result, /Reservation remains incomplete/);
   const writes = f.requests.filter(item => item.method !== 'GET');
   assert.deepEqual(writes, [{ label: 'publisher', endpoint: 'git/refs', method: 'POST',
     body: JSON.stringify({ ref: diagnostic.ref, sha: diagnostic.tagObject }) }]);
   assert.equal(f.requests.at(-1).endpoint, tagPath);
-  await assert.rejects(module.executeDiagnostic(f.env, f.read, f.publisher, f.event), /already spent/);
+  await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event), /already spent/);
   assert.equal(f.requests.filter(item => item.method !== 'GET').length, 1);
 });
 
@@ -300,7 +438,7 @@ test('422, transport failure, ambiguous success and failed verification never re
       });
     }
     const module = await fresh();
-    await assert.rejects(module.executeDiagnostic(f.env, f.read, f.publisher, f.event), error => {
+    await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event), error => {
       const report = diagnosticFailure(error);
       assert.doesNotMatch(report, new RegExp(sentinel));
       assert.match(report, /no retry/);
@@ -308,7 +446,7 @@ test('422, transport failure, ambiguous success and failed verification never re
       return true;
     });
     const count = f.requests.length;
-    await assert.rejects(module.executeDiagnostic(f.env, f.read, f.publisher, f.event), /already spent/);
+    await assert.rejects(module.executeDiagnostic(f.protectedEnv, f.read, f.publisher, f.event), /already spent/);
     assert.equal(f.requests.length, count);
     assert.equal(f.requests.filter(item => item.method === 'POST').length, 1);
   }
