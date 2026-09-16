@@ -124,14 +124,15 @@ test('actual YAML is owner boundary then one fixed request using existing creden
   const request = workflow.jobs.request;
   assert.equal(request.needs, 'boundary');
   assert.equal(request.environment, 'release-insider');
-  assert.equal(request.env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
+  assert.equal(request.env?.RELEASE_PUBLISHER_APP_ID, undefined);
   assert.deepEqual(request.concurrency, { group: 'release-insider', 'cancel-in-progress': false });
   assert.equal(request.concurrency.group, canonical.concurrency.group.replace('${{ inputs.channel }}', 'insider'));
   assert.equal(publisher.concurrency['cancel-in-progress'], false);
   const mint = request.steps.findIndex(step => step.id === 'publisher');
   assert.equal(workflow.jobs.boundary.steps.at(-1).run, 'node scripts/ci/diagnose-release-tag-2736.mjs preflight');
   assert.equal(request.steps[mint - 1].run, 'node scripts/ci/diagnose-release-tag-2736.mjs protected-preflight');
-  assert.equal(request.steps[mint - 1].env.RELEASE_PUBLISHER_APP_ID, undefined);
+  assert.equal(request.steps[mint - 1].env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
+  assert.equal(request.steps.at(-1).env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
   assert.deepEqual(request.steps[mint].with, publisher.jobs.publish.steps.find(step => step.id === 'publisher').with);
   assert.equal(request.steps[mint].uses, publisher.jobs.publish.steps.find(step => step.id === 'publisher').uses);
   assert.equal(request.steps.length, mint + 2);
@@ -167,10 +168,9 @@ test('separate job scopes admit absent repository App ID but reject missing/wron
   await preflightDiagnostic(f.env, f.read, f.event);
   for (const value of [diagnostic.appId, undefined, '', '123']) {
     const protectedEnv = { ...f.env };
-    for (const [key, expression] of Object.entries(workflow.jobs.request.env)) {
-      assert.equal(expression, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
-      protectedEnv[key] = value;
-    }
+    const preflight = workflow.jobs.request.steps.find(step => step.run?.endsWith(' protected-preflight'));
+    assert.equal(preflight.env.RELEASE_PUBLISHER_APP_ID, '${{ vars.RELEASE_PUBLISHER_APP_ID }}');
+    protectedEnv.RELEASE_PUBLISHER_APP_ID = value;
     let minted = false;
     const beforeMint = async () => {
       await preflightProtectedDiagnostic(protectedEnv, f.read, f.event);
