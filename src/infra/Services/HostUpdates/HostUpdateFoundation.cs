@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 #pragma warning disable CA1859 // Journal reconciliation deliberately exposes read-only collections.
+#pragma warning disable CA1849 // The journal must synchronously commit its durable write before returning.
 #pragma warning disable IDISP007 // File leases own streams created by their factory.
 #pragma warning disable SA1107 // Closed record contracts retain concise declarations.
 #pragma warning disable SA1136 // Adjacent bounded contracts are intentionally grouped.
@@ -43,7 +44,9 @@ public sealed class HostUpdateFoundation(
         SignedReleaseMetadata metadata = await metadataProvider.GetCurrentAsync(request.TargetChannel, ct);
         if (installation is null || metadata is null)
         {
-            return HostUpdatePlanResult.Rejected("trusted_evidence_invalid");
+            HostUpdatePlanResult rejected = HostUpdatePlanResult.Rejected("trusted_evidence_invalid");
+            await journal.AppendAsync(HostUpdateJournalEntry.Planned(request, metadata, rejected), ct);
+            return rejected;
         }
 
         HostUpdatePlanResult result = Evaluate(request, installation, metadata);
@@ -136,6 +139,9 @@ public sealed class HostUpdateFoundation(
         }
 
         List<string> reasons = [.. installation.Validate(request.InstallationId), .. metadata.ValidateFor(installation, request)];
+        CanonicalReleaseIdentity? identity = HostUpdateValidation.IsReleaseIdentity(metadata.Identity, request.TargetChannel)
+            ? metadata.Identity
+            : null;
         IReadOnlyList<string>? compatibilityReasons = compatibilityEvaluator.Evaluate(installation, metadata);
         if (compatibilityReasons is null)
         {
@@ -147,7 +153,7 @@ public sealed class HostUpdateFoundation(
             ? compatibilityReasons
             : ["compatibility_evidence_invalid"]);
         reasons.Sort(StringComparer.Ordinal);
-        return new(reasons.Count == 0, ComputePlanHash(request, installation, metadata), metadata.Identity.ManifestDigest, metadata.Identity,
+        return new(reasons.Count == 0, ComputePlanHash(request, installation, metadata), identity?.ManifestDigest ?? string.Empty, identity,
             installation.RequiredComponents, reasons, installation);
     }
 
@@ -428,10 +434,10 @@ public enum HostUpdateLifecycle { Planned, Approved, Staging, Staged, Failed, Ro
 public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset RecordedAt, string OperationId, string IdempotencyKey, HostUpdateLifecycle State,
     string Code, bool Recoverable, HostUpdateJournalSnapshot Snapshot)
 {
-    public static HostUpdateJournalEntry Planned(HostUpdatePlanRequest request, SignedReleaseMetadata metadata, HostUpdatePlanResult result) =>
-        Create(request, HostUpdateValidation.IsReleaseIdentity(metadata.Identity, request.TargetChannel) ? metadata.Identity : null,
+    public static HostUpdateJournalEntry Planned(HostUpdatePlanRequest request, SignedReleaseMetadata? metadata, HostUpdatePlanResult result) =>
+        Create(request, metadata is not null && HostUpdateValidation.IsReleaseIdentity(metadata.Identity, request.TargetChannel) ? metadata.Identity : null,
             HostUpdateLifecycle.Planned, result.IsEligible ? "eligible" : result.Reasons[0], false, result.PlanHash, null, result.Installation,
-            result.RequiredComponents, metadata.ComponentPlatformDigests);
+            result.RequiredComponents, metadata?.ComponentPlatformDigests);
     public static HostUpdateJournalEntry Approved(HostUpdatePlan plan, SignedReleaseMetadata metadata, HostUpdateAuthorization authorization) =>
         Create(plan.Request, metadata.Identity, HostUpdateLifecycle.Approved, authorization.Kind == HostUpdateAuthorizationKind.Manual ? "manual_authorized" : "standing_policy_authorized", false, plan.PlanHash, null, plan.Installation, plan.RequiredComponents, metadata.ComponentPlatformDigests);
     public static HostUpdateJournalEntry StagingIntent(HostUpdatePlan plan, SignedReleaseMetadata metadata) =>
@@ -445,11 +451,28 @@ public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset Record
 
     private static HostUpdateJournalEntry Create(HostUpdatePlanRequest request, CanonicalReleaseIdentity? identity, HostUpdateLifecycle state, string code,
         bool recoverable, string planHash, HostUpdateStagingReceipt? receipt, HostInstallationEvidence? installation = null,
-        IReadOnlySet<string>? requiredComponents = null, IReadOnlyDictionary<string, string>? componentPlatformDigests = null) => new(0, DateTimeOffset.UtcNow, request.OperationId, request.IdempotencyKey,
-            state, code, recoverable, new(request.InstallationId, request.ActorId, request.Nonce, request.ReasonCode, request.SourceChannel,
-                request.TargetChannel, request.ChannelPolicyRevision, planHash, identity, receipt, installation?.TopologyFingerprint ?? string.Empty,
-                new HashSet<string>(requiredComponents ?? Enumerable.Empty<string>(), StringComparer.Ordinal), installation?.Platform ?? string.Empty,
-                componentPlatformDigests ?? new Dictionary<string, string>()));
+        IReadOnlySet<string>? requiredComponents = null, IReadOnlyDictionary<string, string>? componentPlatformDigests = null)
+    {
+        bool hasValidEvidence = identity is not null && installation is not null && installation.Validate(request.InstallationId).Count == 0 &&
+            HostUpdateValidation.IsDigest(installation.TopologyFingerprint) &&
+            HostUpdateValidation.IsIdentifier(installation?.Platform) && requiredComponents is { Count: > 0 } &&
+            requiredComponents.All(HostUpdateValidation.IsIdentifier) && componentPlatformDigests is not null &&
+            componentPlatformDigests.Count == requiredComponents.Count && requiredComponents.All(component =>
+                componentPlatformDigests.TryGetValue($"{component}/{installation!.Platform}", out string? digest) &&
+                HostUpdateValidation.IsDigest(digest));
+        string topologyFingerprint = hasValidEvidence ? installation!.TopologyFingerprint : HostUpdateValidation.RedactedDigest;
+        string platform = hasValidEvidence ? installation!.Platform : HostUpdateValidation.RedactedPlatform;
+        HashSet<string> components = hasValidEvidence
+            ? new(requiredComponents!, StringComparer.Ordinal)
+            : new([HostUpdateValidation.RedactedComponent], StringComparer.Ordinal);
+        IReadOnlyDictionary<string, string> digests = hasValidEvidence
+            ? componentPlatformDigests!
+            : new Dictionary<string, string> { [$"{HostUpdateValidation.RedactedComponent}/{HostUpdateValidation.RedactedPlatform}"] = HostUpdateValidation.RedactedDigest };
+
+        return new(0, DateTimeOffset.UtcNow, request.OperationId, request.IdempotencyKey, state, code, recoverable,
+            new(request.InstallationId, request.ActorId, request.Nonce, request.ReasonCode, request.SourceChannel,
+                request.TargetChannel, request.ChannelPolicyRevision, planHash, identity, receipt, topologyFingerprint, components, platform, digests));
+    }
 }
 
 /// <summary>Contains redacted identifiers and immutable verification evidence only.</summary>
@@ -510,7 +533,17 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             }
 
             HostUpdateJournalEntry durable = entry with { Revision = checked((entries.Count == 0 ? 0 : entries[^1].Revision) + 1) };
-            await File.AppendAllTextAsync(journalPath, JsonSerializer.Serialize(durable, SerializerOptions) + "\n", ct);
+            await using FileStream stream = new(journalPath, new FileStreamOptions
+            {
+                Mode = FileMode.OpenOrCreate,
+                Access = FileAccess.Write,
+                Share = FileShare.Read,
+                Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
+            });
+            stream.Seek(0, SeekOrigin.End);
+            await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(durable, SerializerOptions) + "\n"), ct);
+            await stream.FlushAsync(ct);
+            stream.Flush(flushToDisk: true);
         }
         finally { gate.Release(); }
     }
@@ -587,6 +620,9 @@ internal static class HostUpdateValidation
 {
     private static readonly HashSet<string> Channels = ["stable", "insider"];
     private static readonly HashSet<string> Providers = ["postgres", "sqlserver"];
+    public const string RedactedComponent = "redacted";
+    public const string RedactedPlatform = "redacted";
+    public const string RedactedDigest = "sha256:0000000000000000000000000000000000000000000000000000000000000000";
     public static bool IsIdentifier(string? value) => value is { Length: > 0 and <= 128 } && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
     public static bool IsChannel(string? value) => value is not null && Channels.Contains(value);
     public static bool IsProvider(string? value) => value is not null && Providers.Contains(value);
@@ -614,11 +650,47 @@ internal static class HostUpdateValidation
         version = parsed;
         return true;
     }
-    public static bool IsReleaseIdentity(CanonicalReleaseIdentity? identity, string channel) => identity is not null && IsIdentifier(identity.ReleaseId) && IsSemanticVersion(identity.Version) &&
-        IsChannel(identity.Channel) && identity.Channel == channel && IsIdentifier(identity.SourceTag) && ((channel == "stable" && identity.SourceBranch == "main") ||
+    public static bool IsReleaseIdentity(CanonicalReleaseIdentity? identity, string channel) => identity is not null && IsChannel(channel) &&
+        IsCanonicalReleaseVersion(identity.Version, channel) && identity.ReleaseId == $"{channel}:{identity.Version}" &&
+        IsChannel(identity.Channel) && identity.Channel == channel && identity.SourceTag == $"v{identity.Version}" && ((channel == "stable" && identity.SourceBranch == "main") ||
         (channel == "insider" && identity.SourceBranch == "development")) && IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
         IsIdentifier(identity.BuildMetadata) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel && IsDigest(identity.ProvenanceSubjectDigest) &&
         IsDigest(identity.ManifestDigest) && IsDigest(identity.IndexDigest);
+    /// <summary>Accepts only the release-channel version grammar used in immutable publication identities.</summary>
+    private static bool IsCanonicalReleaseVersion(string? value, string channel)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return false;
+        }
+
+        string suffix = channel == "stable" ? string.Empty : "-insider.";
+        string core = suffix.Length == 0 ? value : value[..Math.Max(0, value.IndexOf('-'))];
+        if (!IsCanonicalVersionCore(core))
+        {
+            return false;
+        }
+
+        if (channel == "stable")
+        {
+            return value == core;
+        }
+
+        return value.StartsWith($"{core}{suffix}", StringComparison.Ordinal) &&
+            IsCanonicalPositiveInteger(value[(core.Length + suffix.Length)..]);
+    }
+    /// <summary>Checks a three-segment numeric version has no ambiguous leading zeroes.</summary>
+    private static bool IsCanonicalVersionCore(string value)
+    {
+        string[] segments = value.Split('.');
+        return segments.Length == 3 && segments.All(IsCanonicalNonNegativeInteger);
+    }
+    /// <summary>Checks one canonical non-negative version segment.</summary>
+    private static bool IsCanonicalNonNegativeInteger(string value) =>
+        value.Length > 0 && value.All(char.IsAsciiDigit) && (value.Length == 1 || value[0] != '0');
+    /// <summary>Checks the required positive insider build number.</summary>
+    private static bool IsCanonicalPositiveInteger(string value) =>
+        IsCanonicalNonNegativeInteger(value) && value != "0";
     public static bool IsJournalEntry(HostUpdateJournalEntry? entry) => entry is not null && IsIdentifier(entry.OperationId) && IsIdentifier(entry.IdempotencyKey) && Enum.IsDefined(entry.State) &&
         IsRejectionCode(entry.Code) && entry.Snapshot is { } snapshot && IsIdentifier(snapshot.InstallationId) && IsIdentifier(snapshot.ActorId) &&
         IsIdentifier(snapshot.Nonce) && IsRejectionCode(snapshot.ReasonCode) && IsChannel(snapshot.SourceChannel) && IsChannel(snapshot.TargetChannel) &&

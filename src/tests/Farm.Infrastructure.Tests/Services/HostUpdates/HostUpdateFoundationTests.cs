@@ -8,18 +8,25 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 public sealed class HostUpdateFoundationTests
 {
     [Fact]
-    public async Task PlanAsync_InvalidMetadataIdentity_DoesNotPoisonFollowingJournalEntry()
+    public async Task PlanAsync_InvalidOrAbsentMetadataIdentityPersistsRedactedJournalEvidence()
     {
         string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
         try
         {
             FileHostUpdateJournal journal = new(directory);
-            Provider provider = new(Metadata() with { Identity = Identity() with { ReleaseId = "bad identity" } });
+            Provider provider = new(Metadata() with { Identity = null! });
             HostUpdateFoundation sut = CreateSut(provider, journal: journal);
             Assert.False((await sut.PlanAsync(Request(), default)).IsEligible);
+            HostUpdateJournalEntry rejected = Assert.Single(await journal.ReadAsync(default));
+            Assert.Null(rejected.Snapshot.Identity);
+            Assert.Equal("redacted", rejected.Snapshot.Platform);
+            Assert.Equal("sha256:0000000000000000000000000000000000000000000000000000000000000000", rejected.Snapshot.TopologyFingerprint);
+            provider.CurrentMetadata = null!;
+            Assert.False((await sut.PlanAsync(Request() with { OperationId = "operation-2", IdempotencyKey = "key-2", Nonce = "nonce-2" }, default)).IsEligible);
+            Assert.Null((await journal.ReadAsync(default))[1].Snapshot.Identity);
             provider.CurrentMetadata = Metadata();
-            Assert.True((await sut.PlanAsync(Request() with { OperationId = "operation-2", IdempotencyKey = "key-2", Nonce = "nonce-2" }, default)).IsEligible);
-            Assert.Null((await journal.ReadAsync(default))[0].Snapshot.Identity);
+            Assert.True((await sut.PlanAsync(Request() with { OperationId = "operation-3", IdempotencyKey = "key-3", Nonce = "nonce-3" }, default)).IsEligible);
+            Assert.Equal(3, (await journal.ReadAsync(default)).Count);
         }
         finally
         {
@@ -137,6 +144,41 @@ public sealed class HostUpdateFoundationTests
     }
 
     [Fact]
+    public async Task PlanAsync_RejectsNonCanonicalReleaseIdentityCombinations()
+    {
+        CanonicalReleaseIdentity valid = Identity();
+        CanonicalReleaseIdentity[] malformed =
+        [
+            valid with { Version = "1.0" },
+            valid with { Version = "1.0.0-beta.1" },
+            valid with { Version = "01.0.0" },
+            valid with { SourceTag = "v1.0.1" },
+            valid with { ReleaseId = "release_1", OciReleaseLabel = "release_1" },
+            valid with { ReleaseId = "stable:1.0.1", OciReleaseLabel = "stable:1.0.1" },
+        ];
+
+        foreach (CanonicalReleaseIdentity identity in malformed)
+        {
+            HostUpdatePlanResult result = await CreateSut(new Provider(Metadata() with { Identity = identity })).PlanAsync(Request(), default);
+            Assert.Contains("release_identity_invalid", result.Reasons);
+        }
+
+        CanonicalReleaseIdentity insider = Identity() with
+        {
+            Channel = "insider",
+            Version = "1.0.0-insider.1",
+            ReleaseId = "insider:1.0.0-insider.1",
+            OciReleaseLabel = "insider:1.0.0-insider.1",
+            OciVersionLabel = "1.0.0-insider.1",
+            SourceTag = "v1.0.0-insider.1",
+            SourceBranch = "development",
+        };
+        HostUpdatePlanResult insiderResult = await CreateSut(new Provider(Metadata() with { Channel = "insider", Identity = insider })).PlanAsync(Request() with { SourceChannel = "insider", TargetChannel = "insider" }, default);
+        Assert.True(insiderResult.IsEligible);
+        Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with { Channel = "insider", Identity = insider with { Version = "1.0.0-insider.0" } })).PlanAsync(Request() with { SourceChannel = "insider", TargetChannel = "insider" }, default)).Reasons);
+    }
+
+    [Fact]
     public async Task StageAsync_DowngradeWithoutExplicitAuthorization_Rejects()
     {
         HostUpdateFoundation sut = CreateSut(new Provider(Metadata(sequence: 1)), inspector: new Inspector(Installation() with { CurrentSequence = 2 }));
@@ -178,7 +220,7 @@ public sealed class HostUpdateFoundationTests
     private static HostInstallationEvidence Installation() => new("installation-1", Digest("installation"), Digest("topology"), "linux-x64", new HashSet<string>(["api", "frontend"]), "postgres", Digest("schema"), Digest("config"), "1.0.0", 1, Identity(), Digest("previous"), 200, 100, true, true, true);
     private static SignedReleaseMetadata Metadata(long sequence = 1, IReadOnlyDictionary<string, string>? components = null, string minimumUpdater = "1.0.0") => new("stable", sequence, true, Identity(), components ?? Digests(("api/linux-x64", Digest("api")), ("frontend/linux-x64", Digest("frontend"))), minimumUpdater);
     private static HostUpdateStagingReceipt Receipt(SignedReleaseMetadata metadata) => new(true, "staged", metadata.Identity, metadata.Identity.ManifestDigest, metadata.ComponentPlatformDigests, Installation().PriorReleaseIdentity, Digest("previous"), Digest("config"));
-    private static CanonicalReleaseIdentity Identity() => new("release_1", "1.0.0", "stable", "v1.0.0", "main", Hash("commit"), Hash("commit"), "build_1", "release_1", "1.0.0", Digest("provenance"), Digest("manifest"), Digest("index"));
+    private static CanonicalReleaseIdentity Identity() => new("stable:1.0.0", "1.0.0", "stable", "v1.0.0", "main", Hash("commit"), Hash("commit"), "build_1", "stable:1.0.0", "1.0.0", Digest("provenance"), Digest("manifest"), Digest("index"));
     private static Dictionary<string, string> Digests(params (string Key, string Value)[] values) => values.ToDictionary(value => value.Key, value => value.Value);
     private static string Digest(string value) => $"sha256:{Hash(value)}";
     private static string Hash(string value) => Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();
