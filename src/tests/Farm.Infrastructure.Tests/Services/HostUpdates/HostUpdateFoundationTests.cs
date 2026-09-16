@@ -254,6 +254,28 @@ public sealed class HostUpdateFoundationTests
         }
     }
 
+    [Fact]
+    public async Task FileHostUpdateInstallationLock_DisposedLease_ReleasesFileForNextAcquire()
+    {
+        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+        try
+        {
+            FileHostUpdateInstallationLock installationLock = new(directory);
+            await using (await installationLock.AcquireAsync("installation-1", default))
+            {
+            }
+
+            await using IAsyncDisposable lease = await installationLock.AcquireAsync("installation-1", default);
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+    }
+
     private static HostUpdateFoundation CreateSut(Provider? provider = null, Inspector? inspector = null, Stager? stager = null, IHostUpdateJournal? journal = null) =>
         new(inspector ?? new Inspector(Installation()), provider ?? new Provider(Metadata()), new Compatibility(), new AuthorizationEvaluator(), stager ?? new Stager(), journal ?? new MemoryJournal(), new Lock());
     private static async Task<HostUpdatePlan> EligiblePlanAsync(HostUpdateFoundation sut) { HostUpdatePlanResult result = await sut.PlanAsync(Request(), default); Assert.True(result.IsEligible); return new(Request(), result.PlanHash, Assert.IsType<CanonicalReleaseIdentity>(result.Identity), result.RequiredComponents, Assert.IsType<HostInstallationEvidence>(result.Installation)); }

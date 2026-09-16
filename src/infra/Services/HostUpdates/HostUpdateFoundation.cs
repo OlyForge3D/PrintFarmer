@@ -309,9 +309,10 @@ public sealed record HostUpdatePlan(HostUpdatePlanRequest Request, string PlanHa
     public string IdempotencyKey => Request.IdempotencyKey;
     public string InstallationId => Installation.InstallationId;
     public string TargetChannel => Request.TargetChannel;
-    public bool IsValid => Request is not null && Request.IsValid && Installation is not null && HostUpdateValidation.IsHexHash(PlanHash) && HostUpdateValidation.IsReleaseIdentity(Identity, TargetChannel) &&
-        RequiredComponents is not null && Installation is not null && Installation.RequiredComponents is not null &&
-        RequiredComponents.SetEquals(Installation.RequiredComponents) && Installation.Validate(Request.InstallationId).Count == 0;
+    public bool IsValid => Request is { IsValid: true } request && Installation is { RequiredComponents: { } installationComponents } installation &&
+        RequiredComponents is { } requiredComponents && HostUpdateValidation.IsHexHash(PlanHash) &&
+        HostUpdateValidation.IsReleaseIdentity(Identity, TargetChannel) && requiredComponents.SetEquals(installationComponents) &&
+        installation.Validate(request.InstallationId).Count == 0;
 }
 
 /// <summary>Bounded authorization accepted only through a trusted evaluator.</summary>
@@ -324,9 +325,14 @@ public sealed record HostUpdateAuthorization(string ActorId, string Nonce, strin
         HostUpdateValidation.IsIdentifier(ActorId) && HostUpdateValidation.IsIdentifier(Nonce) && HostUpdateValidation.HashesEqual(PlanHash, plan.PlanHash) &&
         ActorId == plan.Request.ActorId && Nonce == plan.Request.Nonce && InstallationId == plan.InstallationId &&
         SourceChannel == plan.Request.SourceChannel && TargetChannel == plan.TargetChannel && ChannelPolicyRevision == plan.Request.ChannelPolicyRevision &&
-        (TargetChannel != "insider" || InsiderWarningAcknowledged) &&
-        (Kind == HostUpdateAuthorizationKind.Manual ? !StandingPolicyActive && !StandingPolicyRevoked :
-            StandingPolicyActive && !StandingPolicyRevoked && SourceChannel == TargetChannel);
+        (TargetChannel != "insider" || InsiderWarningAcknowledged) && HasValidPolicyState();
+
+    private bool HasValidPolicyState() => Kind switch
+    {
+        HostUpdateAuthorizationKind.Manual => !StandingPolicyActive && !StandingPolicyRevoked,
+        HostUpdateAuthorizationKind.StandingPolicy => StandingPolicyActive && !StandingPolicyRevoked && SourceChannel == TargetChannel,
+        _ => false,
+    };
 }
 
 /// <summary>Identifies exactly the manual and non-transition standing authorization forms.</summary>
@@ -455,7 +461,7 @@ public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset Record
     {
         bool hasValidEvidence = identity is not null && installation is not null && installation.Validate(request.InstallationId).Count == 0 &&
             HostUpdateValidation.IsDigest(installation.TopologyFingerprint) &&
-            HostUpdateValidation.IsIdentifier(installation?.Platform) && requiredComponents is { Count: > 0 } &&
+            HostUpdateValidation.IsIdentifier(installation.Platform) && requiredComponents is { Count: > 0 } &&
             requiredComponents.All(HostUpdateValidation.IsIdentifier) && componentPlatformDigests is not null &&
             componentPlatformDigests.Count == requiredComponents.Count && requiredComponents.All(component =>
                 componentPlatformDigests.TryGetValue($"{component}/{installation!.Platform}", out string? digest) &&
@@ -600,8 +606,16 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
 }
 
 /// <summary>Acquires a host-local exclusive installation file lease.</summary>
-public sealed class FileHostUpdateInstallationLock(string hostStateDirectory) : IHostUpdateInstallationLock
+public sealed class FileHostUpdateInstallationLock : IHostUpdateInstallationLock
 {
+    private readonly string hostStateDirectory;
+
+    public FileHostUpdateInstallationLock(string hostStateDirectory)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostStateDirectory);
+        this.hostStateDirectory = Path.GetFullPath(hostStateDirectory);
+    }
+
     public Task<IAsyncDisposable> AcquireAsync(string installationId, CancellationToken ct)
     {
         if (!HostUpdateValidation.IsIdentifier(installationId))
@@ -611,9 +625,17 @@ public sealed class FileHostUpdateInstallationLock(string hostStateDirectory) : 
 
         Directory.CreateDirectory(hostStateDirectory);
         string path = Path.Combine(hostStateDirectory, $"{Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(installationId)))}.lock");
-        return Task.FromResult<IAsyncDisposable>(new FileLease(new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None)));
+        return Task.FromResult<IAsyncDisposable>(new FileLease(path));
     }
-    private sealed class FileLease(FileStream stream) : IAsyncDisposable { public ValueTask DisposeAsync() => stream.DisposeAsync(); }
+
+    private sealed class FileLease : IAsyncDisposable
+    {
+        private readonly FileStream stream;
+
+        public FileLease(string path) => stream = new FileStream(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+
+        public ValueTask DisposeAsync() => stream.DisposeAsync();
+    }
 }
 
 internal static class HostUpdateValidation
@@ -652,10 +674,12 @@ internal static class HostUpdateValidation
     }
     public static bool IsReleaseIdentity(CanonicalReleaseIdentity? identity, string channel) => identity is not null && IsChannel(channel) &&
         IsCanonicalReleaseVersion(identity.Version, channel) && identity.ReleaseId == $"{channel}:{identity.Version}" &&
-        IsChannel(identity.Channel) && identity.Channel == channel && identity.SourceTag == $"v{identity.Version}" && ((channel == "stable" && identity.SourceBranch == "main") ||
-        (channel == "insider" && identity.SourceBranch == "development")) && IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
+        IsChannel(identity.Channel) && identity.Channel == channel && identity.SourceTag == $"v{identity.Version}" && HasExpectedSourceBranch(identity.SourceBranch, channel) &&
+        IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
         IsIdentifier(identity.BuildMetadata) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel && IsDigest(identity.ProvenanceSubjectDigest) &&
         IsDigest(identity.ManifestDigest) && IsDigest(identity.IndexDigest);
+    private static bool HasExpectedSourceBranch(string sourceBranch, string channel) =>
+        (channel == "stable" && sourceBranch == "main") || (channel == "insider" && sourceBranch == "development");
     /// <summary>Accepts only the release-channel version grammar used in immutable publication identities.</summary>
     private static bool IsCanonicalReleaseVersion(string? value, string channel)
     {
@@ -714,12 +738,20 @@ internal static class HostUpdateValidation
         snapshot.RequiredComponents.All(IsIdentifier) && snapshot.ComponentPlatformDigests is not null &&
         snapshot.ComponentPlatformDigests.Count == snapshot.RequiredComponents.Count &&
         snapshot.RequiredComponents.All(component => snapshot.ComponentPlatformDigests.TryGetValue($"{component}/{snapshot.Platform}", out string? digest) && IsDigest(digest)) &&
-        ((entry.State == HostUpdateLifecycle.Staged && snapshot.Receipt is not null && snapshot.Receipt.IsComplete &&
-          IsReleaseIdentity(snapshot.Receipt.Identity, snapshot.TargetChannel) && IsReleaseIdentity(snapshot.Receipt.PriorReleaseIdentity, snapshot.Receipt.PriorReleaseIdentity.Channel) &&
-          IsDigest(snapshot.Receipt.ManifestDigest) && IsDigest(snapshot.Receipt.PreviousSetDigest) && IsDigest(snapshot.Receipt.PreviousConfigurationDigest) &&
-          snapshot.Receipt.Identity == snapshot.Identity && DigestsEqual(snapshot.Receipt.ManifestDigest, snapshot.Identity?.ManifestDigest) &&
-          DictionaryEqual(snapshot.Receipt.ComponentPlatformDigests, snapshot.ComponentPlatformDigests)) ||
-         (entry.State != HostUpdateLifecycle.Staged && snapshot.Receipt is null));
+        HasValidReceipt(entry.State, snapshot);
+    private static bool HasValidReceipt(HostUpdateLifecycle state, HostUpdateJournalSnapshot snapshot)
+    {
+        if (state != HostUpdateLifecycle.Staged)
+        {
+            return snapshot.Receipt is null;
+        }
+
+        return snapshot.Receipt is { IsComplete: true } receipt && snapshot.Identity is { } identity &&
+            IsReleaseIdentity(receipt.Identity, snapshot.TargetChannel) && IsReleaseIdentity(receipt.PriorReleaseIdentity, receipt.PriorReleaseIdentity.Channel) &&
+            IsDigest(receipt.ManifestDigest) && IsDigest(receipt.PreviousSetDigest) && IsDigest(receipt.PreviousConfigurationDigest) &&
+            receipt.Identity == identity && DigestsEqual(receipt.ManifestDigest, identity.ManifestDigest) &&
+            DictionaryEqual(receipt.ComponentPlatformDigests, snapshot.ComponentPlatformDigests);
+    }
     public static bool MatchesEitherIdentity(HostUpdateJournalEntry? entry, HostUpdatePlan? plan) => entry?.Snapshot is { } snapshot && plan is not null &&
         snapshot.InstallationId == plan.InstallationId && (entry.OperationId == plan.OperationId || entry.IdempotencyKey == plan.IdempotencyKey);
     public static bool MatchesBothIdentities(HostUpdateJournalEntry? entry, HostUpdatePlan? plan) => entry?.Snapshot is { } snapshot && plan is not null &&
@@ -728,19 +760,19 @@ internal static class HostUpdateValidation
         leftSnapshot.InstallationId == rightSnapshot.InstallationId && left.OperationId == right.OperationId && left.IdempotencyKey == right.IdempotencyKey;
     public static bool TryGetRequest(HostUpdateJournalEntry? entry, out HostUpdatePlanRequest? request)
     {
-        HostUpdateJournalSnapshot? snapshot = entry?.Snapshot;
-        request = snapshot is null || entry is null ? null : new(entry.OperationId, entry.IdempotencyKey, snapshot.ActorId, snapshot.Nonce, snapshot.ReasonCode,
-            snapshot.SourceChannel, snapshot.TargetChannel, snapshot.ChannelPolicyRevision, snapshot.InstallationId);
-        if (request is null || !request.IsValid)
+        if (entry?.Snapshot is not { } snapshot)
         {
+            request = null;
             return false;
         }
 
-        return true;
+        request = new(entry.OperationId, entry.IdempotencyKey, snapshot.ActorId, snapshot.Nonce, snapshot.ReasonCode,
+            snapshot.SourceChannel, snapshot.TargetChannel, snapshot.ChannelPolicyRevision, snapshot.InstallationId);
+        return request.IsValid;
     }
     public static bool SnapshotMatchesTrustedPlan(HostUpdateJournalSnapshot? snapshot, HostUpdatePlan? plan, SignedReleaseMetadata? metadata, HostInstallationEvidence? installation) =>
-        snapshot is not null && plan is not null && metadata is not null && installation is not null &&
-        snapshot.Identity == metadata.Identity && DigestsEqual(snapshot.Identity?.ManifestDigest, metadata.Identity?.ManifestDigest) &&
+        snapshot is { Identity: { } snapshotIdentity } && plan is not null && metadata is { Identity: { } metadataIdentity } && installation is not null &&
+        snapshotIdentity == metadataIdentity && DigestsEqual(snapshotIdentity.ManifestDigest, metadataIdentity.ManifestDigest) &&
         DigestsEqual(snapshot.TopologyFingerprint, installation.TopologyFingerprint) && snapshot.Platform == installation.Platform &&
         snapshot.RequiredComponents is not null && plan.RequiredComponents is not null && snapshot.RequiredComponents.SetEquals(plan.RequiredComponents) &&
         DictionaryEqual(snapshot.ComponentPlatformDigests, metadata.ComponentPlatformDigests) &&
