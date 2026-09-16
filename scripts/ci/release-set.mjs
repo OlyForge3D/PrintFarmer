@@ -156,7 +156,11 @@ export function inspectReleaseSet(record, set, evidencePath, releaseNotesSha256,
   return cryptoEvidence;
 }
 
-function main() {
+async function main() {
+  if (['tag', 'alias'].includes(process.argv[2])) {
+    const { runReleaseControl } = await import('./release-control.mjs');
+    await runReleaseControl('preflight');
+  }
   const record = verifyAuthorization(process.env, command);
   const evidencePathIndex = process.argv.indexOf('--evidence');
   const evidencePath = evidencePathIndex === -1 ? undefined : process.argv[evidencePathIndex + 1];
@@ -212,5 +216,5 @@ function main() {
 }
 
 if (process.argv[1]?.endsWith('release-set.mjs')) {
-  try { main(); } catch (error) { console.error(error.message); process.exitCode = 1; }
+  main().catch(error => { console.error(error.message); process.exitCode = 1; });
 }

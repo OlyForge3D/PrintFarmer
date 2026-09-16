@@ -2,8 +2,8 @@ import { execFileSync } from 'node:child_process';
 import {
   repository, ledgerBranch, requireThat, validateLedger, migrateLegacyLedger, verifyTag, compareVersions, normalizeProtectionEvidence,
   hash, parseTag, publicLedgerQualification, publicRecord, validateRecord, requireKeys, requireString,
-  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, validateApprovalMode,
-  approvedReviewers, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
+  validatePromotionOrigin, parseVersionFile, requireObject, validateReservationAdmission, requireOwnerReleaseMode,
+  validateDispatchAssessment, releaseBuildChecks, releaseReviewStatus, releaseRequiredChecks,
 } from './release-policy.mjs';
 import { publicAuthorization, writePublicSet } from './release-authorization.mjs';
 import { evidenceCollection, evidenceBaseEndpoint, readEvidencePages } from './github-evidence-pages.mjs';
@@ -151,7 +151,7 @@ export function githubRequestUrl(endpoint, method) {
     /^actions\/runs\/[1-9][0-9]*\/approvals$/,
     /^actions\/workflows\/consolidated-release\.yml$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
-    /^environments\/release-(?:stable|insider)(?:-owner-dispatch)?(?:\/deployment-branch-policies)?$/,
+    /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
     /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
   ];
   requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
@@ -451,9 +451,11 @@ export function parseGithubTimestamp(value, description = 'GitHub timestamp') {
   return parsed;
 }
 
-export async function verifyProtection(api, channel, publisherAppId, approvalMode, ownerApprovedReviewers, sourceCommit,
-  dispatchAuthorization) {
-  validateApprovalMode(approvalMode);
+export async function verifyProtection(api, channel, publisherAppId, approvalMode, dispatchAuthorization, sourceCommit) {
+  requireOwnerReleaseMode(approvalMode);
+  validateDispatchAssessment(dispatchAuthorization);
+  requireThat(dispatchAuthorization.ownerDispatchEligible && dispatchAuthorization.channel === channel,
+    'Live owner dispatch is required for protection verification');
   const readPolicy = async endpoint => {
     try { return await api(endpoint); }
     catch (error) {
@@ -473,11 +475,11 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
     requireThat(detail?.id === id, 'Branch ruleset identity changed during verification');
     branchRulesets.push(detail);
   }
-  const environmentName = `release-${channel}${dispatchAuthorization ? '-owner-dispatch' : ''}`;
+  const environmentName = `release-${channel}`;
   const environment = await readPolicy(`environments/${environmentName}`);
   const branchPolicies = await readPolicy(`environments/${environmentName}/deployment-branch-policies`);
   const allRulesets = await readPolicy('rulesets?per_page=100');
-  requireThat(allRulesets.length < 100, 'Ruleset listing may be truncated');
+  requireThat(Array.isArray(allRulesets) && allRulesets.length < 100, 'Ruleset listing malformed or truncated');
   const rulesets = [];
   for (const name of ['release-canonical-tags', 'release-ledger-continuity',
     'release-tag-creators', 'release-ledger-writer']) {
@@ -489,8 +491,8 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
     verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies,
-    rulesets, ...(dispatchAuthorization ? { dispatchAuthorization } : {}) };
-  const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode, ownerApprovedReviewers);
+    rulesets, dispatchAuthorization };
+  const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode);
   if (sourceCommit !== undefined) {
     const required = branchRules.filter(rule => rule.type === 'required_status_checks')
       .flatMap(rule => rule.parameters.required_status_checks);
@@ -501,43 +503,34 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
 
 
 export async function verifyAbandonmentApproval(api, transaction, record, targetReservation,
-  ownerApprovedReviewers, now = Date.now()) {
+  dispatchAuthorization, now = Date.now()) {
+  validateDispatchAssessment(dispatchAuthorization);
+  requireThat(dispatchAuthorization.ownerDispatchEligible &&
+    dispatchAuthorization.operation === 'abandon' && dispatchAuthorization.channel === 'insider' &&
+    dispatchAuthorization.reservationTarget === targetReservation &&
+    dispatchAuthorization.runId === transaction?.runId &&
+    dispatchAuthorization.executionAttempt === transaction?.runAttempt,
+  'Abandonment requires the exact fresh owner dispatch');
   requireThat(record.channel === 'insider' && targetReservation === record.allocationKey,
     'Abandonment target does not match the immutable reservation');
   requireString(transaction?.runId, /^[1-9][0-9]*$/, 'abandonment workflow run');
   requireString(transaction?.runAttempt, /^[1-9][0-9]*$/, 'abandonment workflow attempt');
   requireThat(transaction.runAttempt === '1',
     'Abandonment is restricted to the initial protected workflow attempt');
-  const run = await api(`actions/runs/${transaction.runId}`);
-  requireThat(run?.id === Number(transaction.runId) && run.run_attempt === Number(transaction.runAttempt) &&
-    run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
-    run.path === '.github/workflows/consolidated-release.yml' && run.event === 'workflow_dispatch',
-  'Abandonment workflow run evidence is malformed or mismatched');
   const jobs = await api(`actions/runs/${transaction.runId}/attempts/${transaction.runAttempt}/jobs?per_page=100`);
-  requireThat(jobs?.total_count === jobs.jobs?.length && jobs.jobs.length > 0,
+  requireThat(Array.isArray(jobs?.jobs) && jobs.total_count === jobs.jobs.length && jobs.jobs.length > 0,
     'Abandonment workflow job evidence is missing or truncated');
   const protectedJobs = jobs.jobs.filter(candidate => candidate?.run_id === Number(transaction.runId) &&
     candidate.run_attempt === Number(transaction.runAttempt) &&
     candidate.name === abandonmentProtectedJobName &&
-    typeof candidate.started_at === 'string');
+    candidate.status === 'in_progress' && typeof candidate.started_at === 'string');
   requireThat(protectedJobs.length === 1, 'Abandonment protected job evidence is missing, ambiguous, or mismatched');
   const [job] = protectedJobs;
   requireThat(job && Number.isSafeInteger(job.id) && job.id > 0 &&
     job.run_id === Number(transaction.runId) && job.run_attempt === Number(transaction.runAttempt),
   'Abandonment protected job evidence is missing or mismatched');
-  const approvals = await api(`actions/runs/${transaction.runId}/approvals`);
-  requireThat(Array.isArray(approvals) && approvals.length > 0,
-    'Abandonment environment approval evidence is missing or malformed');
-  const allowed = new Set(approvedReviewers(ownerApprovedReviewers));
   const environment = 'release-insider';
-  const approval = approvals
-    .filter(candidate => candidate?.state === 'approved' &&
-      Array.isArray(candidate.environments) && candidate.environments.length === 1 &&
-      candidate.environments[0]?.name === environment &&
-      allowed.has(candidate.user?.login?.toLowerCase()))
-    [0];
-  requireThat(approval, 'Abandonment requires approval from an allowed owner');
-  // GitHub's approval-history response has no timestamp; protected job start proves approval completed.
+  // The live dispatch is authority; the active protected job bounds its execution window.
   const approvedAt = parseGithubTimestamp(job.started_at, 'abandonment protected job start timestamp');
   requireThat(Number.isFinite(now) && approvedAt <= now, 'Abandonment approval is future-dated');
   return {

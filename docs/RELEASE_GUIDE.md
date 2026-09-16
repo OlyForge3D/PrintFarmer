@@ -16,8 +16,8 @@ post_date: "2026-09-12"
 `consolidated-release.yml` is the sole server release entry point and its trusted
 workflow definition always runs from `development`. Stable selects build source
 from `main`; insider selects build source from `development`. The operator cannot
-select a different control ref. The schedule dispatches the same trusted workflow
-for ordinary insider releases. Branch pushes and direct tag pushes do not publish.
+select a different control ref. Only a fresh owner manual dispatch can publish.
+Schedules, branch pushes, direct tag pushes and reruns do not publish.
 The reusable Docker workflow requires the signed record from this exact
 workflow/run/attempt; arbitrary reusable callers cannot authorize a release.
 
@@ -37,8 +37,8 @@ The supported administrator journey is:
    ancestor. The workflow definition remains pinned independently.
 3. Click **Run workflow** on `development`. In `single-maintainer` mode, the
    authenticated owner's initial manual publication dispatch is the authorization;
-   there is no second environment approval. Other eligible paths retain one explicit
-   `release-stable` or `release-insider` environment approval.
+   there is no second environment approval. Unsupported actors, triggers and
+   reruns are rejected, never routed to a fallback approval.
 4. Follow the generated Actions summary. Qualification, evidence collection,
    allocation, ledger/tag work, publication and pointer advancement are
    automatic and fail closed.
@@ -59,8 +59,8 @@ transaction, GitHub Actions App, check suite, workflow commit, and namespaced
 reusable-workflow jobs that check out the pinned source. These jobs satisfy the
 corresponding build checks, including their configured App integration bindings;
 additional configured checks still require genuine exact-source evidence.
-Release qualification always forces the full-safe CI matrix, including scheduled
-insider runs with no changed-file list. Build receipt entries explicitly identify
+Release qualification always forces the full-safe CI matrix, even without a
+changed-file list. Build receipt entries explicitly identify
 their transaction job, run, attempt and workflow commit.
 The same authorization step re-reads that API evidence, source review mapping,
 evidence timestamps, and live strict branch policy after the selected authorization boundary.
@@ -83,22 +83,19 @@ This is exact-tree review
 mapping, **not** a review status on the squash commit, and no status is created.
 Missing, stale, failed, forged, ambiguous or tree-mismatched evidence fails closed.
 `single-maintainer` accepts genuine self-attested/owner review without introducing
-a second person's approval. `separation-of-duties` additionally requires current
-exact-reviewed-head native approval by a source code owner other than the PR
-author or release initiator, with live write permission. Existing branch and
-environment review requirements for separation mode remain unchanged.
-The supported native CODEOWNERS policy ends with a user-only catch-all rule;
-team or path-specific ownership requires reviewed support rather than guessing.
+a second person's approval. Release launch supports only `single-maintainer`;
+`separation-of-duties` is not an alternative release mode. Historical signed
+approval evidence remains verifiable without changing its original claims.
 
 By owner decision, release validation is limited to automated tests,
 static analysis, code review, and fail-closed checks. No rehearsal or alternate
 live diagnostic workflow, mode, environment, receipt, fixture, probe, or
 operator ceremony exists.
 
-`release-stable` and `release-insider` retain required reviewers. Their
-`-owner-dispatch` counterparts are reserved for the authenticated owner's initial
-manual publish in single-maintainer mode. A blocking read-only job verifies the
-trusted live dispatch before selecting either route, without environment secrets
+`release-stable` and `release-insider` are the only release environments. Retain
+their credentials and history; remove only redundant approval gates after the
+reviewed code-first cutover. A blocking read-only job verifies the
+trusted live dispatch before selecting the channel environment, without environment secrets
 or OIDC. See [cutover requirements](#environment-approval-and-cutover).
 Each real run creates exactly one deployment to the selected environment. The
 same protected job verifies live policy, mints credentials, reserves identity,
@@ -247,31 +244,30 @@ One global decimal counter covers beta, insider and RC, across bases.
 Workflow migration requires an owner-reviewed code/policy change; arbitrary
 replacement workflow identities are rejected. Allocation keys include repository,
 workflow ref, run ID, channel, stage, full source SHA and base. Same-run reruns
-recover the immutable attempt-one transaction, reservation and evidence, bind
-the current attempt, and revalidate every retained byte. They do not skip
-qualification or approval and cannot allocate a conflicting identity. Missing
-or mismatched recovery artifacts fail closed. Failed reservations remain consumed.
+are rejected, including failed-jobs-only reruns; use a fresh owner dispatch.
+In-execution retries remain byte-identical and revalidate live authority.
+Failed reservations remain consumed.
 Stable has no N: a new run cannot rebuild an already reserved stable identity.
-Resume byte-identical transfer in the same run, or qualify a reviewed new base;
+Retry byte-identical transfer within the active first attempt, or qualify a reviewed new base;
 never replace a stable identity with new build bytes.
 An active insider reservation that cannot be completed may be terminally abandoned
-only by selecting `abandon` in the same Consolidated Release dispatch and passing
+only by selecting `abandon` and channel `insider` in a fresh owner Consolidated Release dispatch and passing
 its immutable allocation key as `reservation_target`; that dispatch calls the
 existing protected Docker publisher and never invokes publication. The publisher
 recovers the original signed authorization by its original run identity, then uses
-the publisher App token to read the current protected environment approval. The
+the publisher App token to reverify the current owner dispatch and full live policy. The
 immutable abandonment authorization binds the active allocation key, source
 commit, canonical version, channel, original authorization hash, exact current
 workflow run/attempt/job/environment/target, normalized approval time, and a
-current owner-allowlisted approver. The allocation key is the explicit approval
+authenticated immutable owner. The allocation key is the explicit authorization
 target and is echoed by the dispatch input; it selects the insider protected
 environment and concurrency lane, never a mutable tag or source ref. Abandonment
-is restricted to attempt 1 because GitHub approval history is run-scoped and
-cannot prove an approval belongs to a later rerun attempt. GitHub's approval-history response has no
-approval timestamp, so the normalized time is the authenticated protected
-publisher job start time for the exact run and attempt, which occurs only after
-environment approval. Missing, forged, stale, mismatched, or
-wrong-environment approval evidence fails closed. The ledger projects only these
+is restricted to attempt 1, with matching original/triggering actors and live admin
+permission, just like publication. No environment approval history is consulted.
+The normalized execution time is the active protected publisher job start time
+for that exact run and attempt; it must remain within the 15-minute recovery
+window. Missing, forged, stale, mismatched, or wrong-operation/target evidence
+fails closed. The ledger projects only these
 public-safe bindings; raw approval, reviewer, and protection data are never
 projected. Abandonment consumes the original identity and sequence permanently,
 does not publish a pointer or aliases, cannot be reversed, and permits a later
@@ -310,9 +306,9 @@ Consumers check both object ID and peeled commit. Missing, moved or recreated
 tags fail. No tag force-update/delete API is used. Continuous tag protection
 prevents a delete/recreate of the identical object between observations.
 
-Read-only admission uses `github.token` only for source and ledger checks.
+Read-only admission uses `github.token` for source, ledger and live owner/run checks.
 Qualification uses that token's existing read ceiling, including PR reads.
-Neither calls Administration APIs. After the dispatch boundary and any required environment approval,
+Neither calls Administration APIs. After the owner-only dispatch boundary,
 authorization obtains the protected publisher App token and verifies live branch
 rules, tag/ledger rulesets and environment restrictions before reserving anything.
 Missing App credentials or any denied protection read fails without publication;
@@ -320,8 +316,8 @@ the CLI never falls back to `github.token` for authorization or ledger writes.
 
 Raw policy responses stay **only in memory** during App-token verification:
 never in files, logs, outputs, bundles or uploads. The immutable record contains
-only a strict, normalized `protection` attestation (schema 5 for explicit approval,
-schema 6 for owner dispatch):
+only a strict, normalized schema-6 `protection` attestation; historical schema-5
+explicit-approval records remain readable:
 repository/channel/branch, ISO `verifiedAt`, the
 `printfarmer-release-protection/v4` or `/v5` profile, `approvalMode`, `approvalAssurance`,
 boolean policy claims and a SHA-256
@@ -332,7 +328,7 @@ restriction, the applicable authorization with administrator bypass blocked, imm
 exclusive writes by the owner-approved publisher. No actor/App IDs, reviewer
 identities, raw rules or hashes of private API responses survive normalization.
 `codeOwnerApprovalRequired` and `nonSelfApprovalRequired` are `false` in
-`single-maintainer` mode and `true` in `separation-of-duties` mode.
+current `single-maintainer` mode and remain `true` in historical separation-mode records.
 `selfAttestedReviewRequired` means the existing Squad review gate (including its
 explicit owner override), not an independent approver. It and every other claim
 must remain `true`, except `manualApprovalRequired` is `false` in schema 6.
@@ -341,8 +337,8 @@ transaction SHA-256, workflow/source commits, channel, publish operation, run an
 current attempt, event, approval mode and verified owner eligibility. It is bound
 to the signed record's source/workflow/run/attempt and the protection digest.
 Its assurance is `owner-dispatched/self-attested`, never a fabricated environment
-review or independent approval. Original schema 5 records remain verifiable;
-reruns retain their original signed bytes but need a fresh explicit environment gate.
+review or independent approval. Original schema-5 and schema-6 records remain verifiable;
+reading historical evidence does not authorize a rerun or a new mutating operation.
 The mode, assurance and claims are bound into the normalized digest and signed
 authorization. Earlier evidence, including schema 4/v3, missing modes, unknown fields and
 contradictory claims fail closed; there is no compatibility default. Existing
@@ -726,8 +722,8 @@ approve this Git-CAS storage and recovery design, and choose candidate expiry.
 CODEOWNERS currently names `jpapiez`; that is existing ownership, not approval
 of this new policy.
 The ledger is a data-only coordination ref, never an additional release source
-branch. Manual environment approval always needs an eligible reviewer and an
-explicit approval mode; admin API access alone does not approve the new policy.
+branch. The current release path requires an authenticated owner manual dispatch;
+admin API access alone does not approve a release or a policy change.
 The historical activation dependency was #2682 under #2668. Neither this snapshot
 nor its resolution grants blanket activation: the current run must verify live
 policy, continuity and credentials and satisfy the selected authorization route.
@@ -736,28 +732,27 @@ variables, credentials or rules merely because they were absent on 2026-09-12.
 
 ### Explicit release approval configuration
 
-Set repository variable `RELEASE_APPROVAL_MODE` to exactly one of the values
-below. There is **no default**: missing, misspelled, whitespace-padded and unknown
+Keep repository variable `RELEASE_APPROVAL_MODE` set to `single-maintainer`.
+There is **no default**: missing, unsupported, whitespace-padded and unknown
 values block admission and authorization before any API read or write.
 Admission emits its validated mode as a job output. The protected authorization
 job independently resolves the variable and requires exact equality with that
 output before any API access. Environment overrides must match the repository
 value; a mismatch or missing admission output blocks reservation. Align the
-configuration and rerun all jobs. The output is a consistency check, not a
+configuration and start a fresh owner dispatch. The output is a consistency check, not a
 replacement for protected authorization policy. Never accept this policy from
 dispatch input or infer it from the number of maintainers.
 
 | Mode | Required native branch PR policy | Required environment policy | Normalized assurance |
 | --- | --- | --- | --- |
-| `single-maintainer` | Zero native approvals, code-owner review disabled, last-push approval disabled | Manual required-reviewer gate, `prevent_self_review: false`; every configured reviewer must be an owner-approved user | `owner-confirmed/self-attested` |
-| `separation-of-duties` | At least one native approval and native code-owner review; GitHub does not let PR authors approve their own PR | Manual required-reviewer gate, `prevent_self_review: true`; at least one configured eligible user/team reviewer | `non-self-review-enforced` |
+| `single-maintainer` | Zero native approvals, code-owner review disabled, last-push approval disabled | Existing channel environment, only exact development branch policy, admin bypass disabled, no second approval | `owner-dispatched/self-attested` |
 
-**Both modes require PR-only branch flow**, resolved review conversations,
+**Release operations require PR-only branch flow**, resolved review conversations,
 stale native approval dismissal on push, strict up-to-date required status checks,
 and deletion/force-push prevention on `main` and `development`. In the REST
 ruleset `pull_request` parameters, set `required_review_thread_resolution: true`
 and `dismiss_stale_reviews_on_push: true`; use actual booleans and an integer
-`required_approving_review_count` (0 in single-maintainer, 1–6 otherwise).
+`required_approving_review_count` of 0.
 Single-maintainer must explicitly set `require_code_owner_review: false` and
 `require_last_push_approval: false`; an unsatisfiable native review requirement
 is rejected, not described as a stronger assurance.
@@ -1027,16 +1022,15 @@ The collaborator permission response was reproduced with an owner token, not a
 live boundary job's `github.token`. The parent must confirm that existing token's
 endpoint access during the first real rollout run. A denied read is a hard blocker,
 never inferred permission, a credential-bearing probe, or a reason to expand grants.
-Only initial manual `publish` by user `jpapiez` (pinned account ID `5460061`),
+Only initial manual `publish` or explicit `abandon` by user `jpapiez` (pinned account ID `5460061`),
 still holding the live `admin`
-role, is eligible. Every rerun requires the existing explicit approval, including
-owner reruns: GitHub reruns use the **original actor's privileges**, not the
-rerunner's. Schedules, non-owner dispatch, abandonment and separation-of-duties
-do not inherit dispatch consent. Foreign repositories, control refs, reusable
+role, is eligible. Every rerun is rejected, including owner reruns: GitHub reruns
+use the **original actor's privileges**, not the rerunner's. Schedules, non-owner
+dispatch and separation-of-duties are unsupported, not fallback approval routes.
+Foreign repositories, control refs, reusable
 callers, changed operation/source/channel/attempt and spoofed actor inputs reject.
 The abandonment-only target remains ignored for `publish`, as before.
-Exact-tree source review and native nonself code-owner review in separation mode
-are unchanged.
+Exact-tree source review remains mandatory.
 
 GitHub's [ruleset response](https://docs.github.com/en/rest/repos/rules#get-a-repository-ruleset)
 exposes `bypass_actors` only with ruleset-write access. The former publisher
@@ -1064,48 +1058,40 @@ that its credential could change.
 
 **Migration, after review only:**
 
-1. Preserve `release-stable` and `release-insider`, their reviewers, secrets and
-   deployment history. Schedules, non-owner dispatch, all reruns, abandonment and
-   separation-of-duties continue to use them.
-2. Accept only the approved existing App's Administration-write change for this
-   repository, and verify its effective installation permission and repository
-   selection. Do not broaden any other App right or repository.
-3. Before placing credentials, provision the two new environments from
-   [the reviewed configuration](../.github/release-owner-dispatch-environments.json).
-   Apply each `settings` object to the named environment and its `branchPolicies`
-   to the separate deployment-branch-policy API. Read back **exactly one**
-   `development` branch policy, no tag pattern, disabled admin bypass, no reviewers
-   or other waiting/custom gate. Do not remove reviewers from the original pair.
-4. The owner re-provisions `RELEASE_PUBLISHER_PRIVATE_KEY` and
-   `RELEASE_REGISTRY_TOKEN` privately in the new pair and configures the matching
-   App ID, registry user, ledger anchor and approval mode. GitHub cannot export
-   existing environment secret values; this is not an automatic secret-copy
-   migration. Do not move credentials to repository/organization scope. The
-   optional `RELEASE_OWNER_APPROVED_REVIEWERS` secret stays on the original pair;
-   delegates never acquire owner-dispatch eligibility.
-5. Verify the exact trusted workflow signer allowlist is unchanged:
+1. Stop new release dispatches and let old publishers finish or have the parent
+   cancel them. Deploy the reviewed owner-only code to `development` **before**
+   changing environment approval requirements. Do not rerun old workflow commits.
+2. Preserve `release-stable` and `release-insider`, all existing credential values,
+   variables and deployment history. No environments, Apps or credentials are
+   created, copied or re-entered. The existing publisher App's previously approved
+   Administration-write grant and repository-only installation remain unchanged.
+3. Obtain scoped owner confirmation to remove only the second-approval requirements
+   from the existing pair. Read back **exactly one** `development` branch policy,
+   `protected_branches: false`, `custom_branch_policies: true`,
+   `can_admins_bypass: false`, and only the `branch_policy` protection rule.
+   Required reviewers, wait timers or custom gates remain blockers until removed;
+   the code never bypasses them. Retain `RELEASE_APPROVAL_MODE=single-maintainer`
+   and all branch/tag/ledger/package controls. The old delegate-reviewer secret is
+   unused; removing it is not needed for rollout.
+4. Verify the exact trusted workflow signer allowlist is unchanged:
    `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/docker-publish.yml@refs/heads/development`.
    Cosign checks that workflow certificate identity, not an environment-name
-   subject. Any externally configured environment-qualified OIDC subject allowlist
-   must be inventoried and narrowly updated by the owner before rollout; do not
-   relax certificate issuer/workflow checks.
-6. The parent coordinates a **fresh** manual run and checks the boundary result,
+   subject. Existing environment names and external OIDC subjects do not change.
+5. The parent coordinates a **fresh owner** manual run and checks the boundary result,
    selected deployment, live complete bypass evidence and signed schema-6
    provenance, then the normal qualification/signing/digest/ledger/pointer results.
    Old job approvals, receipts and the failed historical run are not acceptance.
    This change does not launch that run or claim live publication success.
 
-**Rollback:** stop dispatch/scheduled admission and wait for active publishers to
-finish or be cancelled under the parent's control. Remove the new pair's credential
-access first; preserve the original pair and all signed records/ledger history.
-Deploy reviewed code routing all operations through the original reviewer
-environments while retaining schema-6 read compatibility and complete policy
-verification. Then remove unused owner-dispatch environments if desired. Do not
-blindly revert to a verifier that rejects historical schema-6 identities. Revoking
-Administration write reintroduces #2728's visibility blocker; it safely disables
-publication until a separately approved complete-evidence solution exists.
+**Rollback:** stop new dispatches and wait for active publishers to finish or be
+cancelled under the parent's control. Keep existing environments, credentials and
+all signed records/ledger history. Deploy only reviewed owner-only code that keeps
+schema-5/6 read compatibility and full policy verification. Restoring a second
+approval gate safely blocks this code; it does not enable an alternate release
+route. Never revert to old scheduled/non-owner code against ungated environments.
+Revoking Administration write reintroduces #2728's complete-evidence blocker.
 
-**Both modes require administrator bypass to be disabled.** In each release
+**Administrator bypass must remain disabled.** In each release
 environment, deselect **Allow administrators to bypass configured protection
 rules**. Read back the environment using the publisher App: the REST
 `GET /repos/{owner}/{repo}/environments/{environment_name}` response must contain
@@ -1123,30 +1109,11 @@ only `environmentAdminBypassBlocked: true`; raw environment data stays in memory
 Disabling bypass is an activation requirement, not a claim of independent
 approval or proof that administrators cannot later change configuration.
 
-In single-maintainer mode, `jpapiez` is the approved owner reviewer. To delegate,
-the owner must explicitly approve the users in private activation evidence and
-provision the optional **environment secret** `RELEASE_OWNER_APPROVED_REVIEWERS`
-as a JSON array of GitHub user logins. The owner remains allowed; an unset/empty
-secret adds no delegates. Invalid JSON, empty arrays or malformed logins fail
-closed. Do not put identities in repository variables, workflow YAML, logs or
-public evidence. This secret is an owner-provisioned allowlist, not independent
-proof of who approved it; access to environment-secret administration is a
-trust boundary. Keep the owner's approval record private and review changes.
-
-GitHub accepts any one required reviewer, so **every** configured reviewer must
-be on that allowlist in single-maintainer mode; adding an unapproved user beside
-the owner is not sufficient. Teams are rejected in that mode because team
-membership does not establish explicit approval of each possible reviewer.
-In separation-of-duties mode, GitHub's configured user/team reviewer object
-provides eligibility evidence and the environment prevents the initiator from
-approving; an empty/malformed reviewer list never qualifies.
-
-Single-maintainer approval is **owner-confirmed/self-attested**, not separation
-of duties, four-eyes control or independent approval. The normalized evidence
-attests the checked environment policy, not the identity of a particular
-approver. Switching modes changes the branch and environment approval policy: exact SHA and
-branch restrictions, App isolation, immutable tags, ledger continuity, package
-ACL isolation and automated negative-path tests remain mandatory.
+Single-maintainer authorization is **owner-dispatched/self-attested**, not
+separation of duties, four-eyes control or independent approval. No delegate
+allowlist or environment-review fallback exists. Exact source identity, branch
+restrictions, App isolation, immutable tags, ledger continuity, package ACL
+isolation and automated negative-path tests remain mandatory.
 
 Before enabling:
 
@@ -1167,14 +1134,14 @@ Before enabling:
    evidence. A head equal to the checkpoint has no seed and is rejected.
    Every subsequent snapshot and edge back through the seed is mandatory.
    The workflow never auto-initializes.
-3. Enforce the mode-specific main/development PR policy, non-force/non-delete
+3. Enforce the single-maintainer main/development PR policy, non-force/non-delete
    rules without bypass, conversation resolution and all exact-SHA checks above.
    Do not enable native approval requirements in single-maintainer mode.
    Protect `release-stable`/`release-insider` with
-   manual reviewer approval under the explicit mode above and allow only the
-   immutable `development` workflow control branch. Configure the variable and any owner-approved
-   delegate secret; disable administrator bypass and read back each environment's
-   actual reviewer/self-review settings and boolean `can_admins_bypass: false`
+   the owner-only dispatch boundary above and allow only the
+   immutable `development` workflow control branch. Retain the approval-mode
+   variable; disable administrator bypass and read back each environment's
+   branch-only protection rules and boolean `can_admins_bypass: false`
    before enabling publication.
 4. Activate `release-canonical-tags` (`v*`, no update/delete, **no bypass**) and
    `release-ledger-continuity` (ledger branch, no force/delete, **no bypass**).
@@ -1193,8 +1160,7 @@ Before enabling:
    alone does not constrain another workflow's `GITHUB_TOKEN`, so this package
    ACL cutover is mandatory owner evidence, not implied by environment setup.
    Infrastructure package ownership is unchanged.
-   Store these credentials only in the original reviewer environments and, after
-   the reviewed cutover above, the two owner-dispatch environments.
+   Keep these credentials only in the existing `release-stable` and `release-insider` environments.
    Their deployment branch policy allows the immutable `development` workflow
    control ref for both channels; the selected source remains independently
    pinned to `main` for stable or `development` for insider.
@@ -1217,7 +1183,7 @@ Run from the repository root:
 
 ```text
 node --test scripts/ci/tests/test-release-tag-triggers.mjs scripts/ci/tests/test-daily-development-images.mjs
-node --test scripts/ci/tests/test-release-transaction.mjs scripts/ci/tests/test-github-evidence-pages.mjs
+node --test scripts/ci/tests/test-release-transaction.mjs scripts/ci/tests/test-release-dispatch.mjs scripts/ci/tests/test-github-evidence-pages.mjs
 ```
 
 Fixtures execute admission denials without writes, positive stable/insider
@@ -1229,11 +1195,12 @@ intermediate merges and invalid snapshots, missing/truncated objects, explicit
 checkpoint semantics and a 1,005-snapshot chain. Read, allocation and source-tag
 paths assert zero POST/PATCH calls on rejection; executed admission/authorization
 also reject evidence rewrites before writes.
-Approval fixtures cover both modes on both channels, absent/invalid mode,
-missing/manual-reviewer gates, self-review contradictions, unapproved delegates,
-malformed owner configuration, mode-change retries and redaction. Both modes
-execute the real admission/authorization/consumer flow with fake API transport;
-single-maintainer policy denials prove no reservation/tag/ledger writes.
+Authorization fixtures cover both channels, absent/unsupported mode, exact owner
+identity and live admin permission, non-owner/schedule/rerun/direct-call denial,
+explicit owner recovery, missing/malformed environment and ruleset evidence,
+second-approval rejection and redaction. Single-maintainer fixtures execute the
+real admission/authorization/consumer flow with fake API transport; denials prove
+no reservation/tag/ledger writes. Historical schema-5/6 readers retain coverage.
 Branch fixtures reject native-review mode mismatches, every missing required
 context, non-strict checks, malformed parameters and bypasses (including the
 owner and publisher App). Exact-SHA fixtures reject wrong/missing SHA, pending

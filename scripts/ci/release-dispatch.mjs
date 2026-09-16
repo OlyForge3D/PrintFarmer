@@ -59,7 +59,7 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
     Number.isSafeInteger(run.repository.id) && run.repository.id > 0 &&
     run.head_repository.id === run.repository.id &&
     run.head_branch === 'development' && run.head_sha === transaction.workflowCommit &&
-    run.event === env.GITHUB_EVENT_NAME && ['workflow_dispatch', 'schedule'].includes(run.event) &&
+    run.event === env.GITHUB_EVENT_NAME && run.event === 'workflow_dispatch' &&
     run.status === 'in_progress',
   'Dispatch run, attempt, repository, or workflow evidence does not match');
   const actor = identity(run.actor);
@@ -67,53 +67,42 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
   requireThat(env.GITHUB_ACTOR === actor.login && env.GITHUB_ACTOR_ID === String(actor.id) &&
     env.GITHUB_TRIGGERING_ACTOR === triggeringActor.login,
   'Runner actor claims differ from GitHub run evidence');
-  const scheduled = run.event === 'schedule';
-  let operation = 'publish';
-  let reservationTarget = '';
-  if (!scheduled) {
-    requireThat(event?.repository?.full_name === repository &&
-      event.repository.id === run.repository.id &&
-      ['development', 'refs/heads/development'].includes(event.ref) &&
-      sameIdentity(identity(event.sender), actor),
-    'Dispatch event repository, ref, or sender does not match GitHub run evidence');
-    requireKeys(event.inputs, ['channel', 'operation'], ['source_sha', 'reservation_target'],
-      'dispatch inputs');
-    operation = event.inputs.operation;
-    reservationTarget = operation === 'abandon' ? event.inputs.reservation_target ?? '' : '';
-    requireThat(['publish', 'abandon'].includes(operation) &&
-      ['stable', 'insider'].includes(event.inputs.channel) &&
-      transaction.channel === (operation === 'abandon' ? 'insider' : event.inputs.channel) &&
-      typeof reservationTarget === 'string' &&
-      (operation === 'publish' ? reservationTarget === '' : /^[a-f0-9]{64}$/.test(reservationTarget)),
-    'Dispatch channel, operation, or reservation target differs from the selected transaction');
-    requireThat(event.inputs.source_sha === undefined || typeof event.inputs.source_sha === 'string',
-      'Dispatch source input is malformed');
-    const selectedSource = event.inputs.source_sha?.trim();
-    requireThat(selectedSource ? selectedSource === transaction.sourceCommit :
-      transaction.sourceCommit === transaction.observedBranchHead,
-    'Dispatch source differs from the immutable source selection');
-  } else {
-    requireThat(transaction.channel === 'insider' &&
-      transaction.sourceCommit === transaction.observedBranchHead &&
-      (event?.inputs === undefined || Object.keys(event.inputs).length === 0),
-    'Scheduled release cannot inherit manual dispatch inputs');
-  }
+  requireThat(actor.login === ownerLogin && actor.id === ownerAccountId &&
+    actor.type === 'User' && sameIdentity(actor, triggeringActor),
+  'Only the immutable owner may initiate release operations; use a fresh owner manual dispatch');
+  requireThat(event?.repository?.full_name === repository &&
+    event.repository.id === run.repository.id &&
+    ['development', 'refs/heads/development'].includes(event.ref) &&
+    sameIdentity(identity(event.sender), actor),
+  'Dispatch event repository, ref, or sender does not match GitHub run evidence');
+  requireKeys(event.inputs, ['channel', 'operation'], ['source_sha', 'reservation_target'],
+    'dispatch inputs');
+  const operation = event.inputs.operation;
+  const reservationTarget = operation === 'abandon' ? event.inputs.reservation_target ?? '' : '';
+  requireThat(['publish', 'abandon'].includes(operation) &&
+    ['stable', 'insider'].includes(event.inputs.channel) &&
+    transaction.channel === event.inputs.channel &&
+    (operation !== 'abandon' || transaction.channel === 'insider') &&
+    typeof reservationTarget === 'string' &&
+    (operation === 'publish' ? reservationTarget === '' : /^[a-f0-9]{64}$/.test(reservationTarget)),
+  'Dispatch channel, operation, or reservation target differs from the selected transaction');
+  requireThat(event.inputs.source_sha === undefined || typeof event.inputs.source_sha === 'string',
+    'Dispatch source input is malformed');
+  const selectedSource = event.inputs.source_sha?.trim();
+  requireThat(selectedSource ? selectedSource === transaction.sourceCommit :
+    transaction.sourceCommit === transaction.observedBranchHead,
+  'Dispatch source differs from the immutable source selection');
   requireThat(env.RELEASE_OPERATION === operation &&
     (operation === 'publish' || (env.RELEASE_ABANDONMENT_TARGET ?? '') === reservationTarget),
   'Executing operation differs from the original dispatch');
   await verifyCanonicalSource(api, 'development', transaction.workflowCommit);
   await verifyCanonicalSource(api, transaction.sourceBranch, transaction.sourceCommit);
-  let ownerDispatchEligible = false;
-  if (!scheduled && operation === 'publish' && env.GITHUB_RUN_ATTEMPT === '1' &&
-    transaction.approvalMode === 'single-maintainer' &&
-    actor.login === ownerLogin && actor.id === ownerAccountId &&
-    actor.type === 'User' && sameIdentity(actor, triggeringActor)) {
-    const permission = await api(`collaborators/${ownerLogin}/permission`);
-    requireThat(permission && typeof permission.permission === 'string' &&
-      sameIdentity(identity(permission.user), actor),
-    'Owner live repository permission evidence is missing or mismatched');
-    ownerDispatchEligible = permission.permission === 'admin' && permission.role_name === 'admin';
-  }
+  const permission = await api(`collaborators/${ownerLogin}/permission`);
+  requireThat(permission && typeof permission.permission === 'string' &&
+    sameIdentity(identity(permission.user), actor),
+  'Owner live repository permission evidence is missing or mismatched');
+  requireThat(permission.permission === 'admin' && permission.role_name === 'admin',
+    'Owner must retain live repository administrator permission');
   const assessment = {
     kind: 'release-dispatch-assessment', schema: 1,
     repository, transactionSha256: hash(transaction),
@@ -121,7 +110,7 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
     channel: transaction.channel, operation, reservationTarget,
     runId: transaction.runId, executionAttempt: env.GITHUB_RUN_ATTEMPT,
     event: run.event, approvalMode: transaction.approvalMode,
-    ownerDispatchEligible,
+    ownerDispatchEligible: true,
   };
   validateDispatchAssessment(assessment);
   return assessment;
@@ -140,7 +129,7 @@ async function verifySelectedEnvironment(api, assessment) {
   const name = publicationEnvironment(assessment);
   verifyEnvironmentRestrictions(await api(`environments/${name}`),
     await api(`environments/${name}/deployment-branch-policies`),
-    assessment.channel, assessment.ownerDispatchEligible);
+    assessment.channel);
 }
 
 export async function selectPublicationAccess(env = process.env, api = githubClient(env.GH_TOKEN),

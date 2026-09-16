@@ -2,7 +2,7 @@ import { appendFileSync, closeSync, constants, fstatSync, lstatSync, openSync, r
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import {
   abandon, abandonmentAuthorization, admit, advance, hash, requireThat, reserve, transact, verifyConsumer, verifyTag,
-  identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission, validateApprovalMode,
+  identityLabels, parseTag, verifyProtectionEvidence, validateReservationAdmission, requireOwnerReleaseMode,
 } from './release-policy.mjs';
 import {
   command, ensureSourceTag, githubClient, gitLedger, readTag, readVersion,
@@ -10,7 +10,7 @@ import {
   verifyAbandonmentApproval, verifyStableQualification,
 } from './release-github.mjs';
 import { emitBuildIdentity } from './release-metadata.mjs';
-import { verifyPublicationAccess } from './release-dispatch.mjs';
+import { assessOwnerDispatch, verifyPublicationAccess } from './release-dispatch.mjs';
 import {
   privateSetPath, publicAuthorization, readPrivateAuthorization, readPrivateJson, readReleaseManifest, verifyAuthorization, writeAuthorization, writePublicSet,
 } from './release-authorization.mjs';
@@ -68,6 +68,10 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   requireThat(['admit', 'authorize', 'consume', 'preflight', 'advance', 'recover-abandonment', 'abandon'].includes(operation), 'Unknown release operation');
   const consumer = ['consume', 'preflight', 'advance'].includes(operation);
   const transaction = transactionFromEnvironment(env);
+  requireOwnerReleaseMode(env.RELEASE_APPROVAL_MODE);
+  if (operation === 'authorize') {
+    requireOwnerReleaseMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
+  }
   const verifyQualification = async (requireReceipt = false) => {
     if (requireReceipt) {
       const receipt = readQualificationReceipt(transaction);
@@ -100,8 +104,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
   const verifyCurrentProtection = async () => {
     const access = await verifyPublicationAccess(env, api);
     return verifyProtection(api, transaction.channel, env.RELEASE_PUBLISHER_APP_ID,
-      env.RELEASE_APPROVAL_MODE, env.RELEASE_OWNER_APPROVED_REVIEWERS, undefined,
-      access.ownerDispatchEligible ? access : undefined);
+      env.RELEASE_APPROVAL_MODE, access);
   };
   const context = runContext(env, transaction);
   if (consumer) {
@@ -125,13 +128,13 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     return reservation.record;
   }
   if (['admit', 'authorize'].includes(operation)) {
-    validateApprovalMode(env.RELEASE_APPROVAL_MODE);
+    requireOwnerReleaseMode(env.RELEASE_APPROVAL_MODE);
     if (operation === 'authorize') {
-      validateApprovalMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
+      requireOwnerReleaseMode(env.RELEASE_ADMITTED_APPROVAL_MODE);
       requireThat(env.RELEASE_ADMITTED_APPROVAL_MODE === env.RELEASE_APPROVAL_MODE,
-        'Approval mode changed after admission; align repository and environment policy and rerun all jobs');
+        'Approval mode changed after admission; align policy and use a fresh owner dispatch');
       requireThat(transaction.approvalMode === env.RELEASE_APPROVAL_MODE,
-        'Approval mode changed after transaction selection; rerun all jobs');
+        'Approval mode changed after transaction selection; use a fresh owner dispatch');
     }
     const channel = transaction.channel;
     const branch = channel === 'stable' ? 'main' : 'development';
@@ -143,6 +146,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
     output('source_sha', context.eventSha);
     output('channel', admission.channel);
     if (operation === 'admit') {
+      await assessOwnerDispatch(env, api);
       output('approval_mode', env.RELEASE_APPROVAL_MODE);
       return admission;
     }
@@ -158,10 +162,11 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       if (existing?.identitySha256) {
         // A lost private artifact cannot be reconstructed from public ledger data.
         const saved = readPrivateAuthorization();
-        requireThat(hash(saved) === existing.identitySha256, 'Original authorization unavailable; rerun with a new attempt');
+        requireThat(hash(saved) === existing.identitySha256,
+          'Original authorization unavailable; stop and follow explicit reservation recovery');
         verifySavedDispatchBinding(saved);
         requireThat(saved.protection.approvalMode === protection.approvalMode,
-          'Approval mode changed after reservation; rerun with a new attempt');
+          'Approval mode changed after reservation; stop and follow explicit reservation recovery');
         return saved;
       }
       const reservation = reserve(state, admission, new Date().toISOString(), protection, qualification);
@@ -201,6 +206,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       (await readVersion(api, entry.record.sourceCommit)).replace(/\r?\n$/, '').slice(1), 'Source VERSION changed');
   }
   if (operation === 'consume') {
+    await assessOwnerDispatch(env, api);
     const metadata = emitBuildIdentity(record);
     output('frontend_identity', metadata.frontendIdentity);
     output('version', record.sourceTag);
@@ -229,7 +235,7 @@ export async function runReleaseControl(operation, env = process.env, verify = c
       const protection = await verifyCurrentProtection();
       const approval = await verifyAbandonmentApproval(api, {
         runId: env.GITHUB_RUN_ID, runAttempt: env.GITHUB_RUN_ATTEMPT,
-      }, record, env.RELEASE_ABANDONMENT_TARGET, env.RELEASE_OWNER_APPROVED_REVIEWERS);
+      }, record, env.RELEASE_ABANDONMENT_TARGET, protection.dispatchAuthorization);
       return abandon(latest, record, abandonmentAuthorization(record, protection, approval), protection);
     });
   } else if (operation === 'advance') {
