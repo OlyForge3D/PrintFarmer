@@ -44,21 +44,24 @@ export function readDispatchEvent(env = process.env) {
   }
 }
 
-export async function assessOwnerDispatch(env = process.env, api = githubClient(env.GH_TOKEN),
-  event = readDispatchEvent(env)) {
-  const transaction = transactionFromEnvironment(env);
-  requireThat(transaction.approvalMode === env.RELEASE_APPROVAL_MODE,
-    'Dispatch approval policy changed after transaction selection');
-  const run = await api(`actions/runs/${transaction.runId}`);
-  const definition = await api('actions/workflows/consolidated-release.yml');
+export async function verifyOwnerRun(env, api, event, path = workflowPath) {
+  requireThat(env.GITHUB_REPOSITORY === repository && env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
+    env.GITHUB_REF === 'refs/heads/development' &&
+    env.GITHUB_WORKFLOW_REF === `${repository}/${path}@refs/heads/development` &&
+    /^[a-f0-9]{40}$/.test(env.GITHUB_WORKFLOW_SHA ?? '') &&
+    env.GITHUB_SHA === env.GITHUB_WORKFLOW_SHA && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? '') &&
+    env.GITHUB_RUN_ATTEMPT === '1',
+  'Owner dispatch requires the exact control ref and initial run attempt');
+  const run = await api(`actions/runs/${env.GITHUB_RUN_ID}`);
+  const definition = await api(`actions/workflows/${path.split('/').at(-1)}`);
   requireThat(Number.isSafeInteger(definition?.id) && definition.id > 0 &&
-    definition.path === workflowPath && definition.state === 'active' &&
-    String(run?.id) === transaction.runId && String(run.run_attempt) === env.GITHUB_RUN_ATTEMPT &&
-    run.workflow_id === definition.id && run.path === workflowPath &&
+    definition.path === path && definition.state === 'active' &&
+    String(run?.id) === env.GITHUB_RUN_ID && String(run.run_attempt) === env.GITHUB_RUN_ATTEMPT &&
+    run.workflow_id === definition.id && run.path === path &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
     Number.isSafeInteger(run.repository.id) && run.repository.id > 0 &&
     run.head_repository.id === run.repository.id &&
-    run.head_branch === 'development' && run.head_sha === transaction.workflowCommit &&
+    run.head_branch === 'development' && run.head_sha === env.GITHUB_WORKFLOW_SHA &&
     run.event === env.GITHUB_EVENT_NAME && run.event === 'workflow_dispatch' &&
     run.status === 'in_progress',
   'Dispatch run, attempt, repository, or workflow evidence does not match');
@@ -75,6 +78,21 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
     ['development', 'refs/heads/development'].includes(event.ref) &&
     sameIdentity(identity(event.sender), actor),
   'Dispatch event repository, ref, or sender does not match GitHub run evidence');
+  const permission = await api(`collaborators/${ownerLogin}/permission`);
+  requireThat(permission && typeof permission.permission === 'string' &&
+    sameIdentity(identity(permission.user), actor),
+  'Owner live repository permission evidence is missing or mismatched');
+  requireThat(permission.permission === 'admin' && permission.role_name === 'admin',
+    'Owner must retain live repository administrator permission');
+  return run;
+}
+
+export async function assessOwnerDispatch(env = process.env, api = githubClient(env.GH_TOKEN),
+  event = readDispatchEvent(env)) {
+  const transaction = transactionFromEnvironment(env);
+  requireThat(transaction.approvalMode === env.RELEASE_APPROVAL_MODE,
+    'Dispatch approval policy changed after transaction selection');
+  const run = await verifyOwnerRun(env, api, event);
   requireKeys(event.inputs, ['channel', 'operation'], ['source_sha', 'reservation_target'],
     'dispatch inputs');
   const operation = event.inputs.operation;
@@ -97,12 +115,6 @@ export async function assessOwnerDispatch(env = process.env, api = githubClient(
   'Executing operation differs from the original dispatch');
   await verifyCanonicalSource(api, 'development', transaction.workflowCommit);
   await verifyCanonicalSource(api, transaction.sourceBranch, transaction.sourceCommit);
-  const permission = await api(`collaborators/${ownerLogin}/permission`);
-  requireThat(permission && typeof permission.permission === 'string' &&
-    sameIdentity(identity(permission.user), actor),
-  'Owner live repository permission evidence is missing or mismatched');
-  requireThat(permission.permission === 'admin' && permission.role_name === 'admin',
-    'Owner must retain live repository administrator permission');
   const assessment = {
     kind: 'release-dispatch-assessment', schema: 1,
     repository, transactionSha256: hash(transaction),

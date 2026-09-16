@@ -149,10 +149,12 @@ export function githubRequestUrl(endpoint, method) {
     /^actions\/runs\/[1-9][0-9]*$/,
     /^actions\/runs\/[1-9][0-9]*\/attempts\/[1-9][0-9]*\/jobs\?per_page=100$/,
     /^actions\/runs\/[1-9][0-9]*\/approvals$/,
-    /^actions\/workflows\/consolidated-release\.yml$/,
+    /^actions\/workflows\/(?:consolidated-release|diagnose-release-tag-2736)\.yml$/,
+    /^actions\/workflows\/diagnose-release-tag-2736\.yml\/runs\?per_page=100$/,
+    /^actions\/workflows\/consolidated-release\.yml\/runs\?status=(?:queued|in_progress|waiting|pending|requested)&per_page=100$/,
     /^rules\/branches\/(?:main|development)\?per_page=100$/,
     /^environments\/release-(?:stable|insider)(?:\/deployment-branch-policies)?$/,
-    /^rulesets(?:\/[1-9][0-9]*|\?per_page=100)$/,
+    /^rulesets(?:\/[1-9][0-9]*|\?per_page=100(?:&includes_parents=true)?)$/,
   ];
   requireThat((method === 'GET' && reads.some(pattern => pattern.test(evidenceBaseEndpoint(endpoint)))) ||
     (method === 'POST' && ['git/blobs', 'git/trees', 'git/commits', 'git/tags', 'git/refs'].includes(endpoint)) ||
@@ -280,6 +282,8 @@ async function githubFailureDiagnostics(response) {
   };
 }
 
+export class GithubReleaseRequestError extends Error {}
+
 export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
   requireThat(token, 'Missing GitHub credential');
   return async (endpoint, method = 'GET', body) => {
@@ -293,7 +297,7 @@ export function githubClient(token = process.env.GH_TOKEN, fetcher = fetch) {
       });
       if (!response.ok || response.redirected) {
         const diagnostics = await githubFailureDiagnostics(response);
-        const error = new Error(`GitHub ${method} ${diagnosticEndpoint(endpoint)}: HTTP ${response.status}; ${JSON.stringify(diagnostics)}`);
+        const error = new GithubReleaseRequestError(`GitHub ${method} ${diagnosticEndpoint(endpoint)}: HTTP ${response.status}; ${JSON.stringify(diagnostics)}`);
         error.status = response.status;
         error.diagnostics = diagnostics;
         throw error;
@@ -566,6 +570,18 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   validateDispatchAssessment(dispatchAuthorization);
   requireThat(dispatchAuthorization.ownerDispatchEligible && dispatchAuthorization.channel === channel,
     'Live owner dispatch is required for protection verification');
+  const evidence = await readReleaseProtection(api, channel, publisherAppId);
+  evidence.dispatchAuthorization = dispatchAuthorization;
+  const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode);
+  if (sourceCommit !== undefined) {
+    const required = evidence.branchRules.filter(rule => rule.type === 'required_status_checks')
+      .flatMap(rule => rule.parameters.required_status_checks);
+    await verifyReleaseChecks(api, sourceCommit, required);
+  }
+  return normalized;
+}
+
+export async function readReleaseProtection(api, channel, publisherAppId) {
   const readPolicy = async endpoint => {
     try { return await api(endpoint); }
     catch (error) {
@@ -601,14 +617,8 @@ export async function verifyProtection(api, channel, publisherAppId, approvalMod
   }
   const evidence = { schema: 1, repository, channel, branch, publisherAppId,
     verifiedAt: new Date().toISOString(), branchRules, branchRulesets, environment, branchPolicies,
-    rulesets, dispatchAuthorization };
-  const normalized = normalizeProtectionEvidence(evidence, channel, publisherAppId, approvalMode);
-  if (sourceCommit !== undefined) {
-    const required = branchRules.filter(rule => rule.type === 'required_status_checks')
-      .flatMap(rule => rule.parameters.required_status_checks);
-    await verifyReleaseChecks(api, sourceCommit, required);
-  }
-  return normalized;
+    rulesets };
+  return evidence;
 }
 
 
