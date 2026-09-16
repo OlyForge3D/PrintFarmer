@@ -279,6 +279,34 @@ source tag, `VERSION`, branch head, or source qualification to remain available.
 Big integers are compared numerically, not lexically or through floating point.
 No timestamp, run-number concatenation or local tag scan allocates identities.
 
+### Failed GitHub requests and unsigned reservations
+
+Release API failures retain their original HTTP status and fail-closed behavior.
+Diagnostics include only a fixed endpoint template, a finite message category,
+and up to eight allowlisted error code/resource/field entries with fixed message
+categories. Unknown values are `unknown-redacted`; arbitrary messages, workflow
+paths, headers, URLs, credentials and policy bodies are never echoed. The client
+buffers at most 8 KiB from the error stream and explicitly reports unavailable,
+empty, oversized, unreadable, invalid-JSON or malformed bodies and omitted or
+truncated errors. It does not retry a failed request or turn it into success.
+Existing tag-not-found and ledger CAS status handling is unchanged.
+
+`validation-failed` and recognized validation codes describe GitHub's response;
+`workflow-permission-denied` requires a recognized refusal message, not merely
+HTTP 422. Unknown responses do not establish a cause or authorize extra App
+permissions. See [GitHub REST troubleshooting](https://docs.github.com/en/rest/using-the-rest-api/troubleshooting-the-rest-api#validation-failed).
+
+**Unresolved recovery blocker (#2734):** owner insider run `35046281532`
+reserved `v0.2.3-insider.1`, but its create-ref request failed with HTTP 422 before
+signing/uploading `release-authorization-1`. The original response body was
+discarded, so its precise cause remains unproven. Standard abandonment requires
+the original signed authorization and cannot operate on this unsigned partial
+allocation. There is no existing executable recovery path for this case.
+Preserve the consumed identity, sequence, tag object and immutable ledger
+history. Do not reconstruct private authority from public ledger data, delete,
+reuse or reset the reservation, or treat a new allocation as recovery.
+Diagnostics do not repair it; operational recovery remains separately deferred.
+
 Every **new** stable canonical version and insider base must exceed the current
 effective stable floor: `pointers.stable.canonicalVersion`, or the immutable
 `lastHistoricalStable` when no stable pointer exists. Admission checks the floor,
