@@ -674,6 +674,73 @@ public sealed class HostUpdateFoundationTests
                     if (Directory.Exists(directory)) Directory.Delete(directory, true);
                 }
             }
+
+    [Fact]
+    public async Task FileJournal_ApprovedEntryRejectsMismatchedAcceptedAuthorizationAuditTuple()
+    {
+        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+        try
+        {
+            FileHostUpdateJournal journal = new(directory);
+            HostUpdatePlan plan = await EligiblePlanAsync(CreateSut());
+            HostUpdateJournalEntry approved = HostUpdateJournalEntry.Approved(plan, Metadata(), Authorization(plan));
+            HostUpdateJournalEntry invalid = approved with
+            {
+                Snapshot = approved.Snapshot with
+                {
+                    AuthorizationAudit = approved.Snapshot.AuthorizationAudit! with { Nonce = "other-nonce" },
+                },
+            };
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => journal.AppendAsync(invalid, default));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
+
+    [Fact]
+    public async Task FileJournal_ApprovedInsiderEntryRejectsUnacknowledgedAuthorizationAudit()
+    {
+        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+        try
+        {
+            FileHostUpdateJournal journal = new(directory);
+            HostUpdatePlanRequest request = Request() with { SourceChannel = "insider", TargetChannel = "insider" };
+            CanonicalReleaseIdentity insider = Identity() with
+            {
+                Channel = "insider",
+                Version = "1.0.0-insider.1",
+                ReleaseId = "insider:1.0.0-insider.1",
+                OciReleaseLabel = "insider:1.0.0-insider.1",
+                OciVersionLabel = "1.0.0-insider.1",
+                SourceTag = "v1.0.0-insider.1",
+                SourceBranch = "development",
+            };
+            SignedReleaseMetadata metadata = Metadata() with { Channel = "insider", Identity = insider };
+            HostUpdateFoundation sut = CreateSut(new Provider(metadata), new Inspector(Installation() with { PriorReleaseIdentity = insider }));
+            HostUpdatePlanResult result = await sut.PlanAsync(request, default);
+            Assert.True(result.IsEligible);
+            HostUpdatePlan plan = new(request, result.PlanHash, Assert.IsType<CanonicalReleaseIdentity>(result.Identity), result.RequiredComponents,
+                Assert.IsType<HostInstallationEvidence>(result.Installation));
+            HostUpdateJournalEntry approved = HostUpdateJournalEntry.Approved(plan, metadata,
+                Authorization(plan) with { SourceChannel = "insider", TargetChannel = "insider", InsiderWarningAcknowledged = true });
+            HostUpdateJournalEntry invalid = approved with
+            {
+                Snapshot = approved.Snapshot with
+                {
+                    AuthorizationAudit = approved.Snapshot.AuthorizationAudit! with { InsiderWarningAcknowledged = false },
+                },
+            };
+
+            await Assert.ThrowsAsync<InvalidDataException>(() => journal.AppendAsync(invalid, default));
+        }
+        finally
+        {
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
+        }
+    }
     private static HostUpdateFoundation CreateSut(Provider? provider = null, Inspector? inspector = null, IHostUpdateStager? stager = null, IHostUpdateJournal? journal = null, IHostUpdateAuthorizationEvaluator? authorizationEvaluator = null) =>
         new(inspector ?? new Inspector(Installation()), provider ?? new Provider(Metadata()), new Compatibility(), authorizationEvaluator ?? new AuthorizationEvaluator(), stager ?? new Stager(), journal ?? new MemoryJournal(), new Lock());
     private static async Task<HostUpdatePlan> EligiblePlanAsync(HostUpdateFoundation sut) { HostUpdatePlanResult result = await sut.PlanAsync(Request(), default); Assert.True(result.IsEligible); return new(Request(), result.PlanHash, Assert.IsType<CanonicalReleaseIdentity>(result.Identity), result.RequiredComponents, Assert.IsType<HostInstallationEvidence>(result.Installation)); }

@@ -1015,7 +1015,7 @@ internal static class HostUpdateValidation
     private static bool HasValidAuthorizationAudit(HostUpdateJournalEntry entry, HostUpdateJournalSnapshot snapshot) =>
         entry.State == HostUpdateLifecycle.Approved
             ? snapshot.AuthorizationAudit is { Accepted: true } accepted && HasValidAuthorizationAuditTuple(accepted) &&
-                accepted.Kind is "manual" or "standingpolicy" && accepted.ExpiresAt > entry.RecordedAt && HasValidAcceptedPolicy(accepted)
+                HasMatchingAcceptedAuthorizationAudit(entry, snapshot, accepted) && accepted.ExpiresAt > entry.RecordedAt && HasValidAcceptedPolicy(accepted)
             : entry.Code is "authorization_invalid" or "downgrade_not_authorized"
                 ? snapshot.AuthorizationAudit is { Accepted: false } rejected && HasValidAuthorizationAuditTuple(rejected)
                 : snapshot.AuthorizationAudit is null;
@@ -1024,6 +1024,15 @@ internal static class HostUpdateValidation
         (IsChannel(audit.SourceChannel) || audit.SourceChannel == "redacted") &&
         (IsChannel(audit.TargetChannel) || audit.TargetChannel == "redacted") &&
         IsIdentifier(audit.ChannelPolicyRevision) && (!audit.Accepted || audit.ExpiresAt is not null);
+    private static bool HasMatchingAcceptedAuthorizationAudit(HostUpdateJournalEntry entry, HostUpdateJournalSnapshot snapshot, HostUpdateAuthorizationAudit audit) =>
+        audit.ActorId == snapshot.ActorId && audit.Nonce == snapshot.Nonce && audit.InstallationId == snapshot.InstallationId &&
+        HashesEqual(audit.PlanHash, snapshot.PlanHash) && audit.SourceChannel == snapshot.SourceChannel && audit.TargetChannel == snapshot.TargetChannel &&
+        audit.ChannelPolicyRevision == snapshot.ChannelPolicyRevision && audit.Kind switch
+        {
+            "manual" => entry.Code == "manual_authorized",
+            "standingpolicy" => entry.Code == "standing_policy_authorized",
+            _ => false,
+        } && (audit.TargetChannel != "insider" || audit.InsiderWarningAcknowledged);
     private static bool HasValidAcceptedPolicy(HostUpdateAuthorizationAudit audit) => audit.Kind switch
     {
         "manual" => !audit.StandingPolicyActive && !audit.StandingPolicyRevoked,
