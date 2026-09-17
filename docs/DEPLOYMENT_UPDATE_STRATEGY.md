@@ -34,22 +34,39 @@ Future updater work is separate and must not silently trust publication alone.
 The first signed managed-update release is a new boundary: it publishes
 `update-manifest.json` and `update-manifest.sigstore.json` only after all six
 OCI images, platform child digests, compliance checks, and release inventory
-checks pass. The manifest uses schema `1`, deterministic canonical JSON, and
-the sequence `major*1_000_000_000 + minor*1_000_000 + patch*1_000 +
-insiderSuffix`. It is eligible only when the exact bytes verify with the
-GitHub OIDC issuer `https://token.actions.githubusercontent.com` and the
-canonical workflow identity for the selected channel:
+checks pass. The manifest uses schema `1`, deterministic canonical JSON, and a
+collision-free, stable-dominant `sequence`. `deriveSequence` (in
+`scripts/ci/release-manifest.mjs`) positionally encodes bounded, validated
+components&mdash;major (`0..99`), minor (`0..999`), patch (`0..99999`), and a
+prerelease suffix (`1..99998`, or the reserved sentinel `99999` for stable)&mdash;
+so that, unlike the earlier weighted-decimal formula
+(`major*1_000_000_000 + minor*1_000_000 + patch*1_000 + insiderSuffix`, which
+let a patch or insider suffix &ge;1000 overflow into the next field and collide
+with a different version, and let an insider prerelease outrank its own stable
+release at the same major.minor.patch), every distinct version now maps to a
+distinct sequence and a stable release always sorts above every prerelease of
+the same major.minor.patch. The maximum encodable sequence
+(`999_999_999_999_999`) stays a safe JS integer and an ordinary C# `long`/`int`,
+so the wire format is unchanged. It is eligible only when the exact bytes
+verify with the GitHub OIDC issuer
+`https://token.actions.githubusercontent.com` and the canonical workflow
+identity for the selected channel:
 
 - stable and insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
 
 Keyless Cosign trust is bootstrapped from Sigstore's OIDC certificate and
 transparency log; rotation is performed by changing the pinned official
 Cosign/tooling versions and the explicitly reviewed workflow identity, never by
-accepting a wildcard issuer or subject. Existing unsigned releases remain
-manual-only, including legacy `v0.2.3-insider.1` and `v0.2.3-insider.2`. A valid signature
-authenticates the publisher and exact manifest bytes; it does not authorize or
-implement apply, installation, active-print handling, staging, recovery, or
-runtime safety.
+accepting a wildcard issuer or subject. The exact manifest bytes and their
+Sigstore bundle are verified three times: twice by the workflow (sign, then
+re-verify) before `publish-release.mjs` even runs, and once more by
+`publish-release.mjs` itself immediately before the `gh release upload` call,
+so nothing between those workflow steps and the actual upload can present an
+unsigned or mismatched manifest as the release's signed contract. Existing
+unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
+`v0.2.3-insider.2`. A valid signature authenticates the publisher and exact
+manifest bytes; it does not authorize or implement apply, installation,
+active-print handling, staging, recovery, or runtime safety.
 
 ### Read-only inventory and installation readiness
 

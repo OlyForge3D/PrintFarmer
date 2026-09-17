@@ -65,7 +65,12 @@ inventory, publish versioned image tags, and advance permitted stable aliases.
 The manifest is canonical JSON with schema `1`, binds all six OCI index
 digests plus every declared platform child digest, and sets
 `managedUpdateEligible: true`. The exact bytes are signed with keyless Cosign
-through GitHub Actions OIDC and verified twice before release visibility.
+through GitHub Actions OIDC and verified three times before release visibility:
+twice by the workflow (sign, then re-verify) and once more by
+`publish-release.mjs` itself immediately before the `gh release upload` call,
+so nothing can substitute an unsigned or mismatched manifest between those
+workflow steps and the actual upload. Its `sequence` field is a collision-free,
+stable-dominant encoding (see [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md)).
 It publishes the GitHub release **last**. Insider releases are prereleases and
 have only their exact version image tag: they never advance `latest`, major or
 minor tags. Stable additionally retains `stable-X.Y.Z` and advances `X.Y`,

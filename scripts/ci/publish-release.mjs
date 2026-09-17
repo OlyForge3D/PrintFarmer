@@ -10,7 +10,7 @@ import {
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { components, repository, requireThat, validateVersion, compareVersions, parseTag } from './release-policy.mjs';
+import { components, repository, requireThat, validateVersion, compareVersions, parseTag, workflow } from './release-policy.mjs';
 import { githubClient, verifyOwnerDispatch } from './release-dispatch.mjs';
 import { emitBuildMetadata } from './release-metadata.mjs';
 import { command, imageRepository, rejectExistingImages, verifyImages, publishImageTags } from './release-set.mjs';
@@ -139,6 +139,27 @@ export function releaseAssets(release) {
   ];
 }
 
+// The workflow signs and verifies update-manifest.json in two prior steps
+// (sign, then re-verify) before this script even starts. Re-verify the exact
+// bytes about to be uploaded here too, immediately before the upload call,
+// so nothing between those earlier steps and the actual upload (a rebuilt
+// asset, a manual edit, disk corruption) can present an unsigned or
+// mismatched manifest as this release's signed managed-update contract.
+function manifestSignatureIdentity() {
+  return `https://github.com/${repository}/${workflow}@refs/heads/development`;
+}
+
+function verifyManifestSignatureBeforeUpload(assets, run) {
+  const manifestPath = join(assets, 'update-manifest.json');
+  const bundlePath = join(assets, 'update-manifest.sigstore.json');
+  requireThat(readFileSync(manifestPath).length > 0, 'Missing update manifest immediately before upload');
+  requireThat(readFileSync(bundlePath).length > 0,
+    'Missing update manifest signature bundle immediately before upload');
+  run('cosign', ['verify-blob', '--bundle', bundlePath,
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    '--certificate-identity', manifestSignatureIdentity(), manifestPath]);
+}
+
 export async function publishRelease(release, assets, api, {
   run = command, verify = verifyImages, rejectImages = rejectExistingImages, tagImages = publishImageTags,
 } = {}) {
@@ -165,6 +186,7 @@ export async function publishRelease(release, assets, api, {
     body: notes, draft: true, prerelease: release.channel === 'insider', make_latest: 'false',
   } });
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
+  verifyManifestSignatureBeforeUpload(assets, run);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);
   requireThat(Array.isArray(uploaded) && uploaded.length === files.length &&

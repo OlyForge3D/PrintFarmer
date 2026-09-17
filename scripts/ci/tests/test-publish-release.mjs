@@ -10,7 +10,9 @@ import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
 import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
-import { buildManifest, deriveSequence, validateManifest, validateManifestInput } from '../release-manifest.mjs';
+import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
+  SEQUENCE_MAJOR_MAX, SEQUENCE_MINOR_MAX, SEQUENCE_PATCH_MAX, SEQUENCE_PRERELEASE_MAX,
+  SEQUENCE_STABLE_SUFFIX } from '../release-manifest.mjs';
 
 const sha = 'a'.repeat(40);
 const head = 'b'.repeat(40);
@@ -245,6 +247,56 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
   }));
 });
 
+test('sequence encoding is collision-free, stable-dominant and stays within safe/C#-compatible bounds', () => {
+  // Stable-dominant: a stable release always outranks every insider prerelease
+  // of the exact same major.minor.patch (the old weighted-decimal encoding
+  // inverted this, since it added the insider suffix on top of the stable
+  // value instead of reserving a dominant sentinel for stable).
+  assert.ok(deriveSequence('0.2.3') > deriveSequence('0.2.3-insider.1'));
+  assert.ok(deriveSequence('0.2.3') > deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX}`));
+  assert.equal(deriveSequence('0.2.3') - deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX}`), 1);
+
+  // Collision-free at and beyond the previous encoding's known collision
+  // points (patch or insider suffix reaching 1000).
+  assert.notEqual(deriveSequence('0.2.3'), deriveSequence('0.3.0'));
+  assert.notEqual(deriveSequence('0.1.1000'), deriveSequence('0.2.0'));
+  assert.notEqual(deriveSequence('0.2.3-insider.999'), deriveSequence('0.2.3-insider.1000'));
+  assert.notEqual(deriveSequence('0.2.3-insider.1000'), deriveSequence('0.2.4-insider.1'));
+  const seen = new Set();
+  for (const version of [
+    '0.2.3', '0.2.3-insider.1', '0.2.3-insider.2', '0.2.4', '0.2.4-insider.1', '0.3.0', '1.0.0',
+    '0.2.3-insider.999', '0.2.3-insider.1000', '0.2.3-insider.99998', `0.2.${SEQUENCE_PATCH_MAX}`,
+    `${SEQUENCE_MAJOR_MAX}.${SEQUENCE_MINOR_MAX}.${SEQUENCE_PATCH_MAX}`,
+  ]) {
+    const sequence = deriveSequence(version);
+    assert.ok(Number.isSafeInteger(sequence), `${version} produced an unsafe integer`);
+    assert.ok(!seen.has(sequence), `${version} collided with another encoded sequence`);
+    seen.add(sequence);
+  }
+
+  // Monotonic ordering across a patch/suffix rollover that used to collide.
+  assert.ok(deriveSequence('0.2.3-insider.1000') > deriveSequence('0.2.3-insider.999'));
+  assert.ok(deriveSequence('0.1.1000') > deriveSequence('0.1.999'));
+  assert.ok(deriveSequence('0.2.0') > deriveSequence('0.1.1000'));
+
+  // Explicit, validated bounds: at-limit values succeed, one past the limit throws.
+  assert.doesNotThrow(() => deriveSequence(`${SEQUENCE_MAJOR_MAX}.0.0`));
+  assert.throws(() => deriveSequence(`${SEQUENCE_MAJOR_MAX + 1}.0.0`), /Major version exceeds/);
+  assert.doesNotThrow(() => deriveSequence(`0.${SEQUENCE_MINOR_MAX}.0`));
+  assert.throws(() => deriveSequence(`0.${SEQUENCE_MINOR_MAX + 1}.0`), /Minor version exceeds/);
+  assert.doesNotThrow(() => deriveSequence(`0.0.${SEQUENCE_PATCH_MAX}`));
+  assert.throws(() => deriveSequence(`0.0.${SEQUENCE_PATCH_MAX + 1}`), /Patch version exceeds/);
+  assert.doesNotThrow(() => deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX}`));
+  assert.throws(() => deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX + 1}`), /Prerelease sequence exceeds/);
+  // The prerelease max is exactly one below the reserved stable-dominant sentinel.
+  assert.equal(SEQUENCE_PRERELEASE_MAX, SEQUENCE_STABLE_SUFFIX - 1);
+
+  // The maximum representable sequence is comfortably a safe JS integer and an
+  // ordinary (non-BigInt-requiring) C# long/int; no wire format change needed.
+  const max = deriveSequence(`${SEQUENCE_MAJOR_MAX}.${SEQUENCE_MINOR_MAX}.${SEQUENCE_PATCH_MAX}`);
+  assert.ok(Number.isSafeInteger(max) && max < Number.MAX_SAFE_INTEGER);
+});
+
 test('actual build loop passes the six targets/platforms and source metadata, stops on partial failure', t => {
   const root = workspace(t);
   const source = join(root, 'source');
@@ -348,6 +400,39 @@ test('publication creates tag once, uploads a complete draft, tags images, publi
     assert.ok(calls.every(call => !/ledger|authorization|reservation/.test(call.endpoint ?? '')));
     assert.ok(calls.every(call => call.method !== 'DELETE'));
     assert.ok(!calls.find(call => call.command)?.args.includes('--clobber'));
+  }
+});
+
+test('the exact manifest bytes and its signature bundle are re-verified immediately before upload', async t => {
+  const { chosen, assets, api, deps, calls } = publishFixture(t);
+  await publishRelease(chosen, assets, api, deps);
+  const commands = calls.filter(call => call.command);
+  const cosignIndex = commands.findIndex(call => call.command === 'cosign');
+  const ghIndex = commands.findIndex(call => call.command === 'gh');
+  assert.ok(cosignIndex !== -1 && ghIndex !== -1 && cosignIndex < ghIndex,
+    'cosign verify-blob must run, and must run before gh release upload');
+  const cosignArgs = commands[cosignIndex].args;
+  assert.equal(cosignArgs[0], 'verify-blob');
+  assert.equal(cosignArgs[1], '--bundle');
+  assert.match(cosignArgs[2], /update-manifest\.sigstore\.json$/);
+  assert.equal(cosignArgs[3], '--certificate-oidc-issuer');
+  assert.equal(cosignArgs[4], 'https://token.actions.githubusercontent.com');
+  assert.equal(cosignArgs[5], '--certificate-identity');
+  assert.match(cosignArgs[6], /^https:\/\/github\.com\/.+\/\.github\/workflows\/consolidated-release\.yml@refs\/heads\/development$/);
+  assert.match(cosignArgs[7], /update-manifest\.json$/);
+});
+
+test('a manifest or signature bundle wiped between draft creation and upload blocks the upload', async t => {
+  for (const corrupted of ['update-manifest.json', 'update-manifest.sigstore.json']) {
+    const fixture = publishFixture(t);
+    const { assets, chosen, calls, api, deps } = fixture;
+    const draftingApi = async (endpoint, options) => {
+      const result = await api(endpoint, options);
+      if (endpoint === 'releases') writeFileSync(join(assets, corrupted), '');
+      return result;
+    };
+    await assert.rejects(publishRelease(chosen, assets, draftingApi, deps));
+    assert.ok(!calls.some(call => call.command === 'gh'), `gh upload must not run when ${corrupted} is missing`);
   }
 });
 
