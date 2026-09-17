@@ -48,6 +48,8 @@ public interface IVerifiedReleaseEvidenceCache
 /// <inheritdoc cref="IVerifiedReleaseEvidenceCache"/>
 public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
 {
+    private const string DefaultError = "Verified release discovery failed without an error message.";
+    private const int MaximumErrorLength = 1024;
     private readonly Lock _gate = new();
     private VerifiedReleaseEvidenceDto? _current;
     private DateTimeOffset? _lastVerifiedAt;
@@ -104,11 +106,16 @@ public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
     /// <inheritdoc/>
     public void SetError(string error)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(error);
+        string normalized = string.IsNullOrWhiteSpace(error) ? DefaultError : error.Trim();
+        if (normalized.Length > MaximumErrorLength)
+        {
+            normalized = normalized[..MaximumErrorLength];
+        }
+
         lock (_gate)
         {
             // Deliberately does NOT touch _current/_lastVerifiedAt. See interface remarks.
-            _lastError = error;
+            _lastError = normalized;
         }
     }
 }

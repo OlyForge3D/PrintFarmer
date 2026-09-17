@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -31,19 +32,31 @@ public static class VerifiedReleaseEvidenceMapper
     /// after manifest schema/content validation and Cosign signature verification both
     /// succeeded — to the DTO shape <c>ReleaseReadinessEvaluator</c> consumes.
     /// </summary>
-    public static VerifiedReleaseEvidenceDto ToEvidenceDto(this SignedReleaseMetadata metadata)
+    public static VerifiedReleaseEvidenceDto ToEvidenceDto(this SignedReleaseMetadata metadata) =>
+        ToEvidenceDto(metadata, GetHostPlatform());
+
+    /// <summary>Maps verified metadata for one explicit host platform.</summary>
+    internal static VerifiedReleaseEvidenceDto ToEvidenceDto(
+        this SignedReleaseMetadata metadata,
+        string hostPlatform)
     {
         ArgumentNullException.ThrowIfNull(metadata);
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
 
         List<ReleaseServiceRequirementDto> services = [];
         foreach ((string key, string digest) in metadata.ComponentPlatformDigests)
         {
-            // Keys are always "{serviceId}/{platform}" — see
-            // VerifiedGitHubReleaseMetadataProvider.GetCurrentAsync's construction of
-            // ComponentPlatformDigests. Defensively skip any entry that doesn't parse rather
-            // than throw, so a single malformed component can't take down the whole cache.
             int separator = key.IndexOf('/');
-            if (separator <= 0 || separator == key.Length - 1)
+            if (separator <= 0
+                || separator == key.Length - 1
+                || key.IndexOf('/', separator + 1) >= 0)
+            {
+                throw new InvalidDataException(
+                    $"Verified release component platform key '{key}' is invalid.");
+            }
+
+            string platform = key[(separator + 1)..];
+            if (platform != hostPlatform)
             {
                 continue;
             }
@@ -51,9 +64,16 @@ public static class VerifiedReleaseEvidenceMapper
             services.Add(new ReleaseServiceRequirementDto
             {
                 ServiceId = key[..separator],
-                Platform = key[(separator + 1)..],
+                Platform = platform,
                 PlatformDigest = digest,
             });
+        }
+
+        if (services.GroupBy(service => service.ServiceId, StringComparer.Ordinal)
+            .Any(group => group.Skip(1).Any()))
+        {
+            throw new InvalidDataException(
+                $"Verified release contains duplicate service targets for host platform '{hostPlatform}'.");
         }
 
         CanonicalReleaseIdentityDto identity = new()
@@ -81,5 +101,23 @@ public static class VerifiedReleaseEvidenceMapper
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,
         };
+    }
+
+    private static string GetHostPlatform()
+    {
+        string operatingSystem = OperatingSystem.IsLinux() ? "linux"
+            : OperatingSystem.IsWindows() ? "windows"
+            : OperatingSystem.IsMacOS() ? "darwin"
+            : throw new PlatformNotSupportedException("The current operating system is not supported for signed release discovery.");
+        string architecture = RuntimeInformation.ProcessArchitecture switch
+        {
+            Architecture.X64 => "amd64",
+            Architecture.Arm64 => "arm64",
+            Architecture.X86 => "386",
+            Architecture.Arm => "arm",
+            _ => throw new PlatformNotSupportedException(
+                $"Architecture '{RuntimeInformation.ProcessArchitecture}' is not supported for signed release discovery."),
+        };
+        return $"{operatingSystem}-{architecture}";
     }
 }

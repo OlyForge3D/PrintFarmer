@@ -6,7 +6,7 @@ using Xunit;
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 /// <summary>
-/// Focused coverage for <see cref="VerifiedReleaseEvidenceMapper.ToEvidenceDto"/> (issue #2757
+/// Focused coverage for <see cref="VerifiedReleaseEvidenceMapper"/> (issue #2757
 /// item 4): translating the host-update-domain <see cref="SignedReleaseMetadata"/> shape into
 /// the inventory-domain <see cref="VerifiedReleaseEvidenceDto"/> shape
 /// <c>ReleaseReadinessEvaluator</c> consumes, including splitting
@@ -38,7 +38,7 @@ public class VerifiedReleaseEvidenceMapperTests
             ComponentPlatformDigests: new Dictionary<string, string>(),
             MinimumUpdaterVersion: "1.0.0");
 
-        VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto();
+        VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto("linux-amd64");
 
         dto.SignatureVerified.Should().BeTrue();
         dto.IsComplete.Should().BeTrue();
@@ -51,7 +51,7 @@ public class VerifiedReleaseEvidenceMapperTests
     }
 
     [Fact]
-    public void ToEvidenceDto_SplitsComponentPlatformDigestKeysIntoServiceRequirements()
+    public void ToEvidenceDto_TwoPlatforms_SelectsDistinctHostChildDigestOncePerService()
     {
         SignedReleaseMetadata metadata = new(
             Channel: "stable",
@@ -60,22 +60,25 @@ public class VerifiedReleaseEvidenceMapperTests
             Identity: Identity(),
             ComponentPlatformDigests: new Dictionary<string, string>
             {
-                ["api/linux-x64"] = "sha256:" + new string('b', 64),
-                ["slicer-worker/windows-x64"] = "sha256:" + new string('c', 64),
+                ["api/linux-amd64"] = "sha256:" + new string('b', 64),
+                ["api/linux-arm64"] = "sha256:" + new string('c', 64),
+                ["slicer-worker/linux-amd64"] = "sha256:" + new string('d', 64),
+                ["slicer-worker/linux-arm64"] = "sha256:" + new string('e', 64),
             },
             MinimumUpdaterVersion: "1.0.0");
 
-        VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto();
+        VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto("linux-arm64");
 
         dto.Services.Should().HaveCount(2);
+        dto.Services.Select(service => service.ServiceId).Should().OnlyHaveUniqueItems();
         dto.Services.Should().ContainSingle(service =>
-            service.ServiceId == "api" && service.Platform == "linux-x64" && service.PlatformDigest == "sha256:" + new string('b', 64));
+            service.ServiceId == "api" && service.Platform == "linux-arm64" && service.PlatformDigest == "sha256:" + new string('c', 64));
         dto.Services.Should().ContainSingle(service =>
-            service.ServiceId == "slicer-worker" && service.Platform == "windows-x64" && service.PlatformDigest == "sha256:" + new string('c', 64));
+            service.ServiceId == "slicer-worker" && service.Platform == "linux-arm64" && service.PlatformDigest == "sha256:" + new string('e', 64));
     }
 
     [Fact]
-    public void ToEvidenceDto_SkipsMalformedComponentKeyWithoutThrowing()
+    public void ToEvidenceDto_MalformedComponentKey_Rejects()
     {
         SignedReleaseMetadata metadata = new(
             Channel: "stable",
@@ -85,14 +88,13 @@ public class VerifiedReleaseEvidenceMapperTests
             ComponentPlatformDigests: new Dictionary<string, string>
             {
                 ["malformed-no-separator"] = "sha256:" + new string('d', 64),
-                ["api/linux-x64"] = "sha256:" + new string('e', 64),
+                ["api/linux-amd64"] = "sha256:" + new string('e', 64),
             },
             MinimumUpdaterVersion: "1.0.0");
 
-        VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto();
+        Action act = () => metadata.ToEvidenceDto("linux-amd64");
 
-        dto.Services.Should().ContainSingle();
-        dto.Services[0].ServiceId.Should().Be("api");
+        act.Should().Throw<InvalidDataException>();
     }
 
     [Fact]
@@ -100,7 +102,7 @@ public class VerifiedReleaseEvidenceMapperTests
     {
         SignedReleaseMetadata? metadata = null;
 
-        Action act = () => metadata!.ToEvidenceDto();
+        Action act = () => metadata!.ToEvidenceDto("linux-amd64");
 
         act.Should().Throw<ArgumentNullException>();
     }

@@ -34,7 +34,8 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
 
     private static (VerifiedReleaseDiscoveryMonitorService Service, IVerifiedReleaseEvidenceCache Cache, Mock<IBackgroundServiceMonitor> Monitor) CreateService(
         string channel,
-        IHostUpdateMetadataProvider metadataProvider)
+        IHostUpdateMetadataProvider metadataProvider,
+        IVerifiedReleaseManifestBindingStore? bindingStore = null)
     {
         var settingsService = new Mock<ISettingsService>();
         settingsService
@@ -44,6 +45,19 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
         var services = new ServiceCollection();
         services.AddSingleton(settingsService.Object);
         services.AddSingleton(metadataProvider);
+        if (bindingStore is null)
+        {
+            var bindingStoreMock = new Mock<IVerifiedReleaseManifestBindingStore>();
+            bindingStoreMock
+                .Setup(store => store.EnsureBoundAsync(
+                    It.IsAny<string>(),
+                    It.IsAny<string>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns(Task.CompletedTask);
+            bindingStore = bindingStoreMock.Object;
+        }
+
+        services.AddSingleton(bindingStore);
         ServiceProvider provider = services.BuildServiceProvider();
 
         var optionsMonitor = new Mock<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>();
@@ -83,7 +97,6 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
 
         cache.Current.Should().NotBeNull();
         cache.Current!.Identity!.Channel.Should().Be("stable");
-        cache.Current.Services.Should().ContainSingle(s => s.ServiceId == "api");
         cache.LastVerifiedAt.Should().NotBeNull();
         cache.LastError.Should().BeNull();
     }
@@ -134,9 +147,9 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
         VerifiedReleaseEvidenceDto? firstEvidence = cache.Current;
         DateTimeOffset? firstVerifiedAt = cache.LastVerifiedAt;
 
-        Func<Task> secondRound = () => service.DiscoverAndCacheAsync(CancellationToken.None);
+        Func<Task<bool>> secondRound = () => service.RunDiscoveryRoundAsync(3600, CancellationToken.None);
 
-        await secondRound.Should().ThrowAsync<InvalidDataException>();
+        (await secondRound()).Should().BeFalse();
         cache.Current.Should().BeSameAs(firstEvidence, "a discovery failure must not clear previously cached verified evidence");
         cache.LastVerifiedAt.Should().Be(firstVerifiedAt);
         cache.LastError.Should().Be("no verified release found");
@@ -152,10 +165,98 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
         (VerifiedReleaseDiscoveryMonitorService service, IVerifiedReleaseEvidenceCache cache, _) =
             CreateService("stable", provider.Object);
 
-        Func<Task> act = () => service.DiscoverAndCacheAsync(CancellationToken.None);
+        bool result = await service.RunDiscoveryRoundAsync(3600, CancellationToken.None);
 
-        await act.Should().ThrowAsync<InvalidDataException>();
+        result.Should().BeFalse();
         cache.Current.Should().BeNull();
         cache.LastError.Should().Be("no releases found for channel");
+    }
+
+    [Fact]
+    public async Task RunDiscoveryRoundAsync_InternalCancellation_ReportsOnceAndNextRoundRecovers()
+    {
+        SignedReleaseMetadata metadata = new(
+            Channel: "stable",
+            Sequence: 1,
+            SignatureVerified: true,
+            Identity: Identity("stable"),
+            ComponentPlatformDigests: new Dictionary<string, string>(),
+            MinimumUpdaterVersion: "1.0.0");
+        var provider = new Mock<IHostUpdateMetadataProvider>();
+        provider.SetupSequence(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException())
+            .ReturnsAsync(metadata);
+        (VerifiedReleaseDiscoveryMonitorService service, IVerifiedReleaseEvidenceCache cache, Mock<IBackgroundServiceMonitor> monitor) =
+            CreateService("stable", provider.Object);
+
+        (await service.RunDiscoveryRoundAsync(3600, CancellationToken.None)).Should().BeFalse();
+        (await service.RunDiscoveryRoundAsync(3600, CancellationToken.None)).Should().BeTrue();
+
+        monitor.Verify(m => m.ReportError(
+            "VerifiedReleaseDiscoveryMonitorService",
+            It.IsAny<string>()), Times.Once);
+        monitor.Verify(m => m.ReportSuccess(
+            "VerifiedReleaseDiscoveryMonitorService",
+            3600), Times.Once);
+        cache.Current.Should().NotBeNull();
+        cache.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task RunDiscoveryRoundAsync_ShutdownCancellation_PropagatesWithoutFailureReport()
+    {
+        using CancellationTokenSource stopping = new();
+        stopping.Cancel();
+        var provider = new Mock<IHostUpdateMetadataProvider>();
+        provider.Setup(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new OperationCanceledException(stopping.Token));
+        (VerifiedReleaseDiscoveryMonitorService service, IVerifiedReleaseEvidenceCache cache, Mock<IBackgroundServiceMonitor> monitor) =
+            CreateService("stable", provider.Object);
+
+        Func<Task> act = async () => await service.RunDiscoveryRoundAsync(3600, stopping.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+        monitor.Verify(m => m.ReportError(It.IsAny<string>(), It.IsAny<string>()), Times.Never);
+        cache.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task DiscoverAndCacheAsync_ChangedDigestBinding_RejectsBeforeCacheReplacement()
+    {
+        SignedReleaseMetadata first = new(
+            Channel: "stable",
+            Sequence: 1,
+            SignatureVerified: true,
+            Identity: Identity("stable"),
+            ComponentPlatformDigests: new Dictionary<string, string>(),
+            MinimumUpdaterVersion: "1.0.0");
+        SignedReleaseMetadata changed = first with
+        {
+            Identity = first.Identity with { ManifestDigest = "sha256:" + new string('f', 64) },
+        };
+        var provider = new Mock<IHostUpdateMetadataProvider>();
+        provider.SetupSequence(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(first)
+            .ReturnsAsync(changed);
+        var bindingStore = new Mock<IVerifiedReleaseManifestBindingStore>();
+        bindingStore.Setup(store => store.EnsureBoundAsync(
+                first.Identity.ReleaseId,
+                first.Identity.ManifestDigest,
+                It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        bindingStore.Setup(store => store.EnsureBoundAsync(
+                changed.Identity.ReleaseId,
+                changed.Identity.ManifestDigest,
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidDataException("manifest digest conflict"));
+        (VerifiedReleaseDiscoveryMonitorService service, IVerifiedReleaseEvidenceCache cache, _) =
+            CreateService("stable", provider.Object, bindingStore.Object);
+
+        await service.DiscoverAndCacheAsync(CancellationToken.None);
+        VerifiedReleaseEvidenceDto accepted = cache.Current!;
+        (await service.RunDiscoveryRoundAsync(3600, CancellationToken.None)).Should().BeFalse();
+
+        cache.Current.Should().BeSameAs(accepted);
+        cache.Current!.ManifestDigest.Should().Be(first.Identity.ManifestDigest);
     }
 }

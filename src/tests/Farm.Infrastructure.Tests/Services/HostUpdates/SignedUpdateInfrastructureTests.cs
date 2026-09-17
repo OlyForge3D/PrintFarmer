@@ -75,6 +75,9 @@ public sealed class SignedUpdateInfrastructureTests
     public async Task Provider_MapsVerifiedManifestAndComputesDigestFromExactBytes()
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
+        Dictionary<string, string> childDigests = manifest.PlatformDigests.ToDictionary(StringComparer.Ordinal);
+        childDigests["api/linux-amd64"] = "sha256:" + new string('b', 64);
+        manifest = manifest with { PlatformDigests = childDigests };
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
         TestHandler handler = new(bytes);
         VerifiedGitHubReleaseMetadataProvider provider = new(new GitHubSignedReleaseDiscovery(new HttpClient(handler), new AcceptingVerifier()));
@@ -86,7 +89,7 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Equal("stable:1.2.3", metadata.Identity.OciReleaseLabel);
         Assert.Equal("1.2.3", metadata.Identity.OciVersionLabel);
         Assert.Equal(manifest.BuildId, metadata.Identity.BuildMetadata);
-        Assert.Equal("sha256:" + new string('a', 64), metadata.ComponentPlatformDigests["api/linux-amd64"]);
+        Assert.Equal("sha256:" + new string('b', 64), metadata.ComponentPlatformDigests["api/linux-amd64"]);
     }
 
     [Fact]
@@ -113,12 +116,30 @@ public sealed class SignedUpdateInfrastructureTests
             Channel = "insider",
             Tag = "v9.9.9",
             Sequence = 1,
-            PlatformDigests = new Dictionary<string, string> { ["linux-amd64"] = "sha256:bad" },
+            PlatformDigests = new Dictionary<string, string> { ["api/linux-amd64"] = "sha256:bad" },
         };
         SignedUpdateValidationResult result = SignedUpdateManifestValidator.Validate(manifest);
         Assert.Contains("sequence_mismatch", result.Errors);
         Assert.Contains("tag_version_mismatch", result.Errors);
         Assert.Contains("platform_digest_invalid", result.Errors);
+    }
+
+    [Fact]
+    public void Validate_IncompleteOrMismatchedServicePlatformDigestMap_Rejects()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
+        Dictionary<string, string> incomplete = manifest.PlatformDigests
+            .Where(pair => pair.Key != "api/linux-amd64")
+            .ToDictionary(StringComparer.Ordinal);
+        Dictionary<string, string> mismatched = incomplete.ToDictionary(StringComparer.Ordinal);
+        mismatched["unknown/linux-amd64"] = "sha256:" + new string('a', 64);
+
+        Assert.Contains(
+            "platform_digest_invalid",
+            SignedUpdateManifestValidator.Validate(manifest with { PlatformDigests = incomplete }).Errors);
+        Assert.Contains(
+            "platform_digest_invalid",
+            SignedUpdateManifestValidator.Validate(manifest with { PlatformDigests = mismatched }).Errors);
     }
 
     [Fact]
@@ -139,7 +160,7 @@ public sealed class SignedUpdateInfrastructureTests
             ReleaseJson(104, "v2.0.0", false, false, true),
         }) + "]";
         ReleaseHandler handler = new(new Dictionary<int, string> { [1] = pageOne, [2] = pageTwo },
-            new Dictionary<string, byte[]> { ["manifest-100"] = System.Text.Encoding.UTF8.GetBytes(firstJson), ["manifest-103"] = System.Text.Encoding.UTF8.GetBytes(firstJson), ["manifest-104"] = System.Text.Encoding.UTF8.GetBytes(latestJson) });
+            new Dictionary<long, byte[]> { [1001] = System.Text.Encoding.UTF8.GetBytes(firstJson), [1031] = System.Text.Encoding.UTF8.GetBytes(firstJson), [1041] = System.Text.Encoding.UTF8.GetBytes(latestJson) });
         RecordingVerifier verifier = new(manifest => manifest.Span.SequenceEqual(System.Text.Encoding.UTF8.GetBytes(latestJson)));
         GitHubSignedReleaseDiscovery discovery = new(new HttpClient(handler), verifier);
 
@@ -148,12 +169,108 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.NotNull(result);
         Assert.Equal("2.0.0", result.Manifest.Version);
         Assert.Equal(
-            [
-                "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main",
-                "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main",
-            ],
+            ["https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"],
             verifier.Identities);
         Assert.Equal(new[] { 1, 2 }, handler.ReleasePages);
+    }
+
+    [Fact]
+    public async Task Discovery_UntrustedBrowserUrlAndRedirectOrigin_NeverEscapesPinnedGitHubAssetEndpoint()
+    {
+        List<Uri> requests = [];
+        DelegateHandler handler = new(request =>
+        {
+            requests.Add(request.RequestUri!);
+            if (request.RequestUri!.AbsoluteUri.Contains("/releases?", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"[{ReleaseJson(7, "v1.2.3", false, false, true)}]"),
+                };
+            }
+
+            var redirect = new HttpResponseMessage(HttpStatusCode.Found);
+            redirect.Headers.Location = new Uri("https://attacker.invalid/release-asset");
+            return redirect;
+        });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            verifier).DiscoverAsync("stable", default);
+
+        Assert.Null(result);
+        Assert.Empty(verifier.Identities);
+        Assert.Equal(
+            [
+                "https://api.github.com/repos/OlyForge3D/PrintFarmer/releases?per_page=100&page=1",
+                "https://api.github.com/repos/OlyForge3D/PrintFarmer/releases/assets/71",
+            ],
+            requests.Select(uri => uri.AbsoluteUri));
+    }
+
+    [Fact]
+    public async Task Discovery_OversizedManifest_IsRejectedWithoutVerification()
+    {
+        byte[] oversized = new byte[(256 * 1024) + 1];
+        DelegateHandler handler = new(request =>
+        {
+            if (request.RequestUri!.AbsoluteUri.Contains("/releases?", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"[{ReleaseJson(8, "v1.2.3", false, false, true)}]"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(oversized),
+            };
+        });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            verifier).DiscoverAsync("stable", default);
+
+        Assert.Null(result);
+        Assert.Empty(verifier.Identities);
+    }
+
+    [Fact]
+    public async Task Discovery_OversizedBundle_IsRejectedWithoutVerification()
+    {
+        byte[] manifest = JsonSerializer.SerializeToUtf8Bytes(
+            CreateManifest("1.2.3", "stable", "main"),
+            JsonOptions);
+        byte[] oversizedBundle = new byte[(1024 * 1024) + 1];
+        DelegateHandler handler = new(request =>
+        {
+            string uri = request.RequestUri!.AbsoluteUri;
+            if (uri.Contains("/releases?", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"[{ReleaseJson(9, "v1.2.3", false, false, true)}]"),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(uri.EndsWith("/91", StringComparison.Ordinal)
+                    ? manifest
+                    : oversizedBundle),
+            };
+        });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            verifier).DiscoverAsync("stable", default);
+
+        Assert.Null(result);
+        Assert.Empty(verifier.Identities);
     }
 
     [Fact]
@@ -168,7 +285,7 @@ public sealed class SignedUpdateInfrastructureTests
                 ReleaseJson(1, "v1.2.3", false, true, true),
                 ReleaseJson(2, "v1.2.3-insider.4", false, true, true),
             }) + "]",
-        }, new Dictionary<string, byte[]> { ["manifest-1"] = bytes, ["manifest-2"] = bytes });
+        }, new Dictionary<long, byte[]> { [11] = bytes, [21] = bytes });
         RecordingVerifier verifier = new(_ => true);
 
         VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(new HttpClient(handler), verifier).DiscoverAsync("insider", default);
@@ -224,7 +341,7 @@ public sealed class SignedUpdateInfrastructureTests
         return new(1, $"v{version}", version, channel, branch, new string('b', 40), "build-1",
             SignedUpdateManifestValidator.DeriveSequence(version), true,
             services.Select(id => new SignedUpdateService(id, $"ghcr.io/olyforge3d/printfarmer-{id}@{digest}")).ToArray(),
-            platforms, new Dictionary<string, string> { ["linux-amd64"] = digest });
+            platforms, services.ToDictionary(id => $"{id}/linux-amd64", _ => digest, StringComparer.Ordinal));
     }
 
     private sealed class AcceptingVerifier : ISignedReleaseVerifier
@@ -243,14 +360,14 @@ public sealed class SignedUpdateInfrastructureTests
                 {
                     new { id = 1L, tagName = "v1.2.3", draft = false, prerelease = false, assets = new[]
                     {
-                        new { name = "update-manifest.json", browserDownloadUrl = "https://assets.test/manifest" },
-                        new { name = "update-manifest.sigstore.json", browserDownloadUrl = "https://assets.test/bundle" },
+                        new { id = 11L, name = "update-manifest.json", browserDownloadUrl = "http://169.254.169.254/latest/meta-data" },
+                        new { id = 12L, name = "update-manifest.sigstore.json", browserDownloadUrl = "https://attacker.invalid/bundle" },
                     } },
                 });
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releaseJson) });
             }
 
-            byte[] content = request.RequestUri?.AbsoluteUri.EndsWith("/manifest", StringComparison.Ordinal) == true
+            byte[] content = request.RequestUri?.AbsoluteUri.EndsWith("/11", StringComparison.Ordinal) == true
                 ? manifestBytes
                 : "{}"u8.ToArray();
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(content) });
@@ -260,12 +377,12 @@ public sealed class SignedUpdateInfrastructureTests
     private static string ReleaseJson(int id, string tag, bool draft, bool prerelease, bool assets)
     {
         string assetJson = assets
-            ? $"[{{\"name\":\"update-manifest.json\",\"browserDownloadUrl\":\"https://assets.test/manifest-{id}\"}},{{\"name\":\"update-manifest.sigstore.json\",\"browserDownloadUrl\":\"https://assets.test/bundle-{id}\"}}]"
+            ? $"[{{\"id\":{id}1,\"name\":\"update-manifest.json\",\"browserDownloadUrl\":\"http://169.254.169.254/manifest-{id}\"}},{{\"id\":{id}2,\"name\":\"update-manifest.sigstore.json\",\"browserDownloadUrl\":\"https://attacker.invalid/bundle-{id}\"}}]"
             : "[]";
         return $"{{\"id\":{id},\"tagName\":\"{tag}\",\"draft\":{draft.ToString().ToLowerInvariant()},\"prerelease\":{prerelease.ToString().ToLowerInvariant()},\"assets\":{assetJson}}}";
     }
 
-    private sealed class ReleaseHandler(Dictionary<int, string> releasePages, Dictionary<string, byte[]> assets) : HttpMessageHandler
+    private sealed class ReleaseHandler(Dictionary<int, string> releasePages, Dictionary<long, byte[]> assets) : HttpMessageHandler
     {
         public List<int> ReleasePages { get; } = [];
 
@@ -281,7 +398,7 @@ public sealed class SignedUpdateInfrastructureTests
                 return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasePages.GetValueOrDefault(page, "[]")) });
             }
 
-            string key = path[(path.LastIndexOf('/') + 1)..];
+            long key = long.Parse(path[(path.LastIndexOf('/') + 1)..]);
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(assets.GetValueOrDefault(key, "{}"u8.ToArray())) });
         }
     }
@@ -295,6 +412,16 @@ public sealed class SignedUpdateInfrastructureTests
             Identities.Add(certificateIdentity);
             return Task.FromResult(accept(manifest));
         }
+
+    }
+
+    private sealed class DelegateHandler(Func<HttpRequestMessage, HttpResponseMessage> responseFactory)
+        : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(responseFactory(request));
     }
 
     private sealed class RecordingRunner : ICosignProcessRunner

@@ -78,4 +78,16 @@ public class VerifiedReleaseEvidenceCacheTests
         cache.LastVerifiedAt.Should().BeNull();
         cache.LastError.Should().Be("no verified release ever discovered");
     }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void SetError_EmptyMessage_NormalizesWithoutThrowing(string error)
+    {
+        var cache = new VerifiedReleaseEvidenceCache();
+
+        cache.SetError(error);
+
+        cache.LastError.Should().Be("Verified release discovery failed without an error message.");
+    }
 }

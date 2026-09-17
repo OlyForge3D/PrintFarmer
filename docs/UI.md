@@ -174,14 +174,18 @@ rows no longer borrow the API build: their legacy version string is `Unknown`.
   naturally have different digests. Mixed application channels block normal
   eligibility and are explicitly labelled unsafe.
 
-Selection defaults to **stable**, including native and legacy installations.
-The read-only host configuration key `Deployment:SelectedChannel` can describe an
-explicit administrator selection (`stable` or `insider`). It is not an unrestricted
-settings API field and creates no enrollment, release check, or execution action.
-Unknown values fall back to stable selection, never observed stable provenance.
-Observed channel comes only from bound, independently verified release evidence;
-a target channel is null because this increment does not discover targets.
-When insider is selected or reported, the page persistently states:
+Selection defaults to **stable**, including native and legacy installations. The
+persisted `UpdateChannel` setting selects `stable` or `insider`; selecting insider
+also requires the persisted `insiderAcknowledged` acknowledgement. This setting
+controls signed-release discovery and readiness evaluation only. It does not stage,
+apply, or recover an update.
+
+Observed channel still comes only from bound, independently verified release
+evidence. After discovery verifies a signed target, the inventory readiness result
+compares that discovered target with the selected channel and the host's current
+service/platform evidence. Until then, readiness remains `NotManaged` rather than
+inventing a target. When insider is selected or reported, the page persistently
+states:
 
 > Insider updates may arrive more frequently and have reduced stability compared
 > with stable releases.

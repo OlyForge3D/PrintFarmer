@@ -328,6 +328,8 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache, Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCache>();
+        services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseManifestBindingStore,
+            Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseManifestBindingStore>();
 
         // Signed release discovery (issue #2757): GitHub Releases discovery + Cosign
         // verification + verified-metadata mapping, all wired through DI for the production
@@ -350,15 +352,19 @@ public static class FeatureServicesStartup
 
         // GitHub public releases API client: pinned base address + standard GitHub REST headers.
         services.AddHttpClient<Farm.Infrastructure.Services.HostUpdates.GitHubSignedReleaseDiscovery>((sp, client) =>
-        {
-            Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
-                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>>().Value;
-            client.BaseAddress = new Uri("https://api.github.com/");
-            client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
-            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
-            client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
-            client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
-        });
+            {
+                Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
+                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>>().Value;
+                client.BaseAddress = new Uri("https://api.github.com/");
+                client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
+                client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+                client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+                client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
+            })
+            .ConfigurePrimaryHttpMessageHandler(() => new SocketsHttpHandler
+            {
+                AllowAutoRedirect = false,
+            });
         services.AddTransient<Farm.Infrastructure.Services.HostUpdates.IHostUpdateMetadataProvider,
             Farm.Infrastructure.Services.HostUpdates.VerifiedGitHubReleaseMetadataProvider>();
 

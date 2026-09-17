@@ -219,14 +219,13 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     }
 
     [Fact]
-    public async Task GetInfo_Admin_ReadinessReflectsVerifiedReleaseEvidenceCache()
+    public async Task GetInfo_Admin_ReadinessReflectsVerifiedReleaseEvidenceCacheInIsolatedHost()
     {
-        // Issue #2757 production wiring: SystemInfoService must actually consult
-        // IVerifiedReleaseEvidenceCache (fed by VerifiedReleaseDiscoveryMonitorService in
-        // production) rather than a stub. Both assertions run against the same admin client
-        // in one method, in order, because the cache is a process-lifetime singleton shared
-        // by every test in this class fixture.
-        HttpResponseMessage before = await _adminClient!.GetAsync("/api/system/info");
+        await using Factory isolatedFactory = new();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+
+        HttpResponseMessage before = await isolatedAdmin.GetAsync("/api/system/info");
         using (JsonDocument beforeJson = JsonDocument.Parse(await before.Content.ReadAsStringAsync()))
         {
             JsonElement readiness = beforeJson.RootElement.GetProperty("inventory").GetProperty("readiness");
@@ -237,7 +236,8 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         // A release whose channel does not match the host's selected channel ("stable" by
         // default) is unambiguously Blocked, proving the evaluator is wired against a
         // *populated* cache, not always the "no evidence" branch.
-        IVerifiedReleaseEvidenceCache cache = _factory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
         cache.SetVerified(
             new VerifiedReleaseEvidenceDto
             {
@@ -254,9 +254,9 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
                 Services = [],
             },
             DateTimeOffset.UtcNow);
-        _factory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
+        isolatedFactory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
 
-        HttpResponseMessage after = await _adminClient!.GetAsync("/api/system/info");
+        HttpResponseMessage after = await isolatedAdmin.GetAsync("/api/system/info");
         using JsonDocument afterJson = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
         afterJson.RootElement.GetProperty("inventory").GetProperty("readiness").GetProperty("state").GetString().Should().Be("Blocked");
     }

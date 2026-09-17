@@ -94,10 +94,9 @@ public class VerifiedReleaseDiscoveryMonitorService(
                 }
 
                 _serviceMonitor.ReportEnabled(ServiceId, true);
-                await DiscoverAndCacheAsync(stoppingToken);
-                _serviceMonitor.ReportSuccess(ServiceId, options.IntervalSeconds);
+                await RunDiscoveryRoundAsync(options.IntervalSeconds, stoppingToken);
             }
-            catch (OperationCanceledException)
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
                 _logger.LogInformation("[VerifiedReleaseDiscovery] Stopping");
                 break;
@@ -108,8 +107,7 @@ public class VerifiedReleaseDiscoveryMonitorService(
                 // evidence it already had — see IVerifiedReleaseEvidenceCache remarks — so a
                 // transient outage does not regress readiness evaluation to "no evidence".
                 _logger.LogError(ex, "[VerifiedReleaseDiscovery] Unhandled error during discovery");
-                _cache.SetError(ex.Message);
-                _serviceMonitor.ReportError(ServiceId, ex.Message);
+                RecordFailure(ex);
             }
         }
 
@@ -135,32 +133,50 @@ public class VerifiedReleaseDiscoveryMonitorService(
         string channel = channelSettings.Channel;
 
         IHostUpdateMetadataProvider metadataProvider = scope.ServiceProvider.GetRequiredService<IHostUpdateMetadataProvider>();
+        IVerifiedReleaseManifestBindingStore bindingStore =
+            scope.ServiceProvider.GetRequiredService<IVerifiedReleaseManifestBindingStore>();
 
+        SignedReleaseMetadata metadata = await metadataProvider.GetCurrentAsync(channel, ct);
+        VerifiedReleaseEvidenceDto evidence = metadata.ToEvidenceDto();
+        await bindingStore.EnsureBoundAsync(
+            metadata.Identity.ReleaseId,
+            metadata.Identity.ManifestDigest,
+            ct);
+        _cache.SetVerified(evidence, DateTimeOffset.UtcNow);
+        _logger.LogInformation(
+            "[VerifiedReleaseDiscovery] Cached verified release for channel '{Channel}' (releaseId={ReleaseId}, sequence={Sequence})",
+            channel,
+            metadata.Identity.ReleaseId,
+            metadata.Sequence);
+    }
+
+    /// <summary>Runs one monitored discovery round and reports exactly one outcome.</summary>
+    internal async Task<bool> RunDiscoveryRoundAsync(int intervalSeconds, CancellationToken stoppingToken)
+    {
         try
         {
-            SignedReleaseMetadata metadata = await metadataProvider.GetCurrentAsync(channel, ct);
-            VerifiedReleaseEvidenceDto evidence = metadata.ToEvidenceDto();
-            _cache.SetVerified(evidence, DateTimeOffset.UtcNow);
-            _logger.LogInformation(
-                "[VerifiedReleaseDiscovery] Cached verified release for channel '{Channel}' (releaseId={ReleaseId}, sequence={Sequence})",
-                channel,
-                metadata.Identity.ReleaseId,
-                metadata.Sequence);
+            await DiscoverAndCacheAsync(stoppingToken);
+            _serviceMonitor.ReportSuccess(ServiceId, intervalSeconds);
+            return true;
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
         {
             throw;
         }
         catch (Exception ex)
         {
-            // Discovery/verification failure for THIS round only. Explicit failure log +
-            // recorded error; the cache's previously verified evidence (if any) is retained.
-            _logger.LogError(
-                ex,
-                "[VerifiedReleaseDiscovery] Failed to discover/verify a release for channel '{Channel}'",
-                channel);
-            _cache.SetError(ex.Message);
-            throw;
+            RecordFailure(ex);
+            return false;
         }
+    }
+
+    private void RecordFailure(Exception exception)
+    {
+        string message = string.IsNullOrWhiteSpace(exception.Message)
+            ? "Verified release discovery failed without an error message."
+            : exception.Message;
+        _logger.LogError(exception, "[VerifiedReleaseDiscovery] Failed to discover/verify a release");
+        _cache.SetError(message);
+        _serviceMonitor.ReportError(ServiceId, _cache.LastError!);
     }
 }

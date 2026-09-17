@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
@@ -90,6 +91,8 @@ public static partial class SignedUpdateManifestValidator
         if (string.IsNullOrWhiteSpace(manifest.BuildId) || manifest.BuildId.Length > 128) errors.Add("build_id_invalid");
         if (manifest.Sequence != DeriveSequence(manifest.Version)) errors.Add("sequence_mismatch");
         if (!manifest.ManagedUpdateEligible) errors.Add("managed_update_ineligible");
+        IReadOnlyList<string> manifestPlatforms = manifest.Platforms ?? [];
+        HashSet<string> expectedPlatformDigestKeys = new(StringComparer.Ordinal);
         if (manifest.Services is null || manifest.Services.Count != ServiceIds.Count) errors.Add("service_set_invalid");
         else
         {
@@ -104,14 +107,32 @@ public static partial class SignedUpdateManifestValidator
                 }
 
                 if (!IsApprovedImage(service.Id, service.Image)) errors.Add("image_reference_invalid");
-                if (service.Platforms is not null && service.Platforms.Any(platform => !IsPlatform(platform))) errors.Add("platform_invalid");
+                IReadOnlyList<string> servicePlatforms = service.Platforms ?? manifestPlatforms;
+                if (servicePlatforms.Count == 0
+                    || servicePlatforms.Distinct(StringComparer.Ordinal).Count() != servicePlatforms.Count
+                    || servicePlatforms.Any(platform => !IsPlatform(platform) || !manifestPlatforms.Contains(platform, StringComparer.Ordinal)))
+                {
+                    errors.Add("platform_invalid");
+                }
+                else
+                {
+                    foreach (string platform in servicePlatforms)
+                    {
+                        expectedPlatformDigestKeys.Add($"{service.Id}/{platform}");
+                    }
+                }
             }
         }
 
         if (manifest.Platforms is null || manifest.Platforms.Count == 0 || manifest.Platforms.Distinct(StringComparer.Ordinal).Count() != manifest.Platforms.Count ||
             manifest.Platforms.Any(platform => !IsPlatform(platform))) errors.Add("platform_invalid");
-        if (manifest.PlatformDigests is null || manifest.Platforms is null || manifest.PlatformDigests.Count != manifest.Platforms.Count ||
-            manifest.Platforms.Any(platform => !manifest.PlatformDigests.TryGetValue(platform, out string? digest) || !IsSha256Digest(digest))) errors.Add("platform_digest_invalid");
+        if (manifest.PlatformDigests is null
+            || manifest.PlatformDigests.Count != expectedPlatformDigestKeys.Count
+            || manifest.PlatformDigests.Keys.Any(key => !expectedPlatformDigestKeys.Contains(key))
+            || expectedPlatformDigestKeys.Any(key => !manifest.PlatformDigests.TryGetValue(key, out string? digest) || !IsSha256Digest(digest)))
+        {
+            errors.Add("platform_digest_invalid");
+        }
         if (manifest.MinimumUpdaterVersion is not null && !HostUpdateValidation.IsSemanticVersion(manifest.MinimumUpdaterVersion)) errors.Add("compatibility_invalid");
         return errors.Count == 0 ? SignedUpdateValidationResult.Valid : new(false, errors.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
     }
@@ -249,7 +270,7 @@ public static partial class SignedUpdateManifestValidator
     private static partial Regex Sha256();
 }
 
-public sealed record GitHubReleaseAsset(string Name, string BrowserDownloadUrl);
+public sealed record GitHubReleaseAsset(long Id, string Name);
 public sealed record GitHubRelease(long Id, string TagName, bool Draft, bool Prerelease, IReadOnlyList<GitHubReleaseAsset> Assets);
 
 public interface ISignedReleaseVerifier
@@ -260,6 +281,15 @@ public interface ISignedReleaseVerifier
 public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedReleaseVerifier verifier)
 {
     private const string Repository = "OlyForge3D/PrintFarmer";
+    private const int MaximumCandidates = 25;
+    private const int MaximumManifestBytes = 256 * 1024;
+    private const int MaximumBundleBytes = 1024 * 1024;
+    private static readonly HashSet<string> AllowedAssetRedirectHosts = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "objects.githubusercontent.com",
+        "release-assets.githubusercontent.com",
+    };
+
     public async Task<VerifiedSignedUpdateRelease?> DiscoverAsync(string channel, CancellationToken cancellationToken)
     {
         if (channel is not ("stable" or "insider")) throw new ArgumentException("Unsupported channel.", nameof(channel));
@@ -279,25 +309,137 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
         string identity = channel == "stable"
             ? "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"
             : "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development";
-        List<VerifiedSignedUpdateRelease> verified = [];
-        foreach (GitHubRelease release in releases.Where(candidate => !candidate.Draft && candidate.Prerelease == (channel == "insider") &&
-            SignedUpdateManifestValidator.IsTagForChannel(candidate.TagName, channel)))
+        List<ReleaseCandidate> candidates = [];
+        foreach (GitHubRelease release in releases
+            .Where(candidate => !candidate.Draft && candidate.Prerelease == (channel == "insider")
+                && SignedUpdateManifestValidator.IsTagForChannel(candidate.TagName, channel))
+            .Take(MaximumCandidates))
         {
-            string tag = release.TagName;
-            GitHubReleaseAsset? manifestAsset = release.Assets.FirstOrDefault(asset => asset.Name == "update-manifest.json");
-            GitHubReleaseAsset? bundleAsset = release.Assets.FirstOrDefault(asset => asset.Name == "update-manifest.sigstore.json");
-            if (manifestAsset is null || bundleAsset is null) continue;
-            byte[] manifestBytes = await httpClient.GetByteArrayAsync(manifestAsset.BrowserDownloadUrl, cancellationToken);
-            byte[] bundleBytes = await httpClient.GetByteArrayAsync(bundleAsset.BrowserDownloadUrl, cancellationToken);
-            SignedUpdateManifest parsed;
-            try { parsed = SignedUpdateManifestValidator.Parse(System.Text.Encoding.UTF8.GetString(manifestBytes)); }
-            catch (JsonException) { continue; }
-            if (parsed.Tag != tag || !SignedUpdateManifestValidator.Validate(parsed).IsValid ||
-                !await verifier.VerifyAsync(manifestBytes, bundleBytes, identity, cancellationToken)) continue;
-            verified.Add(new(parsed, manifestBytes));
+            if (release.Assets is null) continue;
+            GitHubReleaseAsset[] manifestAssets = release.Assets.Where(asset => asset.Name == "update-manifest.json").ToArray();
+            GitHubReleaseAsset[] bundleAssets = release.Assets.Where(asset => asset.Name == "update-manifest.sigstore.json").ToArray();
+            if (manifestAssets.Length != 1
+                || bundleAssets.Length != 1
+                || manifestAssets[0].Id <= 0
+                || bundleAssets[0].Id <= 0)
+            {
+                continue;
+            }
+
+            try
+            {
+                byte[] manifestBytes = await DownloadAssetAsync(manifestAssets[0].Id, MaximumManifestBytes, cancellationToken);
+                SignedUpdateManifest parsed = SignedUpdateManifestValidator.Parse(Encoding.UTF8.GetString(manifestBytes));
+                if (parsed.Tag == release.TagName && SignedUpdateManifestValidator.Validate(parsed).IsValid)
+                {
+                    candidates.Add(new(parsed, manifestBytes, bundleAssets[0].Id));
+                }
+            }
+            catch (InvalidDataException)
+            {
+                continue;
+            }
+            catch (JsonException)
+            {
+                continue;
+            }
         }
-        return verified.OrderByDescending(candidate => candidate.Manifest.Sequence).FirstOrDefault();
+
+        foreach (ReleaseCandidate candidate in candidates.OrderByDescending(item => item.Manifest.Sequence))
+        {
+            byte[] bundleBytes;
+            try
+            {
+                bundleBytes = await DownloadAssetAsync(candidate.BundleAssetId, MaximumBundleBytes, cancellationToken);
+            }
+            catch (InvalidDataException)
+            {
+                continue;
+            }
+
+            if (await verifier.VerifyAsync(candidate.ManifestBytes, bundleBytes, identity, cancellationToken))
+            {
+                return new(candidate.Manifest, candidate.ManifestBytes);
+            }
+        }
+
+        return null;
     }
+
+    private async Task<byte[]> DownloadAssetAsync(long assetId, int maximumBytes, CancellationToken cancellationToken)
+    {
+        using HttpRequestMessage request = CreateAssetRequest(
+            new Uri($"https://api.github.com/repos/{Repository}/releases/assets/{assetId}", UriKind.Absolute));
+        using HttpResponseMessage response = await httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            cancellationToken);
+
+        if (response.StatusCode is HttpStatusCode.Found or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
+        {
+            Uri? location = response.Headers.Location;
+            if (location is null
+                || !location.IsAbsoluteUri
+                || location.Scheme != Uri.UriSchemeHttps
+                || !AllowedAssetRedirectHosts.Contains(location.IdnHost))
+            {
+                throw new InvalidDataException("GitHub release asset redirect origin is not allowed.");
+            }
+
+            using HttpRequestMessage redirectedRequest = CreateAssetRequest(location);
+            using HttpResponseMessage redirectedResponse = await httpClient.SendAsync(
+                redirectedRequest,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
+            if ((int)redirectedResponse.StatusCode is >= 300 and < 400)
+            {
+                throw new InvalidDataException("GitHub release asset returned more than one redirect.");
+            }
+
+            redirectedResponse.EnsureSuccessStatusCode();
+            return await ReadBoundedAsync(redirectedResponse.Content, maximumBytes, cancellationToken);
+        }
+
+        response.EnsureSuccessStatusCode();
+        return await ReadBoundedAsync(response.Content, maximumBytes, cancellationToken);
+    }
+
+    private static HttpRequestMessage CreateAssetRequest(Uri uri)
+    {
+        HttpRequestMessage request = new(HttpMethod.Get, uri);
+        request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PrintFarmer", "1.0"));
+        request.Headers.Accept.Clear();
+        request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/octet-stream"));
+        return request;
+    }
+
+    private static async Task<byte[]> ReadBoundedAsync(HttpContent content, int maximumBytes, CancellationToken cancellationToken)
+    {
+        if (content.Headers.ContentLength > maximumBytes)
+        {
+            throw new InvalidDataException($"GitHub release asset exceeds the {maximumBytes}-byte limit.");
+        }
+
+        await using Stream source = await content.ReadAsStreamAsync(cancellationToken);
+        using MemoryStream destination = new(Math.Min(maximumBytes, 16 * 1024));
+        byte[] buffer = new byte[16 * 1024];
+        int total = 0;
+        int read;
+        while ((read = await source.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
+        {
+            total = checked(total + read);
+            if (total > maximumBytes)
+            {
+                throw new InvalidDataException($"GitHub release asset exceeds the {maximumBytes}-byte limit.");
+            }
+
+            await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
+        }
+
+        return destination.ToArray();
+    }
+
+    private sealed record ReleaseCandidate(SignedUpdateManifest Manifest, byte[] ManifestBytes, long BundleAssetId);
 }
 
 public sealed record CosignVerifierOptions(string ExecutablePath, TimeSpan Timeout, int MaxDiagnostics = 8192);
@@ -431,9 +573,7 @@ public sealed class VerifiedGitHubReleaseMetadataProvider(GitHubSignedReleaseDis
         string version = manifest.Version;
         string releaseId = $"{manifest.Channel}:{version}";
         string manifestDigest = $"sha256:{Convert.ToHexString(SHA256.HashData(verifiedRelease.ManifestBytes)).ToLowerInvariant()}";
-        Dictionary<string, string> componentPlatformDigests = manifest.Services
-            .SelectMany(service => (service.Platforms ?? manifest.Platforms).Select(platform => (Key: $"{service.Id}/{platform}", Value: service.Image[(service.Image.IndexOf("@sha256:", StringComparison.Ordinal) + 1)..])))
-            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+        Dictionary<string, string> componentPlatformDigests = manifest.PlatformDigests.ToDictionary(StringComparer.Ordinal);
         CanonicalReleaseIdentity identity = new(releaseId, version, manifest.Channel, manifest.Tag, manifest.SourceBranch, manifest.SourceCommit,
             manifest.SourceCommit, manifest.BuildId, releaseId, version, manifestDigest);
         return new(manifest.Channel, manifest.Sequence, true, identity, componentPlatformDigests, manifest.MinimumUpdaterVersion ?? "0.0.0");
