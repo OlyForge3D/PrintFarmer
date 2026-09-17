@@ -17,7 +17,8 @@ const dailyValidationSmoke = readFileSync(
   'utf8',
 );
 const splitTopologySmoke = readFileSync('tests/test-split-topology-route-smoke.sh', 'utf8');
-const publishWorkflow = readFileSync('.github/workflows/docker-publish.yml', 'utf8');
+const publishWorkflow = readFileSync('.github/workflows/consolidated-release.yml', 'utf8');
+const publisher = readFileSync('scripts/ci/publish-release.mjs', 'utf8');
 const shell = process.platform === 'win32' ? 'C:\\Program Files\\Git\\bin\\bash.exe' : 'bash';
 const bashPath = value => value.replaceAll('\\', '/');
 const buildMetadataPath = bashPath(path.resolve('scripts/build-metadata.sh'));
@@ -89,11 +90,10 @@ test('active Dockerfile variants propagate full commit metadata into production 
 });
 
 test('release workflow injects the full source commit into container builds', () => {
-  assert.doesNotMatch(publishWorkflow, /^\s{6}(?:source_sha|channel):$/m);
-  assert.match(publishWorkflow, /source_sha='\$\{\{ fromJSON\(inputs\.transaction\)\.sourceCommit \}\}'/);
-  assert.match(publishWorkflow, /--build-arg "GIT_SHA=\$\{source_sha\}"/);
-  assert.match(publishWorkflow, /--build-arg "VITE_GIT_SHA=\$\{source_sha\}"/);
-  assert.doesNotMatch(publishWorkflow, /git rev-parse --short HEAD/);
+  assert.match(publishWorkflow, /RELEASE_SELECTED_SOURCE: \$\{\{ needs.select.outputs.source_sha \}\}/);
+  assert.match(publisher, /'--build-arg', `GIT_SHA=\$\{release.sourceCommit\}`/);
+  assert.match(publisher, /'--build-arg', `VITE_GIT_SHA=\$\{release.sourceCommit\}`/);
+  assert.doesNotMatch(publisher, /git rev-parse --short HEAD/);
 });
 
 test('live split-topology builds inject the exact commit under test', () => {

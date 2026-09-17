@@ -1,220 +1,100 @@
-import { readFileSync } from 'node:fs';
-import {
-  compareVersions, components, identityLabels, loadReleaseTrustPolicy, parseTag, requireThat, validateCompleteSet,
-} from './release-policy.mjs';
-import { command } from './release-github.mjs';
-import { readEvidence, stageEvidenceFromFiles } from './release-evidence.mjs';
-import { emitPublicReleaseAssets, privateSetPath, readPrivateJson, verifyAuthorization, writeAuthorizationSet } from './release-authorization.mjs';
+import { spawnSync } from 'node:child_process';
+import { components, compareVersions, parseTag, requireThat } from './release-policy.mjs';
 
-export function inspectCompleteSet(record, digests, run = command) {
-  const set = { schema: 1, identity: record, managedEligible: false, images: {} };
-  for (const [name, expectedPlatforms] of Object.entries(components)) {
-    const digest = digests[name];
-    requireThat(/^sha256:[a-f0-9]{64}$/.test(digest), `Missing digest: ${name}`);
-    const image = `ghcr.io/olyforge3d/printfarmer-${name}`;
-    const index = JSON.parse(run('docker', ['buildx', 'imagetools', 'inspect', `${image}@${digest}`, '--raw']));
-    requireThat(Array.isArray(index.manifests), `Missing multi-platform index/provenance: ${name}`);
-    const declaredPlatforms = index.manifests
-      .filter(item => item.annotations?.['vnd.docker.reference.type'] !== 'attestation-manifest')
-      .map(item => `${item.platform?.os}/${item.platform?.architecture}`).sort();
-    requireThat(declaredPlatforms.join() === [...expectedPlatforms].sort().join(),
-      `Undeclared or missing platform: ${name}`);
-    const platforms = {};
-    for (const platform of expectedPlatforms) {
-      const matches = index.manifests.filter(item => `${item.platform?.os}/${item.platform?.architecture}` === platform);
-      requireThat(matches.length === 1, `Missing/duplicate platform: ${name}/${platform}`);
-      const platformDigest = matches[0].digest;
-      requireThat(index.manifests.some(item =>
-        item.annotations?.['vnd.docker.reference.type'] === 'attestation-manifest' &&
-        item.annotations?.['vnd.docker.reference.digest'] === platformDigest),
-      `Missing platform provenance/SBOM descriptor: ${name}/${platform}`);
-      const config = JSON.parse(run('docker', ['buildx', 'imagetools', 'inspect',
-        `${image}@${platformDigest}`, '--format', '{{json .Image}}']));
-      platforms[platform] = { digest: platformDigest, labels: Object.fromEntries(
-        Object.keys(identityLabels(record)).map(key => [key, config.config.Labels?.[key]])) };
-    }
-    set.images[name] = { digest, platforms };
-  }
-  validateCompleteSet(record, set);
-  return set;
+export function command(name, args, options = {}) {
+  const result = spawnSync(name, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'],
+    maxBuffer: 32 * 1024 * 1024, ...options });
+  if (result.error) throw result.error;
+  requireThat(result.status === 0, `${name} failed (${result.status}): ${result.stderr ?? ''}`);
+  return result.stdout;
 }
 
-export function publishImmutableTags(record, set, inspect, create) {
-  validateCompleteSet(record, set);
-  for (const [component, image] of Object.entries(set.images)) {
-    const repository = `ghcr.io/olyforge3d/printfarmer-${component}`;
-    const tag = `${repository}:${record.canonicalVersion}`;
-    const existing = inspect(tag);
-    requireThat(!existing || existing === image.digest, `Immutable image tag conflict: ${tag}`);
-  }
-  for (const [component, image] of Object.entries(set.images)) {
-    const repository = `ghcr.io/olyforge3d/printfarmer-${component}`;
-    const tag = `${repository}:${record.canonicalVersion}`;
-    if (!inspect(tag)) create(tag, `${repository}@${image.digest}`);
-    requireThat(inspect(tag) === image.digest, `Published image tag differs: ${tag}`);
-  }
-}
+export const imageRepository = name => `ghcr.io/olyforge3d/printfarmer-${name}`;
 
-export function registryTagInspection(output) {
-  let inspected;
-  try { inspected = JSON.parse(output); } catch { throw new Error('Registry returned invalid image inspection JSON'); }
-  const digest = inspected?.manifest?.digest;
-  const image = inspected?.image;
-  const entries = image?.config ? [image] : Object.values(image ?? {});
-  const versions = entries.map(value => value?.config?.Labels?.['org.opencontainers.image.version']);
-  requireThat(/^sha256:[a-f0-9]{64}$/.test(digest), 'Registry returned no image manifest digest');
-  requireThat(entries.length > 0 && versions.every(version =>
-    typeof version === 'string' && /^\d+\.\d+\.\d+(?:-(?:insider|beta|rc)\.\d+)?$/.test(version)) &&
-    new Set(versions).size === 1, 'Registry image platforms lack one canonical version label');
+export function inspectTag(reference, run = spawnSync) {
+  const result = run('docker', ['buildx', 'imagetools', 'inspect', reference,
+    '--format', '{"manifest":{{json .Manifest}},"image":{{json .Image}}}'],
+  { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+  if (result.error) throw result.error;
+  if (result.status !== 0) {
+    // Only an explicit registry not-found is absence. Auth/network failures block publication.
+    requireThat(/(?:manifest unknown|not found\s*$)/i.test(result.stderr ?? '') &&
+      !/(?:unauthorized|denied|timeout|connection|no such host)/i.test(result.stderr ?? ''),
+    `Cannot inspect registry tag ${reference}: ${result.stderr}`);
+    return undefined;
+  }
+  const resultData = JSON.parse(result.stdout);
+  const digest = resultData.manifest?.digest;
+  requireThat(/^sha256:[a-f0-9]{64}$/.test(digest ?? ''), `Invalid registry digest: ${reference}`);
+  const images = resultData.image?.config ? [resultData.image] : Object.values(resultData.image ?? {});
+  const versions = images.map(image => image.config?.Labels?.['org.opencontainers.image.version']);
+  requireThat(versions.length > 0 && versions.every(version => typeof version === 'string') &&
+    new Set(versions).size === 1, `Missing consistent version labels: ${reference}`);
+  parseTag(`v${versions[0]}`);
   return { digest, version: versions[0] };
 }
 
-export function plannedReleaseAliases(record, set, inspect = () => undefined) {
-  validateCompleteSet(record, set);
-  const parsed = parseTag(record.sourceTag);
-  return Object.fromEntries(Object.entries(set.images).map(([component, image]) => {
-    const aliases = record.channel === 'stable'
-      ? [
-      { value: record.canonicalVersion, mutable: false },
-      { value: `stable-${record.canonicalVersion}`, mutable: false, retained: true },
-      ...(() => {
-        const value = `${parsed.major}.${parsed.minor}`;
-        const existing = inspect(`ghcr.io/olyforge3d/printfarmer-${component}:${value}`);
-        if (!existing || existing.digest === image.digest) return [{ value, mutable: true }];
-        requireThat(parseTag(`v${existing.version}`).channel === 'stable',
-          `Cross-channel alias movement rejected for ${component}:${value}`);
-        return compareVersions(record.canonicalVersion, existing.version) > 0 ? [{ value, mutable: true }] : [];
-      })(),
-      ...[parsed.major, 'latest'].flatMap(value => {
-        const existing = inspect(`ghcr.io/olyforge3d/printfarmer-${component}:${value}`);
-        if (!existing || existing.digest === image.digest) return [{ value, mutable: true }];
-        requireThat(parseTag(`v${existing.version}`).channel === 'stable',
-          `Cross-channel alias movement rejected for ${component}:${value}`);
-        return compareVersions(record.canonicalVersion, existing.version) > 0 ? [{ value, mutable: true }] : [];
-      }),
-    ]
-      : [{ value: record.canonicalVersion, mutable: false }];
-    return [component,
-    aliases.map(alias => ({
-      tag: `ghcr.io/olyforge3d/printfarmer-${component}:${alias.value}`,
-      digest: image.digest,
-      mutable: alias.mutable,
-      ...(alias.retained ? { retained: true } : {}),
-      channel: record.channel,
-    }))];
-  }));
-}
-
-export function publishReleaseAliases(record, set, inspect, create) {
-  const plan = plannedReleaseAliases(record, set, inspect);
-  requireThat(Object.values(plan).flat().every(alias => !alias.mutable || record.channel === 'stable'),
-    'Only stable aliases may be mutable');
-  for (const aliases of Object.values(plan)) {
-    for (const alias of aliases) {
-      const existing = inspect(alias.tag);
-      if (!existing) continue;
-      requireThat(existing.digest === alias.digest || alias.mutable,
-        `Immutable image tag conflict: ${alias.tag}`);
-      if (alias.mutable && existing.digest !== alias.digest) {
-        requireThat(existing.version && compareVersions(record.canonicalVersion, existing.version) > 0,
-          `Alias regression or unverified existing version: ${alias.tag}`);
-        requireThat(record.channel === 'stable' && parseTag(`v${existing.version}`).channel === 'stable',
-          `Cross-channel alias movement rejected: ${alias.tag}`);
-      }
+export function verifyImages(version, sourceCommit, digests, run = command) {
+  requireThat(Object.keys(digests).sort().join() === Object.keys(components).sort().join(), 'Incomplete image set');
+  for (const [name, { platforms }] of Object.entries(components)) {
+    const digest = digests[name];
+    requireThat(/^sha256:[a-f0-9]{64}$/.test(digest ?? ''), `Missing image digest: ${name}`);
+    const index = JSON.parse(run('docker', ['buildx', 'imagetools', 'inspect', `${imageRepository(name)}@${digest}`, '--raw']));
+    requireThat(Array.isArray(index.manifests), `Missing image index: ${name}`);
+    const runtime = index.manifests.filter(item =>
+      item.annotations?.['vnd.docker.reference.type'] !== 'attestation-manifest');
+    requireThat(runtime.map(item => `${item.platform?.os}/${item.platform?.architecture}`).sort().join() ===
+      [...platforms].sort().join(), `Missing, duplicate, or unexpected platforms: ${name}`);
+    for (const item of runtime) {
+      requireThat(/^sha256:[a-f0-9]{64}$/.test(item.digest ?? '') &&
+        index.manifests.some(proof => proof.annotations?.['vnd.docker.reference.type'] === 'attestation-manifest' &&
+          proof.annotations?.['vnd.docker.reference.digest'] === item.digest),
+      `Missing platform provenance/SBOM: ${name}`);
+      const image = JSON.parse(run('docker', ['buildx', 'imagetools', 'inspect',
+        `${imageRepository(name)}@${item.digest}`, '--format', '{{json .Image}}']));
+      requireThat(image.config?.Labels?.['org.opencontainers.image.version'] === version &&
+        image.config.Labels['org.opencontainers.image.revision'] === sourceCommit &&
+        image.config.Labels['org.printfarmer.release-channel'] === parseTag(`v${version}`).channel,
+      `Image version/source mismatch: ${name}`);
     }
   }
-  for (const aliases of Object.values(plan)) {
-    for (const alias of aliases) {
-      const existing = inspect(alias.tag);
-      if (existing?.digest !== alias.digest) {
+}
+
+export function immutableTags(version) {
+  const parsed = parseTag(`v${version}`);
+  return parsed.channel === 'stable' ? [version, `stable-${version}`] : [version];
+}
+
+export function rejectExistingImages(version, inspect = inspectTag) {
+  for (const name of Object.keys(components)) {
+    for (const tag of immutableTags(version)) {
+      requireThat(!inspect(`${imageRepository(name)}:${tag}`), `Image version already exists: ${name}:${tag}`);
+    }
+  }
+}
+
+export function publishImageTags(version, digests, inspect = inspectTag, run = command) {
+  rejectExistingImages(version, inspect);
+  const create = (name, tag, immutable = false) => {
+    const reference = `${imageRepository(name)}:${tag}`;
+    if (immutable) requireThat(!inspect(reference), `Image version appeared during publication: ${reference}`);
+    run('docker', ['buildx', 'imagetools', 'create', '--tag', reference, `${imageRepository(name)}@${digests[name]}`]);
+    requireThat(inspect(reference)?.digest === digests[name], `Published tag verification failed: ${reference}`);
+  };
+  for (const name of Object.keys(components)) {
+    for (const tag of immutableTags(version)) create(name, tag, true);
+  }
+  const parsed = parseTag(`v${version}`);
+  if (parsed.channel === 'stable') {
+    for (const name of Object.keys(components)) {
+      for (const tag of [`${parsed.major}.${parsed.minor}`, parsed.major, 'latest']) {
+        const existing = inspect(`${imageRepository(name)}:${tag}`);
         if (existing) {
-          requireThat(existing.version && compareVersions(record.canonicalVersion, existing.version) > 0,
-            `Alias regression or unverified existing version: ${alias.tag}`);
-          requireThat(parseTag(`v${existing.version}`).channel === 'stable',
-            `Cross-channel alias movement rejected: ${alias.tag}`);
+          requireThat(parseTag(`v${existing.version}`).channel === 'stable', `Cross-channel alias: ${name}:${tag}`);
+          if (compareVersions(version, existing.version) <= 0) continue;
         }
-        create(alias.tag, alias.digest);
+        create(name, tag);
       }
-      const published = inspect(alias.tag);
-      requireThat(published?.digest === alias.digest,
-        `Alias compare-and-set conflict: ${alias.tag}`);
     }
   }
-  return plan;
-}
-
-export function inspectReleaseSet(record, set, evidencePath, releaseNotesSha256, metadataBytes,
-  sourceArtifactBytes, root = '.') {
-  const stagedEvidence = readEvidence(evidencePath, set, {
-    policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, createdTime: record.created,
-    trustedTime: process.env.RELEASE_VERIFICATION_TIME ?? record.created,
-  });
-  const cryptoEvidence = { ...stagedEvidence.set, sha256: stagedEvidence.sha256 };
-  writeAuthorizationSet(record, set);
-  emitPublicReleaseAssets(record, set, root, releaseNotesSha256, metadataBytes, sourceArtifactBytes,
-    cryptoEvidence);
-  return cryptoEvidence;
-}
-
-async function main() {
-  if (['tag', 'alias'].includes(process.argv[2])) {
-    const { runReleaseControl } = await import('./release-control.mjs');
-    await runReleaseControl('preflight');
-  }
-  const record = verifyAuthorization(process.env, command);
-  const evidencePathIndex = process.argv.indexOf('--evidence');
-  const evidencePath = evidencePathIndex === -1 ? undefined : process.argv[evidencePathIndex + 1];
-  if (process.argv[2] === 'evidence') {
-    requireThat(evidencePathIndex !== -1 && evidencePath, 'Explicit crypto evidence path is required');
-    const digests = Object.fromEntries(Object.keys(components).map(name =>
-      [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
-    const set = inspectCompleteSet(record, digests);
-    stageEvidenceFromFiles(evidencePath, set, process.argv[3] ?? '.artifacts/release-authorization/crypto-evidence', {
-      policy: loadReleaseTrustPolicy(), releaseId: record.releaseId, createdTime: record.created,
-      trustedTime: process.env.RELEASE_VERIFICATION_TIME ?? record.created,
-    });
-  } else if (process.argv[2] === 'inspect') {
-    requireThat(evidencePathIndex !== -1 && evidencePath, 'Explicit crypto evidence path is required');
-    const digests = Object.fromEntries(Object.keys(components).map(name =>
-      [name, readFileSync(`artifacts/digest-${name}/digest-${name}.txt`, 'utf8').trim()]));
-    const set = inspectCompleteSet(record, digests);
-    const metadataBytes = readFileSync('.artifacts/release-authorization/source-release-metadata.json', 'utf8');
-    const metadata = JSON.parse(metadataBytes);
-    const sourceArtifactBytes = Object.fromEntries(Object.values(metadata.schemas).map(schema => [
-      schema.artifact,
-      readFileSync(`.artifacts/release-authorization/source-artifacts/${schema.artifact}`),
-    ]));
-    inspectReleaseSet(record, set, evidencePath, process.env.RELEASE_NOTES_SHA256,
-      metadataBytes, sourceArtifactBytes);
-  } else if (process.argv[2] === 'tag') {
-    const set = readPrivateJson(privateSetPath);
-    publishImmutableTags(record, set, tag => {
-      try {
-        const output = command('docker', ['buildx', 'imagetools', 'inspect', tag]);
-        const digest = output.match(/^Digest:\s+(sha256:[a-f0-9]{64})$/m)?.[1];
-        requireThat(digest, 'Registry returned no digest');
-        return digest;
-      } catch (error) {
-        // Authentication/network failures must not be interpreted as an absent tag.
-        if (/\bmanifest unknown\b|\bMANIFEST_UNKNOWN\b/.test(String(error.stderr))) return undefined;
-        throw error;
-      }
-    }, (tag, source) => command('docker', ['buildx', 'imagetools', 'create', '--tag', tag, source]));
-  } else if (process.argv[2] === 'alias') {
-    const set = readPrivateJson(privateSetPath);
-    publishReleaseAliases(record, set, tag => {
-      try {
-        const output = command('docker', ['buildx', 'imagetools', 'inspect', tag, '--format', '{{json .}}']);
-        return registryTagInspection(output);
-      } catch (error) {
-        if (/\bmanifest unknown\b|\bMANIFEST_UNKNOWN\b/.test(String(error.stderr))) return undefined;
-        throw error;
-      }
-    }, (tag, digest) => command('docker', ['buildx', 'imagetools', 'create', '--tag', tag,
-      `${tag.slice(0, tag.lastIndexOf(':'))}@${digest}`]));
-  } else throw new Error('Expected inspect, tag, or alias');
-}
-
-if (process.argv[1]?.endsWith('release-set.mjs')) {
-  main().catch(error => { console.error(error.message); process.exitCode = 1; });
 }

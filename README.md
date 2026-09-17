@@ -463,30 +463,18 @@ PrintFarmer builds on amazing open-source projects:
 **Last Updated:** January 11, 2026  
 **Current Version:** See [GitHub Releases](https://github.com/OlyForge3D/PrintFarmer/releases)  
 
-Server releases use one [branch-bound release workflow](docs/RELEASE_GUIDE.md):
-stable from `main`, explicitly opted-in insider from `development`. Release
-activation requires owner-approved protections and allocator continuity.
-The normal form exposes only the channel and an optional full source SHA; one
-owner manual dispatch using existing `release-stable` or `release-insider` covers the complete protected
-publication transaction. No rehearsal or alternate live diagnostic path exists;
-validation uses automated tests, static analysis, code review, and fail-closed checks.
-Set an explicit [release approval mode](docs/RELEASE_GUIDE.md#explicit-release-approval-configuration):
-`single-maintainer` (owner-dispatched/self-attested), with no second environment
-approval and administrator bypass disabled. Non-owner/scheduled runs and reruns
-are rejected; necessary insider abandonment requires a fresh explicit owner dispatch.
-Single-maintainer uses PR-only flow, exact-SHA self-attested review/build checks,
-resolved conversations and no branch bypass/force-push/deletion, without an
-unsatisfiable native approval count. Owner confirmation is not independent
-authorization. Canonical release SHAs need their own genuine review evidence;
-PR-head statuses cannot be copied to later squash/merge commits.
-`consolidated-release.yml` automatically runs exact-source qualification before
-the protected publisher approval and binds that evidence to the immutable
-transaction. The [retired manual qualification flow](docs/RELEASE_GUIDE.md#retired-manual-canonical-qualification-history)
-is retained only as historical context. Qualification needs no publisher
-secrets and never reserves versions, publishes artifacts or deploys.
-Missing configuration or admission/authorization mode drift blocks release.
-Source-only releases are not managed-update candidates without the complete
-signed manifest; historical image aliases remain unchanged during cutover.
-The retired `scripts/release.sh` and `scripts/publish-to-public.sh` helpers
-exit without publication; use the consolidated workflow instead.
+Server releases use one [manual Actions workflow](docs/RELEASE_GUIDE.md):
+choose stable (`main`) or insider (`development`), enter `X.Y.Z` or
+`X.Y.Z-insider.N` matching that source's `VERSION`, and run **Consolidated Release**
+on `development` as the owner. It checks the source, builds all six supported
+container images and publishes a GitHub release with notes and pinned digests
+last. Existing release environment protections remain; there is no custom
+allocator, signed-operation or abandonment prerequisite.
+
+Used versions are never overwritten. Failed runs report partial results;
+start a fresh dispatch with a new version if its tag already exists.
+Publication is **manual-install-only**, not managed-update readiness or permission
+to update an installation. Historical tags and remote audit records remain intact.
+The retired `scripts/release.sh` and `scripts/publish-to-public.sh` helpers still
+exit without publication.
 **Current Phase:** Phase 4 - COMPLETE (Phase 4.5 Load Balancing planned next)

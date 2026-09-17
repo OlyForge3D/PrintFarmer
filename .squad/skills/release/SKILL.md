@@ -1,62 +1,41 @@
 ---
 name: release
-description: Follow the canonical branch-bound PrintFarmer release workflow. Use when the user asks to cut, ship, or create a server release.
+description: Use the manual VERSION and Git tag server release workflow.
 confidence: high
 ---
 
-## PrintFarmer release authority
+## Server release authority
 
-Read [the release guide](../../../docs/RELEASE_GUIDE.md) before attempting
-publication. `.github/workflows/consolidated-release.yml` is the sole server
-release entry point. Stable selects source from `main`; insider selects source
-from `development`.
-The workflow itself is always dispatched from `development`; the selected
-channel determines whether build source is pinned from `main` or `development`.
-Branch pushes, direct tag pushes and stabilization branches do not publish.
-The reusable Docker workflow is an authorized consumer, not a second entry point.
+Read [the release guide](../../../docs/RELEASE_GUIDE.md).
+Only an explicitly authorized owner manual dispatch of
+`consolidated-release.yml` on `development` publishes server releases.
+Stable selects source from `main`; insider selects source from `development`.
+Implementation/review tasks do not authorize a live dispatch, merge or deployment.
 
-## Prerequisites
+## Operator flow
 
-- Obtain explicit authorization to publish; implementation and review tasks do
-  not authorize a live release.
-- Review `VERSION` on the selected canonical branch. It contains `vX.Y.Z`;
-  do not calculate the release from local tags or a private/public remote pair.
-- Verify exact-source qualification, owner-approved protection and publisher
-  configuration, and pinned ledger continuity as described in the release guide.
-- New stable versions and insider bases must exceed the effective stable floor.
-  The ledger allocates insider sequence numbers, not the operator.
+1. Review the selected branch's `VERSION` (`vX.Y.Z`).
+2. Choose channel and explicit version: `X.Y.Z` or `X.Y.Z-insider.N`.
+   Optionally select a full channel-branch ancestor source SHA.
+3. Run Consolidated Release once and inspect its summary/release URL.
 
-## Publication
+Native Actions concurrency, duplicate checks and permanent Git tags replace
+the retired ledger/allocation/signed-operation/abandonment architecture (#2745).
+Do not recreate that machinery or require missing old authorization artifacts.
+If a version is already used, use a new one; never overwrite/delete its tags.
+A fresh dispatch may retry only a still-unused version. Job reruns are rejected.
+The existing owner-only channel environment protection and credentials remain.
 
-Dispatch `consolidated-release.yml` only from `development` and select the
-matching channel. Leave `source_sha` blank to pin that channel branch HEAD once or enter
-that full SHA or a trusted ancestor. The workflow definition commit remains a
-separate binding. Do not provide a mode or version;
-tag, allocator value, CI run ID, comment ID or formatted attestation. Approve
-the single `release-<channel>` transaction environment. The workflow starts
-canonical qualification, collects evidence, allocates identity and publishes
-automatically.
+## Safety boundaries
 
-Qualification receipts are bound to the dispatch run, immutable attempt-one
-transaction, workflow commit, GitHub Actions check suite, namespaced jobs,
-exact source checks, evidence timestamps and live branch policy. They expire
-after 30 minutes and are reverified after approval.
-`release-stable` and `release-insider` are the only publication environments.
-The dispatch has only channel and optional source SHA, and the selected
-environment supplies the single approval for the complete protected
-transaction. No rehearsal or alternate live diagnostic path exists; validation
-uses automated tests, static analysis, code review and fail-closed checks.
+GitHub release publication happens after required builds, assets and image tags.
+Partial failures remain explicit; a draft or moving alias is not a complete release.
+Use pinned digests from the last successfully published release.
+These releases are manual-install-only, not signed managed-update candidates.
+Do not weaken installation authorization, active-print checks, update safety,
+repository review or CI to simplify publication.
 
-## Retired paths and recovery
-
-`scripts/release.sh` and `scripts/publish-to-public.sh` always exit 2, including
-dry-run/help invocations. Neither performs a version bump, branch merge, orphan
-snapshot, tag creation, force push, release creation or asset/container upload.
-Do not restore their former dual-history or `--clean-history` behavior.
-
-Never bypass a denial with manual canonical tags, GitHub release commands,
-history rewrites or counter resets. Same-run reruns recover the immutable
-attempt-one transaction and exact existing reservation bytes. Missing or
-mismatched recovery artifacts fail closed; reruns never allocate a second
-identity or skip qualification/approval. Follow the release guide's owner-only
-continuity recovery procedure when evidence is missing or invalid.
+Preserve historical remote tags, ledgers, artifacts and run records. In particular,
+`v0.2.3-insider.1` is used forever. Never rerun the consumed tag diagnostic or
+failed abandonment, reconstruct signing authority, or edit grants/secrets.
+The retired shell release helpers remain disabled.

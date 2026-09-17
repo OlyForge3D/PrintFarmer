@@ -13,6 +13,24 @@ post_date: "2026-09-12"
 
 ## Recommendation and scope
 
+### Publication supersession (#2745, 2026-09-16)
+
+The [current release guide](RELEASE_GUIDE.md) supersedes all publication-specific
+allocator, ledger, qualification-receipt, signed-operation, pointer-advancement
+and abandonment proposals or implementation snapshots below. They are retained
+as **historical design discussion**, not active publisher requirements.
+The server now uses VERSION, an explicit version, a permanent Git tag and one
+owner-manual build-and-release workflow. Old unsigned reservations do not block it.
+
+New releases deliberately do not provide the old signed managed-update set.
+`container-images.json` is informational and marks managed-update eligibility
+false. Build metadata does not fabricate allocation/sequence authority. The
+existing inventory evaluator and host-update signature, authorization,
+active-print and runtime safety contracts remain unchanged; an incompatible or
+missing signed feed must not be advertised as ready. There is no production
+GitHub metadata-provider adapter in the current host-updater foundation.
+Future updater work is separate and must not silently trust publication alone.
+
 ### Read-only inventory and installation readiness
 
 `GET /api/system/info` returns the additive, administrator-only `inventory` read
