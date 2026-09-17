@@ -79,7 +79,9 @@ public class OpenApiDocumentTests
                 .GetProperty("application/json")
                 .GetProperty("schema");
 
-            _ = schema.GetProperty("type").GetString().Should().Be("object");
+            _ = schema.ValueKind.Should().Be(JsonValueKind.Object);
+            _ = schema.EnumerateObject().Should().BeEmpty(
+                "ASP.NET OpenAPI represents a typeof(object) response as an unconstrained schema object");
         }
     }
 
