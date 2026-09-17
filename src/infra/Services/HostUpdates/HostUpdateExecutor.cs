@@ -28,14 +28,48 @@ public sealed record HostUpdateExecutionTarget(string ServiceId, string Platform
 public sealed record HostUpdateExecutionRequest(string ReleaseId, long AuthenticatedSequence, string ManifestDigest, string SourceCommit, HostUpdateExecutionChannel Channel, IReadOnlyList<HostUpdateExecutionTarget> Targets)
 {
     public const int RequiredTargetCount = 6;
+    public static IReadOnlySet<string> RequiredServiceIds { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"
+    };
+
+    public string RequestId { get; init; } = string.Empty;
+    public string TrustRoot { get; init; } = string.Empty;
+    public long PolicyRevision { get; init; } = -1;
+    public string PolicyFingerprint { get; init; } = string.Empty;
+    public string HostPlatform { get; init; } = string.Empty;
+
     public bool IsValid(out string error)
     {
         error = string.Empty;
-        if (string.IsNullOrWhiteSpace(ReleaseId) || AuthenticatedSequence < 1 || !Digest(ManifestDigest) || !Commit(SourceCommit) || Targets is null || Targets.Count != RequiredTargetCount) { error = "release_identity_invalid"; return false; }
-        if (Targets.Any(t => t is null || string.IsNullOrWhiteSpace(t.ServiceId) || string.IsNullOrWhiteSpace(t.Platform) || !Digest(t.ChildDigest))) { error = "target_invalid"; return false; }
-        if (Targets.Select(t => t.ServiceId).Distinct(StringComparer.Ordinal).Count() != RequiredTargetCount) { error = "target_set_invalid"; return false; }
+        if (string.IsNullOrWhiteSpace(RequestId) || string.IsNullOrWhiteSpace(ReleaseId) || AuthenticatedSequence < 1 || !Digest(ManifestDigest) || !Commit(SourceCommit) ||
+            string.IsNullOrWhiteSpace(TrustRoot) || PolicyRevision < 0 || string.IsNullOrWhiteSpace(PolicyFingerprint) || string.IsNullOrWhiteSpace(HostPlatform))
+        {
+            error = "release_binding_invalid";
+            return false;
+        }
+
+        if (Targets is null || Targets.Count != RequiredTargetCount)
+        {
+            error = "target_invalid";
+            return false;
+        }
+
+        if (Targets.Any(t => t is null || string.IsNullOrWhiteSpace(t.ServiceId) || !string.Equals(t.Platform, HostPlatform, StringComparison.Ordinal) || !Digest(t.ChildDigest)))
+        {
+            error = "target_invalid";
+            return false;
+        }
+
+        if (Targets.Select(t => t.ServiceId).ToHashSet(StringComparer.Ordinal).SetEquals(RequiredServiceIds) is false)
+        {
+            error = "target_set_invalid";
+            return false;
+        }
+
         return true;
     }
+
     private static bool Digest(string value) => !string.IsNullOrWhiteSpace(value) && value.StartsWith("sha256:", StringComparison.Ordinal) && value.Length == 71 && value[7..].All(Uri.IsHexDigit);
     private static bool Commit(string value) => !string.IsNullOrWhiteSpace(value) && value.Length is >= 40 and <= 64 && value.All(Uri.IsHexDigit);
 }
@@ -68,14 +102,21 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
             {
                 if (activities.Any(a => a.State == state && a.Phase.EndsWith(":after", StringComparison.Ordinal))) continue;
                 if (safe && cancellationToken.IsCancellationRequested) return new(request.ReleaseId, current, "canceled", activities);
-                Append(activities, request, state, phase + ":before"); await InvokeAsync(state, request); Append(activities, request, state, phase + ":after"); current = state;
+                Append(activities, request, state, phase + ":before");
+                await InvokeAsync(state, request, safe ? cancellationToken : CancellationToken.None);
+                Append(activities, request, state, phase + ":after");
+                current = state;
                 if (safe && cancellationToken.IsCancellationRequested) return new(request.ReleaseId, current, "canceled", activities);
             }
             Append(activities, request, HostUpdateExecutionState.Completed, "completed"); return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
         }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            return new(request.ReleaseId, current, "canceled", activities);
+        }
         catch (Exception ex) when (ex is not OperationCanceledException) { Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + ex.GetType().Name); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities); }
     }
-    private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request) => state switch { HostUpdateExecutionState.Preflight => steps.PreflightAsync(request, CancellationToken.None), HostUpdateExecutionState.Draining => steps.DrainAsync(request, CancellationToken.None), HostUpdateExecutionState.Fenced => steps.FenceAsync(request, CancellationToken.None), HostUpdateExecutionState.BackedUp => steps.BackupAsync(request, CancellationToken.None), HostUpdateExecutionState.Migrating => steps.MigrateAsync(request, CancellationToken.None), HostUpdateExecutionState.Applying => steps.ApplyAsync(request, CancellationToken.None), HostUpdateExecutionState.Verifying => steps.VerifyAsync(request, CancellationToken.None), _ => Task.CompletedTask };
+    private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => state switch { HostUpdateExecutionState.Preflight => steps.PreflightAsync(request, cancellationToken), HostUpdateExecutionState.Draining => steps.DrainAsync(request, cancellationToken), HostUpdateExecutionState.Fenced => steps.FenceAsync(request, cancellationToken), HostUpdateExecutionState.BackedUp => steps.BackupAsync(request, cancellationToken), HostUpdateExecutionState.Migrating => steps.MigrateAsync(request, cancellationToken), HostUpdateExecutionState.Applying => steps.ApplyAsync(request, cancellationToken), HostUpdateExecutionState.Verifying => steps.VerifyAsync(request, cancellationToken), _ => Task.CompletedTask };
     private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase) { var activity = new HostUpdateExecutionActivity(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow); journal.Append(activity); activities.Add(activity); }
 }
 

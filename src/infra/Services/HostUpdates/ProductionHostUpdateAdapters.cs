@@ -151,18 +151,11 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
     private static bool IsCommit(string value) => value.Length is >= 40 and <= 64 && value.All(Uri.IsHexDigit);
 }
 
-/// <summary>
-/// Explicitly refuses scheduler work while Dallas's executor contract cannot carry the scheduler
-/// trust root, policy fingerprint, and canonical target binding without loss.
-/// </summary>
-public sealed class UnavailableHostUpdateSchedulerExecutor : IHostUpdateSchedulerExecutor
+public static class HostUpdateSchedulingAvailability
 {
-    public const string Reason = "executor_contract_missing_trust_root_policy_and_canonical_targets";
-
-    public Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct) =>
-        Task.FromResult(new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, Reason));
-
-    public Task SignalSafeCheckpointCancellationAsync(string requestId, CancellationToken ct) => Task.CompletedTask;
+    public const string ExecutorNotProvisionedReason = "automatic_scheduler_executor_not_provisioned";
+    public const string ProtectedReplayAnchorReason = "protected_replay_anchor_unavailable";
+    public const string PolicyMutationReason = "policy_mutation_facility_unavailable";
 }
 
 /// <summary>Reports registered-but-unavailable automatic updates without starting a hosted loop.</summary>
@@ -182,8 +175,8 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
             PolicyRevision = automation.PolicyRevision,
             Backoff = new HostUpdateBackoffDto { State = HostUpdateBackoffState.Unknown, ConsecutiveFailures = 0, Reasons = ["scheduler_not_started"] },
             KillSwitch = new HostUpdateKillSwitchDto { Enabled = automation.KillSwitchEnabled, Reason = automation.KillSwitchEnabled ? "configured" : null },
-            Executor = new HostUpdateExecutorDto { State = HostUpdateExecutorState.Unavailable, Reason = UnavailableHostUpdateSchedulerExecutor.Reason },
-            Reasons = ["protected_replay_anchor_unavailable", "policy_mutation_facility_unavailable", UnavailableHostUpdateSchedulerExecutor.Reason],
+            Executor = new HostUpdateExecutorDto { State = HostUpdateExecutorState.Unavailable, Reason = HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason },
+            Reasons = [HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.PolicyMutationReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason],
         };
     }
 }

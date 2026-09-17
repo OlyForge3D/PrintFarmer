@@ -328,7 +328,6 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IHostUpdateSchedulingStatusProvider, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulingStatusProvider>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateCandidateReadiness>();
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerExecutor, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulerExecutor>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCandidateCache>(sp =>
             new Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCandidateCache(
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache>(),

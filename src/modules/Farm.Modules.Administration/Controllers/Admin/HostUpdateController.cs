@@ -21,13 +21,24 @@ public sealed record HostUpdateExecuteRequestBody(
     public bool TryToExecutionRequest(out HostUpdateExecutionRequest? request, out string error)
     {
         request = null;
+        error = string.Empty;
         if (!Enum.TryParse(Channel, ignoreCase: true, out HostUpdateExecutionChannel channel))
         {
             error = "channel_invalid";
             return false;
         }
 
-        var candidate = new HostUpdateExecutionRequest(ReleaseId, AuthenticatedSequence, ManifestDigest, SourceCommit, channel, Targets);
+        string hostPlatform = Targets is { Count: > 0 } && Targets.Select(target => target.Platform).Distinct(StringComparer.Ordinal).SingleOrDefault() is string platform
+            ? platform
+            : string.Empty;
+        var candidate = new HostUpdateExecutionRequest(ReleaseId, AuthenticatedSequence, ManifestDigest, SourceCommit, channel, Targets)
+        {
+            RequestId = "manual:" + ReleaseId,
+            TrustRoot = "manual-authorization",
+            PolicyRevision = 0,
+            PolicyFingerprint = "manual-authorization",
+            HostPlatform = hostPlatform,
+        };
         if (!candidate.IsValid(out error))
         {
             return false;
@@ -74,7 +85,9 @@ public sealed class HostUpdateController(
         [FromBody] HostUpdateExecuteRequestBody body,
         CancellationToken cancellationToken)
     {
-        if (body is null || !body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out string error))
+        HostUpdateExecutionRequest? request;
+        string error = string.Empty;
+        if (body is null || !body.TryToExecutionRequest(out request, out error))
         {
             return BadRequest(new { code = string.IsNullOrEmpty(error) ? "request_invalid" : error });
         }
@@ -128,7 +141,9 @@ public sealed class HostUpdateController(
             return Conflict(new { code = "not_in_recovery" });
         }
 
-        if (body is null || !body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out string error))
+        HostUpdateExecutionRequest? request;
+        string error = string.Empty;
+        if (body is null || !body.TryToExecutionRequest(out request, out error))
         {
             return BadRequest(new { code = string.IsNullOrEmpty(error) ? "request_invalid" : error });
         }

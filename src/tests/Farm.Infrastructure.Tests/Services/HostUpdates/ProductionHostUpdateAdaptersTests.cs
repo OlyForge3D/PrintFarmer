@@ -80,17 +80,6 @@ public sealed class ProductionHostUpdateAdaptersTests
         }
     }
 
-    [Fact]
-    public async Task ExecutorAdapterRefusesContractMismatchWithoutCallingWork()
-    {
-        UnavailableHostUpdateSchedulerExecutor executor = new();
-        HostUpdateExecutorResponse response = await executor.ExecuteAsync(null!, CancellationToken.None);
-
-        Assert.Equal(HostUpdateExecutorResult.Refused, response.Result);
-        Assert.Equal(UnavailableHostUpdateSchedulerExecutor.Reason, response.Reason);
-        await executor.SignalSafeCheckpointCancellationAsync("manual-request", CancellationToken.None);
-    }
-
     private static VerifiedReleaseEvidenceDto Evidence(long sequence = 42) => new()
     {
         Sequence = sequence,

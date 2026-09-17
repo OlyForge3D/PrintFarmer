@@ -503,6 +503,21 @@ public sealed class HostUpdateSchedulerTests
         Assert.Equal(HostUpdateReplayDisposition.Accepted, decision.Disposition);
     }
 
+    [Fact]
+    public async Task ReplayStore_HighWaterIsIndependentPerChannel()
+    {
+        string root = TempRoot();
+        await SeedEmptyReplayFileAsync(root);
+        InMemoryReplayAnchor anchor = new();
+        FileHostUpdateReplayStore store = new(root, anchor);
+
+        HostUpdateReplayDecision stable = await store.DecideAsync(Candidate() with { Sequence = 8 }, HostUpdateReplayIntent.Admit, default);
+        HostUpdateReplayDecision insider = await store.DecideAsync(Candidate(UpdateChannelSettings.InsiderChannel) with { Sequence = 1 }, HostUpdateReplayIntent.Admit, default);
+
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, stable.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, insider.Disposition);
+    }
+
     private static string TempRoot()
     {
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-replay-" + Guid.NewGuid().ToString("N"));
