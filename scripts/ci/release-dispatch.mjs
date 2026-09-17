@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { repository, workflow, requireThat, verifyEnvironmentRestrictions } from './release-policy.mjs';
 
@@ -27,7 +28,14 @@ export function githubClient(token, fetcher = fetch) {
 // GitHub-populated fields that legitimately differ on a normal workflow_dispatch.
 // The live repository contents API binds GITHUB_WORKFLOW_SHA to the exact active
 // workflow file; run.head_sha separately binds the selected source commit.
-export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'))) {
+function gitBlobSha(bytes) {
+  const header = Buffer.from(`blob ${bytes.length}\0`);
+  return createHash('sha1').update(Buffer.concat([header, bytes])).digest('hex');
+}
+
+export async function verifyOwnerDispatch(env, api,
+  event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')),
+  localWorkflowBytes = readFileSync(workflow)) {
   const channel = env.RELEASE_CHANNEL;
   requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel');
   const sourceBranch = channel === 'stable' ? 'main' : 'development';
@@ -39,12 +47,21 @@ export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileS
   `Use a fresh owner manual dispatch of Consolidated Release on ${sourceBranch} for the ${channel} channel; reruns cannot publish`);
   const run = await api(`actions/runs/${env.GITHUB_RUN_ID}`);
   const definition = await api('actions/workflows/consolidated-release.yml');
+  const commit = await api(`commits/${env.GITHUB_WORKFLOW_SHA}`);
   const workflowFile = await api(`contents/${workflow}?ref=${env.GITHUB_WORKFLOW_SHA}`);
+  const tree = await api(`git/trees/${commit?.commit?.tree?.sha}?recursive=1`);
+  const workflowEntry = tree?.tree?.find(entry => entry.path === workflow);
+  const expectedBlobSha = gitBlobSha(localWorkflowBytes);
+  const content = workflowFile?.encoding === 'base64'
+    ? Buffer.from(workflowFile.content.replace(/\s/g, ''), 'base64')
+    : undefined;
   const owner = value => value?.login === 'jpapiez' && value.id === 5460061 && value.type === 'User';
   requireThat(run?.event === 'workflow_dispatch' && run.path === workflow &&
     run.workflow_id === definition?.id && definition.path === workflow && definition.state === 'active' &&
+    commit?.sha === env.GITHUB_WORKFLOW_SHA &&
+    workflowEntry?.type === 'blob' && workflowEntry.sha === workflowFile?.sha &&
     workflowFile?.type === 'file' && workflowFile.path === workflow &&
-    workflowFile.sha === env.GITHUB_WORKFLOW_SHA &&
+    workflowFile.sha === expectedBlobSha && content?.equals(localWorkflowBytes) &&
     String(run.id) === env.GITHUB_RUN_ID && run.run_attempt === 1 && run.status === 'in_progress' &&
     run.head_branch === sourceBranch && run.head_sha === env.GITHUB_SHA &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&

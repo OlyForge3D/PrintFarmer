@@ -82,11 +82,6 @@ repository must also satisfy the managed-update `VERSION` v1+ ordering
 prerequisite before the first signed publication; legacy VERSION/release
 ordering is not silently upgraded.
 
-The sign job verifies Cosign immediately after signing. The publish job binds
-the signature to the exact manifest SHA-256 and re-verifies the exact manifest
-and bundle immediately before release upload. A valid signature authenticates
-the publisher and bytes; it does not implement update apply.
-
 ### Read-only inventory and installation readiness
 
 `GET /api/system/info` returns the additive, administrator-only `inventory` read

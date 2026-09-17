@@ -128,6 +128,7 @@ jobs:
     name: Sign immutable release manifest
     needs: [select, checks, build]
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     environment: ${{ needs.select.outputs.environment }}
     permissions:
       contents: read

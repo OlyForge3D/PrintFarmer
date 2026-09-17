@@ -17,6 +17,12 @@ import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
 const sha = 'a'.repeat(40);
 const head = 'b'.repeat(40);
 const workflowSha = 'e'.repeat(40);
+const workflowTreeSha = 'f'.repeat(40);
+const workflowBytes = Buffer.from('workflow fixture\n');
+function gitBlobSha(bytes) {
+  return createHash('sha1').update(Buffer.concat([Buffer.from(`blob ${bytes.length}\0`), bytes])).digest('hex');
+}
+const workflowBlobSha = gitBlobSha(workflowBytes);
 const digest = `sha256:${'c'.repeat(64)}`;
 const platformDigest = `sha256:${'d'.repeat(64)}`;
 const release = { version: '1.2.3-insider.2', tag: 'v1.2.3-insider.2', channel: 'insider',
@@ -65,8 +71,12 @@ function ownerApi(overrides = {}) {
       head_branch: 'development', head_sha: sha, actor: owner, triggering_actor: owner,
       repository: repo, head_repository: repo },
     'actions/workflows/consolidated-release.yml': { id: 9, path: '.github/workflows/consolidated-release.yml', state: 'active' },
+    [`commits/${workflowSha}`]: { sha: workflowSha, commit: { tree: { sha: workflowTreeSha } } },
+    [`git/trees/${workflowTreeSha}?recursive=1`]:
+      { tree: [{ path: '.github/workflows/consolidated-release.yml', type: 'blob', sha: workflowBlobSha }] },
     [`contents/.github/workflows/consolidated-release.yml?ref=${workflowSha}`]:
-      { type: 'file', path: '.github/workflows/consolidated-release.yml', sha: workflowSha },
+      { type: 'file', path: '.github/workflows/consolidated-release.yml', sha: workflowBlobSha,
+        encoding: 'base64', content: workflowBytes.toString('base64') },
     'collaborators/jpapiez/permission': { user: owner, permission: 'admin', role_name: 'admin' },
     'environments/release-insider': environment,
     'environments/release-insider/deployment-branch-policies': policies,
@@ -100,24 +110,37 @@ test('explicit version matches channel and VERSION without allocating any state'
 });
 
 test('owner manual access verifies live identity, original inputs and existing environment policy', async () => {
-  await verifyOwnerDispatch(env, ownerApi(), event);
+  await verifyOwnerDispatch(env, ownerApi(), event, workflowBytes);
   for (const override of [
     { GITHUB_RUN_ATTEMPT: '2' }, { GITHUB_EVENT_NAME: 'push' }, { GITHUB_REF: 'refs/heads/main' },
     { GITHUB_ACTOR_ID: '1' }, { GITHUB_TRIGGERING_ACTOR: 'another' },
     { GITHUB_WORKFLOW_REF: env.GITHUB_WORKFLOW_REF.replace('consolidated-release', 'other') },
     { RELEASE_APPROVAL_MODE: '' }, { RELEASE_VERSION: '1.2.3-insider.3' },
     { GITHUB_WORKFLOW_SHA: 'not-a-sha' }, { GITHUB_SHA: 'not-a-sha' },
-  ]) await assert.rejects(verifyOwnerDispatch({ ...env, ...override }, ownerApi(), event));
+  ]) await assert.rejects(verifyOwnerDispatch({ ...env, ...override }, ownerApi(), event, workflowBytes));
   // The dispatched branch/head identity (GITHUB_SHA vs. the live run's head_sha) is
   // verified independently of the workflow definition's own SHA (GITHUB_WORKFLOW_SHA),
   // which legitimately differs from it on a normal dispatch (see env fixture above).
-  await assert.rejects(verifyOwnerDispatch({ ...env, GITHUB_SHA: head }, ownerApi(), event));
-  await assert.rejects(verifyOwnerDispatch(env, ownerApi(), { ...event, sender: { ...owner, id: 1 } }));
+  await assert.rejects(verifyOwnerDispatch({ ...env, GITHUB_SHA: head }, ownerApi(), event, workflowBytes));
+  await assert.rejects(verifyOwnerDispatch(env, ownerApi(), { ...event, sender: { ...owner, id: 1 } }, workflowBytes));
   await assert.rejects(verifyOwnerDispatch(env, ownerApi(), { ...event,
-    inputs: { ...event.inputs, operation: 'abandon' } }));
+    inputs: { ...event.inputs, operation: 'abandon' } }, workflowBytes));
   await assert.rejects(verifyOwnerDispatch(env, ownerApi({
     'collaborators/jpapiez/permission': { user: owner, permission: 'write', role_name: 'write' },
-  }), event));
+  }), event, workflowBytes));
+  await assert.rejects(verifyOwnerDispatch(env, ownerApi({
+    [`contents/.github/workflows/consolidated-release.yml?ref=${workflowSha}`]:
+      { type: 'file', path: '.github/workflows/consolidated-release.yml', sha: '1'.repeat(40),
+        encoding: 'base64', content: workflowBytes.toString('base64') },
+  }), event, workflowBytes));
+  await assert.rejects(verifyOwnerDispatch(env, ownerApi({
+    [`contents/.github/workflows/consolidated-release.yml?ref=${workflowSha}`]:
+      { type: 'file', path: '.github/workflows/consolidated-release.yml', sha: workflowBlobSha,
+        encoding: 'base64', content: Buffer.from('tampered\n').toString('base64') },
+  }), event, workflowBytes));
+  await assert.rejects(verifyOwnerDispatch(env, ownerApi({
+    [`commits/${workflowSha}`]: { sha: head, commit: { tree: { sha: workflowTreeSha } } },
+  }), event, workflowBytes));
   for (const changed of [
     { ...environment, can_admins_bypass: true },
     { ...environment, protection_rules: [] },
@@ -148,7 +171,7 @@ test('stable owner dispatch runs from main and reaches the channel-aware signing
     'environments/release-stable': stableEnvironment,
     'environments/release-stable/deployment-branch-policies': stablePolicies,
   });
-  await verifyOwnerDispatch(stableEnv, stableApi, stableEvent);
+  await verifyOwnerDispatch(stableEnv, stableApi, stableEvent, workflowBytes);
   assert.doesNotThrow(() => verifyEnvironmentRestrictions(stableEnvironment, stablePolicies, stableChannel));
   // Integration assertion: the exact dispatch just verified for `stable` ran from
   // `main`; the channel's Cosign signing identity (see manifestSignatureIdentity
@@ -162,8 +185,8 @@ test('stable owner dispatch runs from main and reaches the channel-aware signing
   // Each channel's branch policy and signing identity move together: a stable
   // dispatch from `development`, and an insider dispatch from `main`, both reject.
   await assert.rejects(verifyOwnerDispatch({ ...stableEnv, GITHUB_REF: 'refs/heads/development',
-    GITHUB_WORKFLOW_REF: stableEnv.GITHUB_WORKFLOW_REF.replace('main', 'development') }, stableApi, stableEvent));
-  await assert.rejects(verifyOwnerDispatch({ ...stableEnv, RELEASE_CHANNEL: 'insider' }, stableApi, stableEvent));
+    GITHUB_WORKFLOW_REF: stableEnv.GITHUB_WORKFLOW_REF.replace('main', 'development') }, stableApi, stableEvent, workflowBytes));
+  await assert.rejects(verifyOwnerDispatch({ ...stableEnv, RELEASE_CHANNEL: 'insider' }, stableApi, stableEvent, workflowBytes));
   assert.throws(() => verifyEnvironmentRestrictions(stableEnvironment, policies, stableChannel));
   assert.throws(() => verifyEnvironmentRestrictions(environment, stablePolicies, 'insider'));
 });
@@ -675,6 +698,7 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.equal(workflow.jobs.publish.environment, '${{ needs.select.outputs.environment }}');
   assert.equal(workflow.jobs.build.permissions['id-token'], undefined);
   assert.equal(workflow.jobs.sign.permissions['id-token'], 'write');
+  assert.equal(workflow.jobs.sign['timeout-minutes'], 15);
   assert.equal(workflow.jobs.publish.permissions['id-token'], undefined);
   assert.equal(workflow.jobs.select.permissions['id-token'], undefined);
   assert.equal(workflow.jobs.build.env.RELEASE_SELECTED_SOURCE, '${{ needs.select.outputs.source_sha }}');
