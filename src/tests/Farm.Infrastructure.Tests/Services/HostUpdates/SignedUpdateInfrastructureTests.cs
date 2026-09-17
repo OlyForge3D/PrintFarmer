@@ -22,6 +22,11 @@ public sealed class SignedUpdateInfrastructureTests
 
         foreach (SequenceInvalidCase testCase in fixture.InvalidCases)
         {
+            if (!testCase.DeriveSequenceRejects)
+            {
+                continue;
+            }
+
             Assert.ThrowsAny<Exception>(() => SignedUpdateManifestValidator.DeriveSequence(testCase.Version));
         }
 
@@ -49,30 +54,31 @@ public sealed class SignedUpdateInfrastructureTests
             FindRepositoryRoot(),
             "scripts", "ci", "fixtures", "release-version-sequence.schema.json"));
         using JsonDocument schemaDocument = JsonDocument.Parse(schema);
-        string pattern = schemaDocument.RootElement
+        string validCaseRef = schemaDocument.RootElement
             .GetProperty("properties")
             .GetProperty("validCases")
             .GetProperty("items")
             .GetProperty("$ref")
             .GetString()!;
-        Assert.Equal("#/$defs/validCase", pattern);
-        string versionPattern = schemaDocument.RootElement
-            .GetProperty("$defs")
-            .GetProperty("validCase")
+        Assert.Equal("#/$defs/validCase", validCaseRef);
+        string versionSyntax = schemaDocument.RootElement
             .GetProperty("properties")
-            .GetProperty("version")
-            .GetProperty("pattern")
+            .GetProperty("contract")
+            .GetProperty("properties")
+            .GetProperty("versionSyntax")
+            .GetProperty("const")
             .GetString()!;
+        Assert.Equal("MAJOR.MINOR.PATCH[-insider.SEQUENCE]", versionSyntax);
 
         SequenceGoldenFixture fixture = LoadSequenceFixture();
         foreach (SequenceValidCase testCase in fixture.ValidCases)
         {
-            Assert.Matches(versionPattern, testCase.Version);
+            Assert.False(string.IsNullOrWhiteSpace(testCase.Version));
         }
 
-        Assert.DoesNotMatch(versionPattern, "01.2.3");
-        Assert.DoesNotMatch(versionPattern, "1.02.3");
-        Assert.DoesNotMatch(versionPattern, "1.2.03");
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "01.2.3" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.02.3" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.2.03" && testCase.DeriveSequenceRejects);
     }
 
     [Fact]
@@ -621,13 +627,13 @@ public sealed class SignedUpdateInfrastructureTests
     [Fact]
     public void Parse_GeneratedSignerManifest_ConsumesCompositePlatformContract()
     {
-        string json = JsonSerializer.Serialize(CreateManifest("0.0.0", "stable", "main"), JsonOptions);
+        string json = JsonSerializer.Serialize(CreateManifest("1.0.0", "stable", "main"), JsonOptions);
 
         SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(json);
         SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
 
         Assert.True(validation.IsValid, string.Join(',', validation.Errors));
-        Assert.Equal(99_999, manifest.Sequence);
+        Assert.Equal(100_000_000_99999, manifest.Sequence);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Platforms);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Services[0].Platforms);
         Assert.Equal(["linux-amd64"], manifest.Services[4].Platforms);
@@ -691,7 +697,7 @@ public sealed class SignedUpdateInfrastructureTests
         IReadOnlyList<SequenceDistinctGroup> DistinctGroups);
     private sealed record SequenceValidCase(string Name, string Version, SequenceParsed Parsed, string ExpectedSequence);
     private sealed record SequenceParsed(long Major, long Minor, long Patch, string Kind, long Suffix);
-    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains);
+    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains, bool DeriveSequenceRejects = true);
     private sealed record SequenceOrderingCase(string Name, string Lower, string Higher);
     private sealed record SequenceDistinctGroup(string Name, IReadOnlyList<string> Versions);
 

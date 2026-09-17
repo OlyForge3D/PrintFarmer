@@ -175,6 +175,11 @@ public static partial class SignedUpdateManifestValidator
         }
 
         long major = ParseBounded(match.Groups["major"].Value, SequenceMajorMaximum, "Major version");
+        if (major < 1)
+        {
+            throw new FormatException("Major version must be greater than zero.");
+        }
+
         long minor = ParseBounded(match.Groups["minor"].Value, SequenceMinorMaximum, "Minor version");
         long patch = ParseBounded(match.Groups["patch"].Value, SequencePatchMaximum, "Patch version");
         long suffix = SequenceStableSuffix;
