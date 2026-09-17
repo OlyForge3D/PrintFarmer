@@ -5078,7 +5078,7 @@ export interface ServiceInventory {
   eligibility: InventoryEligibility;
   eligibilityReasons: string[];
   readiness: ReleaseReadiness | null;
-  updateScheduling: UpdateSchedulingStatus | null;
+  updateScheduling?: UpdateSchedulingStatus | null;
   snapshotOrigin: InventorySnapshotOrigin;
   snapshotSource: string | null;
   snapshotExportedAt: string | null;

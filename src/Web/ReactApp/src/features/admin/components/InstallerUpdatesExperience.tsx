@@ -1,5 +1,6 @@
 import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/common/components/ui";
 import { Modal } from "@/common/components/modals/Modal";
+import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
 import type { ServiceInventory, UpdateChannel, UpdateChannelSettings } from "@/types/api";
 import { useEffect, useState } from "react";
 
@@ -196,8 +197,8 @@ function observedIdentityDetails(inventory: ServiceInventory | null | undefined)
 }
 
 
-function formatDateTime(value: string | null | undefined) {
-  return value ?? "Not scheduled";
+function formatDateTime(value: string | null | undefined, fallback: string) {
+  return value ?? fallback;
 }
 
 function schedulerReasons(reasons: readonly string[] | null | undefined) {
@@ -223,11 +224,11 @@ function updateSchedulingDetails(inventory: ServiceInventory | null | undefined)
         <div><dt>Selected channel</dt><dd>{scheduling.selectedChannel}</dd></div>
         <div><dt>Effective channel</dt><dd>{scheduling.effectiveChannel ?? UNKNOWN}</dd></div>
         <div><dt>Policy revision</dt><dd>{scheduling.policyRevision}</dd></div>
-        <div><dt>Last attempt</dt><dd>{formatDateTime(scheduling.lastAttemptAt)}</dd></div>
-        <div><dt>Next attempt</dt><dd>{formatDateTime(scheduling.nextAttemptAt)}</dd></div>
+        <div><dt>Last attempt</dt><dd>{formatDateTime(scheduling.lastAttemptAt, "Never attempted")}</dd></div>
+        <div><dt>Next attempt</dt><dd>{formatDateTime(scheduling.nextAttemptAt, "Not scheduled")}</dd></div>
         <div><dt>Backoff state</dt><dd>{scheduling.backoff.state}</dd></div>
         <div><dt>Consecutive failures</dt><dd>{scheduling.backoff.consecutiveFailures}</dd></div>
-        <div><dt>Backoff until</dt><dd>{formatDateTime(scheduling.backoff.until)}</dd></div>
+        <div><dt>Backoff until</dt><dd>{formatDateTime(scheduling.backoff.until, "Not waiting")}</dd></div>
         <div><dt>Kill switch</dt><dd>{scheduling.killSwitch.enabled ? "Enabled" : "Disabled"}</dd></div>
         <div><dt>Kill switch reason</dt><dd>{scheduling.killSwitch.reason ?? "None reported"}</dd></div>
         <div><dt>Executor state</dt><dd>{scheduling.executor.state}</dd></div>
@@ -260,14 +261,23 @@ export function InstallerUpdatesExperience({
   const [savingChannel, setSavingChannel] = useState(false);
   const [channelError, setChannelError] = useState<string | null>(null);
   const [channelStatus, setChannelStatus] = useState("");
+  // True only while a save outcome could not be confirmed by either the POST
+  // or an authoritative refetch. Mutation controls stay disabled the whole
+  // time this is true, until a fresh authoritative GET (initial load or an
+  // explicit GET-only retry) resolves it below.
+  const [saveOutcomeUnknown, setSaveOutcomeUnknown] = useState(false);
 
   useEffect(() => {
     if (!updateChannelSettings) return;
     setChannel(updateChannelSettings.channel);
+    // A fresh authoritative settings object (initial load or a GET-only
+    // retry) resolves any prior unknown outcome and clears stale error text.
+    setSaveOutcomeUnknown(false);
+    setChannelError(null);
   }, [updateChannelSettings]);
 
   const settingsLoaded = updateChannelSettings != null && !updateChannelIsLoading && !updateChannelIsError;
-  const channelControlDisabled = savingChannel || !settingsLoaded || !onSaveUpdateChannel;
+  const channelControlDisabled = savingChannel || !settingsLoaded || !onSaveUpdateChannel || saveOutcomeUnknown;
   const persistedInsiderAcknowledged = updateChannelSettings?.insiderAcknowledged ?? false;
   const fieldError = channelError ?? (updateChannelIsError ? "Failed to load the authoritative UpdateChannel settings. Retry before changing the release channel." : null);
   const channelDescribedBy = fieldError ? "update-channel-help update-channel-error" : "update-channel-help";
@@ -287,15 +297,42 @@ export function InstallerUpdatesExperience({
     setChannelError(null);
     setChannelStatus("");
     try {
+      // A resolved promise means an authoritative refetch confirmed the
+      // requested settings were actually applied; only then is success
+      // reported, regardless of whether the POST itself resolved or
+      // rejected.
       const authoritativeSettings = await onSaveUpdateChannel(settings);
       setChannel(authoritativeSettings.channel);
       setChannelStatus("Update channel saved.");
       setInsiderAcknowledgementDraft(false);
+      setSaveOutcomeUnknown(false);
       if (options.closeAcknowledgementOnSuccess) {
         setAcknowledgementOpen(false);
       }
-    } catch {
-      setChannelError("Update channel save outcome is unknown because the authoritative UpdateChannel settings could not be confirmed. Retry before saving again.");
+    } catch (error) {
+      if (error instanceof UpdateChannelSaveRejectedError) {
+        // The authoritative refetch succeeded and disagrees with the
+        // request: this is a confirmed rejection/unchanged state, not an
+        // unknown one. Reconcile the UI to the real server value instead of
+        // claiming success, and leave mutation controls enabled since the
+        // state is known.
+        setChannel(error.authoritative.channel);
+        setChannelError(
+          `Update channel was not saved. The server still reports "${error.authoritative.channel}".`,
+        );
+        setSaveOutcomeUnknown(false);
+        // The outcome is conclusively known (not pending): close the
+        // acknowledgement dialog rather than leaving it open over a control
+        // that has already reverted to the authoritative value.
+        setAcknowledgementOpen(false);
+        setInsiderAcknowledgementDraft(false);
+      } else {
+        // Neither the POST nor the refetch could confirm the outcome. Keep
+        // mutation controls disabled until a fresh authoritative GET
+        // resolves this.
+        setSaveOutcomeUnknown(true);
+        setChannelError("Update channel save outcome is unknown because the authoritative UpdateChannel settings could not be confirmed. Retry before saving again.");
+      }
     } finally {
       setSavingChannel(false);
     }

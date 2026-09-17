@@ -2,6 +2,7 @@ import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi } from 'vitest';
 import { InstallerUpdatesExperience } from '@/features/admin/components/InstallerUpdatesExperience';
+import { UpdateChannelSaveRejectedError } from '@/features/admin/utils/updateChannelSaveErrors';
 import { blockedReadinessInventory, conflictingReplicaInventory, digest, identity, inventory, replica } from '@/test/features/system/serviceInventoryFixture';
 import type { UpdateSchedulingExecutorState } from '@/types/api';
 
@@ -237,6 +238,58 @@ describe('InstallerUpdatesExperience', () => {
     expect(await screen.findByRole('dialog', { name: 'Acknowledge Insider channel risk' })).toBeVisible();
     expect(screen.getByRole('alert')).toHaveTextContent(/outcome is unknown/);
     expect(document.querySelector('[aria-label="Update channel save status"]')).toHaveTextContent('');
+  });
+
+  it('keeps mutation controls disabled after an unknown save outcome until a fresh authoritative refetch resolves it (GET-only retry)', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockRejectedValue(new Error('refetch failed'));
+    const initialSettings = { channel: 'stable' as const, insiderAcknowledged: false };
+    const { rerender } = render(
+      <InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={initialSettings} onSaveUpdateChannel={save} />,
+    );
+
+    expect(screen.getByRole('combobox', { name: 'Release channel' })).not.toBeDisabled();
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/outcome is unknown/));
+    // The outcome is unknown: mutation controls stay disabled and there is
+    // no race that re-enables them while reconciliation is unresolved.
+    expect(screen.getByRole('combobox', { name: 'Release channel' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save update channel' })).toBeDisabled();
+
+    // A fresh authoritative GET (e.g. the page's GET-only retry succeeding)
+    // delivers a new settings object; only then do mutation controls
+    // re-enable and the stale error clears.
+    rerender(
+      <InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ ...initialSettings }} onSaveUpdateChannel={save} />,
+    );
+
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Release channel' })).not.toBeDisabled());
+    expect(screen.getByRole('button', { name: 'Save update channel' })).not.toBeDisabled();
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('reconciles the selector to the authoritative channel and reports a truthful rejection, without claiming success, when the refetch disagrees with the request', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockRejectedValue(new UpdateChannelSaveRejectedError({ channel: 'stable', insiderAcknowledged: false }));
+    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    await user.click(screen.getByRole('checkbox', { name: /accept the prerelease risk/i }));
+    await user.click(screen.getByRole('button', { name: 'Acknowledge and save' }));
+
+    // The outcome is conclusively known (not pending): the acknowledgement
+    // dialog closes rather than staying open over a reverted control.
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Acknowledge Insider channel risk' })).not.toBeInTheDocument());
+    expect(await screen.findByRole('alert')).toHaveTextContent(/was not saved/);
+    expect(screen.getByRole('alert')).toHaveTextContent(/"stable"/);
+    expect(document.querySelector('[aria-label="Update channel save status"]')).toHaveTextContent('');
+    // The authoritative (unchanged) state is known, not unknown: mutation
+    // controls re-enable so the admin can see the reverted selection and retry.
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Release channel' })).toHaveValue('stable'));
+    expect(screen.getByRole('combobox', { name: 'Release channel' })).not.toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Save update channel' })).not.toBeDisabled();
   });
 
   it('resets modal-local acknowledgement on cancel and requires a fresh acknowledgement', async () => {

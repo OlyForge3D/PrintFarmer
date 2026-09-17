@@ -4,6 +4,7 @@ import { Alert, Button } from "@/common/components/ui";
 import { InstallerUpdatesExperience } from "@/features/admin/components/InstallerUpdatesExperience";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 import { apiClient } from "@/services/api";
+import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
 import type { SystemInfo, UpdateChannelSettings } from "@/types/api";
 
 type ConnectionObservation = "connected" | "unknown";
@@ -121,13 +122,33 @@ export function InstallerUpdatesPage() {
       updateChannelIsError={updateChannelIsError}
       onRetryUpdateChannel={() => { void refetchUpdateChannel(); }}
       onSaveUpdateChannel={async (settings) => {
-        await apiClient.updateUpdateChannelSettings(settings);
+        // A POST rejection (including a timeout or lost response) is not by
+        // itself authoritative. Always attempt the refetch below so the UI
+        // reconciles to the server's real state instead of guessing from the
+        // POST outcome alone.
+        try {
+          await apiClient.updateUpdateChannelSettings(settings);
+        } catch {
+          // Fall through to the refetch below regardless of this rejection.
+        }
         const result = await refetchUpdateChannel();
         if (result.isError || !result.data) {
+          // Neither the POST nor the refetch confirmed anything: the outcome
+          // is genuinely unknown.
           throw new Error("UpdateChannel settings could not be confirmed after save.");
         }
+        const authoritative = result.data;
+        const matchesRequested =
+          authoritative.channel === settings.channel &&
+          authoritative.insiderAcknowledged === settings.insiderAcknowledged;
+        if (!matchesRequested) {
+          // The authoritative refetch is the source of truth: a mismatch
+          // means the save was rejected or left unchanged, regardless of
+          // whether the POST promise itself resolved or rejected.
+          throw new UpdateChannelSaveRejectedError(authoritative);
+        }
         void refetchInventory();
-        return result.data;
+        return authoritative;
       }}
     />
   );
