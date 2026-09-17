@@ -13,7 +13,7 @@ interface InstallerPagePropsSnapshot {
   updateChannelSettings?: UpdateChannelSettings;
   updateChannelIsLoading?: boolean;
   updateChannelIsError?: boolean;
-  onRetryUpdateChannel?: () => void;
+  onRetryUpdateChannel?: () => Promise<UpdateChannelSettings>;
   onSaveUpdateChannel?: (settings: UpdateChannelSettings) => Promise<UpdateChannelSettings>;
 }
 

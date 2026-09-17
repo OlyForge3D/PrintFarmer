@@ -120,7 +120,20 @@ export function InstallerUpdatesPage() {
       updateChannelSettings={updateChannelSettings}
       updateChannelIsLoading={updateChannelIsLoading}
       updateChannelIsError={updateChannelIsError}
-      onRetryUpdateChannel={() => { void refetchUpdateChannel(); }}
+      onRetryUpdateChannel={async () => {
+        // An explicit GET-only retry: the resolved (or thrown) value here is
+        // the authoritative contract the child component reconciles from
+        // directly, rather than inferring success from the
+        // `updateChannelSettings` prop changing identity. TanStack Query's
+        // structural sharing can return the exact same cached object
+        // reference for a deep-equal refetch result, which would otherwise
+        // never re-trigger a prop-identity effect.
+        const result = await refetchUpdateChannel();
+        if (result.isError || !result.data) {
+          throw new Error("UpdateChannel settings could not be confirmed.");
+        }
+        return result.data;
+      }}
       onSaveUpdateChannel={async (settings) => {
         // A POST rejection (including a timeout or lost response) is not by
         // itself authoritative. Always attempt the refetch below so the UI
