@@ -190,15 +190,17 @@
         "reason": "Documented fictional hard-coded credential used as a security anti-pattern example."
       },
       {
-        "path": ".copilot/skills/secret-handling/SKILL.md",
+        "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
         "reason": "Private-key marker documented without key material in secret-handling guidance."
       },
       {
-        "path": ".copilot/skills/secret-handling/SKILL.md",
+        "path": ".github/skills/secret-handling/SKILL.md",
         "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
         "matchSha256": "8bcac7908eb950419537b91e19adc83ce2c9cbfdacf4f81157fdadfec11f7017",
+        "contentSha256": "b9222aa132746bb312ac06b7060e3893c6b2f0126f2e33753037bd98c0c6b47b",
         "reason": "RSA private-key marker documented without key material in secret-handling guidance."
       },
       {
@@ -212,6 +214,97 @@
         "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
         "matchSha256": "44de90237471c73eee56499f5e43c97119b04c0fd489502881d035cae8c3423c",
         "reason": "Synthetic credentialed URL used by the negative source-archive test."
+      },
+      {
+        "path": "src/tests/Farm.Infrastructure.Tests/Infrastructure/UrlCredentialRedactorTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "47fdf2b239af0f3308a2e95939fb581a931860a7d5a695bfa679338a21eaa1ee",
+        "contentSha256": "68189db3a43e838ce92027734de3a3d6bd5ffa65ff5a622b42a858a58729fe5c",
+        "reason": "Synthetic interpolated URL credentials exercise redaction; the local password constant is test data."
+      },
+      {
+        "path": "src/tests/Farm.Infrastructure.Tests/Infrastructure/UrlCredentialRedactorTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "ffda012aeacbeb23aeb87f74f035748431572c7f0710052d88bdd46f7bfa1f45",
+        "contentSha256": "68189db3a43e838ce92027734de3a3d6bd5ffa65ff5a622b42a858a58729fe5c",
+        "reason": "Synthetic interpolated URL credentials exercise redaction; the local password constant is test data."
+      },
+      {
+        "path": "src/tests/Farm.Infrastructure.Tests/Network/EgressGuardTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "f8c7f2987069485166a19282090fd6bfda8b12c5ccf46c99846068ed92369f32",
+        "contentSha256": "5704043e018790d13850cf9c06372f43c0c5775e5bdcb14fea7f837b7df3e123",
+        "reason": "Synthetic user-info preservation fixture for a printer.local URL."
+      },
+      {
+        "path": "src/tests/Farm.Infrastructure.Tests/Services/Notifications/NativePush/DirectApnsNativePushSenderTests.cs",
+        "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+        "contentSha256": "001de560b75d3ec4f26b1bc0fea46639b1c81958c3cd5d73cf5c52c5d5b65f70",
+        "reason": "Deliberately corrupt PEM with a non-key text fragment tests sanitized APNs diagnostics."
+      },
+      {
+        "path": "src/tests/Farm.Infrastructure.Tests/Services/Notifications/NativePush/NativePushSettingsValidatorTests.cs",
+        "pattern": "-----BEGIN (RSA |EC |OPENSSH )?PRIVATE KEY-----",
+        "matchSha256": "3021d90eb9437b2d8f30e8363695c4418b5e5f1870801b5c317e9398ee0f572d",
+        "contentSha256": "a15ffcdc9046817d39655b49c402b5c0904422bdc7786f43f832bec7d433920e",
+        "reason": "Invalid PEM containing only zero-byte base64 tests rejection with sanitized diagnostics."
+      },
+      {
+        "path": "src/tests/Farm.Modules.Calibration.Tests/Calibration/CalibrationProfileResolutionStartupTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "f8c7f2987069485166a19282090fd6bfda8b12c5ccf46c99846068ed92369f32",
+        "contentSha256": "587666c1141b9e288a68d73e396598979fc2caec5a8b91ad0b72336a8fb02a90",
+        "reason": "Synthetic credentialed slicer-host URL tests startup validation rejection."
+      },
+      {
+        "path": "src/tests/Farm.Modules.Printers.Tests/Controllers/PrintersControllerTestConnectionTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
+        "contentSha256": "d5a053417c9ab9828e84c5d6ad1c05762140f0aacfa00630701bef0fa6a7d163",
+        "reason": "Synthetic credentialed printer.local URL tests rejection before network egress."
+      },
+      {
+        "path": "src/tests/Farm.Modules.PrintQueue.Tests/Services/Queue/PrintJobManagementSecurityTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "22d4b986213abe3277be6d78ad75e989d356b1c7ca6e4f6fcaac7d71a7faf856",
+        "contentSha256": "19edc8301ea0d4fe18c1ef36d1c4b354bc040b6bfbcd2bbbbdf29203972de370",
+        "reason": "Synthetic backend exception URL tests result and log redaction."
+      },
+      {
+        "path": "src/tests/Farm.OrcaSlicer.Worker.Tests/ModelDownloadRequestTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "093866188144b0216fb125431572e8ac2df8980dfeeb6ebeb3d9f3987d1e4c1d",
+        "contentSha256": "87614088fa5698151cc57435a59dbeab2e77bf383d8af9855d56de0091ea428f",
+        "reason": "Synthetic credentialed example.test URL tests untrusted API base rejection."
+      },
+      {
+        "path": "src/tests/Farm.Web.Api.Tests/Controllers/SetupBootstrapControllerTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "13a78fd65a52b696a35b089b8681a80d4c263bbe0c843b259e0c464e69f30bc3",
+        "contentSha256": "9c86ad359877aadf88fcc41a5952d8e4d097068b1bc66979f6d669c13e34d91a",
+        "reason": "Synthetic Spoolman configuration tests bootstrap credential non-disclosure."
+      },
+      {
+        "path": "src/tests/Farm.Web.Api.Tests/Integration/PrinterImportFacadeIntegrationTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "a28b8176f57374f4f478f28ad1530d57fff8e37cdb58a74e5146350154124e29",
+        "contentSha256": "8b557adf6abe75ce7e1cff31519ba176162d07aa8687ff56a24d03763829cca6",
+        "reason": "Synthetic printer.local import payload tests credential handling."
+      },
+      {
+        "path": "src/tests/Farm.Web.Api.Tests/Security/PrinterEndpointRedactionTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
+        "contentSha256": "487b6945760d69b545397478ec9fe324b13c12ef528e3ff29a62301fd7075d3f",
+        "reason": "Synthetic printer credentials test endpoint redaction."
+      },
+      {
+        "path": "src/tests/Farm.Web.Api.Tests/Security/SensitiveSerializationTests.cs",
+        "pattern": "https?://[^\\s/:]+:[^\\s/@]+@",
+        "matchSha256": "2b37ca011dc0baf5ac3ceff7569d873e97e370f6c6cfa28ebfdc8fba20ed280a",
+        "contentSha256": "3d25b1d4fd999194282d4691aedebba55077f47a6f00998b1745ff936db16e72",
+        "reason": "Synthetic printer URL tests removal of embedded credentials from computed URLs."
       }
     ]
   },
