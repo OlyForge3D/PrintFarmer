@@ -13,13 +13,28 @@ public static partial class ReleaseReadinessEvaluator
         List<string> hops = ["InventoryRead"];
         if (release is null)
         {
-            return Result(InventoryEligibility.NotManaged, ["NoSignedReleaseSelected"], hops);
+            return Result(InventoryEligibility.Unknown, ["NoSignedReleaseEvidence"], hops);
         }
 
         hops.Add("SignedReleaseEvidence");
         if (!release.SignatureVerified || !release.IsComplete || release.Identity is null || !Digest().IsMatch(release.ManifestDigest ?? string.Empty))
         {
             return Result(InventoryEligibility.Blocked, ["ReleaseEvidenceIncompleteOrUnverified"], hops);
+        }
+
+        if (!HostUpdateValidation.TryParseSemanticVersion(release.MinimumUpdaterVersion, out Version minimumUpdater))
+        {
+            return Result(InventoryEligibility.Unknown, ["MinimumUpdaterVersionUnknown"], hops);
+        }
+
+        if (!HostUpdateValidation.TryParseSemanticVersion(inventory.HostUpdaterVersion, out Version hostUpdater))
+        {
+            return Result(InventoryEligibility.Unknown, ["HostUpdaterVersionUnknown"], hops);
+        }
+
+        if (hostUpdater < minimumUpdater)
+        {
+            return Result(InventoryEligibility.Blocked, ["HostUpdaterVersionTooOld"], hops);
         }
 
         if (inventory.SnapshotOrigin == InventorySnapshotOrigin.Imported)

@@ -92,4 +92,18 @@ public class VerifiedReleaseEvidenceCacheTests
 
         cache.LastError.Should().Be("Verified release discovery failed without an error message.");
     }
+
+    [Fact]
+    public void SetVerified_OlderSequence_DoesNotReplaceNewerEvidence()
+    {
+        var cache = new VerifiedReleaseEvidenceCache();
+        VerifiedReleaseEvidenceDto newer = Evidence() with { Sequence = 20 };
+        VerifiedReleaseEvidenceDto older = Evidence() with { Sequence = 19 };
+
+        cache.SetVerified(newer, DateTimeOffset.UtcNow);
+        cache.SetVerified(older, DateTimeOffset.UtcNow.AddSeconds(1));
+
+        cache.Current.Should().BeSameAs(newer);
+        cache.LastVerifiedAt.Should().NotBeNull();
+    }
 }

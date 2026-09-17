@@ -96,6 +96,11 @@ public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
         ArgumentNullException.ThrowIfNull(evidence);
         lock (_gate)
         {
+            if (_current is not null && evidence.Sequence < _current.Sequence)
+            {
+                return;
+            }
+
             _current = evidence;
             _lastVerifiedAt = verifiedAt;
             _lastError = null;

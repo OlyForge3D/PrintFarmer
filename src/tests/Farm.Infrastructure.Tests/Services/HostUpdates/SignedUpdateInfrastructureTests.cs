@@ -43,6 +43,39 @@ public sealed class SignedUpdateInfrastructureTests
     }
 
     [Fact]
+    public void DeriveSequence_GoldenFixture_MatchesSchemaVersionPattern()
+    {
+        string schema = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "scripts", "ci", "fixtures", "release-version-sequence.schema.json"));
+        using JsonDocument schemaDocument = JsonDocument.Parse(schema);
+        string pattern = schemaDocument.RootElement
+            .GetProperty("properties")
+            .GetProperty("validCases")
+            .GetProperty("items")
+            .GetProperty("$ref")
+            .GetString()!;
+        Assert.Equal("#/$defs/validCase", pattern);
+        string versionPattern = schemaDocument.RootElement
+            .GetProperty("$defs")
+            .GetProperty("validCase")
+            .GetProperty("properties")
+            .GetProperty("version")
+            .GetProperty("pattern")
+            .GetString()!;
+
+        SequenceGoldenFixture fixture = LoadSequenceFixture();
+        foreach (SequenceValidCase testCase in fixture.ValidCases)
+        {
+            Assert.Matches(versionPattern, testCase.Version);
+        }
+
+        Assert.DoesNotMatch(versionPattern, "01.2.3");
+        Assert.DoesNotMatch(versionPattern, "1.02.3");
+        Assert.DoesNotMatch(versionPattern, "1.2.03");
+    }
+
+    [Fact]
     public void Validate_ValidStableManifest_AcceptsStrictContract()
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");

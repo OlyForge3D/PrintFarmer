@@ -63,10 +63,9 @@ public class SystemInfoService(
     /// production release-readiness evaluation (issue #2757) using whatever independently
     /// verified release evidence <see cref="Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache"/>
     /// currently holds. When no verified release has been discovered yet (cache empty, or the
-    /// discovery background service is disabled/still starting), <c>ReleaseReadinessEvaluator</c>
-    /// resolves this to <c>NotManaged</c> -- readiness degrades safely rather than throwing.
+    /// discovery background service is disabled/still starting), readiness is explicitly unknown.
     /// </summary>
-    private ServiceInventoryDto BuildInventory(IReadOnlyList<ServiceReplicaObservationDto> observations)
+    private ServiceInventoryDto BuildInventory(IReadOnlyList<ServiceReplicaObservationDto> observations, string hostUpdaterVersion)
     {
         string channel = _settingsService.Get<Farm.Infrastructure.Settings.UpdateChannelSettings>().Channel;
         DateTimeOffset now = DateTimeOffset.UtcNow;
@@ -74,16 +73,11 @@ public class SystemInfoService(
         ReleaseReadinessDto? unavailable = GetUnavailableReleaseReadiness(now);
         ReleaseReadinessDto readiness = unavailable
             ?? ReleaseReadinessEvaluator.Evaluate(inventory, _verifiedReleaseEvidenceCache.Current, now);
-        return inventory with { Readiness = readiness };
+        return inventory with { HostUpdaterVersion = hostUpdaterVersion, Readiness = readiness };
     }
 
     private ReleaseReadinessDto? GetUnavailableReleaseReadiness(DateTimeOffset now)
     {
-        if (_verifiedReleaseEvidenceCache.Current is null)
-        {
-            return null;
-        }
-
         Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
             _verifiedReleaseDiscoveryOptions.CurrentValue;
         if (!options.Enabled)
@@ -92,6 +86,16 @@ public class SystemInfoService(
             {
                 State = InventoryEligibility.Unknown,
                 Reasons = ["VerifiedReleaseDiscoveryDisabled"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        if (_verifiedReleaseEvidenceCache.Current is null)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseEvidenceUnavailable"],
                 Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
             };
         }
@@ -153,7 +157,7 @@ public class SystemInfoService(
         string databaseProvider = NormalizeDatabaseEngine(_db.Database.ProviderName);
         return new SystemInfoDto
         {
-            Inventory = BuildInventory(observations),
+            Inventory = BuildInventory(observations, appVersion),
             App = new SystemAppInfoDto
             {
                 Version = appVersion,

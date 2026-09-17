@@ -62,39 +62,26 @@ public class VerifiedReleaseDiscoveryMonitorService(
             options.IntervalSeconds);
         _serviceMonitor.ReportStarted(ServiceId);
 
-        if (!options.Enabled)
-        {
-            _logger.LogInformation("[VerifiedReleaseDiscovery] Disabled via configuration");
-            _serviceMonitor.ReportEnabled(ServiceId, false);
-            return;
-        }
-
-        _serviceMonitor.ReportEnabled(ServiceId, true);
-        _logger.LogInformation(
-            "[VerifiedReleaseDiscovery] Started. Interval: {Interval}s",
-            options.IntervalSeconds);
-
         while (!stoppingToken.IsCancellationRequested)
         {
             try
             {
-                await Task.Delay(TimeSpan.FromSeconds(options.IntervalSeconds), stoppingToken);
-
-                if (stoppingToken.IsCancellationRequested)
-                {
-                    break;
-                }
-
                 options = _optionsMonitor.CurrentValue;
-                if (!options.Enabled)
+                if (options.Enabled)
+                {
+                    _serviceMonitor.ReportEnabled(ServiceId, true);
+                    _logger.LogInformation(
+                        "[VerifiedReleaseDiscovery] Running. Interval: {Interval}s",
+                        options.IntervalSeconds);
+                    await RunDiscoveryRoundAsync(options.IntervalSeconds, stoppingToken);
+                }
+                else
                 {
                     _logger.LogInformation("[VerifiedReleaseDiscovery] Disabled, pausing");
                     _serviceMonitor.ReportEnabled(ServiceId, false);
-                    continue;
                 }
 
-                _serviceMonitor.ReportEnabled(ServiceId, true);
-                await RunDiscoveryRoundAsync(options.IntervalSeconds, stoppingToken);
+                await Task.Delay(TimeSpan.FromSeconds(options.IntervalSeconds), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {

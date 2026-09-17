@@ -58,7 +58,9 @@ public static class VerifiedReleaseEvidenceMapper
         }
 
         List<ReleaseServiceRequirementDto> services = [];
-        if (metadata.ComponentPlatforms is null || metadata.ComponentIndexDigests is null)
+        if (metadata.ComponentPlatforms is null
+            || metadata.ComponentIndexDigests is null
+            || metadata.ComponentPlatformDigests is null)
         {
             throw new InvalidDataException("Verified release service platform or index evidence is missing.");
         }
@@ -139,6 +141,7 @@ public static class VerifiedReleaseEvidenceMapper
             SignatureVerified = metadata.SignatureVerified,
             IsComplete = true,
             Sequence = metadata.Sequence,
+            MinimumUpdaterVersion = metadata.MinimumUpdaterVersion,
             Identity = identity,
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,

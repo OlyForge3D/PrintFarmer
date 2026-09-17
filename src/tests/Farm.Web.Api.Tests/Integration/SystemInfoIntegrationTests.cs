@@ -237,8 +237,8 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         using (JsonDocument beforeJson = JsonDocument.Parse(await before.Content.ReadAsStringAsync()))
         {
             JsonElement readiness = beforeJson.RootElement.GetProperty("inventory").GetProperty("readiness");
-            readiness.GetProperty("state").GetString().Should().Be("NotManaged");
-            readiness.GetProperty("reasons").EnumerateArray().Select(r => r.GetString()).Should().Contain("NoSignedReleaseSelected");
+            readiness.GetProperty("state").GetString().Should().Be("Unknown");
+            readiness.GetProperty("reasons").EnumerateArray().Select(r => r.GetString()).Should().Contain("VerifiedReleaseEvidenceUnavailable");
         }
 
         // A release whose channel does not match the host's selected channel ("stable" by

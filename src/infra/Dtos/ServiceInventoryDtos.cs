@@ -227,6 +227,10 @@ public sealed record ServiceReplicaObservationDto
 /// <summary>Admin-only read-only inventory. This contract does not authorize or perform updates.</summary>
 public sealed record ServiceInventoryDto
 {
+    /// <summary>Trusted local updater version, when the host exposes one.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.Never)]
+    public string? HostUpdaterVersion { get; init; }
+
     /// <summary>Local configured selection; defaults to stable, never inferred from builds.</summary>
     public string SelectedChannel { get; init; } = "stable";
 
@@ -350,6 +354,9 @@ public sealed record VerifiedReleaseEvidenceDto
 {
     /// <summary>Monotonic signed release sequence used for downgrade ordering.</summary>
     public long Sequence { get; init; }
+
+    /// <summary>Minimum trusted updater version required by the signed release.</summary>
+    public string? MinimumUpdaterVersion { get; init; }
 
     /// <summary>Whether the complete coordinated release set has a valid signature.</summary>
     public bool SignatureVerified { get; init; }

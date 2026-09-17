@@ -40,7 +40,7 @@ public sealed record VerifiedSignedUpdateRelease(SignedUpdateManifest Manifest, 
 
 public static partial class SignedUpdateManifestValidator
 {
-    private static readonly HashSet<string> ServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
+    private static readonly string[] OrderedServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
     private const long SequenceMajorMaximum = 99;
     private const long SequenceMinorMaximum = 999;
     private const long SequencePatchMaximum = 99_999;
@@ -107,11 +107,11 @@ public static partial class SignedUpdateManifestValidator
         IReadOnlyList<string> manifestPlatforms = manifest.Platforms ?? [];
         string[] expectedTopLevelPlatforms = ["linux-amd64", "linux-arm64"];
         HashSet<string> expectedPlatformDigestKeys = new(StringComparer.Ordinal);
-        if (manifest.Services is null || manifest.Services.Count != ServiceIds.Count) errors.Add("service_set_invalid");
+        if (manifest.Services is null || manifest.Services.Count != OrderedServiceIds.Length) errors.Add("service_set_invalid");
         else
         {
             string[] ids = manifest.Services.Select(service => service?.Id ?? string.Empty).ToArray();
-            if (!ids.SequenceEqual(ServiceIds, StringComparer.Ordinal)) errors.Add("service_set_invalid");
+            if (!ids.SequenceEqual(OrderedServiceIds, StringComparer.Ordinal)) errors.Add("service_set_invalid");
             foreach (SignedUpdateService service in manifest.Services)
             {
                 if (service is null)
@@ -311,15 +311,16 @@ public static partial class SignedUpdateManifestValidator
         !image[(image.IndexOf('/') + 1)..image.IndexOf('@')].Contains(':', StringComparison.Ordinal) &&
         IsSha256Digest(image[(image.IndexOf("@sha256:", StringComparison.Ordinal) + 1)..]);
     private static bool IsSha256Digest(string? value) => value is not null && Sha256().IsMatch(value);
-    internal static bool IsPlatform(string? value) => value is "linux-amd64" or "linux-arm64";
+    internal static bool IsPlatform(string? value) => value is
+        "linux-amd64" or "linux-arm64" or
+        "windows-amd64" or "windows-arm64" or
+        "darwin-amd64" or "darwin-arm64";
     [GeneratedRegex(@"^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-insider\.(?<insider>[1-9]\d*))?$", RegexOptions.CultureInvariant)]
     private static partial Regex CanonicalVersion();
     [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$", RegexOptions.CultureInvariant)]
     private static partial Regex StableTag();
     [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-insider\.[1-9]\d*$", RegexOptions.CultureInvariant)]
     private static partial Regex InsiderTag();
-    [GeneratedRegex("^[a-z0-9][a-z0-9._-]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex Platform();
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex LowerHex40();
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
@@ -560,8 +561,8 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
         Stopwatch stopwatch = Stopwatch.StartNew();
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
-        Task<string> output = ReadLimitedAsync(process.StandardOutput, maxDiagnostics);
-        Task<string> error = ReadLimitedAsync(process.StandardError, maxDiagnostics);
+        Task<string> output = ReadLimitedAsync(process.StandardOutput, maxDiagnostics, deadline.Token);
+        Task<string> error = ReadLimitedAsync(process.StandardError, maxDiagnostics, deadline.Token);
         Exception? processFailure = null;
         try
         {
@@ -620,12 +621,12 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
         }
     }
 
-    private static async Task<string> ReadLimitedAsync(StreamReader reader, int maximum)
+    private static async Task<string> ReadLimitedAsync(StreamReader reader, int maximum, CancellationToken cancellationToken)
     {
         StringBuilder captured = new(Math.Min(maximum, 4096));
         char[] buffer = new char[1024];
         int read;
-        while ((read = await reader.ReadAsync(buffer.AsMemory())) > 0)
+        while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
         {
             int remaining = maximum - captured.Length;
             if (remaining > 0) captured.Append(buffer, 0, Math.Min(remaining, read));

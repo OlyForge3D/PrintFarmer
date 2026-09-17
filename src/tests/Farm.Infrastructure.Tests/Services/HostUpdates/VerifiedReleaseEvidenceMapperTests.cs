@@ -10,7 +10,7 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// item 4): translating the host-update-domain <see cref="SignedReleaseMetadata"/> shape into
 /// the inventory-domain <see cref="VerifiedReleaseEvidenceDto"/> shape
 /// <c>ReleaseReadinessEvaluator</c> consumes, including splitting
-/// <c>ComponentPlatformDigests</c>' <c>"{serviceId}-{platform}"</c> keys.
+/// <c>ComponentPlatformDigests</c>' <c>"{serviceId}/{platform}"</c> keys.
 /// </summary>
 public class VerifiedReleaseEvidenceMapperTests
 {
@@ -54,6 +54,7 @@ public class VerifiedReleaseEvidenceMapperTests
         dto.Identity.CanonicalVersion.Should().Be("1.4.0");
         dto.Identity.ReleaseId.Should().Be("stable:1.4.0");
         dto.Identity.SourceCommit.Should().Be(metadata.Identity.SourceCommit);
+        dto.MinimumUpdaterVersion.Should().Be("1.0.0");
     }
 
     [Fact]
@@ -182,6 +183,24 @@ public class VerifiedReleaseEvidenceMapperTests
         Action act = () => metadata!.ToEvidenceDto("linux-amd64");
 
         act.Should().Throw<ArgumentNullException>();
+    }
+
+    [Fact]
+    public void ToEvidenceDto_NullPlatformDigests_Rejects()
+    {
+        SignedReleaseMetadata metadata = new(
+            "stable",
+            1,
+            true,
+            Identity(),
+            null!,
+            "1.0.0",
+            IndexDigests("api"),
+            Platforms("api"));
+
+        Action act = () => metadata.ToEvidenceDto("linux-amd64");
+
+        act.Should().Throw<InvalidDataException>();
     }
 
     private static Dictionary<string, string> IndexDigests(params string[] services) =>

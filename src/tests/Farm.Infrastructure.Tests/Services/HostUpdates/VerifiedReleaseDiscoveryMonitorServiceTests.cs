@@ -44,7 +44,7 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
     }}";
 
     private static IReadOnlyDictionary<string, string> PlatformDigests =>
-        new Dictionary<string, string> { [$"api-{HostPlatform}"] = "sha256:" + new string('b', 64) };
+        new Dictionary<string, string> { [$"api/{HostPlatform}"] = "sha256:" + new string('b', 64) };
 
     private static IReadOnlyDictionary<string, string> IndexDigests =>
         new Dictionary<string, string> { ["api"] = "sha256:" + new string('c', 64) };
