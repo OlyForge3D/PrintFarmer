@@ -68,6 +68,8 @@ public interface IHostUpdateMigrationTarget
 
     Task<string> GetProviderNameAsync(CancellationToken cancellationToken);
 
+    Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken);
+
     Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken);
 
     /// <summary>

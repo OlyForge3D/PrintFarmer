@@ -37,6 +37,8 @@ public sealed class HostUpdatePreflightStepTests
 
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult(provider);
 
+        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+
         public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) => Task.FromResult(new DatabaseMigrationResult(false, []));
 
         public Task<string> GetConnectionStringFingerprintAsync(CancellationToken cancellationToken) =>

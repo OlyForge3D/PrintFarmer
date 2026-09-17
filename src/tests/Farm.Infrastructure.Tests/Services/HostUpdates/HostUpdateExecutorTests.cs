@@ -109,9 +109,9 @@ public sealed class HostUpdateExecutorTests
         HostUpdateExecutionResult result = await executor.ExecuteAsync(request);
 
         Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
-        Assert.Equal("uncertain_side_effect:migration", result.FailureCode);
+        Assert.Equal("uncertain_side_effect:migration:reconciler_unavailable", result.FailureCode);
         Assert.Empty(steps.Calls);
-        Assert.Equal("failure:uncertain_side_effect:migration", journal.Read(request.ReleaseId)[^1].Phase);
+        Assert.Equal("failure:uncertain_side_effect:migration:reconciler_unavailable", journal.Read(request.ReleaseId)[^1].Phase);
     }
 
     [Fact]
@@ -132,15 +132,83 @@ public sealed class HostUpdateExecutorTests
         HostUpdateExecutionResult result = await executor.ExecuteAsync(request);
 
         Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
-        Assert.Equal("uncertain_side_effect:apply", result.FailureCode);
+        Assert.Equal("uncertain_side_effect:apply:reconciler_unavailable", result.FailureCode);
         Assert.Empty(steps.Calls);
-        Assert.Equal("failure:uncertain_side_effect:apply", journal.Read(request.ReleaseId)[^1].Phase);
+        Assert.Equal("failure:uncertain_side_effect:apply:reconciler_unavailable", journal.Read(request.ReleaseId)[^1].Phase);
     }
 
+
+    [Fact]
+    public async Task Executor_reconciles_completed_migration_after_restart_without_replaying_external_side_effect()
+    {
+        HostUpdateExecutionRequest request = Request();
+        var steps = new FakeSteps();
+        var journal = new MemoryJournal(
+            Activity(request, HostUpdateExecutionState.Accepted, "accepted"),
+            Activity(request, HostUpdateExecutionState.Preflight, "preflight:after"),
+            Activity(request, HostUpdateExecutionState.Draining, "drain:after"),
+            Activity(request, HostUpdateExecutionState.Fenced, "fence:after"),
+            Activity(request, HostUpdateExecutionState.BackedUp, "backup:after"),
+            Activity(request, HostUpdateExecutionState.Migrating, "migration:before"));
+        var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), new FakeSideEffectReconciler("migration"));
+
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(request);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new[] { "apply", "verify" }, steps.Calls);
+        Assert.Contains(journal.Read(request.ReleaseId), a => a.State == HostUpdateExecutionState.Migrating && a.Phase == "migration:after");
+    }
+
+    [Fact]
+    public async Task Executor_reconciles_completed_apply_after_restart_without_replaying_compose()
+    {
+        HostUpdateExecutionRequest request = Request();
+        var steps = new FakeSteps();
+        var journal = new MemoryJournal(
+            Activity(request, HostUpdateExecutionState.Accepted, "accepted"),
+            Activity(request, HostUpdateExecutionState.Preflight, "preflight:after"),
+            Activity(request, HostUpdateExecutionState.Draining, "drain:after"),
+            Activity(request, HostUpdateExecutionState.Fenced, "fence:after"),
+            Activity(request, HostUpdateExecutionState.BackedUp, "backup:after"),
+            Activity(request, HostUpdateExecutionState.Migrating, "migration:after"),
+            Activity(request, HostUpdateExecutionState.Applying, "apply:before"));
+        var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), new FakeSideEffectReconciler("apply"));
+
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(request);
+
+        Assert.True(result.Succeeded);
+        Assert.Equal(new[] { "verify" }, steps.Calls);
+        Assert.DoesNotContain("apply", steps.Calls);
+        Assert.Contains(journal.Read(request.ReleaseId), a => a.State == HostUpdateExecutionState.Applying && a.Phase == "apply:after");
+    }
+
+    [Fact]
+    public async Task Executor_persists_recovery_required_when_side_effect_reconciliation_is_unproven()
+    {
+        HostUpdateExecutionRequest request = Request();
+        var steps = new FakeSteps();
+        var journal = new MemoryJournal(
+            Activity(request, HostUpdateExecutionState.Accepted, "accepted"),
+            Activity(request, HostUpdateExecutionState.Preflight, "preflight:after"),
+            Activity(request, HostUpdateExecutionState.Draining, "drain:after"),
+            Activity(request, HostUpdateExecutionState.Fenced, "fence:after"),
+            Activity(request, HostUpdateExecutionState.BackedUp, "backup:after"),
+            Activity(request, HostUpdateExecutionState.Migrating, "migration:after"),
+            Activity(request, HostUpdateExecutionState.Applying, "apply:before"));
+        var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), new FakeSideEffectReconciler(reconciledPhase: null));
+
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(request);
+
+        Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
+        Assert.Equal("uncertain_side_effect:apply:not_proven", result.FailureCode);
+        Assert.Empty(steps.Calls);
+        Assert.Equal("failure:uncertain_side_effect:apply:not_proven", journal.Read(request.ReleaseId)[^1].Phase);
+    }
     private static HostUpdateExecutionActivity Activity(HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase) =>
         new(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(request));
 
     private sealed class NoopLock : IHostUpdateExecutionLock { public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken) => new Lease(); private sealed class Lease : IHostUpdateExecutionLease { public void Dispose() { } } }
     private sealed class MemoryJournal(params HostUpdateExecutionActivity[] seed) : IHostUpdateExecutionJournal { private readonly List<HostUpdateExecutionActivity> entries = [.. seed]; public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => entries.Where(e => e.ReleaseId == releaseId).ToArray(); public void Append(HostUpdateExecutionActivity activity) => entries.Add(activity); public IReadOnlyList<string> ListReleaseIds() => entries.Select(e => e.ReleaseId).Distinct().ToArray(); }
+    private sealed class FakeSideEffectReconciler(string? reconciledPhase) : IHostUpdateSideEffectReconciler { public Task<HostUpdateSideEffectReconciliation> ReconcileAsync(string phase, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(string.Equals(phase, reconciledPhase, StringComparison.Ordinal) ? HostUpdateSideEffectReconciliation.Complete("proven") : HostUpdateSideEffectReconciliation.Uncertain("not_proven")); }
     private sealed class FakeSteps : IHostUpdateExecutionSteps { public List<string> Calls { get; } = []; public List<CancellationToken> StepTokens { get; } = []; public Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("preflight", c); public Task DrainAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("drain", c); public Task FenceAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("fence", c); public Task BackupAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("backup", c); public Task MigrateAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("migration", c); public Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("apply", c); public Task VerifyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("verify", c); private Task AddAsync(string value, CancellationToken cancellationToken) { Calls.Add(value); StepTokens.Add(cancellationToken); return Task.CompletedTask; } }
 }

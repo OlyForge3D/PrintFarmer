@@ -250,3 +250,23 @@ public sealed class AutoDispatchFenceFlag : IHostUpdateWriterActivityFlag
 
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
 }
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for outbound webhook delivery.
+/// This fences the webhook bridge so no external HTTP delivery or webhook delivery-log write can
+/// start while the host-update executor is in its pre-backup/migration/apply critical section.
+/// </summary>
+public sealed class WebhookDeliveryFenceFlag : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new();
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}

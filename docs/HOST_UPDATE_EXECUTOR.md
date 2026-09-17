@@ -1,4 +1,4 @@
-# Host update executor
+﻿# Host update executor
 
 The safe-executor core (`HostUpdateExecutor`) supplies
 immutable release identity contracts, durable canonical request fingerprint binding, exact six-target validation, a bounded process/installation
@@ -55,7 +55,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 
 `IHostUpdateExecutionAvailabilityProvider` (`HostUpdateExecutionAvailability.cs`) positively probes
 — never assumes — that the executor is actually usable: the root directory is writable, the
-journal is not corrupt, no default `RequiredUnavailableFacilities` entries remain, at least one migration and one backup target are configured, every
+journal is not corrupt, no configured `RequiredUnavailableFacilities` entries remain, at least one migration and one backup target are configured, every
 configured compose file exists on disk, and the container runtime (`docker version`) is reachable.
 `HostUpdateExecutionAvailabilityHostedService` computes this immediately at process startup
 ("restart reconciliation" — a fresh process re-proves its own readiness rather than trusting a
@@ -63,7 +63,7 @@ previous run's state) and then periodically rechecks, publishing every result in
 `HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
-`compose_file_missing:...`, `docker_runtime_unavailable`, `facility_unavailable:bridge-webhook-ingress-fence`) so an operator is never left guessing.
+`compose_file_missing:...`, `docker_runtime_unavailable`, `missing_fenced_writer:webhook-delivery`) so an operator is never left guessing.
 
 ## DI wiring
 
@@ -79,7 +79,7 @@ permission.
 
 `HostUpdateController` (`Farm.Modules.Administration`) exposes the manual, operator-invoked
 surface: `[RequirePermission("system_settings", "admin")]`-gated execute/recover endpoints that
-bind one immutable request per call. Both endpoints now gate on the same `HostUpdateExecutionAvailabilityHolder` the availability hosted service maintains: a request that arrives while the executor reports `Unavailable` (including while restart reconciliation still reports an unresolved prior release) is rejected with `503 Service Unavailable` and the exact reasons, before it ever reaches `IHostUpdateExecutor`/`IHostUpdateRecoveryCoordinator` — see `HostUpdateControllerAvailabilityTests`. Replay/duplicate-submission protection relies on the executor's file-based journal/lock plus the durable request fingerprint. If migration or apply has a `:before` journal receipt without the matching `:after`, the executor does not replay the external side effect automatically; it records `RecoveryRequired` with `uncertain_side_effect:<phase>` so an operator must reconcile or recover while fences remain closed.
+bind one immutable request per call. Both endpoints now gate on the same `HostUpdateExecutionAvailabilityHolder` the availability hosted service maintains: a request that arrives while the executor reports `Unavailable` (including while restart reconciliation still reports an unresolved prior release) is rejected with `503 Service Unavailable` and the exact reasons, before it ever reaches `IHostUpdateExecutor`/`IHostUpdateRecoveryCoordinator` — see `HostUpdateControllerAvailabilityTests`. Replay/duplicate-submission protection relies on the executor's file-based journal/lock plus the durable request fingerprint. If migration or apply has a `:before` journal receipt without the matching `:after`, the executor first requires operation-specific proof before continuing: migration must show every registered context has no pending migrations, and apply must show the exact requested running digests. If either proof is unavailable or negative, it records `RecoveryRequired` with `uncertain_side_effect:<phase>:<reason>` so an operator must recover while fences remain closed.
 
 ## Known limitations
 
@@ -150,22 +150,7 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   verifier's container-name resolution independently throws (`service_mapping_missing:<serviceId>`)
   rather than silently falling back to a guessed container name if it is ever reached without that
   earlier guard having run.
-- Five writers are concretely fenced today (the admission gate, the queue outbox
-  publisher, `PowerReadingPruneService`, `QueueRetentionPruneService`, and
-  `AutoDispatchBackgroundService`, now included in the default required writer inventory); other background schedulers/bridges/API replicas/workers
-  still need `IFenceableWriter` implementations registered as they are identified. Remaining
-  known unfenced hosted services:
-  `MaintenanceAlertHostedService`, `CatalogUpdateDetectionService`,
-  `VerifiedReleaseDiscoveryMonitorService`, `OrphanedJobSyncStartupService`,
-  `HistorySeedingBackgroundService`, `ActiveExternalJobSyncBackgroundService`. The availability
-  provider fails closed (`insufficient_fenced_writers:<names>`) only for names explicitly listed
-  in `HostUpdateExecutionOptions.RequiredFencedWriterNames`; it cannot detect a writer that was
-  never added to that list in the first place, so extending coverage still requires deliberate,
-  audited work per writer rather than a generic scan. The admission gate itself
-  (`IHostUpdateAdmissionGate`) is now wired into real submission/physical-dispatch chokepoints:
-  `JobQueueService.AddJobToQueueAsync`, `JobQueueController.QueueJobAsync`, manual start endpoints
-  (`DispatchJobAsync`, `DispatchToAsync`, `BatchDispatchAsync`), `AutoDispatchController.MarkReadyAsync`, and `DbSlicerJobQueue.EnqueueAsync`. Production DI now uses `FileHostUpdateAdmissionGate`, rooted under `HostUpdateExecution:RootDirectory/state`, and standalone `Farm.Slicer.Host` registers the same durable gate without registering the full executor; a drain in the main API therefore rejects split-host slicer submissions that share the same host-controlled root. Bridge/webhook ingress is still not proven fenced -- see the topology
-  caveat below). Bridge/webhook ingress remains an open gap and is not claimed fenced.
+- Six writer paths are concretely fenced today: the durable admission gate, the queue outbox publisher, `PowerReadingPruneService`, `QueueRetentionPruneService`, `AutoDispatchBackgroundService`, and outbound `WebhookService` delivery. The webhook fence pauses the bridge before dequeuing new delivery work, so no external HTTP delivery or webhook delivery-log write starts inside the backup/migration/apply critical section. Other background schedulers/bridges/API replicas/workers still need `IFenceableWriter` implementations registered as they are identified; adding a required writer name with no registration keeps availability closed.
   `AutoDispatchBackgroundService` -- the loop that physically starts new printer-dispatch
   workers -- now consults its own dedicated `AutoDispatchFenceFlag` at the top of each trigger
   iteration: while paused it skips starting a new dispatch worker entirely (relying on the
@@ -189,4 +174,4 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   part of `RecoverAsync` itself — including when recovery is cancelled mid-flight — so the outcome
   survives a process crash immediately afterward even if whatever invoked recovery never gets a
   chance to persist it. A successful rollback releases the writer fence only after the durable `RolledBack` outcome is written; if fence release fails, recovery overwrites the outcome with `NeedsOperator` and keeps the system closed. The manual admin status endpoint now includes the latest durable recovery outcome for the requested release, so operators can see `RolledBack`/`NeedsOperator` details after the original recovery call has returned or the process has restarted.
-- Remaining #2663 gaps are explicit and still hold availability closed by default through `HostUpdateExecutionOptions.RequiredUnavailableFacilities`: bridge/webhook ingress is not proven fenced, and migration/apply uncertainty remains fail-closed rather than reconciled by operation-specific provider/container probes after a crash between before/after markers. Do not remove a `RequiredUnavailableFacilities` entry by configuration alone in production; remove it only with the corresponding concrete implementation and tests.
+- Power-loss reconciliation is now operation-specific for the unsafe side-effect checkpoints. A restart after `migration:before` without `migration:after` continues only when all migration targets report no pending migrations; a restart after `apply:before` without `apply:after` continues only when exact running digest verification succeeds. Otherwise the journal records durable `RecoveryRequired`/operator action and does not replay migrations or compose automatically.

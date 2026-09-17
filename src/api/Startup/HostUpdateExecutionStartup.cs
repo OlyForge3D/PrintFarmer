@@ -72,6 +72,7 @@ public static class HostUpdateExecutionStartup
         services.AddSingleton<PowerReadingPruneFenceFlag>();
         services.AddSingleton<QueueRetentionPruneFenceFlag>();
         services.AddSingleton<AutoDispatchFenceFlag>();
+        services.AddSingleton<WebhookDeliveryFenceFlag>();
         services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp =>
         [
             new AdmissionFenceableWriter(sp.GetRequiredService<IHostUpdateAdmissionGate>()),
@@ -79,6 +80,7 @@ public static class HostUpdateExecutionStartup
             new BackgroundWriterFenceableWriter("power-reading-prune", sp.GetRequiredService<PowerReadingPruneFenceFlag>()),
             new BackgroundWriterFenceableWriter("queue-retention-prune", sp.GetRequiredService<QueueRetentionPruneFenceFlag>()),
             new BackgroundWriterFenceableWriter("auto-dispatch", sp.GetRequiredService<AutoDispatchFenceFlag>()),
+            new BackgroundWriterFenceableWriter("webhook-delivery", sp.GetRequiredService<WebhookDeliveryFenceFlag>()),
         ]);
         services.AddSingleton<IHostUpdateFenceCoordinator>(sp =>
         {
@@ -153,8 +155,10 @@ public static class HostUpdateExecutionStartup
                 sp.GetRequiredService<ILogger<SlicerDbContext>>());
         });
         services.AddScoped<IReadOnlyList<IHostUpdateMigrationTarget>>(sp => [.. sp.GetServices<IHostUpdateMigrationTarget>()]);
-        services.AddScoped<IHostUpdateMigrationCoordinator>(sp =>
+        services.AddScoped<HostUpdateMigrationCoordinator>(sp =>
             new HostUpdateMigrationCoordinator(sp.GetRequiredService<IReadOnlyList<IHostUpdateMigrationTarget>>()));
+        services.AddScoped<IHostUpdateMigrationCoordinator>(sp => sp.GetRequiredService<HostUpdateMigrationCoordinator>());
+        services.AddScoped<IHostUpdateMigrationReconciler>(sp => sp.GetRequiredService<HostUpdateMigrationCoordinator>());
 
         services.AddScoped<IHostUpdateBackupTarget>(sp =>
         {
@@ -201,6 +205,7 @@ public static class HostUpdateExecutionStartup
 
         services.AddScoped<IHostUpdateHealthVerifier>(sp => CreateHealthVerifier(sp));
         services.AddScoped<IHostUpdateDigestVerifier>(sp => (IHostUpdateDigestVerifier)sp.GetRequiredService<IHostUpdateHealthVerifier>());
+        services.AddScoped<IHostUpdateSideEffectReconciler, HostUpdateSideEffectReconciler>();
     }
 
     private static HostUpdateImageApplier CreateImageApplier(IServiceProvider sp, HostUpdateExecutionOptions options)

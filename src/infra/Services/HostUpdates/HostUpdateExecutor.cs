@@ -118,7 +118,11 @@ public static class HostUpdateRequestFingerprint
     }
 }
 
-public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpdateExecutionJournal journal, IHostUpdateExecutionLock updateLock) : IHostUpdateExecutor
+public sealed class HostUpdateExecutor(
+    IHostUpdateExecutionSteps steps,
+    IHostUpdateExecutionJournal journal,
+    IHostUpdateExecutionLock updateLock,
+    IHostUpdateSideEffectReconciler? sideEffectReconciler = null) : IHostUpdateExecutor
 {
     private static readonly (HostUpdateExecutionState State, string Phase, bool SafeToCancelAndReplay)[] Plan =
     [(HostUpdateExecutionState.Preflight, "preflight", true), (HostUpdateExecutionState.Draining, "drain", true), (HostUpdateExecutionState.Fenced, "fence", true), (HostUpdateExecutionState.BackedUp, "backup", true), (HostUpdateExecutionState.Migrating, "migration", false), (HostUpdateExecutionState.Applying, "apply", false), (HostUpdateExecutionState.Verifying, "verify", true)];
@@ -155,7 +159,21 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
                 }
 
                 if (!safeToCancelAndReplay && activities.Any(a => a.State == state && string.Equals(a.Phase, phase + ":before", StringComparison.Ordinal)))
-                { string failure = "uncertain_side_effect:" + phase; Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities); }
+                {
+                    HostUpdateSideEffectReconciliation reconciliation = sideEffectReconciler is null
+                        ? HostUpdateSideEffectReconciliation.Uncertain("reconciler_unavailable")
+                        : await sideEffectReconciler.ReconcileAsync(phase, request, cancellationToken).ConfigureAwait(false);
+                    if (reconciliation.Reconciled)
+                    {
+                        Append(activities, request, state, phase + ":after");
+                        current = state;
+                        continue;
+                    }
+
+                    string failure = "uncertain_side_effect:" + phase + ":" + reconciliation.Detail;
+                    Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure);
+                    return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities);
+                }
                 if (safeToCancelAndReplay && cancellationToken.IsCancellationRequested)
                 {
                     return new(request.ReleaseId, current, "canceled", activities);
@@ -200,6 +218,56 @@ public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecut
     private sealed class Lease(FileStream stream) : IHostUpdateExecutionLease { public void Dispose() => stream.Dispose(); }
 }
 
+/// <summary>Outcome of proving whether a prior side effect already reached its target state.</summary>
+public sealed record HostUpdateSideEffectReconciliation(bool Reconciled, string Detail)
+{
+    public static HostUpdateSideEffectReconciliation Complete(string detail) => new(true, detail);
+
+    public static HostUpdateSideEffectReconciliation Uncertain(string detail) => new(false, detail);
+}
+
+/// <summary>Proves migration/apply side-effect completion after a crash before the after-marker was journaled.</summary>
+public interface IHostUpdateSideEffectReconciler
+{
+    Task<HostUpdateSideEffectReconciliation> ReconcileAsync(string phase, HostUpdateExecutionRequest request, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Reconciles unsafe side effects with operation-specific evidence: migrations are complete only
+/// when every context reports no pending migrations; apply is complete only when exact running
+/// digests match the immutable request. Anything else remains NeedsOperator.
+/// </summary>
+public sealed class HostUpdateSideEffectReconciler(
+    IHostUpdateMigrationReconciler migrationReconciler,
+    IHostUpdateDigestVerifier digestVerifier) : IHostUpdateSideEffectReconciler
+{
+    public async Task<HostUpdateSideEffectReconciliation> ReconcileAsync(string phase, HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (string.Equals(phase, "migration", StringComparison.Ordinal))
+        {
+            return await migrationReconciler.IsReconciledAsync(request, cancellationToken).ConfigureAwait(false)
+                ? HostUpdateSideEffectReconciliation.Complete("migration_state_matches")
+                : HostUpdateSideEffectReconciliation.Uncertain("migration_state_incomplete");
+        }
+
+        if (string.Equals(phase, "apply", StringComparison.Ordinal))
+        {
+            try
+            {
+                IReadOnlyDictionary<string, string> digests = request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal);
+                await digestVerifier.VerifyDigestsAsync(digests, cancellationToken).ConfigureAwait(false);
+                return HostUpdateSideEffectReconciliation.Complete("running_digests_match");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return HostUpdateSideEffectReconciliation.Uncertain("running_digests_unverified:" + exception.GetType().Name);
+            }
+        }
+
+        return HostUpdateSideEffectReconciliation.Uncertain("unsupported_phase");
+    }
+}
 public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExecutionJournal
 {
     private sealed record JournalRecord(string PreviousHash, string Payload, string Hash, HostUpdateExecutionActivity Activity);

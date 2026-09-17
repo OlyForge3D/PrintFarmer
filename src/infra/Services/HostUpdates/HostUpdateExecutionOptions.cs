@@ -85,21 +85,12 @@ public sealed class HostUpdateExecutionOptions
     public bool DatabaseExternallyOwned { get; set; }
 
     /// <summary>
-    /// Known production facilities that are still deliberately unavailable for #2663 closure.
-    /// Each entry makes <see cref="HostUpdateExecutionAvailabilityProvider"/> report
-    /// <c>facility_unavailable:{name}</c> until a future audited implementation removes it from
-    /// configuration. This keeps manual execution fail-closed instead of allowing a host with
-    /// documented gaps (for example bridge ingress or split slicer admission) to report ready.
+    /// Production facilities that must stay fail-closed when a deployment intentionally
+    /// disables them by configuration. The built-in executor no longer seeds known #2663
+    /// gaps here; availability is instead determined by concrete root, adapter, writer,
+    /// backup, runtime, health, and journal probes.
     /// </summary>
-    public string[] RequiredUnavailableFacilities { get; set; } =
-    [
-        "split-slicer-host-admission",
-        "bridge-webhook-ingress-fence",
-        "canonical-six-subsystem-health-matrix",
-        "migration-apply-side-effect-reconciliation",
-        "rollback-platform-digest-evidence",
-        "historical-recovery-status-api",
-    ];
+    public string[] RequiredUnavailableFacilities { get; set; } = [];
 
     /// <summary>
     /// Writer names (matching <see cref="IFenceableWriter.Name"/>) that must all be present in
@@ -116,6 +107,7 @@ public sealed class HostUpdateExecutionOptions
         "power-reading-prune",
         "queue-retention-prune",
         "auto-dispatch",
+        "webhook-delivery",
     ];
 
     /// <summary>

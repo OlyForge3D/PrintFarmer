@@ -52,6 +52,8 @@ public class HostUpdateExecutionAvailabilityTests
 
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult("Microsoft.EntityFrameworkCore.Sqlite");
 
+        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+
         public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) =>
             Task.FromResult(new DatabaseMigrationResult(false, []));
     }
@@ -148,7 +150,7 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
-    public async Task CheckAsync_DefaultUnavailableFacilities_ReportUnavailableUntilAuditedImplementationClearsThem()
+    public async Task CheckAsync_DefaultRequiredFencedWriters_ReportUnavailableWhenWriterCoverageMissing()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -159,7 +161,6 @@ public class HostUpdateExecutionAvailabilityTests
             {
                 RootDirectory = root,
                 ComposeFiles = [composeFile],
-                RequiredFencedWriterNames = [],
             };
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 options,
@@ -173,8 +174,9 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:bridge-webhook-ingress-fence");
-            result.Reasons.Should().Contain("facility_unavailable:split-slicer-host-admission");
+            result.Reasons.Should().NotContain(r => r.StartsWith("facility_unavailable:", StringComparison.Ordinal));
+            result.Reasons.Should().Contain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal)).Should().Contain("webhook-delivery");
         }
         finally
         {

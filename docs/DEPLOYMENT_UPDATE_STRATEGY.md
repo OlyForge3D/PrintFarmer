@@ -1,4 +1,4 @@
----
+﻿---
 post_title: "Deployment visibility and safe update strategy"
 author1: "Parker"
 post_slug: "deployment-update-strategy"
@@ -216,11 +216,7 @@ of it is wired through production DI (`HostUpdateExecutionStartup.AddHostUpdateE
 behind a manual, permission-gated admin API (`HostUpdateController`) with no automatic
 scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter table,
 the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
-contract a scheduler must poll before ever invoking the executor. Remaining gaps still
-hold availability closed by default through `RequiredUnavailableFacilities`: bridge/webhook
-ingress is not proven fenced, and migration/apply crash uncertainty is fail-closed rather
-than operation-specifically reconciled after a `:before` marker without the matching
-`:after` marker.
+contract a scheduler must poll before ever invoking the executor. The production executor keeps availability closed for explicit operator-configured `RequiredUnavailableFacilities`, but no longer seeds #2663 placeholders by default: bridge/webhook delivery is fenced, and migration/apply crash uncertainty is reconciled only from concrete provider/container evidence after a `:before` marker without the matching `:after` marker.
 On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
 durable journal for any release left mid-flight or in `RecoveryRequired`
 without a confirmed `RolledBack` outcome and immediately re-closes every

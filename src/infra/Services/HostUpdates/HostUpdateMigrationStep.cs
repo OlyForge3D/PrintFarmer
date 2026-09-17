@@ -11,7 +11,7 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// there is never a mixed old/new writer window across contexts.
 /// </summary>
 public sealed class HostUpdateMigrationCoordinator(IReadOnlyList<IHostUpdateMigrationTarget> targets)
-    : IHostUpdateMigrationCoordinator
+    : IHostUpdateMigrationCoordinator, IHostUpdateMigrationReconciler
 {
     public async Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
@@ -22,12 +22,33 @@ public sealed class HostUpdateMigrationCoordinator(IReadOnlyList<IHostUpdateMigr
             _ = await target.MigrateAsync(cancellationToken).ConfigureAwait(false);
         }
     }
+
+    public async Task<bool> IsReconciledAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        foreach (IHostUpdateMigrationTarget target in targets)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (await target.HasPendingMigrationsAsync(cancellationToken).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
 }
 
 /// <summary>Runs the migration step of the host update executor.</summary>
 public interface IHostUpdateMigrationCoordinator
 {
     Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
+}
+
+/// <summary>Proves whether a prior migration side effect already reached the requested target state.</summary>
+public interface IHostUpdateMigrationReconciler
+{
+    Task<bool> IsReconciledAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 }
 
 /// <summary>
@@ -60,6 +81,12 @@ public sealed class DbContextMigrationTarget<TContext>(
 
         string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(connectionString))).ToLowerInvariant();
         return Task.FromResult(fingerprint);
+    }
+
+    public async Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken)
+    {
+        TContext context = resolveContext();
+        return (await context.Database.GetPendingMigrationsAsync(cancellationToken).ConfigureAwait(false)).Any();
     }
 
     public async Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken)
