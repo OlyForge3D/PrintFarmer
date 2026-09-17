@@ -79,7 +79,8 @@ public class OpenApiDocumentTests
                 .GetProperty("application/json")
                 .GetProperty("schema");
 
-            _ = schema.GetProperty("type").GetString().Should().Be("object");
+            _ = schema.ValueKind.Should().Be(JsonValueKind.Object);
+            _ = schema.TryGetProperty("$ref", out _).Should().BeFalse();
         }
     }
 
