@@ -98,7 +98,7 @@ public static partial class SignedUpdateManifestValidator
         string expectedBranch = manifest.Channel == "stable" ? "main" : "development";
         if (manifest.SourceBranch != expectedBranch) errors.Add("source_branch_invalid");
         if (!LowerHex40().IsMatch(manifest.SourceCommit)) errors.Add("source_commit_invalid");
-        if (string.IsNullOrWhiteSpace(manifest.BuildId) || manifest.BuildId.Length > 128) errors.Add("build_id_invalid");
+        if (!PositiveDecimal().IsMatch(manifest.BuildId ?? string.Empty)) errors.Add("build_id_invalid");
         try
         {
             if (manifest.Sequence != DeriveSequence(manifest.Version)) errors.Add("sequence_mismatch");
@@ -331,6 +331,8 @@ public static partial class SignedUpdateManifestValidator
     private static partial Regex StableTag();
     [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-insider\.[1-9]\d*$", RegexOptions.CultureInvariant)]
     private static partial Regex InsiderTag();
+    [GeneratedRegex("^[1-9][0-9]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex PositiveDecimal();
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex LowerHex40();
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]

@@ -142,6 +142,29 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.True(manifest.ManagedUpdateEligible);
     }
 
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("12345678901234567890", true)]
+    [InlineData("abc", false)]
+    [InlineData("0", false)]
+    [InlineData("+1", false)]
+    [InlineData("-1", false)]
+    [InlineData(" 1", false)]
+    [InlineData("1 ", false)]
+    [InlineData("01", false)]
+    public void Validate_BuildId_MatchesProducerPositiveDecimalContract(string buildId, bool expectedValid)
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main") with { BuildId = buildId };
+
+        SignedUpdateValidationResult result = SignedUpdateManifestValidator.Validate(manifest);
+
+        Assert.Equal(expectedValid, result.IsValid);
+        if (!expectedValid)
+        {
+            Assert.Contains("build_id_invalid", result.Errors);
+        }
+    }
+
     [Fact]
     public void Validate_UnknownDuplicateAndMutableServices_Rejects()
     {
@@ -264,7 +287,7 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         byte[] firstBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
-        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "build-2" }, JsonOptions);
+        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "200" }, JsonOptions);
         VerifiedGitHubReleaseMetadataProvider firstProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(firstBytes)), new AcceptingVerifier()));
         VerifiedGitHubReleaseMetadataProvider secondProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(secondBytes)), new AcceptingVerifier()));
 
@@ -655,7 +678,7 @@ public sealed class SignedUpdateInfrastructureTests
         string digest = "sha256:" + new string('a', 64);
         string[] platforms = ["linux-amd64", "linux-arm64"];
         string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
-        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "build-1",
+        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "100",
             SignedUpdateManifestValidator.DeriveSequence(version), true,
             services.Select(id => new SignedUpdateService(
                 id,

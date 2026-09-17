@@ -5067,6 +5067,7 @@ export interface ServiceReplicaObservation {
 }
 
 export interface ServiceInventory {
+  hostUpdaterVersion: string | null;
   selectedChannel: string;
   selectionSource: string;
   collectedAt: string;

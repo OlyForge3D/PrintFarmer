@@ -82,6 +82,7 @@ public static partial class ReleaseReadinessEvaluator
                     || !Digest().IsMatch(target.PlatformDigest)
                     || !Digest().IsMatch(target.IndexDigest)
                     || !Digest().IsMatch(service.IndexDigest ?? string.Empty)
+                    || !string.Equals(service.PlatformDigest, target.PlatformDigest, StringComparison.Ordinal)
                     || !string.Equals(service.IndexDigest, target.IndexDigest, StringComparison.Ordinal))
                 {
                     return Result(InventoryEligibility.Blocked, [$"PlatformMismatchOrInvalidDigestEvidence:{service.ServiceId}"], hops);

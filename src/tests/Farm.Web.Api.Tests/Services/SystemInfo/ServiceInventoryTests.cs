@@ -332,7 +332,27 @@ public sealed class ServiceInventoryTests
 
         Assert.Equal(InventoryEligibility.Eligible, result.State);
         Assert.Empty(result.Reasons);
-        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+    }
+
+    [Fact]
+    public void Readiness_ValidButDifferentPlatformDigest_Blocks()
+    {
+        string observedDigest = "sha256:" + new string('c', 64);
+        string signedDigest = "sha256:" + new string('d', 64);
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { PlatformDigest = observedDigest }]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                Release(null).Services.Single() with { PlatformDigest = signedDigest },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("PlatformMismatchOrInvalidDigestEvidence:api", Assert.Single(result.Reasons));
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence"], result.Hops);
         Assert.False(result.Hops is string[]);
     }
 

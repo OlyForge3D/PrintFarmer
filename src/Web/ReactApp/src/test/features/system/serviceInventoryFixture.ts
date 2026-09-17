@@ -19,6 +19,7 @@ export function replica(overrides: Partial<ServiceReplicaObservation> = {}): Ser
 }
 export function inventory(overrides: Partial<ServiceInventory> = {}): ServiceInventory {
   return {
+    hostUpdaterVersion: '1.2.3',
     selectedChannel: 'stable', selectionSource: 'Default', collectedAt: '2026-09-12T12:00:00Z',
     observedChannel: null, targetChannel: null, channelState: 'Unknown', compatibilityState: 'Unknown',
     compatibilityReasons: ['IncompleteReleaseOrPlatformEvidence'], eligibility: 'NotManaged',
