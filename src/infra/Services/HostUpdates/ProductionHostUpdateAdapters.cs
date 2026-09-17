@@ -148,7 +148,8 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
                 digests["orcaslicer-worker"],
                 digests["monolith"]),
             EvidenceFresh: true,
-            VerifiedAt: verifiedAt);
+            VerifiedAt: verifiedAt,
+            HostPlatform: hostPlatform);
     }
 
     private static bool IsCommit(string value) => value.Length is >= 40 and <= 64 && value.All(Uri.IsHexDigit);
@@ -159,6 +160,7 @@ public static class HostUpdateSchedulingAvailability
     public const string ExecutorNotProvisionedReason = "automatic_scheduler_executor_not_provisioned";
     public const string ProtectedReplayAnchorReason = "protected_replay_anchor_unavailable";
     public const string PolicyMutationReason = "policy_mutation_facility_unavailable";
+    public const string AdmissionFenceReason = "host_update_recovery_unavailable";
 }
 
 /// <summary>Reports registered-but-unavailable automatic updates without starting a hosted loop.</summary>
@@ -173,8 +175,8 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
         HostUpdateAutomationPolicy policy = policyResult.Policy;
         string selectedChannel = policyResult.Available ? policy.Channel : UpdateChannelSettings.StableChannel;
         IReadOnlyList<string> reasons = policyResult.Available
-            ? [HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.PolicyMutationReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason]
-            : ["host_update_policy_unavailable", HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason];
+            ? [HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.PolicyMutationReason, HostUpdateSchedulingAvailability.AdmissionFenceReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason]
+            : ["host_update_policy_unavailable", HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.AdmissionFenceReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason];
         return new HostUpdateSchedulingStatusDto
         {
             ConfiguredEnabled = policy.Enabled,

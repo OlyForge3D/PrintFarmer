@@ -36,6 +36,7 @@ public enum HostUpdateSchedulerReason
     RecoveryRequired,
     HostShutdown,
     ReplayStoreUnavailable,
+    AdmissionFenceActive,
 }
 
 internal static class HostUpdateCanonical
@@ -133,7 +134,8 @@ public sealed record VerifiedHostUpdateCandidate(
     bool EvidenceFresh = true,
     string TrustRoot = "default",
     DateTimeOffset? VerifiedAt = null,
-    DateTimeOffset? ExpiresAt = null)
+    DateTimeOffset? ExpiresAt = null,
+    string HostPlatform = "")
 {
     public bool IsEligible => CryptographicallyVerified && CompatibilityReady && InstallationAvailable && MaintenanceWindowOpen && SafetyPassed && IsNewer &&
         !string.IsNullOrWhiteSpace(ReleaseId) && !string.IsNullOrWhiteSpace(SourceCommit) && Sequence >= 0 &&
@@ -660,11 +662,13 @@ public sealed class HostUpdateScheduler(
     IHostUpdateSchedulerExecutor executor,
     IHostUpdateClock clock,
     IHostUpdateJitter jitter,
-    ILogger<HostUpdateScheduler>? logger = null) : IDisposable
+    ILogger<HostUpdateScheduler>? logger = null,
+    IHostUpdateAdmissionFence? admissionFence = null) : IDisposable
 {
     private static readonly TimeSpan MaxJitter = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<HostUpdateScheduler> _logger = logger ?? NullLogger<HostUpdateScheduler>.Instance;
+    private readonly IHostUpdateAdmissionFence _admissionFence = admissionFence ?? new InactiveHostUpdateAdmissionFence();
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private HostUpdateSchedulerStatus _status = new(false, false, false, UpdateChannelSettings.StableChannel, 0, null, null, 0, HostUpdateSchedulerReason.Disabled);
     private string? _activeRequestId;
@@ -801,6 +805,12 @@ public sealed class HostUpdateScheduler(
             if (driftDetected)
             {
                 return Backoff(HostUpdateSchedulerReason.PolicyDrifted, candidate.Identity);
+            }
+
+            HostUpdateAdmissionFenceStatus admission = _admissionFence.GetStatus();
+            if (admission.BlocksAdmission)
+            {
+                return Backoff(HostUpdateSchedulerReason.AdmissionFenceActive, admission.OperationId ?? candidate.Identity);
             }
 
             HostUpdateExecutorRequest request = new(

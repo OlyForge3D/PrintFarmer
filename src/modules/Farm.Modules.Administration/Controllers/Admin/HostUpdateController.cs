@@ -5,61 +5,19 @@ using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Modules.Administration.Controllers.Admin;
 
-/// <summary>
-/// One immutable, fully specified execution request. The request body is bound once and never
-/// partially updated afterward; resubmitting the same <see cref="ReleaseId"/> resumes the same
-/// journal-tracked operation (idempotent-by-release, see <c>HostUpdateExecutor</c>).
-/// </summary>
-public sealed record HostUpdateExecuteRequestBody(
-    string ReleaseId,
-    long AuthenticatedSequence,
-    string ManifestDigest,
-    string SourceCommit,
-    string Channel,
-    IReadOnlyList<HostUpdateExecutionTarget> Targets)
-{
-    public bool TryToExecutionRequest(out HostUpdateExecutionRequest? request, out string error)
-    {
-        request = null;
-        error = string.Empty;
-        if (!Enum.TryParse(Channel, ignoreCase: true, out HostUpdateExecutionChannel channel))
-        {
-            error = "channel_invalid";
-            return false;
-        }
-
-        string hostPlatform = Targets is { Count: > 0 } && Targets.Select(target => target.Platform).Distinct(StringComparer.Ordinal).SingleOrDefault() is string platform
-            ? platform
-            : string.Empty;
-        var candidate = new HostUpdateExecutionRequest(ReleaseId, AuthenticatedSequence, ManifestDigest, SourceCommit, channel, Targets)
-        {
-            RequestId = "manual:" + ReleaseId,
-            TrustRoot = "manual-authorization",
-            PolicyRevision = 0,
-            PolicyFingerprint = "manual-authorization",
-            HostPlatform = hostPlatform,
-        };
-        if (!candidate.IsValid(out error))
-        {
-            return false;
-        }
-
-        request = candidate;
-        return true;
-    }
-}
-
 /// <summary>Operator-visible status for one release's execution/recovery history.</summary>
 public sealed record HostUpdateStatusResponse(
     string ReleaseId,
     HostUpdateExecutionState CurrentState,
     IReadOnlyList<HostUpdateExecutionActivity> Activities);
 
+public sealed record HostUpdateRecoveryRequestBody(string? RequestId = null);
+
 /// <summary>
-/// Manual-first admin API for the host update executor (#2663). This is the operator-initiated
-/// path only: it grants no standing automatic-scheduler permission, and every call is
-/// authorized as a fresh administrative action. Automatic scheduling on this same engine is
-/// #2666's later, separately authorized milestone.
+/// Manual-first admin API for the host update executor (#2663/#2666). The API accepts only
+/// operator intent/authorization references; immutable release identity, sequence, manifest,
+/// channel, trust root, platform, and execution target digests are resolved server-side from
+/// signed verified evidence and protected authorization state immediately before execution.
 /// </summary>
 [ApiController]
 [Route("api/admin/host-updates")]
@@ -67,13 +25,37 @@ public sealed record HostUpdateStatusResponse(
 [Tags("Admin - Host Updates")]
 public sealed class HostUpdateController(
     IHostUpdateExecutor executor,
+    IHostUpdateExecutionRequestResolver requestResolver,
     IHostUpdateExecutionJournal journal,
     IHostUpdateRecoveryCoordinator recoveryCoordinator) : ControllerBase
 {
+    [HttpPost("authorizations")]
+    [ProducesResponseType(typeof(HostUpdateManualAuthorizationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<HostUpdateManualAuthorizationResponse>> AuthorizeAsync(
+        [FromBody] HostUpdateManualAuthorizationIntent? intent,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            HostUpdateManualAuthorizationResponse response = await requestResolver.AuthorizeCurrentAsync(
+                intent ?? new HostUpdateManualAuthorizationIntent(),
+                cancellationToken).ConfigureAwait(false);
+            return Ok(response);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { code = ex.Message });
+        }
+    }
+
     /// <summary>
-    /// Executes (or resumes) one manually approved host update to completion or
-    /// <see cref="HostUpdateExecutionState.RecoveryRequired"/>. Never enables unattended
-    /// automatic scheduling; this call must be made explicitly by an authorized operator.
+    /// Executes one manually approved host update. The body may reference an existing one-time
+    /// authorization ID or be empty to atomically authorize the current verified candidate once;
+    /// it never carries target release material supplied by the client.
     /// </summary>
     [HttpPost("execute")]
     [ProducesResponseType(typeof(HostUpdateStatusResponse), StatusCodes.Status200OK)]
@@ -82,17 +64,18 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<HostUpdateStatusResponse>> ExecuteAsync(
-        [FromBody] HostUpdateExecuteRequestBody body,
+        [FromBody] HostUpdateManualAuthorizationIntent? intent,
         CancellationToken cancellationToken)
     {
-        HostUpdateExecutionRequest? request;
-        string error = string.Empty;
-        if (body is null || !body.TryToExecutionRequest(out request, out error))
+        HostUpdateExecutionResolutionResult resolution = await requestResolver.ResolveManualAsync(
+            intent ?? new HostUpdateManualAuthorizationIntent(),
+            cancellationToken).ConfigureAwait(false);
+        if (!resolution.Succeeded || resolution.Request is null)
         {
-            return BadRequest(new { code = string.IsNullOrEmpty(error) ? "request_invalid" : error });
+            return Conflict(new { code = resolution.Error ?? "request_not_authorized" });
         }
 
-        HostUpdateExecutionResult result = await executor.ExecuteAsync(request!, cancellationToken).ConfigureAwait(false);
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(resolution.Request, cancellationToken).ConfigureAwait(false);
         var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities);
         return result.State == HostUpdateExecutionState.RecoveryRequired ? Conflict(response) : Ok(response);
     }
@@ -116,8 +99,9 @@ public sealed class HostUpdateController(
     }
 
     /// <summary>
-    /// Attempts recovery for a release currently left in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.
-    /// Only ever performed explicitly by an authorized operator; never triggered automatically.
+    /// Attempts recovery for a release currently left in recovery. Recovery accepts only the
+    /// route release identity and optional request ID, then reconstructs the exact immutable
+    /// request from the durable execution journal before invoking coordinator side effects.
     /// </summary>
     [HttpPost("{releaseId}/recover")]
     [ProducesResponseType(typeof(HostUpdateRecoveryResult), StatusCodes.Status200OK)]
@@ -127,7 +111,7 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<HostUpdateRecoveryResult>> RecoverAsync(
         string releaseId,
-        [FromBody] HostUpdateExecuteRequestBody body,
+        [FromBody] HostUpdateRecoveryRequestBody? body,
         CancellationToken cancellationToken)
     {
         IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
@@ -141,18 +125,6 @@ public sealed class HostUpdateController(
             return Conflict(new { code = "not_in_recovery" });
         }
 
-        HostUpdateExecutionRequest? request;
-        string error = string.Empty;
-        if (body is null || !body.TryToExecutionRequest(out request, out error))
-        {
-            return BadRequest(new { code = string.IsNullOrEmpty(error) ? "request_invalid" : error });
-        }
-
-        if (!string.Equals(releaseId, request!.ReleaseId, StringComparison.Ordinal))
-        {
-            return Conflict(new { code = "recovery_binding_mismatch" });
-        }
-
         HostUpdateExecutionRequest[] journalRequests = activities.Select(activity => activity.RequestBinding)
             .Where(binding => binding is not null)
             .Select(binding => binding!)
@@ -163,17 +135,22 @@ public sealed class HostUpdateController(
             .Distinct(StringComparer.Ordinal)
             .ToArray();
         if (journalRequests.Length != activities.Count || journalBindings.Length != 1 ||
-            journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), journalBindings[0], StringComparison.Ordinal)) ||
-            !string.Equals(journalBindings[0], HostUpdateRequestBinding.Compute(request), StringComparison.Ordinal))
+            journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), journalBindings[0], StringComparison.Ordinal)))
         {
             string code = journalRequests.Length == 0 || journalBindings.Length == 0 ? "recovery_binding_missing" : "recovery_binding_mismatch";
             return Conflict(new { code });
         }
 
         HostUpdateExecutionRequest failedRequest = journalRequests[0];
-        if (journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), HostUpdateRequestBinding.Compute(failedRequest), StringComparison.Ordinal)))
+        string failedHash = HostUpdateRequestBinding.Compute(failedRequest);
+        if (journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), failedHash, StringComparison.Ordinal)))
         {
             return Conflict(new { code = "recovery_binding_mixed" });
+        }
+
+        if (!string.IsNullOrWhiteSpace(body?.RequestId) && !string.Equals(body.RequestId, failedRequest.RequestId, StringComparison.Ordinal))
+        {
+            return Conflict(new { code = "recovery_request_mismatch" });
         }
 
         HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);

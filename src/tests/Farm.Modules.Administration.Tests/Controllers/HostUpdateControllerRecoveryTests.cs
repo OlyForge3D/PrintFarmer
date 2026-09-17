@@ -16,20 +16,37 @@ public sealed class HostUpdateControllerRecoveryTests
     [InlineData("sequence")]
     [InlineData("policy-revision")]
     [InlineData("policy-fingerprint")]
-    public async Task Recovery_rejects_every_immutable_binding_mismatch_before_side_effects(string mutation)
+    public async Task Recovery_rejects_journal_binding_hash_mismatch_before_side_effects(string mutation)
     {
-        HostUpdateExecuteRequestBody body = Body();
-        Assert.True(body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out _));
-        HostUpdateExecutionRequest changed = Mutate(request!, mutation);
-        MemoryJournal journal = new(new HostUpdateExecutionActivity("failure", request!.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
+        HostUpdateExecutionRequest request = Request();
+        HostUpdateExecutionRequest changed = Mutate(request, mutation);
+        MemoryJournal journal = new(new HostUpdateExecutionActivity("failure", request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
         {
             RequestBindingHash = HostUpdateRequestBinding.Compute(changed),
-            RequestBinding = changed,
+            RequestBinding = request,
         });
         RecordingRecovery recovery = new();
-        HostUpdateController controller = new(new NoopExecutor(), journal, recovery);
+        HostUpdateController controller = new(new NoopExecutor(), new NoopResolver(), journal, recovery);
 
-        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, body, default);
+        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, null, default);
+
+        Assert.IsType<ConflictObjectResult>(result.Result);
+        Assert.Equal(0, recovery.Calls);
+    }
+
+    [Fact]
+    public async Task Recovery_rejects_fresh_request_id_mismatch_before_side_effects()
+    {
+        HostUpdateExecutionRequest request = Request();
+        MemoryJournal journal = new(new HostUpdateExecutionActivity("failure", request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
+        {
+            RequestBindingHash = HostUpdateRequestBinding.Compute(request),
+            RequestBinding = request,
+        });
+        RecordingRecovery recovery = new();
+        HostUpdateController controller = new(new NoopExecutor(), new NoopResolver(), journal, recovery);
+
+        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, new HostUpdateRecoveryRequestBody("other-request"), default);
 
         Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.Equal(0, recovery.Calls);
@@ -38,43 +55,49 @@ public sealed class HostUpdateControllerRecoveryTests
     [Fact]
     public async Task Recovery_rejects_missing_or_mixed_binding_before_side_effects()
     {
-        HostUpdateExecuteRequestBody body = Body();
-        Assert.True(body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out _));
-        HostUpdateExecutionActivity missing = new("missing", request!.ReleaseId, HostUpdateExecutionState.Applying, "apply:before", DateTimeOffset.UtcNow);
+        HostUpdateExecutionRequest request = Request();
+        HostUpdateExecutionActivity missing = new("missing", request.ReleaseId, HostUpdateExecutionState.Applying, "apply:before", DateTimeOffset.UtcNow);
         HostUpdateExecutionActivity bound = new("failure", request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
         {
             RequestBindingHash = HostUpdateRequestBinding.Compute(request),
             RequestBinding = request,
         };
         RecordingRecovery recovery = new();
-        HostUpdateController controller = new(new NoopExecutor(), new MemoryJournal(missing, bound), recovery);
+        HostUpdateController controller = new(new NoopExecutor(), new NoopResolver(), new MemoryJournal(missing, bound), recovery);
 
-        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, body, default);
+        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, null, default);
 
         Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.Equal(0, recovery.Calls);
     }
 
     [Fact]
-    public async Task Recovery_accepts_exact_shared_binding_only_then_invokes_coordinator()
+    public async Task Recovery_accepts_exact_shared_journal_binding_only_then_invokes_coordinator()
     {
-        HostUpdateExecuteRequestBody body = Body();
-        Assert.True(body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out _));
-        MemoryJournal journal = new(new HostUpdateExecutionActivity("failure", request!.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
+        HostUpdateExecutionRequest request = Request();
+        MemoryJournal journal = new(new HostUpdateExecutionActivity("failure", request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
         {
             RequestBindingHash = HostUpdateRequestBinding.Compute(request),
             RequestBinding = request,
         });
         RecordingRecovery recovery = new();
-        HostUpdateController controller = new(new NoopExecutor(), journal, recovery);
+        HostUpdateController controller = new(new NoopExecutor(), new NoopResolver(), journal, recovery);
 
-        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, body, default);
+        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, new HostUpdateRecoveryRequestBody(request.RequestId), default);
 
         Assert.IsType<OkObjectResult>(result.Result);
         Assert.Equal(1, recovery.Calls);
     }
 
-    private static HostUpdateExecuteRequestBody Body() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), "stable", Targets());
+    private static HostUpdateExecutionRequest Request() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, Targets())
+    {
+        RequestId = "request-1",
+        TrustRoot = "trust-root",
+        PolicyRevision = 1,
+        PolicyFingerprint = "policy",
+        HostPlatform = "linux-amd64",
+        AuthorizationKind = HostUpdateAuthorizationKind.Manual,
+    };
 
     private static HostUpdateExecutionRequest Mutate(HostUpdateExecutionRequest request, string mutation) => mutation switch
     {
@@ -118,5 +141,11 @@ public sealed class HostUpdateControllerRecoveryTests
     private sealed class NoopExecutor : IHostUpdateExecutor
     {
         public Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default) => throw new NotSupportedException();
+    }
+
+    private sealed class NoopResolver : IHostUpdateExecutionRequestResolver
+    {
+        public Task<HostUpdateManualAuthorizationResponse> AuthorizeCurrentAsync(HostUpdateManualAuthorizationIntent intent, CancellationToken ct) => throw new NotSupportedException();
+        public Task<HostUpdateExecutionResolutionResult> ResolveManualAsync(HostUpdateManualAuthorizationIntent intent, CancellationToken ct) => throw new NotSupportedException();
     }
 }

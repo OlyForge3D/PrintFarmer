@@ -52,6 +52,8 @@ public sealed record HostUpdateExecutionRequest(string ReleaseId, long Authentic
 
     public string HostPlatform { get; init; } = string.Empty;
 
+    public HostUpdateAuthorizationKind AuthorizationKind { get; init; } = HostUpdateAuthorizationKind.StandingPolicy;
+
     public bool IsValid(out string error)
     {
         error = string.Empty;
@@ -252,6 +254,54 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
     }
 }
 
+
+public static class HostUpdateExecutionRequestBuilder
+{
+    private static readonly string[] ServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
+
+    public static HostUpdateExecutionRequest FromExecutorRequest(
+        HostUpdateExecutorRequest request,
+        string hostPlatform,
+        HostUpdateAuthorizationKind authorizationKind)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
+
+        HostUpdateExecutionChannel channel = request.Channel switch
+        {
+            "stable" => HostUpdateExecutionChannel.Stable,
+            "insider" => HostUpdateExecutionChannel.Insider,
+            _ => throw new ArgumentException("channel_invalid", nameof(request)),
+        };
+
+        return new HostUpdateExecutionRequest(
+            request.ReleaseId,
+            request.Sequence,
+            request.ManifestDigest,
+            request.SourceCommit,
+            channel,
+            CreateTargets(request.PlatformDigests, hostPlatform))
+        {
+            RequestId = request.RequestId,
+            TrustRoot = request.TrustRoot,
+            PolicyRevision = request.PolicyRevision,
+            PolicyFingerprint = request.PolicyFingerprint,
+            HostPlatform = hostPlatform,
+            AuthorizationKind = authorizationKind,
+        };
+    }
+
+    private static List<HostUpdateExecutionTarget> CreateTargets(HostUpdatePlatformDigests digests, string hostPlatform) =>
+    [
+        new(ServiceIds[0], hostPlatform, digests.Api),
+        new(ServiceIds[1], hostPlatform, digests.Frontend),
+        new(ServiceIds[2], hostPlatform, digests.SlicerHost),
+        new(ServiceIds[3], hostPlatform, digests.PrinterDiscovery),
+        new(ServiceIds[4], hostPlatform, digests.OrcaslicerWorker),
+        new(ServiceIds[5], hostPlatform, digests.Monolith),
+    ];
+}
+
 public static class HostUpdateRequestBinding
 {
     public static string Compute(HostUpdateExecutionRequest request)
@@ -269,6 +319,7 @@ public static class HostUpdateRequestBinding
             request.ManifestDigest,
             request.SourceCommit,
             request.HostPlatform,
+            request.AuthorizationKind,
             Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
         });
     }

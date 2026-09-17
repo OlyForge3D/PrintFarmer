@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -11,7 +11,6 @@ public sealed class DallasHostUpdateSchedulerExecutor(
     IHostUpdateExecutor executor,
     string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable
 {
-    private static readonly string[] ServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeRequests = new(StringComparer.Ordinal);
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
@@ -19,30 +18,18 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
 
-        HostUpdateExecutionChannel channel;
+        HostUpdateExecutionRequest executionRequest;
         try
         {
-            channel = ParseChannel(request.Channel);
+            executionRequest = HostUpdateExecutionRequestBuilder.FromExecutorRequest(
+                request,
+                hostPlatform,
+                HostUpdateAuthorizationKind.StandingPolicy);
         }
         catch (ArgumentException exception)
         {
             return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, exception.Message);
         }
-
-        HostUpdateExecutionRequest executionRequest = new(
-            request.ReleaseId,
-            request.Sequence,
-            request.ManifestDigest,
-            request.SourceCommit,
-            channel,
-            CreateTargets(request.PlatformDigests))
-        {
-            RequestId = request.RequestId,
-            TrustRoot = request.TrustRoot,
-            PolicyRevision = request.PolicyRevision,
-            PolicyFingerprint = request.PolicyFingerprint,
-            HostPlatform = hostPlatform,
-        };
 
         if (!executionRequest.IsValid(out string validationError))
         {
@@ -103,21 +90,4 @@ public sealed class DallasHostUpdateSchedulerExecutor(
 
         _activeRequests.Clear();
     }
-
-    private static HostUpdateExecutionChannel ParseChannel(string channel) => channel switch
-    {
-        "stable" => HostUpdateExecutionChannel.Stable,
-        "insider" => HostUpdateExecutionChannel.Insider,
-        _ => throw new ArgumentException("channel_invalid", nameof(channel)),
-    };
-
-    private List<HostUpdateExecutionTarget> CreateTargets(HostUpdatePlatformDigests digests) =>
-    [
-        new(ServiceIds[0], hostPlatform, digests.Api),
-        new(ServiceIds[1], hostPlatform, digests.Frontend),
-        new(ServiceIds[2], hostPlatform, digests.SlicerHost),
-        new(ServiceIds[3], hostPlatform, digests.PrinterDiscovery),
-        new(ServiceIds[4], hostPlatform, digests.OrcaslicerWorker),
-        new(ServiceIds[5], hostPlatform, digests.Monolith),
-    ];
 }

@@ -27,9 +27,37 @@ New releases deliberately do not provide the old signed managed-update set.
 false. Build metadata does not fabricate allocation/sequence authority. The
 existing inventory evaluator and host-update signature, authorization,
 active-print and runtime safety contracts remain unchanged; an incompatible or
-missing signed feed must not be advertised as ready. There is no production
-GitHub metadata-provider adapter in the current host-updater foundation.
-Future updater work is separate and must not silently trust publication alone.
+missing signed feed must not be advertised as ready. The production GitHub
+metadata-provider/discovery adapter is read-only evidence input; it does not
+make automatic scheduling or installation effective without the separate
+protected admission, readiness and executor gates described below.
+
+### Active host-update scheduler and execution policy (#2666, 2026-09-17)
+
+The active baseline remains **default off**. `configuredEnabled` means an
+administrator saved policy intent; it is not the same as `effectiveEnabled`.
+Effective automatic execution is true only when concrete verified release
+discovery, protected replay/high-water state, policy-fence state, readiness and
+compatibility adapters, an admission fence, and a constrained executor are all
+provisioned. Channel selection alone authorizes neither checks nor installation,
+and insider still requires explicit acknowledgement before it can become
+effective. A generic socket, Docker, container-control, or host-command proxy is
+not an acceptable substitute for those typed adapters.
+
+The current admin Update Now path is a one-time operator authorization path,
+not standing automatic policy. The API accepts only an authorization/operation
+intent plus optional expected policy revision/fingerprint. Release identity,
+sequence, source commit, channel, manifest digest, host platform, trust root,
+and the six execution target digests are resolved server-side immediately before
+admission from the current signed verified evidence cache, manifest binding
+store, replay/high-water decision, selected policy, protected authorization
+record, and admission fence. Stale cache state, last-known-good evidence with a
+current discovery error, channel mismatch, policy drift, replay rejection,
+expired or consumed authorization, rebound release/digest/target evidence, and
+active host-update admission fences fail closed. Recovery accepts only the route
+release identity and optional request ID, then reconstructs the exact immutable
+request from the durable execution journal after validating the journal binding
+hash.
 
 ### Read-only inventory and installation readiness
 

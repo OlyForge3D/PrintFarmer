@@ -180,6 +180,26 @@ public sealed class HostUpdateSchedulerTests
     }
 
     [Fact]
+    public async Task TickAsync_AdmissionFenceActive_BlocksUpdateBeforeExecutor()
+    {
+        FakeExecutor executor = new();
+        HostUpdateScheduler scheduler = new(
+            new Settings(new HostUpdateSchedulerSettings(true)),
+            new Cache(Candidate()),
+            new MemoryReplayStore(),
+            new AlwaysAdvancePolicyFence(),
+            executor,
+            new FixedClock(),
+            new ZeroHostUpdateJitter(),
+            admissionFence: new FixedAdmissionFence(new(true, "host_update_operation_active", "operation-1")));
+
+        HostUpdateSchedulerStatus status = await scheduler.TickAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.AdmissionFenceActive, status.Reason);
+        Assert.Empty(executor.Requests);
+    }
+
+    [Fact]
     public async Task TickAsync_KillSwitchFlippedAfterReplayDecision_BlocksAdmissionBeforeExecutor()
     {
         FakeExecutor executor = new();
@@ -588,6 +608,8 @@ public sealed class HostUpdateSchedulerTests
     private sealed class FixedJitter(TimeSpan value) : IHostUpdateJitter { public TimeSpan For(string identity, int attempt) => value; }
 
     private sealed class AlwaysAdvancePolicyFence : IHostUpdatePolicyFence { public Task<bool> TryAdvanceAsync(long revision, string fingerprint, CancellationToken ct) => Task.FromResult(true); }
+
+    private sealed class FixedAdmissionFence(HostUpdateAdmissionFenceStatus status) : IHostUpdateAdmissionFence { public HostUpdateAdmissionFenceStatus GetStatus() => status; }
 
     private sealed class InMemoryReplayAnchor : IHostUpdateReplayAnchor
     {
