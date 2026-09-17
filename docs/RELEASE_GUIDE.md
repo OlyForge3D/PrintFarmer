@@ -104,9 +104,11 @@ short-lived token **after** the long build. Only the publication job requests
 `id-token: write`, and the official Cosign installer is pinned to `v3.9.2`
 while the binary is pinned to `v3.0.6`.
 Cosign verification requires issuer
-`https://token.actions.githubusercontent.com` and the exact workflow identity:
-`refs/heads/main` for stable and `refs/heads/development` for insider. The
-workflow also checks `GITHUB_WORKFLOW_REF` against that channel-specific ref, so no
+`https://token.actions.githubusercontent.com` and the exact development workflow
+identity
+`https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
+for both channels. The workflow also checks `GITHUB_WORKFLOW_REF` against that
+actual dispatch ref, so no
 other workflow, repository, branch, or fork identity is accepted.
 Existing `RELEASE_PUBLISHER_APP_ID`,
 `RELEASE_PUBLISHER_PRIVATE_KEY`, `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN`

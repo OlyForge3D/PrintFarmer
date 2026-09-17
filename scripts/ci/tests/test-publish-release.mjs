@@ -327,7 +327,7 @@ function publishFixture(t, channel = 'insider') {
     throw new Error(`Unexpected endpoint ${endpoint}`);
   };
   const deps = { run: (name, args) => calls.push({ command: name, args }),
-    verify: () => calls.push({ verify: true }), rejectImages: () => calls.push({ rejectImages: true }),
+    verify: () => { calls.push({ verify: true }); return imageDetails; }, rejectImages: () => calls.push({ rejectImages: true }),
     tagImages: () => calls.push({ tagImages: true }) };
   return { assets, chosen, files, calls, api, deps };
 }
@@ -447,7 +447,7 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.match(active, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
   assert.match(active, /--certificate-identity "\$EXPECTED_IDENTITY"/);
   assert.match(active, /update-manifest\.sigstore\.json/);
-  assert.match(active, /inputs\.channel == 'stable' && 'refs\/heads\/main' \|\| 'refs\/heads\/development'/);
+  assert.match(active, /EXPECTED_IDENTITY: https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/consolidated-release\.yml@refs\/heads\/development/);
   assert.doesNotMatch(active, /--certificate-oidc-issuer\s+\S+\s+\S+\*/);
   assert.doesNotMatch(active, /RELEASE_LEDGER|release-authorization|release-transaction|reservation_target/);
 });
