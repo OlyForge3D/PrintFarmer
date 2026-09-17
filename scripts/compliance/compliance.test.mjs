@@ -814,11 +814,12 @@ test('reviewed documentation cannot hide a usable private key with the same allo
     await execFileAsync('tar', ['-czf', archivePath, '-C', root, path.basename(payloadDirectory)]);
     await assert.rejects(
       scanSourceArchive(archivePath, publication.secretPatterns, exceptions),
-      /PUBLICATION_SECRET/,
+      /\[PUBLICATION_SECRET\]/,
     );
     const errors = await scanPublicationFiles(
       payloadDirectory, [relativePath], publication.secretPatterns, exceptions,
     );
+    assert.ok(hasCode(errors, 'PUBLICATION_SECRET'));
     assert.ok(hasCode(errors, 'PUBLICATION_SECRET_EXCEPTION_STALE'));
   } finally {
     await rm(root, { force: true, recursive: true });
