@@ -347,6 +347,12 @@ settings API) for any channel value other than `stable`/`insider`, and for selec
 without `insiderAcknowledged: true`. This setting only changes what the discovery/readiness path
 evaluates — it never stages, downloads, applies, or triggers an update by itself.
 
+Both the channel selection and accepted same-version manifest bindings use the existing generic
+application-settings database, so they survive an ordinary process restart. That persistence is
+not protected anti-replay continuity: restoring an older database or replaying older settings
+storage can also restore older bindings and acknowledgement state. Issues #2666 and #2663 own
+protected continuity across storage rollback; this feature does not claim that protection.
+
 Related operational bounds for the discovery path itself (GitHub polling interval, HTTP
 timeouts, Cosign verification) live in `HostUpdates:VerifiedReleaseDiscovery` app configuration,
 validated at startup by `VerifiedReleaseDiscoveryOptionsValidator` (not a persisted setting —

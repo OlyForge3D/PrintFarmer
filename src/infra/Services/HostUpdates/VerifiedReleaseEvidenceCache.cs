@@ -15,12 +15,11 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// <para>
 /// A discovery failure (network error, verification failure, missing/invalid manifest) records
 /// <see cref="LastError"/> via <see cref="SetError"/> but deliberately leaves the previously
-/// cached <see cref="Current"/>/<see cref="LastVerifiedAt"/> untouched — a transient discovery
-/// failure must not regress readiness evaluation back to "no evidence" (which
-/// <c>ReleaseReadinessEvaluator</c> treats as <c>NotManaged</c>) when a perfectly good previous
-/// verification is still the best available evidence. This is retaining safe previous state,
-/// not a success-shaped fallback: <see cref="LastError"/> remains visible/logged until the next
-/// successful discovery clears it.
+/// cached <see cref="Current"/>/<see cref="LastVerifiedAt"/> untouched so diagnostics retain the
+/// last independently verified target. Readiness does not treat that retained target as
+/// indefinitely eligible: <c>SystemInfoService</c> emits a non-success state whenever discovery
+/// is disabled, the latest round failed, or verification is older than twice the configured
+/// polling interval. <see cref="LastError"/> remains visible until the next successful discovery.
 /// </para>
 /// </summary>
 public interface IVerifiedReleaseEvidenceCache

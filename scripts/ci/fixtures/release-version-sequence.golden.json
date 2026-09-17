@@ -1,0 +1,285 @@
+{
+  "$schema": "./release-version-sequence.schema.json",
+  "schemaVersion": 1,
+  "contract": {
+    "versionSyntax": "MAJOR.MINOR.PATCH[-insider.SEQUENCE]",
+    "componentType": "unsigned decimal integer without leading zeroes",
+    "manifestSequenceJsonType": "integer",
+    "implementationType": "signed 64-bit integer",
+    "formula": "(((major * 1000) + minor) * 100000 + patch) * 100000 + suffix",
+    "radices": {
+      "minor": 1000,
+      "patch": 100000,
+      "suffix": 100000
+    },
+    "limits": {
+      "major": 99,
+      "minor": 999,
+      "patch": 99999,
+      "insiderSequence": 99998,
+      "stableSuffix": 99999
+    }
+  },
+  "validCases": [
+    {
+      "name": "minimum insider",
+      "version": "0.0.0-insider.1",
+      "parsed": {
+        "major": 0,
+        "minor": 0,
+        "patch": 0,
+        "kind": "insider",
+        "suffix": 1
+      },
+      "expectedSequence": "1"
+    },
+    {
+      "name": "minimum stable",
+      "version": "0.0.0",
+      "parsed": {
+        "major": 0,
+        "minor": 0,
+        "patch": 0,
+        "kind": "stable",
+        "suffix": 99999
+      },
+      "expectedSequence": "99999"
+    },
+    {
+      "name": "ordinary insider",
+      "version": "0.2.3-insider.1",
+      "parsed": {
+        "major": 0,
+        "minor": 2,
+        "patch": 3,
+        "kind": "insider",
+        "suffix": 1
+      },
+      "expectedSequence": "20000300001"
+    },
+    {
+      "name": "ordinary stable",
+      "version": "0.2.3",
+      "parsed": {
+        "major": 0,
+        "minor": 2,
+        "patch": 3,
+        "kind": "stable",
+        "suffix": 99999
+      },
+      "expectedSequence": "20000399999"
+    },
+    {
+      "name": "maximum insider suffix",
+      "version": "0.2.3-insider.99998",
+      "parsed": {
+        "major": 0,
+        "minor": 2,
+        "patch": 3,
+        "kind": "insider",
+        "suffix": 99998
+      },
+      "expectedSequence": "20000399998"
+    },
+    {
+      "name": "historical patch collision left",
+      "version": "0.1.1000",
+      "parsed": {
+        "major": 0,
+        "minor": 1,
+        "patch": 1000,
+        "kind": "stable",
+        "suffix": 99999
+      },
+      "expectedSequence": "10100099999"
+    },
+    {
+      "name": "historical patch collision right",
+      "version": "0.2.0",
+      "parsed": {
+        "major": 0,
+        "minor": 2,
+        "patch": 0,
+        "kind": "stable",
+        "suffix": 99999
+      },
+      "expectedSequence": "20000099999"
+    },
+    {
+      "name": "historical suffix collision left",
+      "version": "0.2.3-insider.1000",
+      "parsed": {
+        "major": 0,
+        "minor": 2,
+        "patch": 3,
+        "kind": "insider",
+        "suffix": 1000
+      },
+      "expectedSequence": "20000301000"
+    },
+    {
+      "name": "historical suffix collision right",
+      "version": "0.2.4",
+      "parsed": {
+        "major": 0,
+        "minor": 2,
+        "patch": 4,
+        "kind": "stable",
+        "suffix": 99999
+      },
+      "expectedSequence": "20000499999"
+    },
+    {
+      "name": "maximum insider",
+      "version": "99.999.99999-insider.99998",
+      "parsed": {
+        "major": 99,
+        "minor": 999,
+        "patch": 99999,
+        "kind": "insider",
+        "suffix": 99998
+      },
+      "expectedSequence": "999999999999998"
+    },
+    {
+      "name": "maximum stable",
+      "version": "99.999.99999",
+      "parsed": {
+        "major": 99,
+        "minor": 999,
+        "patch": 99999,
+        "kind": "stable",
+        "suffix": 99999
+      },
+      "expectedSequence": "999999999999999"
+    }
+  ],
+  "invalidCases": [
+    {
+      "name": "empty",
+      "version": "",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "missing patch",
+      "version": "1.2",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "extra component",
+      "version": "1.2.3.4",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "stable metadata",
+      "version": "1.2.3+build.4",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "unsupported beta",
+      "version": "1.2.3-beta.1",
+      "errorContains": "stable or insider"
+    },
+    {
+      "name": "unsupported release candidate",
+      "version": "1.2.3-rc.1",
+      "errorContains": "stable or insider"
+    },
+    {
+      "name": "leading zero major",
+      "version": "01.2.3",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "leading zero minor",
+      "version": "1.02.3",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "leading zero patch",
+      "version": "1.2.03",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "zero insider suffix",
+      "version": "1.2.3-insider.0",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "leading zero insider suffix",
+      "version": "1.2.3-insider.01",
+      "errorContains": "without leading zeros"
+    },
+    {
+      "name": "major above maximum",
+      "version": "100.0.0",
+      "errorContains": "Major version exceeds"
+    },
+    {
+      "name": "minor above maximum",
+      "version": "0.1000.0",
+      "errorContains": "Minor version exceeds"
+    },
+    {
+      "name": "patch above maximum",
+      "version": "0.0.100000",
+      "errorContains": "Patch version exceeds"
+    },
+    {
+      "name": "insider suffix above maximum",
+      "version": "0.0.0-insider.99999",
+      "errorContains": "Prerelease sequence exceeds"
+    }
+  ],
+  "ordering": [
+    {
+      "name": "insider sequence increments",
+      "lower": "0.2.3-insider.1",
+      "higher": "0.2.3-insider.2"
+    },
+    {
+      "name": "maximum insider remains below stable",
+      "lower": "0.2.3-insider.99998",
+      "higher": "0.2.3"
+    },
+    {
+      "name": "patch increments across historical collision",
+      "lower": "0.1.1000",
+      "higher": "0.2.0"
+    },
+    {
+      "name": "suffix rollover remains below next patch",
+      "lower": "0.2.3-insider.1000",
+      "higher": "0.2.4-insider.1"
+    },
+    {
+      "name": "maximum insider remains below maximum stable",
+      "lower": "99.999.99999-insider.99998",
+      "higher": "99.999.99999"
+    }
+  ],
+  "distinctGroups": [
+    {
+      "name": "historical weighted-decimal patch collision",
+      "versions": [
+        "0.1.1000",
+        "0.2.0"
+      ]
+    },
+    {
+      "name": "historical weighted-decimal suffix collision",
+      "versions": [
+        "0.2.3-insider.1000",
+        "0.2.4"
+      ]
+    },
+    {
+      "name": "stable and insider identities",
+      "versions": [
+        "0.2.3-insider.1",
+        "0.2.3-insider.99998",
+        "0.2.3"
+      ]
+    }
+  ]
+}

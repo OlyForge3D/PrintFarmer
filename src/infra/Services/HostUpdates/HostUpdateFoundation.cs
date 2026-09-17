@@ -307,7 +307,7 @@ public sealed class HostUpdateFoundation(
             ComponentPlatformDigests = installation.RequiredComponents is null
                 ? new Dictionary<string, string>()
                 : installation.RequiredComponents
-                    .Select(component => $"{component}/{installation.Platform}")
+                    .Select(component => SignedUpdateManifestValidator.PlatformKey(component, installation.Platform))
                     .Where(key => metadata.ComponentPlatformDigests?.ContainsKey(key) == true)
                     .ToDictionary(key => key, key => metadata.ComponentPlatformDigests![key], StringComparer.Ordinal),
         };
@@ -443,10 +443,13 @@ public enum HostUpdateAuthorizationKind { Manual, StandingPolicy }
 
 /// <summary>Contains immutable signed release identity, component bytes, and updater compatibility.</summary>
 public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool SignatureVerified, CanonicalReleaseIdentity Identity,
-    IReadOnlyDictionary<string, string> ComponentPlatformDigests, string MinimumUpdaterVersion)
+    IReadOnlyDictionary<string, string> ComponentPlatformDigests, string MinimumUpdaterVersion,
+    IReadOnlyDictionary<string, string>? ComponentIndexDigests = null,
+    IReadOnlyDictionary<string, IReadOnlyList<string>>? ComponentPlatforms = null)
 {
     public string CanonicalValue => string.Join('|', Channel, Sequence, SignatureVerified, Identity?.CanonicalValue, MinimumUpdaterVersion,
-        string.Join(',', ComponentPlatformDigests?.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}") ?? []));
+        string.Join(',', ComponentPlatformDigests?.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}") ?? []),
+        string.Join(',', ComponentIndexDigests?.OrderBy(pair => pair.Key, StringComparer.Ordinal).Select(pair => $"{pair.Key}={pair.Value}") ?? []));
     /// <summary>Returns release-set, version, and updater rejection codes.</summary>
     public IReadOnlyList<string> ValidateFor(HostInstallationEvidence installation, HostUpdatePlanRequest request)
     {
@@ -486,7 +489,10 @@ public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool S
 
         foreach (string component in installation.RequiredComponents)
         {
-            if (!ComponentPlatformDigests.TryGetValue($"{component}/{installation.Platform}", out string? digest) || !HostUpdateValidation.IsDigest(digest))
+            if (!ComponentPlatformDigests.TryGetValue(
+                    SignedUpdateManifestValidator.PlatformKey(component, installation.Platform),
+                    out string? digest)
+                || !HostUpdateValidation.IsDigest(digest))
             {
                 reasons.Add("release_set_incomplete");
             }
@@ -522,8 +528,8 @@ public sealed record HostUpdateStagingReceipt(bool IsComplete, string Code, Cano
         HostUpdateValidation.DigestsEqual(PreviousSetDigest, installation.PriorSetDigest) &&
         HostUpdateValidation.DigestsEqual(PreviousConfigurationDigest, installation.ConfigurationFingerprint) &&
         ComponentPlatformDigests.Count == plan.RequiredComponents.Count && plan.RequiredComponents.All(component =>
-            ComponentPlatformDigests.TryGetValue($"{component}/{installation.Platform}", out string? actual) &&
-            metadata.ComponentPlatformDigests.TryGetValue($"{component}/{installation.Platform}", out string? expected) &&
+            ComponentPlatformDigests.TryGetValue(SignedUpdateManifestValidator.PlatformKey(component, installation.Platform), out string? actual) &&
+            metadata.ComponentPlatformDigests.TryGetValue(SignedUpdateManifestValidator.PlatformKey(component, installation.Platform), out string? expected) &&
             HostUpdateValidation.DigestsEqual(actual, expected));
 }
 
@@ -567,7 +573,9 @@ public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset Record
             HostUpdateValidation.IsIdentifier(installation.Platform) && requiredComponents is { Count: > 0 } &&
             requiredComponents.All(HostUpdateValidation.IsIdentifier) && componentPlatformDigests is not null &&
             componentPlatformDigests.Count == requiredComponents.Count && requiredComponents.All(component =>
-                componentPlatformDigests.TryGetValue($"{component}/{installation!.Platform}", out string? digest) &&
+                componentPlatformDigests.TryGetValue(
+                    SignedUpdateManifestValidator.PlatformKey(component, installation!.Platform),
+                    out string? digest) &&
                 HostUpdateValidation.IsDigest(digest));
         string topologyFingerprint = hasValidEvidence ? installation!.TopologyFingerprint : HostUpdateValidation.RedactedDigest;
         string platform = hasValidEvidence ? installation!.Platform : HostUpdateValidation.RedactedPlatform;
@@ -576,7 +584,12 @@ public sealed record HostUpdateJournalEntry(long Revision, DateTimeOffset Record
             : new([HostUpdateValidation.RedactedComponent], StringComparer.Ordinal);
         IReadOnlyDictionary<string, string> digests = hasValidEvidence
             ? componentPlatformDigests!
-            : new Dictionary<string, string> { [$"{HostUpdateValidation.RedactedComponent}/{HostUpdateValidation.RedactedPlatform}"] = HostUpdateValidation.RedactedDigest };
+            : new Dictionary<string, string>
+            {
+                [SignedUpdateManifestValidator.PlatformKey(
+                    HostUpdateValidation.RedactedComponent,
+                    HostUpdateValidation.RedactedPlatform)] = HostUpdateValidation.RedactedDigest,
+            };
 
         return new(0, DateTimeOffset.UtcNow, request.OperationId, request.IdempotencyKey, state, code,
             new(request.InstallationId, request.ActorId, request.Nonce, request.ReasonCode, request.SourceChannel,
@@ -1010,7 +1023,9 @@ internal static class HostUpdateValidation
         IsDigest(snapshot.TopologyFingerprint) && IsIdentifier(snapshot.Platform) && snapshot.RequiredComponents is { Count: > 0 } &&
         snapshot.RequiredComponents.All(IsIdentifier) && snapshot.ComponentPlatformDigests is not null &&
         snapshot.ComponentPlatformDigests.Count == snapshot.RequiredComponents.Count &&
-        snapshot.RequiredComponents.All(component => snapshot.ComponentPlatformDigests.TryGetValue($"{component}/{snapshot.Platform}", out string? digest) && IsDigest(digest)) &&
+        snapshot.RequiredComponents.All(component => snapshot.ComponentPlatformDigests.TryGetValue(
+            SignedUpdateManifestValidator.PlatformKey(component, snapshot.Platform),
+            out string? digest) && IsDigest(digest)) &&
         (string.IsNullOrEmpty(entry.IntegrityHash) || IsHexHash(entry.IntegrityHash)) && HasValidReceipt(entry.State, snapshot) && HasValidAuthorizationAudit(entry, snapshot);
     private static bool HasValidAuthorizationAudit(HostUpdateJournalEntry entry, HostUpdateJournalSnapshot snapshot) =>
         entry.State == HostUpdateLifecycle.Approved
@@ -1076,7 +1091,9 @@ internal static class HostUpdateValidation
         DigestsEqual(snapshot.TopologyFingerprint, installation.TopologyFingerprint) && snapshot.Platform == installation.Platform &&
         snapshot.RequiredComponents is not null && plan.RequiredComponents is not null && snapshot.RequiredComponents.SetEquals(plan.RequiredComponents) &&
         DictionaryEqual(snapshot.ComponentPlatformDigests, metadata.ComponentPlatformDigests) &&
-        snapshot.RequiredComponents.All(component => snapshot.ComponentPlatformDigests.TryGetValue($"{component}/{snapshot.Platform}", out string? digest) && IsDigest(digest));
+        snapshot.RequiredComponents.All(component => snapshot.ComponentPlatformDigests.TryGetValue(
+            SignedUpdateManifestValidator.PlatformKey(component, snapshot.Platform),
+            out string? digest) && IsDigest(digest));
     public static bool DictionaryEqual(IReadOnlyDictionary<string, string>? left, IReadOnlyDictionary<string, string>? right) =>
         left is not null && right is not null && left.Count == right.Count &&
         left.All(pair => right.TryGetValue(pair.Key, out string? value) && DigestsEqual(pair.Value, value));

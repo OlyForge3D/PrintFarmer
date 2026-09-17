@@ -1,5 +1,6 @@
 ﻿using System.Text.RegularExpressions;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.HostUpdates;
 
 namespace Farm.Infrastructure.Services.SystemStatus;
 
@@ -58,9 +59,12 @@ public static partial class ReleaseReadinessEvaluator
 
             foreach (ServiceReplicaObservationDto service in matchingServices)
             {
-                if (!string.Equals(service.Platform, target.Platform, StringComparison.Ordinal)
+                if (!string.Equals(NormalizePlatform(service.Platform), target.Platform, StringComparison.Ordinal)
                     || !Digest().IsMatch(service.PlatformDigest ?? string.Empty)
-                    || !Digest().IsMatch(target.PlatformDigest))
+                    || !Digest().IsMatch(target.PlatformDigest)
+                    || !Digest().IsMatch(target.IndexDigest)
+                    || !Digest().IsMatch(service.IndexDigest ?? string.Empty)
+                    || !string.Equals(service.IndexDigest, target.IndexDigest, StringComparison.Ordinal))
                 {
                     return Result(InventoryEligibility.Blocked, [$"PlatformMismatchOrInvalidDigestEvidence:{service.ServiceId}"], hops);
                 }
@@ -113,6 +117,17 @@ public static partial class ReleaseReadinessEvaluator
         && now - service.ObservedAt <= TimeSpan.FromSeconds(90)
         && now - service.LastSuccessAt <= TimeSpan.FromSeconds(90)
         && now - service.VerifiedAt <= TimeSpan.FromSeconds(90);
+
+    private static string? NormalizePlatform(string? platform)
+    {
+        if (string.IsNullOrWhiteSpace(platform))
+        {
+            return null;
+        }
+
+        string normalized = platform.Replace('/', '-');
+        return SignedUpdateManifestValidator.IsPlatform(normalized) ? normalized : null;
+    }
 
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
     private static partial Regex Digest();

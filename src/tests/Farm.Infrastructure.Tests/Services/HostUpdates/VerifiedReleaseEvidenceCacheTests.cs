@@ -14,6 +14,7 @@ public class VerifiedReleaseEvidenceCacheTests
 {
     private static VerifiedReleaseEvidenceDto Evidence(string channel = "stable") => new()
     {
+        Sequence = 123_456_789_012,
         SignatureVerified = true,
         IsComplete = true,
         ManifestDigest = "sha256:" + new string('a', 64),
@@ -48,6 +49,7 @@ public class VerifiedReleaseEvidenceCacheTests
         cache.SetVerified(evidence, verifiedAt);
 
         cache.Current.Should().BeSameAs(evidence);
+        cache.Current!.Sequence.Should().Be(123_456_789_012);
         cache.LastVerifiedAt.Should().Be(verifiedAt);
         cache.LastError.Should().BeNull();
     }

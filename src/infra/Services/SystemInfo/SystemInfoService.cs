@@ -13,6 +13,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.SystemStatus;
 
@@ -27,7 +28,8 @@ public class SystemInfoService(
     ILogger<SystemInfoService> logger,
     IEnumerable<IServiceInventorySource> inventorySources,
     Farm.Infrastructure.Settings.ISettingsService settingsService,
-    Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache verifiedReleaseEvidenceCache) : ISystemInfoService
+    Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache verifiedReleaseEvidenceCache,
+    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
     private const string CacheKey = "SystemInfo:Snapshot";
@@ -39,6 +41,8 @@ public class SystemInfoService(
     private readonly ILogger<SystemInfoService> _logger = logger;
     private readonly Farm.Infrastructure.Settings.ISettingsService _settingsService = settingsService;
     private readonly Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache _verifiedReleaseEvidenceCache = verifiedReleaseEvidenceCache;
+    private readonly IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> _verifiedReleaseDiscoveryOptions =
+        verifiedReleaseDiscoveryOptions;
 
     /// <summary>
     /// Returns the current system information snapshot, served from a 10-second cache to avoid
@@ -65,9 +69,56 @@ public class SystemInfoService(
     private ServiceInventoryDto BuildInventory(IReadOnlyList<ServiceReplicaObservationDto> observations)
     {
         string channel = _settingsService.Get<Farm.Infrastructure.Settings.UpdateChannelSettings>().Channel;
-        ServiceInventoryDto inventory = ServiceInventoryEvaluator.Evaluate(observations, channel, DateTimeOffset.UtcNow);
-        ReleaseReadinessDto readiness = ReleaseReadinessEvaluator.Evaluate(inventory, _verifiedReleaseEvidenceCache.Current, DateTimeOffset.UtcNow);
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        ServiceInventoryDto inventory = ServiceInventoryEvaluator.Evaluate(observations, channel, now);
+        ReleaseReadinessDto? unavailable = GetUnavailableReleaseReadiness(now);
+        ReleaseReadinessDto readiness = unavailable
+            ?? ReleaseReadinessEvaluator.Evaluate(inventory, _verifiedReleaseEvidenceCache.Current, now);
         return inventory with { Readiness = readiness };
+    }
+
+    private ReleaseReadinessDto? GetUnavailableReleaseReadiness(DateTimeOffset now)
+    {
+        if (_verifiedReleaseEvidenceCache.Current is null)
+        {
+            return null;
+        }
+
+        Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
+            _verifiedReleaseDiscoveryOptions.CurrentValue;
+        if (!options.Enabled)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseDiscoveryDisabled"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        if (_verifiedReleaseEvidenceCache.LastError is not null)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseDiscoveryFailed"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        DateTimeOffset? verifiedAt = _verifiedReleaseEvidenceCache.LastVerifiedAt;
+        TimeSpan maximumAge = TimeSpan.FromSeconds(checked(options.IntervalSeconds * 2L));
+        if (verifiedAt is null || verifiedAt > now || now - verifiedAt > maximumAge)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseEvidenceStale"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        return null;
     }
 
     /// <summary>

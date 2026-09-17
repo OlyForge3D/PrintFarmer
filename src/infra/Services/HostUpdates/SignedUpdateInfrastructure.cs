@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Runtime.ExceptionServices;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -40,6 +41,11 @@ public sealed record VerifiedSignedUpdateRelease(SignedUpdateManifest Manifest, 
 public static partial class SignedUpdateManifestValidator
 {
     private static readonly HashSet<string> ServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
+    private const long SequenceMajorMaximum = 99;
+    private const long SequenceMinorMaximum = 999;
+    private const long SequencePatchMaximum = 99_999;
+    private const long SequenceInsiderMaximum = 99_998;
+    private const long SequenceStableSuffix = 99_999;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static SignedUpdateManifest Parse(string json)
@@ -89,10 +95,18 @@ public static partial class SignedUpdateManifestValidator
         if (manifest.SourceBranch != expectedBranch) errors.Add("source_branch_invalid");
         if (!LowerHex40().IsMatch(manifest.SourceCommit)) errors.Add("source_commit_invalid");
         if (string.IsNullOrWhiteSpace(manifest.BuildId) || manifest.BuildId.Length > 128) errors.Add("build_id_invalid");
-        if (manifest.Sequence != DeriveSequence(manifest.Version)) errors.Add("sequence_mismatch");
+        try
+        {
+            if (manifest.Sequence != DeriveSequence(manifest.Version)) errors.Add("sequence_mismatch");
+        }
+        catch (Exception exception) when (exception is FormatException or OverflowException)
+        {
+            errors.Add("sequence_invalid");
+        }
         if (!manifest.ManagedUpdateEligible) errors.Add("managed_update_ineligible");
         IReadOnlyList<string> manifestPlatforms = manifest.Platforms ?? [];
         HashSet<string> expectedPlatformDigestKeys = new(StringComparer.Ordinal);
+        List<string> expectedPlatformOrder = [];
         if (manifest.Services is null || manifest.Services.Count != ServiceIds.Count) errors.Add("service_set_invalid");
         else
         {
@@ -107,10 +121,10 @@ public static partial class SignedUpdateManifestValidator
                 }
 
                 if (!IsApprovedImage(service.Id, service.Image)) errors.Add("image_reference_invalid");
-                IReadOnlyList<string> servicePlatforms = service.Platforms ?? manifestPlatforms;
+                IReadOnlyList<string> servicePlatforms = service.Platforms ?? [];
                 if (servicePlatforms.Count == 0
                     || servicePlatforms.Distinct(StringComparer.Ordinal).Count() != servicePlatforms.Count
-                    || servicePlatforms.Any(platform => !IsPlatform(platform) || !manifestPlatforms.Contains(platform, StringComparer.Ordinal)))
+                    || servicePlatforms.Any(platform => !IsPlatform(platform)))
                 {
                     errors.Add("platform_invalid");
                 }
@@ -118,14 +132,21 @@ public static partial class SignedUpdateManifestValidator
                 {
                     foreach (string platform in servicePlatforms)
                     {
-                        expectedPlatformDigestKeys.Add($"{service.Id}/{platform}");
+                        string key = PlatformKey(service.Id, platform);
+                        expectedPlatformDigestKeys.Add(key);
+                        expectedPlatformOrder.Add(key);
+                        if (!manifestPlatforms.Contains(key, StringComparer.Ordinal))
+                        {
+                            errors.Add("platform_invalid");
+                        }
                     }
                 }
             }
         }
 
         if (manifest.Platforms is null || manifest.Platforms.Count == 0 || manifest.Platforms.Distinct(StringComparer.Ordinal).Count() != manifest.Platforms.Count ||
-            manifest.Platforms.Any(platform => !IsPlatform(platform))) errors.Add("platform_invalid");
+            manifest.Platforms.Any(platform => !IsPlatform(platform))
+            || !manifest.Platforms.SequenceEqual(expectedPlatformOrder, StringComparer.Ordinal)) errors.Add("platform_invalid");
         if (manifest.PlatformDigests is null
             || manifest.PlatformDigests.Count != expectedPlatformDigestKeys.Count
             || manifest.PlatformDigests.Keys.Any(key => !expectedPlatformDigestKeys.Contains(key))
@@ -139,14 +160,30 @@ public static partial class SignedUpdateManifestValidator
 
     public static long DeriveSequence(string version)
     {
+        ArgumentNullException.ThrowIfNull(version);
         Match match = CanonicalVersion().Match(version);
-        if (!match.Success) return 0;
-        long major = long.Parse(match.Groups["major"].Value);
-        long minor = long.Parse(match.Groups["minor"].Value);
-        long patch = long.Parse(match.Groups["patch"].Value);
-        long insider = match.Groups["insider"].Success ? long.Parse(match.Groups["insider"].Value) : 0;
-        return checked(major * 1_000_000_000L + minor * 1_000_000L + patch * 1_000L + insider);
+        if (!match.Success)
+        {
+            throw new FormatException("Sequence version must use unsigned decimal components without leading zeros.");
+        }
+
+        long major = ParseBounded(match.Groups["major"].Value, SequenceMajorMaximum, "Major version");
+        long minor = ParseBounded(match.Groups["minor"].Value, SequenceMinorMaximum, "Minor version");
+        long patch = ParseBounded(match.Groups["patch"].Value, SequencePatchMaximum, "Patch version");
+        long suffix = SequenceStableSuffix;
+        if (match.Groups["insider"].Success)
+        {
+            suffix = ParseBounded(match.Groups["insider"].Value, SequenceInsiderMaximum, "Prerelease sequence");
+            if (suffix < 1)
+            {
+                throw new FormatException("Prerelease sequence must be between 1 and 99998.");
+            }
+        }
+
+        return checked((((major * 1_000L) + minor) * 100_000L + patch) * 100_000L + suffix);
     }
+
+    internal static string PlatformKey(string serviceId, string platform) => $"{serviceId}-{platform}";
 
     public static bool IsTagForChannel(string? tag, string channel)
     {
@@ -248,6 +285,21 @@ public static partial class SignedUpdateManifestValidator
         }
     }
 
+    private static long ParseBounded(string value, long maximum, string label)
+    {
+        if (!long.TryParse(value, System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out long parsed))
+        {
+            throw new OverflowException($"{label} exceeds the signed 64-bit parsing limit.");
+        }
+
+        if (parsed > maximum)
+        {
+            throw new OverflowException($"{label} exceeds sequence encoding limit of {maximum}.");
+        }
+
+        return parsed;
+    }
+
     private static bool IsVersionForChannel(string version, string channel) =>
         channel == "stable" ? CanonicalVersion().Match(version).Groups["insider"].Success is false :
         channel == "insider" && CanonicalVersion().Match(version).Groups["insider"].Success;
@@ -257,13 +309,15 @@ public static partial class SignedUpdateManifestValidator
         !image[(image.IndexOf('/') + 1)..image.IndexOf('@')].Contains(':', StringComparison.Ordinal) &&
         IsSha256Digest(image[(image.IndexOf("@sha256:", StringComparison.Ordinal) + 1)..]);
     private static bool IsSha256Digest(string? value) => value is not null && Sha256().IsMatch(value);
-    private static bool IsPlatform(string? value) => value is { Length: > 0 and <= 64 } && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
-    [GeneratedRegex(@"^(?<major>[1-9]\d*)\.(?<minor>\d+)\.(?<patch>\d+)(?:-insider\.(?<insider>[1-9]\d*))?$", RegexOptions.CultureInvariant)]
+    internal static bool IsPlatform(string? value) => value is { Length: > 0 and <= 64 } && Platform().IsMatch(value);
+    [GeneratedRegex(@"^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-insider\.(?<insider>[1-9]\d*))?$", RegexOptions.CultureInvariant)]
     private static partial Regex CanonicalVersion();
-    [GeneratedRegex(@"^v[1-9]\d*\.\d+\.\d+$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$", RegexOptions.CultureInvariant)]
     private static partial Regex StableTag();
-    [GeneratedRegex(@"^v[1-9]\d*\.\d+\.\d+-insider\.[1-9]\d*$", RegexOptions.CultureInvariant)]
+    [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-insider\.[1-9]\d*$", RegexOptions.CultureInvariant)]
     private static partial Regex InsiderTag();
+    [GeneratedRegex("^[a-z0-9][a-z0-9._-]*$", RegexOptions.CultureInvariant)]
+    private static partial Regex Platform();
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex LowerHex40();
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
@@ -284,6 +338,7 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
     private const int MaximumCandidates = 25;
     private const int MaximumManifestBytes = 256 * 1024;
     private const int MaximumBundleBytes = 1024 * 1024;
+    private const int MaximumReleaseListingBytes = 4 * 1024 * 1024;
     private static readonly HashSet<string> AllowedAssetRedirectHosts = new(StringComparer.OrdinalIgnoreCase)
     {
         "objects.githubusercontent.com",
@@ -298,9 +353,19 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
         {
             using HttpRequestMessage request = new(HttpMethod.Get, $"https://api.github.com/repos/{Repository}/releases?per_page=100&page={page}");
             request.Headers.UserAgent.Add(new ProductInfoHeaderValue("PrintFarmer", "1.0"));
-            using HttpResponseMessage response = await httpClient.SendAsync(request, cancellationToken);
+            using HttpResponseMessage response = await httpClient.SendAsync(
+                request,
+                HttpCompletionOption.ResponseHeadersRead,
+                cancellationToken);
             response.EnsureSuccessStatusCode();
-            IReadOnlyList<GitHubRelease>? pageReleases = await response.Content.ReadFromJsonAsync<IReadOnlyList<GitHubRelease>>(cancellationToken: cancellationToken);
+            byte[] releaseBytes = await ReadBoundedAsync(
+                response.Content,
+                MaximumReleaseListingBytes,
+                "GitHub release listing",
+                cancellationToken);
+            IReadOnlyList<GitHubRelease>? pageReleases = JsonSerializer.Deserialize<IReadOnlyList<GitHubRelease>>(
+                releaseBytes,
+                new JsonSerializerOptions(JsonSerializerDefaults.Web));
             if (pageReleases is null || pageReleases.Count == 0) break;
             releases.AddRange(pageReleases);
             if (pageReleases.Count < 100) break;
@@ -335,11 +400,7 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
                     candidates.Add(new(parsed, manifestBytes, bundleAssets[0].Id));
                 }
             }
-            catch (InvalidDataException)
-            {
-                continue;
-            }
-            catch (JsonException)
+            catch (Exception exception) when (IsCandidateLocalFailure(exception, cancellationToken))
             {
                 continue;
             }
@@ -352,14 +413,21 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             {
                 bundleBytes = await DownloadAssetAsync(candidate.BundleAssetId, MaximumBundleBytes, cancellationToken);
             }
-            catch (InvalidDataException)
+            catch (Exception exception) when (IsCandidateLocalFailure(exception, cancellationToken))
             {
                 continue;
             }
 
-            if (await verifier.VerifyAsync(candidate.ManifestBytes, bundleBytes, identity, cancellationToken))
+            try
             {
-                return new(candidate.Manifest, candidate.ManifestBytes);
+                if (await verifier.VerifyAsync(candidate.ManifestBytes, bundleBytes, identity, cancellationToken))
+                {
+                    return new(candidate.Manifest, candidate.ManifestBytes);
+                }
+            }
+            catch (Exception exception) when (IsCandidateLocalFailure(exception, cancellationToken))
+            {
+                continue;
             }
         }
 
@@ -375,7 +443,9 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             HttpCompletionOption.ResponseHeadersRead,
             cancellationToken);
 
-        if (response.StatusCode is HttpStatusCode.Found or HttpStatusCode.TemporaryRedirect or HttpStatusCode.PermanentRedirect)
+        if (response.StatusCode is HttpStatusCode.MovedPermanently or HttpStatusCode.Found
+            or HttpStatusCode.SeeOther or HttpStatusCode.TemporaryRedirect
+            or HttpStatusCode.PermanentRedirect)
         {
             Uri? location = response.Headers.Location;
             if (location is null
@@ -397,11 +467,19 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             }
 
             redirectedResponse.EnsureSuccessStatusCode();
-            return await ReadBoundedAsync(redirectedResponse.Content, maximumBytes, cancellationToken);
+            return await ReadBoundedAsync(
+                redirectedResponse.Content,
+                maximumBytes,
+                "GitHub release asset",
+                cancellationToken);
         }
 
         response.EnsureSuccessStatusCode();
-        return await ReadBoundedAsync(response.Content, maximumBytes, cancellationToken);
+        return await ReadBoundedAsync(
+            response.Content,
+            maximumBytes,
+            "GitHub release asset",
+            cancellationToken);
     }
 
     private static HttpRequestMessage CreateAssetRequest(Uri uri)
@@ -413,11 +491,15 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
         return request;
     }
 
-    private static async Task<byte[]> ReadBoundedAsync(HttpContent content, int maximumBytes, CancellationToken cancellationToken)
+    private static async Task<byte[]> ReadBoundedAsync(
+        HttpContent content,
+        int maximumBytes,
+        string contentName,
+        CancellationToken cancellationToken)
     {
         if (content.Headers.ContentLength > maximumBytes)
         {
-            throw new InvalidDataException($"GitHub release asset exceeds the {maximumBytes}-byte limit.");
+            throw new InvalidDataException($"{contentName} exceeds the {maximumBytes}-byte limit.");
         }
 
         await using Stream source = await content.ReadAsStreamAsync(cancellationToken);
@@ -430,7 +512,7 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             total = checked(total + read);
             if (total > maximumBytes)
             {
-                throw new InvalidDataException($"GitHub release asset exceeds the {maximumBytes}-byte limit.");
+                throw new InvalidDataException($"{contentName} exceeds the {maximumBytes}-byte limit.");
             }
 
             await destination.WriteAsync(buffer.AsMemory(0, read), cancellationToken);
@@ -438,6 +520,9 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
 
         return destination.ToArray();
     }
+
+    private static bool IsCandidateLocalFailure(Exception exception, CancellationToken cancellationToken) =>
+        exception is not OperationCanceledException || !cancellationToken.IsCancellationRequested;
 
     private sealed record ReleaseCandidate(SignedUpdateManifest Manifest, byte[] ManifestBytes, long BundleAssetId);
 }
@@ -470,14 +555,19 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
         foreach (string argument in command.Arguments) process.StartInfo.ArgumentList.Add(argument);
         if (!process.Start()) return new(-1, string.Empty);
 
+        Stopwatch stopwatch = Stopwatch.StartNew();
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
         deadline.CancelAfter(timeout);
+        Task<string> output = ReadLimitedAsync(process.StandardOutput, maxDiagnostics);
+        Task<string> error = ReadLimitedAsync(process.StandardError, maxDiagnostics);
+        Exception? processFailure = null;
         try
         {
-            Task<string> output = ReadLimitedAsync(process.StandardOutput, maxDiagnostics, CancellationToken.None);
-            Task<string> error = ReadLimitedAsync(process.StandardError, maxDiagnostics, CancellationToken.None);
             await process.WaitForExitAsync(deadline.Token);
-            return new(process.ExitCode, (await output) + (await error));
+        }
+        catch (Exception exception)
+        {
+            processFailure = exception;
         }
         finally
         {
@@ -487,14 +577,53 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
                 await process.WaitForExitAsync(CancellationToken.None);
             }
         }
+
+        Task<string[]> drain = Task.WhenAll(output, error);
+        string[] diagnostics;
+        try
+        {
+            TimeSpan remaining = timeout - stopwatch.Elapsed;
+            diagnostics = await DrainOutputAsync(
+                drain,
+                remaining > TimeSpan.Zero ? remaining : TimeSpan.Zero);
+        }
+        catch (TimeoutException) when (processFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(processFailure).Throw();
+            throw;
+        }
+
+        if (processFailure is not null)
+        {
+            ExceptionDispatchInfo.Capture(processFailure).Throw();
+        }
+
+        return new(process.ExitCode, diagnostics[0] + diagnostics[1]);
     }
 
-    private static async Task<string> ReadLimitedAsync(StreamReader reader, int maximum, CancellationToken cancellationToken)
+    internal static async Task<string[]> DrainOutputAsync(Task<string[]> drain, TimeSpan timeout)
+    {
+        try
+        {
+            return await drain.WaitAsync(timeout, CancellationToken.None);
+        }
+        catch
+        {
+            _ = drain.ContinueWith(
+                completed => _ = completed.Exception,
+                CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+            throw;
+        }
+    }
+
+    private static async Task<string> ReadLimitedAsync(StreamReader reader, int maximum)
     {
         StringBuilder captured = new(Math.Min(maximum, 4096));
         char[] buffer = new char[1024];
         int read;
-        while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
+        while ((read = await reader.ReadAsync(buffer.AsMemory())) > 0)
         {
             int remaining = maximum - captured.Length;
             if (remaining > 0) captured.Append(buffer, 0, Math.Min(remaining, read));
@@ -574,8 +703,24 @@ public sealed class VerifiedGitHubReleaseMetadataProvider(GitHubSignedReleaseDis
         string releaseId = $"{manifest.Channel}:{version}";
         string manifestDigest = $"sha256:{Convert.ToHexString(SHA256.HashData(verifiedRelease.ManifestBytes)).ToLowerInvariant()}";
         Dictionary<string, string> componentPlatformDigests = manifest.PlatformDigests.ToDictionary(StringComparer.Ordinal);
+        Dictionary<string, string> componentIndexDigests = manifest.Services.ToDictionary(
+            service => service.Id,
+            service => service.Image[(service.Image.IndexOf('@', StringComparison.Ordinal) + 1)..],
+            StringComparer.Ordinal);
+        Dictionary<string, IReadOnlyList<string>> componentPlatforms = manifest.Services.ToDictionary(
+            service => service.Id,
+            service => (IReadOnlyList<string>)[.. service.Platforms ?? []],
+            StringComparer.Ordinal);
         CanonicalReleaseIdentity identity = new(releaseId, version, manifest.Channel, manifest.Tag, manifest.SourceBranch, manifest.SourceCommit,
             manifest.SourceCommit, manifest.BuildId, releaseId, version, manifestDigest);
-        return new(manifest.Channel, manifest.Sequence, true, identity, componentPlatformDigests, manifest.MinimumUpdaterVersion ?? "0.0.0");
+        return new(
+            manifest.Channel,
+            manifest.Sequence,
+            true,
+            identity,
+            componentPlatformDigests,
+            manifest.MinimumUpdaterVersion ?? "0.0.0",
+            componentIndexDigests,
+            componentPlatforms);
     }
 }

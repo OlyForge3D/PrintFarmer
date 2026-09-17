@@ -190,6 +190,16 @@ states:
 > Insider updates may arrive more frequently and have reduced stability compared
 > with stable releases.
 
+Verified target evidence is freshness-bounded to twice the configured discovery interval.
+Disabling discovery, a failed discovery round, or evidence older than that bound changes
+readiness to a non-success `Unknown` state while retaining the last verified target and failure
+diagnostics for operators. It never leaves an earlier `Eligible` result active indefinitely.
+
+The selected channel, insider acknowledgement, and same-version manifest bindings survive normal
+restarts through the generic settings database. Restoring an older database or replaying older
+settings storage can restore older values; #2666 and #2663 own protected anti-replay continuity.
+This readiness feature does not claim protection against old-database restoration.
+
 The browser displays its **loaded asset** commit/build time, not the API build.
 A source/release mismatch is incompatible under the conservative same-build policy
 and calls for refresh; if it persists, operators must reconcile the deployment.

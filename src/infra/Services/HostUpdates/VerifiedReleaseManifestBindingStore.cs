@@ -9,7 +9,10 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// <summary>
 /// Persists the immutable association between a canonical release ID and the exact signed
 /// manifest digest accepted for it. Records use the existing generic application-settings
-/// table under internal keys and are not exposed as an editable settings section.
+/// table under internal keys and are not exposed as an editable settings section. The binding
+/// survives an ordinary process restart, but this generic database persistence cannot detect an
+/// older database restoration or replayed settings storage; issues #2666 and #2663 own protected
+/// anti-replay continuity.
 /// </summary>
 public interface IVerifiedReleaseManifestBindingStore
 {

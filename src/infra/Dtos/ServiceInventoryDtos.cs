@@ -348,6 +348,9 @@ public sealed record InstallationInventorySnapshotDto
 /// <summary>Complete independently verified release evidence consumed by the readiness evaluator.</summary>
 public sealed record VerifiedReleaseEvidenceDto
 {
+    /// <summary>Monotonic signed release sequence used for downgrade ordering.</summary>
+    public long Sequence { get; init; }
+
     /// <summary>Whether the complete coordinated release set has a valid signature.</summary>
     public bool SignatureVerified { get; init; }
 
@@ -375,6 +378,9 @@ public sealed record ReleaseServiceRequirementDto
 
     /// <summary>Target immutable platform digest.</summary>
     public string PlatformDigest { get; init; } = string.Empty;
+
+    /// <summary>Immutable multi-platform image index digest.</summary>
+    public string IndexDigest { get; init; } = string.Empty;
 
     /// <summary>Required source migration head for this service's context.</summary>
     public string? RequiredMigrationHead { get; init; }

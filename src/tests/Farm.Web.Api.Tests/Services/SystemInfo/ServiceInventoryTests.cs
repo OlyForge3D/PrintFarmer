@@ -425,6 +425,7 @@ public sealed class ServiceInventoryTests
                     ServiceId = "frontend",
                     Platform = "linux/amd64",
                     PlatformDigest = Digest,
+                    IndexDigest = Digest,
                 },
             ],
         };
@@ -471,6 +472,7 @@ public sealed class ServiceInventoryTests
                     ServiceId = "worker",
                     Platform = "linux/amd64",
                     PlatformDigest = Digest,
+                    IndexDigest = Digest,
                 },
             ],
         };
@@ -521,6 +523,7 @@ public sealed class ServiceInventoryTests
             VerifiedAt = Now,
             Platform = "linux/amd64",
             PlatformDigest = Digest,
+            IndexDigest = Digest,
             ManifestDigest = Digest,
             Identity = new()
             {
@@ -542,6 +545,7 @@ public sealed class ServiceInventoryTests
 
     private static VerifiedReleaseEvidenceDto Release(string? migrationHead) => new()
     {
+        Sequence = 200_004_999_999,
         SignatureVerified = true,
         IsComplete = true,
         ManifestDigest = Digest,
@@ -556,8 +560,9 @@ public sealed class ServiceInventoryTests
             new()
             {
                 ServiceId = "api",
-                Platform = "linux/amd64",
+                Platform = "linux-amd64",
                 PlatformDigest = Digest,
+                IndexDigest = Digest,
                 RequiredMigrationHead = migrationHead,
             },
         ],

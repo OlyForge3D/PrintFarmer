@@ -26,6 +26,16 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// </summary>
 public static class VerifiedReleaseEvidenceMapper
 {
+    private static readonly Dictionary<string, string> InventoryServiceIds =
+        new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["api"] = "api",
+            ["frontend"] = "frontend",
+            ["slicer-host"] = "slicer-host",
+            ["printer-discovery"] = "discovery",
+            ["orcaslicer-worker"] = "slicer-worker",
+        };
+
     /// <summary>
     /// Maps a fully verified <see cref="SignedReleaseMetadata"/> — which
     /// <see cref="VerifiedGitHubReleaseMetadataProvider.GetCurrentAsync"/> only ever returns
@@ -42,31 +52,62 @@ public static class VerifiedReleaseEvidenceMapper
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
+        if (!SignedUpdateManifestValidator.IsPlatform(hostPlatform))
+        {
+            throw new InvalidDataException($"Host platform '{hostPlatform}' is invalid.");
+        }
 
         List<ReleaseServiceRequirementDto> services = [];
-        foreach ((string key, string digest) in metadata.ComponentPlatformDigests)
+        if (metadata.ComponentPlatforms is null || metadata.ComponentIndexDigests is null)
         {
-            int separator = key.IndexOf('/');
-            if (separator <= 0
-                || separator == key.Length - 1
-                || key.IndexOf('/', separator + 1) >= 0)
-            {
-                throw new InvalidDataException(
-                    $"Verified release component platform key '{key}' is invalid.");
-            }
+            throw new InvalidDataException("Verified release service platform or index evidence is missing.");
+        }
 
-            string platform = key[(separator + 1)..];
-            if (platform != hostPlatform)
+        foreach ((string manifestServiceId, IReadOnlyList<string> platforms) in metadata.ComponentPlatforms)
+        {
+            if (manifestServiceId == "monolith")
             {
                 continue;
             }
 
+            if (!InventoryServiceIds.TryGetValue(manifestServiceId, out string? inventoryServiceId)
+                || platforms is null
+                || platforms.Count == 0
+                || platforms.Distinct(StringComparer.Ordinal).Count() != platforms.Count
+                || platforms.Any(platform => !SignedUpdateManifestValidator.IsPlatform(platform)))
+            {
+                throw new InvalidDataException(
+                    $"Verified release service '{manifestServiceId}' has invalid platform evidence.");
+            }
+
+            if (!platforms.Contains(hostPlatform, StringComparer.Ordinal))
+            {
+                continue;
+            }
+
+            string key = SignedUpdateManifestValidator.PlatformKey(manifestServiceId, hostPlatform);
+            if (!metadata.ComponentPlatformDigests.TryGetValue(key, out string? digest)
+                || !metadata.ComponentIndexDigests.TryGetValue(manifestServiceId, out string? indexDigest)
+                || !HostUpdateValidation.IsDigest(digest)
+                || !HostUpdateValidation.IsDigest(indexDigest))
+            {
+                throw new InvalidDataException(
+                    $"Verified release service '{manifestServiceId}' is missing immutable digest evidence for '{hostPlatform}'.");
+            }
+
             services.Add(new ReleaseServiceRequirementDto
             {
-                ServiceId = key[..separator],
-                Platform = platform,
+                ServiceId = inventoryServiceId,
+                Platform = hostPlatform,
                 PlatformDigest = digest,
+                IndexDigest = indexDigest,
             });
+        }
+
+        if (services.Count == 0)
+        {
+            throw new InvalidDataException(
+                $"Verified release has no service targets for host platform '{hostPlatform}'.");
         }
 
         if (services.GroupBy(service => service.ServiceId, StringComparer.Ordinal)
@@ -97,6 +138,7 @@ public static class VerifiedReleaseEvidenceMapper
             // SignatureVerified/IsComplete are both unconditionally true.
             SignatureVerified = metadata.SignatureVerified,
             IsComplete = true,
+            Sequence = metadata.Sequence,
             Identity = identity,
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,

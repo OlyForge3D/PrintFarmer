@@ -10,7 +10,7 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// item 4): translating the host-update-domain <see cref="SignedReleaseMetadata"/> shape into
 /// the inventory-domain <see cref="VerifiedReleaseEvidenceDto"/> shape
 /// <c>ReleaseReadinessEvaluator</c> consumes, including splitting
-/// <c>ComponentPlatformDigests</c>' <c>"{serviceId}/{platform}"</c> keys.
+/// <c>ComponentPlatformDigests</c>' <c>"{serviceId}-{platform}"</c> keys.
 /// </summary>
 public class VerifiedReleaseEvidenceMapperTests
 {
@@ -35,13 +35,19 @@ public class VerifiedReleaseEvidenceMapperTests
             Sequence: 7,
             SignatureVerified: true,
             Identity: Identity(),
-            ComponentPlatformDigests: new Dictionary<string, string>(),
-            MinimumUpdaterVersion: "1.0.0");
+            ComponentPlatformDigests: new Dictionary<string, string>
+            {
+                ["api-linux-amd64"] = "sha256:" + new string('b', 64),
+            },
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests("api"),
+            ComponentPlatforms: Platforms("api"));
 
         VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto("linux-amd64");
 
         dto.SignatureVerified.Should().BeTrue();
         dto.IsComplete.Should().BeTrue();
+        dto.Sequence.Should().Be(7);
         dto.ManifestDigest.Should().Be(metadata.Identity.ManifestDigest);
         dto.Identity.Should().NotBeNull();
         dto.Identity!.Channel.Should().Be("stable");
@@ -60,12 +66,14 @@ public class VerifiedReleaseEvidenceMapperTests
             Identity: Identity(),
             ComponentPlatformDigests: new Dictionary<string, string>
             {
-                ["api/linux-amd64"] = "sha256:" + new string('b', 64),
-                ["api/linux-arm64"] = "sha256:" + new string('c', 64),
-                ["slicer-worker/linux-amd64"] = "sha256:" + new string('d', 64),
-                ["slicer-worker/linux-arm64"] = "sha256:" + new string('e', 64),
+                ["api-linux-amd64"] = "sha256:" + new string('b', 64),
+                ["api-linux-arm64"] = "sha256:" + new string('c', 64),
+                ["orcaslicer-worker-linux-amd64"] = "sha256:" + new string('d', 64),
+                ["orcaslicer-worker-linux-arm64"] = "sha256:" + new string('e', 64),
             },
-            MinimumUpdaterVersion: "1.0.0");
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests("api", "orcaslicer-worker"),
+            ComponentPlatforms: Platforms("api", "orcaslicer-worker"));
 
         VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto("linux-arm64");
 
@@ -87,14 +95,85 @@ public class VerifiedReleaseEvidenceMapperTests
             Identity: Identity(),
             ComponentPlatformDigests: new Dictionary<string, string>
             {
-                ["malformed-no-separator"] = "sha256:" + new string('d', 64),
-                ["api/linux-amd64"] = "sha256:" + new string('e', 64),
+                ["api-linux-amd64"] = "sha256:" + new string('e', 64),
             },
-            MinimumUpdaterVersion: "1.0.0");
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests("api"),
+            ComponentPlatforms: new Dictionary<string, IReadOnlyList<string>>
+            {
+                ["api"] = ["Linux-amd64"],
+            });
 
         Action act = () => metadata.ToEvidenceDto("linux-amd64");
 
         act.Should().Throw<InvalidDataException>();
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("linux/amd64")]
+    [InlineData("Linux-amd64")]
+    [InlineData("-linux-amd64")]
+    public void ToEvidenceDto_InvalidOrEmptyHostPlatform_FailsClosed(string hostPlatform)
+    {
+        SignedReleaseMetadata metadata = new(
+            "stable",
+            1,
+            true,
+            Identity(),
+            new Dictionary<string, string>
+            {
+                ["api-linux-amd64"] = "sha256:" + new string('b', 64),
+            },
+            "1.0.0",
+            IndexDigests("api"),
+            Platforms("api"));
+
+        Action act = () => metadata.ToEvidenceDto(hostPlatform);
+
+        if (string.IsNullOrWhiteSpace(hostPlatform))
+        {
+            act.Should().Throw<ArgumentException>();
+        }
+        else
+        {
+            act.Should().Throw<InvalidDataException>();
+        }
+    }
+
+    [Fact]
+    public void ToEvidenceDto_ManifestVocabulary_MapsObservedServicesAndOmitsPackagingOnlyMonolith()
+    {
+        string platformDigest = "sha256:" + new string('b', 64);
+        string indexDigest = "sha256:" + new string('a', 64);
+        string[] manifestServices =
+        [
+            "api",
+            "frontend",
+            "slicer-host",
+            "printer-discovery",
+            "orcaslicer-worker",
+            "monolith",
+        ];
+        SignedReleaseMetadata metadata = new(
+            "stable",
+            99_999,
+            true,
+            Identity(),
+            manifestServices.ToDictionary(
+                id => $"{id}-linux-amd64",
+                _ => platformDigest,
+                StringComparer.Ordinal),
+            "1.0.0",
+            IndexDigests(manifestServices),
+            Platforms(manifestServices));
+
+        VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto("linux-amd64");
+
+        dto.Services.Select(service => service.ServiceId).Should().BeEquivalentTo(
+            ["api", "frontend", "slicer-host", "discovery", "slicer-worker"]);
+        dto.Services.Should().OnlyContain(service =>
+            service.PlatformDigest == platformDigest && service.IndexDigest == indexDigest);
     }
 
     [Fact]
@@ -106,4 +185,16 @@ public class VerifiedReleaseEvidenceMapperTests
 
         act.Should().Throw<ArgumentNullException>();
     }
+
+    private static Dictionary<string, string> IndexDigests(params string[] services) =>
+        services.ToDictionary(
+            service => service,
+            _ => "sha256:" + new string('a', 64),
+            StringComparer.Ordinal);
+
+    private static Dictionary<string, IReadOnlyList<string>> Platforms(params string[] services) =>
+        services.ToDictionary(
+            service => service,
+            _ => (IReadOnlyList<string>)["linux-amd64", "linux-arm64"],
+            StringComparer.Ordinal);
 }

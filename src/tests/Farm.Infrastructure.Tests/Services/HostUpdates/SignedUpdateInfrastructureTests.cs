@@ -8,12 +8,38 @@ public sealed class SignedUpdateInfrastructureTests
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
-    [Theory]
-    [InlineData("1.2.3", 1_002_003_000L)]
-    [InlineData("1.2.3-insider.4", 1_002_003_004L)]
-    public void DeriveSequence_CanonicalVersion_ReturnsDeterministicSequence(string version, long expected)
+    [Fact]
+    public void DeriveSequence_GoldenSignerContract_MatchesValidInvalidOrderingAndDistinctCases()
     {
-        Assert.Equal(expected, SignedUpdateManifestValidator.DeriveSequence(version));
+        SequenceGoldenFixture fixture = LoadSequenceFixture();
+
+        foreach (SequenceValidCase testCase in fixture.ValidCases)
+        {
+            Assert.Equal(
+                long.Parse(testCase.ExpectedSequence, System.Globalization.CultureInfo.InvariantCulture),
+                SignedUpdateManifestValidator.DeriveSequence(testCase.Version));
+        }
+
+        foreach (SequenceInvalidCase testCase in fixture.InvalidCases)
+        {
+            Assert.ThrowsAny<Exception>(() => SignedUpdateManifestValidator.DeriveSequence(testCase.Version));
+        }
+
+        foreach (SequenceOrderingCase testCase in fixture.Ordering)
+        {
+            Assert.True(
+                SignedUpdateManifestValidator.DeriveSequence(testCase.Lower)
+                < SignedUpdateManifestValidator.DeriveSequence(testCase.Higher),
+                testCase.Name);
+        }
+
+        foreach (SequenceDistinctGroup group in fixture.DistinctGroups)
+        {
+            long[] sequences = group.Versions
+                .Select(SignedUpdateManifestValidator.DeriveSequence)
+                .ToArray();
+            Assert.Equal(sequences.Length, sequences.Distinct().Count());
+        }
     }
 
     [Fact]
@@ -76,7 +102,7 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         Dictionary<string, string> childDigests = manifest.PlatformDigests.ToDictionary(StringComparer.Ordinal);
-        childDigests["api/linux-amd64"] = "sha256:" + new string('b', 64);
+        childDigests["api-linux-amd64"] = "sha256:" + new string('b', 64);
         manifest = manifest with { PlatformDigests = childDigests };
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
         TestHandler handler = new(bytes);
@@ -89,7 +115,10 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Equal("stable:1.2.3", metadata.Identity.OciReleaseLabel);
         Assert.Equal("1.2.3", metadata.Identity.OciVersionLabel);
         Assert.Equal(manifest.BuildId, metadata.Identity.BuildMetadata);
-        Assert.Equal("sha256:" + new string('b', 64), metadata.ComponentPlatformDigests["api/linux-amd64"]);
+        Assert.Equal(manifest.Sequence, metadata.Sequence);
+        Assert.Equal("sha256:" + new string('b', 64), metadata.ComponentPlatformDigests["api-linux-amd64"]);
+        Assert.Equal("sha256:" + new string('a', 64), metadata.ComponentIndexDigests!["api"]);
+        Assert.Equal(["linux-amd64"], metadata.ComponentPlatforms!["api"]);
     }
 
     [Fact]
@@ -116,7 +145,7 @@ public sealed class SignedUpdateInfrastructureTests
             Channel = "insider",
             Tag = "v9.9.9",
             Sequence = 1,
-            PlatformDigests = new Dictionary<string, string> { ["api/linux-amd64"] = "sha256:bad" },
+            PlatformDigests = new Dictionary<string, string> { ["api-linux-amd64"] = "sha256:bad" },
         };
         SignedUpdateValidationResult result = SignedUpdateManifestValidator.Validate(manifest);
         Assert.Contains("sequence_mismatch", result.Errors);
@@ -129,10 +158,10 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         Dictionary<string, string> incomplete = manifest.PlatformDigests
-            .Where(pair => pair.Key != "api/linux-amd64")
+            .Where(pair => pair.Key != "api-linux-amd64")
             .ToDictionary(StringComparer.Ordinal);
         Dictionary<string, string> mismatched = incomplete.ToDictionary(StringComparer.Ordinal);
-        mismatched["unknown/linux-amd64"] = "sha256:" + new string('a', 64);
+        mismatched["unknown-linux-amd64"] = "sha256:" + new string('a', 64);
 
         Assert.Contains(
             "platform_digest_invalid",
@@ -209,6 +238,49 @@ public sealed class SignedUpdateInfrastructureTests
             requests.Select(uri => uri.AbsoluteUri));
     }
 
+    [Theory]
+    [InlineData(HttpStatusCode.MovedPermanently)]
+    [InlineData(HttpStatusCode.SeeOther)]
+    public async Task Discovery_AllowedPermanentAndSeeOtherRedirects_AreBoundedAndAccepted(
+        HttpStatusCode redirectStatus)
+    {
+        byte[] manifest = JsonSerializer.SerializeToUtf8Bytes(
+            CreateManifest("1.2.3", "stable", "main"),
+            JsonOptions);
+        DelegateHandler handler = new(request =>
+        {
+            string uri = request.RequestUri!.AbsoluteUri;
+            if (uri.Contains("/releases?", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent($"[{ReleaseJson(7, "v1.2.3", false, false, true)}]"),
+                };
+            }
+
+            if (request.RequestUri.IdnHost == "api.github.com")
+            {
+                var redirect = new HttpResponseMessage(redirectStatus);
+                redirect.Headers.Location = new Uri(
+                    $"https://objects.githubusercontent.com/{request.RequestUri.Segments[^1]}");
+                return redirect;
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(uri.EndsWith("/71", StringComparison.Ordinal)
+                    ? manifest
+                    : "{}"u8.ToArray()),
+            };
+        });
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            new AcceptingVerifier()).DiscoverAsync("stable", default);
+
+        Assert.Equal("1.2.3", result!.Manifest.Version);
+    }
+
     [Fact]
     public async Task Discovery_OversizedManifest_IsRejectedWithoutVerification()
     {
@@ -236,6 +308,77 @@ public sealed class SignedUpdateInfrastructureTests
 
         Assert.Null(result);
         Assert.Empty(verifier.Identities);
+    }
+
+    [Fact]
+    public async Task Discovery_OversizedReleaseListing_FailsClosedBeforeAssetRequests()
+    {
+        byte[] oversized = new byte[(4 * 1024 * 1024) + 1];
+        DelegateHandler handler = new(_ => new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new ByteArrayContent(oversized),
+        });
+
+        Func<Task> act = async () => await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            new AcceptingVerifier()).DiscoverAsync("stable", default);
+
+        await Assert.ThrowsAsync<InvalidDataException>(act);
+    }
+
+    [Fact]
+    public async Task Discovery_BadCandidateHttpAndOverflow_DoNotAbortLaterValidCandidate()
+    {
+        SignedUpdateManifest valid = CreateManifest("2.0.0", "stable", "main");
+        string overflow = JsonSerializer.Serialize(
+            CreateManifest("1.0.0", "stable", "main") with
+            {
+                Version = "100.0.0",
+                Tag = "v100.0.0",
+            },
+            JsonOptions);
+        byte[] validBytes = JsonSerializer.SerializeToUtf8Bytes(valid, JsonOptions);
+        int failedAssetRequests = 0;
+        DelegateHandler handler = new(request =>
+        {
+            string uri = request.RequestUri!.AbsoluteUri;
+            if (uri.Contains("/releases?", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(
+                        $"[{ReleaseJson(1, "v0.1.0", false, false, true)},{ReleaseJson(2, "v100.0.0", false, false, true)},{ReleaseJson(3, "v2.0.0", false, false, true)}]"),
+                };
+            }
+
+            if (uri.EndsWith("/11", StringComparison.Ordinal))
+            {
+                failedAssetRequests++;
+                return new HttpResponseMessage(HttpStatusCode.ServiceUnavailable);
+            }
+
+            if (uri.EndsWith("/21", StringComparison.Ordinal))
+            {
+                return new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent(overflow),
+                };
+            }
+
+            return new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new ByteArrayContent(uri.EndsWith("/31", StringComparison.Ordinal)
+                    ? validBytes
+                    : "{}"u8.ToArray()),
+            };
+        });
+
+        VerifiedSignedUpdateRelease? release = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            new AcceptingVerifier()).DiscoverAsync("stable", default);
+
+        Assert.Equal(1, failedAssetRequests);
+        Assert.Equal("2.0.0", release!.Manifest.Version);
     }
 
     [Fact]
@@ -333,6 +476,41 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.False(Directory.Exists(directory));
     }
 
+    [Fact]
+    public async Task ProcessCosignRunner_OutputDrainTimeout_IsBoundedAndObservesLaterFault()
+    {
+        Task<string[]> drain = Task.Run(async () =>
+        {
+            await Task.Delay(100);
+            throw new IOException("late pipe failure");
+#pragma warning disable CS0162
+            return Array.Empty<string>();
+#pragma warning restore CS0162
+        });
+
+#pragma warning disable VSTHRD003 // drain is deliberately controlled by this test to outlive the bounded wait.
+        await Assert.ThrowsAsync<TimeoutException>(() =>
+            ProcessCosignRunner.DrainOutputAsync(drain, TimeSpan.FromMilliseconds(20)));
+
+        await Assert.ThrowsAsync<IOException>(() => drain);
+#pragma warning restore VSTHRD003
+    }
+
+    [Fact]
+    public void Parse_GeneratedSignerManifest_ConsumesCompositePlatformContract()
+    {
+        string json = JsonSerializer.Serialize(CreateManifest("0.0.0", "stable", "main"), JsonOptions);
+
+        SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(json);
+        SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
+
+        Assert.True(validation.IsValid, string.Join(',', validation.Errors));
+        Assert.Equal(99_999, manifest.Sequence);
+        Assert.All(manifest.Services, service => Assert.Equal(["linux-amd64"], service.Platforms));
+        Assert.Equal(manifest.Platforms, manifest.PlatformDigests.Keys);
+        Assert.Contains("printer-discovery-linux-amd64", manifest.Platforms);
+    }
+
     private static SignedUpdateManifest CreateManifest(string version, string channel, string branch)
     {
         string digest = "sha256:" + new string('a', 64);
@@ -340,9 +518,43 @@ public sealed class SignedUpdateInfrastructureTests
         string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
         return new(1, $"v{version}", version, channel, branch, new string('b', 40), "build-1",
             SignedUpdateManifestValidator.DeriveSequence(version), true,
-            services.Select(id => new SignedUpdateService(id, $"ghcr.io/olyforge3d/printfarmer-{id}@{digest}")).ToArray(),
-            platforms, services.ToDictionary(id => $"{id}/linux-amd64", _ => digest, StringComparer.Ordinal));
+            services.Select(id => new SignedUpdateService(
+                id,
+                $"ghcr.io/olyforge3d/printfarmer-{id}@{digest}",
+                platforms)).ToArray(),
+            services.Select(id => $"{id}-linux-amd64").ToArray(),
+            services.ToDictionary(id => $"{id}-linux-amd64", _ => digest, StringComparer.Ordinal));
     }
+
+    private static SequenceGoldenFixture LoadSequenceFixture()
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "VERSION")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        string path = Path.Combine(
+            root.FullName,
+            "scripts",
+            "ci",
+            "fixtures",
+            "release-version-sequence.golden.json");
+        return JsonSerializer.Deserialize<SequenceGoldenFixture>(
+            File.ReadAllText(path),
+            new JsonSerializerOptions(JsonSerializerDefaults.Web))!;
+    }
+
+    private sealed record SequenceGoldenFixture(
+        IReadOnlyList<SequenceValidCase> ValidCases,
+        IReadOnlyList<SequenceInvalidCase> InvalidCases,
+        IReadOnlyList<SequenceOrderingCase> Ordering,
+        IReadOnlyList<SequenceDistinctGroup> DistinctGroups);
+    private sealed record SequenceValidCase(string Name, string Version, string ExpectedSequence);
+    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains);
+    private sealed record SequenceOrderingCase(string Name, string Lower, string Higher);
+    private sealed record SequenceDistinctGroup(string Name, IReadOnlyList<string> Versions);
 
     private sealed class AcceptingVerifier : ISignedReleaseVerifier
     {

@@ -4,9 +4,11 @@ using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
+using System.Runtime.InteropServices;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
@@ -32,10 +34,29 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
         OciVersionLabel: "2.0.0",
         ManifestDigest: "sha256:" + new string('a', 64));
 
+    private static string HostPlatform => $"{(OperatingSystem.IsWindows() ? "windows" : OperatingSystem.IsMacOS() ? "darwin" : "linux")}-{RuntimeInformation.ProcessArchitecture switch
+    {
+        Architecture.X64 => "amd64",
+        Architecture.Arm64 => "arm64",
+        Architecture.X86 => "386",
+        Architecture.Arm => "arm",
+        _ => throw new PlatformNotSupportedException(),
+    }}";
+
+    private static IReadOnlyDictionary<string, string> PlatformDigests =>
+        new Dictionary<string, string> { [$"api-{HostPlatform}"] = "sha256:" + new string('b', 64) };
+
+    private static IReadOnlyDictionary<string, string> IndexDigests =>
+        new Dictionary<string, string> { ["api"] = "sha256:" + new string('c', 64) };
+
+    private static IReadOnlyDictionary<string, IReadOnlyList<string>> ComponentPlatforms =>
+        new Dictionary<string, IReadOnlyList<string>> { ["api"] = [HostPlatform] };
+
     private static (VerifiedReleaseDiscoveryMonitorService Service, IVerifiedReleaseEvidenceCache Cache, Mock<IBackgroundServiceMonitor> Monitor) CreateService(
         string channel,
         IHostUpdateMetadataProvider metadataProvider,
-        IVerifiedReleaseManifestBindingStore? bindingStore = null)
+        IVerifiedReleaseManifestBindingStore? bindingStore = null,
+        ILogger<VerifiedReleaseDiscoveryMonitorService>? logger = null)
     {
         var settingsService = new Mock<ISettingsService>();
         settingsService
@@ -68,7 +89,7 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
 
         var service = new VerifiedReleaseDiscoveryMonitorService(
             provider,
-            NullLogger<VerifiedReleaseDiscoveryMonitorService>.Instance,
+            logger ?? NullLogger<VerifiedReleaseDiscoveryMonitorService>.Instance,
             optionsMonitor.Object,
             backgroundMonitor.Object,
             cache);
@@ -84,8 +105,10 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
             Sequence: 3,
             SignatureVerified: true,
             Identity: Identity("stable"),
-            ComponentPlatformDigests: new Dictionary<string, string> { ["api/linux-x64"] = "sha256:" + new string('b', 64) },
-            MinimumUpdaterVersion: "1.0.0");
+            ComponentPlatformDigests: PlatformDigests,
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests,
+            ComponentPlatforms: ComponentPlatforms);
 
         var provider = new Mock<IHostUpdateMetadataProvider>();
         provider.Setup(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>())).ReturnsAsync(metadata);
@@ -109,8 +132,10 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
             Sequence: 1,
             SignatureVerified: true,
             Identity: Identity("insider"),
-            ComponentPlatformDigests: new Dictionary<string, string>(),
-            MinimumUpdaterVersion: "1.0.0");
+            ComponentPlatformDigests: PlatformDigests,
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests,
+            ComponentPlatforms: ComponentPlatforms);
 
         var provider = new Mock<IHostUpdateMetadataProvider>();
         provider.Setup(p => p.GetCurrentAsync("insider", It.IsAny<CancellationToken>())).ReturnsAsync(metadata);
@@ -132,8 +157,10 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
             Sequence: 1,
             SignatureVerified: true,
             Identity: Identity("stable"),
-            ComponentPlatformDigests: new Dictionary<string, string>(),
-            MinimumUpdaterVersion: "1.0.0");
+            ComponentPlatformDigests: PlatformDigests,
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests,
+            ComponentPlatforms: ComponentPlatforms);
 
         var provider = new Mock<IHostUpdateMetadataProvider>();
         provider.SetupSequence(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>()))
@@ -173,6 +200,26 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
     }
 
     [Fact]
+    public async Task RunDiscoveryRoundAsync_Failure_LogsAndReportsExactlyOnce()
+    {
+        var provider = new Mock<IHostUpdateMetadataProvider>();
+        provider.Setup(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new HttpRequestException("release listing unavailable"));
+        var logger = new CountingLogger();
+        (VerifiedReleaseDiscoveryMonitorService service, _, Mock<IBackgroundServiceMonitor> monitor) =
+            CreateService("stable", provider.Object, logger: logger);
+
+        (await service.RunDiscoveryRoundAsync(3600, CancellationToken.None)).Should().BeFalse();
+
+        logger.ErrorCount.Should().Be(1);
+        monitor.Verify(
+            item => item.ReportError(
+                "VerifiedReleaseDiscoveryMonitorService",
+                "release listing unavailable"),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task RunDiscoveryRoundAsync_InternalCancellation_ReportsOnceAndNextRoundRecovers()
     {
         SignedReleaseMetadata metadata = new(
@@ -180,8 +227,10 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
             Sequence: 1,
             SignatureVerified: true,
             Identity: Identity("stable"),
-            ComponentPlatformDigests: new Dictionary<string, string>(),
-            MinimumUpdaterVersion: "1.0.0");
+            ComponentPlatformDigests: PlatformDigests,
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests,
+            ComponentPlatforms: ComponentPlatforms);
         var provider = new Mock<IHostUpdateMetadataProvider>();
         provider.SetupSequence(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>()))
             .ThrowsAsync(new OperationCanceledException())
@@ -228,8 +277,10 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
             Sequence: 1,
             SignatureVerified: true,
             Identity: Identity("stable"),
-            ComponentPlatformDigests: new Dictionary<string, string>(),
-            MinimumUpdaterVersion: "1.0.0");
+            ComponentPlatformDigests: PlatformDigests,
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests,
+            ComponentPlatforms: ComponentPlatforms);
         SignedReleaseMetadata changed = first with
         {
             Identity = first.Identity with { ManifestDigest = "sha256:" + new string('f', 64) },
@@ -258,5 +309,28 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
 
         cache.Current.Should().BeSameAs(accepted);
         cache.Current!.ManifestDigest.Should().Be(first.Identity.ManifestDigest);
+    }
+
+    private sealed class CountingLogger : ILogger<VerifiedReleaseDiscoveryMonitorService>
+    {
+        public int ErrorCount { get; private set; }
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Error)
+            {
+                ErrorCount++;
+            }
+        }
     }
 }

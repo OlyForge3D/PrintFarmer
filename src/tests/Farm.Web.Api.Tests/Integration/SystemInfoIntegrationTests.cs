@@ -28,12 +28,20 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     public class Factory : CustomWebApplicationFactory
     {
         public Factory()
+            : this(discoveryEnabled: true)
+        {
+        }
+
+        private Factory(bool discoveryEnabled)
             : base(new Dictionary<string, string?>
             {
                 ["Security:DevModeBypassAuth"] = "false",
+                ["HostUpdates:VerifiedReleaseDiscovery:Enabled"] = discoveryEnabled.ToString(),
             })
         {
         }
+
+        public static Factory WithDiscoveryDisabled() => new(discoveryEnabled: false);
     }
 
     private readonly Factory _factory;
@@ -241,6 +249,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         cache.SetVerified(
             new VerifiedReleaseEvidenceDto
             {
+                Sequence = 999_999,
                 SignatureVerified = true,
                 IsComplete = true,
                 ManifestDigest = "sha256:" + new string('a', 64),
@@ -259,6 +268,110 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         HttpResponseMessage after = await isolatedAdmin.GetAsync("/api/system/info");
         using JsonDocument afterJson = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
         afterJson.RootElement.GetProperty("inventory").GetProperty("readiness").GetProperty("state").GetString().Should().Be("Blocked");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_DiscoveryFailureRevokesPriorReadinessWithoutDiscardingDiagnostics()
+    {
+        await using Factory isolatedFactory = new();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        VerifiedReleaseEvidenceDto evidence = new()
+        {
+            Sequence = 99_999,
+            SignatureVerified = true,
+            IsComplete = true,
+            ManifestDigest = "sha256:" + new string('a', 64),
+            Identity = new CanonicalReleaseIdentityDto
+            {
+                CanonicalVersion = "0.0.0",
+                BaseVersion = "0.0.0",
+                Channel = "stable",
+                ReleaseId = "stable:0.0.0",
+            },
+        };
+        cache.SetVerified(evidence, DateTimeOffset.UtcNow);
+        cache.SetError("GitHub release listing failed");
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseDiscoveryFailed");
+        cache.Current.Should().BeSameAs(evidence);
+        cache.LastError.Should().Be("GitHub release listing failed");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_DisabledDiscoveryRevokesPriorReadiness()
+    {
+        await using Factory isolatedFactory = Factory.WithDiscoveryDisabled();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        cache.SetVerified(
+            new VerifiedReleaseEvidenceDto
+            {
+                Sequence = 99_999,
+                SignatureVerified = true,
+                IsComplete = true,
+                ManifestDigest = "sha256:" + new string('a', 64),
+                Identity = new CanonicalReleaseIdentityDto
+                {
+                    CanonicalVersion = "0.0.0",
+                    BaseVersion = "0.0.0",
+                    Channel = "stable",
+                    ReleaseId = "stable:0.0.0",
+                },
+            },
+            DateTimeOffset.UtcNow);
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseDiscoveryDisabled");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_StaleVerifiedReleaseEvidenceIsNotEligible()
+    {
+        await using Factory isolatedFactory = new();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        cache.SetVerified(
+            new VerifiedReleaseEvidenceDto
+            {
+                Sequence = 99_999,
+                SignatureVerified = true,
+                IsComplete = true,
+                ManifestDigest = "sha256:" + new string('a', 64),
+                Identity = new CanonicalReleaseIdentityDto
+                {
+                    CanonicalVersion = "0.0.0",
+                    BaseVersion = "0.0.0",
+                    Channel = "stable",
+                    ReleaseId = "stable:0.0.0",
+                },
+            },
+            DateTimeOffset.UtcNow.AddHours(-3));
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseEvidenceStale");
     }
 
     [Fact]
