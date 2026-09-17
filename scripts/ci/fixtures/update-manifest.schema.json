@@ -1,0 +1,261 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/OlyForge3D/PrintFarmer/blob/development/scripts/ci/fixtures/update-manifest.schema.json",
+  "title": "PrintFarmer signed update manifest",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "tag",
+    "version",
+    "channel",
+    "sourceBranch",
+    "sourceCommit",
+    "buildId",
+    "sequence",
+    "managedUpdateEligible",
+    "services",
+    "platforms",
+    "platformDigests",
+    "minimumUpdaterVersion"
+  ],
+  "properties": {
+    "schema": {
+      "const": 1
+    },
+    "tag": {
+      "type": "string",
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-insider\\.[1-9][0-9]*)?$"
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-insider\\.[1-9][0-9]*)?$"
+    },
+    "channel": {
+      "enum": [
+        "stable",
+        "insider"
+      ]
+    },
+    "sourceBranch": {
+      "enum": [
+        "main",
+        "development"
+      ]
+    },
+    "sourceCommit": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    "buildId": {
+      "type": "string",
+      "pattern": "^[1-9][0-9]*$"
+    },
+    "sequence": {
+      "type": "integer",
+      "minimum": 1,
+      "maximum": 9007199254740991
+    },
+    "managedUpdateEligible": {
+      "const": true
+    },
+    "services": {
+      "type": "array",
+      "minItems": 6,
+      "maxItems": 6,
+      "prefixItems": [
+        {
+          "$ref": "#/$defs/api"
+        },
+        {
+          "$ref": "#/$defs/frontend"
+        },
+        {
+          "$ref": "#/$defs/slicerHost"
+        },
+        {
+          "$ref": "#/$defs/printerDiscovery"
+        },
+        {
+          "$ref": "#/$defs/orcaSlicerWorker"
+        },
+        {
+          "$ref": "#/$defs/monolith"
+        }
+      ],
+      "items": false
+    },
+    "platforms": {
+      "const": [
+        "linux-amd64",
+        "linux-arm64"
+      ]
+    },
+    "platformDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "api/linux-amd64",
+        "api/linux-arm64",
+        "frontend/linux-amd64",
+        "frontend/linux-arm64",
+        "slicer-host/linux-amd64",
+        "slicer-host/linux-arm64",
+        "printer-discovery/linux-amd64",
+        "printer-discovery/linux-arm64",
+        "orcaslicer-worker/linux-amd64",
+        "monolith/linux-amd64",
+        "monolith/linux-arm64"
+      ],
+      "properties": {
+        "api/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "api/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "frontend/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "frontend/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "slicer-host/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "slicer-host/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "printer-discovery/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "printer-discovery/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "orcaslicer-worker/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "monolith/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "monolith/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        }
+      }
+    },
+    "minimumUpdaterVersion": {
+      "type": "string",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-[0-9A-Za-z.-]+)?$"
+    },
+    "compatibility": {
+      "type": "string"
+    }
+  },
+  "$defs": {
+    "digest": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "dualPlatformService": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "image",
+        "platforms"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "image": {
+          "type": "string"
+        },
+        "platforms": {
+          "const": [
+            "linux-amd64",
+            "linux-arm64"
+          ]
+        }
+      }
+    },
+    "api": {
+      "$ref": "#/$defs/dualPlatformService",
+      "properties": {
+        "id": {
+          "const": "api"
+        },
+        "image": {
+          "pattern": "^ghcr\\.io/olyforge3d/printfarmer-api@sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "frontend": {
+      "$ref": "#/$defs/dualPlatformService",
+      "properties": {
+        "id": {
+          "const": "frontend"
+        },
+        "image": {
+          "pattern": "^ghcr\\.io/olyforge3d/printfarmer-frontend@sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "slicerHost": {
+      "$ref": "#/$defs/dualPlatformService",
+      "properties": {
+        "id": {
+          "const": "slicer-host"
+        },
+        "image": {
+          "pattern": "^ghcr\\.io/olyforge3d/printfarmer-slicer-host@sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "printerDiscovery": {
+      "$ref": "#/$defs/dualPlatformService",
+      "properties": {
+        "id": {
+          "const": "printer-discovery"
+        },
+        "image": {
+          "pattern": "^ghcr\\.io/olyforge3d/printfarmer-printer-discovery@sha256:[0-9a-f]{64}$"
+        }
+      }
+    },
+    "orcaSlicerWorker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "id",
+        "image",
+        "platforms"
+      ],
+      "properties": {
+        "id": {
+          "const": "orcaslicer-worker"
+        },
+        "image": {
+          "type": "string",
+          "pattern": "^ghcr\\.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:[0-9a-f]{64}$"
+        },
+        "platforms": {
+          "const": [
+            "linux-amd64"
+          ]
+        }
+      }
+    },
+    "monolith": {
+      "$ref": "#/$defs/dualPlatformService",
+      "properties": {
+        "id": {
+          "const": "monolith"
+        },
+        "image": {
+          "pattern": "^ghcr\\.io/olyforge3d/printfarmer-monolith@sha256:[0-9a-f]{64}$"
+        }
+      }
+    }
+  }
+}
