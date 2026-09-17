@@ -18,8 +18,9 @@ post_date: "2026-09-16"
    a nonzero major version; change the base through
    the normal reviewed PR process when needed; keep monorepo versions synchronized.
 2. As **jpapiez**, open **Actions > Consolidated Release > Run workflow** on
-   `development`. Choose the channel and enter
-   `1.2.3` for stable or an unused `1.2.3-insider.N` for insider, such as
+   `main` for **stable** or `development` for **insider** -- the run must
+   be dispatched from that same channel's source branch. Choose the channel and
+   enter `1.2.3` for stable or an unused `1.2.3-insider.N` for insider, such as
    `1.2.3-insider.3`. The base must match the selected source's `VERSION`.
    Leave `source_sha` blank for that channel branch's current HEAD, or supply
    its full 40-character ancestor SHA.
@@ -132,8 +133,9 @@ days; they are diagnostic files, never credentials for retry.
 ## Existing protections and configuration
 
 Keep the approved `single-maintainer` mode, owner-only manual dispatch and
-development-only routing. Both existing release environments retain their
-branch policy, disabled administrator bypass and no-second-reviewer configuration.
+channel-scoped branch routing: stable dispatches only from `main`, insider only
+from `development`. Both existing release environments retain their branch
+policy, disabled administrator bypass and no-second-reviewer configuration.
 This change neither alters protections nor edits App grants, environments or secrets.
 
 The approved publisher App/installation remains PrintFarmer-only. The workflow

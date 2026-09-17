@@ -22,6 +22,11 @@ export function githubClient(token, fetcher = fetch) {
 // mirrors consolidated-release.yml's channel-aware source_branch/Cosign identity
 // (see manifestSignatureIdentity in publish-release.mjs); no branch is hardcoded
 // here independent of the selected channel.
+// GITHUB_WORKFLOW_SHA (the workflow definition's own commit) and GITHUB_SHA (the
+// dispatched branch/head commit actually checked out for this run) are distinct
+// GitHub-populated fields that legitimately differ on a normal workflow_dispatch;
+// each is format-validated independently rather than required to match the other.
+// Branch/head identity is instead verified against the live run (run.head_sha).
 export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'))) {
   const channel = env.RELEASE_CHANNEL;
   requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel');
@@ -30,7 +35,7 @@ export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileS
     env.GITHUB_REF === `refs/heads/${sourceBranch}` && env.GITHUB_RUN_ATTEMPT === '1' &&
     env.GITHUB_WORKFLOW_REF === `${repository}/${workflow}@refs/heads/${sourceBranch}` &&
     /^[a-f0-9]{40}$/.test(env.GITHUB_WORKFLOW_SHA ?? '') &&
-    env.GITHUB_SHA === env.GITHUB_WORKFLOW_SHA && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? ''),
+    /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? ''),
   `Use a fresh owner manual dispatch of Consolidated Release on ${sourceBranch} for the ${channel} channel; reruns cannot publish`);
   const run = await api(`actions/runs/${env.GITHUB_RUN_ID}`);
   const definition = await api('actions/workflows/consolidated-release.yml');
@@ -38,7 +43,7 @@ export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileS
   requireThat(run?.event === 'workflow_dispatch' && run.path === workflow &&
     run.workflow_id === definition?.id && definition.path === workflow && definition.state === 'active' &&
     String(run.id) === env.GITHUB_RUN_ID && run.run_attempt === 1 && run.status === 'in_progress' &&
-    run.head_branch === sourceBranch && run.head_sha === env.GITHUB_WORKFLOW_SHA &&
+    run.head_branch === sourceBranch && run.head_sha === env.GITHUB_SHA &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
     run.head_repository.id === run.repository.id &&
     owner(run.actor) && owner(run.triggering_actor) && owner(event.sender) &&

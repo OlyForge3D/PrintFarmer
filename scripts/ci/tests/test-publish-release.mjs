@@ -16,6 +16,7 @@ import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
 
 const sha = 'a'.repeat(40);
 const head = 'b'.repeat(40);
+const workflowSha = 'e'.repeat(40);
 const digest = `sha256:${'c'.repeat(64)}`;
 const platformDigest = `sha256:${'d'.repeat(64)}`;
 const release = { version: '1.2.3-insider.2', tag: 'v1.2.3-insider.2', channel: 'insider',
@@ -32,7 +33,7 @@ const env = {
   GITHUB_REPOSITORY: repo.full_name, GITHUB_EVENT_NAME: 'workflow_dispatch',
   GITHUB_REF: 'refs/heads/development', GITHUB_RUN_ATTEMPT: '1', GITHUB_RUN_ID: '42',
   GITHUB_WORKFLOW_REF: `${repo.full_name}/.github/workflows/consolidated-release.yml@refs/heads/development`,
-  GITHUB_WORKFLOW_SHA: sha, GITHUB_SHA: sha, GITHUB_ACTOR: owner.login, GITHUB_ACTOR_ID: String(owner.id),
+  GITHUB_WORKFLOW_SHA: workflowSha, GITHUB_SHA: sha, GITHUB_ACTOR: owner.login, GITHUB_ACTOR_ID: String(owner.id),
   GITHUB_TRIGGERING_ACTOR: owner.login, RELEASE_APPROVAL_MODE: 'single-maintainer',
   RELEASE_CHANNEL: release.channel, RELEASE_VERSION: release.version, RELEASE_SOURCE_SHA: '',
 };
@@ -103,7 +104,12 @@ test('owner manual access verifies live identity, original inputs and existing e
     { GITHUB_ACTOR_ID: '1' }, { GITHUB_TRIGGERING_ACTOR: 'another' },
     { GITHUB_WORKFLOW_REF: env.GITHUB_WORKFLOW_REF.replace('consolidated-release', 'other') },
     { RELEASE_APPROVAL_MODE: '' }, { RELEASE_VERSION: '1.2.3-insider.3' },
+    { GITHUB_WORKFLOW_SHA: 'not-a-sha' }, { GITHUB_SHA: 'not-a-sha' },
   ]) await assert.rejects(verifyOwnerDispatch({ ...env, ...override }, ownerApi(), event));
+  // The dispatched branch/head identity (GITHUB_SHA vs. the live run's head_sha) is
+  // verified independently of the workflow definition's own SHA (GITHUB_WORKFLOW_SHA),
+  // which legitimately differs from it on a normal dispatch (see env fixture above).
+  await assert.rejects(verifyOwnerDispatch({ ...env, GITHUB_SHA: head }, ownerApi(), event));
   await assert.rejects(verifyOwnerDispatch(env, ownerApi(), { ...event, sender: { ...owner, id: 1 } }));
   await assert.rejects(verifyOwnerDispatch(env, ownerApi(), { ...event,
     inputs: { ...event.inputs, operation: 'abandon' } }));
