@@ -1,0 +1,233 @@
+namespace Farm.Infrastructure.Services.HostUpdates;
+
+/// <summary>Outcome of an attempted recovery after the executor left the release in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.</summary>
+public enum HostUpdateRecoveryOutcome
+{
+    /// <summary>The host was restored to a verified prior working state.</summary>
+    RolledBack,
+
+    /// <summary>No safe rollback/restore path exists; an operator must resolve this manually.</summary>
+    NeedsOperator,
+}
+
+/// <summary>Durable, immutable record of one recovery attempt.</summary>
+public sealed record HostUpdateRecoveryResult(HostUpdateRecoveryOutcome Outcome, string Detail);
+
+/// <summary>
+/// Decides whether a failed update can be recovered by re-applying the prior pinned images
+/// alone (image-only rollback), which is only safe when the prior release''s schema/storage
+/// contract is still compatible with what is currently on disk (i.e. no migration successfully
+/// committed past the prior release during the failed attempt).
+/// </summary>
+public interface IHostUpdateRecoveryCompatibilityEvaluator
+{
+    bool SupportsImageOnlyRollback(InstalledHostState priorState, IReadOnlyList<HostUpdateExecutionActivity> activities);
+}
+
+/// <summary>
+/// Image-only rollback is safe only when the failed attempt''s own journal shows the migration
+/// step never completed (no <c>migration:after</c> activity was recorded) -- i.e. the schema
+/// on disk is still the one the prior release expects. Any recorded migration completion means
+/// the schema may have moved forward and only a coordinated restore (or fix-forward) is safe.
+/// </summary>
+public sealed class DefaultHostUpdateRecoveryCompatibilityEvaluator : IHostUpdateRecoveryCompatibilityEvaluator
+{
+    public bool SupportsImageOnlyRollback(InstalledHostState priorState, IReadOnlyList<HostUpdateExecutionActivity> activities)
+    {
+        ArgumentNullException.ThrowIfNull(priorState);
+        ArgumentNullException.ThrowIfNull(activities);
+        bool migrationCommitted = activities.Any(a =>
+            a.State == HostUpdateExecutionState.Migrating && a.Phase.EndsWith(":after", StringComparison.Ordinal));
+        return !migrationCommitted;
+    }
+}
+
+/// <summary>Restores both provider-native database contexts plus application-owned blobs/config/keyrings from a specific completed backup.</summary>
+public interface IHostUpdateRestoreExecutor
+{
+    Task RestoreAsync(HostUpdateBackupManifest manifest, string backupRunDirectory, CancellationToken cancellationToken);
+}
+
+/// <summary>Locates the most recent completed, checksum-verified backup manifest for a release.</summary>
+public interface IHostUpdateBackupManifestLocator
+{
+    Task<(HostUpdateBackupManifest Manifest, string RunDirectory)?> FindLatestAsync(string releaseId, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Recovers a release left in <see cref="HostUpdateExecutionState.RecoveryRequired"/>: prefers a
+/// verified image-only rollback when schema-compatible, otherwise performs a coordinated
+/// restore of both databases and owned storage/config/key material from the matching backup.
+/// Never uses EF down-migrations and never guesses; any uncertainty is persisted as
+/// <see cref="HostUpdateRecoveryOutcome.NeedsOperator"/> rather than reported as recovered.
+/// </summary>
+public sealed class HostUpdateRecoveryCoordinator(
+    IInstalledHostStateStore installedStateStore,
+    IHostUpdateRecoveryCompatibilityEvaluator compatibilityEvaluator,
+    IHostUpdateDigestApplier digestApplier,
+    IHostUpdateRestoreExecutor restoreExecutor,
+    IHostUpdateBackupManifestLocator manifestLocator,
+    IHostUpdateDigestVerifier digestVerifier) : IHostUpdateRecoveryCoordinator
+{
+    public async Task<HostUpdateRecoveryResult> RecoverAsync(
+        HostUpdateExecutionRequest failedRequest,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(failedRequest);
+        ArgumentNullException.ThrowIfNull(activities);
+
+        InstalledHostState? priorState = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (priorState is not null && compatibilityEvaluator.SupportsImageOnlyRollback(priorState, activities))
+            {
+                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
+                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "image_only_rollback");
+            }
+
+            (HostUpdateBackupManifest Manifest, string RunDirectory)? located =
+                await manifestLocator.FindLatestAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
+            if (located is null)
+            {
+                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "no_backup_available");
+            }
+
+            await restoreExecutor.RestoreAsync(located.Value.Manifest, located.Value.RunDirectory, cancellationToken).ConfigureAwait(false);
+
+            if (priorState is not null)
+            {
+                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
+            }
+
+            return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "coordinated_restore");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // Fail closed: any exception during recovery itself is an uncertain outcome, never
+            // reported as a successful rollback.
+            return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, exception.GetType().Name);
+        }
+    }
+}
+
+/// <summary>Attempts recovery for a release left in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.</summary>
+public interface IHostUpdateRecoveryCoordinator
+{
+    Task<HostUpdateRecoveryResult> RecoverAsync(
+        HostUpdateExecutionRequest failedRequest,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Restores database contexts and owned storage from a backup manifest by invoking the
+/// existing provider-specific restore tooling (e.g. <c>pg_restore</c>/<c>sqlcmd RESTORE
+/// DATABASE</c>/<c>sqlite3 .restore</c>) via an explicit argument list, and by copying owned
+/// directories back from the backup run. Verified per-file against the manifest''s recorded
+/// checksums before considering the restore trustworthy.
+/// </summary>
+public sealed class ProcessHostUpdateRestoreExecutor(
+    IHostUpdateProcessRunner processRunner,
+    IReadOnlyDictionary<string, Func<string, IReadOnlyList<string>>> restoreCommandsByTarget,
+    IReadOnlyDictionary<string, string> directoryRestoreTargetsByName,
+    TimeSpan timeout) : IHostUpdateRestoreExecutor
+{
+    public async Task RestoreAsync(HostUpdateBackupManifest manifest, string backupRunDirectory, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+        await VerifyChecksumsAsync(manifest, backupRunDirectory, cancellationToken).ConfigureAwait(false);
+
+        foreach (string targetName in manifest.TargetNames)
+        {
+            string targetDirectory = Path.Combine(backupRunDirectory, SanitizeForPath(targetName));
+            if (restoreCommandsByTarget.TryGetValue(targetName, out Func<string, IReadOnlyList<string>>? buildArguments))
+            {
+                HostUpdateProcessResult result = await processRunner.RunAsync(
+                    "sh",
+                    buildArguments(targetDirectory),
+                    timeout,
+                    cancellationToken).ConfigureAwait(false);
+                if (!result.Succeeded)
+                {
+                    throw new InvalidOperationException($"restore_failed:{targetName}");
+                }
+
+                continue;
+            }
+
+            if (directoryRestoreTargetsByName.TryGetValue(targetName, out string? destinationDirectory))
+            {
+                Directory.CreateDirectory(destinationDirectory);
+                foreach (string sourcePath in Directory.EnumerateFiles(targetDirectory, "*", SearchOption.AllDirectories))
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    string relative = Path.GetRelativePath(targetDirectory, sourcePath);
+                    string destinationPath = Path.Combine(destinationDirectory, relative);
+                    Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? destinationDirectory);
+                    File.Copy(sourcePath, destinationPath, overwrite: true);
+                }
+            }
+        }
+    }
+
+    private static async Task VerifyChecksumsAsync(HostUpdateBackupManifest manifest, string backupRunDirectory, CancellationToken cancellationToken)
+    {
+        foreach (HostUpdateBackupManifestFile file in manifest.Files)
+        {
+            string path = Path.Combine(backupRunDirectory, file.RelativePath);
+            if (!File.Exists(path))
+            {
+                throw new InvalidOperationException($"restore_source_missing:{file.RelativePath}");
+            }
+
+            byte[] bytes = await File.ReadAllBytesAsync(path, cancellationToken).ConfigureAwait(false);
+            string hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(bytes)).ToLowerInvariant();
+            if (!string.Equals(hash, file.Sha256, StringComparison.Ordinal) || bytes.LongLength != file.Length)
+            {
+                throw new InvalidOperationException($"restore_checksum_mismatch:{file.RelativePath}");
+            }
+        }
+    }
+
+    private static string SanitizeForPath(string value)
+    {
+        char[] invalid = Path.GetInvalidFileNameChars();
+        return new string([.. value.Select(c => invalid.Contains(c) ? '_' : c)]);
+    }
+}
+
+/// <summary>Finds the most recent backup run directory (and its manifest) for a release under the backup root.</summary>
+public sealed class FileHostUpdateBackupManifestLocator(string backupRootDirectory) : IHostUpdateBackupManifestLocator
+{
+    public async Task<(HostUpdateBackupManifest Manifest, string RunDirectory)?> FindLatestAsync(string releaseId, CancellationToken cancellationToken)
+    {
+        string releaseDirectory = Path.Combine(backupRootDirectory, SanitizeForPath(releaseId));
+        if (!Directory.Exists(releaseDirectory))
+        {
+            return null;
+        }
+
+        string? latestRun = Directory.GetDirectories(releaseDirectory)
+            .OrderByDescending(d => d, StringComparer.Ordinal)
+            .FirstOrDefault(d => File.Exists(Path.Combine(d, "manifest.json")));
+        if (latestRun is null)
+        {
+            return null;
+        }
+
+        string manifestJson = await File.ReadAllTextAsync(Path.Combine(latestRun, "manifest.json"), cancellationToken).ConfigureAwait(false);
+        HostUpdateBackupManifest? manifest = System.Text.Json.JsonSerializer.Deserialize<HostUpdateBackupManifest>(manifestJson);
+        return manifest is null ? null : (manifest, latestRun);
+    }
+
+    private static string SanitizeForPath(string value)
+    {
+        char[] invalid = Path.GetInvalidFileNameChars();
+        return new string([.. value.Select(c => invalid.Contains(c) ? '_' : c)]);
+    }
+}
