@@ -174,18 +174,19 @@ public static partial class SignedUpdateManifestValidator
             throw new FormatException("Sequence version must use unsigned decimal components without leading zeros.");
         }
 
+        Group insider = match.Groups["insider"];
         long major = ParseBounded(match.Groups["major"].Value, SequenceMajorMaximum, "Major version");
-        if (major < 1)
+        if (!insider.Success && major < 1)
         {
-            throw new FormatException("Major version must be greater than zero.");
+            throw new FormatException("Stable major version must be greater than zero.");
         }
 
         long minor = ParseBounded(match.Groups["minor"].Value, SequenceMinorMaximum, "Minor version");
         long patch = ParseBounded(match.Groups["patch"].Value, SequencePatchMaximum, "Patch version");
         long suffix = SequenceStableSuffix;
-        if (match.Groups["insider"].Success)
+        if (insider.Success)
         {
-            suffix = ParseBounded(match.Groups["insider"].Value, SequenceInsiderMaximum, "Prerelease sequence");
+            suffix = ParseBounded(insider.Value, SequenceInsiderMaximum, "Prerelease sequence");
             if (suffix < 1)
             {
                 throw new FormatException("Prerelease sequence must be between 1 and 99998.");

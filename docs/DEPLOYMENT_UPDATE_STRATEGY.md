@@ -38,10 +38,11 @@ checks pass. The manifest uses schema `1`, deterministic canonical JSON, and a
 collision-free, stable-dominant `sequence`. `deriveSequence` (in
 `scripts/ci/release-manifest.mjs`) uses the verified weighted formula
 `((((major * 1000) + minor) * 100000) + patch) * 100000 + suffix` with bounded
-components: major (`1..99`), minor (`0..999`), patch (`0..99999`), insider
-suffix (`1..99998`), and the reserved stable suffix `99999`. These bounds prevent
-decimal carry collisions while the reserved suffix makes stable releases sort
-above every insider prerelease of the same base version. Arithmetic is BigInt;
+components: major (`0..99` for insider and `1..99` for stable), minor
+(`0..999`), patch (`0..99999`), insider suffix (`1..99998`), and the reserved
+stable suffix `99999`. These bounds prevent decimal carry collisions while the
+reserved suffix makes stable releases sort above every insider prerelease of the
+same base version. Arithmetic is BigInt;
 the producer rejects values outside JavaScript's safe integer range or C#
 signed `Int64` before JSON serialization. The language-neutral vectors are checked in at
 `scripts/ci/fixtures/release-version-sequence.golden.json`, with their
@@ -68,7 +69,8 @@ mutation and again immediately before the `gh release upload` call, so nothing
 between those workflow steps and the actual upload can present an unsigned or
 mismatched manifest as the release's signed contract. Existing
 unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
-`v0.2.3-insider.2`. A valid signature authenticates the publisher and exact
+`v0.2.3-insider.2`; future signed `0.x.y-insider.N` releases are
+managed-update eligible. A valid signature authenticates the publisher and exact
 manifest bytes; it does not authorize or implement apply, installation,
 active-print handling, staging, recovery, or runtime safety.
 

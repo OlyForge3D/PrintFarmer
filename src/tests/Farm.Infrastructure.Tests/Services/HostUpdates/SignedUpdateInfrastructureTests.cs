@@ -79,6 +79,8 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "01.2.3" && testCase.DeriveSequenceRejects);
         Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.02.3" && testCase.DeriveSequenceRejects);
         Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.2.03" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.ValidCases, testCase => testCase.Version == "0.2.3-insider.1");
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "0.2.3" && testCase.DeriveSequenceRejects);
     }
 
     [Fact]
@@ -130,6 +132,14 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
+    }
+
+    [Fact]
+    public void Validate_ValidZeroMajorInsiderManifest_AcceptsManagedUpdateEvidence()
+    {
+        SignedUpdateManifest manifest = CreateManifest("0.2.3-insider.1", "insider", "development");
+        Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
+        Assert.True(manifest.ManagedUpdateEligible);
     }
 
     [Fact]
