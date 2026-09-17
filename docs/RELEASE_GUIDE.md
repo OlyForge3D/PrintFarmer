@@ -119,9 +119,10 @@ enroll or update any host. Versions and channels do not prove compatibility.
 ## Retired tag diagnostic and unsigned reservation assessment
 
 The owner-authorized diagnostic consumed its single request and is retired from
-source. Its remote workflow definition and all run history remain preserved; this
-source change does not dispatch, disable, delete, rename, reset, or recreate any
-workflow or run.
+source. The workflow file is removed from `development`, so future dispatches
+from that ref are retired. This source change does not call the GitHub API to
+disable or delete the remote workflow record, and it does not alter any run
+history, rename, reset, or recreate any workflow or run.
 
 Known sanitized evidence is limited to the following:
 
@@ -145,9 +146,12 @@ options are intentionally bounded:
 1. **Leave the reservation unresolved** until the owner chooses a new, separately
    reviewed recovery protocol that can prove original signed authority. This is
    the only option that preserves the current invariants without live mutation.
-2. **Create a new release allocation and publication** through the canonical
-   owner dispatch, only as a future release decision. A fresh allocation is not a
-   repair of the historical reservation and must not reuse its tag or authority.
+2. **Create a new stable release allocation and publication** through the
+   canonical owner dispatch, only as a future release decision. A new insider
+   allocation is currently blocked by the unresolved insider reservation and
+   cannot proceed until a separately authorized recovery protocol terminally
+   resolves it. A fresh allocation is not a repair of the historical reservation
+   and must not reuse its tag or authority.
 3. **Change the recovery invariant** to support unsigned-reservation cleanup only
    after an explicit owner decision, a new threat-model review, and dedicated
    implementation. This issue does not grant that decision and does not add the
