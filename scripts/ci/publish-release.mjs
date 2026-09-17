@@ -10,11 +10,12 @@ import {
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { components, repository, requireThat, validateVersion, compareVersions, parseTag } from './release-policy.mjs';
+import { components, repository, requireThat, validateVersion, compareVersions, parseTag, workflow } from './release-policy.mjs';
 import { githubClient, verifyOwnerDispatch } from './release-dispatch.mjs';
 import { emitBuildMetadata } from './release-metadata.mjs';
 import { command, imageRepository, rejectExistingImages, verifyImages, publishImageTags } from './release-set.mjs';
 import { releaseNotes } from './release-notes.mjs';
+import { buildManifest, deriveSequence, validateManifest } from './release-manifest.mjs';
 
 export async function rejectExistingVersion(api, tag) {
   requireThat(!await api(`git/ref/tags/${tag}`, { allowMissing: true }), `Tag ${tag} already exists; choose a new version`);
@@ -98,7 +99,7 @@ export function buildImages(release, source, assets, run = command, rejectImages
   copyFileSync(join(assets, `printfarmer-monolith-${release.tag}.spdx.json`),
     join(assets, `printfarmer-${release.tag}.spdx.json`));
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) copyFileSync(join(source, file), join(assets, file));
-  verifyImages(release.version, release.sourceCommit, digests, run);
+  const imageDetails = verifyImages(release.version, release.sourceCommit, digests, run);
   const smokeCommands = {
     api: 'test -f /app/Farm.Web.Api.dll && dotnet --info >/dev/null',
     'slicer-host': 'test -f /app/Farm.Slicer.Host.dll && test -d /app/plugins/slicer && dotnet --info >/dev/null',
@@ -115,6 +116,8 @@ export function buildImages(release, source, assets, run = command, rejectImages
       Object.keys(components).map(name => [name, { reference: `${imageRepository(name)}@${digests[name]}`,
         platforms: components[name].platforms }])),
   }, undefined, 2)}\n`);
+  writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
+    { ...release, sequence: deriveSequence(release.version) }, imageDetails));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   return digests;
 }
@@ -130,20 +133,56 @@ export function releaseAssets(release) {
   return [
     ...sourceBundleFiles(release),
     'LICENSE', 'THIRD-PARTY-NOTICES.md', 'license-inventory.json', 'container-images.json', 'release-notes.md',
+    'update-manifest.json', 'update-manifest.sigstore.json',
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
   ];
+}
+
+// The workflow signs and verifies update-manifest.json in two prior steps
+// (sign, then re-verify) before this script even starts. Re-verify the exact
+// bytes about to be uploaded here too, immediately before the upload call,
+// so nothing between those earlier steps and the actual upload (a rebuilt
+// asset, a manual edit, disk corruption) can present an unsigned or
+// mismatched manifest as this release's signed managed-update contract.
+// The signing identity is channel-aware: stable releases are signed by the
+// workflow running from `main`, insider releases by the workflow running
+// from `development`. This must match the ref the workflow actually runs
+// from for that channel (see consolidated-release.yml), not a single
+// hardcoded ref, so the cosign identity check reflects real job identity.
+function manifestSignatureIdentity(channel) {
+  requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel for signature identity');
+  const ref = channel === 'stable' ? 'main' : 'development';
+  return `https://github.com/${repository}/${workflow}@refs/heads/${ref}`;
+}
+
+function verifyManifestSignatureBeforeUpload(assets, run, channel) {
+  const manifestPath = join(assets, 'update-manifest.json');
+  const bundlePath = join(assets, 'update-manifest.sigstore.json');
+  requireThat(readFileSync(manifestPath).length > 0, 'Missing update manifest immediately before upload');
+  requireThat(readFileSync(bundlePath).length > 0,
+    'Missing update manifest signature bundle immediately before upload');
+  run('cosign', ['verify-blob', '--bundle', bundlePath,
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    '--certificate-identity', manifestSignatureIdentity(channel), manifestPath]);
 }
 
 export async function publishRelease(release, assets, api, {
   run = command, verify = verifyImages, rejectImages = rejectExistingImages, tagImages = publishImageTags,
 } = {}) {
   const digests = JSON.parse(readFileSync(join(assets, 'digests.json'), 'utf8'));
-  verify(release.version, release.sourceCommit, digests);
+  const imageDetails = verify(release.version, release.sourceCommit, digests);
+  requireThat(imageDetails && typeof imageDetails === 'object',
+    'Image verification must return OCI index and child platform digests');
   const files = releaseAssets(release);
   for (const name of files.filter(name => name !== 'release-notes.md')) {
     requireThat(readFileSync(join(assets, name)).length > 0, `Missing release asset: ${name}`);
   }
+  validateManifest(readFileSync(join(assets, 'update-manifest.json'), 'utf8'), release, digests, imageDetails);
+  // Verify before creating the permanent Git tag or draft release. The later
+  // verification immediately before upload protects the exact bytes after any
+  // fallible draft-release operations.
+  verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
   await rejectExistingVersion(api, release.tag);
@@ -158,6 +197,7 @@ export async function publishRelease(release, assets, api, {
     body: notes, draft: true, prerelease: release.channel === 'insider', make_latest: 'false',
   } });
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
+  verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);
   requireThat(Array.isArray(uploaded) && uploaded.length === files.length &&
@@ -183,7 +223,7 @@ async function main() {
   await verifyOwnerDispatch(env, api);
   const release = await selectRelease(env, api);
   const operation = process.argv[2];
-  requireThat(['select', 'build', 'publish'].includes(operation), 'Unknown release command');
+  requireThat(['select', 'verify', 'build', 'publish'].includes(operation), 'Unknown release command');
   if (operation === 'select') {
     for (const [key, value] of Object.entries({ source_sha: release.sourceCommit,
       version: release.version, environment: `release-${release.channel}` })) {
@@ -193,6 +233,7 @@ async function main() {
   }
   requireThat(env.RELEASE_SELECTED_SOURCE === release.sourceCommit, 'Pinned source output is required');
   requireThat(env.RELEASE_PUBLICATION_ENVIRONMENT === `release-${release.channel}`, 'Protected environment is required');
+  if (operation === 'verify') return;
   const assets = resolve('release-assets');
   if (operation === 'build') buildImages(release, resolve('source'), assets);
   else {

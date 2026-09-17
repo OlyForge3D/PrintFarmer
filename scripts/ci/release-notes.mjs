@@ -10,8 +10,9 @@ export async function releaseNotes(api, release, digests) {
   return `## PrintFarmer ${release.version}\n\n` +
     `Channel: **${release.channel}**. Source: \`${release.sourceCommit}\`.\n\n` +
     `Build: https://github.com/${repository}/actions/runs/${release.buildId}\n\n` +
-    `### Installation\n\nManual installation only. This publication is not a signed managed-update candidate ` +
-    `and does not authorize installation or Auto-update. Back up your data, stop active prints, and follow ` +
+    `### Installation\n\nManual installation only; this publication includes a signed ` +
+    `managed-update manifest, but signing authenticates the publisher and exact bytes; it does not authorize ` +
+    `installation or Auto-update. Back up your data, stop active prints, and follow ` +
     `[the deployment guide](https://github.com/${repository}/blob/${release.sourceCommit}/docs/DEPLOYMENT.md) ` +
     `before changing containers. Review migrations and recovery requirements for your installation.\n\n` +
     `### Images\n\n| Image | Platforms | Pinned reference |\n| --- | --- | --- |\n${images.join('\n')}\n\n` +
