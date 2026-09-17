@@ -315,14 +315,24 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         cache.LastError.Should().Be(rollbackMessage);
     }
 
-    [Fact]
-    public void NormalizeAssemblyVersion_FourPartVersion_ProducesSemanticVersion()
+    [Theory]
+    [MemberData(nameof(NormalizeAssemblyVersionCases))]
+    public void NormalizeAssemblyVersion_ProducesExpectedSemanticVersion(Version? assemblyVersion, string expected)
     {
-        string normalized = SystemInfoService.NormalizeAssemblyVersion(new Version(1, 2, 3, 4));
+        string normalized = SystemInfoService.NormalizeAssemblyVersion(assemblyVersion);
 
-        normalized.Should().Be("1.2.3");
+        normalized.Should().Be(expected);
         HostUpdateValidation.IsSemanticVersion(normalized).Should().BeTrue();
     }
+
+    // Build == -1 (no third component, e.g. `new Version(1, 2)`) previously fell through to Math.Max, but this
+    // case must stay covered explicitly so a regression there fails a test instead of only field observation.
+    public static TheoryData<Version?, string> NormalizeAssemblyVersionCases => new()
+    {
+        { new Version(1, 2, 3, 4), "1.2.3" },
+        { new Version(1, 2), "1.2.0" },
+        { null, "0.0.0" },
+    };
 
     [Fact]
     public async Task GetInfo_Admin_DisabledDiscoveryRevokesPriorReadiness()

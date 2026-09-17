@@ -943,18 +943,6 @@ internal static class HostUpdateValidation
     }
     public static bool DigestsEqual(string? left, string? right) => IsDigest(left) && IsDigest(right) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left![7..]), Convert.FromHexString(right![7..]));
     public static bool IsSemanticVersion(string? value) => TryParseSemanticVersionParts(value, out _);
-    public static bool TryParseSemanticVersion(string? value, out Version version)
-    {
-        version = new Version(0, 0, 0);
-        if (!TryParseSemanticVersionParts(value, out ParsedSemanticVersion parsed) ||
-            !Version.TryParse($"{parsed.Major}.{parsed.Minor}.{parsed.Patch}", out Version? coreVersion))
-        {
-            return false;
-        }
-
-        version = coreVersion;
-        return true;
-    }
     public static bool TryCompareSemanticVersions(string? left, string? right, out int comparison)
     {
         comparison = 0;
