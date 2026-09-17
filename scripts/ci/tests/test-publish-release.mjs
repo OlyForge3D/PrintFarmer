@@ -210,6 +210,13 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   const smokes = [];
   const run = (name, args) => {
     if (name === 'git') return sha;
+    if (name === 'node' && args[0] === 'scripts/compliance/create-source-bundle.mjs') {
+      const outputDirectory = args[args.indexOf('--output') + 1];
+      assert.ok(outputDirectory.startsWith(`${source}${'\\'}`) || outputDirectory.startsWith(`${source}/`));
+      mkdirSync(outputDirectory, { recursive: true });
+      writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.tar.gz`), 'archive');
+      writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.json`), 'manifest');
+    }
     if (name === 'docker' && args[1] === 'build') {
       builds.push(args);
       writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify({ 'containerimage.digest': digest }));

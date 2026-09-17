@@ -45,8 +45,12 @@ export function buildImages(release, source, assets, run = command, rejectImages
   const execute = (name, args) => run(name, args, { cwd: source, stdio: ['ignore', 'inherit', 'pipe'] });
   run('dotnet', ['restore', 'farm-web.sln'], { cwd: join(source, 'src'), stdio: ['ignore', 'inherit', 'pipe'] });
   execute('node', ['scripts/compliance/validate-compliance.mjs']);
+  const sourceBundleAssets = join(source, '.release-assets');
   execute('node', ['scripts/compliance/create-source-bundle.mjs',
-    '--revision', release.sourceCommit, '--version', release.tag, '--output', assets]);
+    '--revision', release.sourceCommit, '--version', release.tag, '--output', sourceBundleAssets]);
+  for (const file of [`PrintFarmer-${release.tag}-source.tar.gz`, `PrintFarmer-${release.tag}-source.json`]) {
+    copyFileSync(join(sourceBundleAssets, file), join(assets, file));
+  }
   execute('node', ['scripts/compliance/create-license-inventory.mjs', '--version', release.tag,
     '--revision', release.sourceCommit, '--output', join(assets, 'license-inventory.json')]);
   emitBuildMetadata(release, source);
