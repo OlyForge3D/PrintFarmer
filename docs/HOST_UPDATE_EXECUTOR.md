@@ -1,5 +1,99 @@
-# Host update executor foundation
+# Host update executor
 
-The safe-executor core supplies immutable release identity contracts, exact six-target validation, a bounded process/installation lock, a durable hash-chained journal, and a checkpoint-aware state machine. It is a foundation only; it does not enable automatic updates or claim deployment completion.
+The safe-executor core (`HostUpdateExecutor`, unmodified since the foundation commit) supplies
+immutable release identity contracts, exact six-target validation, a bounded process/installation
+lock, a durable hash-chained journal, and a checkpoint-aware state machine. On top of that
+foundation, issue #2663 adds concrete, repository-appropriate step adapters that turn the
+foundation into a functional **manual-first** update path: an operator (or, later, #2666's
+scheduler once it is granted standing permission — not yet the case here) submits one immutable
+`HostUpdateExecutionRequest` through the admin API, and the executor drives it through
+preflight → drain → fence → backup → migration → apply → verify, or into `RecoveryRequired` on any
+failure. There is still no automatic/unattended execution path.
 
-Concrete adapters still required are admission/drain, all-writer fencing, coordinated database/blob/config backup, provider migration ownership, pinned-image application, health/readiness verification, and verified rollback/restore. These adapters must persist evidence before and after side effects and keep uncertain outcomes in `RecoveryRequired`.
+## Configuration: `HostUpdateExecutionOptions`
+
+Bound from the `HostUpdateExecution` configuration section (see
+`src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`) and enforced at process start by
+`HostUpdateExecutionOptionsValidator` via `ValidateOnStart()`:
+
+- **`RootDirectory`** (required, no default): an absolute, host-controlled, persistent directory
+  that owns all executor state — the durable journal, the execution lock, installed-state, and
+  coordinated backups. The validator rejects a relative path, a path under the OS temp directory,
+  and the process's current/working directory (or any subdirectory of it), so a container rebuild,
+  temp-cleanup, or an application-DB restore can never silently destroy update history or
+  in-flight recovery evidence. Configure it via `HostUpdateExecution__RootDirectory` (or the
+  equivalent JSON/YAML nesting) to a real, persistent host path (e.g. a dedicated bind-mounted
+  volume) before the executor can be used at all.
+- Derived paths: `StateDirectory` (`{RootDirectory}/state`), `BackupRootDirectory`
+  (`{RootDirectory}/backups`), `DiskWatchPath` (`RootDirectory`, checked for free space at
+  preflight).
+- Timeouts/poll intervals for drain, fence-proof, backup, verify, apply, and short diagnostic
+  process calls; `MinimumFreeBytes`; the EF Core provider allowlist (`SupportedProviderNames`);
+  `DatabaseExternallyOwned` (fails backup closed instead of silently skipping a customer-managed
+  database); `OwnedDirectories` (name → absolute path for the compose-managed API container's real
+  mount points: `/data`, `/app/models`, `/app/gcode`, `/app/profiles`,
+  `/app/data-protection-keys`); `ComposeFiles`/`ComposeProjectName`/`ServiceMappings` (the six
+  canonical service ids — `api`, `frontend`, `slicer-host`, `printer-discovery`,
+  `orcaslicer-worker`, `monolith` — each mapped to its compose service name, pinned-image
+  environment variable, and `ghcr.io/olyforge3d/printfarmer-*` repository); `HealthCheckBaseUrl`
+  for readiness probes.
+
+## Concrete adapters (`src/infra/Services/HostUpdates/`)
+
+| Step | Adapter | Notes |
+|---|---|---|
+| Preflight | `HostUpdatePreflightCheck` | Revalidates installed version/digests, provider allowlist, disk free space, and every configured migration target's provider name before anything else runs. |
+| Drain | `HostUpdateDrainCoordinator` | Closes the admission gate to new submissions/scheduling, then bounded-polls `IActiveWorkObservationPort` (backed by `AppDbContext`) for active prints/pending outbox work to finish naturally — never a blind cancellation. Times out closed. |
+| Fence | `HostUpdateFenceCoordinator` | Proves every registered `IFenceableWriter` (the admission gate itself, and the queue-outbox publisher via `IHostUpdateWriterActivityFlag`) has actually quiesced before backup — bounded-polled, not assumed. |
+| Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
+| Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Wraps the existing `ProviderAwareMigrationRunner` under the executor's own single-writer lock; inspects the actual installed provider state and fails closed on an unsupported/mixed configuration rather than duplicating migration logic. |
+| Apply | `HostUpdateImageApplier` | Applies immutable `repository@sha256` images via the existing compose templates and `docker compose up -d`, using an explicit process argument list — never shell interpolation, never a mutable tag. |
+| Verify | `HostUpdateHealthVerifier` | Confirms exact running digests (`docker inspect`) plus HTTP readiness before reporting healthy and allowing writers to reopen. |
+| Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling, and persists `NeedsOperator` when recovery itself is uncertain or fails. Resumable/idempotent via the same durable journal after a process restart. |
+
+## Availability contract
+
+`IHostUpdateExecutionAvailabilityProvider` (`HostUpdateExecutionAvailability.cs`) positively probes
+— never assumes — that the executor is actually usable: the root directory is writable, the
+journal is not corrupt, at least one migration and one backup target are configured, every
+configured compose file exists on disk, and the container runtime (`docker version`) is reachable.
+`HostUpdateExecutionAvailabilityHostedService` computes this immediately at process startup
+("restart reconciliation" — a fresh process re-proves its own readiness rather than trusting a
+previous run's state) and then periodically rechecks, publishing every result into the singleton
+`HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
+without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
+carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
+`compose_file_missing:...`, `docker_runtime_unavailable`) so an operator is never left guessing.
+
+## DI wiring
+
+`HostUpdateExecutionStartup.AddHostUpdateExecution` (`src/api/Startup/HostUpdateExecutionStartup.cs`,
+called from `FeatureServicesStartup`) composes every adapter above behind the unmodified
+`IHostUpdateExecutionSteps`/`IHostUpdateExecutor` contracts, plus the options/validator, the
+availability provider/holder/hosted service, and the durable journal/lock/installed-state stores —
+all rooted under the validated `RootDirectory`. It registers only the manual admin API's
+dependencies; it never grants #2666's scheduler (or anything else) standing automatic-execution
+permission.
+
+## Manual admin API
+
+`HostUpdateController` (`Farm.Modules.Administration`) exposes the manual, operator-invoked
+surface: `[RequirePermission("system_settings", "admin")]`-gated execute/recover endpoints that
+bind one immutable request per call. Replay/duplicate-submission protection currently relies on the
+executor's own file-based journal/lock rather than a controller-level idempotency key; stale-plan
+checking against the separate staging/authorization layer (`HostUpdateFoundation`/
+`SignedUpdateInfrastructure`) is a known remaining gap — see the acceptance-gap list tracked
+against issue #2663.
+
+## Known limitations
+
+- Split-topology deployments where `AppDbContext` and `SlicerDbContext` point at genuinely
+  different physical databases are not yet handled by the single shared database backup/restore
+  target; the common (monolith/shared-DB) case is.
+- Only two writers are concretely fenced today (the admission gate and the queue outbox
+  publisher); other background schedulers/bridges/API replicas/workers still need
+  `IFenceableWriter` implementations registered as they are identified.
+- The PostgreSQL/SQL Server restore commands interpolate the connection password into a `sh -c`
+  script string (required by the foundation's fixed `sh`-based restore invocation); a password
+  containing a single quote is a known, accepted shell-quoting risk, not yet hardened.
+

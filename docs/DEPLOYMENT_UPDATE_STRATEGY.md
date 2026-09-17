@@ -137,6 +137,31 @@ Issue #2663 owns all transitions after `Staged`, including drain, backup,
 migration, apply, verification, and recovery. Issue #2666 owns request
 integration and scheduling.
 
+**Issue #2663 implementation status:** concrete, repository-appropriate step
+adapters exist for every stage — preflight (`HostUpdatePreflightCheck`), drain
+(`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
+than cancelling), fence (`HostUpdateFenceCoordinator`, proving the admission
+gate and the queue outbox publisher have quiesced), backup
+(`HostUpdateBackupCoordinator` plus provider-native
+`HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`,
+failing closed for an externally-owned database), migration
+(`HostUpdateMigrationCoordinator` wrapping the existing
+`ProviderAwareMigrationRunner` under the executor's own lock), apply
+(`HostUpdateImageApplier`, pinned `repository@sha256` images via the existing
+compose templates, no shell interpolation), verify (`HostUpdateHealthVerifier`,
+exact digest plus HTTP readiness), and recovery
+(`HostUpdateRecoveryCoordinator`, image-only rollback vs. coordinated restore,
+`NeedsOperator` on uncertainty). All of it is wired through production DI
+(`HostUpdateExecutionStartup.AddHostUpdateExecution`) behind a manual,
+permission-gated admin API (`HostUpdateController`) with no automatic
+scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full
+adapter table, the `HostUpdateExecutionOptions` root-directory contract, and
+the availability-probing contract a scheduler must poll before ever invoking
+the executor. Remaining gaps: split-topology (non-shared) database
+backup/restore, additional `IFenceableWriter` registrations beyond the
+admission gate and queue outbox publisher, and controller-level replay/
+stale-plan checks against the staging/authorization layer.
+
 Scope: single-host Docker Compose, monolith and split-service deployments,
 optional/local/remote workers, external databases, and offline installations.
 The [provider matrix](DEPLOYMENT.md#database-configuration) permits PostgreSQL

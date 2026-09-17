@@ -25,6 +25,12 @@ public static class FeatureServicesStartup
         // Farm.Modules.Devices.DevicesApiModule (issue #2043, Phase 15).
         services.Configure<Farm.Infrastructure.Settings.OctoPrintSettings>(configuration.GetSection("OctoPrint"));
 
+        // Host update executor (issue #2663): production DI wiring for the concrete
+        // preflight/drain/fence/backup/migration/apply/verify/recovery adapters and the manual
+        // admin API's dependencies. See HostUpdateExecutionStartup for details; never grants
+        // automatic scheduler execution permission.
+        services.AddHostUpdateExecution(configuration);
+
         // ApiKey repository
         services.AddScoped<Farm.Infrastructure.Repositories.Api.IApiKeyRepository, Farm.Infrastructure.Repositories.Api.EfApiKeyRepository>();
 

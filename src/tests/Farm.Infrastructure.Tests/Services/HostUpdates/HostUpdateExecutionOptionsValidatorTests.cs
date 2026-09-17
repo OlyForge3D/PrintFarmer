@@ -1,0 +1,167 @@
+using Farm.Infrastructure.Services.HostUpdates;
+using FluentAssertions;
+using Microsoft.Extensions.Options;
+using Xunit;
+
+namespace Farm.Infrastructure.Tests.Services.HostUpdates;
+
+/// <summary>
+/// Focused coverage for <see cref="HostUpdateExecutionOptionsValidator"/> (issue #2663): proves
+/// the executor can never start with its durable root resolving under a temp directory or the
+/// process's working directory, and that every other required field is enforced at startup.
+/// </summary>
+public class HostUpdateExecutionOptionsValidatorTests
+{
+    private static readonly HostUpdateExecutionOptionsValidator Validator = new();
+
+    private static HostUpdateExecutionOptions ValidOptions(string root) => new() { RootDirectory = root };
+
+    [Fact]
+    public void Validate_ValidAbsoluteRootOutsideTempAndCwd_Succeeds()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        ValidateOptionsResult result = Validator.Validate(null, ValidOptions(root));
+
+        result.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_MissingRootDirectory_Fails()
+    {
+        ValidateOptionsResult result = Validator.Validate(null, new HostUpdateExecutionOptions { RootDirectory = string.Empty });
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("RootDirectory is required");
+    }
+
+    [Fact]
+    public void Validate_RelativeRootDirectory_Fails()
+    {
+        ValidateOptionsResult result = Validator.Validate(null, ValidOptions("relative/path"));
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("must be an absolute path");
+    }
+
+    [Fact]
+    public void Validate_RootUnderTempDirectory_Fails()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-updates");
+        ValidateOptionsResult result = Validator.Validate(null, ValidOptions(root));
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("must not be under the OS temp directory");
+    }
+
+    [Fact]
+    public void Validate_RootIsCurrentWorkingDirectory_Fails()
+    {
+        ValidateOptionsResult result = Validator.Validate(null, ValidOptions(Directory.GetCurrentDirectory()));
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("current/working directory");
+    }
+
+    [Fact]
+    public void Validate_RootIsSubdirectoryOfCurrentWorkingDirectory_Fails()
+    {
+        string root = Path.Combine(Directory.GetCurrentDirectory(), "host-updates");
+        ValidateOptionsResult result = Validator.Validate(null, ValidOptions(root));
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("current/working directory");
+    }
+
+    [Fact]
+    public void Validate_EmptySupportedProviderNames_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.SupportedProviderNames = [];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("SupportedProviderNames");
+    }
+
+    [Fact]
+    public void Validate_EmptyComposeFiles_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ComposeFiles = [];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("ComposeFiles");
+    }
+
+    [Fact]
+    public void Validate_ServiceMappingMissingField_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ServiceMappings = [new HostUpdateServiceMappingOptions("api", string.Empty, "IMG", "repo")];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("missing a required field");
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_NonPositiveMinimumFreeBytes_Fails(long minimumFreeBytes)
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.MinimumFreeBytes = minimumFreeBytes;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("MinimumFreeBytes");
+    }
+
+    [Fact]
+    public void Validate_NonPositiveTimeout_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.DrainTimeoutSeconds = 0;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("DrainTimeoutSeconds");
+    }
+
+    [Fact]
+    public void Validate_InvalidHealthCheckBaseUrl_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.HealthCheckBaseUrl = "not-a-url";
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("HealthCheckBaseUrl");
+    }
+
+    [Fact]
+    public void Validate_MissingComposeProjectName_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ComposeProjectName = string.Empty;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("ComposeProjectName");
+    }
+}

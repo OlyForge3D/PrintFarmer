@@ -27,6 +27,7 @@ public class CustomWebApplicationFactory : HostFixture<Program>
 {
     // Each test gets a unique in-memory database using named connection
     private readonly Dictionary<string, string?>? _configOverrides;
+    private readonly string _hostUpdateExecutionRoot;
     private static int _databaseCounter = 0;
 
     public CustomWebApplicationFactory() : this(configOverrides: null) { }
@@ -57,6 +58,39 @@ public class CustomWebApplicationFactory : HostFixture<Program>
             "Default Timeout=30;Pooling=False")
     {
         _configOverrides = configOverrides;
+
+        // HostUpdateExecutionOptionsValidator (issue #2663) deliberately rejects any
+        // RootDirectory under the OS temp directory or the process's working directory, so
+        // (unlike ModelStoragePath/GcodeStoragePath above) this cannot reuse Path.GetTempPath().
+        // LocalApplicationData is host-controlled and persistent across a single test run;
+        // DisposeAsync below removes it.
+        _hostUpdateExecutionRoot = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "PrintFarmerTests",
+            "host-updates",
+            $"factory_{Guid.NewGuid():N}");
+        Directory.CreateDirectory(_hostUpdateExecutionRoot);
+    }
+
+    /// <summary>Removes this factory's isolated host-update-execution root (see constructor).</summary>
+    public override async ValueTask DisposeAsync()
+    {
+        await base.DisposeAsync();
+        try
+        {
+            if (Directory.Exists(_hostUpdateExecutionRoot))
+            {
+                Directory.Delete(_hostUpdateExecutionRoot, recursive: true);
+            }
+        }
+        catch (IOException)
+        {
+            // Best-effort cleanup; a locked file on a shared CI runner should not fail the test.
+        }
+        catch (UnauthorizedAccessException)
+        {
+            // Best-effort cleanup; a locked file on a shared CI runner should not fail the test.
+        }
     }
 
     protected override void ConfigureWebHost(IWebHostBuilder builder)
@@ -76,7 +110,8 @@ public class CustomWebApplicationFactory : HostFixture<Program>
             {
                 ["WorkerAuth:SharedKey"] = "test-worker-key",
                 ["STORAGE_PATHS:UPLOADS"] = ModelStoragePath,
-                ["STORAGE_PATHS:GCODE"] = GcodeStoragePath
+                ["STORAGE_PATHS:GCODE"] = GcodeStoragePath,
+                ["HostUpdateExecution:RootDirectory"] = _hostUpdateExecutionRoot
             };
 
             // Merge any caller-supplied config overrides (e.g., "Slicer:Enabled" = "false")
