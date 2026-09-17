@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
@@ -12,7 +12,6 @@ using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 
 namespace Farm.Infrastructure.Services.SystemStatus;
@@ -27,7 +26,8 @@ public class SystemInfoService(
     IMemoryCache cache,
     ILogger<SystemInfoService> logger,
     IEnumerable<IServiceInventorySource> inventorySources,
-    IConfiguration configuration) : ISystemInfoService
+    Farm.Infrastructure.Settings.ISettingsService settingsService,
+    Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache verifiedReleaseEvidenceCache) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
     private const string CacheKey = "SystemInfo:Snapshot";
@@ -37,6 +37,8 @@ public class SystemInfoService(
     private readonly IBackgroundServiceMonitor _backgroundServiceMonitor = backgroundServiceMonitor;
     private readonly IMemoryCache _cache = cache;
     private readonly ILogger<SystemInfoService> _logger = logger;
+    private readonly Farm.Infrastructure.Settings.ISettingsService _settingsService = settingsService;
+    private readonly Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache _verifiedReleaseEvidenceCache = verifiedReleaseEvidenceCache;
 
     /// <summary>
     /// Returns the current system information snapshot, served from a 10-second cache to avoid
@@ -49,6 +51,23 @@ public class SystemInfoService(
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(10);
             return await CollectSystemInfoAsync(cancellationToken);
         }) ?? await CollectSystemInfoAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the service inventory snapshot for the currently persisted
+    /// <see cref="Farm.Infrastructure.Settings.UpdateChannelSettings.Channel"/>, then layers on a
+    /// production release-readiness evaluation (issue #2757) using whatever independently
+    /// verified release evidence <see cref="Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache"/>
+    /// currently holds. When no verified release has been discovered yet (cache empty, or the
+    /// discovery background service is disabled/still starting), <c>ReleaseReadinessEvaluator</c>
+    /// resolves this to <c>NotManaged</c> -- readiness degrades safely rather than throwing.
+    /// </summary>
+    private ServiceInventoryDto BuildInventory(IReadOnlyList<ServiceReplicaObservationDto> observations)
+    {
+        string channel = _settingsService.Get<Farm.Infrastructure.Settings.UpdateChannelSettings>().Channel;
+        ServiceInventoryDto inventory = ServiceInventoryEvaluator.Evaluate(observations, channel, DateTimeOffset.UtcNow);
+        ReleaseReadinessDto readiness = ReleaseReadinessEvaluator.Evaluate(inventory, _verifiedReleaseEvidenceCache.Current, DateTimeOffset.UtcNow);
+        return inventory with { Readiness = readiness };
     }
 
     /// <summary>
@@ -83,7 +102,7 @@ public class SystemInfoService(
         string databaseProvider = NormalizeDatabaseEngine(_db.Database.ProviderName);
         return new SystemInfoDto
         {
-            Inventory = ServiceInventoryEvaluator.Evaluate(observations, configuration["Deployment:SelectedChannel"], DateTimeOffset.UtcNow),
+            Inventory = BuildInventory(observations),
             App = new SystemAppInfoDto
             {
                 Version = appVersion,

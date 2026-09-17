@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data;
 using Farm.Web.Api.Middleware;
 using Farm.Web.Api.Services;
 
@@ -327,6 +327,40 @@ public static class FeatureServicesStartup
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache, Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCache>();
+
+        // Signed release discovery (issue #2757): GitHub Releases discovery + Cosign
+        // verification + verified-metadata mapping, all wired through DI for the production
+        // discovery path. This registration ONLY discovers/verifies release metadata; it never
+        // stages, downloads, applies, or recovers an update (see VerifiedReleaseDiscoveryMonitorService).
+        services.AddOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>,
+            Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptionsValidator>();
+
+        // ISignedReleaseVerifier -> ProcessCosignVerifier: invokes the configured, bounded-options
+        // Cosign executable (path/timeout/diagnostics-size are all startup-validated above).
+        // ProcessCosignVerifier itself fails closed (returns false, never throws) when the
+        // executable is missing or misbehaves, so a misconfigured/unbundled Cosign binary can
+        // only ever prevent a release from verifying — never cause an unsafe "verified" result.
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.ISignedReleaseVerifier>(sp =>
+            new Farm.Infrastructure.Services.HostUpdates.ProcessCosignVerifier(
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>>().Value.ToCosignVerifierOptions()));
+
+        // GitHub public releases API client: pinned base address + standard GitHub REST headers.
+        services.AddHttpClient<Farm.Infrastructure.Services.HostUpdates.GitHubSignedReleaseDiscovery>((sp, client) =>
+        {
+            Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
+                sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions>>().Value;
+            client.BaseAddress = new Uri("https://api.github.com/");
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("PrintFarmer/1.0");
+            client.DefaultRequestHeaders.Accept.ParseAdd("application/vnd.github+json");
+            client.DefaultRequestHeaders.Add("X-GitHub-Api-Version", "2022-11-28");
+            client.Timeout = TimeSpan.FromSeconds(options.HttpTimeoutSeconds);
+        });
+        services.AddTransient<Farm.Infrastructure.Services.HostUpdates.IHostUpdateMetadataProvider,
+            Farm.Infrastructure.Services.HostUpdates.VerifiedGitHubReleaseMetadataProvider>();
 
         // Keep host build identity and deployment policy explicit when projecting from infrastructure.
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IServiceInventorySource>(sp =>

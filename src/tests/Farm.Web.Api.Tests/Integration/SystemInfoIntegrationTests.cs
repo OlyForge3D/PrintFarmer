@@ -6,6 +6,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Slicer.Module.Services.SystemInfo;
@@ -215,6 +216,49 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         workers.Should().Contain(row => row.InstanceId == second.ToString() && row.ApplicationVersion == null && row.ObservationState == InventoryObservationState.Unavailable);
         workers.Should().OnlyContain(row => row.PlatformDigest == null && row.Identity == null);
         json.Should().NotContain("private-worker").And.NotContain("never-return-registry-key").And.NotContain("not-attestation").And.NotContain("capabilitiesJson");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_ReadinessReflectsVerifiedReleaseEvidenceCache()
+    {
+        // Issue #2757 production wiring: SystemInfoService must actually consult
+        // IVerifiedReleaseEvidenceCache (fed by VerifiedReleaseDiscoveryMonitorService in
+        // production) rather than a stub. Both assertions run against the same admin client
+        // in one method, in order, because the cache is a process-lifetime singleton shared
+        // by every test in this class fixture.
+        HttpResponseMessage before = await _adminClient!.GetAsync("/api/system/info");
+        using (JsonDocument beforeJson = JsonDocument.Parse(await before.Content.ReadAsStringAsync()))
+        {
+            JsonElement readiness = beforeJson.RootElement.GetProperty("inventory").GetProperty("readiness");
+            readiness.GetProperty("state").GetString().Should().Be("NotManaged");
+            readiness.GetProperty("reasons").EnumerateArray().Select(r => r.GetString()).Should().Contain("NoSignedReleaseSelected");
+        }
+
+        // A release whose channel does not match the host's selected channel ("stable" by
+        // default) is unambiguously Blocked, proving the evaluator is wired against a
+        // *populated* cache, not always the "no evidence" branch.
+        IVerifiedReleaseEvidenceCache cache = _factory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        cache.SetVerified(
+            new VerifiedReleaseEvidenceDto
+            {
+                SignatureVerified = true,
+                IsComplete = true,
+                ManifestDigest = "sha256:" + new string('a', 64),
+                Identity = new CanonicalReleaseIdentityDto
+                {
+                    CanonicalVersion = "9.9.9",
+                    BaseVersion = "9.9.9",
+                    Channel = "insider",
+                    ReleaseId = "insider:9.9.9",
+                },
+                Services = [],
+            },
+            DateTimeOffset.UtcNow);
+        _factory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
+
+        HttpResponseMessage after = await _adminClient!.GetAsync("/api/system/info");
+        using JsonDocument afterJson = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
+        afterJson.RootElement.GetProperty("inventory").GetProperty("readiness").GetProperty("state").GetString().Should().Be("Blocked");
     }
 
     [Fact]

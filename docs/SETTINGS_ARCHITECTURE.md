@@ -328,6 +328,30 @@ Spoolman uses the generic Integrations editor for users with `system_settings:ad
 A dedicated Spoolman card serves `spoolman:admin` delegates without that permission;
 the two editors never mount together for the same section.
 
+## Update Channel Setting (#2757)
+
+`UpdateChannelSettings` (`src/infra/Settings/UpdateChannelSettings.cs`, section `UpdateChannel`)
+is a plain `IAppSetting`/`IValidatableSetting` using the same generic settings store described
+above — it is not a bespoke settings surface. It selects which signed release channel the
+production discovery path (`VerifiedReleaseDiscoveryMonitorService`) discovers/caches evidence
+for, and which channel `SystemInfoService`/`ServiceInventoryEvaluator` compare against when
+evaluating release readiness.
+
+| Property | JSON key | Type | Notes |
+|---|---|---|---|
+| `Channel` | `channel` | `string` | Must be exactly `"stable"` or `"insider"`. Defaults to `"stable"`. |
+| `InsiderAcknowledged` | `insiderAcknowledged` | `bool` | Must be `true` before `Channel` may be set to `"insider"`. Enforced in `Validate()`. |
+
+`Validate()` throws `ValidationException` (translated to `400 Bad Request` by the generic
+settings API) for any channel value other than `stable`/`insider`, and for selecting `insider`
+without `insiderAcknowledged: true`. This setting only changes what the discovery/readiness path
+evaluates — it never stages, downloads, applies, or triggers an update by itself.
+
+Related operational bounds for the discovery path itself (GitHub polling interval, HTTP
+timeouts, Cosign verification) live in `HostUpdates:VerifiedReleaseDiscovery` app configuration,
+validated at startup by `VerifiedReleaseDiscoveryOptionsValidator` (not a persisted setting —
+plain `IOptions<T>` bound from configuration).
+
 ## Save Model — One Section At A Time
 
 There is **no "Save All" button** anywhere in the settings UI. The page renders a **single
