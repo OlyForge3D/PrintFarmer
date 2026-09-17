@@ -1,4 +1,12 @@
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -45,7 +53,7 @@ export function buildImages(release, source, assets, run = command, rejectImages
   const execute = (name, args) => run(name, args, { cwd: source, stdio: ['ignore', 'inherit', 'pipe'] });
   run('dotnet', ['restore', 'farm-web.sln'], { cwd: join(source, 'src'), stdio: ['ignore', 'inherit', 'pipe'] });
   execute('node', ['scripts/compliance/validate-compliance.mjs']);
-  const sourceBundleAssets = join(source, '.release-assets');
+  const sourceBundleAssets = mkdtempSync(join(source, '.release-assets-'));
   try {
     execute('node', ['scripts/compliance/create-source-bundle.mjs',
       '--revision', release.sourceCommit, '--version', release.tag, '--output', sourceBundleAssets]);

@@ -206,6 +206,8 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   mkdirSync(join(source, 'src'), { recursive: true });
   writeFileSync(join(source, 'VERSION'), 'v0.2.3');
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) writeFileSync(join(source, file), file);
+  mkdirSync(join(source, '.release-assets'));
+  writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
   const builds = [];
   const smokes = [];
   const run = (name, args) => {
@@ -213,6 +215,7 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     if (name === 'node' && args[0] === 'scripts/compliance/create-source-bundle.mjs') {
       const outputDirectory = args[args.indexOf('--output') + 1];
       assert.ok(!relative(source, outputDirectory).startsWith('..'));
+      assert.ok(outputDirectory.includes('.release-assets-'));
       mkdirSync(outputDirectory, { recursive: true });
       writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.tar.gz`), 'archive');
       writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.json`), 'manifest');
@@ -229,7 +232,7 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   for (const file of [`PrintFarmer-${release.tag}-source.tar.gz`, `PrintFarmer-${release.tag}-source.json`]) {
     assert.ok(existsSync(join(assets, file)));
   }
-  assert.ok(!existsSync(join(source, '.release-assets')));
+  assert.ok(existsSync(join(source, '.release-assets', 'preserved.txt')));
   assert.equal(builds.length, 6);
   assert.equal(smokes.length, 5);
   for (const [index, [, component]] of Object.entries(components).entries()) {
