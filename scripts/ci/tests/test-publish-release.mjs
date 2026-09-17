@@ -216,11 +216,10 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
   assert.deepEqual(manifest.services.map(service => service.id), Object.keys(components));
   for (const service of manifest.services) {
     assert.match(service.image, new RegExp(`^ghcr\\.io/olyforge3d/printfarmer-${service.id}@sha256:`));
-    assert.deepEqual(Object.keys(service.platformDigests), components[service.id].platforms);
-    assert.ok(Object.values(service.platformDigests).every(value => /^sha256:[a-f0-9]{64}$/.test(value)));
+    assert.deepEqual(service.platforms, components[service.id].platforms);
   }
   validateManifestInput({ ...release, sequence: deriveSequence(release.version) }, imageDetails);
-  validateManifest(first);
+  validateManifest(first, { ...release, sequence: deriveSequence(release.version) }, digests);
   for (const mutation of [
     () => validateManifestInput(release, { ...imageDetails, api: undefined }),
     () => validateManifestInput(release, { ...imageDetails, api: { ...imageDetails.api, indexDigest: 'latest' } }),
@@ -233,8 +232,12 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@', 'docker.io/example/api@'),
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@sha256:', 'ghcr.io/olyforge3d/printfarmer-api:'),
     value => value.replace('"id":"frontend"', '"id":"api"'),
-    value => value.replace(`"linux/amd64":"sha256:${'d'.repeat(64)}"`, '"linux/amd64":"bad"'),
+    value => value.replace(`"api/linux/amd64":"sha256:${'d'.repeat(64)}"`, '"api/linux/amd64":"bad"'),
   ]) assert.throws(() => validateManifest(mutation(first)));
+  assert.throws(() => validateManifest(first, { ...release, version: '0.2.3-insider.3',
+    tag: 'v0.2.3-insider.3', sequence: deriveSequence('0.2.3-insider.3') }, digests));
+  assert.throws(() => validateManifest(first, { ...release, sequence: deriveSequence(release.version) },
+    { ...digests, api: platformDigest }));
 });
 
 test('actual build loop passes the six targets/platforms and source metadata, stops on partial failure', t => {
@@ -413,6 +416,8 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.equal(workflow.jobs.checks.with.release_qualification, true);
   assert.deepEqual(workflow.jobs.publish.needs, ['select', 'checks']);
   assert.equal(workflow.jobs.publish.environment, '${{ needs.select.outputs.environment }}');
+  assert.equal(workflow.jobs.publish.permissions['id-token'], 'write');
+  assert.equal(workflow.jobs.select.permissions['id-token'], undefined);
   assert.equal(workflow.jobs.publish.env.RELEASE_SELECTED_SOURCE, '${{ needs.select.outputs.source_sha }}');
   const steps = workflow.jobs.publish.steps;
   assert.equal(steps.find(step => step.name === 'Checkout pinned application source').with.ref,
@@ -434,5 +439,9 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
     'scripts/ci/release-dispatch.mjs', 'scripts/ci/release-set.mjs'].map(file => readFileSync(file, 'utf8')).join('\n');
   assert.match(active, /cosign sign-blob --yes --bundle/);
   assert.match(active, /cosign verify-blob --bundle/);
+  assert.match(active, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
+  assert.match(active, /--certificate-identity "\$EXPECTED_IDENTITY"/);
+  assert.match(active, /update-manifest\.sigstore\.json/);
+  assert.doesNotMatch(active, /--certificate-oidc-issuer\s+\S+\s+\S+\*/);
   assert.doesNotMatch(active, /RELEASE_LEDGER|release-authorization|release-transaction|reservation_target/);
 });

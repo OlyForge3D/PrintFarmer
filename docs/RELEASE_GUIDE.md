@@ -16,15 +16,14 @@ post_date: "2026-09-16"
 1. Review `VERSION` on `main` for **stable**, or `development` for **insider**.
    It contains the base version, for example `v0.2.3`. Change the base through
    the normal reviewed PR process when needed; keep monorepo versions synchronized.
-2. As **jpapiez**, open **Actions > Consolidated Release > Run workflow** on the
-   channel's canonical workflow ref: `main` for stable or `development` for
-   insider. Choose the channel and enter
+2. As **jpapiez**, open **Actions > Consolidated Release > Run workflow** on
+   `development`. Choose the channel and enter
    `0.2.3` for stable or an unused `0.2.3-insider.N` for insider, such as
-   `0.2.3-insider.2`. The base must match the selected source's `VERSION`.
+   `0.2.3-insider.3`. The base must match the selected source's `VERSION`.
    Leave `source_sha` blank for that channel branch's current HEAD, or supply
    its full 40-character ancestor SHA.
 3. Run it once. The summary identifies the pinned source, check results and
-   release URL. A    successful release contains generated GitHub release notes, pinned image
+   release URL. A successful release contains generated GitHub release notes, pinned image
    references, corresponding source, license notices, SBOMs, and a signed
    `update-manifest.json` plus its `update-manifest.sigstore.json` bundle.
 
@@ -106,9 +105,9 @@ short-lived token **after** the long build. Only the publication job requests
 while the binary is pinned to `v3.0.6`.
 Cosign verification requires issuer
 `https://token.actions.githubusercontent.com` and the exact identity
-`https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main`
-for stable or the corresponding `refs/heads/development` identity for insider.
-The workflow also checks `GITHUB_WORKFLOW_REF` against that expected ref, so no
+`https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
+for both stable and insider. The workflow also checks `GITHUB_WORKFLOW_REF`
+against that expected ref, so no
 other workflow, repository, branch, or fork identity is accepted.
 Existing `RELEASE_PUBLISHER_APP_ID`,
 `RELEASE_PUBLISHER_PRIVATE_KEY`, `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN`
@@ -144,7 +143,7 @@ workflows and mutation/recovery commands are removed from active source.
 Remote ledger records, runs, artifacts and tags remain historical audit data.
 No migration or recovery of them is a prerequisite to this workflow.
 
-In particular, **`v0.2.3-insider.2` remains permanently manual-only**. Its unsigned
+In particular, **`v0.2.3-insider.1` remains permanently manual-only**. Its unsigned
 reservation is not repaired or abandoned. Do not rerun the consumed diagnostic
 35169805018 or failed abandonment 35177228925, reconstruct the missing
 `release-authorization-1` artifact, reset counters, or mutate remote history.

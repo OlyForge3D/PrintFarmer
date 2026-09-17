@@ -4,6 +4,7 @@ import { components, parseTag, requireThat } from './release-policy.mjs';
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const commitPattern = /^[a-f0-9]{40}$/;
 const platformPattern = /^[a-z0-9][a-z0-9._-]*$/;
+const manifestPlatformPattern = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/;
 const imagePattern = /^ghcr\.io\/olyforge3d\/printfarmer-[a-z0-9-]+@sha256:[a-f0-9]{64}$/;
 
 export function deriveSequence(version) {
@@ -69,15 +70,10 @@ export function buildManifest(release, imageDetails, options = {}) {
       id,
       image: `ghcr.io/olyforge3d/printfarmer-${id}@${details.indexDigest}`,
       platforms,
-      platformDigests: Object.fromEntries(platforms.map(platform => [
-        platform, details.platformDigests[platform],
-      ])),
-      ...(options.minimumUpdaterVersion ? { minimumUpdaterVersion: options.minimumUpdaterVersion } : {}),
-      ...(options.compatibility ? { compatibility: options.compatibility } : {}),
     };
   });
-  const platformEntries = Object.entries(imageDetails).flatMap(([id, details]) =>
-    Object.entries(details.platformDigests).map(([platform, digest]) => [`${id}-${platform.replaceAll('/', '-')}`, digest]));
+  const platformEntries = Object.entries(components).flatMap(([id, policy]) =>
+    policy.platforms.map(platform => [`${id}/${platform}`, imageDetails[id].platformDigests[platform]]));
   const manifest = {
     schema: 1,
     tag: normalizedRelease.tag,
@@ -91,33 +87,48 @@ export function buildManifest(release, imageDetails, options = {}) {
     services,
     platforms: platformEntries.map(([platform]) => platform),
     platformDigests: Object.fromEntries(platformEntries),
+    ...(options.minimumUpdaterVersion ? { minimumUpdaterVersion: options.minimumUpdaterVersion } : {}),
+    ...(options.compatibility ? { compatibility: options.compatibility } : {}),
   };
   const bytes = `${JSON.stringify(manifest)}\n`;
   validateManifest(bytes);
   return bytes;
 }
 
-export function validateManifest(bytes) {
+export function validateManifest(bytes, release, digests) {
   const manifest = JSON.parse(bytes);
   requireThat(manifest.schema === 1 && manifest.managedUpdateEligible === true,
     'Invalid managed update manifest header');
   requireThat(Array.isArray(manifest.services) && manifest.services.length === Object.keys(components).length,
     'Invalid managed update service set');
+  if (release) {
+    requireThat(manifest.tag === release.tag && manifest.version === release.version &&
+      manifest.channel === release.channel && manifest.sourceBranch === release.sourceBranch &&
+      manifest.sourceCommit === release.sourceCommit && String(manifest.buildId) === String(release.buildId) &&
+      manifest.sequence === deriveSequence(release.version), 'Manifest release identity mismatch');
+  }
   const ids = manifest.services.map(service => service?.id);
   requireThat(new Set(ids).size === ids.length &&
     ids.sort().join() === Object.keys(components).sort().join(), 'Invalid managed update service IDs');
   for (const service of manifest.services) {
     requireThat(imagePattern.test(service.image), `Mutable or unapproved image reference: ${service.id}`);
+    if (digests) requireThat(service.image === `ghcr.io/olyforge3d/printfarmer-${service.id}@${digests[service.id]}`,
+      `Manifest image mismatch: ${service.id}`);
     const policy = components[service.id];
     requireThat(Array.isArray(service.platforms) &&
       service.platforms.length === policy.platforms.length &&
       [...service.platforms].sort().join() === [...policy.platforms].sort().join(),
     `Invalid manifest platforms: ${service.id}`);
-    requireThat(service.platformDigests && typeof service.platformDigests === 'object' &&
-      Object.keys(service.platformDigests).sort().join() === [...policy.platforms].sort().join(),
-    `Invalid manifest child digests: ${service.id}`);
-    for (const platform of policy.platforms) validateDigest(service.platformDigests[platform],
-      `${service.id}/${platform}`);
+  }
+  const expectedPlatforms = Object.entries(components).flatMap(([id, policy]) =>
+    policy.platforms.map(platform => `${id}/${platform}`));
+  requireThat(Array.isArray(manifest.platforms) &&
+    manifest.platforms.join() === expectedPlatforms.join(), 'Invalid manifest platform list');
+  requireThat(manifest.platformDigests && Object.keys(manifest.platformDigests).join() === expectedPlatforms.join(),
+    'Invalid manifest child digest map');
+  for (const platform of expectedPlatforms) {
+    requireThat(manifestPlatformPattern.test(platform), `Invalid manifest platform: ${platform}`);
+    validateDigest(manifest.platformDigests[platform], platform);
   }
   return manifest;
 }

@@ -148,7 +148,7 @@ export async function publishRelease(release, assets, api, {
   for (const name of files.filter(name => name !== 'release-notes.md')) {
     requireThat(readFileSync(join(assets, name)).length > 0, `Missing release asset: ${name}`);
   }
-  validateManifest(readFileSync(join(assets, 'update-manifest.json'), 'utf8'));
+  validateManifest(readFileSync(join(assets, 'update-manifest.json'), 'utf8'), release, digests);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
   await rejectExistingVersion(api, release.tag);
