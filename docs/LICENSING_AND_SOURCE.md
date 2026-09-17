@@ -142,6 +142,14 @@ records remain under their own terms. A custom distribution `LicenseRef`
 requires extracted text or an exact in-image copyright path under
 `/usr/share/doc` or `/usr/share/licenses`. Unknown or unreviewed licenses block
 release.
+Syft 1.51.1 converts whitespace-delimited Alpine license metadata into an
+`AND` expression and can therefore misclassify operators and free-form terms
+as custom identifiers, such as `LicenseRef-AND` or
+`LicenseRef-Public-Domain`. Corrections are permitted only through reviewed
+package evidence that matches the APK ecosystem, package name, version, and
+complete observed expression. Any corrected custom identifier must include
+hash-bound extracted terms; changed versions, changed expressions, and
+unrelated packages continue to fail closed.
 The frontend build also generates
 `THIRD-PARTY-LICENSES.npm.txt` deterministically from installed production
 package terms and exact package/version/license/hash-bound fallbacks. Frontend
