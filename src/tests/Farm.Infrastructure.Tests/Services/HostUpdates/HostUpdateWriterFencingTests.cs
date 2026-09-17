@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.Electricity;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Queue;

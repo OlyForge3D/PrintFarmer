@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -29,6 +29,51 @@ public interface IHostUpdateAdmissionGate
     Task OpenAsync(CancellationToken cancellationToken);
 
     Task<bool> IsClosedAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Host-root-backed admission gate shared by API replicas and the standalone slicer-host. A
+/// missing or invalid root is treated as closed so producers fail safe instead of admitting work
+/// while executor availability is unavailable.
+/// </summary>
+public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions options) : IHostUpdateAdmissionGate
+{
+    private string GatePath => Path.Combine(options.StateDirectory, "admission.closed");
+
+    public async Task CloseAsync(CancellationToken cancellationToken)
+    {
+        string path = GatePath;
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, DateTimeOffset.UtcNow.ToString("O"), cancellationToken).ConfigureAwait(false);
+        await using FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
+        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
+#pragma warning disable CA1849 // Durable gate close must flush the file-system write-through marker before admitting backup/migration.
+        stream.Flush(flushToDisk: true);
+#pragma warning restore CA1849
+    }
+
+    public Task OpenAsync(CancellationToken cancellationToken)
+    {
+        string path = GatePath;
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> IsClosedAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Task.FromResult(File.Exists(GatePath));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Task.FromResult(true);
+        }
+    }
 }
 
 /// <summary>Process-wide, thread-safe <see cref="IHostUpdateAdmissionGate"/>.</summary>

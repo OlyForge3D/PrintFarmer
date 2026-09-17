@@ -1,4 +1,4 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Web.Api.Startup;
 using Microsoft.Extensions.Configuration;

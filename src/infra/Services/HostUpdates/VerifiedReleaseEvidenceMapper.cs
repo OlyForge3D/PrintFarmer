@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -122,7 +122,7 @@ public static class VerifiedReleaseEvidenceMapper
         CanonicalReleaseIdentityDto identity = new()
         {
             CanonicalVersion = metadata.Identity.Version,
-            BaseVersion = metadata.Identity.Version,
+            BaseVersion = GetBaseVersion(metadata.Identity.Version, metadata.Identity.Channel),
             Channel = metadata.Identity.Channel,
             ReleaseId = metadata.Identity.ReleaseId,
             SourceTag = metadata.Identity.SourceTag,
@@ -146,6 +146,20 @@ public static class VerifiedReleaseEvidenceMapper
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,
         };
+    }
+
+    private static string GetBaseVersion(string version, string channel)
+    {
+        if (channel == "insider")
+        {
+            int delimiter = version.IndexOf("-insider.", StringComparison.Ordinal);
+            if (delimiter > 0)
+            {
+                return version[..delimiter];
+            }
+        }
+
+        return version;
     }
 
     private static string GetHostPlatform()

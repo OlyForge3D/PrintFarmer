@@ -29,6 +29,17 @@ PrintFarmer supports two Docker deployment architectures:
 
 PrintFarmer's Docker deployment system consists of three coordinated layers that work together to enable flexible, repeatable deployments:
 
+## Passkey HTTPS Configuration
+
+Passkeys are bound to the browser origin. For a LAN or public installation,
+choose the canonical DNS hostname with `PRINTFARMER_HOST` (or
+`install.sh --host`) and terminate TLS for that hostname. The installer writes
+one `https://<hostname>` WebAuthn origin and prints that HTTPS address in its
+summary; it intentionally does not treat a LAN HTTP address as a passkey
+origin. The deployment script likewise requires `HTTPS_PORT` for a
+non-`localhost` `SERVER_HOST`; `localhost` remains supported for local
+development.
+
 ### 1. Orchestration Layer: `scripts/deploy-docker.sh`
 
 The main user-facing deployment script that handles interactive setup, validation, and container orchestration.
@@ -258,8 +269,33 @@ export HTTP_PORT=8080
 export API_PORT=5245
 export ALLOW_LOCAL_NETWORK=true
 export ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
+export WebAuthn__RelyingPartyId=pfarm.example.com
+export WebAuthn__RelyingPartyName=PrintFarmer
+export WebAuthn__Origin=https://pfarm.example.com
 NON_INTERACTIVE=1 ./scripts/deploy-docker.sh --non-interactive
 ```
+
+### Passkey / WebAuthn Configuration
+
+Passkey registration requires the relying party ID and browser origin to match the
+public URL exactly. The deployment script writes these settings to `.deploy-config`
+and `.env`, and the Compose templates pass them to the API:
+
+| Variable | Value |
+|----------|-------|
+| `WebAuthn__RelyingPartyId` | Public hostname only, without a scheme or port |
+| `WebAuthn__RelyingPartyName` | Display name shown by the authenticator |
+| `WebAuthn__Origin` | Exact browser origin, including `https://` and any non-default port |
+
+When these values are omitted, Docker deployment derives the relying party ID from
+`SERVER_HOST`, uses `PrintFarmer` as the name, and derives the origin from the
+configured HTTPS or HTTP port. Local application development keeps its existing
+`localhost` and `http://localhost:3000` defaults.
+
+For TLS terminated by an external reverse proxy or tunnel, set
+`WebAuthn__Origin` explicitly because the container-facing port does not identify
+the browser's public origin. After changing any WebAuthn value, recreate the API
+container so the Fido2 configuration is reloaded.
 
 ### Port Remapping Behavior
 

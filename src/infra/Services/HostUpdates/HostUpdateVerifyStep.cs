@@ -3,6 +3,10 @@
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
+/// <summary>Thrown when the digest map does not match the configured canonical service set.</summary>
+public sealed class HostUpdateVerificationTargetSetException(string expected, string actual)
+    : InvalidOperationException($"host_update_verification_target_set_mismatch:expected={expected}:actual={actual}");
+
 /// <summary>Thrown when one or more health checks failed to report healthy within the bounded timeout.</summary>
 public sealed class HostUpdateVerificationTimeoutException(IReadOnlyList<string> failedCheckNames)
     : TimeoutException($"health_verification_timeout:{string.Join(',', failedCheckNames)}")
@@ -48,7 +52,7 @@ public sealed class HttpHostUpdateHealthCheck(string name, HttpClient client, st
 /// response that always returns 200 unconditionally and can never detect a broken
 /// database/queue/storage/worker subsystem.
 /// </summary>
-public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient client, string relativeUrl) : IHostUpdateHealthCheck
+public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient client, string relativeUrl, IReadOnlySet<string>? requiredResultNames = null) : IHostUpdateHealthCheck
 {
     public string Name { get; } = name;
 
@@ -67,7 +71,8 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
             // this health check silently reported unhealthy for every real response, which was
             // caught only by feeding it an actual serialized fixture instead of a hand-built one.
             return TryGetStatusProperty(document.RootElement, out JsonElement statusElement) &&
-                string.Equals(statusElement.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase);
+                string.Equals(statusElement.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase) &&
+                RequiredResultsAreHealthy(document.RootElement);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
         {
@@ -75,11 +80,35 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
         }
     }
 
+    private bool RequiredResultsAreHealthy(JsonElement root)
+    {
+        if (requiredResultNames is null || requiredResultNames.Count == 0)
+        {
+            return true;
+        }
+
+        if (!root.TryGetProperty("results", out JsonElement results) && !root.TryGetProperty("Results", out results))
+        {
+            return false;
+        }
+
+        foreach (string resultName in requiredResultNames)
+        {
+            if (!results.TryGetProperty(resultName, out JsonElement result) ||
+                !TryGetStatusProperty(result, out JsonElement resultStatus) ||
+                !string.Equals(resultStatus.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private static bool TryGetStatusProperty(JsonElement root, out JsonElement statusElement) =>
         root.TryGetProperty("status", out statusElement) || root.TryGetProperty("Status", out statusElement);
 }
 
-/// <summary>Verifies the exact running image digest of one container against an expected pinned digest.</summary>
 /// <summary>
 /// Verifies one service's exact running image digest by inspecting the live container, never
 /// trusting a mutable tag. Bishop/Hicks review (issue #2663): <c>docker container inspect</c>
@@ -139,6 +168,7 @@ public sealed class HostUpdateHealthVerifier(
     Func<string, string, IHostUpdateHealthCheck> digestCheckFactory,
     TimeSpan timeout,
     TimeSpan pollInterval,
+    IReadOnlySet<string>? requiredServiceIds = null,
     TimeProvider? timeProvider = null) : IHostUpdateHealthVerifier, IHostUpdateDigestVerifier
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -157,6 +187,13 @@ public sealed class HostUpdateHealthVerifier(
     /// </summary>
     public async Task VerifyDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken)
     {
+        if (requiredServiceIds is { Count: > 0 } && !digestsByService.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(requiredServiceIds))
+        {
+            string actual = string.Join(',', digestsByService.Keys.OrderBy(id => id, StringComparer.Ordinal));
+            string expected = string.Join(',', requiredServiceIds.OrderBy(id => id, StringComparer.Ordinal));
+            throw new HostUpdateVerificationTargetSetException(expected, actual);
+        }
+
         List<IHostUpdateHealthCheck> checks =
         [
             .. staticChecks,

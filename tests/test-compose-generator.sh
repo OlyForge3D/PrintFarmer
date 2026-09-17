@@ -58,6 +58,9 @@ setup() {
     export AUTO_ADMIN_PASSWORD="compose-generator-test-value"
     export GRAFANA_ADMIN_PASSWORD="compose-generator-test-value"
     export Jwt__Key="compose-generator-test-jwt-key-32-bytes"
+    export WebAuthn__RelyingPartyId="localhost"
+    export WebAuthn__RelyingPartyName="PrintFarmer Test"
+    export WebAuthn__Origin="http://localhost:8080"
     export POSTGRES_PASSWORD="compose-generator-test-db-secret"
     export ConnectionStrings__Default
     ConnectionStrings__Default="$(postgres_connection_string "$POSTGRES_PASSWORD")"

@@ -82,6 +82,27 @@ public sealed class HostUpdateImageApplierTests
         runner.Calls[1].Arguments.Should().ContainInOrder("--pull", "never");
     }
 
+
+    [Fact]
+    public async Task ApplyByDigestsAsync_RecoveryUsesPersistedPlatformEvidenceWhenAvailable()
+    {
+        var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(0, "ok", string.Empty));
+        var applier = new HostUpdateImageApplier(
+            runner,
+            ["compose.yml"],
+            "printfarmer",
+            new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
+            TimeSpan.FromSeconds(30));
+        string digest = "sha256:" + new string('a', 64);
+
+        await applier.ApplyByDigestsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["api"] = digest },
+            CancellationToken.None,
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["api"] = "linux-arm64" });
+
+        runner.Calls[0].Arguments.Should().Equal("image", "pull", "--platform", "linux-arm64", $"ghcr.io/olyforge3d/printfarmer-api@{digest}");
+        runner.Calls[1].Arguments.Should().ContainInOrder("--pull", "never");
+    }
     private sealed record ProcessCall(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
 
     private sealed class RecordingProcessRunner(Func<ProcessCall, HostUpdateProcessResult> onRun) : IHostUpdateProcessRunner

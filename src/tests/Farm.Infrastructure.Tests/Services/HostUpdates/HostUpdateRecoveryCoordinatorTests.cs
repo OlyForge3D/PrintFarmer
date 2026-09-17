@@ -258,18 +258,18 @@ public sealed class HostUpdateRecoveryCoordinatorTests
 
     private sealed class FakeDigestApplier : IHostUpdateDigestApplier
     {
-        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken) => Task.CompletedTask;
+        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? platformsByService = null) => Task.CompletedTask;
     }
 
     private sealed class ThrowingDigestApplier : IHostUpdateDigestApplier
     {
-        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken) =>
+        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? platformsByService = null) =>
             throw new InvalidOperationException("apply_failed");
     }
 
     private sealed class CancelingDigestApplier : IHostUpdateDigestApplier
     {
-        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken) =>
+        public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? platformsByService = null) =>
             throw new OperationCanceledException();
     }
 

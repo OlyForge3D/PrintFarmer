@@ -1,3 +1,4 @@
+﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -8,7 +9,6 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
-using System.Runtime.InteropServices;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
@@ -56,6 +56,7 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
         string channel,
         IHostUpdateMetadataProvider metadataProvider,
         IVerifiedReleaseManifestBindingStore? bindingStore = null,
+        IOptionsMonitor<VerifiedReleaseDiscoveryOptions>? optionsMonitor = null,
         ILogger<VerifiedReleaseDiscoveryMonitorService>? logger = null)
     {
         var settingsService = new Mock<ISettingsService>();
@@ -81,8 +82,17 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
         services.AddSingleton(bindingStore);
         ServiceProvider provider = services.BuildServiceProvider();
 
-        var optionsMonitor = new Mock<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>();
-        optionsMonitor.Setup(m => m.CurrentValue).Returns(new VerifiedReleaseDiscoveryOptions());
+        IOptionsMonitor<VerifiedReleaseDiscoveryOptions> resolvedOptionsMonitor;
+        if (optionsMonitor is null)
+        {
+            var defaultOptionsMonitor = new Mock<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>();
+            defaultOptionsMonitor.Setup(m => m.CurrentValue).Returns(new VerifiedReleaseDiscoveryOptions());
+            resolvedOptionsMonitor = defaultOptionsMonitor.Object;
+        }
+        else
+        {
+            resolvedOptionsMonitor = optionsMonitor;
+        }
 
         var cache = new VerifiedReleaseEvidenceCache();
         var backgroundMonitor = new Mock<IBackgroundServiceMonitor>();
@@ -90,7 +100,7 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
         var service = new VerifiedReleaseDiscoveryMonitorService(
             provider,
             logger ?? NullLogger<VerifiedReleaseDiscoveryMonitorService>.Instance,
-            optionsMonitor.Object,
+            resolvedOptionsMonitor,
             backgroundMonitor.Object,
             cache);
 
@@ -286,6 +296,44 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
             3600), Times.Once);
         cache.Current.Should().NotBeNull();
         cache.LastError.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_OptionsReloadValidationFailure_ReportsAndDelaysBeforeNextIteration()
+    {
+        var provider = new Mock<IHostUpdateMetadataProvider>(MockBehavior.Strict);
+        var optionsMonitor = new Mock<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>();
+        var validationFailure = new OptionsValidationException(
+            Options.DefaultName,
+            typeof(VerifiedReleaseDiscoveryOptions),
+            ["invalid interval"]);
+        optionsMonitor.Setup(m => m.CurrentValue).Throws(validationFailure);
+        (VerifiedReleaseDiscoveryMonitorService service, IVerifiedReleaseEvidenceCache cache, Mock<IBackgroundServiceMonitor> monitor) =
+            CreateService("stable", provider.Object, optionsMonitor: optionsMonitor.Object);
+        TaskCompletionSource delayObserved = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        TimeSpan? observedDelay = null;
+        service.DelayAsync = (delay, cancellationToken) =>
+        {
+            observedDelay = delay;
+            delayObserved.TrySetResult();
+            return Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        };
+
+        await service.StartAsync(CancellationToken.None);
+        await delayObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await service.StopAsync(CancellationToken.None);
+
+        observedDelay.Should().Be(TimeSpan.FromSeconds(new VerifiedReleaseDiscoveryOptions().IntervalSeconds));
+        cache.Current.Should().BeNull();
+        cache.LastError.Should().Contain("invalid interval");
+        provider.Verify(
+            p => p.GetCurrentAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+        optionsMonitor.Verify(m => m.CurrentValue, Times.Once);
+        monitor.Verify(m => m.ReportError(
+            "VerifiedReleaseDiscoveryMonitorService",
+            It.Is<string>(message => message.Contains("invalid interval", StringComparison.Ordinal))),
+            Times.Once);
     }
 
     [Fact]

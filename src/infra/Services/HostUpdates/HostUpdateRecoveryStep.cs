@@ -195,7 +195,7 @@ public sealed class HostUpdateRecoveryCoordinator(
         {
             if (priorState is not null && compatibilityEvaluator.SupportsImageOnlyRollback(priorState, activities))
             {
-                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
                 await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
                 await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
                 return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "image_only_rollback");
@@ -212,7 +212,7 @@ public sealed class HostUpdateRecoveryCoordinator(
 
             if (priorState is not null)
             {
-                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
                 await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
                 await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
             }

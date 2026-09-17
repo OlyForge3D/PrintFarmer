@@ -11,7 +11,8 @@ public sealed record InstalledHostState(
     string ManifestDigest,
     IReadOnlyDictionary<string, string> ServiceDigests,
     string Topology,
-    DateTimeOffset RecordedAt);
+    DateTimeOffset RecordedAt,
+    IReadOnlyDictionary<string, string>? ServicePlatforms = null);
 
 /// <summary>
 /// Durable single-writer store for the host's last verified installed state. Used by preflight

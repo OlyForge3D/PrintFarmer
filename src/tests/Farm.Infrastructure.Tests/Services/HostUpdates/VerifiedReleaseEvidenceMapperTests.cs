@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Dtos;
+﻿using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Xunit;
@@ -14,17 +14,17 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class VerifiedReleaseEvidenceMapperTests
 {
-    private static CanonicalReleaseIdentity Identity(string channel = "stable") => new(
-        ReleaseId: $"{channel}:1.4.0",
-        Version: "1.4.0",
+    private static CanonicalReleaseIdentity Identity(string channel = "stable", string version = "1.4.0") => new(
+        ReleaseId: $"{channel}:{version}",
+        Version: version,
         Channel: channel,
-        SourceTag: "v1.4.0",
-        SourceBranch: "main",
+        SourceTag: $"v{version}",
+        SourceBranch: channel == "insider" ? "development" : "main",
         SourceCommit: new string('c', 40),
         AuthorizedBranchHead: new string('c', 40),
         BuildMetadata: "build-42",
-        OciReleaseLabel: "v1.4.0",
-        OciVersionLabel: "1.4.0",
+        OciReleaseLabel: $"v{version}",
+        OciVersionLabel: version,
         ManifestDigest: "sha256:" + new string('a', 64));
 
     [Fact]
@@ -55,6 +55,31 @@ public class VerifiedReleaseEvidenceMapperTests
         dto.Identity.ReleaseId.Should().Be("stable:1.4.0");
         dto.Identity.SourceCommit.Should().Be(metadata.Identity.SourceCommit);
         dto.MinimumUpdaterVersion.Should().Be("1.0.0");
+    }
+
+    [Fact]
+    public void ToEvidenceDto_ZeroMajorInsider_MapsCanonicalAndBaseVersionSeparately()
+    {
+        SignedReleaseMetadata metadata = new(
+            Channel: "insider",
+            Sequence: 20_000_300_001,
+            SignatureVerified: true,
+            Identity: Identity("insider", "0.2.3-insider.1"),
+            ComponentPlatformDigests: new Dictionary<string, string>
+            {
+                ["api/linux-amd64"] = "sha256:" + new string('b', 64),
+            },
+            MinimumUpdaterVersion: "0.0.0",
+            ComponentIndexDigests: IndexDigests("api"),
+            ComponentPlatforms: Platforms("api"));
+
+        VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto("linux-amd64");
+
+        dto.Identity.Should().NotBeNull();
+        dto.Identity!.CanonicalVersion.Should().Be("0.2.3-insider.1");
+        dto.Identity.BaseVersion.Should().Be("0.2.3");
+        dto.Identity.Channel.Should().Be("insider");
+        dto.Sequence.Should().Be(20_000_300_001);
     }
 
     [Fact]

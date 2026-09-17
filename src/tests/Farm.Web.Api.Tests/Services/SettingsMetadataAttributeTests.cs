@@ -22,7 +22,11 @@ namespace Farm.Web.Api.Tests.Services;
 /// </remarks>
 public class SettingsMetadataAttributeTests
 {
-    private const int ExpectedDisplayLabelCount = 111;
+    // 113, not 111: UpdateChannelSettings (issue #2757) added two user-visible display labels
+    // ("Channel", "Insider channel acknowledged") without changing any other settings class, so
+    // this count is expected to move in lockstep whenever a settings class gains/loses a
+    // [SettingDisplay]-annotated property -- it is not a magic number to "fix" back down.
+    private const int ExpectedDisplayLabelCount = 113;
 
     private static readonly string[] CanonicalTerms =
     [

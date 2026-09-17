@@ -58,17 +58,21 @@ public sealed class HostUpdateImageApplier(
 
     /// <summary>
     /// Applies a specific service-&gt;digest map directly, without an <see cref="HostUpdateExecutionRequest"/>.
-    /// Used both by the forward apply step and by recovery's image-only rollback path, which
-    /// restores prior digests recorded in <see cref="InstalledHostState"/> rather than
-    /// reconstructing a new signed request. Recovery has no platform evidence today, so staging
-    /// still pulls immutable digests but cannot add <c>--platform</c> until prior-state records
-    /// persist the platform set as well.
+    /// Used by recovery's image-only rollback path, which restores prior digests and platform
+    /// evidence recorded in <see cref="InstalledHostState"/> rather than reconstructing a new
+    /// signed request.
     /// </summary>
-    public Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken)
+    public Task ApplyByDigestsAsync(
+        IReadOnlyDictionary<string, string> digestsByService,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? platformsByService = null)
     {
         IReadOnlyDictionary<string, HostUpdateExecutionTarget> targetsByService = digestsByService.ToDictionary(
             pair => pair.Key,
-            pair => new HostUpdateExecutionTarget(pair.Key, string.Empty, pair.Value),
+            pair => new HostUpdateExecutionTarget(
+                pair.Key,
+                platformsByService is not null && platformsByService.TryGetValue(pair.Key, out string? platform) ? platform : string.Empty,
+                pair.Value),
             StringComparer.Ordinal);
         return ApplyTargetsAsync(targetsByService, cancellationToken);
     }
@@ -133,5 +137,8 @@ public interface IHostUpdateApplyCoordinator
 /// <summary>Applies a service-&gt;digest map directly, independent of any signed execution request. Used by recovery.</summary>
 public interface IHostUpdateDigestApplier
 {
-    Task ApplyByDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken);
+    Task ApplyByDigestsAsync(
+        IReadOnlyDictionary<string, string> digestsByService,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? platformsByService = null);
 }

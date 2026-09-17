@@ -47,7 +47,7 @@ public static class HostUpdateExecutionStartup
             new FileHostUpdateExecutionLock(Path.Combine(sp.GetRequiredService<HostUpdateExecutionOptions>().StateDirectory, "execution.lock")));
 
         // Drain: perimeter admission gate + observed active print/outbox work.
-        services.AddSingleton<IHostUpdateAdmissionGate, InMemoryHostUpdateAdmissionGate>();
+        services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();
         services.AddScoped<IActiveWorkObservationPort, DbActiveWorkObservationPort>();
         services.AddScoped<IHostUpdateDrainCoordinator>(sp =>
         {
@@ -225,7 +225,11 @@ public static class HostUpdateExecutionStartup
 
         List<IHostUpdateHealthCheck> staticChecks =
         [
-            new AggregateHostUpdateHealthCheck("api-comprehensive-health", httpClientFactory.CreateClient(HealthClientName), "/health"),
+            new AggregateHostUpdateHealthCheck(
+                "api-comprehensive-health",
+                httpClientFactory.CreateClient(HealthClientName),
+                "/health",
+                options.RequiredAggregateHealthResultNames.ToHashSet(StringComparer.Ordinal)),
         ];
 
         return new HostUpdateHealthVerifier(
@@ -236,7 +240,8 @@ public static class HostUpdateExecutionStartup
                 ContainerNameFor(options, serviceId),
                 digest),
             TimeSpan.FromSeconds(options.VerifyTimeoutSeconds),
-            TimeSpan.FromSeconds(options.VerifyPollIntervalSeconds));
+            TimeSpan.FromSeconds(options.VerifyPollIntervalSeconds),
+            options.ServiceMappings.Select(m => m.ServiceId).ToHashSet(StringComparer.Ordinal));
     }
 
     private static string ContainerNameFor(HostUpdateExecutionOptions options, string serviceId)

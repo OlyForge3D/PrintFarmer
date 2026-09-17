@@ -415,7 +415,8 @@ public class AuthController(
     /// </summary>
     [HttpPost("passkey/register/begin")]
     [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
-    [ProducesResponseType(typeof(CredentialCreateOptions), StatusCodes.Status200OK)]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PasskeyRegisterBeginAsync(CancellationToken ct)
     {
@@ -430,7 +431,10 @@ public class AuthController(
         try
         {
             CredentialCreateOptions options = await _passkeyService.BeginRegistrationAsync(userId, username, ct);
-            return Ok(options);
+
+            // Fido2NetLib owns the browser wire contract; the global enum converter emits
+            // .NET enum names and breaks WebAuthn consumers such as Safari.
+            return Content(options.ToJson(), "application/json");
         }
         catch (Exception ex)
         {
@@ -440,8 +444,7 @@ public class AuthController(
     }
 
     /// <summary>
-    /// Completes the passkey registration ceremony by verifying the authenticator attestation.
-    /// Credential persistence is deferred to #354.
+    /// Completes the passkey registration ceremony by verifying and storing the authenticator credential.
     /// </summary>
     [HttpPost("passkey/register/complete")]
     [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
@@ -483,7 +486,8 @@ public class AuthController(
     /// </summary>
     [HttpPost("passkey/login/begin")]
     [AllowAnonymous] // Public because passkey assertion options are required to start authentication.
-    [ProducesResponseType(typeof(AssertionOptions), StatusCodes.Status200OK)]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PasskeyLoginBeginAsync(
         [FromBody] PasskeyLoginBeginRequest request,
@@ -498,7 +502,9 @@ public class AuthController(
         try
         {
             AssertionOptions options = await _passkeyService.BeginLoginAsync(request.Username, ct);
-            return Ok(options);
+
+            // Keep assertion options on the same Fido2NetLib wire contract as registration.
+            return Content(options.ToJson(), "application/json");
         }
         catch (Exception ex)
         {
@@ -508,8 +514,7 @@ public class AuthController(
     }
 
     /// <summary>
-    /// Completes the passkey login ceremony. Returns a JWT on successful assertion.
-    /// Full assertion verification against stored credentials is deferred to #354.
+    /// Completes the passkey login ceremony by verifying the stored credential assertion and returning a JWT.
     /// </summary>
     [HttpPost("passkey/login/complete")]
     [AllowAnonymous] // Public because the signed passkey assertion is the credential being verified.

@@ -49,20 +49,33 @@ export function validateVersion(version, channel, versionFile) {
   requireThat(parsed.channel === channel && (!parsed.stage || parsed.stage === 'insider'),
     'Version must match the selected channel (stable X.Y.Z / insider X.Y.Z-insider.N)');
   requireThat(parsed.baseVersion === parseVersionFile(versionFile), 'Release base must match selected-source VERSION');
+  requireThat(parsed.stage || BigInt(parsed.major) > 0n,
+    'Stable signed release major version must be greater than zero');
+  requireThat(BigInt(parsed.major) <= 99n, 'Major version exceeds sequence encoding limit of 99');
+  requireThat(BigInt(parsed.minor) <= 999n, 'Minor version exceeds sequence encoding limit of 999');
+  requireThat(BigInt(parsed.patch) <= 99999n, 'Patch version exceeds sequence encoding limit of 99999');
+  requireThat(!parsed.sequence || BigInt(parsed.sequence) <= 99998n,
+    'Prerelease sequence exceeds encoding limit of 99998');
   requireThat(parsed.baseVersion.split('.').every(part => BigInt(part) <= 65534n),
     'Version exceeds .NET assembly version limits');
   return parsed;
 }
 
+// Each release environment restricts deployment to its channel's own source
+// branch: release-stable to `main`, release-insider to `development` -- matching
+// the dispatch/source-branch/signing-identity policy enforced elsewhere for that
+// same channel (release-dispatch.mjs, consolidated-release.yml, publish-release.mjs).
 export function verifyEnvironmentRestrictions(environment, policies, channel) {
+  requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel for environment restrictions');
+  const sourceBranch = channel === 'stable' ? 'main' : 'development';
   requireThat(environment?.name === `release-${channel}` &&
     environment.deployment_branch_policy?.custom_branch_policies === true &&
     environment.deployment_branch_policy.protected_branches === false &&
     environment.can_admins_bypass === false,
   'Release environment protection is missing or changed');
   requireThat(policies?.total_count === 1 && policies.branch_policies?.length === 1 &&
-    policies.branch_policies[0].name === 'development' && policies.branch_policies[0].type === 'branch',
-  'Release environment must allow only development');
+    policies.branch_policies[0].name === sourceBranch && policies.branch_policies[0].type === 'branch',
+  `Release environment must allow only ${sourceBranch}`);
   requireThat(Array.isArray(environment.protection_rules) && environment.protection_rules.length === 1 &&
     environment.protection_rules[0].type === 'branch_policy',
   'Release environment must retain the approved owner-manual, no-second-reviewer configuration');

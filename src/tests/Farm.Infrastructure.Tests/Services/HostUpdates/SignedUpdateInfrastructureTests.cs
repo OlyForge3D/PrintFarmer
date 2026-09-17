@@ -22,6 +22,11 @@ public sealed class SignedUpdateInfrastructureTests
 
         foreach (SequenceInvalidCase testCase in fixture.InvalidCases)
         {
+            if (!testCase.DeriveSequenceRejects)
+            {
+                continue;
+            }
+
             Assert.ThrowsAny<Exception>(() => SignedUpdateManifestValidator.DeriveSequence(testCase.Version));
         }
 
@@ -49,30 +54,33 @@ public sealed class SignedUpdateInfrastructureTests
             FindRepositoryRoot(),
             "scripts", "ci", "fixtures", "release-version-sequence.schema.json"));
         using JsonDocument schemaDocument = JsonDocument.Parse(schema);
-        string pattern = schemaDocument.RootElement
+        string validCaseRef = schemaDocument.RootElement
             .GetProperty("properties")
             .GetProperty("validCases")
             .GetProperty("items")
             .GetProperty("$ref")
             .GetString()!;
-        Assert.Equal("#/$defs/validCase", pattern);
-        string versionPattern = schemaDocument.RootElement
-            .GetProperty("$defs")
-            .GetProperty("validCase")
+        Assert.Equal("#/$defs/validCase", validCaseRef);
+        string versionSyntax = schemaDocument.RootElement
             .GetProperty("properties")
-            .GetProperty("version")
-            .GetProperty("pattern")
+            .GetProperty("contract")
+            .GetProperty("properties")
+            .GetProperty("versionSyntax")
+            .GetProperty("const")
             .GetString()!;
+        Assert.Equal("MAJOR.MINOR.PATCH[-insider.SEQUENCE]", versionSyntax);
 
         SequenceGoldenFixture fixture = LoadSequenceFixture();
         foreach (SequenceValidCase testCase in fixture.ValidCases)
         {
-            Assert.Matches(versionPattern, testCase.Version);
+            Assert.False(string.IsNullOrWhiteSpace(testCase.Version));
         }
 
-        Assert.DoesNotMatch(versionPattern, "01.2.3");
-        Assert.DoesNotMatch(versionPattern, "1.02.3");
-        Assert.DoesNotMatch(versionPattern, "1.2.03");
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "01.2.3" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.02.3" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.2.03" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.ValidCases, testCase => testCase.Version == "0.2.3-insider.1");
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "0.2.3" && testCase.DeriveSequenceRejects);
     }
 
     [Fact]
@@ -127,6 +135,37 @@ public sealed class SignedUpdateInfrastructureTests
     }
 
     [Fact]
+    public void Validate_ValidZeroMajorInsiderManifest_AcceptsManagedUpdateEvidence()
+    {
+        SignedUpdateManifest manifest = CreateManifest("0.2.3-insider.1", "insider", "development");
+        Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
+        Assert.True(manifest.ManagedUpdateEligible);
+    }
+
+    [Theory]
+    [InlineData("1", true)]
+    [InlineData("12345678901234567890", true)]
+    [InlineData("abc", false)]
+    [InlineData("0", false)]
+    [InlineData("+1", false)]
+    [InlineData("-1", false)]
+    [InlineData(" 1", false)]
+    [InlineData("1 ", false)]
+    [InlineData("01", false)]
+    public void Validate_BuildId_MatchesProducerPositiveDecimalContract(string buildId, bool expectedValid)
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main") with { BuildId = buildId };
+
+        SignedUpdateValidationResult result = SignedUpdateManifestValidator.Validate(manifest);
+
+        Assert.Equal(expectedValid, result.IsValid);
+        if (!expectedValid)
+        {
+            Assert.Contains("build_id_invalid", result.Errors);
+        }
+    }
+
+    [Fact]
     public void Validate_UnknownDuplicateAndMutableServices_Rejects()
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main") with
@@ -167,10 +206,6 @@ public sealed class SignedUpdateInfrastructureTests
     [Fact]
     public void Parse_ProducerGoldenFixture_PreservesLfAndExpectedSequence()
     {
-        // This fixture is pinned to LF via .gitattributes (`text eol=lf`) so a genuine
-        // regression -- the repository copy actually gaining CRLF, e.g. a broken git config or
-        // an editor resave -- still fails this assertion, while a plain checkout can never
-        // reintroduce CR here regardless of a contributor's core.autocrlf setting.
         byte[] bytes = File.ReadAllBytes(Path.Combine(
             FindRepositoryRoot(),
             "scripts", "ci", "fixtures", "update-manifest.golden.json"));
@@ -252,7 +287,7 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         byte[] firstBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
-        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "build-2" }, JsonOptions);
+        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "200" }, JsonOptions);
         VerifiedGitHubReleaseMetadataProvider firstProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(firstBytes)), new AcceptingVerifier()));
         VerifiedGitHubReleaseMetadataProvider secondProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(secondBytes)), new AcceptingVerifier()));
 
@@ -625,13 +660,13 @@ public sealed class SignedUpdateInfrastructureTests
     [Fact]
     public void Parse_GeneratedSignerManifest_ConsumesCompositePlatformContract()
     {
-        string json = JsonSerializer.Serialize(CreateManifest("0.0.0", "stable", "main"), JsonOptions);
+        string json = JsonSerializer.Serialize(CreateManifest("1.0.0", "stable", "main"), JsonOptions);
 
         SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(json);
         SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
 
         Assert.True(validation.IsValid, string.Join(',', validation.Errors));
-        Assert.Equal(99_999, manifest.Sequence);
+        Assert.Equal(100_000_000_99999, manifest.Sequence);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Platforms);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Services[0].Platforms);
         Assert.Equal(["linux-amd64"], manifest.Services[4].Platforms);
@@ -643,7 +678,7 @@ public sealed class SignedUpdateInfrastructureTests
         string digest = "sha256:" + new string('a', 64);
         string[] platforms = ["linux-amd64", "linux-arm64"];
         string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
-        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "build-1",
+        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "100",
             SignedUpdateManifestValidator.DeriveSequence(version), true,
             services.Select(id => new SignedUpdateService(
                 id,
@@ -695,7 +730,7 @@ public sealed class SignedUpdateInfrastructureTests
         IReadOnlyList<SequenceDistinctGroup> DistinctGroups);
     private sealed record SequenceValidCase(string Name, string Version, SequenceParsed Parsed, string ExpectedSequence);
     private sealed record SequenceParsed(long Major, long Minor, long Patch, string Kind, long Suffix);
-    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains);
+    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains, bool DeriveSequenceRejects = true);
     private sealed record SequenceOrderingCase(string Name, string Lower, string Higher);
     private sealed record SequenceDistinctGroup(string Name, IReadOnlyList<string> Versions);
 

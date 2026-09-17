@@ -1,4 +1,4 @@
-using System.Reflection;
+﻿using System.Reflection;
 using System.Text.RegularExpressions;
 
 namespace Farm.Infrastructure.Services.SystemStatus;

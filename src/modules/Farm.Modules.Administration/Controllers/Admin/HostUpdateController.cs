@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -42,7 +42,8 @@ public sealed record HostUpdateExecuteRequestBody(
 public sealed record HostUpdateStatusResponse(
     string ReleaseId,
     HostUpdateExecutionState CurrentState,
-    IReadOnlyList<HostUpdateExecutionActivity> Activities);
+    IReadOnlyList<HostUpdateExecutionActivity> Activities,
+    HostUpdateRecoveryOutcomeRecord? RecoveryOutcome = null);
 
 /// <summary>
 /// Manual-first admin API for the host update executor (#2663). This is the operator-initiated
@@ -58,7 +59,8 @@ public sealed class HostUpdateController(
     IHostUpdateExecutor executor,
     IHostUpdateExecutionJournal journal,
     IHostUpdateRecoveryCoordinator recoveryCoordinator,
-    HostUpdateExecutionAvailabilityHolder availabilityHolder) : ControllerBase
+    HostUpdateExecutionAvailabilityHolder availabilityHolder,
+    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore) : ControllerBase
 {
     /// <summary>
     /// Executes (or resumes) one manually approved host update to completion or
@@ -88,7 +90,8 @@ public sealed class HostUpdateController(
         }
 
         HostUpdateExecutionResult result = await executor.ExecuteAsync(request!, cancellationToken).ConfigureAwait(false);
-        var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities);
+        HostUpdateRecoveryOutcomeRecord? recoveryOutcome = await recoveryOutcomeStore.ReadAsync(result.ReleaseId, cancellationToken).ConfigureAwait(false);
+        var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities, recoveryOutcome);
         return result.State == HostUpdateExecutionState.RecoveryRequired ? Conflict(response) : Ok(response);
     }
 
@@ -98,7 +101,7 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public ActionResult<HostUpdateStatusResponse> GetStatus(string releaseId)
+    public async Task<ActionResult<HostUpdateStatusResponse>> GetStatusAsync(string releaseId, CancellationToken cancellationToken)
     {
         IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
         if (activities.Count == 0)
@@ -107,7 +110,8 @@ public sealed class HostUpdateController(
         }
 
         HostUpdateExecutionState current = activities[^1].State;
-        return Ok(new HostUpdateStatusResponse(releaseId, current, activities));
+        HostUpdateRecoveryOutcomeRecord? recoveryOutcome = await recoveryOutcomeStore.ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
+        return Ok(new HostUpdateStatusResponse(releaseId, current, activities, recoveryOutcome));
     }
 
     /// <summary>

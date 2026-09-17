@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
@@ -81,8 +81,22 @@ public class SystemInfoService(
 
     private ReleaseReadinessDto? GetUnavailableReleaseReadiness(DateTimeOffset now, VerifiedReleaseEvidenceCacheSnapshot cacheSnapshot)
     {
-        Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
-            _verifiedReleaseDiscoveryOptions.CurrentValue;
+        Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options;
+        try
+        {
+            options = _verifiedReleaseDiscoveryOptions.CurrentValue;
+        }
+        catch (OptionsValidationException ex)
+        {
+            _logger.LogError(ex, "Verified release discovery options are invalid.");
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseDiscoveryOptionsInvalid"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
         if (!options.Enabled)
         {
             return new ReleaseReadinessDto

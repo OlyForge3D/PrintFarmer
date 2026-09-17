@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net;
 using System.Text;
 using System.Text.Json;
@@ -54,8 +54,11 @@ public sealed class MoonrakerDirectControlTests
         var client = new MoonrakerClient(http, NullLogger<MoonrakerClient>.Instance, new BackendTimeoutSettings());
         var printer = new Printer
         {
-            Id = Guid.NewGuid(), Name = "Snapshot fixture", Backend = (int)PrinterBackend.Moonraker,
-            ServerUrl = "http://snapshot-fixture.invalid", BackendPort = 7125,
+            Id = Guid.NewGuid(),
+            Name = "Snapshot fixture",
+            Backend = (int)PrinterBackend.Moonraker,
+            ServerUrl = "http://snapshot-fixture.invalid",
+            BackendPort = 7125,
             Credential = PrinterCredential.FromApiKey("fixture-key"),
         };
         DateTime before = DateTime.UtcNow;

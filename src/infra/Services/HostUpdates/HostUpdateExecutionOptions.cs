@@ -155,6 +155,13 @@ public sealed class HostUpdateExecutionOptions
 
     public string ComposeProjectName { get; set; } = "printfarmer";
 
+    /// <summary>
+    /// Required entries inside the API <c>/health</c> aggregate result. Missing or non-Healthy
+    /// entries fail verification closed so a top-level healthy-looking response cannot hide a
+    /// skipped subsystem probe.
+    /// </summary>
+    public string[] RequiredAggregateHealthResultNames { get; set; } = ["comprehensive", "signalr", "spoolman"];
+
     /// <summary>Base URL used for HTTP readiness checks (API/nginx) during verify.</summary>
     public string HealthCheckBaseUrl { get; set; } = "http://localhost:5245";
 

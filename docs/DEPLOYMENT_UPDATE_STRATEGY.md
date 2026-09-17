@@ -31,6 +31,59 @@ missing signed feed must not be advertised as ready. There is no production
 GitHub metadata-provider adapter in the current host-updater foundation.
 Future updater work is separate and must not silently trust publication alone.
 
+The first signed managed-update release is a new boundary: it publishes
+`update-manifest.json` and `update-manifest.sigstore.json` only after all six
+OCI images, platform child digests, compliance checks, and release inventory
+checks pass. The manifest uses schema `1`, deterministic canonical JSON, and a
+collision-free, stable-dominant `sequence`. `deriveSequence` (in
+`scripts/ci/release-manifest.mjs`) uses the verified weighted formula
+`((((major * 1000) + minor) * 100000) + patch) * 100000 + suffix` with bounded
+components: major (`0..99` for insider and `1..99` for stable), minor
+(`0..999`), patch (`0..99999`), insider suffix (`1..99998`), and the reserved
+stable suffix `99999`. These bounds prevent decimal carry collisions while the
+reserved suffix makes stable releases sort above every insider prerelease of the
+same base version. Arithmetic is BigInt;
+the producer rejects values outside JavaScript's safe integer range or C#
+signed `Int64` before JSON serialization. The language-neutral vectors are checked in at
+`scripts/ci/fixtures/release-version-sequence.golden.json`, with their
+`schemaVersion: 1` JSON Schema at
+`scripts/ci/fixtures/release-version-sequence.schema.json`. Valid vectors
+contain parsed components and lossless decimal-string expected sequences;
+invalid, ordering, and distinct-group vectors define rejection, precedence,
+and historical collision behavior for every consumer. It is eligible only when
+the exact bytes verify with the GitHub OIDC issuer
+`https://token.actions.githubusercontent.com` and the canonical workflow
+identity for the selected channel:
+
+- stable: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main`
+- insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
+
+Keyless Cosign trust is bootstrapped from Sigstore's OIDC certificate and
+transparency log; rotation is performed by changing the pinned official
+Cosign/tooling versions and the explicitly reviewed workflow identity, never by
+accepting a wildcard issuer or subject. The isolated signing job receives only
+immutable build evidence and runs no selected-source code; the publication job has no OIDC permission and binds its separate signature
+artifact to the exact manifest bytes. The sign job verifies immediately after
+signing; `publish-release.mjs` verifies before any permanent Git/image tag
+mutation and again immediately before the `gh release upload` call, so nothing
+between those workflow steps and the actual upload can present an unsigned or
+mismatched manifest as the release's signed contract. Existing
+unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
+`v0.2.3-insider.2`; future signed `0.x.y-insider.N` releases are
+managed-update eligible. A valid signature authenticates the publisher and exact
+manifest bytes; it does not authorize or implement apply, installation,
+active-print handling, staging, recovery, or runtime safety.
+
+Before the first stable signed publication, a maintainer must update the live
+`release-stable` environment deployment-branch policy to allow only `main`;
+`release-insider` must allow only `development`. The release tooling queries
+these live policies and fails closed when they are missing, permissive, or
+cross-channel. This migration is a prerequisite for stable signing and is not
+performed by the workflow; no cloud environment or grant is changed here. The
+repository must also satisfy the managed-update `VERSION` v1+ ordering
+prerequisite before the first signed publication; legacy VERSION/release
+ordering is not silently upgraded.
+
 ### Read-only inventory and installation readiness
 
 `GET /api/system/info` returns the additive, administrator-only `inventory` read
@@ -140,46 +193,34 @@ integration and scheduling.
 **Issue #2663 implementation status:** concrete, repository-appropriate step
 adapters exist for every stage — preflight (`HostUpdatePreflightCheck`), drain
 (`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
-than cancelling), fence (`HostUpdateFenceCoordinator`, proving the admission
-gate, the queue outbox publisher, `PowerReadingPruneService`, and
-`QueueRetentionPruneService` have quiesced), backup
-(`HostUpdateBackupCoordinator` plus provider-native
-`HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`,
-failing closed for an externally-owned database and for any required owned
-directory that is unexpectedly missing), migration
-(`HostUpdateMigrationCoordinator` wrapping the existing
-`ProviderAwareMigrationRunner` under the executor's own lock, and preflight
-failing closed with `split_database_not_supported` if `AppDbContext`'s and
-`SlicerDbContext`'s connection-string fingerprints differ), apply
-(`HostUpdateImageApplier`, pinned `repository@sha256` images via the existing
-compose templates, no shell interpolation), verify (`HostUpdateHealthVerifier`,
-exact digest plus the aggregated `/health` endpoint's JSON body requiring a
-top-level `Status` of exactly `"Healthy"`, never merely HTTP 200), and recovery
-(`HostUpdateRecoveryCoordinator`, image-only rollback vs. coordinated restore
-via structured process args/env only, never a shell string, with the
+than cancelling), fence (`HostUpdateFenceCoordinator`, proving the durable admission
+gate, the queue outbox publisher, `PowerReadingPruneService`,
+`QueueRetentionPruneService`, and `AutoDispatchBackgroundService` have quiesced),
+backup (`HostUpdateBackupCoordinator` plus provider-native
+`HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
+closed for externally-owned databases and unexpectedly missing required owned
+directories), migration (`HostUpdateMigrationCoordinator` wrapping the existing
+`ProviderAwareMigrationRunner` under the executor's own lock), apply
+(`HostUpdateImageApplier`, staging pinned `repository@sha256` images before compose
+mutation and applying with `docker compose up -d --no-build --pull never`), verify
+(`HostUpdateHealthVerifier`, exact configured service set, exact running digests,
+and aggregate `/health` JSON requiring configured result entries to be present and
+healthy), and recovery (`HostUpdateRecoveryCoordinator`, image-only rollback vs.
+coordinated restore via structured process args/env only, with the
 `RolledBack`/`NeedsOperator` outcome durably persisted by
-`FileHostUpdateRecoveryOutcomeStore` even if recovery is cancelled mid-flight).
-All of it is wired through production DI
-(`HostUpdateExecutionStartup.AddHostUpdateExecution`) behind a manual,
-permission-gated admin API (`HostUpdateController`) with no automatic
-scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full
-adapter table, the `HostUpdateExecutionOptions` root-directory contract, and
-the availability-probing contract a scheduler must poll before ever invoking
-the executor. Remaining gaps: additional `IFenceableWriter` registrations
-beyond the admission gate, queue outbox publisher,
-`PowerReadingPruneService`, and `QueueRetentionPruneService` (known unfenced:
-`MaintenanceAlertHostedService`, `CatalogUpdateDetectionService`,
-`VerifiedReleaseDiscoveryMonitorService`, `OrphanedJobSyncStartupService`,
-`HistorySeedingBackgroundService`, `ActiveExternalJobSyncBackgroundService`);
-the admission gate is wired into exactly one real chokepoint today
-(`JobQueueService.AddJobToQueueAsync`, covering OctoPrint upload+print, manual UI
-queue-add, and direct API calls) and is not yet wired into printer-command
-dispatch (`JobQueueController`'s `/dispatch`/`/dispatch-to`,
-`AutoDispatchController`), slicer-job submission, or bridge/webhook ingress; and
-controller-level request fingerprint binding, replay/stale-plan checks, and
-crash-resume idempotency
-for individual side-effecting operations are owned by the scheduler
-integration work (issues #2665/#2666), not this physical-adapter slice.
+`FileHostUpdateRecoveryOutcomeStore` before fence release). Production DI uses a
+host-root-backed `FileHostUpdateAdmissionGate`; the standalone split
+`Farm.Slicer.Host` registers that same gate without registering the full executor,
+so shared-root slicer submissions are rejected while the main API is draining. All
+of it is wired through production DI (`HostUpdateExecutionStartup.AddHostUpdateExecution`)
+behind a manual, permission-gated admin API (`HostUpdateController`) with no automatic
+scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter table,
+the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
+contract a scheduler must poll before ever invoking the executor. Remaining gaps still
+hold availability closed by default through `RequiredUnavailableFacilities`: bridge/webhook
+ingress is not proven fenced, and migration/apply crash uncertainty is fail-closed rather
+than operation-specifically reconciled after a `:before` marker without the matching
+`:after` marker.
 On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
 durable journal for any release left mid-flight or in `RecoveryRequired`
 without a confirmed `RolledBack` outcome and immediately re-closes every

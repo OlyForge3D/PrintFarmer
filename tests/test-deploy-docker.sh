@@ -34,6 +34,9 @@ NETWORK_RANGES=192.168.0.0/16
 HTTP_PORT=8080
 HTTPS_PORT=0
 SERVER_HOST=localhost
+WebAuthn__RelyingPartyId=
+WebAuthn__RelyingPartyName=
+WebAuthn__Origin=
 API_PORT=5245
 WEB_PORT=3000
 ENVIRONMENT=Development
@@ -352,6 +355,70 @@ test_environment_variables() {
     
     assert_contains "$output" "microservices" "Should show microservices architecture"
     
+    pass_test
+}
+
+test_webauthn_configuration() {
+    start_test "WebAuthn deployment configuration defaults and overrides"
+
+    cd "$TEST_TEMP_DIR"
+
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local env_content
+    env_content=$(cat .env)
+
+    assert_contains "$env_content" "WebAuthn__RelyingPartyId=localhost" \
+        "Default deployment should use localhost as the relying party ID"
+    assert_contains "$env_content" "WebAuthn__RelyingPartyName=PrintFarmer" \
+        "Default deployment should use the PrintFarmer relying party name"
+    assert_contains "$env_content" "WebAuthn__Origin=http://localhost:8080" \
+        "Default deployment should derive the browser origin from the HTTP port"
+
+    capture_output "$(get_deploy_script_command --dry-run --batch \
+        --env WebAuthn__RelyingPartyId=pfarm.example.com \
+        --env WebAuthn__RelyingPartyName=ExamplePrintFarmer \
+        --env WebAuthn__Origin=https://pfarm.example.com)"
+    env_content=$(cat .env)
+
+    assert_contains "$env_content" "WebAuthn__RelyingPartyId=pfarm.example.com" \
+        "Explicit relying party ID should survive saved configuration loading"
+    assert_contains "$env_content" "WebAuthn__RelyingPartyName=ExamplePrintFarmer" \
+        "Explicit relying party name should survive saved configuration loading"
+    assert_contains "$env_content" "WebAuthn__Origin=https://pfarm.example.com" \
+        "Explicit WebAuthn origin should survive saved configuration loading"
+    assert_contains "$(cat .deploy-config)" "WebAuthn__ConfigurationSource=explicit" \
+        "Explicit WebAuthn configuration should persist stable provenance"
+
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    env_content=$(cat .env)
+    assert_contains "$env_content" "WebAuthn__Origin=https://pfarm.example.com" \
+        "Explicit WebAuthn origin should persist without being supplied again"
+    assert_contains "$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}' \
+        "Microservices compose should pass WebAuthn configuration to the API"
+    assert_contains "$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.monolith.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}' \
+        "Monolith compose should pass WebAuthn configuration to the API"
+
+    write_default_deploy_config
+
+    capture_output "$(get_deploy_script_command --dry-run --batch \
+        --env SERVER_HOST=first.example.com \
+        --env HTTPS_PORT=8443)"
+    capture_output "$(get_deploy_script_command --dry-run --batch \
+        --env SERVER_HOST=second.example.com \
+        --env HTTPS_PORT=9443)"
+    env_content=$(cat .env)
+    assert_contains "$env_content" "WebAuthn__RelyingPartyId=second.example.com" \
+        "Redeployment should re-derive the relying party ID from the current host"
+    assert_contains "$env_content" "WebAuthn__Origin=https://second.example.com:9443" \
+        "Redeployment should re-derive the HTTPS origin from the current host and port"
+
+    capture_output "$(get_deploy_script_command --dry-run --batch \
+        --env SERVER_HOST=https://invalid.example.com)"
+    assert_not_equals "0" "$(get_exit_code)" \
+        "Deployment should reject a passkey host that includes a scheme"
+
     pass_test
 }
 
@@ -1645,6 +1712,13 @@ test_installer_lite_slicer_worker_key() {
     assert_file_exists "$install_dir/docker-compose.yml" "Lite installer should create docker-compose.yml"
     assert_contains "$(cat "$install_dir/.env")" "WORKER_SHARED_API_KEY=$expected_key" "Lite installer should persist the shared key"
     assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Lite monolith should receive the shared key"
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=http://localhost:18907" "Lite installer should derive the localhost passkey origin"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}' \
+        "Lite monolith should reject a missing or empty passkey relying party ID"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}' \
+        "Lite monolith should reject a missing or empty passkey origin"
     assert_not_contains "$output" "$expected_key" "Installer output must not expose the shared key"
     local env_mode
     env_mode=$(stat -c '%a' "$install_dir/.env" 2>/dev/null || stat -f '%Lp' "$install_dir/.env")
@@ -1654,6 +1728,74 @@ test_installer_lite_slicer_worker_key() {
     local preserved_key
     preserved_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
     assert_equals "$expected_key" "$preserved_key" "Reinstall should preserve the shared key"
+
+    pass_test
+}
+
+test_installer_standard_webauthn_configuration() {
+    start_test "installer standard profile configures canonical passkey origin"
+
+    local install_dir="$TEST_TEMP_DIR/installer-standard"
+    local mock_bin="$TEST_TEMP_DIR/installer-standard-bin"
+    create_installer_docker_stub "$mock_bin"
+
+    capture_output "PATH='$mock_bin:$PATH' PRINTFARMER_HOST='farm.example.com' '$INSTALL_SCRIPT' --non-interactive --profile standard --port 18909 --dir '$install_dir' --dry-run"
+
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__RelyingPartyId=farm.example.com" "Standard installer should persist the canonical passkey hostname"
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=https://farm.example.com" "Standard installer should require HTTPS for a non-loopback passkey origin"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}' \
+        "Standard installer API should reject a missing or empty passkey relying party ID"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}' \
+        "Standard installer API should reject a missing or empty passkey origin"
+
+    pass_test
+}
+
+test_installer_upgrade_preserves_webauthn_configuration() {
+    start_test "installer upgrade preserves existing passkey configuration"
+
+    local install_dir="$TEST_TEMP_DIR/installer-webauthn-upgrade"
+    local mock_bin="$TEST_TEMP_DIR/installer-webauthn-upgrade-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+
+    cat > "$install_dir/.env" <<'EOF'
+IMAGE_TAG=latest
+DEPLOY_PROFILE=lite
+Jwt__Key=existing-jwt-key
+WebAuthn__RelyingPartyId=farm.example.com
+WebAuthn__RelyingPartyName=Farm Console
+WebAuthn__Origin=https://farm.example.com
+EOF
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  printfarmer:
+    container_name: printfarmer-monolith
+    environment:
+      - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+EOF
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --dir '$install_dir'"
+
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__RelyingPartyId=farm.example.com" "Upgrade should preserve the existing relying party ID"
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__RelyingPartyName=Farm Console" "Upgrade should preserve the existing relying party name"
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=https://farm.example.com" "Upgrade should preserve the existing passkey origin"
+
+    pass_test
+}
+
+test_installer_rejects_invalid_webauthn_host() {
+    start_test "installer rejects invalid passkey hosts"
+
+    local install_dir="$TEST_TEMP_DIR/installer-invalid-host"
+    local mock_bin="$TEST_TEMP_DIR/installer-invalid-host-bin"
+    create_installer_docker_stub "$mock_bin"
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --non-interactive --profile lite --host https://farm.example.com --dir '$install_dir' --dry-run"
+
+    assert_not_equals "0" "$(get_exit_code)" "Installer should reject hosts that include a scheme"
 
     pass_test
 }
@@ -2030,6 +2172,7 @@ run_all_tests() {
     test_batch_mode
     test_config_file_generation
     test_environment_variables
+    test_webauthn_configuration
     test_api_deployable_health_statuses
     test_password_not_logged_to_stdout
     test_no_redis_configuration
@@ -2063,6 +2206,9 @@ run_all_tests() {
     test_pfarm_variables_complete_set
     test_pfarm_variables_sourcing
     test_installer_lite_slicer_worker_key
+    test_installer_standard_webauthn_configuration
+    test_installer_upgrade_preserves_webauthn_configuration
+    test_installer_rejects_invalid_webauthn_host
     test_installer_upgrade_adds_slicer_worker_key
     test_installer_env_write_is_atomic
     test_installer_fails_without_secure_entropy

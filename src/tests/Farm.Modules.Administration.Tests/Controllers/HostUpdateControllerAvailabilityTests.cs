@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -42,7 +42,7 @@ public class HostUpdateControllerAvailabilityTests
         Mock<IHostUpdateRecoveryCoordinator> recovery = new(MockBehavior.Strict);
         var holder = new HostUpdateExecutionAvailabilityHolder();
         holder.Update(HostUpdateExecutionAvailability.Unavailable(DateTimeOffset.UtcNow, ["root_directory_not_configured"]));
-        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder);
+        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder, new InMemoryRecoveryOutcomeStore());
 
         ActionResult<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse> result =
             await controller.ExecuteAsync(ValidBody(), CancellationToken.None);
@@ -60,7 +60,7 @@ public class HostUpdateControllerAvailabilityTests
         Mock<IHostUpdateRecoveryCoordinator> recovery = new(MockBehavior.Strict);
         var holder = new HostUpdateExecutionAvailabilityHolder();
         holder.Update(HostUpdateExecutionAvailability.Unavailable(DateTimeOffset.UtcNow, ["restart_reconciliation_pending:release-1:Fenced"]));
-        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder);
+        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder, new InMemoryRecoveryOutcomeStore());
 
         ActionResult<HostUpdateRecoveryResult> result =
             await controller.RecoverAsync("release-1", ValidBody(), CancellationToken.None);
@@ -82,7 +82,7 @@ public class HostUpdateControllerAvailabilityTests
         var expected = new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []);
         executor.Setup(e => e.ExecuteAsync(It.IsAny<HostUpdateExecutionRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
-        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder);
+        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder, new InMemoryRecoveryOutcomeStore());
 
         ActionResult<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse> result =
             await controller.ExecuteAsync(ValidBody(), CancellationToken.None);
@@ -90,5 +90,60 @@ public class HostUpdateControllerAvailabilityTests
         OkObjectResult ok = result.Result.Should().BeOfType<OkObjectResult>().Which;
         ok.Value.Should().BeOfType<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse>();
         executor.Verify(e => e.ExecuteAsync(It.IsAny<HostUpdateExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    public async Task GetStatusAsync_WithRecoveryOutcome_ReturnsDurableOutcome()
+    {
+        Mock<IHostUpdateExecutor> executor = new(MockBehavior.Strict);
+        Mock<IHostUpdateExecutionJournal> journal = new(MockBehavior.Strict);
+        Mock<IHostUpdateRecoveryCoordinator> recovery = new(MockBehavior.Strict);
+        var holder = new HostUpdateExecutionAvailabilityHolder();
+        var outcomeStore = new InMemoryRecoveryOutcomeStore();
+        var outcome = new HostUpdateRecoveryOutcomeRecord(
+            "release-1",
+            HostUpdateRecoveryOutcome.NeedsOperator,
+            "fence_release_failed:IOException",
+            DateTimeOffset.UtcNow);
+        outcomeStore.Seed(outcome);
+        journal.Setup(j => j.Read("release-1"))
+            .Returns([
+                new HostUpdateExecutionActivity(
+                    "activity-1",
+                    "release-1",
+                    HostUpdateExecutionState.RecoveryRequired,
+                    "failure:apply_failed",
+                    DateTimeOffset.UtcNow),
+            ]);
+        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(
+            executor.Object,
+            journal.Object,
+            recovery.Object,
+            holder,
+            outcomeStore);
+
+        ActionResult<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse> result =
+            await controller.GetStatusAsync("release-1", CancellationToken.None);
+
+        OkObjectResult ok = result.Result.Should().BeOfType<OkObjectResult>().Which;
+        Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse response =
+            ok.Value.Should().BeOfType<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse>().Subject;
+        response.RecoveryOutcome.Should().Be(outcome);
+    }
+
+    private sealed class InMemoryRecoveryOutcomeStore : IHostUpdateRecoveryOutcomeStore
+    {
+        private readonly Dictionary<string, HostUpdateRecoveryOutcomeRecord> outcomes = new(StringComparer.Ordinal);
+
+        public Task WriteAsync(HostUpdateRecoveryOutcomeRecord outcome, CancellationToken cancellationToken)
+        {
+            outcomes[outcome.ReleaseId] = outcome;
+            return Task.CompletedTask;
+        }
+
+        public Task<HostUpdateRecoveryOutcomeRecord?> ReadAsync(string releaseId, CancellationToken cancellationToken) =>
+            Task.FromResult(outcomes.TryGetValue(releaseId, out HostUpdateRecoveryOutcomeRecord? outcome) ? outcome : null);
+
+        public void Seed(HostUpdateRecoveryOutcomeRecord outcome) => outcomes[outcome.ReleaseId] = outcome;
     }
 }

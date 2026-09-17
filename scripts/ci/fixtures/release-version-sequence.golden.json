@@ -6,7 +6,7 @@
     "componentType": "unsigned decimal integer without leading zeroes",
     "manifestSequenceJsonType": "integer",
     "implementationType": "signed 64-bit integer",
-    "formula": "(((major * 1000) + minor) * 100000 + patch) * 100000 + suffix",
+    "formula": "((((major * 1000) + minor) * 100000) + patch) * 100000 + suffix",
     "radices": {
       "minor": 1000,
       "patch": 100000,
@@ -22,31 +22,7 @@
   },
   "validCases": [
     {
-      "name": "minimum insider",
-      "version": "0.0.0-insider.1",
-      "parsed": {
-        "major": 0,
-        "minor": 0,
-        "patch": 0,
-        "kind": "insider",
-        "suffix": 1
-      },
-      "expectedSequence": "1"
-    },
-    {
-      "name": "minimum stable",
-      "version": "0.0.0",
-      "parsed": {
-        "major": 0,
-        "minor": 0,
-        "patch": 0,
-        "kind": "stable",
-        "suffix": 99999
-      },
-      "expectedSequence": "99999"
-    },
-    {
-      "name": "ordinary insider",
+      "name": "minimum zero-major insider",
       "version": "0.2.3-insider.1",
       "parsed": {
         "major": 0,
@@ -58,76 +34,112 @@
       "expectedSequence": "20000300001"
     },
     {
-      "name": "ordinary stable",
-      "version": "0.2.3",
+      "name": "minimum insider",
+      "version": "1.0.0-insider.1",
       "parsed": {
-        "major": 0,
+        "major": 1,
+        "minor": 0,
+        "patch": 0,
+        "kind": "insider",
+        "suffix": 1
+      },
+      "expectedSequence": "10000000000001"
+    },
+    {
+      "name": "minimum stable",
+      "version": "1.0.0",
+      "parsed": {
+        "major": 1,
+        "minor": 0,
+        "patch": 0,
+        "kind": "stable",
+        "suffix": 99999
+      },
+      "expectedSequence": "10000000099999"
+    },
+    {
+      "name": "ordinary insider",
+      "version": "1.2.3-insider.1",
+      "parsed": {
+        "major": 1,
+        "minor": 2,
+        "patch": 3,
+        "kind": "insider",
+        "suffix": 1
+      },
+      "expectedSequence": "10020000300001"
+    },
+    {
+      "name": "ordinary stable",
+      "version": "1.2.3",
+      "parsed": {
+        "major": 1,
         "minor": 2,
         "patch": 3,
         "kind": "stable",
         "suffix": 99999
       },
-      "expectedSequence": "20000399999"
+      "expectedSequence": "10020000399999"
     },
     {
       "name": "maximum insider suffix",
-      "version": "0.2.3-insider.99998",
+      "version": "1.2.3-insider.99998",
       "parsed": {
-        "major": 0,
+        "major": 1,
         "minor": 2,
         "patch": 3,
         "kind": "insider",
         "suffix": 99998
       },
-      "expectedSequence": "20000399998"
+      "expectedSequence": "10020000399998"
     },
     {
-      "name": "historical patch collision left",
-      "version": "0.1.1000",
+      "name": "weighted boundary left",
+      "version": "1.1.99999",
       "parsed": {
-        "major": 0,
+        "major": 1,
         "minor": 1,
-        "patch": 1000,
+        "patch": 99999,
         "kind": "stable",
         "suffix": 99999
       },
-      "expectedSequence": "10100099999"
+      "expectedSequence": "10019999999999"
     },
     {
-      "name": "historical patch collision right",
-      "version": "0.2.0",
+      "name": "weighted boundary right",
+      "version": "1.2.0",
       "parsed": {
-        "major": 0,
+        "major": 1,
         "minor": 2,
         "patch": 0,
         "kind": "stable",
         "suffix": 99999
       },
-      "expectedSequence": "20000099999"
+      "expectedSequence": "10020000099999"
     },
     {
-      "name": "historical suffix collision left",
-      "version": "0.2.3-insider.1000",
+      "name": "stable reserved suffix",
+      "version": "1.2.3-insider.99998",
       "parsed": {
-        "major": 0,
+        "major": 1,
         "minor": 2,
         "patch": 3,
         "kind": "insider",
-        "suffix": 1000
+        "suffix": 99998
       },
-      "expectedSequence": "20000301000"
+      "expectedSequence": "10020000399998"
     },
     {
-      "name": "historical suffix collision right",
-      "version": "0.2.4",
+      "name": "stable reserved suffix stable",
+      "version": "1.2.3",
       "parsed": {
-        "major": 0,
+        "major": 1,
         "minor": 2,
-        "patch": 4,
+        "patch": 3,
         "kind": "stable",
         "suffix": 99999
       },
-      "expectedSequence": "20000499999"
+      "expectedSequence": "10020000399999"
     },
     {
       "name": "maximum insider",
@@ -186,6 +198,11 @@
       "errorContains": "stable or insider"
     },
     {
+      "name": "zero-major stable signed release",
+      "version": "0.2.3",
+      "errorContains": "Stable"
+    },
+    {
       "name": "leading zero major",
       "version": "01.2.3",
       "errorContains": "without leading zeros"
@@ -217,40 +234,45 @@
     },
     {
       "name": "minor above maximum",
-      "version": "0.1000.0",
+      "version": "1.1000.0",
       "errorContains": "Minor version exceeds"
     },
     {
       "name": "patch above maximum",
-      "version": "0.0.100000",
+      "version": "1.0.100000",
       "errorContains": "Patch version exceeds"
     },
     {
       "name": "insider suffix above maximum",
-      "version": "0.0.0-insider.99999",
+      "version": "1.0.0-insider.99999",
       "errorContains": "Prerelease sequence exceeds"
     }
   ],
   "ordering": [
     {
+      "name": "zero-major insider remains below first public stable",
+      "lower": "0.2.3-insider.99998",
+      "higher": "1.0.0"
+    },
+    {
       "name": "insider sequence increments",
-      "lower": "0.2.3-insider.1",
-      "higher": "0.2.3-insider.2"
+      "lower": "1.2.3-insider.1",
+      "higher": "1.2.3-insider.2"
     },
     {
       "name": "maximum insider remains below stable",
-      "lower": "0.2.3-insider.99998",
-      "higher": "0.2.3"
+      "lower": "1.2.3-insider.99998",
+      "higher": "1.2.3"
     },
     {
-      "name": "patch increments across historical collision",
-      "lower": "0.1.1000",
-      "higher": "0.2.0"
+      "name": "patch increments across weighted boundary",
+      "lower": "1.1.99999",
+      "higher": "1.2.0"
     },
     {
-      "name": "suffix rollover remains below next patch",
-      "lower": "0.2.3-insider.1000",
-      "higher": "0.2.4-insider.1"
+      "name": "stable reserved suffix dominates insider",
+      "lower": "1.2.3-insider.99998",
+      "higher": "1.2.3"
     },
     {
       "name": "maximum insider remains below maximum stable",
@@ -260,25 +282,19 @@
   ],
   "distinctGroups": [
     {
-      "name": "historical weighted-decimal patch collision",
+      "name": "weighted boundary versions",
       "versions": [
-        "0.1.1000",
-        "0.2.0"
-      ]
-    },
-    {
-      "name": "historical weighted-decimal suffix collision",
-      "versions": [
-        "0.2.3-insider.1000",
-        "0.2.4"
+        "1.1.99999",
+        "1.2.0"
       ]
     },
     {
       "name": "stable and insider identities",
       "versions": [
         "0.2.3-insider.1",
-        "0.2.3-insider.99998",
-        "0.2.3"
+        "1.2.3-insider.1",
+        "1.2.3-insider.99998",
+        "1.2.3"
       ]
     }
   ]

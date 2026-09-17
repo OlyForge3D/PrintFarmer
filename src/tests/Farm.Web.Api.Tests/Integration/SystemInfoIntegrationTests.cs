@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -9,13 +9,17 @@ using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
-using Farm.Slicer.Module.Services.SystemInfo;
-using FluentAssertions;
-using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Caching.Memory;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
+using Farm.Slicer.Module.Services.SystemInfo;
+using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration;
@@ -27,21 +31,42 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
 {
     public class Factory : CustomWebApplicationFactory
     {
+        private readonly bool _throwDiscoveryOptions;
+
         public Factory()
-            : this(discoveryEnabled: true)
+            : this(discoveryEnabled: true, throwDiscoveryOptions: false)
         {
         }
 
-        private Factory(bool discoveryEnabled)
+        private Factory(bool discoveryEnabled, bool throwDiscoveryOptions)
             : base(new Dictionary<string, string?>
             {
                 ["Security:DevModeBypassAuth"] = "false",
                 ["HostUpdates:VerifiedReleaseDiscovery:Enabled"] = discoveryEnabled.ToString(),
             })
         {
+            _throwDiscoveryOptions = throwDiscoveryOptions;
         }
 
-        public static Factory WithDiscoveryDisabled() => new(discoveryEnabled: false);
+        public static Factory WithDiscoveryDisabled() => new(discoveryEnabled: false, throwDiscoveryOptions: false);
+
+        public static Factory WithInvalidDiscoveryOptions() => new(discoveryEnabled: true, throwDiscoveryOptions: true);
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            if (!_throwDiscoveryOptions)
+            {
+                return;
+            }
+
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>();
+                services.AddSingleton<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>(
+                    new ThrowingVerifiedReleaseDiscoveryOptionsMonitor());
+            });
+        }
     }
 
     private readonly Factory _factory;
@@ -213,8 +238,17 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         {
             SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
             db.SlicerServices.AddRange(
-                new SlicerService { Id = first, Name = "first", Version = "2.4.2", Host = "http://private-worker.invalid", ApiKey = "never-return-registry-key", Status = "Online", LastSeen = DateTime.UtcNow,
-                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}" },
+                new SlicerService
+                {
+                    Id = first,
+                    Name = "first",
+                    Version = "2.4.2",
+                    Host = "http://private-worker.invalid",
+                    ApiKey = "never-return-registry-key",
+                    Status = "Online",
+                    LastSeen = DateTime.UtcNow,
+                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}"
+                },
                 new SlicerService { Id = second, Name = "second", Version = "2.4.2", Host = "http://private-worker.invalid", Status = "Offline", LastSeen = DateTime.UtcNow.AddHours(-1) });
             await db.SaveChangesAsync();
         }
@@ -315,6 +349,24 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         cache.LastError.Should().Be(rollbackMessage);
     }
 
+    [Fact]
+    public async Task GetInfo_Admin_InvalidDiscoveryOptionsReportsReadinessUnavailable()
+    {
+        await using Factory isolatedFactory = Factory.WithInvalidDiscoveryOptions();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        isolatedFactory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseDiscoveryOptionsInvalid");
+    }
+
     [Theory]
     [MemberData(nameof(NormalizeAssemblyVersionCases))]
     public void NormalizeAssemblyVersion_ProducesExpectedSemanticVersion(Version? assemblyVersion, string expected)
@@ -333,6 +385,18 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         { new Version(1, 2), "1.2.0" },
         { null, "0.0.0" },
     };
+
+    private sealed class ThrowingVerifiedReleaseDiscoveryOptionsMonitor : IOptionsMonitor<VerifiedReleaseDiscoveryOptions>
+    {
+        public VerifiedReleaseDiscoveryOptions CurrentValue => throw new OptionsValidationException(
+            Options.DefaultName,
+            typeof(VerifiedReleaseDiscoveryOptions),
+            ["invalid interval"]);
+
+        public VerifiedReleaseDiscoveryOptions Get(string? name) => new();
+
+        public IDisposable? OnChange(Action<VerifiedReleaseDiscoveryOptions, string?> listener) => null;
+    }
 
     [Fact]
     public async Task GetInfo_Admin_DisabledDiscoveryRevokesPriorReadiness()

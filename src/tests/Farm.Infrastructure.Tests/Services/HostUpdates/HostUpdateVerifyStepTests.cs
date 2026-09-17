@@ -107,6 +107,42 @@ public sealed class AggregateHostUpdateHealthCheckTests
         result.Should().BeFalse();
     }
 
+
+    [Fact]
+    public async Task IsHealthyAsync_RequiredResultMissing_ReturnsFalse()
+    {
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"}}}""");
+        var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var check = new AggregateHostUpdateHealthCheck(
+            "api-comprehensive-health",
+            client,
+            "/health",
+            new HashSet<string>(StringComparer.Ordinal) { "comprehensive", "signalr" });
+
+        bool result = await check.IsHealthyAsync(CancellationToken.None);
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsHealthyAsync_RequiredResultDegraded_ReturnsFalse()
+    {
+        var handler = new StubHttpMessageHandler(
+            HttpStatusCode.OK,
+            """{"status":"Healthy","results":{"comprehensive":{"status":"Healthy"},"signalr":{"status":"Degraded"}}}""");
+        var client = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        var check = new AggregateHostUpdateHealthCheck(
+            "api-comprehensive-health",
+            client,
+            "/health",
+            new HashSet<string>(StringComparer.Ordinal) { "comprehensive", "signalr" });
+
+        bool result = await check.IsHealthyAsync(CancellationToken.None);
+
+        result.Should().BeFalse();
+    }
     private sealed class StubHttpMessageHandler(HttpStatusCode statusCode, string body) : HttpMessageHandler
     {
         protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
@@ -202,5 +238,39 @@ public sealed class DigestHostUpdateHealthCheckTests
         bool result = await check.IsHealthyAsync(CancellationToken.None);
 
         result.Should().BeFalse();
+    }
+}
+public sealed class HostUpdateHealthVerifierTests
+{
+    [Fact]
+    public async Task VerifyDigestsAsync_PartialServiceSet_ThrowsBeforeHealthChecks()
+    {
+        var check = new RecordingHealthCheck();
+        var verifier = new HostUpdateHealthVerifier(
+            [check],
+            (serviceId, digest) => new RecordingHealthCheck(),
+            TimeSpan.Zero,
+            TimeSpan.Zero,
+            new HashSet<string>(StringComparer.Ordinal) { "api", "frontend" });
+
+        Func<Task> act = () => verifier.VerifyDigestsAsync(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["api"] = "sha256:" + new string('a', 64) },
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateVerificationTargetSetException>();
+        check.CallCount.Should().Be(0);
+    }
+
+    private sealed class RecordingHealthCheck : IHostUpdateHealthCheck
+    {
+        public string Name => "recording";
+
+        public int CallCount { get; private set; }
+
+        public Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
+        {
+            CallCount++;
+            return Task.FromResult(true);
+        }
     }
 }

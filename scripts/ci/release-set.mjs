@@ -36,6 +36,7 @@ export function inspectTag(reference, run = spawnSync) {
 
 export function verifyImages(version, sourceCommit, digests, run = command) {
   requireThat(Object.keys(digests).sort().join() === Object.keys(components).sort().join(), 'Incomplete image set');
+  const details = {};
   for (const [name, { platforms }] of Object.entries(components)) {
     const digest = digests[name];
     requireThat(/^sha256:[a-f0-9]{64}$/.test(digest ?? ''), `Missing image digest: ${name}`);
@@ -45,6 +46,12 @@ export function verifyImages(version, sourceCommit, digests, run = command) {
       item.annotations?.['vnd.docker.reference.type'] !== 'attestation-manifest');
     requireThat(runtime.map(item => `${item.platform?.os}/${item.platform?.architecture}`).sort().join() ===
       [...platforms].sort().join(), `Missing, duplicate, or unexpected platforms: ${name}`);
+    details[name] = {
+      indexDigest: digest,
+      platforms: [...platforms],
+      platformDigests: Object.fromEntries(runtime.map(item =>
+        [`${item.platform.os}/${item.platform.architecture}`, item.digest])),
+    };
     for (const item of runtime) {
       requireThat(/^sha256:[a-f0-9]{64}$/.test(item.digest ?? '') &&
         index.manifests.some(proof => proof.annotations?.['vnd.docker.reference.type'] === 'attestation-manifest' &&
@@ -58,6 +65,7 @@ export function verifyImages(version, sourceCommit, digests, run = command) {
       `Image version/source mismatch: ${name}`);
     }
   }
+  return details;
 }
 
 export function immutableTags(version) {
