@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.HostUpdates;
+﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>Outcome of an attempted recovery after the executor left the release in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.</summary>
 public enum HostUpdateRecoveryOutcome
@@ -12,6 +12,60 @@ public enum HostUpdateRecoveryOutcome
 
 /// <summary>Durable, immutable record of one recovery attempt.</summary>
 public sealed record HostUpdateRecoveryResult(HostUpdateRecoveryOutcome Outcome, string Detail);
+
+/// <summary>Durable record of one recovery attempt, persisted independently of the caller so a
+/// <see cref="HostUpdateRecoveryOutcome.NeedsOperator"/> outcome survives a process crash even if
+/// whatever invoked <see cref="IHostUpdateRecoveryCoordinator.RecoverAsync"/> never got to persist
+/// it itself (Kane audit P1.7).</summary>
+public sealed record HostUpdateRecoveryOutcomeRecord(
+    string ReleaseId,
+    HostUpdateRecoveryOutcome Outcome,
+    string Detail,
+    DateTimeOffset RecordedAt);
+
+/// <summary>Durably persists (and retrieves) the most recent recovery outcome for a release.</summary>
+public interface IHostUpdateRecoveryOutcomeStore
+{
+    Task<HostUpdateRecoveryOutcomeRecord?> ReadAsync(string releaseId, CancellationToken cancellationToken);
+
+    Task WriteAsync(HostUpdateRecoveryOutcomeRecord record, CancellationToken cancellationToken);
+}
+
+/// <summary>File-backed <see cref="IHostUpdateRecoveryOutcomeStore"/> using an atomic write-then-rename,
+/// one JSON file per release under <paramref name="rootDirectory"/> so recovery outcomes for distinct
+/// releases never overwrite each other and a restart can discover the last outcome for any release.</summary>
+public sealed class FileHostUpdateRecoveryOutcomeStore(string rootDirectory) : IHostUpdateRecoveryOutcomeStore
+{
+    public async Task<HostUpdateRecoveryOutcomeRecord?> ReadAsync(string releaseId, CancellationToken cancellationToken)
+    {
+        string path = PathFor(releaseId);
+        if (!File.Exists(path))
+        {
+            return null;
+        }
+
+        string json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
+        return System.Text.Json.JsonSerializer.Deserialize<HostUpdateRecoveryOutcomeRecord>(json);
+    }
+
+    public async Task WriteAsync(HostUpdateRecoveryOutcomeRecord record, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        Directory.CreateDirectory(rootDirectory);
+        string path = PathFor(record.ReleaseId);
+        string json = System.Text.Json.JsonSerializer.Serialize(record);
+        string temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
+        await File.WriteAllTextAsync(temp, json, cancellationToken).ConfigureAwait(false);
+        File.Move(temp, path, overwrite: true);
+    }
+
+    private string PathFor(string releaseId)
+    {
+        char[] invalid = Path.GetInvalidFileNameChars();
+        string safeReleaseId = new([.. releaseId.Select(c => invalid.Contains(c) ? '_' : c)]);
+        return Path.Combine(rootDirectory, $"{safeReleaseId}.recovery.json");
+    }
+}
 
 /// <summary>
 /// Decides whether a failed update can be recovered by re-applying the prior pinned images
@@ -67,7 +121,8 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateDigestApplier digestApplier,
     IHostUpdateRestoreExecutor restoreExecutor,
     IHostUpdateBackupManifestLocator manifestLocator,
-    IHostUpdateDigestVerifier digestVerifier) : IHostUpdateRecoveryCoordinator
+    IHostUpdateDigestVerifier digestVerifier,
+    IHostUpdateRecoveryOutcomeStore outcomeStore) : IHostUpdateRecoveryCoordinator
 {
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
@@ -77,6 +132,39 @@ public sealed class HostUpdateRecoveryCoordinator(
         ArgumentNullException.ThrowIfNull(failedRequest);
         ArgumentNullException.ThrowIfNull(activities);
 
+        HostUpdateRecoveryResult result;
+        try
+        {
+            result = await RecoverCoreAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Recovery itself was cancelled/killed mid-flight: this is exactly the uncertain case
+            // NeedsOperator exists for, so it must be durably recorded (not silently dropped)
+            // before the cancellation propagates to the caller.
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, HostUpdateRecoveryOutcome.NeedsOperator, "recovery_canceled", DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
+            throw;
+        }
+
+        // Persisted unconditionally on every completed outcome -- including NeedsOperator --
+        // so it survives a process crash/kill even if whatever invoked RecoverAsync never gets a
+        // chance to persist it itself (Kane audit P1.7). Uses CancellationToken.None for the
+        // persistence write itself: recording the outcome must not be skipped just because the
+        // caller's token happens to already be in a cancellation-requested state.
+        await outcomeStore.WriteAsync(
+            new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, result.Outcome, result.Detail, DateTimeOffset.UtcNow),
+            CancellationToken.None).ConfigureAwait(false);
+
+        return result;
+    }
+
+    private async Task<HostUpdateRecoveryResult> RecoverCoreAsync(
+        HostUpdateExecutionRequest failedRequest,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken)
+    {
         InstalledHostState? priorState = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
         try
         {
@@ -133,7 +221,7 @@ public interface IHostUpdateRecoveryCoordinator
 /// </summary>
 public sealed class ProcessHostUpdateRestoreExecutor(
     IHostUpdateProcessRunner processRunner,
-    IReadOnlyDictionary<string, Func<string, IReadOnlyList<string>>> restoreCommandsByTarget,
+    IReadOnlyDictionary<string, Func<string, HostUpdateRestoreCommand>> restoreCommandsByTarget,
     IReadOnlyDictionary<string, string> directoryRestoreTargetsByName,
     TimeSpan timeout) : IHostUpdateRestoreExecutor
 {
@@ -145,13 +233,15 @@ public sealed class ProcessHostUpdateRestoreExecutor(
         foreach (string targetName in manifest.TargetNames)
         {
             string targetDirectory = Path.Combine(backupRunDirectory, SanitizeForPath(targetName));
-            if (restoreCommandsByTarget.TryGetValue(targetName, out Func<string, IReadOnlyList<string>>? buildArguments))
+            if (restoreCommandsByTarget.TryGetValue(targetName, out Func<string, HostUpdateRestoreCommand>? buildCommand))
             {
+                HostUpdateRestoreCommand command = buildCommand(targetDirectory);
                 HostUpdateProcessResult result = await processRunner.RunAsync(
-                    "sh",
-                    buildArguments(targetDirectory),
+                    command.FileName,
+                    command.Arguments,
                     timeout,
-                    cancellationToken).ConfigureAwait(false);
+                    cancellationToken,
+                    command.Environment).ConfigureAwait(false);
                 if (!result.Succeeded)
                 {
                     throw new InvalidOperationException($"restore_failed:{targetName}");

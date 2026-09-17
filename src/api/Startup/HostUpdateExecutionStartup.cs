@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Slicer.Module.Data;
@@ -102,7 +102,8 @@ public static class HostUpdateExecutionStartup
                 sp.GetRequiredService<IHostUpdateProcessRunner>(),
                 options.DiskWatchPath,
                 options.MinimumFreeBytes,
-                options.SupportedProviderNames.ToHashSet(StringComparer.Ordinal));
+                options.SupportedProviderNames.ToHashSet(StringComparer.Ordinal),
+                options.ServiceMappings.Select(m => m.ServiceId).ToHashSet(StringComparer.Ordinal));
         });
         services.AddScoped<IHostUpdateExecutionSteps, HostUpdateExecutionStepsAdapter>();
         services.AddScoped<IHostUpdateExecutor, HostUpdateExecutor>();
@@ -168,7 +169,9 @@ public static class HostUpdateExecutionStartup
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             List<IHostUpdateBackupTarget> targets = [.. sp.GetServices<IHostUpdateBackupTarget>()];
-            targets.AddRange(options.OwnedDirectories.Select(pair => new DirectoryCopyBackupTarget(pair.Key, pair.Value)));
+            var optionalDirectoryNames = new HashSet<string>(options.OptionalOwnedDirectories, StringComparer.Ordinal);
+            targets.AddRange(options.OwnedDirectories.Select(pair =>
+                new DirectoryCopyBackupTarget(pair.Key, pair.Value, isRequired: !optionalDirectoryNames.Contains(pair.Key))));
             return targets;
         });
         services.AddScoped<IReadOnlyList<IHostUpdateBackupTarget>>(sp => [.. sp.GetRequiredService<IEnumerable<IHostUpdateBackupTarget>>()]);
@@ -212,7 +215,7 @@ public static class HostUpdateExecutionStartup
 
         List<IHostUpdateHealthCheck> staticChecks =
         [
-            new HttpHostUpdateHealthCheck("api", httpClientFactory.CreateClient(HealthClientName), "/healthz"),
+            new AggregateHostUpdateHealthCheck("api-comprehensive-health", httpClientFactory.CreateClient(HealthClientName), "/health"),
         ];
 
         return new HostUpdateHealthVerifier(
@@ -229,8 +232,16 @@ public static class HostUpdateExecutionStartup
     private static string ContainerNameFor(HostUpdateExecutionOptions options, string serviceId)
     {
         HostUpdateServiceMappingOptions? mapping = options.ServiceMappings.FirstOrDefault(m => string.Equals(m.ServiceId, serviceId, StringComparison.Ordinal));
-        string composeServiceName = mapping?.ComposeServiceName ?? serviceId;
-        return $"{options.ComposeProjectName}-{composeServiceName}-1";
+        if (mapping is null)
+        {
+            // Preflight already fails closed when a request target has no ServiceMappings entry
+            // (Kane audit P0.5); this is a second, independent guard so a caller that reaches
+            // digest verification through any other path never silently guesses a container name
+            // that would just fail an unrelated "docker inspect" call later.
+            throw new InvalidOperationException($"service_mapping_missing:{serviceId}");
+        }
+
+        return $"{options.ComposeProjectName}-{mapping.ComposeServiceName}-1";
     }
 
     private static void AddRecovery(IServiceCollection services)
@@ -242,7 +253,7 @@ public static class HostUpdateExecutionStartup
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>());
-            var restoreCommandsByTarget = new Dictionary<string, Func<string, IReadOnlyList<string>>>(StringComparer.Ordinal)
+            var restoreCommandsByTarget = new Dictionary<string, Func<string, HostUpdateRestoreCommand>>(StringComparer.Ordinal)
             {
                 ["database"] = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig),
             };
@@ -253,6 +264,9 @@ public static class HostUpdateExecutionStartup
                 directoryRestoreTargetsByName,
                 TimeSpan.FromSeconds(options.BackupTimeoutSeconds));
         });
+        services.AddSingleton<IHostUpdateRecoveryOutcomeStore>(sp =>
+            new FileHostUpdateRecoveryOutcomeStore(
+                Path.Combine(sp.GetRequiredService<HostUpdateExecutionOptions>().StateDirectory, "recovery-outcomes")));
         services.AddScoped<IHostUpdateRecoveryCoordinator, HostUpdateRecoveryCoordinator>();
     }
 }

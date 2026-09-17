@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -68,6 +68,16 @@ public interface IHostUpdateMigrationTarget
     Task<string> GetProviderNameAsync(CancellationToken cancellationToken);
 
     Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken);
+
+    /// <summary>
+    /// A non-secret SHA256 fingerprint of this context's resolved connection string. Used only
+    /// to detect -- never to reveal -- whether two in-process migration targets are pointed at
+    /// different physical databases (Kane audit P0.6: a genuinely split AppDbContext/SlicerDbContext
+    /// cannot be covered by the single shared "database" backup target). The default
+    /// implementation returns empty, which preflight treats as "cannot compare" rather than
+    /// "definitely equal".
+    /// </summary>
+    Task<string> GetConnectionStringFingerprintAsync(CancellationToken cancellationToken) => Task.FromResult(string.Empty);
 }
 
 /// <summary>
@@ -81,11 +91,24 @@ public sealed class HostUpdatePreflightCheck(
     IHostUpdateProcessRunner processRunner,
     string diskWatchPath,
     long minimumFreeBytes,
-    IReadOnlySet<string> supportedProviderNames) : IHostUpdatePreflightCheck
+    IReadOnlySet<string> supportedProviderNames,
+    IReadOnlySet<string>? mappedServiceIds = null) : IHostUpdatePreflightCheck
 {
     public async Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (mappedServiceIds is not null)
+        {
+            // A request target whose service ID has no configured ServiceMappings entry would
+            // otherwise silently fall back to a guessed container name at verify/apply time
+            // (Kane audit P0.5); fail closed here instead, before any mutating step runs.
+            string[] unmapped = [.. request.Targets.Select(t => t.ServiceId).Where(id => !mappedServiceIds.Contains(id))];
+            if (unmapped.Length > 0)
+            {
+                throw new HostUpdatePreflightFailedException($"unmapped_service_target:{string.Join(',', unmapped)}");
+            }
+        }
 
         InstalledHostState? installed = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
         if (installed is not null)
@@ -100,6 +123,7 @@ public sealed class HostUpdatePreflightCheck(
             }
         }
 
+        var connectionStringFingerprintsByContext = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (IHostUpdateMigrationTarget target in migrationTargets)
         {
             string provider;
@@ -116,6 +140,26 @@ public sealed class HostUpdatePreflightCheck(
             {
                 throw new HostUpdatePreflightFailedException($"unsupported_provider:{provider}");
             }
+
+            string fingerprint = await target.GetConnectionStringFingerprintAsync(cancellationToken).ConfigureAwait(false);
+            if (!string.IsNullOrEmpty(fingerprint))
+            {
+                connectionStringFingerprintsByContext[target.ContextName] = fingerprint;
+            }
+        }
+
+        // Defense-in-depth for Kane audit P0.6: the coordinated backup step covers a single
+        // shared "database" target, which is architecturally correct only because every
+        // documented deployment shape points AppDbContext and SlicerDbContext at the exact same
+        // physical database (see SlicerModuleExtensions doc comments). If both contexts are
+        // registered in this process and ever resolve to different connection strings, that
+        // assumption is violated and the single-target backup would silently miss one of them --
+        // fail closed rather than proceed with an incomplete backup.
+        if (connectionStringFingerprintsByContext.TryGetValue("AppDbContext", out string? appFingerprint) &&
+            connectionStringFingerprintsByContext.TryGetValue("SlicerDbContext", out string? slicerFingerprint) &&
+            !string.Equals(appFingerprint, slicerFingerprint, StringComparison.Ordinal))
+        {
+            throw new HostUpdatePreflightFailedException("split_database_not_supported");
         }
 
         if (!TryGetFreeBytes(diskWatchPath, out long freeBytes) || freeBytes < minimumFreeBytes)

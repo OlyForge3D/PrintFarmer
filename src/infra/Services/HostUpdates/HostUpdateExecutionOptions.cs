@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.HostUpdates;
+﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
 /// Production configuration for the concrete host-update executor step adapters (issue
@@ -104,8 +104,12 @@ public sealed class HostUpdateExecutionOptions
     /// Application-owned directories to back up (name to absolute path), matching this host's
     /// actual container mount points (<c>/data</c>, <c>/app/models</c>, <c>/app/gcode</c>,
     /// <c>/app/profiles</c>, <c>/app/data-protection-keys</c> for the compose-managed API
-    /// container -- see <c>docker-compose.yml</c>). A directory that does not exist in a given
-    /// deployment (e.g. certs/keyrings not configured) is recorded as empty, not an error.
+    /// container -- see <c>docker-compose.yml</c>). A directory is fail-closed by default: a
+    /// configured path that does not exist at backup time is treated as a misconfiguration
+    /// (missing mount) and fails the backup step closed, never silently masked as ".empty". Only
+    /// a directory named in <see cref="OptionalOwnedDirectories"/> may legitimately be absent
+    /// (e.g. certs/keyrings not configured in this deployment); for those, an absent source
+    /// directory is still recorded as empty, not an error.
     /// </summary>
     public IDictionary<string, string> OwnedDirectories { get; set; } = new Dictionary<string, string>(StringComparer.Ordinal)
     {
@@ -115,6 +119,15 @@ public sealed class HostUpdateExecutionOptions
         ["slicer-profiles"] = "/app/profiles",
         ["data-protection-keys"] = "/app/data-protection-keys",
     };
+
+    /// <summary>
+    /// Names (keys of <see cref="OwnedDirectories"/>) that may legitimately be absent in a given
+    /// deployment without failing the backup step closed (e.g. an optional certs/keyrings
+    /// directory not configured on this host). Empty by default: every current
+    /// <see cref="OwnedDirectories"/> default entry is a real, always-mounted path and must be
+    /// present for the backup to be considered complete.
+    /// </summary>
+    public string[] OptionalOwnedDirectories { get; set; } = [];
 
     /// <summary>Compose files (in <c>-f</c> order) applied for the currently configured topology. Must
     /// define every compose service named in <see cref="ServiceMappings"/> that this deployment

@@ -1,4 +1,4 @@
-using Microsoft.Data.SqlClient;
+﻿using Microsoft.Data.SqlClient;
 using Microsoft.Data.Sqlite;
 using Npgsql;
 
@@ -48,7 +48,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 isExternallyOwned: false,
                 processRunner,
                 "sqlite3",
-                dest => [dbFilePath, $".backup '{Path.Combine(dest, SqliteFileName)}'"],
+                dest => [dbFilePath, $".backup '{EscapeQuotedLiteral(Path.Combine(dest, SqliteFileName))}'"],
                 timeout);
         }
 
@@ -78,9 +78,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
         {
             var builder = new SqlConnectionStringBuilder(dbConfig.ConnectionString);
             string database = builder.InitialCatalog;
-            List<string> authArgs = builder.IntegratedSecurity
-                ? ["-E"]
-                : ["-U", builder.UserID, "-P", builder.Password];
+            (IReadOnlyList<string> authArgs, IReadOnlyDictionary<string, string>? authEnvironment) = SqlServerAuthArgs(builder);
             return new ProcessDatabaseBackupTarget(
                 name,
                 isExternallyOwned: false,
@@ -90,9 +88,10 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 [
                     "-S", builder.DataSource,
                     .. authArgs,
-                    "-Q", $"BACKUP DATABASE [{database}] TO DISK = N'{Path.Combine(dest, SqlServerFileName)}' WITH INIT",
+                    "-Q", $"BACKUP DATABASE [{EscapeBracketedIdentifier(database)}] TO DISK = N'{EscapeQuotedLiteral(Path.Combine(dest, SqlServerFileName))}' WITH INIT",
                 ],
-                timeout);
+                timeout,
+                authEnvironment);
         }
 
         throw new NotSupportedException($"unsupported_backup_provider:{dbConfig.Provider}");
@@ -100,48 +99,110 @@ public static class HostUpdateDatabaseBackupTargetFactory
 
     /// <summary>
     /// Builds the matching restore command for one already-verified backup target's on-disk
-    /// dump, keyed by target name, for <see cref="ProcessHostUpdateRestoreExecutor"/>.
+    /// dump, keyed by target name, for <see cref="ProcessHostUpdateRestoreExecutor"/>. Returns a
+    /// structured <see cref="HostUpdateRestoreCommand"/> (file name, argument list, environment)
+    /// invoked directly via <see cref="IHostUpdateProcessRunner"/> -- never through a shell -- so
+    /// a connection password can only ever reach the child process via its environment (Postgres,
+    /// SQL Server) or not at all (SQLite has no credential), the same guarantee
+    /// <see cref="CreateBackupTarget"/> already provides for backup.
     /// </summary>
-    public static Func<string, IReadOnlyList<string>> CreateRestoreCommand(Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig)
+    public static Func<string, HostUpdateRestoreCommand> CreateRestoreCommand(Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig)
     {
         ArgumentNullException.ThrowIfNull(dbConfig);
 
         if (dbConfig.IsSqlite)
         {
             string dbFilePath = new SqliteConnectionStringBuilder(dbConfig.ConnectionString).DataSource;
-            return targetDirectory =>
-            [
-                "-c",
-                $"sqlite3 '{dbFilePath}' \".restore '{Path.Combine(targetDirectory, SqliteFileName)}'\"",
-            ];
+            return targetDirectory => new HostUpdateRestoreCommand(
+                "sqlite3",
+                [dbFilePath, $".restore '{EscapeQuotedLiteral(Path.Combine(targetDirectory, SqliteFileName))}'"],
+                null);
         }
 
         if (dbConfig.IsPostgres)
         {
             var builder = new NpgsqlConnectionStringBuilder(dbConfig.ConnectionString);
             string password = builder.Password ?? string.Empty;
-            string passwordPrefix = string.IsNullOrEmpty(password) ? string.Empty : $"PGPASSWORD='{password}' ";
-            return targetDirectory =>
-            [
-                "-c",
-                $"{passwordPrefix}pg_restore --clean --if-exists -h {builder.Host} -p {builder.Port} -U {builder.Username} -d {builder.Database} '{Path.Combine(targetDirectory, PostgresFileName)}'",
-            ];
+            return targetDirectory => new HostUpdateRestoreCommand(
+                "pg_restore",
+                [
+                    "--clean",
+                    "--if-exists",
+                    "-h", builder.Host ?? "localhost",
+                    "-p", builder.Port.ToString(System.Globalization.CultureInfo.InvariantCulture),
+                    "-U", builder.Username ?? string.Empty,
+                    "-d", builder.Database ?? string.Empty,
+                    Path.Combine(targetDirectory, PostgresFileName),
+                ],
+                string.IsNullOrEmpty(password) ? null : new Dictionary<string, string>(StringComparer.Ordinal) { ["PGPASSWORD"] = password });
         }
 
         if (dbConfig.IsSqlServer)
         {
             var builder = new SqlConnectionStringBuilder(dbConfig.ConnectionString);
-            string authArgs = builder.IntegratedSecurity ? "-E" : $"-U {builder.UserID} -P {builder.Password}";
-            return targetDirectory =>
-            [
-                "-c",
-                $"sqlcmd -S {builder.DataSource} {authArgs} -Q \"RESTORE DATABASE [{builder.InitialCatalog}] FROM DISK = N'{Path.Combine(targetDirectory, SqlServerFileName)}' WITH REPLACE\"",
-            ];
+            string database = builder.InitialCatalog;
+            (IReadOnlyList<string> authArgs, IReadOnlyDictionary<string, string>? authEnvironment) = SqlServerAuthArgs(builder);
+            return targetDirectory => new HostUpdateRestoreCommand(
+                "sqlcmd",
+                [
+                    "-S", builder.DataSource,
+                    .. authArgs,
+                    "-Q", $"RESTORE DATABASE [{EscapeBracketedIdentifier(database)}] FROM DISK = N'{EscapeQuotedLiteral(Path.Combine(targetDirectory, SqlServerFileName))}' WITH REPLACE",
+                ],
+                authEnvironment);
         }
 
         throw new NotSupportedException($"unsupported_restore_provider:{dbConfig.Provider}");
     }
+
+    /// <summary>
+    /// <c>sqlcmd</c>'s own credential-handling convention: username may safely appear as a
+    /// process argument, but the password must travel only through the <c>SQLCMDPASSWORD</c>
+    /// environment variable (supported natively by <c>sqlcmd</c>) so it never appears in a
+    /// process argument list -- visible via <c>ps</c>/process listings or argv-capturing
+    /// audit/process logging -- for either backup or restore.
+    /// </summary>
+    /// <summary>
+    /// Escapes a single-quoted literal for <c>sqlite3</c>'s own dot-command tokenizer (used by
+    /// <c>.backup</c>/<c>.restore</c>) and for T-SQL <c>N'...'</c> string literals: both treat a
+    /// doubled quote as one literal quote character, the same convention SQL itself uses. This
+    /// closes a security-review finding that a backup-root path containing a single quote could
+    /// otherwise terminate the literal early and inject additional dot-command/T-SQL text.
+    /// </summary>
+    private static string EscapeQuotedLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
+
+    /// <summary>
+    /// Escapes a T-SQL bracketed identifier (<c>[name]</c>) by doubling any embedded <c>]</c>,
+    /// the standard T-SQL identifier-escaping convention, so a database name containing <c>]</c>
+    /// cannot break out of the bracket and inject additional T-SQL into the same batch.
+    /// </summary>
+    private static string EscapeBracketedIdentifier(string value) => value.Replace("]", "]]", StringComparison.Ordinal);
+
+    private static (IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string>? Environment) SqlServerAuthArgs(SqlConnectionStringBuilder builder)
+    {
+        if (builder.IntegratedSecurity)
+        {
+            return (["-E"], null);
+        }
+
+        string password = builder.Password ?? string.Empty;
+        IReadOnlyDictionary<string, string>? environment = string.IsNullOrEmpty(password)
+            ? null
+            : new Dictionary<string, string>(StringComparer.Ordinal) { ["SQLCMDPASSWORD"] = password };
+        return (["-U", builder.UserID], environment);
+    }
 }
+
+/// <summary>
+/// A structured (never shell-interpolated) restore invocation: the executable, its explicit
+/// argument list, and any environment variables (e.g. a database password) the child process
+/// needs. Mirrors the argument shape <see cref="ProcessDatabaseBackupTarget"/> already uses for
+/// backup, so a restore never has to fall back to a <c>sh -c</c> string.
+/// </summary>
+public sealed record HostUpdateRestoreCommand(
+    string FileName,
+    IReadOnlyList<string> Arguments,
+    IReadOnlyDictionary<string, string>? Environment);
 
 /// <summary>A backup target this host does not own and therefore never attempts to back up itself.</summary>
 public sealed class ExternallyOwnedBackupTarget(string name) : IHostUpdateBackupTarget

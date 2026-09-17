@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -154,7 +154,7 @@ public sealed class ProcessDatabaseBackupTarget(
 }
 
 /// <summary>Backs up an application-owned directory (blobs/profiles/calibration/config/keyrings) via a recursive copy.</summary>
-public sealed class DirectoryCopyBackupTarget(string name, string sourceDirectory) : IHostUpdateBackupTarget
+public sealed class DirectoryCopyBackupTarget(string name, string sourceDirectory, bool isRequired = true) : IHostUpdateBackupTarget
 {
     public string Name { get; } = name;
 
@@ -164,9 +164,21 @@ public sealed class DirectoryCopyBackupTarget(string name, string sourceDirector
     {
         if (!Directory.Exists(sourceDirectory))
         {
-            // Nothing to back up (e.g. certificates not configured in this deployment) is not
-            // an incomplete backup; the coordinator's non-empty-file check still applies to
-            // catch a target that produces nothing when it was expected to.
+            if (isRequired)
+            {
+                // Every currently-configured owned directory is a real, always-mounted container
+                // path (see the doc comment on HostUpdateExecutionOptions.OwnedDirectories); a
+                // missing mount here means the deployment is misconfigured, not that there is
+                // legitimately nothing to back up. Writing a ".empty" sentinel and reporting
+                // success would silently drop this directory's data from every future restore, so
+                // a required target fails the backup closed instead.
+                throw new HostUpdateBackupIncompleteException(Name);
+            }
+
+            // Only a directory explicitly declared optional (e.g. certificates/keyrings not
+            // configured in this deployment) may legitimately be absent. The coordinator's
+            // non-empty-file check still applies to catch a target that produces nothing when it
+            // was expected to.
             await File.WriteAllTextAsync(Path.Combine(destinationDirectory, ".empty"), "source_not_present", cancellationToken)
                 .ConfigureAwait(false);
             return;

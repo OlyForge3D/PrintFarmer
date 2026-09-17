@@ -1,3 +1,7 @@
+﻿using System.Security.Cryptography;
+using System.Text;
+using Microsoft.EntityFrameworkCore;
+
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
@@ -43,6 +47,19 @@ public sealed class DbContextMigrationTarget<TContext>(
     {
         TContext context = resolveContext();
         return Task.FromResult(context.Database.ProviderName ?? string.Empty);
+    }
+
+    public Task<string> GetConnectionStringFingerprintAsync(CancellationToken cancellationToken)
+    {
+        TContext context = resolveContext();
+        string? connectionString = context.Database.GetConnectionString();
+        if (string.IsNullOrEmpty(connectionString))
+        {
+            return Task.FromResult(string.Empty);
+        }
+
+        string fingerprint = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(connectionString))).ToLowerInvariant();
+        return Task.FromResult(fingerprint);
     }
 
     public async Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken)

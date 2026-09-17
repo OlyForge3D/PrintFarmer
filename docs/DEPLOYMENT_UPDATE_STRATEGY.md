@@ -145,27 +145,37 @@ gate, the queue outbox publisher, `PowerReadingPruneService`, and
 `QueueRetentionPruneService` have quiesced), backup
 (`HostUpdateBackupCoordinator` plus provider-native
 `HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`,
-failing closed for an externally-owned database), migration
+failing closed for an externally-owned database and for any required owned
+directory that is unexpectedly missing), migration
 (`HostUpdateMigrationCoordinator` wrapping the existing
-`ProviderAwareMigrationRunner` under the executor's own lock), apply
+`ProviderAwareMigrationRunner` under the executor's own lock, and preflight
+failing closed with `split_database_not_supported` if `AppDbContext`'s and
+`SlicerDbContext`'s connection-string fingerprints differ), apply
 (`HostUpdateImageApplier`, pinned `repository@sha256` images via the existing
 compose templates, no shell interpolation), verify (`HostUpdateHealthVerifier`,
-exact digest plus HTTP readiness), and recovery
-(`HostUpdateRecoveryCoordinator`, image-only rollback vs. coordinated restore,
-`NeedsOperator` on uncertainty). All of it is wired through production DI
+exact digest plus the aggregated `/health` endpoint's JSON body requiring a
+top-level `Status` of exactly `"Healthy"`, never merely HTTP 200), and recovery
+(`HostUpdateRecoveryCoordinator`, image-only rollback vs. coordinated restore
+via structured process args/env only, never a shell string, with the
+`RolledBack`/`NeedsOperator` outcome durably persisted by
+`FileHostUpdateRecoveryOutcomeStore` even if recovery is cancelled mid-flight).
+All of it is wired through production DI
 (`HostUpdateExecutionStartup.AddHostUpdateExecution`) behind a manual,
 permission-gated admin API (`HostUpdateController`) with no automatic
 scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full
 adapter table, the `HostUpdateExecutionOptions` root-directory contract, and
 the availability-probing contract a scheduler must poll before ever invoking
-the executor. Remaining gaps: split-topology (non-shared) database
-backup/restore, additional `IFenceableWriter` registrations beyond the
-admission gate, queue outbox publisher, `PowerReadingPruneService`, and
-`QueueRetentionPruneService` (known unfenced: `MaintenanceAlertHostedService`,
-`CatalogUpdateDetectionService`, `VerifiedReleaseDiscoveryMonitorService`,
-`OrphanedJobSyncStartupService`, `HistorySeedingBackgroundService`,
-`ActiveExternalJobSyncBackgroundService`), and controller-level replay/
-stale-plan checks against the staging/authorization layer.
+the executor. Remaining gaps: additional `IFenceableWriter` registrations
+beyond the admission gate, queue outbox publisher,
+`PowerReadingPruneService`, and `QueueRetentionPruneService` (known unfenced:
+`MaintenanceAlertHostedService`, `CatalogUpdateDetectionService`,
+`VerifiedReleaseDiscoveryMonitorService`, `OrphanedJobSyncStartupService`,
+`HistorySeedingBackgroundService`, `ActiveExternalJobSyncBackgroundService`);
+the admission gate is not yet wired into every real submission/scheduling/
+slicing/printer-command/bridge call site; and controller-level request
+fingerprint binding, replay/stale-plan checks, and crash-resume idempotency
+for individual side-effecting operations are owned by the scheduler
+integration work (issues #2665/#2666), not this physical-adapter slice.
 
 Scope: single-host Docker Compose, monolith and split-service deployments,
 optional/local/remote workers, external databases, and offline installations.

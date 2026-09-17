@@ -48,8 +48,8 @@ Bound from the `HostUpdateExecution` configuration section (see
 | Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
 | Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Wraps the existing `ProviderAwareMigrationRunner` under the executor's own single-writer lock; inspects the actual installed provider state and fails closed on an unsupported/mixed configuration rather than duplicating migration logic. |
 | Apply | `HostUpdateImageApplier` | Applies immutable `repository@sha256` images via the existing compose templates and `docker compose up -d`, using an explicit process argument list — never shell interpolation, never a mutable tag. |
-| Verify | `HostUpdateHealthVerifier` | Confirms exact running digests (`docker inspect`) plus HTTP readiness before reporting healthy and allowing writers to reopen. |
-| Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling, and persists `NeedsOperator` when recovery itself is uncertain or fails. Resumable/idempotent via the same durable journal after a process restart. |
+| Verify | `HostUpdateHealthVerifier` + `AggregateHostUpdateHealthCheck` | Confirms exact running digests (`docker inspect`) plus the aggregated `/health` endpoint's JSON body has a top-level `Status` of exactly `"Healthy"` (never merely an HTTP 200 — ASP.NET Core's default health middleware also returns 200 for `"Degraded"`) before reporting healthy and allowing writers to reopen. |
+| Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` + `FileHostUpdateRecoveryOutcomeStore` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling (structured process args/env only — no shell string, no password on argv), and durably persists the `RolledBack`/`NeedsOperator` outcome itself (survives a crash immediately after cancellation) before reporting it. Resumable/idempotent via the same durable journal after a process restart. |
 
 ## Availability contract
 
@@ -89,7 +89,22 @@ against issue #2663.
 
 - Split-topology deployments where `AppDbContext` and `SlicerDbContext` point at genuinely
   different physical databases are not yet handled by the single shared database backup/restore
-  target; the common (monolith/shared-DB) case is.
+  target. Preflight now fails closed (`split_database_not_supported`) whenever the two contexts'
+  connection strings differ (compared only as a SHA256 fingerprint — the raw connection string,
+  which may embed a password, is never logged or persisted), so a real split topology is
+  explicitly refused rather than silently backing up only one database; the common
+  (monolith/shared-DB) case is fully supported.
+- Owned application directories (blobs/profiles/calibration/config/certs/keyrings) are fail-closed
+  by default: a configured, required owned directory that is missing at backup time throws
+  `HostUpdateBackupIncompleteException` instead of writing a `.empty` sentinel and reporting
+  success. A directory can be explicitly opted into the old empty-sentinel behavior via
+  `HostUpdateExecutionOptions.OptionalOwnedDirectories` only when its absence is genuinely
+  expected (e.g. an optional feature that was never enabled on this host).
+- Preflight also fails closed (`unmapped_service_target:<serviceId>`) if a request names a service
+  ID with no corresponding `HostUpdateExecutionOptions.ServiceMappings` entry, and the digest
+  verifier's container-name resolution independently throws (`service_mapping_missing:<serviceId>`)
+  rather than silently falling back to a guessed container name if it is ever reached without that
+  earlier guard having run.
 - Only four writers are concretely fenced today (the admission gate, the queue outbox
   publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService`); other background
   schedulers/bridges/API replicas/workers still need `IFenceableWriter` implementations
@@ -100,8 +115,27 @@ against issue #2663.
   provider fails closed (`insufficient_fenced_writers:<names>`) only for names explicitly listed
   in `HostUpdateExecutionOptions.RequiredFencedWriterNames`; it cannot detect a writer that was
   never added to that list in the first place, so extending coverage still requires deliberate,
-  audited work per writer rather than a generic scan.
-- The PostgreSQL/SQL Server restore commands interpolate the connection password into a `sh -c`
-  script string (required by the foundation's fixed `sh`-based restore invocation); a password
-  containing a single quote is a known, accepted shell-quoting risk, not yet hardened.
+  audited work per writer rather than a generic scan. The admission gate itself
+  (`IHostUpdateAdmissionGate`) is also not yet wired into every real submission/scheduling/
+  slicing/printer-command/bridge call site — only the paths that already call it are actually
+  protected from admitting new work during a drain.
+- PostgreSQL/SQL Server backup and restore commands are invoked as a structured process argument
+  list with the connection password passed only via an environment variable (`PGPASSWORD` /
+  `SQLCMDPASSWORD`), never on the command line and never through a shell (`sh -c`) string — closing
+  the earlier shell-quoting/argv-exposure risk for both directions. The interpolated T-SQL
+  identifier/literal (`[database]` / `N'path'`) and the interpolated sqlite3 `.backup`/`.restore`
+  literal path are also escaped (doubled `]`/`'` respectively, the standard T-SQL/sqlite3
+  convention) so a database name or backup-root path containing one of those characters cannot
+  terminate the literal early and inject additional dot-command/T-SQL text into the same batch.
+- Recovery's `NeedsOperator`/`RolledBack` outcome is now durably persisted by
+  `FileHostUpdateRecoveryOutcomeStore` (one JSON file per release, atomic write-then-rename) as
+  part of `RecoverAsync` itself — including when recovery is cancelled mid-flight — so the outcome
+  survives a process crash immediately afterward even if whatever invoked recovery never gets a
+  chance to persist it. It does not yet expose an operator-facing read API beyond the store
+  itself; the admin API does not currently surface historical recovery outcomes.
+- The manual admin API's request fingerprint binding (same `ReleaseId` with a changed
+  sequence/manifest/source/channel/targets resuming a stale plan) and the executor's crash-resume
+  idempotency semantics for individual side-effecting operations are owned by the scheduler
+  integration work (issue #2665/#2666) rather than this physical-adapter slice; see that work's
+  acceptance criteria for current status.
 

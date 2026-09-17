@@ -1,6 +1,7 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
+using Microsoft.Data.SqlClient;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
@@ -104,11 +105,62 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     {
         var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlite", ConnectionString = "Data Source=farm.db" };
 
-        Func<string, IReadOnlyList<string>> restoreCommand = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig);
-        IReadOnlyList<string> args = restoreCommand(Path.GetTempPath());
+        Func<string, HostUpdateRestoreCommand> restoreCommand = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig);
+        HostUpdateRestoreCommand command = restoreCommand(Path.GetTempPath());
 
-        args[0].Should().Be("-c");
-        args[1].Should().Contain("sqlite3").And.Contain(".restore");
+        command.FileName.Should().Be("sqlite3");
+        command.Arguments.Should().Contain(a => a.Contains(".restore", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void CreateRestoreCommand_Postgres_PasswordOnlyInEnvironmentNeverInArguments()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "postgres",
+            ConnectionString = "Host=dbhost;Port=5433;Database=printfarmer;Username=pf;Password=test-only-pw-1",
+        };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        command.FileName.Should().Be("pg_restore");
+        command.Arguments.Should().NotContain(a => a.Contains("test-only-pw-1", StringComparison.Ordinal));
+        command.Environment.Should().ContainKey("PGPASSWORD").WhoseValue.Should().Be("test-only-pw-1");
+    }
+
+    [Fact]
+    public void CreateRestoreCommand_SqlServer_PasswordOnlyInEnvironmentNeverInArguments()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-2;TrustServerCertificate=True",
+        };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        command.FileName.Should().Be("sqlcmd");
+        command.Arguments.Should().Contain(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
+        command.Arguments.Should().NotContain(a => a.Contains("test-only-pw-2", StringComparison.Ordinal));
+        command.Environment.Should().ContainKey("SQLCMDPASSWORD").WhoseValue.Should().Be("test-only-pw-2");
+    }
+
+    [Fact]
+    public async Task CreateBackupTarget_SqlServer_PasswordOnlyInEnvironmentNeverInArguments()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-3;TrustServerCertificate=True",
+        };
+        var runner = new RecordingProcessRunner();
+
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+        await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        runner.LastArguments.Should().NotContain(a => a.Contains("test-only-pw-3", StringComparison.Ordinal));
+        runner.LastEnvironment.Should().ContainKey("SQLCMDPASSWORD").WhoseValue.Should().Be("test-only-pw-3");
     }
 
     [Fact]
@@ -119,5 +171,84 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         Action act = () => HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig);
 
         act.Should().Throw<NotSupportedException>();
+    }
+
+    // Security-review finding (Kane audit follow-up): a database name or backup-root path
+    // containing a single quote or closing bracket must never be able to terminate a T-SQL
+    // literal/identifier or a sqlite3 dot-command literal early and inject additional
+    // dot-command/T-SQL text into the same batch, even though these values never reach an OS
+    // shell. The tests below use hostile-but-realistic values (a bracket in a database name, a
+    // single quote in a backup path) and assert the emitted command always contains the escaped
+    // (doubled) form, never the raw unescaped value.
+    [Fact]
+    public async Task CreateBackupTarget_SqlServer_DatabaseNameWithBracket_EscapesIdentifier()
+    {
+        var builder = new SqlConnectionStringBuilder
+        {
+            DataSource = "sqlhost",
+            InitialCatalog = "printfarmer]; DROP TABLE Users; --",
+            UserID = "sa",
+            Password = "test-only-pw-4",
+        };
+        var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlserver", ConnectionString = builder.ConnectionString };
+        var runner = new RecordingProcessRunner();
+
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+        await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        string query = runner.LastArguments!.Single(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
+        query.Should().Contain("[printfarmer]]; DROP TABLE Users; --]");
+    }
+
+    [Fact]
+    public void CreateRestoreCommand_SqlServer_DatabaseNameWithBracket_EscapesIdentifier()
+    {
+        var builder = new SqlConnectionStringBuilder
+        {
+            DataSource = "sqlhost",
+            InitialCatalog = "printfarmer]; DROP TABLE Users; --",
+            UserID = "sa",
+            Password = "test-only-pw-5",
+        };
+        var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlserver", ConnectionString = builder.ConnectionString };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
+        query.Should().Contain("[printfarmer]]; DROP TABLE Users; --]");
+    }
+
+    [Fact]
+    public async Task CreateBackupTarget_Sqlite_DestinationPathWithSingleQuote_EscapesLiteral()
+    {
+        var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlite", ConnectionString = "Data Source=farm.db" };
+        var runner = new RecordingProcessRunner();
+        string hostileDestination = Path.Combine(Path.GetTempPath(), "it's-a-trap");
+
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+        await target.BackupAsync(hostileDestination, CancellationToken.None);
+
+        string backupCommand = runner.LastArguments!.Single(a => a.Contains(".backup", StringComparison.Ordinal));
+        backupCommand.Should().Contain("it''s-a-trap");
+        backupCommand.Should().NotContain("it's-a-trap");
+    }
+
+    [Fact]
+    public void CreateRestoreCommand_SqlServer_PathWithSingleQuote_EscapesLiteral()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-6;TrustServerCertificate=True",
+        };
+        string hostileTargetDirectory = Path.Combine(Path.GetTempPath(), "it's-a-trap");
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(hostileTargetDirectory);
+
+        string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
+        query.Should().Contain("it''s-a-trap");
+        query.Should().NotContain("N'" + hostileTargetDirectory);
     }
 }

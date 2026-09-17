@@ -1,3 +1,5 @@
+﻿using System.Text.Json;
+
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
@@ -30,6 +32,37 @@ public sealed class HttpHostUpdateHealthCheck(string name, HttpClient client, st
             return response.IsSuccessStatusCode;
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException)
+        {
+            return false;
+        }
+    }
+}
+
+/// <summary>
+/// Hits the API's aggregated <c>/health</c> endpoint (which runs <c>ComprehensiveHealthCheck</c>,
+/// <c>SignalRHealthCheck</c>, and <c>SpoolmanHealthCheck</c> -- see
+/// <c>Farm.Web.Api.Startup.HealthCheckStartup</c>) and requires the top-level report status to
+/// be exactly <c>"Healthy"</c>, never merely a 200 response: ASP.NET Core's default health check
+/// middleware also returns 200 for <c>"Degraded"</c>. This closes Kane audit P0.5's core gap --
+/// the previously wired <c>/healthz</c> liveness probe is a hardcoded <c>{ status = "ok" }</c>
+/// response that always returns 200 unconditionally and can never detect a broken
+/// database/queue/storage/worker subsystem.
+/// </summary>
+public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient client, string relativeUrl) : IHostUpdateHealthCheck
+{
+    public string Name { get; } = name;
+
+    public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using HttpResponseMessage response = await client.GetAsync(relativeUrl, cancellationToken).ConfigureAwait(false);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using JsonDocument document = JsonDocument.Parse(body);
+            return document.RootElement.TryGetProperty("Status", out JsonElement statusElement) &&
+                string.Equals(statusElement.GetString(), "Healthy", StringComparison.Ordinal);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
         {
             return false;
         }
