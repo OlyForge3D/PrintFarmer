@@ -332,6 +332,8 @@ public sealed class ServiceInventoryTests
 
         Assert.Equal(InventoryEligibility.Eligible, result.State);
         Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+        Assert.False(result.Hops is string[]);
     }
 
     [Fact]
@@ -353,7 +355,6 @@ public sealed class ServiceInventoryTests
         Assert.Equal(InventoryEligibility.Blocked, result.State);
         Assert.Equal("PlatformMismatchOrInvalidDigestEvidence:api", Assert.Single(result.Reasons));
         Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence"], result.Hops);
-        Assert.False(result.Hops is string[]);
     }
 
     [Fact]
