@@ -258,7 +258,8 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@sha256:', 'ghcr.io/olyforge3d/printfarmer-api:'),
     value => value.replace('"id":"frontend"', '"id":"api"'),
     value => value.replace(`"api/linux-amd64":"sha256:${'d'.repeat(64)}"`, '"api/linux-amd64":"bad"'),
-    value => value.replace('"platforms":["linux-amd64","linux-arm64"]', '"platforms":["api-linux-amd64"]'),
+    value => value.replace('"platforms":["linux-amd64","linux-arm64"],"platformDigests"',
+      '"platforms":["api-linux-amd64"],"platformDigests"'),
     value => value.replace('"platforms":["linux-amd64"]', '"platforms":["linux-amd64","linux-arm64"]'),
     value => value.replace(',"minimumUpdaterVersion":"0.0.0"', ''),
   ]) assert.throws(() => validateManifest(mutation(first)));
@@ -297,17 +298,30 @@ test('shared update manifest fixture is the exact generated cross-language contr
   }));
   const fixtureDigests = Object.fromEntries(manifestFixture.services.map(service =>
     [service.id, service.image.split('@')[1]]));
+  const schemaServiceDefinitions = schema.properties.services.prefixItems.map(item =>
+    schema.$defs[item.$ref.slice('#/$defs/'.length)]);
 
   assert.deepEqual(manifestFixture.services.map(service => service.id), Object.keys(components));
+  assert.deepEqual(schemaServiceDefinitions.map(definition => definition.properties.id.const), Object.keys(components));
   assert.deepEqual(manifestFixture.platforms, schema.properties.platforms.const);
+  assert.deepEqual(Object.keys(manifestFixture.platformDigests), schema.properties.platformDigests.required);
   assert.ok(schema.required.includes('minimumUpdaterVersion'));
   assert.equal(manifestFixture.minimumUpdaterVersion, MINIMUM_UPDATER_VERSION);
   assert.equal(manifestFixture.sequence, 10020000300042);
+  assert.equal(schema.properties.sequence.maximum, Number.MAX_SAFE_INTEGER);
   assert.ok(Number.isSafeInteger(manifestFixture.sequence));
   assert.ok(BigInt(manifestFixture.sequence) <= 9223372036854775807n);
   assert.equal(deriveSequence(manifestFixture.version), manifestFixture.sequence);
   assert.deepEqual(manifestFixture.services.find(service => service.id === 'orcaslicer-worker').platforms,
     ['linux-amd64']);
+  assert.equal(typeof manifestFixture.buildId, 'string');
+  for (const [index, service] of manifestFixture.services.entries()) {
+    const definition = schemaServiceDefinitions[index];
+    const expectedPlatforms = definition.properties.platforms?.const ??
+      schema.$defs.dualPlatformService.properties.platforms.const;
+    assert.match(service.image, new RegExp(definition.properties.image.pattern));
+    assert.deepEqual(service.platforms, expectedPlatforms);
+  }
 
   const generated = Buffer.from(buildManifest(fixtureRelease, fixtureImageDetails));
   assert.equal(Buffer.compare(generated, manifestFixtureBytes), 0);
