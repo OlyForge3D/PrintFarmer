@@ -179,8 +179,8 @@
         },
         {
           "name": "slicing",
-          "namespacePrefixes": ["Infrastructure", "Builders", "Services/Sync"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Infrastructure.|FullyQualifiedName~Farm.Infrastructure.Tests.Builders.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Sync."
+          "namespacePrefixes": ["Infrastructure", "Builders", "Services/Sync", "Services/HostUpdates"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Infrastructure.|FullyQualifiedName~Farm.Infrastructure.Tests.Builders.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Sync.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.HostUpdates."
         },
         {
           "name": "filament",
