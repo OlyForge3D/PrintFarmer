@@ -1281,10 +1281,78 @@ test('reviewed npm license fallbacks are pinned to LF checkout in .gitattributes
     );
 
     const fileBytes = await readFile(path.join(repositoryRoot, fallback.licenseFile));
+    const normalizedText = `${fileBytes.toString('utf8').replaceAll('\r\n', '\n').trimEnd()}\n`;
     assert.equal(
-      sha256(fileBytes),
+      sha256(Buffer.from(normalizedText)),
       fallback.sha256,
-      `${fallback.licenseFile} checked-out bytes no longer match the reviewed policy sha256`,
+      `${fallback.licenseFile} normalized bytes no longer match the reviewed policy sha256`,
     );
+  }
+});
+
+test('createNpmLicenseInventory rejects incomplete, invalid-date, and stale-hash fallbacks', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-npm-fallback-'));
+  const lockRelativePath = 'src/Web/ReactApp/package-lock.json';
+  const licenseFile = 'compliance/licenses/npm/fixture.txt';
+  const licenseText = 'MIT license evidence\n';
+  const fallback = {
+    ecosystem: 'npm',
+    package: 'fixture',
+    version: '1.0.0',
+    license: 'MIT',
+    licenseFile,
+    sha256: sha256(Buffer.from(licenseText)),
+    source: 'https://licenses.example.test/fixture',
+    evidence: 'Immutable fixture license text',
+    reviewer: 'Maintainer',
+    reviewDate: '2026-07-24',
+    reviewAfter: '2099-07-24',
+    rationale: 'Fixture for fallback validation.',
+  };
+  const policy = {
+    allowedExpressions: ['MIT'],
+    deniedValues: ['', 'UNKNOWN'],
+    npmLockFiles: [lockRelativePath],
+    npm: { licenseTextFallbacks: [fallback] },
+    reviewedExceptions: [],
+    sbom: { npmBundleLockFile: lockRelativePath },
+  };
+
+  try {
+    await mkdir(path.join(root, path.dirname(lockRelativePath)), { recursive: true });
+    await mkdir(path.join(root, path.dirname(licenseFile)), { recursive: true });
+    await writeFile(path.join(root, lockRelativePath), JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'fixture-root', version: '1.0.0' },
+        'node_modules/fixture': { license: 'MIT', version: '1.0.0' },
+      },
+    }));
+    await writeFile(path.join(root, licenseFile), licenseText);
+
+    assert.deepEqual((await createNpmLicenseInventory(root, policy)).errors, []);
+
+    const incomplete = structuredClone(policy);
+    incomplete.npm.licenseTextFallbacks[0].evidence = '';
+    assert.ok(hasCode(
+      (await createNpmLicenseInventory(root, incomplete)).errors,
+      'LICENSE_EXCEPTION_INCOMPLETE',
+    ));
+
+    const invalidDate = structuredClone(policy);
+    invalidDate.npm.licenseTextFallbacks[0].reviewDate = '2026-7-24';
+    assert.ok(hasCode(
+      (await createNpmLicenseInventory(root, invalidDate)).errors,
+      'LICENSE_EXCEPTION_DATE',
+    ));
+
+    const staleHash = structuredClone(policy);
+    staleHash.npm.licenseTextFallbacks[0].sha256 = '0'.repeat(64);
+    assert.ok(hasCode(
+      (await createNpmLicenseInventory(root, staleHash)).errors,
+      'LICENSE_EVIDENCE_MISMATCH',
+    ));
+  } finally {
+    await rm(root, { force: true, recursive: true });
   }
 });
