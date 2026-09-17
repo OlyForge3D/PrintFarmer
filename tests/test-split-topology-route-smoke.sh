@@ -208,8 +208,12 @@ trap 'cleanup 143' TERM
 : "${HTTP_PORT:=18080}"
 : "${HTTPS_PORT:=18443}"
 : "${POSTGRES_PORT:=15432}"
+: "${WebAuthn__RelyingPartyId:=localhost}"
+: "${WebAuthn__RelyingPartyName:=PrintFarmer Route Smoke}"
+: "${WebAuthn__Origin:=http://localhost:${HTTP_PORT}}"
 export POSTGRES_PASSWORD POSTGRES_USER Jwt__Key WORKER_SHARED_API_KEY \
-  ConnectionStrings__Default API_PORT SLICER_HOST_PORT HTTP_PORT HTTPS_PORT POSTGRES_PORT
+  ConnectionStrings__Default WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName \
+  WebAuthn__Origin API_PORT SLICER_HOST_PORT HTTP_PORT HTTPS_PORT POSTGRES_PORT
 export DB_PROVIDER=Postgres
 export ENABLE_DISTRIBUTED_SLICING=true
 export ENABLE_ORCA_WORKER=yes
