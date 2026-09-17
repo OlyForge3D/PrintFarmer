@@ -45,7 +45,7 @@
           "const": "signed 64-bit integer"
         },
         "formula": {
-          "const": "(((major * 1000) + minor) * 100000 + patch) * 100000 + suffix"
+          "const": "major * 1000000000 + minor * 1000000 + patch * 1000 + suffix"
         },
         "radices": {
           "type": "object",
@@ -60,10 +60,10 @@
               "const": 1000
             },
             "patch": {
-              "const": 100000
+              "const": 1000
             },
             "suffix": {
-              "const": 100000
+              "const": 1000
             }
           }
         },
@@ -85,13 +85,13 @@
               "const": 999
             },
             "patch": {
-              "const": 99999
+              "const": 999
             },
             "insiderSequence": {
-              "const": 99998
+              "const": 998
             },
             "stableSuffix": {
-              "const": 99999
+              "const": 999
             }
           }
         }
@@ -180,7 +180,7 @@
       "properties": {
         "major": {
           "type": "integer",
-          "minimum": 0,
+          "minimum": 1,
           "maximum": 99
         },
         "minor": {
@@ -191,7 +191,7 @@
         "patch": {
           "type": "integer",
           "minimum": 0,
-          "maximum": 99999
+          "maximum": 999
         },
         "kind": {
           "enum": [
@@ -202,7 +202,7 @@
         "suffix": {
           "type": "integer",
           "minimum": 1,
-          "maximum": 99999
+          "maximum": 999
         }
       }
     },

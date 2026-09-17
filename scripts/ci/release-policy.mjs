@@ -49,6 +49,12 @@ export function validateVersion(version, channel, versionFile) {
   requireThat(parsed.channel === channel && (!parsed.stage || parsed.stage === 'insider'),
     'Version must match the selected channel (stable X.Y.Z / insider X.Y.Z-insider.N)');
   requireThat(parsed.baseVersion === parseVersionFile(versionFile), 'Release base must match selected-source VERSION');
+  requireThat(BigInt(parsed.major) > 0n, 'Signed release major version must be greater than zero');
+  requireThat(BigInt(parsed.major) <= 99n, 'Major version exceeds sequence encoding limit of 99');
+  requireThat(BigInt(parsed.minor) <= 999n, 'Minor version exceeds sequence encoding limit of 999');
+  requireThat(BigInt(parsed.patch) <= 999n, 'Patch version exceeds sequence encoding limit of 999');
+  requireThat(!parsed.sequence || BigInt(parsed.sequence) <= 998n,
+    'Prerelease sequence exceeds encoding limit of 998');
   requireThat(parsed.baseVersion.split('.').every(part => BigInt(part) <= 65534n),
     'Version exceeds .NET assembly version limits');
   return parsed;

@@ -8,15 +8,9 @@ const imagePattern = /^ghcr\.io\/olyforge3d\/printfarmer-[a-z0-9-]+@sha256:[a-f0
 const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 // Cross-channel sequence contract (see docs/DEPLOYMENT_UPDATE_STRATEGY.md):
-// a collision-free, stable-dominant, positional mixed-radix encoding of
-// major/minor/patch plus a channel-aware suffix. Each field has an explicit,
-// validated upper bound so an out-of-range component throws instead of
-// silently overflowing into the next field (the prior weighted-decimal
-// encoding collided once patch or the insider suffix reached 1000). Stable
-// releases always encode a suffix of SEQUENCE_STABLE_SUFFIX, which is greater
-// than any valid prerelease suffix, so a stable release outranks every
-// prerelease of the same major.minor.patch (the prior encoding inverted this:
-// an insider suffix >= 1 always outranked the matching stable release).
+// retain the verifier's legacy weighted formula, but bound every component
+// below the next decimal weight. Stable releases use the reserved suffix
+// above every valid insider suffix.
 // All arithmetic is done in BigInt for exactness; the final value is checked
 // against signed C# Int64 and Number.MAX_SAFE_INTEGER before converting to a
 // JS Number, so the contract never emits an unsafe JSON integer. The supported
@@ -24,13 +18,10 @@ const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 // wire value remains a JSON integer.
 export const SEQUENCE_MAJOR_MAX = 99;
 export const SEQUENCE_MINOR_MAX = 999;
-export const SEQUENCE_PATCH_MAX = 99999;
-export const SEQUENCE_PRERELEASE_MAX = 99998;
-export const SEQUENCE_STABLE_SUFFIX = 99999;
+export const SEQUENCE_PATCH_MAX = 999;
+export const SEQUENCE_PRERELEASE_MAX = 998;
+export const SEQUENCE_STABLE_SUFFIX = 999;
 export const MINIMUM_UPDATER_VERSION = '0.0.0';
-const SEQUENCE_SUFFIX_WIDTH = 100000n;
-const SEQUENCE_PATCH_WIDTH = 100000n;
-const SEQUENCE_MINOR_WIDTH = 1000n;
 const INT64_MAX = 9223372036854775807n;
 
 export function deriveSequence(version) {
@@ -39,6 +30,7 @@ export function deriveSequence(version) {
   const major = BigInt(parsed.major);
   const minor = BigInt(parsed.minor);
   const patch = BigInt(parsed.patch);
+  requireThat(major >= 1n, 'Signed release major version must be greater than zero');
   requireThat(major <= BigInt(SEQUENCE_MAJOR_MAX), `Major version exceeds sequence encoding limit of ${SEQUENCE_MAJOR_MAX}`);
   requireThat(minor <= BigInt(SEQUENCE_MINOR_MAX), `Minor version exceeds sequence encoding limit of ${SEQUENCE_MINOR_MAX}`);
   requireThat(patch <= BigInt(SEQUENCE_PATCH_MAX), `Patch version exceeds sequence encoding limit of ${SEQUENCE_PATCH_MAX}`);
@@ -51,9 +43,9 @@ export function deriveSequence(version) {
   } else {
     suffix = BigInt(SEQUENCE_STABLE_SUFFIX);
   }
-  const encoded = major * SEQUENCE_MINOR_WIDTH * SEQUENCE_PATCH_WIDTH * SEQUENCE_SUFFIX_WIDTH +
-    minor * SEQUENCE_PATCH_WIDTH * SEQUENCE_SUFFIX_WIDTH +
-    patch * SEQUENCE_SUFFIX_WIDTH +
+  const encoded = major * 1_000_000_000n +
+    minor * 1_000_000n +
+    patch * 1_000n +
     suffix;
   requireThat(encoded <= INT64_MAX, 'Encoded sequence exceeds C# Int64 range');
   requireThat(encoded <= BigInt(Number.MAX_SAFE_INTEGER), 'Encoded sequence exceeds safe integer range');
@@ -127,9 +119,13 @@ export function buildManifest(release, imageDetails, options = {}) {
       platforms: policy.platforms.map(manifestPlatform),
     };
   });
-  const platformEntries = Object.entries(components).flatMap(([id, policy]) =>
-    policy.platforms.map(platform => [`${id}/${manifestPlatform(platform)}`,
-      imageDetails[id].platformDigests[platform]]));
+  const platformEntries = manifestPlatforms().map(platform => {
+    const source = Object.values(components).find(policy =>
+      policy.platforms.map(manifestPlatform).includes(platform));
+    const service = Object.keys(components).find(id =>
+      components[id] === source);
+    return [platform, imageDetails[service].platformDigests[platform.replaceAll('-', '/')]];
+  });
   const manifest = {
     schema: 1,
     tag: normalizedRelease.tag,
@@ -184,21 +180,22 @@ export function validateManifest(bytes, release, digests, imageDetails) {
       [...service.platforms].sort().join() === policy.platforms.map(manifestPlatform).sort().join(),
     `Invalid manifest platforms: ${service.id}`);
   }
-  const expectedPlatformEntries = Object.entries(components).flatMap(([id, policy]) =>
-    policy.platforms.map(platform => ({ id, platform, key: `${id}/${manifestPlatform(platform)}` })));
   const expectedPlatforms = manifestPlatforms();
   requireThat(Array.isArray(manifest.platforms) &&
     manifest.platforms.join() === expectedPlatforms.join(), 'Invalid manifest platform list');
-  const expectedPlatformDigestKeys = expectedPlatformEntries.map(entry => entry.key);
+  const expectedPlatformDigestKeys = expectedPlatforms;
   requireThat(manifest.platformDigests &&
     Object.keys(manifest.platformDigests).join() === expectedPlatformDigestKeys.join(),
     'Invalid manifest child digest map');
-  for (const entry of expectedPlatformEntries) {
-    validatePlatform(manifestPlatform(entry.platform), entry.key);
-    validateDigest(manifest.platformDigests[entry.key], entry.key);
+  for (const platform of expectedPlatforms) {
+    validatePlatform(platform, platform);
+    validateDigest(manifest.platformDigests[platform], platform);
     if (imageDetails) {
-      requireThat(manifest.platformDigests[entry.key] === imageDetails[entry.id].platformDigests[entry.platform],
-        `Manifest child digest mismatch: ${entry.key}`);
+      const source = Object.entries(imageDetails).find(([, details]) =>
+        details.platforms.map(manifestPlatform).includes(platform));
+      const sourceDigest = source?.[1].platformDigests[platform.replaceAll('-', '/')];
+      requireThat(manifest.platformDigests[platform] === sourceDigest,
+        `Manifest child digest mismatch: ${platform}`);
     }
   }
   requireThat(typeof manifest.minimumUpdaterVersion === 'string' &&

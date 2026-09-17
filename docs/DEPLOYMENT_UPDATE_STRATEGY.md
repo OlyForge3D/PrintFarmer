@@ -36,19 +36,14 @@ The first signed managed-update release is a new boundary: it publishes
 OCI images, platform child digests, compliance checks, and release inventory
 checks pass. The manifest uses schema `1`, deterministic canonical JSON, and a
 collision-free, stable-dominant `sequence`. `deriveSequence` (in
-`scripts/ci/release-manifest.mjs`) positionally encodes bounded, validated
-components&mdash;major (`0..99`), minor (`0..999`), patch (`0..99999`), and a
-prerelease suffix (`1..99998`, or the reserved sentinel `99999` for stable)&mdash;
-so that, unlike the earlier weighted-decimal formula
-(`major*1_000_000_000 + minor*1_000_000 + patch*1_000 + insiderSuffix`, which
-let a patch or insider suffix &ge;1000 overflow into the next field and collide
-with a different version, and let an insider prerelease outrank its own stable
-release at the same major.minor.patch), every distinct version now maps to a
-distinct sequence and a stable release always sorts above every prerelease of
-the same major.minor.patch. The maximum encodable sequence
-(`999_999_999_999_999`) stays a safe JS integer and fits a signed 64-bit
-`long`/`Int64` (not a C# `int`), so the manifest wire value remains a JSON
-integer. The language-neutral vectors are checked in at
+`scripts/ci/release-manifest.mjs`) uses Lambert's legacy weighted formula
+(`major*1_000_000_000 + minor*1_000_000 + patch*1_000 + suffix`) with bounded
+components: major (`1..99`), minor (`0..999`), patch (`0..999`), insider
+suffix (`1..998`), and the reserved stable suffix `999`. These bounds prevent
+decimal carry collisions while the reserved suffix makes stable releases sort
+above every insider prerelease of the same base version. Arithmetic is BigInt;
+the producer rejects values outside JavaScript's safe integer range or C#
+signed `Int64` before JSON serialization. The language-neutral vectors are checked in at
 `scripts/ci/fixtures/release-version-sequence.golden.json`, with their
 `schemaVersion: 1` JSON Schema at
 `scripts/ci/fixtures/release-version-sequence.schema.json`. Valid vectors

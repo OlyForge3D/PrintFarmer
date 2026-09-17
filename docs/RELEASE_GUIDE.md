@@ -14,12 +14,13 @@ post_date: "2026-09-16"
 ## Release a version
 
 1. Review `VERSION` on `main` for **stable**, or `development` for **insider**.
-   It contains the base version, for example `v0.2.3`. Change the base through
+   It contains the base version, for example `v1.2.3`. Signed releases require
+   a nonzero major version; change the base through
    the normal reviewed PR process when needed; keep monorepo versions synchronized.
 2. As **jpapiez**, open **Actions > Consolidated Release > Run workflow** on
    `development`. Choose the channel and enter
-   `0.2.3` for stable or an unused `0.2.3-insider.N` for insider, such as
-   `0.2.3-insider.3`. The base must match the selected source's `VERSION`.
+   `1.2.3` for stable or an unused `1.2.3-insider.N` for insider, such as
+   `1.2.3-insider.3`. The base must match the selected source's `VERSION`.
    Leave `source_sha` blank for that channel branch's current HEAD, or supply
    its full 40-character ancestor SHA.
 3. Run it once. The summary identifies the pinned source, check results and
@@ -76,9 +77,10 @@ The cross-language wire contract uses exactly these service IDs: `api`,
 `frontend`, `slicer-host`, `printer-discovery`, `orcaslicer-worker`, and
 `monolith`. Top-level `platforms` is the bare union
 `["linux-amd64","linux-arm64"]`; each service declares a subset of that union,
-and `orcaslicer-worker` declares only `linux-amd64`. `platformDigests` is a flat
-string map keyed as `<service-id>/<bare-platform>`, for example
-`api/linux-amd64`. A nested per-service map is not accepted by the C# consumer.
+and `orcaslicer-worker` declares only `linux-amd64`. `platformDigests` is a flat string map keyed by the bare platform union:
+`linux-amd64` and `linux-arm64`. Service `platforms` arrays remain subsets of
+that union; `orcaslicer-worker` is amd64-only. A service-namespaced digest map
+is not accepted by the C# consumer.
 The canonical byte fixture is
 `scripts/ci/fixtures/update-manifest.golden.json`, with its Draft 2020-12 schema
 at `scripts/ci/fixtures/update-manifest.schema.json`. Node tests regenerate the

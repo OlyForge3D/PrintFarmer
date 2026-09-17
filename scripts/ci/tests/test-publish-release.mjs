@@ -18,7 +18,7 @@ const sha = 'a'.repeat(40);
 const head = 'b'.repeat(40);
 const digest = `sha256:${'c'.repeat(64)}`;
 const platformDigest = `sha256:${'d'.repeat(64)}`;
-const release = { version: '0.2.3-insider.2', tag: 'v0.2.3-insider.2', channel: 'insider',
+const release = { version: '1.2.3-insider.2', tag: 'v1.2.3-insider.2', channel: 'insider',
   sourceBranch: 'development', sourceCommit: sha, buildId: '42' };
 const digests = Object.fromEntries(Object.keys(components).map(name => [name, digest]));
 const imageDetails = Object.fromEntries(Object.entries(components).map(([name, component]) => [name, {
@@ -80,18 +80,18 @@ function workspace(t) {
 }
 
 test('explicit version matches channel and VERSION without allocating any state', () => {
-  assert.equal(validateVersion('0.2.3', 'stable', 'v0.2.3\n').baseVersion, '0.2.3');
-  assert.equal(validateVersion(release.version, 'insider', 'v0.2.3\r\n').sequence, '2');
+  assert.equal(validateVersion('1.2.3', 'stable', 'v1.2.3\n').baseVersion, '1.2.3');
+  assert.equal(validateVersion(release.version, 'insider', 'v1.2.3\r\n').sequence, '2');
   for (const [version, channel, base] of [
-    ['0.2.3', 'insider', 'v0.2.3'], ['0.2.3-insider.2', 'stable', 'v0.2.3'],
-    ['0.2.3-beta.2', 'insider', 'v0.2.3'], ['0.2.3-rc.2', 'insider', 'v0.2.3'],
-    ['0.2.4', 'stable', 'v0.2.3'], ['0.2.3-insider.0', 'insider', 'v0.2.3'],
-    ['0.2.3-insider.01', 'insider', 'v0.2.3'], ['00.2.3', 'stable', 'v00.2.3'],
-    ['0.2.3\n', 'stable', 'v0.2.3'], ['0.2.3', 'stable', 'v0.2.3\n\n'],
-    ['0.2.3', 'unknown', 'v0.2.3'], ['65535.2.3', 'stable', 'v65535.2.3'],
+    ['0.2.3', 'insider', 'v0.2.3'], ['1.2.3-insider.2', 'stable', 'v1.2.3'],
+    ['1.2.3-beta.2', 'insider', 'v1.2.3'], ['1.2.3-rc.2', 'insider', 'v1.2.3'],
+    ['1.2.4', 'stable', 'v1.2.3'], ['1.2.3-insider.0', 'insider', 'v1.2.3'],
+    ['1.2.3-insider.01', 'insider', 'v1.2.3'], ['01.2.3', 'stable', 'v01.2.3'],
+    ['1.2.3\n', 'stable', 'v1.2.3'], ['1.2.3', 'stable', 'v1.2.3\n\n'],
+    ['1.2.3', 'unknown', 'v1.2.3'], ['101.2.3', 'stable', 'v101.2.3'],
   ]) assert.throws(() => validateVersion(version, channel, base));
-  assert.equal(compareVersions('0.2.3-insider.10', '0.2.3-insider.2'), 1);
-  assert.equal(compareVersions('0.2.3', '0.2.3-insider.99'), 1);
+  assert.equal(compareVersions('1.2.3-insider.10', '1.2.3-insider.2'), 1);
+  assert.equal(compareVersions('1.2.3', '1.2.3-insider.99'), 1);
 });
 
 test('owner manual access verifies live identity, original inputs and existing environment policy', async () => {
@@ -100,7 +100,7 @@ test('owner manual access verifies live identity, original inputs and existing e
     { GITHUB_RUN_ATTEMPT: '2' }, { GITHUB_EVENT_NAME: 'push' }, { GITHUB_REF: 'refs/heads/main' },
     { GITHUB_ACTOR_ID: '1' }, { GITHUB_TRIGGERING_ACTOR: 'another' },
     { GITHUB_WORKFLOW_REF: env.GITHUB_WORKFLOW_REF.replace('consolidated-release', 'other') },
-    { RELEASE_APPROVAL_MODE: '' }, { RELEASE_VERSION: '0.2.3-insider.3' },
+    { RELEASE_APPROVAL_MODE: '' }, { RELEASE_VERSION: '1.2.3-insider.3' },
   ]) await assert.rejects(verifyOwnerDispatch({ ...env, ...override }, ownerApi(), event));
   await assert.rejects(verifyOwnerDispatch(env, ownerApi(), { ...event, sender: { ...owner, id: 1 } }));
   await assert.rejects(verifyOwnerDispatch(env, ownerApi(), { ...event,
@@ -121,10 +121,10 @@ test('owner manual access verifies live identity, original inputs and existing e
 test('GitHub absence is only 404; authorization, rate-limit and transport failures block', async () => {
   for (const status of [401, 403, 429, 500]) {
     const api = githubClient('test-token', async () => ({ status, ok: false }));
-    await assert.rejects(api('git/ref/tags/v0.2.3', { allowMissing: true }), new RegExp(String(status)));
+    await assert.rejects(api('git/ref/tags/v1.2.3', { allowMissing: true }), new RegExp(String(status)));
   }
   assert.equal(await githubClient('test-token', async () => ({ status: 404, ok: false }))
-    ('git/ref/tags/v0.2.3', { allowMissing: true }), undefined);
+    ('git/ref/tags/v1.2.3', { allowMissing: true }), undefined);
   await assert.rejects(githubClient('test-token', async () => { throw new Error('offline'); })('releases'), /offline/);
 });
 
@@ -132,11 +132,11 @@ test('selection pins correct canonical source and ignores missing historical led
   for (const channel of ['stable', 'insider']) {
     const paths = [];
     const selectedEnv = { ...env, RELEASE_CHANNEL: channel,
-      RELEASE_VERSION: channel === 'stable' ? '0.2.3' : release.version };
+      RELEASE_VERSION: channel === 'stable' ? '1.2.3' : release.version };
     const api = async endpoint => {
       paths.push(endpoint);
       if (endpoint.startsWith('git/ref/heads/')) return { object: { sha } };
-      if (endpoint.startsWith('contents/VERSION')) return { encoding: 'base64', content: Buffer.from('v0.2.3').toString('base64') };
+      if (endpoint.startsWith('contents/VERSION')) return { encoding: 'base64', content: Buffer.from('v1.2.3').toString('base64') };
       if (endpoint.startsWith('git/ref/tags/') || endpoint.startsWith('releases/tags/')) return undefined;
       throw new Error(`Unexpected endpoint ${endpoint}`);
     };
@@ -151,7 +151,7 @@ test('selected ancestor stays pinned after branch movement; unrelated or malform
   const api = async endpoint => {
     if (endpoint === 'git/ref/heads/development') return { object: { sha: head } };
     if (endpoint === `compare/${sha}...${head}`) return { status: 'ahead' };
-    if (endpoint.startsWith('contents/VERSION')) return { encoding: 'base64', content: Buffer.from('v0.2.3').toString('base64') };
+    if (endpoint.startsWith('contents/VERSION')) return { encoding: 'base64', content: Buffer.from('v1.2.3').toString('base64') };
     return undefined;
   };
   assert.equal((await selectRelease({ ...env, RELEASE_SELECTED_SOURCE: sha }, api)).sourceCommit, sha);
@@ -167,7 +167,7 @@ test('selected ancestor stays pinned after branch movement; unrelated or malform
 test('permanent tag, existing release and even matching immutable image tags reject reuse', async () => {
   for (const existsAt of ['git/ref/tags/', 'releases/tags/']) {
     await assert.rejects(rejectExistingVersion(async endpoint => endpoint.startsWith(existsAt) ? { id: 1 } : undefined,
-      'v0.2.3-insider.1'), /already exists/);
+      'v1.2.3-insider.1'), /already exists/);
   }
   assert.throws(() => rejectExistingImages(release.version, () => ({ digest, version: release.version })), /already exists/);
 });
@@ -236,12 +236,7 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
   }
   assert.deepEqual(manifest.services.find(service => service.id === 'orcaslicer-worker').platforms, ['linux-amd64']);
   assert.deepEqual(Object.keys(manifest.platformDigests), [
-    'api/linux-amd64', 'api/linux-arm64',
-    'frontend/linux-amd64', 'frontend/linux-arm64',
-    'slicer-host/linux-amd64', 'slicer-host/linux-arm64',
-    'printer-discovery/linux-amd64', 'printer-discovery/linux-arm64',
-    'orcaslicer-worker/linux-amd64',
-    'monolith/linux-amd64', 'monolith/linux-arm64',
+    'linux-amd64', 'linux-arm64',
   ]);
   validateManifestInput({ ...release, sequence: deriveSequence(release.version) }, imageDetails);
   validateManifest(first, { ...release, sequence: deriveSequence(release.version) }, digests);
@@ -257,14 +252,14 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@', 'docker.io/example/api@'),
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@sha256:', 'ghcr.io/olyforge3d/printfarmer-api:'),
     value => value.replace('"id":"frontend"', '"id":"api"'),
-    value => value.replace(`"api/linux-amd64":"sha256:${'d'.repeat(64)}"`, '"api/linux-amd64":"bad"'),
+    value => value.replace(`"linux-amd64":"sha256:${'d'.repeat(64)}"`, '"linux-amd64":"bad"'),
     value => value.replace('"platforms":["linux-amd64","linux-arm64"],"platformDigests"',
       '"platforms":["api-linux-amd64"],"platformDigests"'),
     value => value.replace('"platforms":["linux-amd64"]', '"platforms":["linux-amd64","linux-arm64"]'),
     value => value.replace(',"minimumUpdaterVersion":"0.0.0"', ''),
   ]) assert.throws(() => validateManifest(mutation(first)));
-  assert.throws(() => validateManifest(first, { ...release, version: '0.2.3-insider.3',
-    tag: 'v0.2.3-insider.3', sequence: deriveSequence('0.2.3-insider.3') }, digests));
+  assert.throws(() => validateManifest(first, { ...release, version: '1.2.3-insider.3',
+    tag: 'v1.2.3-insider.3', sequence: deriveSequence('1.2.3-insider.3') }, digests));
   assert.throws(() => validateManifest(first, { ...release, sequence: deriveSequence(release.version) },
     { ...digests, api: platformDigest }));
   assert.throws(() => validateManifest(first, release, digests, {
@@ -292,7 +287,7 @@ test('shared update manifest fixture is the exact generated cross-language contr
       platforms: [...policy.platforms],
       platformDigests: Object.fromEntries(policy.platforms.map(platform => [
         platform,
-        manifestFixture.platformDigests[`${service.id}/${platform.replaceAll('/', '-')}`],
+        manifestFixture.platformDigests[platform.replaceAll('/', '-')],
       ])),
     }];
   }));
@@ -307,7 +302,7 @@ test('shared update manifest fixture is the exact generated cross-language contr
   assert.deepEqual(Object.keys(manifestFixture.platformDigests), schema.properties.platformDigests.required);
   assert.ok(schema.required.includes('minimumUpdaterVersion'));
   assert.equal(manifestFixture.minimumUpdaterVersion, MINIMUM_UPDATER_VERSION);
-  assert.equal(manifestFixture.sequence, 10020000300042);
+  assert.equal(manifestFixture.sequence, 1002003042);
   assert.equal(schema.properties.sequence.maximum, Number.MAX_SAFE_INTEGER);
   assert.ok(Number.isSafeInteger(manifestFixture.sequence));
   assert.ok(BigInt(manifestFixture.sequence) <= 9223372036854775807n);
@@ -376,7 +371,7 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   const source = join(root, 'source');
   const assets = join(root, 'assets');
   mkdirSync(join(source, 'src'), { recursive: true });
-  writeFileSync(join(source, 'VERSION'), 'v0.2.3');
+  writeFileSync(join(source, 'VERSION'), 'v1.2.3');
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) writeFileSync(join(source, file), file);
   mkdirSync(join(source, '.release-assets'));
   writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
@@ -430,7 +425,7 @@ test('actual build loop passes the six targets/platforms and source metadata, st
 
 function publishFixture(t, channel = 'insider') {
   const assets = workspace(t);
-  const chosen = channel === 'stable' ? { ...release, channel, version: '0.2.3', tag: 'v0.2.3', sourceBranch: 'main' } : release;
+  const chosen = channel === 'stable' ? { ...release, channel, version: '1.2.3', tag: 'v1.2.3', sourceBranch: 'main' } : release;
   const files = releaseAssets(chosen);
   for (const file of files) writeFileSync(join(assets, file), 'asset');
   writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
@@ -569,18 +564,18 @@ test('duplicate race, upload error, incomplete assets and partial image tagging 
 test('an older stable release cannot replace GitHub latest', async t => {
   const { assets, chosen, calls, api, deps } = publishFixture(t, 'stable');
   await publishRelease(chosen, assets,
-    (endpoint, options) => endpoint === 'releases/latest' ? { tag_name: 'v0.3.0' } : api(endpoint, options), deps);
+    (endpoint, options) => endpoint === 'releases/latest' ? { tag_name: 'v2.0.0' } : api(endpoint, options), deps);
   assert.equal(calls.at(-1).body.make_latest, 'false');
 });
 
 test('image aliases stay channel-correct, never regress, and version tags never overwrite', () => {
-  for (const version of [release.version, '0.2.3']) {
+  for (const version of [release.version, '1.2.3']) {
     const registry = new Map();
     const created = [];
     const inspect = ref => registry.get(ref);
-    if (version === '0.2.3') {
+    if (version === '1.2.3') {
       for (const name of Object.keys(components)) registry.set(`${imageRepository(name)}:latest`,
-        { digest: platformDigest, version: '0.3.0' });
+        { digest: platformDigest, version: '2.0.0' });
     }
     const run = (_name, args) => {
       const ref = args[args.indexOf('--tag') + 1];
@@ -595,13 +590,13 @@ test('image aliases stay channel-correct, never regress, and version tags never 
   }
   const registry = new Map(Object.keys(components).map(name =>
     [`${imageRepository(name)}:latest`, { digest, version: release.version }]));
-  assert.throws(() => publishImageTags('0.2.3', digests, reference => registry.get(reference),
-    (_name, args) => registry.set(args[args.indexOf('--tag') + 1], { digest, version: '0.2.3' })), /Cross-channel/);
+  assert.throws(() => publishImageTags('1.2.3', digests, reference => registry.get(reference),
+    (_name, args) => registry.set(args[args.indexOf('--tag') + 1], { digest, version: '1.2.3' })), /Cross-channel/);
 });
 
 test('build metadata reports version/source without fabrication of signed allocation or managed identity', () => {
   const metadata = buildMetadata(release);
-  assert.match(metadata.props, /<Version>0.2.3-insider.2<\/Version>/);
+  assert.match(metadata.props, /<Version>1.2.3-insider.2<\/Version>/);
   assert.equal(JSON.parse(metadata.frontend).canonicalVersion, release.version);
   assert.doesNotMatch(JSON.stringify(metadata), /allocation|stableSequence|releaseId|signature|managedEligible/);
 });
