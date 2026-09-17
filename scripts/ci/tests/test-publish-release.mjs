@@ -120,6 +120,46 @@ test('owner manual access verifies live identity, original inputs and existing e
   }, 'insider'));
 });
 
+test('stable owner dispatch runs from main and reaches the channel-aware signing identity', async () => {
+  const stableChannel = 'stable';
+  const stableVersion = '1.2.3';
+  const stableEnv = { ...env, GITHUB_REF: 'refs/heads/main',
+    GITHUB_WORKFLOW_REF: `${repo.full_name}/.github/workflows/consolidated-release.yml@refs/heads/main`,
+    RELEASE_CHANNEL: stableChannel, RELEASE_VERSION: stableVersion };
+  const stableEvent = { sender: owner, repository: repo, ref: 'main',
+    inputs: { channel: stableChannel, version: stableVersion, source_sha: '' } };
+  const stableEnvironment = { name: 'release-stable', can_admins_bypass: false,
+    deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
+    protection_rules: [{ type: 'branch_policy' }] };
+  const stablePolicies = { total_count: 1, branch_policies: [{ name: 'main', type: 'branch' }] };
+  const stableApi = ownerApi({
+    'actions/runs/42': { id: 42, run_attempt: 1, status: 'in_progress',
+      event: 'workflow_dispatch', path: '.github/workflows/consolidated-release.yml', workflow_id: 9,
+      head_branch: 'main', head_sha: sha, actor: owner, triggering_actor: owner,
+      repository: repo, head_repository: repo },
+    'environments/release-stable': stableEnvironment,
+    'environments/release-stable/deployment-branch-policies': stablePolicies,
+  });
+  await verifyOwnerDispatch(stableEnv, stableApi, stableEvent);
+  assert.equal(verifyEnvironmentRestrictions(stableEnvironment, stablePolicies, stableChannel), undefined);
+  // Integration assertion: the exact dispatch just verified for `stable` ran from
+  // `main`; the channel's Cosign signing identity (see manifestSignatureIdentity
+  // in publish-release.mjs) must reference that same branch, and never
+  // `development`, so dispatch/source-branch policy and signing identity can
+  // never contradict one another for a given channel.
+  const identity = manifestIdentityFor(stableChannel);
+  assert.match(identity, /@refs\/heads\/main$/);
+  assert.equal(identity.includes('refs/heads/development'), false);
+  assert.equal(stableEnv.GITHUB_REF, `refs/heads/${identity.split('@refs/heads/')[1]}`);
+  // Each channel's branch policy and signing identity move together: a stable
+  // dispatch from `development`, and an insider dispatch from `main`, both reject.
+  await assert.rejects(verifyOwnerDispatch({ ...stableEnv, GITHUB_REF: 'refs/heads/development',
+    GITHUB_WORKFLOW_REF: stableEnv.GITHUB_WORKFLOW_REF.replace('main', 'development') }, stableApi, stableEvent));
+  await assert.rejects(verifyOwnerDispatch({ ...stableEnv, RELEASE_CHANNEL: 'insider' }, stableApi, stableEvent));
+  assert.throws(() => verifyEnvironmentRestrictions(stableEnvironment, policies, stableChannel));
+  assert.throws(() => verifyEnvironmentRestrictions(environment, stablePolicies, 'insider'));
+});
+
 test('GitHub absence is only 404; authorization, rate-limit and transport failures block', async () => {
   for (const status of [401, 403, 429, 500]) {
     const api = githubClient('test-token', async () => ({ status, ok: false }));

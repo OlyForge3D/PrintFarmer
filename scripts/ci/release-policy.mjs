@@ -60,15 +60,21 @@ export function validateVersion(version, channel, versionFile) {
   return parsed;
 }
 
+// Each release environment restricts deployment to its channel's own source
+// branch: release-stable to `main`, release-insider to `development` -- matching
+// the dispatch/source-branch/signing-identity policy enforced elsewhere for that
+// same channel (release-dispatch.mjs, consolidated-release.yml, publish-release.mjs).
 export function verifyEnvironmentRestrictions(environment, policies, channel) {
+  requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel for environment restrictions');
+  const sourceBranch = channel === 'stable' ? 'main' : 'development';
   requireThat(environment?.name === `release-${channel}` &&
     environment.deployment_branch_policy?.custom_branch_policies === true &&
     environment.deployment_branch_policy.protected_branches === false &&
     environment.can_admins_bypass === false,
   'Release environment protection is missing or changed');
   requireThat(policies?.total_count === 1 && policies.branch_policies?.length === 1 &&
-    policies.branch_policies[0].name === 'development' && policies.branch_policies[0].type === 'branch',
-  'Release environment must allow only development');
+    policies.branch_policies[0].name === sourceBranch && policies.branch_policies[0].type === 'branch',
+  `Release environment must allow only ${sourceBranch}`);
   requireThat(Array.isArray(environment.protection_rules) && environment.protection_rules.length === 1 &&
     environment.protection_rules[0].type === 'branch_policy',
   'Release environment must retain the approved owner-manual, no-second-reviewer configuration');
