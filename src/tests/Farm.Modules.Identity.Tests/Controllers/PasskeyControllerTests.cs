@@ -1,4 +1,5 @@
 ﻿using System.Security.Claims;
+using System.Text.Json;
 using Farm.Infrastructure;
 using Farm.Infrastructure.Services.Authentication;
 using Fido2NetLib;
@@ -44,7 +45,7 @@ public class PasskeyControllerTests
     // ─── register/begin ──────────────────────────────────────────────────────
 
     [Fact]
-    public async Task RegisterBegin_HappyPath_Returns200WithOptions()
+    public async Task PasskeyRegisterBeginAsync_ValidRequest_ReturnsBrowserWireFormat()
     {
         CredentialCreateOptions fakeOptions = MakeCredentialCreateOptions();
         _passkeySvc
@@ -54,8 +55,27 @@ public class PasskeyControllerTests
         Farm.Modules.Identity.Controllers.AuthController controller = CreateController();
         IActionResult result = await controller.PasskeyRegisterBeginAsync(CancellationToken.None);
 
-        OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
-        ok.Value.Should().BeSameAs(fakeOptions);
+        ContentResult content = result.Should().BeOfType<ContentResult>().Subject;
+        content.ContentType.Should().Be("application/json");
+        using JsonDocument json = JsonDocument.Parse(content.Content!);
+        JsonElement root = json.RootElement;
+
+        root.GetProperty("rp").GetProperty("id").GetString().Should().Be("localhost");
+        root.GetProperty("attestation").GetString().Should().Be("none");
+        root.GetProperty("challenge").GetString().Should().MatchRegex("^[A-Za-z0-9_-]+$");
+        root.GetProperty("user").GetProperty("id").GetString().Should().MatchRegex("^[A-Za-z0-9_-]+$");
+
+        JsonElement authenticatorSelection = root.GetProperty("authenticatorSelection");
+        authenticatorSelection.GetProperty("residentKey").GetString().Should().Be("preferred");
+        authenticatorSelection.GetProperty("userVerification").GetString().Should().Be("required");
+
+        JsonElement.ArrayEnumerator parameters = root.GetProperty("pubKeyCredParams").EnumerateArray();
+        JsonElement[] parameterValues = parameters.ToArray();
+        parameterValues.Should().NotBeEmpty();
+        parameterValues.Should().OnlyContain(parameter =>
+            parameter.GetProperty("type").GetString() == "public-key" &&
+            parameter.GetProperty("alg").ValueKind == JsonValueKind.Number);
+        parameterValues.Select(parameter => parameter.GetProperty("alg").GetInt32()).Should().OnlyContain(algorithm => algorithm < 0);
     }
 
     [Fact]
@@ -122,7 +142,7 @@ public class PasskeyControllerTests
     // ─── login/begin ─────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task LoginBegin_HappyPath_Returns200WithOptions()
+    public async Task PasskeyLoginBeginAsync_ValidRequest_ReturnsBrowserWireFormat()
     {
         AssertionOptions fakeOptions = MakeAssertionOptions();
         _passkeySvc
@@ -134,8 +154,14 @@ public class PasskeyControllerTests
             new Farm.Modules.Identity.Controllers.PasskeyLoginBeginRequest("testuser"),
             CancellationToken.None);
 
-        OkObjectResult ok = result.Should().BeOfType<OkObjectResult>().Subject;
-        ok.Value.Should().BeSameAs(fakeOptions);
+        ContentResult content = result.Should().BeOfType<ContentResult>().Subject;
+        content.ContentType.Should().Be("application/json");
+        using JsonDocument json = JsonDocument.Parse(content.Content!);
+
+        JsonElement root = json.RootElement;
+        root.GetProperty("rpId").GetString().Should().Be("localhost");
+        root.GetProperty("userVerification").GetString().Should().Be("required");
+        root.GetProperty("challenge").GetString().Should().MatchRegex("^[A-Za-z0-9_-]+$");
     }
 
     [Fact]
@@ -213,15 +239,37 @@ public class PasskeyControllerTests
 
     // ─── helpers ─────────────────────────────────────────────────────────────
 
-    private static CredentialCreateOptions MakeCredentialCreateOptions() =>
-        new()
+    private static CredentialCreateOptions MakeCredentialCreateOptions()
+    {
+        Fido2 fido2 = CreateFido2();
+        return fido2.RequestNewCredential(new RequestNewCredentialParams
         {
-            Rp = new PublicKeyCredentialRpEntity("localhost", "PrintFarmer", null),
             User = new Fido2User { Id = [1], Name = "u", DisplayName = "u" },
-            Challenge = [42],
-            PubKeyCredParams = [],
-        };
+            ExcludeCredentials = [],
+            AuthenticatorSelection = new AuthenticatorSelection
+            {
+                UserVerification = UserVerificationRequirement.Required,
+                ResidentKey = ResidentKeyRequirement.Preferred,
+            },
+            AttestationPreference = AttestationConveyancePreference.None,
+        });
+    }
 
-    private static AssertionOptions MakeAssertionOptions() =>
-        new() { Challenge = [42], RpId = "localhost" };
+    private static AssertionOptions MakeAssertionOptions()
+    {
+        Fido2 fido2 = CreateFido2();
+        return fido2.GetAssertionOptions(new GetAssertionOptionsParams
+        {
+            AllowedCredentials = [],
+            UserVerification = UserVerificationRequirement.Required,
+        });
+    }
+
+    private static Fido2 CreateFido2() =>
+        new(new Fido2Configuration
+        {
+            ServerDomain = "localhost",
+            ServerName = "PrintFarmer",
+            Origins = new HashSet<string> { "http://localhost:3000" },
+        });
 }

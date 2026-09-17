@@ -56,6 +56,34 @@ public class OpenApiDocumentTests
             .BeFalse();
     }
 
+    [Fact]
+    public async Task PasskeyBeginEndpoints_DocumentJsonObjectResponses()
+    {
+        await using CustomWebApplicationFactory factory = CustomWebApplicationFactory.CreateWithIsolatedDatabase();
+        using HttpClient client = factory.CreateClient();
+
+        using HttpResponseMessage response = await client.GetAsync("/openapi/v1.json");
+
+        _ = response.StatusCode.Should().Be(HttpStatusCode.OK);
+        await using Stream content = await response.Content.ReadAsStreamAsync();
+        using JsonDocument document = await JsonDocument.ParseAsync(content);
+        JsonElement paths = document.RootElement.GetProperty("paths");
+
+        foreach (string path in new string[] { "/api/auth/passkey/register/begin", "/api/auth/passkey/login/begin" })
+        {
+            JsonElement schema = paths.GetProperty(path)
+                .GetProperty("post")
+                .GetProperty("responses")
+                .GetProperty("200")
+                .GetProperty("content")
+                .GetProperty("application/json")
+                .GetProperty("schema");
+
+            _ = schema.ValueKind.Should().Be(JsonValueKind.Object);
+            _ = schema.TryGetProperty("$ref", out _).Should().BeFalse();
+        }
+    }
+
     private static bool IsRawGcodeRoute(string route) =>
         (route.StartsWith("api/printers/", StringComparison.OrdinalIgnoreCase) ||
          route.StartsWith("/api/printers/", StringComparison.OrdinalIgnoreCase)) &&
