@@ -8,9 +8,10 @@ const imagePattern = /^ghcr\.io\/olyforge3d\/printfarmer-[a-z0-9-]+@sha256:[a-f0
 const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 // Cross-channel sequence contract (see docs/DEPLOYMENT_UPDATE_STRATEGY.md):
-// retain the verifier's legacy weighted formula, but bound every component
-// below the next decimal weight. Stable releases use the reserved suffix
-// above every valid insider suffix.
+// sequence = ((((major * 1000) + minor) * 100000) + patch) * 100000 + suffix.
+// Stable releases use the reserved suffix (SEQUENCE_STABLE_SUFFIX), which sits
+// strictly above every valid insider suffix so stable always outranks insider
+// at equal major/minor/patch.
 // All arithmetic is done in BigInt for exactness; the final value is checked
 // against signed C# Int64 and Number.MAX_SAFE_INTEGER before converting to a
 // JS Number, so the contract never emits an unsafe JSON integer. The supported
@@ -18,9 +19,9 @@ const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 // wire value remains a JSON integer.
 export const SEQUENCE_MAJOR_MAX = 99;
 export const SEQUENCE_MINOR_MAX = 999;
-export const SEQUENCE_PATCH_MAX = 999;
-export const SEQUENCE_PRERELEASE_MAX = 998;
-export const SEQUENCE_STABLE_SUFFIX = 999;
+export const SEQUENCE_PATCH_MAX = 99_999;
+export const SEQUENCE_PRERELEASE_MAX = 99_998;
+export const SEQUENCE_STABLE_SUFFIX = 99_999;
 export const MINIMUM_UPDATER_VERSION = '0.0.0';
 const INT64_MAX = 9223372036854775807n;
 
@@ -43,10 +44,7 @@ export function deriveSequence(version) {
   } else {
     suffix = BigInt(SEQUENCE_STABLE_SUFFIX);
   }
-  const encoded = major * 1_000_000_000n +
-    minor * 1_000_000n +
-    patch * 1_000n +
-    suffix;
+  const encoded = (((major * 1_000n + minor) * 100_000n) + patch) * 100_000n + suffix;
   requireThat(encoded <= INT64_MAX, 'Encoded sequence exceeds C# Int64 range');
   requireThat(encoded <= BigInt(Number.MAX_SAFE_INTEGER), 'Encoded sequence exceeds safe integer range');
   return Number(encoded);
@@ -60,6 +58,16 @@ function manifestPlatform(platform) {
 
 function manifestPlatforms() {
   return [...new Set(Object.values(components).flatMap(policy => policy.platforms.map(manifestPlatform)))];
+}
+
+// Child digest keys are `${serviceId}/${platform}` (slash-separated), crossing
+// every declared service with its declared platforms. orcaslicer-worker is
+// amd64-only, so it contributes a single key; every other service contributes
+// one key per platform in the bare top-level platform union. This yields the
+// 11 keys the verifier's schema requires, in stable declaration order.
+function serviceDigestKeys() {
+  return Object.entries(components).flatMap(([id, policy]) =>
+    policy.platforms.map(platform => `${id}/${manifestPlatform(platform)}`));
 }
 
 function validatePlatform(platform, label) {
@@ -119,13 +127,9 @@ export function buildManifest(release, imageDetails, options = {}) {
       platforms: policy.platforms.map(manifestPlatform),
     };
   });
-  const platformEntries = manifestPlatforms().map(platform => {
-    const source = Object.values(components).find(policy =>
-      policy.platforms.map(manifestPlatform).includes(platform));
-    const service = Object.keys(components).find(id =>
-      components[id] === source);
-    return [platform, imageDetails[service].platformDigests[platform.replaceAll('-', '/')]];
-  });
+  const platformDigestEntries = Object.entries(components).flatMap(([id, policy]) =>
+    policy.platforms.map(platform =>
+      [`${id}/${manifestPlatform(platform)}`, imageDetails[id].platformDigests[platform]]));
   const manifest = {
     schema: 1,
     tag: normalizedRelease.tag,
@@ -138,7 +142,7 @@ export function buildManifest(release, imageDetails, options = {}) {
     managedUpdateEligible: true,
     services,
     platforms: manifestPlatforms(),
-    platformDigests: Object.fromEntries(platformEntries),
+    platformDigests: Object.fromEntries(platformDigestEntries),
     minimumUpdaterVersion,
     ...(options.compatibility ? { compatibility: options.compatibility } : {}),
   };
@@ -166,8 +170,8 @@ export function validateManifest(bytes, release, digests, imageDetails) {
       manifest.sequence === deriveSequence(release.version), 'Manifest release identity mismatch');
   }
   const ids = manifest.services.map(service => service?.id);
-  requireThat(new Set(ids).size === ids.length &&
-    ids.sort().join() === Object.keys(components).sort().join(), 'Invalid managed update service IDs');
+  requireThat(ids.length === Object.keys(components).length &&
+    ids.join() === Object.keys(components).join(), 'Invalid managed update service IDs');
   for (const service of manifest.services) {
     requireThat(service && Object.keys(service).sort().join() === ['id', 'image', 'platforms'].sort().join(),
       'Invalid managed update service fields');
@@ -176,26 +180,26 @@ export function validateManifest(bytes, release, digests, imageDetails) {
       `Manifest image mismatch: ${service.id}`);
     const policy = components[service.id];
     requireThat(Array.isArray(service.platforms) &&
-      service.platforms.length === policy.platforms.length &&
-      [...service.platforms].sort().join() === policy.platforms.map(manifestPlatform).sort().join(),
+      service.platforms.join() === policy.platforms.map(manifestPlatform).join(),
     `Invalid manifest platforms: ${service.id}`);
   }
   const expectedPlatforms = manifestPlatforms();
   requireThat(Array.isArray(manifest.platforms) &&
     manifest.platforms.join() === expectedPlatforms.join(), 'Invalid manifest platform list');
-  const expectedPlatformDigestKeys = expectedPlatforms;
+  const expectedDigestKeys = serviceDigestKeys();
   requireThat(manifest.platformDigests &&
-    Object.keys(manifest.platformDigests).join() === expectedPlatformDigestKeys.join(),
+    Object.keys(manifest.platformDigests).join() === expectedDigestKeys.join(),
     'Invalid manifest child digest map');
-  for (const platform of expectedPlatforms) {
-    validatePlatform(platform, platform);
-    validateDigest(manifest.platformDigests[platform], platform);
-    if (imageDetails) {
-      const source = Object.entries(imageDetails).find(([, details]) =>
-        details.platforms.map(manifestPlatform).includes(platform));
-      const sourceDigest = source?.[1].platformDigests[platform.replaceAll('-', '/')];
-      requireThat(manifest.platformDigests[platform] === sourceDigest,
-        `Manifest child digest mismatch: ${platform}`);
+  for (const [id, policy] of Object.entries(components)) {
+    for (const platform of policy.platforms) {
+      const key = `${id}/${manifestPlatform(platform)}`;
+      validatePlatform(manifestPlatform(platform), key);
+      validateDigest(manifest.platformDigests[key], key);
+      if (imageDetails) {
+        const sourceDigest = imageDetails[id]?.platformDigests?.[platform];
+        requireThat(manifest.platformDigests[key] === sourceDigest,
+          `Manifest child digest mismatch: ${key}`);
+      }
     }
   }
   requireThat(typeof manifest.minimumUpdaterVersion === 'string' &&

@@ -25,11 +25,11 @@
     },
     "tag": {
       "type": "string",
-      "pattern": "^v[1-9][0-9]*\\.[0-9]+\\.[0-9]+(?:-insider\\.[1-9][0-9]*)?$"
+      "pattern": "^v[0-9]+\\.[0-9]+\\.[0-9]+(?:-insider\\.[1-9][0-9]*)?$"
     },
     "version": {
       "type": "string",
-      "pattern": "^[1-9][0-9]*\\.[0-9]+\\.[0-9]+(?:-insider\\.[1-9][0-9]*)?$"
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+(?:-insider\\.[1-9][0-9]*)?$"
     },
     "channel": {
       "enum": [
@@ -95,14 +95,50 @@
       "type": "object",
       "additionalProperties": false,
       "required": [
-        "linux-amd64",
-        "linux-arm64"
+        "api/linux-amd64",
+        "api/linux-arm64",
+        "frontend/linux-amd64",
+        "frontend/linux-arm64",
+        "slicer-host/linux-amd64",
+        "slicer-host/linux-arm64",
+        "printer-discovery/linux-amd64",
+        "printer-discovery/linux-arm64",
+        "orcaslicer-worker/linux-amd64",
+        "monolith/linux-amd64",
+        "monolith/linux-arm64"
       ],
       "properties": {
-        "linux-amd64": {
+        "api/linux-amd64": {
           "$ref": "#/$defs/digest"
         },
-        "linux-arm64": {
+        "api/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "frontend/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "frontend/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "slicer-host/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "slicer-host/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "printer-discovery/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "printer-discovery/linux-arm64": {
+          "$ref": "#/$defs/digest"
+        },
+        "orcaslicer-worker/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "monolith/linux-amd64": {
+          "$ref": "#/$defs/digest"
+        },
+        "monolith/linux-arm64": {
           "$ref": "#/$defs/digest"
         }
       }

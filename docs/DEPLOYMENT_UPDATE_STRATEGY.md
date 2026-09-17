@@ -36,10 +36,10 @@ The first signed managed-update release is a new boundary: it publishes
 OCI images, platform child digests, compliance checks, and release inventory
 checks pass. The manifest uses schema `1`, deterministic canonical JSON, and a
 collision-free, stable-dominant `sequence`. `deriveSequence` (in
-`scripts/ci/release-manifest.mjs`) uses Lambert's legacy weighted formula
-(`major*1_000_000_000 + minor*1_000_000 + patch*1_000 + suffix`) with bounded
-components: major (`1..99`), minor (`0..999`), patch (`0..999`), insider
-suffix (`1..998`), and the reserved stable suffix `999`. These bounds prevent
+`scripts/ci/release-manifest.mjs`) uses the verified weighted formula
+`((((major * 1000) + minor) * 100000) + patch) * 100000 + suffix` with bounded
+components: major (`1..99`), minor (`0..999`), patch (`0..99999`), insider
+suffix (`1..99998`), and the reserved stable suffix `99999`. These bounds prevent
 decimal carry collisions while the reserved suffix makes stable releases sort
 above every insider prerelease of the same base version. Arithmetic is BigInt;
 the producer rejects values outside JavaScript's safe integer range or C#
@@ -54,7 +54,8 @@ the exact bytes verify with the GitHub OIDC issuer
 `https://token.actions.githubusercontent.com` and the canonical workflow
 identity for the selected channel:
 
-- stable and insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
+- stable: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main`
+- insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
 
 Keyless Cosign trust is bootstrapped from Sigstore's OIDC certificate and
 transparency log; rotation is performed by changing the pinned official

@@ -52,9 +52,9 @@ export function validateVersion(version, channel, versionFile) {
   requireThat(BigInt(parsed.major) > 0n, 'Signed release major version must be greater than zero');
   requireThat(BigInt(parsed.major) <= 99n, 'Major version exceeds sequence encoding limit of 99');
   requireThat(BigInt(parsed.minor) <= 999n, 'Minor version exceeds sequence encoding limit of 999');
-  requireThat(BigInt(parsed.patch) <= 999n, 'Patch version exceeds sequence encoding limit of 999');
-  requireThat(!parsed.sequence || BigInt(parsed.sequence) <= 998n,
-    'Prerelease sequence exceeds encoding limit of 998');
+  requireThat(BigInt(parsed.patch) <= 99999n, 'Patch version exceeds sequence encoding limit of 99999');
+  requireThat(!parsed.sequence || BigInt(parsed.sequence) <= 99998n,
+    'Prerelease sequence exceeds encoding limit of 99998');
   requireThat(parsed.baseVersion.split('.').every(part => BigInt(part) <= 65534n),
     'Version exceeds .NET assembly version limits');
   return parsed;

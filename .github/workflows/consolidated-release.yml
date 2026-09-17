@@ -127,10 +127,11 @@ jobs:
         env:
           MANIFEST: release-assets/update-manifest.json
           BUNDLE: release-assets/update-manifest.sigstore.json
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/development
+          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
         run: |
           set -euo pipefail
-          expected_ref="refs/heads/development"
+          expected_ref="refs/heads/${EXPECTED_IDENTITY_REF}"
           test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@${expected_ref}"
           cosign sign-blob --yes --bundle "$BUNDLE" "$MANIFEST"
           cosign verify-blob --bundle "$BUNDLE" \
@@ -138,7 +139,7 @@ jobs:
             --certificate-identity "$EXPECTED_IDENTITY" "$MANIFEST"
       - name: Re-verify exact manifest before publication
         env:
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/development
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
         run: |
           set -euo pipefail
           cosign verify-blob --bundle release-assets/update-manifest.sigstore.json \

@@ -77,10 +77,11 @@ The cross-language wire contract uses exactly these service IDs: `api`,
 `frontend`, `slicer-host`, `printer-discovery`, `orcaslicer-worker`, and
 `monolith`. Top-level `platforms` is the bare union
 `["linux-amd64","linux-arm64"]`; each service declares a subset of that union,
-and `orcaslicer-worker` declares only `linux-amd64`. `platformDigests` is a flat string map keyed by the bare platform union:
-`linux-amd64` and `linux-arm64`. Service `platforms` arrays remain subsets of
-that union; `orcaslicer-worker` is amd64-only. A service-namespaced digest map
-is not accepted by the C# consumer.
+and `orcaslicer-worker` declares only `linux-amd64`. `platformDigests` is keyed
+by slash-separated `<serviceId>/<platform>` pairs, crossing every declared
+service with its declared platforms: 11 keys total (five dual-platform
+services times two platforms, plus `orcaslicer-worker/linux-amd64`). The bare
+top-level `platforms` union above is unrelated to those keys.
 The canonical byte fixture is
 `scripts/ci/fixtures/update-manifest.golden.json`, with its Draft 2020-12 schema
 at `scripts/ci/fixtures/update-manifest.schema.json`. Node tests regenerate the
@@ -141,12 +142,15 @@ short-lived token **after** the long build. Only the publication job requests
 `id-token: write`, and the official Cosign installer is pinned to `v3.9.2`
 while the binary is pinned to `v3.0.6`.
 Cosign verification requires issuer
-`https://token.actions.githubusercontent.com` and the exact development workflow
-identity
-`https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
-for both channels. The workflow also checks `GITHUB_WORKFLOW_REF` against that
-actual dispatch ref, so no
-other workflow, repository, branch, or fork identity is accepted.
+`https://token.actions.githubusercontent.com` and the exact workflow identity for
+the release's own channel:
+
+- stable: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main`
+- insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
+
+The workflow also checks `GITHUB_WORKFLOW_REF` against that same channel-selected
+ref, so no other workflow, repository, branch, fork, or cross-channel identity is
+accepted.
 Existing `RELEASE_PUBLISHER_APP_ID`,
 `RELEASE_PUBLISHER_PRIVATE_KEY`, `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN`
 and `RELEASE_APPROVAL_MODE` configuration is reused. No ledger anchor is needed.

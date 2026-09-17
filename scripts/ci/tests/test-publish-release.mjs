@@ -50,10 +50,12 @@ const manifestSchemaPath = 'scripts/ci/fixtures/update-manifest.schema.json';
 const manifestFixtureBytes = readFileSync(manifestFixturePath);
 const manifestFixture = JSON.parse(manifestFixtureBytes);
 const manifestIssuer = 'https://token.actions.githubusercontent.com';
-const manifestIdentity =
-  'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development';
+function manifestIdentityFor(channel) {
+  return `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/${channel === 'stable' ? 'main' : 'development'}`;
+}
+const manifestIdentity = manifestIdentityFor(release.channel);
 const manifestIdentityTemplate =
-  'https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/development';
+  'https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == \'stable\' && \'main\' || \'development\' }}';
 
 function ownerApi(overrides = {}) {
   const values = {
@@ -236,7 +238,12 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
   }
   assert.deepEqual(manifest.services.find(service => service.id === 'orcaslicer-worker').platforms, ['linux-amd64']);
   assert.deepEqual(Object.keys(manifest.platformDigests), [
-    'linux-amd64', 'linux-arm64',
+    'api/linux-amd64', 'api/linux-arm64',
+    'frontend/linux-amd64', 'frontend/linux-arm64',
+    'slicer-host/linux-amd64', 'slicer-host/linux-arm64',
+    'printer-discovery/linux-amd64', 'printer-discovery/linux-arm64',
+    'orcaslicer-worker/linux-amd64',
+    'monolith/linux-amd64', 'monolith/linux-arm64',
   ]);
   validateManifestInput({ ...release, sequence: deriveSequence(release.version) }, imageDetails);
   validateManifest(first, { ...release, sequence: deriveSequence(release.version) }, digests);
@@ -252,7 +259,7 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@', 'docker.io/example/api@'),
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@sha256:', 'ghcr.io/olyforge3d/printfarmer-api:'),
     value => value.replace('"id":"frontend"', '"id":"api"'),
-    value => value.replace(`"linux-amd64":"sha256:${'d'.repeat(64)}"`, '"linux-amd64":"bad"'),
+    value => value.replace(`"orcaslicer-worker/linux-amd64":"sha256:${'d'.repeat(64)}"`, '"orcaslicer-worker/linux-amd64":"bad"'),
     value => value.replace('"platforms":["linux-amd64","linux-arm64"],"platformDigests"',
       '"platforms":["api-linux-amd64"],"platformDigests"'),
     value => value.replace('"platforms":["linux-amd64"]', '"platforms":["linux-amd64","linux-arm64"]'),
@@ -287,7 +294,7 @@ test('shared update manifest fixture is the exact generated cross-language contr
       platforms: [...policy.platforms],
       platformDigests: Object.fromEntries(policy.platforms.map(platform => [
         platform,
-        manifestFixture.platformDigests[platform.replaceAll('/', '-')],
+        manifestFixture.platformDigests[`${service.id}/${platform.replaceAll('/', '-')}`],
       ])),
     }];
   }));
@@ -302,7 +309,7 @@ test('shared update manifest fixture is the exact generated cross-language contr
   assert.deepEqual(Object.keys(manifestFixture.platformDigests), schema.properties.platformDigests.required);
   assert.ok(schema.required.includes('minimumUpdaterVersion'));
   assert.equal(manifestFixture.minimumUpdaterVersion, MINIMUM_UPDATER_VERSION);
-  assert.equal(manifestFixture.sequence, 1002003042);
+  assert.equal(manifestFixture.sequence, 10020000300042);
   assert.equal(schema.properties.sequence.maximum, Number.MAX_SAFE_INTEGER);
   assert.ok(Number.isSafeInteger(manifestFixture.sequence));
   assert.ok(BigInt(manifestFixture.sequence) <= 9223372036854775807n);
@@ -434,7 +441,7 @@ function publishFixture(t, channel = 'insider') {
   writeFileSync(join(assets, 'update-manifest.sigstore.json'), JSON.stringify({
     sha256: createHash('sha256').update(signedManifestBytes).digest('hex'),
     issuer: manifestIssuer,
-    identity: manifestIdentity,
+    identity: manifestIdentityFor(chosen.channel),
   }));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   const calls = [];
@@ -648,7 +655,7 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.match(active, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
   assert.match(active, /--certificate-identity "\$EXPECTED_IDENTITY"/);
   assert.match(active, /update-manifest\.sigstore\.json/);
-  assert.match(active, /EXPECTED_IDENTITY: https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/consolidated-release\.yml@refs\/heads\/development/);
+  assert.match(active, /EXPECTED_IDENTITY: https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/consolidated-release\.yml@refs\/heads\/\$\{\{ inputs\.channel == 'stable' && 'main' \|\| 'development' \}\}/);
   assert.doesNotMatch(active, /--certificate-oidc-issuer\s+\S+\s+\S+\*/);
   assert.doesNotMatch(active, /RELEASE_LEDGER|release-authorization|release-transaction|reservation_target/);
 });

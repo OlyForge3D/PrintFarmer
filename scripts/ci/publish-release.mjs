@@ -145,11 +145,18 @@ export function releaseAssets(release) {
 // so nothing between those earlier steps and the actual upload (a rebuilt
 // asset, a manual edit, disk corruption) can present an unsigned or
 // mismatched manifest as this release's signed managed-update contract.
-function manifestSignatureIdentity() {
-  return `https://github.com/${repository}/${workflow}@refs/heads/development`;
+// The signing identity is channel-aware: stable releases are signed by the
+// workflow running from `main`, insider releases by the workflow running
+// from `development`. This must match the ref the workflow actually runs
+// from for that channel (see consolidated-release.yml), not a single
+// hardcoded ref, so the cosign identity check reflects real job identity.
+function manifestSignatureIdentity(channel) {
+  requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel for signature identity');
+  const ref = channel === 'stable' ? 'main' : 'development';
+  return `https://github.com/${repository}/${workflow}@refs/heads/${ref}`;
 }
 
-function verifyManifestSignatureBeforeUpload(assets, run) {
+function verifyManifestSignatureBeforeUpload(assets, run, channel) {
   const manifestPath = join(assets, 'update-manifest.json');
   const bundlePath = join(assets, 'update-manifest.sigstore.json');
   requireThat(readFileSync(manifestPath).length > 0, 'Missing update manifest immediately before upload');
@@ -157,7 +164,7 @@ function verifyManifestSignatureBeforeUpload(assets, run) {
     'Missing update manifest signature bundle immediately before upload');
   run('cosign', ['verify-blob', '--bundle', bundlePath,
     '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--certificate-identity', manifestSignatureIdentity(), manifestPath]);
+    '--certificate-identity', manifestSignatureIdentity(channel), manifestPath]);
 }
 
 export async function publishRelease(release, assets, api, {
@@ -186,7 +193,7 @@ export async function publishRelease(release, assets, api, {
     body: notes, draft: true, prerelease: release.channel === 'insider', make_latest: 'false',
   } });
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
-  verifyManifestSignatureBeforeUpload(assets, run);
+  verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);
   requireThat(Array.isArray(uploaded) && uploaded.length === files.length &&
