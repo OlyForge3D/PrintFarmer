@@ -68,7 +68,19 @@ public class HostUpdateExecutionAvailabilityTests
     {
         RootDirectory = root,
         ComposeFiles = [composeFile],
+        RequiredFencedWriterNames = [],
     };
+
+    private sealed class FakeFenceableWriter(string name) : IFenceableWriter
+    {
+        public string Name { get; } = name;
+
+        public Task QuiesceAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => Task.FromResult(true);
+
+        public Task ResumeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
 
     [Fact]
     public async Task CheckAsync_EveryDependencyHealthy_ReportsAvailable()
@@ -83,6 +95,7 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
+                [],
                 new FakeProcessRunner(dockerAvailable: true));
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
@@ -100,10 +113,11 @@ public class HostUpdateExecutionAvailabilityTests
     public async Task CheckAsync_RootDirectoryNotConfigured_ReportsUnavailableWithReason()
     {
         var provider = new HostUpdateExecutionAvailabilityProvider(
-            new HostUpdateExecutionOptions { RootDirectory = string.Empty, ComposeFiles = ["missing.yml"] },
+            new HostUpdateExecutionOptions { RootDirectory = string.Empty, ComposeFiles = ["missing.yml"], RequiredFencedWriterNames = [] },
             new FakeJournal(),
             [new FakeMigrationTarget()],
             [new FakeBackupTarget()],
+            [],
             new FakeProcessRunner(dockerAvailable: true));
 
         HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
@@ -125,6 +139,7 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal { ThrowOnRead = true },
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
+                [],
                 new FakeProcessRunner(dockerAvailable: true));
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
@@ -149,6 +164,7 @@ public class HostUpdateExecutionAvailabilityTests
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 ValidOptions(root, composeFile),
                 new FakeJournal(),
+                [],
                 [],
                 [],
                 new FakeProcessRunner(dockerAvailable: true));
@@ -176,6 +192,7 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
+                [],
                 new FakeProcessRunner(dockerAvailable: true));
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
@@ -202,12 +219,73 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
+                [],
                 new FakeProcessRunner(dockerAvailable: false));
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().Contain("docker_runtime_unavailable");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_AllRequiredWritersFenced_DoesNotReportInsufficientCoverage()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            options.RequiredFencedWriterNames = ["api-admission", "queue-outbox-publisher"];
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
+                new FakeProcessRunner(dockerAvailable: true));
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.Reasons.Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_RequiredWriterNotFenced_ReportsInsufficientCoverageWithMissingName()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            options.RequiredFencedWriterNames = ["api-admission", "queue-outbox-publisher", "history-seeding"];
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
+                new FakeProcessRunner(dockerAvailable: true));
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("insufficient_fenced_writers:history-seeding");
         }
         finally
         {

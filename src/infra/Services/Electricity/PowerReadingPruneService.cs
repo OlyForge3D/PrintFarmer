@@ -12,7 +12,8 @@ namespace Farm.Infrastructure.Services.Electricity;
 /// </summary>
 public class PowerReadingPruneService(
     IServiceScopeFactory scopeFactory,
-    ILogger<PowerReadingPruneService> logger) : BackgroundService
+    ILogger<PowerReadingPruneService> logger,
+    Farm.Infrastructure.Services.HostUpdates.PowerReadingPruneFenceFlag? hostUpdateFence = null) : BackgroundService
 {
     private const int RetentionDays = 90;
     private readonly TimeSpan _interval = TimeSpan.FromHours(24);
@@ -23,20 +24,30 @@ public class PowerReadingPruneService(
         {
             try
             {
-                await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-                AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-
-                DateTime cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
-                int deleted = await db.PowerReadings
-                    .Where(r => r.RecordedAt < cutoff)
-                    .ExecuteDeleteAsync(stoppingToken);
-
-                if (deleted > 0)
+                // Host-update fence (issue #2663): skip this pass's delete entirely while a
+                // coordinated backup/migration is in progress, and acknowledge quiescence to
+                // the fence coordinator rather than racing it with an in-flight ExecuteDeleteAsync.
+                if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
                 {
-                    logger.LogInformation(
-                        "PowerReadingPruneService: deleted {Count} readings older than {Days} days",
-                        deleted,
-                        RetentionDays);
+                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+                }
+                else
+                {
+                    await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+                    AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+                    DateTime cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
+                    int deleted = await db.PowerReadings
+                        .Where(r => r.RecordedAt < cutoff)
+                        .ExecuteDeleteAsync(stoppingToken);
+
+                    if (deleted > 0)
+                    {
+                        logger.LogInformation(
+                            "PowerReadingPruneService: deleted {Count} readings older than {Days} days",
+                            deleted,
+                            RetentionDays);
+                    }
                 }
             }
             catch (Exception ex)

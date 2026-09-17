@@ -177,3 +177,45 @@ public sealed class InMemoryHostUpdateWriterActivityFlag : IHostUpdateWriterActi
         return Task.CompletedTask;
     }
 }
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for
+/// <see cref="Electricity.PowerReadingPruneService"/>. A distinct concrete type (rather than
+/// another registration of the bare interface) lets dependency injection route this specific
+/// writer's optional constructor parameter to its own independent pause/acknowledge state,
+/// separate from every other fenced background writer.
+/// </summary>
+public sealed class PowerReadingPruneFenceFlag : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new();
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for
+/// <see cref="Queue.QueueRetentionPruneService"/>. See <see cref="PowerReadingPruneFenceFlag"/>
+/// for why a distinct concrete type is required instead of another bare-interface registration.
+/// </summary>
+public sealed class QueueRetentionPruneFenceFlag : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new();
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}

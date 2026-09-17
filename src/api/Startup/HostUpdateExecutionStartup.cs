@@ -62,11 +62,21 @@ public static class HostUpdateExecutionStartup
         // Fence: every registered writer must prove quiescence before backup. The outbox
         // publisher's fence flag is the same singleton QueueOutboxPublisherService consults
         // directly (see its optional IHostUpdateWriterActivityFlag constructor parameter).
+        // PowerReadingPruneService and QueueRetentionPruneService each get their own,
+        // independently-typed flag (PowerReadingPruneFenceFlag / QueueRetentionPruneFenceFlag)
+        // -- IHostUpdateWriterActivityFlag's pause/acknowledge state is a single shared boolean
+        // pair per instance, so distinct writers that must be independently proven quiesced
+        // cannot share one registration of the bare interface (the container would hand every
+        // optional-parameter consumer the same last-registered instance).
         services.AddSingleton<IHostUpdateWriterActivityFlag, InMemoryHostUpdateWriterActivityFlag>();
+        services.AddSingleton<PowerReadingPruneFenceFlag>();
+        services.AddSingleton<QueueRetentionPruneFenceFlag>();
         services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp =>
         [
             new AdmissionFenceableWriter(sp.GetRequiredService<IHostUpdateAdmissionGate>()),
             new BackgroundWriterFenceableWriter("queue-outbox-publisher", sp.GetRequiredService<IHostUpdateWriterActivityFlag>()),
+            new BackgroundWriterFenceableWriter("power-reading-prune", sp.GetRequiredService<PowerReadingPruneFenceFlag>()),
+            new BackgroundWriterFenceableWriter("queue-retention-prune", sp.GetRequiredService<QueueRetentionPruneFenceFlag>()),
         ]);
         services.AddSingleton<IHostUpdateFenceCoordinator>(sp =>
         {

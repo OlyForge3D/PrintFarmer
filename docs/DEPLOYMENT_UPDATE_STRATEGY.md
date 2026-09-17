@@ -141,7 +141,8 @@ integration and scheduling.
 adapters exist for every stage — preflight (`HostUpdatePreflightCheck`), drain
 (`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
 than cancelling), fence (`HostUpdateFenceCoordinator`, proving the admission
-gate and the queue outbox publisher have quiesced), backup
+gate, the queue outbox publisher, `PowerReadingPruneService`, and
+`QueueRetentionPruneService` have quiesced), backup
 (`HostUpdateBackupCoordinator` plus provider-native
 `HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`,
 failing closed for an externally-owned database), migration
@@ -159,7 +160,11 @@ adapter table, the `HostUpdateExecutionOptions` root-directory contract, and
 the availability-probing contract a scheduler must poll before ever invoking
 the executor. Remaining gaps: split-topology (non-shared) database
 backup/restore, additional `IFenceableWriter` registrations beyond the
-admission gate and queue outbox publisher, and controller-level replay/
+admission gate, queue outbox publisher, `PowerReadingPruneService`, and
+`QueueRetentionPruneService` (known unfenced: `MaintenanceAlertHostedService`,
+`CatalogUpdateDetectionService`, `VerifiedReleaseDiscoveryMonitorService`,
+`OrphanedJobSyncStartupService`, `HistorySeedingBackgroundService`,
+`ActiveExternalJobSyncBackgroundService`), and controller-level replay/
 stale-plan checks against the staging/authorization layer.
 
 Scope: single-host Docker Compose, monolith and split-service deployments,

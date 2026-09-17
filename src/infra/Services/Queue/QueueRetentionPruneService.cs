@@ -35,7 +35,8 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class QueueRetentionPruneService(
     IServiceScopeFactory scopeFactory,
     IOptions<QueueRetentionSettings> options,
-    ILogger<QueueRetentionPruneService> logger) : BackgroundService
+    ILogger<QueueRetentionPruneService> logger,
+    Farm.Infrastructure.Services.HostUpdates.QueueRetentionPruneFenceFlag? hostUpdateFence = null) : BackgroundService
 {
     private readonly QueueRetentionSettings _settings = options.Value;
 
@@ -44,7 +45,18 @@ public sealed class QueueRetentionPruneService(
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            await RunOnceAsync(stoppingToken);
+            // Host-update fence (issue #2663): skip this pass's deletes while a coordinated
+            // backup/migration is in progress, and acknowledge quiescence to the fence
+            // coordinator. RunOnceAsync itself is left untouched (and unfenced) because tests
+            // call it directly to avoid waiting on the timer.
+            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
+            {
+                await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+            }
+            else
+            {
+                await RunOnceAsync(stoppingToken);
+            }
 
             try
             {

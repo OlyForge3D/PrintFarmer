@@ -85,6 +85,22 @@ public sealed class HostUpdateExecutionOptions
     public bool DatabaseExternallyOwned { get; set; }
 
     /// <summary>
+    /// Writer names (matching <see cref="IFenceableWriter.Name"/>) that must all be present in
+    /// the registered fence coordinator before the executor is considered available. Backfills
+    /// coverage over time as more background writers are fenced (issue #2663); an entry here
+    /// with no corresponding registered <see cref="IFenceableWriter"/> makes the executor
+    /// explicitly <see cref="HostUpdateExecutionAvailabilityState.Unavailable"/> rather than
+    /// silently proceeding to fence only whatever happens to be registered.
+    /// </summary>
+    public string[] RequiredFencedWriterNames { get; set; } =
+    [
+        "api-admission",
+        "queue-outbox-publisher",
+        "power-reading-prune",
+        "queue-retention-prune",
+    ];
+
+    /// <summary>
     /// Application-owned directories to back up (name to absolute path), matching this host's
     /// actual container mount points (<c>/data</c>, <c>/app/models</c>, <c>/app/gcode</c>,
     /// <c>/app/profiles</c>, <c>/app/data-protection-keys</c> for the compose-managed API

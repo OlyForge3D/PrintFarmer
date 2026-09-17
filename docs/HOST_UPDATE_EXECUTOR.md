@@ -44,7 +44,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 |---|---|---|
 | Preflight | `HostUpdatePreflightCheck` | Revalidates installed version/digests, provider allowlist, disk free space, and every configured migration target's provider name before anything else runs. |
 | Drain | `HostUpdateDrainCoordinator` | Closes the admission gate to new submissions/scheduling, then bounded-polls `IActiveWorkObservationPort` (backed by `AppDbContext`) for active prints/pending outbox work to finish naturally — never a blind cancellation. Times out closed. |
-| Fence | `HostUpdateFenceCoordinator` | Proves every registered `IFenceableWriter` (the admission gate itself, and the queue-outbox publisher via `IHostUpdateWriterActivityFlag`) has actually quiesced before backup — bounded-polled, not assumed. |
+| Fence | `HostUpdateFenceCoordinator` | Proves every registered `IFenceableWriter` (the admission gate; the queue-outbox publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService` via their own independent `IHostUpdateWriterActivityFlag`-derived instances) has actually quiesced before backup — bounded-polled, not assumed. The executor's availability provider also fails closed (`insufficient_fenced_writers:<names>`) if `HostUpdateExecutionOptions.RequiredFencedWriterNames` names a writer with no registered `IFenceableWriter`. |
 | Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
 | Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Wraps the existing `ProviderAwareMigrationRunner` under the executor's own single-writer lock; inspects the actual installed provider state and fails closed on an unsupported/mixed configuration rather than duplicating migration logic. |
 | Apply | `HostUpdateImageApplier` | Applies immutable `repository@sha256` images via the existing compose templates and `docker compose up -d`, using an explicit process argument list — never shell interpolation, never a mutable tag. |
@@ -90,9 +90,17 @@ against issue #2663.
 - Split-topology deployments where `AppDbContext` and `SlicerDbContext` point at genuinely
   different physical databases are not yet handled by the single shared database backup/restore
   target; the common (monolith/shared-DB) case is.
-- Only two writers are concretely fenced today (the admission gate and the queue outbox
-  publisher); other background schedulers/bridges/API replicas/workers still need
-  `IFenceableWriter` implementations registered as they are identified.
+- Only four writers are concretely fenced today (the admission gate, the queue outbox
+  publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService`); other background
+  schedulers/bridges/API replicas/workers still need `IFenceableWriter` implementations
+  registered as they are identified. Remaining known unfenced hosted services:
+  `MaintenanceAlertHostedService`, `CatalogUpdateDetectionService`,
+  `VerifiedReleaseDiscoveryMonitorService`, `OrphanedJobSyncStartupService`,
+  `HistorySeedingBackgroundService`, `ActiveExternalJobSyncBackgroundService`. The availability
+  provider fails closed (`insufficient_fenced_writers:<names>`) only for names explicitly listed
+  in `HostUpdateExecutionOptions.RequiredFencedWriterNames`; it cannot detect a writer that was
+  never added to that list in the first place, so extending coverage still requires deliberate,
+  audited work per writer rather than a generic scan.
 - The PostgreSQL/SQL Server restore commands interpolate the connection password into a `sh -c`
   script string (required by the foundation's fixed `sh`-based restore invocation); a password
   containing a single quote is a known, accepted shell-quoting risk, not yet hardened.

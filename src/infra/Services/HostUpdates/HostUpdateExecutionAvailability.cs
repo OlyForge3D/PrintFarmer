@@ -1,3 +1,4 @@
+using System.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -47,6 +48,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     IHostUpdateExecutionJournal journal,
     IReadOnlyList<IHostUpdateMigrationTarget> migrationTargets,
     IReadOnlyList<IHostUpdateBackupTarget> backupTargets,
+    IReadOnlyList<IFenceableWriter> fenceableWriters,
     IHostUpdateProcessRunner processRunner) : IHostUpdateExecutionAvailabilityProvider
 {
     private const string ProbeReleaseId = "__availability_probe__";
@@ -88,6 +90,15 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         if (backupTargets.Count == 0)
         {
             reasons.Add("no_backup_targets_configured");
+        }
+
+        var fencedNames = new HashSet<string>(fenceableWriters.Select(w => w.Name), StringComparer.Ordinal);
+        string[] missingWriters = options.RequiredFencedWriterNames
+            .Where(name => !fencedNames.Contains(name))
+            .ToArray();
+        if (missingWriters.Length > 0)
+        {
+            reasons.Add($"insufficient_fenced_writers:{string.Join(',', missingWriters)}");
         }
 
         foreach (string composeFile in options.ComposeFiles)
