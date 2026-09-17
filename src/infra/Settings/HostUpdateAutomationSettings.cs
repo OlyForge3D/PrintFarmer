@@ -1,4 +1,4 @@
-using System.ComponentModel.DataAnnotations;
+﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
 using Farm.Settings;
 
@@ -37,6 +37,11 @@ public sealed class HostUpdateAutomationSettings : IAppSetting, IValidatableSett
     [JsonPropertyName("maintenanceWindowEndHour")]
     public int MaintenanceWindowEndHour { get; set; } = 24;
 
+    /// <summary>Optional cadence override that only applies once the insider channel is selected
+    /// and explicitly acknowledged; the stable <see cref="PollIntervalSeconds"/> governs otherwise.</summary>
+    [JsonPropertyName("insiderPollIntervalSeconds")]
+    public int? InsiderPollIntervalSeconds { get; set; }
+
     /// <inheritdoc />
     public void Validate()
     {
@@ -58,6 +63,11 @@ public sealed class HostUpdateAutomationSettings : IAppSetting, IValidatableSett
         if (MaintenanceWindowEndHour is < 1 or > 24)
         {
             throw new ValidationException("MaintenanceWindowEndHour must be between 1 and 24.");
+        }
+
+        if (InsiderPollIntervalSeconds is int insiderSeconds && insiderSeconds is < 60 or > 86400)
+        {
+            throw new ValidationException("InsiderPollIntervalSeconds must be between 60 and 86400.");
         }
     }
 }

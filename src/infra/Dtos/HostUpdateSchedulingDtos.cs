@@ -13,13 +13,19 @@ public enum HostUpdateExecutorState
     RecoveryRequired
 }
 
-/// <summary>Backoff state reported by the scheduler.</summary>
+/// <summary>
+/// Backoff state reported by the scheduler. <c>None</c> maps to <c>Admitted</c>/<c>Reused</c>
+/// scheduler outcomes, <c>Waiting</c> to <c>TooEarly</c> (next poll not yet due), <c>Due</c> to a
+/// poll interval that has elapsed but has not yet been evaluated by a tick, and <c>Unknown</c> to
+/// the status-provider being unwired.
+/// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum HostUpdateBackoffState
 {
     Unknown,
     None,
-    Waiting
+    Waiting,
+    Due
 }
 
 /// <summary>Explicit automatic update status. Null means the scheduler is not wired.</summary>

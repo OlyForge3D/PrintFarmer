@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
@@ -42,6 +42,47 @@ public sealed class HostUpdateSchedulingStatusDtoTests
         });
 
         json.Should().Contain("\"updateScheduling\"").And.Contain("\"state\":\"Unknown\"").And.Contain("\"effectiveChannel\":null");
+    }
+
+    [Theory]
+    [InlineData(HostUpdateBackoffState.None)]
+    [InlineData(HostUpdateBackoffState.Waiting)]
+    [InlineData(HostUpdateBackoffState.Due)]
+    [InlineData(HostUpdateBackoffState.Unknown)]
+    public void Serialization_RoundTripsEveryBackoffState(HostUpdateBackoffState state)
+    {
+        var dto = new HostUpdateBackoffDto { State = state, ConsecutiveFailures = 2, Until = DateTimeOffset.UnixEpoch, Reasons = ["kill_switch"] };
+
+        string json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter() }
+        });
+        HostUpdateBackoffDto? roundTripped = JsonSerializer.Deserialize<HostUpdateBackoffDto>(json, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter() }
+        });
+
+        json.Should().Contain($"\"state\":\"{state}\"");
+        roundTripped.Should().NotBeNull();
+        roundTripped!.State.Should().Be(state);
+        roundTripped.Reasons.Should().Contain("kill_switch");
+    }
+
+    [Theory]
+    [InlineData(HostUpdateExecutorState.Unavailable)]
+    [InlineData(HostUpdateExecutorState.Available)]
+    [InlineData(HostUpdateExecutorState.Busy)]
+    [InlineData(HostUpdateExecutorState.RecoveryRequired)]
+    public void Serialization_RoundTripsEveryExecutorState(HostUpdateExecutorState state)
+    {
+        var dto = new HostUpdateExecutorDto { State = state, Reason = "some_reason" };
+
+        string json = JsonSerializer.Serialize(dto, new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            Converters = { new JsonStringEnumConverter() }
+        });
+
+        json.Should().Contain($"\"state\":\"{state}\"").And.Contain("\"reason\":\"some_reason\"");
     }
 
     [Fact]
