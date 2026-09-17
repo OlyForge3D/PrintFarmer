@@ -49,7 +49,8 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     IReadOnlyList<IHostUpdateMigrationTarget> migrationTargets,
     IReadOnlyList<IHostUpdateBackupTarget> backupTargets,
     IReadOnlyList<IFenceableWriter> fenceableWriters,
-    IHostUpdateProcessRunner processRunner) : IHostUpdateExecutionAvailabilityProvider
+    IHostUpdateProcessRunner processRunner,
+    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore) : IHostUpdateExecutionAvailabilityProvider
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
@@ -81,6 +82,8 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         {
             reasons.Add($"journal_unreadable:{exception.Message}");
         }
+
+        await ReconcileNonterminalReleasesAsync(reasons, cancellationToken).ConfigureAwait(false);
 
         if (migrationTargets.Count == 0)
         {
@@ -129,6 +132,68 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         return reasons.Count == 0
             ? HostUpdateExecutionAvailability.Available(now)
             : HostUpdateExecutionAvailability.Unavailable(now, reasons);
+    }
+
+    /// <summary>
+    /// Restart reconciliation (Bishop/Hicks #2663 finding): <see cref="InMemoryHostUpdateAdmissionGate"/>
+    /// and every in-process <see cref="IFenceableWriter"/> default back open on every process
+    /// start, regardless of what the durable journal says. Without this, a process that crashed
+    /// mid-update (or that crashed after reaching <see cref="HostUpdateExecutionState.RecoveryRequired"/>
+    /// and before an operator resolved it) would silently admit new writes the moment the host
+    /// restarted. This scans every release the journal has ever seen and, for any release whose
+    /// last recorded state is neither <see cref="HostUpdateExecutionState.Completed"/> nor a
+    /// durably confirmed <see cref="HostUpdateRecoveryOutcome.RolledBack"/> resolution, re-closes
+    /// every registered writer immediately -- before this check ever reports Available -- and
+    /// records why. It never resumes or retries the update itself; only an explicit operator
+    /// call to the admin API's execute/recover endpoints can move a release forward again.
+    /// </summary>
+    private async Task ReconcileNonterminalReleasesAsync(List<string> reasons, CancellationToken cancellationToken)
+    {
+        IReadOnlyList<string> releaseIds;
+        try
+        {
+            releaseIds = journal.ListReleaseIds();
+        }
+        catch (InvalidDataException exception)
+        {
+            reasons.Add($"journal_corrupt:{exception.Message}");
+            return;
+        }
+
+        foreach (string releaseId in releaseIds)
+        {
+            IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
+            HostUpdateExecutionState? last = activities.Count == 0 ? null : activities[^1].State;
+            if (last is null or HostUpdateExecutionState.Completed)
+            {
+                continue;
+            }
+
+            if (last == HostUpdateExecutionState.RecoveryRequired)
+            {
+                HostUpdateRecoveryOutcomeRecord? outcome = await recoveryOutcomeStore.ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
+                if (outcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
+                {
+                    // Already durably resolved by a prior, confirmed recovery attempt -- nothing
+                    // to re-fence for this specific release.
+                    continue;
+                }
+            }
+
+            foreach (IFenceableWriter writer in fenceableWriters)
+            {
+                try
+                {
+                    await writer.QuiesceAsync(cancellationToken).ConfigureAwait(false);
+                }
+                catch (Exception exception) when (exception is not OperationCanceledException)
+                {
+                    reasons.Add($"restart_reconciliation_fence_failed:{writer.Name}:{exception.GetType().Name}");
+                }
+            }
+
+            reasons.Add($"restart_reconciliation_pending:{releaseId}:{last}");
+        }
     }
 
     private static bool TryEnsureWritable(string rootDirectory, out string? error)

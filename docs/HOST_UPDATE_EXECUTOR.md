@@ -106,15 +106,29 @@ against issue #2663.
   fixture that happened to match the bug). See `HostUpdateExecutorTests`,
   `HostUpdateExecutionStartupDiGraphTests`, `HostUpdateExecutionOptionsValidatorTests`, and
   `AggregateHostUpdateHealthCheckTests` for the regression coverage.
-- **Still open, not yet implemented**: a startup reconciliation hosted service that reads durable
-  nonterminal/recovery journal state on process restart and re-establishes the persistent fence
-  before any writer resumes (releasing the fence only after a verified successful recovery, and
-  persisting `NeedsOperator` when release itself fails or recovery is uncertain) does not exist
-  yet. Today, a process restart mid-execution leaves the journal's last recorded state on disk,
-  but nothing on startup reads it and re-drives recovery/fencing automatically; an operator must
-  currently notice and drive `IHostUpdateRestoreExecutor`/recovery manually. This is the next
-  planned increment; the executor remains explicitly `Unavailable`-reportable, never
-  silently-successful, until it lands.
+- **Fixed (this pass) — restart reconciliation for the perimeter admission gate**: prior to this
+  change, a process restart mid-execution (or a crash after reaching `RecoveryRequired`, before an
+  operator drove recovery) left the journal's last recorded state on disk, but nothing on startup
+  reconciled it: `InMemoryHostUpdateAdmissionGate` and every in-process `IFenceableWriter` default
+  back to *open*/*not quiesced* on every process start, so new job-queue submissions were silently
+  admitted again the moment the host came back up, even though the prior update never reached
+  `Completed` or a confirmed recovery. `HostUpdateExecutionAvailabilityProvider.CheckAsync` (which
+  `HostUpdateExecutionAvailabilityHostedService` already ran immediately at startup and then
+  periodically) now also enumerates every release the journal has ever recorded
+  (`IHostUpdateExecutionJournal.ListReleaseIds()`, new); for any release whose last recorded state
+  is neither `Completed` nor a durably confirmed `HostUpdateRecoveryOutcome.RolledBack` (read from
+  `IHostUpdateRecoveryOutcomeStore`), it immediately re-`QuiesceAsync`s every registered
+  `IFenceableWriter` (closing the admission gate again, requesting every background-writer fence
+  flag pause again) and reports `restart_reconciliation_pending:<releaseId>:<state>` as an
+  `Unavailable` reason. A release left `RecoveryRequired` with a recorded `NeedsOperator` outcome
+  stays fenced the same way, since that outcome means recovery itself did not resolve the release.
+  This is intentionally detection-and-re-fence only: it never resumes or retries the update itself
+  (that remains an explicit operator call to the admin API's `execute`/`recover` endpoints, which
+  already resume idempotently from journal state) and never grants #2666's scheduler any standing
+  automatic-execution permission. See `HostUpdateExecutionAvailabilityTests` (`CheckAsync_Release*`
+  cases) for the regression coverage: mid-flight state, `RecoveryRequired` with no recorded
+  outcome, `RecoveryRequired` with a recorded `NeedsOperator` outcome, `RecoveryRequired` with a
+  recorded `RolledBack` outcome (correctly does not re-fence), and a `Completed` release (no-op).
 - Split-topology deployments where `AppDbContext` and `SlicerDbContext` point at genuinely
   different physical databases are not yet handled by the single shared database backup/restore
   target. Preflight now fails closed (`split_database_not_supported`) whenever the two contexts'

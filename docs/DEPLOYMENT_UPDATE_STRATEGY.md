@@ -180,6 +180,13 @@ controller-level request fingerprint binding, replay/stale-plan checks, and
 crash-resume idempotency
 for individual side-effecting operations are owned by the scheduler
 integration work (issues #2665/#2666), not this physical-adapter slice.
+On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
+durable journal for any release left mid-flight or in `RecoveryRequired`
+without a confirmed `RolledBack` outcome and immediately re-closes every
+registered `IFenceableWriter` (the admission gate included) before reporting
+availability, closing the gap where the in-memory gate previously reset open
+on every restart regardless of an unresolved prior update; it never resumes
+or retries the update itself.
 
 Scope: single-host Docker Compose, monolith and split-service deployments,
 optional/local/remote workers, external databases, and offline installations.

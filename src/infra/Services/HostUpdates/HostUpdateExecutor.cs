@@ -46,7 +46,7 @@ public interface IHostUpdateExecutionSteps
 {
     Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct);
 }
-public interface IHostUpdateExecutionJournal { IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId); void Append(HostUpdateExecutionActivity activity); }
+public interface IHostUpdateExecutionJournal { IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId); void Append(HostUpdateExecutionActivity activity); IReadOnlyList<string> ListReleaseIds(); }
 public interface IHostUpdateExecutionLease : IDisposable { }
 public interface IHostUpdateExecutionLock { IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken); }
 
@@ -109,6 +109,29 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
         }
         return result;
     }
+
+    /// <summary>
+    /// Enumerates every distinct release id ever recorded in this journal, in first-seen order.
+    /// Used at startup by restart reconciliation (Bishop/Hicks #2663 finding: the in-memory
+    /// admission gate resets open on process restart even when a release was left mid-flight or
+    /// in <see cref="HostUpdateExecutionState.RecoveryRequired"/>) to discover which releases, if
+    /// any, still require the perimeter to stay fenced before any new writer is admitted.
+    /// </summary>
+    public IReadOnlyList<string> ListReleaseIds()
+    {
+        if (!File.Exists(path)) return [];
+        List<string> ids = []; HashSet<string> seen = new(StringComparer.Ordinal); string previous = string.Empty;
+        foreach (string line in File.ReadLines(path))
+        {
+            JournalRecord? record; try { record = JsonSerializer.Deserialize<JournalRecord>(line); } catch (JsonException ex) { throw new InvalidDataException("journal_corrupt", ex); }
+            if (record is null || record.Activity is null || !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) || !CryptographicOperations.FixedTimeEquals(Convert.FromHexString(record.Hash), SHA256.HashData(Encoding.UTF8.GetBytes(record.PreviousHash + record.Payload)))) throw new InvalidDataException("journal_integrity_failure");
+            previous = record.Hash;
+            if (seen.Add(record.Activity.ReleaseId)) ids.Add(record.Activity.ReleaseId);
+        }
+
+        return ids;
+    }
+
     public void Append(HostUpdateExecutionActivity activity)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");

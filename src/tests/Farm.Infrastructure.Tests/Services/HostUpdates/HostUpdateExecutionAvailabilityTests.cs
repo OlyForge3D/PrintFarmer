@@ -17,6 +17,10 @@ public class HostUpdateExecutionAvailabilityTests
     {
         public bool ThrowOnRead { get; set; }
 
+        private readonly Dictionary<string, List<HostUpdateExecutionActivity>> byRelease = new(StringComparer.Ordinal);
+
+        private readonly List<string> releaseOrder = [];
+
         public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId)
         {
             if (ThrowOnRead)
@@ -24,12 +28,22 @@ public class HostUpdateExecutionAvailabilityTests
                 throw new InvalidDataException("journal_corrupt");
             }
 
-            return [];
+            return byRelease.TryGetValue(releaseId, out List<HostUpdateExecutionActivity>? activities) ? activities : [];
         }
 
         public void Append(HostUpdateExecutionActivity activity)
         {
+            if (!byRelease.TryGetValue(activity.ReleaseId, out List<HostUpdateExecutionActivity>? activities))
+            {
+                activities = [];
+                byRelease[activity.ReleaseId] = activities;
+                releaseOrder.Add(activity.ReleaseId);
+            }
+
+            activities.Add(activity);
         }
+
+        public IReadOnlyList<string> ListReleaseIds() => ThrowOnRead ? throw new InvalidDataException("journal_corrupt") : releaseOrder;
     }
 
     private sealed class FakeMigrationTarget : IHostUpdateMigrationTarget
@@ -75,11 +89,33 @@ public class HostUpdateExecutionAvailabilityTests
     {
         public string Name { get; } = name;
 
-        public Task QuiesceAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+        public int QuiesceCallCount { get; private set; }
+
+        public Task QuiesceAsync(CancellationToken cancellationToken)
+        {
+            QuiesceCallCount++;
+            return Task.CompletedTask;
+        }
 
         public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => Task.FromResult(true);
 
         public Task ResumeAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    private sealed class FakeRecoveryOutcomeStore : IHostUpdateRecoveryOutcomeStore
+    {
+        private readonly Dictionary<string, HostUpdateRecoveryOutcomeRecord> records = new(StringComparer.Ordinal);
+
+        public void Seed(HostUpdateRecoveryOutcomeRecord record) => records[record.ReleaseId] = record;
+
+        public Task<HostUpdateRecoveryOutcomeRecord?> ReadAsync(string releaseId, CancellationToken cancellationToken) =>
+            Task.FromResult(records.TryGetValue(releaseId, out HostUpdateRecoveryOutcomeRecord? record) ? record : null);
+
+        public Task WriteAsync(HostUpdateRecoveryOutcomeRecord record, CancellationToken cancellationToken)
+        {
+            records[record.ReleaseId] = record;
+            return Task.CompletedTask;
+        }
     }
 
     [Fact]
@@ -96,7 +132,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
                 [],
-                new FakeProcessRunner(dockerAvailable: true));
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -118,7 +155,8 @@ public class HostUpdateExecutionAvailabilityTests
             [new FakeMigrationTarget()],
             [new FakeBackupTarget()],
             [],
-            new FakeProcessRunner(dockerAvailable: true));
+            new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
 
         HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -140,7 +178,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
                 [],
-                new FakeProcessRunner(dockerAvailable: true));
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -167,7 +206,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [],
                 [],
                 [],
-                new FakeProcessRunner(dockerAvailable: true));
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -193,7 +233,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
                 [],
-                new FakeProcessRunner(dockerAvailable: true));
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -220,7 +261,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
                 [],
-                new FakeProcessRunner(dockerAvailable: false));
+                new FakeProcessRunner(dockerAvailable: false),
+                new FakeRecoveryOutcomeStore());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -250,7 +292,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
                 [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
-                new FakeProcessRunner(dockerAvailable: true));
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -280,7 +323,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
                 [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
-                new FakeProcessRunner(dockerAvailable: true));
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -338,8 +382,177 @@ public class HostUpdateExecutionAvailabilityTests
         holder.Current.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
     }
 
+    [Fact]
+    public async Task CheckAsync_ReleaseLeftMidFlight_ReFencesAllWritersAndReportsPendingReconciliation()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var journal = new FakeJournal();
+            journal.Append(new HostUpdateExecutionActivity("a1", "release-1", HostUpdateExecutionState.Fenced, "fence:after", DateTimeOffset.UtcNow));
+            var admission = new FakeFenceableWriter("api-admission");
+            var outbox = new FakeFenceableWriter("queue-outbox-publisher");
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                journal,
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [admission, outbox],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("restart_reconciliation_pending:release-1:Fenced");
+            admission.QuiesceCallCount.Should().BeGreaterThanOrEqualTo(1);
+            outbox.QuiesceCallCount.Should().BeGreaterThanOrEqualTo(1);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ReleaseRecoveryRequiredWithNoRecordedOutcome_StaysFenced()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var journal = new FakeJournal();
+            journal.Append(new HostUpdateExecutionActivity("a1", "release-2", HostUpdateExecutionState.RecoveryRequired, "failure:Exception", DateTimeOffset.UtcNow));
+            var admission = new FakeFenceableWriter("api-admission");
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                journal,
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [admission],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("restart_reconciliation_pending:release-2:RecoveryRequired");
+            admission.QuiesceCallCount.Should().BeGreaterThanOrEqualTo(1);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ReleaseRecoveryRequiredWithNeedsOperatorOutcome_StaysFenced()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var journal = new FakeJournal();
+            journal.Append(new HostUpdateExecutionActivity("a1", "release-3", HostUpdateExecutionState.RecoveryRequired, "failure:Exception", DateTimeOffset.UtcNow));
+            var outcomeStore = new FakeRecoveryOutcomeStore();
+            outcomeStore.Seed(new HostUpdateRecoveryOutcomeRecord("release-3", HostUpdateRecoveryOutcome.NeedsOperator, "rollback_incompatible", DateTimeOffset.UtcNow));
+            var admission = new FakeFenceableWriter("api-admission");
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                journal,
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [admission],
+                new FakeProcessRunner(dockerAvailable: true),
+                outcomeStore);
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("restart_reconciliation_pending:release-3:RecoveryRequired");
+            admission.QuiesceCallCount.Should().BeGreaterThanOrEqualTo(1);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ReleaseRecoveryRequiredButDurablyRolledBack_DoesNotReportPending()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var journal = new FakeJournal();
+            journal.Append(new HostUpdateExecutionActivity("a1", "release-4", HostUpdateExecutionState.RecoveryRequired, "failure:Exception", DateTimeOffset.UtcNow));
+            var outcomeStore = new FakeRecoveryOutcomeStore();
+            outcomeStore.Seed(new HostUpdateRecoveryOutcomeRecord("release-4", HostUpdateRecoveryOutcome.RolledBack, "restored_prior_images", DateTimeOffset.UtcNow));
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                journal,
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                outcomeStore);
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.Reasons.Should().NotContain(r => r.StartsWith("restart_reconciliation_pending", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ReleaseAlreadyCompleted_DoesNotReFenceOrReportPending()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var journal = new FakeJournal();
+            journal.Append(new HostUpdateExecutionActivity("a1", "release-5", HostUpdateExecutionState.Completed, "completed", DateTimeOffset.UtcNow));
+            var admission = new FakeFenceableWriter("api-admission");
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                journal,
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [admission],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            admission.QuiesceCallCount.Should().Be(0);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private sealed class DelegateAvailabilityProvider(Func<HostUpdateExecutionAvailability> compute) : IHostUpdateExecutionAvailabilityProvider
     {
         public Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(compute());
     }
 }
+
