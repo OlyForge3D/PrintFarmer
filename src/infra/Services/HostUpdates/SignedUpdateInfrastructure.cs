@@ -41,11 +41,15 @@ public sealed record VerifiedSignedUpdateRelease(SignedUpdateManifest Manifest, 
 public static partial class SignedUpdateManifestValidator
 {
     private static readonly string[] OrderedServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
-    private const long SequenceMajorMaximum = 99;
-    private const long SequenceMinorMaximum = 999;
-    private const long SequencePatchMaximum = 99_999;
-    private const long SequenceInsiderMaximum = 99_998;
-    private const long SequenceStableSuffix = 99_999;
+
+    // internal (not private) so Farm.Infrastructure.Tests (InternalsVisibleTo) can assert these
+    // against scripts/ci/fixtures/release-version-sequence.schema.json's contract.limits /
+    // contract.radices, keeping the golden schema and this implementation from silently drifting.
+    internal const long SequenceMajorMaximum = 99;
+    internal const long SequenceMinorMaximum = 999;
+    internal const long SequencePatchMaximum = 99_999;
+    internal const long SequenceInsiderMaximum = 99_998;
+    internal const long SequenceStableSuffix = 99_999;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
 
     public static SignedUpdateManifest Parse(string json)
@@ -542,6 +546,16 @@ internal interface ICosignProcessRunner
 
 internal sealed class ProcessCosignRunner : ICosignProcessRunner
 {
+    /// <summary>
+    /// Bound on the post-kill exit wait below. <see cref="Process.Kill(bool)"/> is not
+    /// synchronous, so after a timeout/cancellation forces a kill this still needs a short,
+    /// explicitly bounded wait for the OS to finish tearing the process tree down. This is
+    /// deliberately NOT <see cref="CancellationToken.None"/> with no timeout: an unbounded wait
+    /// here would let a process the OS never reaps hang the verifier indefinitely even though
+    /// the caller's own timeout has already elapsed.
+    /// </summary>
+    private static readonly TimeSpan ProcessKillWaitTimeout = TimeSpan.FromSeconds(5);
+
     public async Task<CosignProcessResult> RunAsync(CosignProcessCommand command, TimeSpan timeout, int maxDiagnostics, CancellationToken cancellationToken)
     {
         using Process process = new()
@@ -577,7 +591,17 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
             if (!process.HasExited)
             {
                 process.Kill(true);
-                await process.WaitForExitAsync(CancellationToken.None);
+                try
+                {
+                    using CancellationTokenSource killDeadline = new(ProcessKillWaitTimeout);
+                    await process.WaitForExitAsync(killDeadline.Token);
+                }
+                catch (OperationCanceledException)
+                {
+                    // The OS did not finish reaping the killed process tree within the bounded
+                    // cleanup window. Proceed rather than block indefinitely; ExitCode below is
+                    // not read in this path because processFailure/timeout handling takes over.
+                }
             }
         }
 

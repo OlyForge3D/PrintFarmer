@@ -76,6 +76,50 @@ public sealed class SignedUpdateInfrastructureTests
     }
 
     [Fact]
+    public void DeriveSequence_GoldenFixture_ContractLimitsAndRadicesMatchImplementation()
+    {
+        // Guards against the schema's documented contract (limits/radices/formula "const"
+        // values) silently drifting from SignedUpdateManifestValidator's actual encoding. The
+        // schema is itself a JSON Schema document, so each documented value lives at
+        // properties.contract.properties.<group>.properties.<name>.const, not as plain data.
+        string schema = File.ReadAllText(Path.Combine(
+            FindRepositoryRoot(),
+            "scripts", "ci", "fixtures", "release-version-sequence.schema.json"));
+        using JsonDocument schemaDocument = JsonDocument.Parse(schema);
+        JsonElement contractProperties = schemaDocument.RootElement
+            .GetProperty("properties")
+            .GetProperty("contract")
+            .GetProperty("properties");
+        JsonElement radices = contractProperties.GetProperty("radices").GetProperty("properties");
+        JsonElement limits = contractProperties.GetProperty("limits").GetProperty("properties");
+
+        static long Const(JsonElement group, string name) => group.GetProperty(name).GetProperty("const").GetInt64();
+
+        Assert.Equal(SignedUpdateManifestValidator.SequenceMinorMaximum + 1, Const(radices, "minor"));
+        Assert.Equal(SignedUpdateManifestValidator.SequencePatchMaximum + 1, Const(radices, "patch"));
+        Assert.Equal(SignedUpdateManifestValidator.SequenceStableSuffix + 1, Const(radices, "suffix"));
+
+        Assert.Equal(SignedUpdateManifestValidator.SequenceMajorMaximum, Const(limits, "major"));
+        Assert.Equal(SignedUpdateManifestValidator.SequenceMinorMaximum, Const(limits, "minor"));
+        Assert.Equal(SignedUpdateManifestValidator.SequencePatchMaximum, Const(limits, "patch"));
+        Assert.Equal(SignedUpdateManifestValidator.SequenceInsiderMaximum, Const(limits, "insiderSequence"));
+        Assert.Equal(SignedUpdateManifestValidator.SequenceStableSuffix, Const(limits, "stableSuffix"));
+
+        // Sanity-check the documented formula itself against a golden case, using the schema's
+        // own radices rather than re-deriving them, so the assertion fails if either drifts.
+        SequenceGoldenFixture fixture = LoadSequenceFixture();
+        long minorRadix = Const(radices, "minor");
+        long patchRadix = Const(radices, "patch");
+        long suffixRadix = Const(radices, "suffix");
+        foreach (SequenceValidCase testCase in fixture.ValidCases)
+        {
+            long expected = long.Parse(testCase.ExpectedSequence, System.Globalization.CultureInfo.InvariantCulture);
+            long recomputed = (((testCase.Parsed.Major * minorRadix) + testCase.Parsed.Minor) * patchRadix + testCase.Parsed.Patch) * suffixRadix + testCase.Parsed.Suffix;
+            Assert.Equal(expected, recomputed);
+        }
+    }
+
+    [Fact]
     public void Validate_ValidStableManifest_AcceptsStrictContract()
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
@@ -645,7 +689,8 @@ public sealed class SignedUpdateInfrastructureTests
         IReadOnlyList<SequenceInvalidCase> InvalidCases,
         IReadOnlyList<SequenceOrderingCase> Ordering,
         IReadOnlyList<SequenceDistinctGroup> DistinctGroups);
-    private sealed record SequenceValidCase(string Name, string Version, string ExpectedSequence);
+    private sealed record SequenceValidCase(string Name, string Version, SequenceParsed Parsed, string ExpectedSequence);
+    private sealed record SequenceParsed(long Major, long Minor, long Patch, string Kind, long Suffix);
     private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains);
     private sealed record SequenceOrderingCase(string Name, string Lower, string Higher);
     private sealed record SequenceDistinctGroup(string Name, IReadOnlyList<string> Versions);
