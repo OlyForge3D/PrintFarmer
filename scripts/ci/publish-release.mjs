@@ -179,6 +179,10 @@ export async function publishRelease(release, assets, api, {
     requireThat(readFileSync(join(assets, name)).length > 0, `Missing release asset: ${name}`);
   }
   validateManifest(readFileSync(join(assets, 'update-manifest.json'), 'utf8'), release, digests, imageDetails);
+  // Verify before creating the permanent Git tag or draft release. The later
+  // verification immediately before upload protects the exact bytes after any
+  // fallible draft-release operations.
+  verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
   await rejectExistingVersion(api, release.tag);
@@ -220,7 +224,6 @@ async function main() {
   const release = await selectRelease(env, api);
   const operation = process.argv[2];
   requireThat(['select', 'verify', 'build', 'publish'].includes(operation), 'Unknown release command');
-  if (operation === 'verify') return;
   if (operation === 'select') {
     for (const [key, value] of Object.entries({ source_sha: release.sourceCommit,
       version: release.version, environment: `release-${release.channel}` })) {
@@ -230,6 +233,7 @@ async function main() {
   }
   requireThat(env.RELEASE_SELECTED_SOURCE === release.sourceCommit, 'Pinned source output is required');
   requireThat(env.RELEASE_PUBLICATION_ENVIRONMENT === `release-${release.channel}`, 'Protected environment is required');
+  if (operation === 'verify') return;
   const assets = resolve('release-assets');
   if (operation === 'build') buildImages(release, resolve('source'), assets);
   else {

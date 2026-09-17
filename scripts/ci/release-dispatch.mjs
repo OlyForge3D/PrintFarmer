@@ -24,9 +24,9 @@ export function githubClient(token, fetcher = fetch) {
 // here independent of the selected channel.
 // GITHUB_WORKFLOW_SHA (the workflow definition's own commit) and GITHUB_SHA (the
 // dispatched branch/head commit actually checked out for this run) are distinct
-// GitHub-populated fields that legitimately differ on a normal workflow_dispatch;
-// each is format-validated independently rather than required to match the other.
-// Branch/head identity is instead verified against the live run (run.head_sha).
+// GitHub-populated fields that legitimately differ on a normal workflow_dispatch.
+// The live repository contents API binds GITHUB_WORKFLOW_SHA to the exact active
+// workflow file; run.head_sha separately binds the selected source commit.
 export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'))) {
   const channel = env.RELEASE_CHANNEL;
   requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel');
@@ -39,9 +39,12 @@ export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileS
   `Use a fresh owner manual dispatch of Consolidated Release on ${sourceBranch} for the ${channel} channel; reruns cannot publish`);
   const run = await api(`actions/runs/${env.GITHUB_RUN_ID}`);
   const definition = await api('actions/workflows/consolidated-release.yml');
+  const workflowFile = await api(`contents/${workflow}?ref=${env.GITHUB_WORKFLOW_SHA}`);
   const owner = value => value?.login === 'jpapiez' && value.id === 5460061 && value.type === 'User';
   requireThat(run?.event === 'workflow_dispatch' && run.path === workflow &&
     run.workflow_id === definition?.id && definition.path === workflow && definition.state === 'active' &&
+    workflowFile?.type === 'file' && workflowFile.path === workflow &&
+    workflowFile.sha === env.GITHUB_WORKFLOW_SHA &&
     String(run.id) === env.GITHUB_RUN_ID && run.run_attempt === 1 && run.status === 'in_progress' &&
     run.head_branch === sourceBranch && run.head_sha === env.GITHUB_SHA &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&

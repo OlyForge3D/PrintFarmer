@@ -72,11 +72,10 @@ digests plus every declared platform child digest, and sets
 through GitHub Actions OIDC in a dedicated signing job that runs no
 selected-source code. The unsigned build evidence and signature/evidence
 artifacts are immutable and separate; publication binds them with a SHA-256
-check before upload. The exact bytes are verified twice before release
-visibility: once in the signing job and once more by
-`publish-release.mjs` itself immediately before the `gh release upload` call,
-so nothing can substitute an unsigned or mismatched manifest between those
-workflow steps and the actual upload. Its `sequence` field is a collision-free,
+check before upload. The sign job verifies the signature immediately after signing. The publish job
+binds the signature artifact to the exact manifest SHA-256, and
+`publish-release.mjs` verifies it before any permanent Git/image tag mutation
+and again immediately before the `gh release upload` call. Its `sequence` field is a collision-free,
 stable-dominant encoding (see [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md)).
 
 The cross-language wire contract uses exactly these service IDs: `api`,
@@ -147,8 +146,10 @@ Before the first stable signed publication, a maintainer must update the live
 `release-insider` must allow only `development`. The workflow queries these live
 policies and fails closed if they are missing, permissive, or cross-channel, so
 a stable signature cannot be represented as ready while the environment still
-allows `development`. This is a one-time migration prerequisite, not a cloud
-mutation performed by the workflow.
+allows `development`. The repository must also satisfy the managed-update
+`VERSION` v1+ ordering prerequisite before the first signed publication; legacy
+VERSION/release ordering is not silently upgraded. These are one-time migration
+prerequisites, not cloud mutations performed by the workflow.
 
 The approved publisher App/installation remains PrintFarmer-only. The workflow
 requests Contents/Workflows write and Actions/Administration read, and mints its
@@ -156,7 +157,10 @@ short-lived token **after** the long build. Only the isolated signing job reques
 `id-token: write` (the isolated signing job; the build and publication jobs do
 not), and the official Cosign installer is pinned to `v3.9.2`
 while the binary is pinned to `v3.0.6`.
-Cosign verification requires issuer
+The sign job verifies the signature immediately after signing. The publish job
+binds the signature artifact to the exact manifest SHA-256 and re-verifies the
+exact manifest and bundle immediately before release upload. Cosign verification
+requires issuer
 `https://token.actions.githubusercontent.com` and the exact workflow identity for
 the release's own channel:
 

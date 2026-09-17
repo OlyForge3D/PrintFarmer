@@ -65,6 +65,8 @@ function ownerApi(overrides = {}) {
       head_branch: 'development', head_sha: sha, actor: owner, triggering_actor: owner,
       repository: repo, head_repository: repo },
     'actions/workflows/consolidated-release.yml': { id: 9, path: '.github/workflows/consolidated-release.yml', state: 'active' },
+    [`contents/.github/workflows/consolidated-release.yml?ref=${workflowSha}`]:
+      { type: 'file', path: '.github/workflows/consolidated-release.yml', sha: workflowSha },
     'collaborators/jpapiez/permission': { user: owner, permission: 'admin', role_name: 'admin' },
     'environments/release-insider': environment,
     'environments/release-insider/deployment-branch-policies': policies,
@@ -542,12 +544,12 @@ test('publication creates tag once, uploads a complete draft, tags images, publi
 test('the exact manifest bytes and its signature bundle are re-verified immediately before upload', async t => {
   const { chosen, assets, api, deps, calls, signedManifestBytes } = publishFixture(t);
   await publishRelease(chosen, assets, api, deps);
-  const commands = calls.filter(call => call.command);
-  const cosignIndex = commands.findIndex(call => call.command === 'cosign');
-  const ghIndex = commands.findIndex(call => call.command === 'gh');
+  const cosignIndices = calls.flatMap((call, index) => call.command === 'cosign' ? [index] : []);
+  const cosignIndex = cosignIndices.at(-1);
+  const ghIndex = calls.findIndex(call => call.command === 'gh');
   assert.ok(cosignIndex !== -1 && ghIndex !== -1, 'verification and upload commands must run');
   assert.equal(ghIndex, cosignIndex + 1, 'cosign verify-blob must be immediately before gh release upload');
-  const cosignArgs = commands[cosignIndex].args;
+  const cosignArgs = calls[cosignIndex].args;
   assert.equal(cosignArgs[0], 'verify-blob');
   assert.equal(cosignArgs[1], '--bundle');
   assert.match(cosignArgs[2], /update-manifest\.sigstore\.json$/);
@@ -557,6 +559,8 @@ test('the exact manifest bytes and its signature bundle are re-verified immediat
   assert.equal(cosignArgs[6], manifestIdentity);
   assert.match(cosignArgs[7], /update-manifest\.json$/);
   assert.deepEqual(readFileSync(cosignArgs[7]), signedManifestBytes);
+  assert.ok(cosignIndices[0] < calls.findIndex(call => call.endpoint === 'git/refs'),
+    'signature must be verified before permanent Git tag creation');
 });
 
 test('missing, tampered or wrong-identity signing evidence blocks publication before upload', async t => {
@@ -681,6 +685,7 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
     '${{ needs.select.outputs.source_sha }}');
   assert.equal(signSteps.find(step => step.name === 'Verify owner dispatch and environment policy').run,
     'node scripts/ci/publish-release.mjs verify');
+  assert.equal(signSteps.find(step => step.uses?.startsWith('actions/setup-node@')).with['node-version'], 24);
   assert.equal(signSteps.some(step => step.name === 'Checkout pinned application source'), false);
   assert.equal(signSteps.some(step => step.run === 'node scripts/ci/publish-release.mjs build'), false);
   assert.match(signSteps.find(step => step.name === 'Sign exact immutable manifest').run,
@@ -695,6 +700,10 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
     '${{ steps.publisher.outputs.token }}');
   assert.match(publishSteps.find(step => step.name === 'Bind signature to exact manifest bytes').run,
     /sha256sum --check signed-release\/update-manifest\.sha256/);
+  assert.equal(publishSteps.find(step => step.name === 'Verify owner dispatch immediately before credentials').run,
+    'node scripts/ci/publish-release.mjs verify');
+  assert.ok(publishSteps.some(step => step.uses?.startsWith('docker/setup-buildx-action@')));
+  assert.ok(publishSteps.some(step => step.uses?.startsWith('docker/login-action@')));
   assert.equal(publishSteps.some(step => step.name === 'Checkout pinned application source'), false);
   assert.equal(publishSteps.some(step => step.uses?.includes('sigstore/cosign-installer')), true);
   assert.equal(workflow.jobs.publish.outputs.release_url, '${{ steps.publish.outputs.release_url }}');
@@ -713,4 +722,10 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.match(active, /EXPECTED_IDENTITY: https:\/\/github\.com\/\$\{\{ github\.repository \}\}\/\.github\/workflows\/consolidated-release\.yml@refs\/heads\/\$\{\{ inputs\.channel == 'stable' && 'main' \|\| 'development' \}\}/);
   assert.doesNotMatch(active, /--certificate-oidc-issuer\s+\S+\s+\S+\*/);
   assert.doesNotMatch(active, /RELEASE_LEDGER|release-authorization|release-transaction|reservation_target/);
+  for (const [jobName, job] of Object.entries(workflow.jobs)) {
+    for (const step of job.steps ?? []) {
+      if (step.uses) assert.match(step.uses, /@[a-f0-9]{40}(?:\s+#.*)?$/,
+        `${jobName} uses an unpinned action: ${step.uses}`);
+    }
+  }
 });

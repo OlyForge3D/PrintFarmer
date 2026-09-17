@@ -61,13 +61,12 @@ Keyless Cosign trust is bootstrapped from Sigstore's OIDC certificate and
 transparency log; rotation is performed by changing the pinned official
 Cosign/tooling versions and the explicitly reviewed workflow identity, never by
 accepting a wildcard issuer or subject. The isolated signing job receives only
-immutable build evidence and runs no selected-source code; the publication job
-has no OIDC permission and binds its separate signature artifact to the exact
-manifest bytes before upload. The exact manifest bytes and their
-Sigstore bundle are verified twice before `publish-release.mjs` even runs, and once more by
-`publish-release.mjs` itself immediately before the `gh release upload` call,
-so nothing between those workflow steps and the actual upload can present an
-unsigned or mismatched manifest as the release's signed contract. Existing
+immutable build evidence and runs no selected-source code; the publication job has no OIDC permission and binds its separate signature
+artifact to the exact manifest bytes. The sign job verifies immediately after
+signing; `publish-release.mjs` verifies before any permanent Git/image tag
+mutation and again immediately before the `gh release upload` call, so nothing
+between those workflow steps and the actual upload can present an unsigned or
+mismatched manifest as the release's signed contract. Existing
 unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
 `v0.2.3-insider.2`. A valid signature authenticates the publisher and exact
 manifest bytes; it does not authorize or implement apply, installation,
@@ -78,7 +77,15 @@ Before the first stable signed publication, a maintainer must update the live
 `release-insider` must allow only `development`. The release tooling queries
 these live policies and fails closed when they are missing, permissive, or
 cross-channel. This migration is a prerequisite for stable signing and is not
-performed by the workflow; no cloud environment or grant is changed here.
+performed by the workflow; no cloud environment or grant is changed here. The
+repository must also satisfy the managed-update `VERSION` v1+ ordering
+prerequisite before the first signed publication; legacy VERSION/release
+ordering is not silently upgraded.
+
+The sign job verifies Cosign immediately after signing. The publish job binds
+the signature to the exact manifest SHA-256 and re-verifies the exact manifest
+and bundle immediately before release upload. A valid signature authenticates
+the publisher and bytes; it does not implement update apply.
 
 ### Read-only inventory and installation readiness
 
