@@ -176,7 +176,7 @@ public sealed class HostUpdateSchedulerTests
     private static HostUpdateScheduler Create(HostUpdateSchedulerSettings? settings = null, VerifiedHostUpdateCandidate? candidate = null, FakeExecutor? executor = null, IHostUpdateReplayStore? replay = null) =>
         new(new Settings(settings ?? new()), new Cache(candidate), replay ?? new MemoryReplayStore(), executor ?? new FakeExecutor(), new FixedClock(), new ZeroHostUpdateJitter());
 
-    private static VerifiedHostUpdateCandidate Candidate(string channel = UpdateChannelSettings.StableChannel) => new("release-1", "commit-1", 1, "sha256:manifest", channel, true, true, true, true, true, true, new("api", "frontend", "worker", "slicer", "database", "host"));
+    private static VerifiedHostUpdateCandidate Candidate(string channel = UpdateChannelSettings.StableChannel) => new("release-1", "commit-1", 1, "sha256:manifest", channel, true, true, true, true, true, true, new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
 
     private sealed class Settings(HostUpdateSchedulerSettings value) : IHostUpdateSchedulerSettings { public HostUpdateSchedulerSettings Current { get; } = value; }
     private sealed class Cache(VerifiedHostUpdateCandidate? value) : IHostUpdateSchedulerCandidateCache { public VerifiedHostUpdateCandidate? Current { get; } = value; public string? LastError => null; }
@@ -211,9 +211,3 @@ public sealed class HostUpdateSchedulerTests
         public Task RecordSupersededAsync(VerifiedHostUpdateCandidate candidate, CancellationToken ct) => throw new InvalidDataException("missing");
     }
 }
-
-
-
-
-
-

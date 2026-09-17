@@ -810,3 +810,7 @@ Docker Network
 ```
 
 See **[Deployment Guide](./DEPLOYMENT.md)** for detailed deployment options.
+
+### Automatic host update status
+
+`SystemInfoDto.UpdateScheduling` is additive and nullable: `null` means automatic update execution is not wired. When production scheduler and executor adapters are installed, the status reports persisted policy/channel state, due/backoff timestamps, kill-switch state, executor availability, and safe reason codes. Discovery remains read-only until those adapters are available; no automatic hosted execution is registered by this milestone.
