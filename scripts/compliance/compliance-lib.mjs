@@ -670,6 +670,7 @@ export async function validateDependencyLicenses(repoRoot, dependencyPolicy) {
     ...(dependencyPolicy.sbom?.reviewedEcosystems ?? []),
     ...(dependencyPolicy.sbom?.runtimePackageEvidence ?? []),
     ...(dependencyPolicy.sbom?.packageEvidence ?? []),
+    ...(dependencyPolicy.sbom?.nativeComponentEvidence ?? []),
   ];
   for (const review of sbomReviews) {
     const contextPath = 'compliance/dependency-license-policy.json:sbom';
@@ -1596,6 +1597,9 @@ export function enrichSbomDocument(sbom, inventory, dependencyPolicy, options) {
   // package's own generated name and versionInfo instead, so it only ever resolves the exact
   // reviewed component it names and leaves every other unmatched/unknown component fail-closed.
   for (const packageRecord of sbom.packages ?? []) {
+    if (getPackagePurl(packageRecord)) {
+      continue;
+    }
     const packageName = packageRecord.name ?? '';
     const evidence = (dependencyPolicy.sbom?.nativeComponentEvidence ?? []).find((record) =>
       new RegExp(record.namePattern, 'i').test(packageName)

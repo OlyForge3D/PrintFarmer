@@ -1203,13 +1203,18 @@ test('enrichSbomDocument resolves the generated e_sqlite3 native component that 
     version: 'v0.2.3',
   };
   const policy = enrichmentPolicy();
+  policy.allowedExpressions.push('blessing');
   policy.sbom.nativeComponentEvidence = [{
     namePattern: '^e_sqlite3$',
     versionPattern: '^3\\.52\\.0(\\.0)?$',
-    approvedExpression: 'MIT',
+    approvedExpression: 'blessing',
     supplier: 'Organization: SQLite (public domain dedication)',
     sourceUrl: 'https://sqlite.org/copyright.html',
     evidence: 'Fixture native SQLite component evidence',
+    reviewer: 'Fixture Reviewer',
+    reviewDate: '2026-07-24',
+    reviewAfter: '2099-07-24',
+    rationale: 'Fixture rationale for reviewed native SQLite evidence.',
   }];
   // Reproduces the exact generated shape from the release run: no purl, no
   // download location/supplier overrides, defaulting to NOASSERTION for both.
@@ -1224,7 +1229,7 @@ test('enrichSbomDocument resolves the generated e_sqlite3 native component that 
   });
 
   assert.deepEqual(errors, []);
-  assert.equal(component.licenseDeclared, 'MIT');
+  assert.equal(component.licenseDeclared, 'blessing');
   assert.equal(component.supplier, 'Organization: SQLite (public domain dedication)');
   assert.equal(component.downloadLocation, 'https://sqlite.org/copyright.html');
   assert.deepEqual(validateSbomDocument(sbom, 'sbom.spdx.json', policy), []);
@@ -1240,13 +1245,18 @@ test('nativeComponentEvidence for e_sqlite3 does not match an unreviewed name or
     version: 'v0.2.3',
   };
   const policy = enrichmentPolicy();
+  policy.allowedExpressions.push('blessing');
   policy.sbom.nativeComponentEvidence = [{
     namePattern: '^e_sqlite3$',
     versionPattern: '^3\\.52\\.0(\\.0)?$',
-    approvedExpression: 'MIT',
+    approvedExpression: 'blessing',
     supplier: 'Organization: SQLite (public domain dedication)',
     sourceUrl: 'https://sqlite.org/copyright.html',
     evidence: 'Fixture native SQLite component evidence',
+    reviewer: 'Fixture Reviewer',
+    reviewDate: '2026-07-24',
+    reviewAfter: '2099-07-24',
+    rationale: 'Fixture rationale for reviewed native SQLite evidence.',
   }];
   const wrongVersion = sbomPackage('SPDXRef-ESqlite3-Wrong-Version', 'e_sqlite3', '9.9.9.9');
   const wrongName = sbomPackage('SPDXRef-Opaque-Native', 'opaque-native-binary', '3.52.0.0');
@@ -1265,6 +1275,62 @@ test('nativeComponentEvidence for e_sqlite3 does not match an unreviewed name or
   const validationErrors = validateSbomDocument(sbom, 'sbom.spdx.json', policy);
   assert.ok(hasCode(validationErrors, 'LICENSE_UNKNOWN'));
   assert.ok(hasCode(validationErrors, 'SBOM_COMPONENT_SOURCE'));
+});
+
+test('validateDependencyLicenses enforces expiry and completeness on nativeComponentEvidence entries', async () => {
+  const emptyRoot = await mkdtemp(path.join(tmpdir(), 'compliance-native-evidence-'));
+  try {
+    const assetsPath = path.join(emptyRoot, 'src', 'app', 'obj', 'project.assets.json');
+    await mkdir(path.dirname(assetsPath), { recursive: true });
+    await writeFile(assetsPath, JSON.stringify({
+      packageFolders: {},
+      libraries: {},
+      project: { restore: { projectPath: path.join(emptyRoot, 'src', 'app', 'app.csproj') } },
+    }));
+
+    const basePolicy = {
+      allowedExpressions: ['blessing'],
+      deniedValues: ['', 'MISSING', 'NONE', 'NOASSERTION', 'UNKNOWN', 'UNLICENSED'],
+      npmLockFiles: [],
+      nuget: {
+        assetsRoot: 'src',
+        excludedProjectPathSegments: [],
+      },
+      reviewedEvidence: [],
+      reviewedExceptions: [],
+    };
+
+    const validEntry = {
+      namePattern: '^e_sqlite3$',
+      versionPattern: '^3\\.52\\.0(\\.0)?$',
+      approvedExpression: 'blessing',
+      supplier: 'Organization: SQLite (public domain dedication)',
+      sourceUrl: 'https://sqlite.org/copyright.html',
+      evidence: 'Fixture native SQLite component evidence',
+      reviewer: 'Fixture Reviewer',
+      reviewDate: '2026-07-24',
+      reviewAfter: '2099-07-24',
+      rationale: 'Fixture rationale for reviewed native SQLite evidence.',
+    };
+    const acceptedPolicy = { ...basePolicy, sbom: { nativeComponentEvidence: [validEntry] } };
+    assert.deepEqual(await validateDependencyLicenses(emptyRoot, acceptedPolicy), []);
+
+    const expiredEntry = { ...validEntry, reviewAfter: '2020-01-01' };
+    const expiredPolicy = { ...basePolicy, sbom: { nativeComponentEvidence: [expiredEntry] } };
+    assert.ok(hasCode(
+      await validateDependencyLicenses(emptyRoot, expiredPolicy),
+      'LICENSE_EXCEPTION_EXPIRED',
+    ));
+
+    const incompleteEntry = { ...validEntry, rationale: undefined };
+    const incompletePolicy = { ...basePolicy, sbom: { nativeComponentEvidence: [incompleteEntry] } };
+    assert.ok(hasCode(
+      await validateDependencyLicenses(emptyRoot, incompletePolicy),
+      'LICENSE_EXCEPTION_INCOMPLETE',
+    ));
+  } finally {
+    await rm(emptyRoot, { force: true, recursive: true });
+  }
 });
 
 test('the reviewed dependency-license-policy.json resolves the exact e_sqlite3 native component from the release SBOM', async () => {
