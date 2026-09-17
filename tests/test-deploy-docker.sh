@@ -34,6 +34,9 @@ NETWORK_RANGES=192.168.0.0/16
 HTTP_PORT=8080
 HTTPS_PORT=0
 SERVER_HOST=localhost
+WebAuthn__RelyingPartyId=
+WebAuthn__RelyingPartyName=
+WebAuthn__Origin=
 API_PORT=5245
 WEB_PORT=3000
 ENVIRONMENT=Development
@@ -352,6 +355,44 @@ test_environment_variables() {
     
     assert_contains "$output" "microservices" "Should show microservices architecture"
     
+    pass_test
+}
+
+test_webauthn_configuration() {
+    start_test "WebAuthn deployment configuration defaults and overrides"
+
+    cd "$TEST_TEMP_DIR"
+
+    capture_output "$(get_deploy_script_command --dry-run --batch)"
+    local env_content
+    env_content=$(cat .env)
+
+    assert_contains "$env_content" "WebAuthn__RelyingPartyId=localhost" \
+        "Default deployment should use localhost as the relying party ID"
+    assert_contains "$env_content" "WebAuthn__RelyingPartyName=PrintFarmer" \
+        "Default deployment should use the PrintFarmer relying party name"
+    assert_contains "$env_content" "WebAuthn__Origin=http://localhost:8080" \
+        "Default deployment should derive the browser origin from the HTTP port"
+
+    capture_output "$(get_deploy_script_command --dry-run --batch \
+        --env WebAuthn__RelyingPartyId=pfarm.example.com \
+        --env WebAuthn__RelyingPartyName=ExamplePrintFarmer \
+        --env WebAuthn__Origin=https://pfarm.example.com)"
+    env_content=$(cat .env)
+
+    assert_contains "$env_content" "WebAuthn__RelyingPartyId=pfarm.example.com" \
+        "Explicit relying party ID should survive saved configuration loading"
+    assert_contains "$env_content" "WebAuthn__RelyingPartyName=ExamplePrintFarmer" \
+        "Explicit relying party name should survive saved configuration loading"
+    assert_contains "$env_content" "WebAuthn__Origin=https://pfarm.example.com" \
+        "Explicit WebAuthn origin should survive saved configuration loading"
+    assert_contains "$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:-http://localhost:3000}' \
+        "Microservices compose should pass WebAuthn configuration to the API"
+    assert_contains "$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.monolith.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:-http://localhost:3000}' \
+        "Monolith compose should pass WebAuthn configuration to the API"
+
     pass_test
 }
 
@@ -2030,6 +2071,7 @@ run_all_tests() {
     test_batch_mode
     test_config_file_generation
     test_environment_variables
+    test_webauthn_configuration
     test_api_deployable_health_statuses
     test_password_not_logged_to_stdout
     test_no_redis_configuration

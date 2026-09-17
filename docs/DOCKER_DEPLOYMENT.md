@@ -258,8 +258,33 @@ export HTTP_PORT=8080
 export API_PORT=5245
 export ALLOW_LOCAL_NETWORK=true
 export ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8
+export WebAuthn__RelyingPartyId=pfarm.example.com
+export WebAuthn__RelyingPartyName=PrintFarmer
+export WebAuthn__Origin=https://pfarm.example.com
 NON_INTERACTIVE=1 ./scripts/deploy-docker.sh --non-interactive
 ```
+
+### Passkey / WebAuthn Configuration
+
+Passkey registration requires the relying party ID and browser origin to match the
+public URL exactly. The deployment script writes these settings to `.deploy-config`
+and `.env`, and the Compose templates pass them to the API:
+
+| Variable | Value |
+|----------|-------|
+| `WebAuthn__RelyingPartyId` | Public hostname only, without a scheme or port |
+| `WebAuthn__RelyingPartyName` | Display name shown by the authenticator |
+| `WebAuthn__Origin` | Exact browser origin, including `https://` and any non-default port |
+
+When these values are omitted, Docker deployment derives the relying party ID from
+`SERVER_HOST`, uses `PrintFarmer` as the name, and derives the origin from the
+configured HTTPS or HTTP port. Local application development keeps its existing
+`localhost` and `http://localhost:3000` defaults.
+
+For TLS terminated by an external reverse proxy or tunnel, set
+`WebAuthn__Origin` explicitly because the container-facing port does not identify
+the browser's public origin. After changing any WebAuthn value, recreate the API
+container so the Fido2 configuration is reloaded.
 
 ### Port Remapping Behavior
 

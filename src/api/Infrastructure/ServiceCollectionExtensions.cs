@@ -462,15 +462,32 @@ public static class ServiceCollectionExtensions
 
     private static void RegisterPasskeyServices(IServiceCollection services, IConfiguration configuration)
     {
-        Fido2Configuration fido2Config = new()
+        _ = services.AddSingleton(new Fido2(CreateFido2Configuration(configuration)));
+    }
+
+    internal static Fido2Configuration CreateFido2Configuration(IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        return new Fido2Configuration
         {
-            ServerDomain = configuration["WebAuthn:RelyingPartyId"] ?? "localhost",
-            ServerName = configuration["WebAuthn:RelyingPartyName"] ?? "PrintFarmer",
-            Origins = new HashSet<string> { configuration["WebAuthn:Origin"] ?? "http://localhost:3000" },
+            ServerDomain = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyId", "localhost"),
+            ServerName = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyName", "PrintFarmer"),
+            Origins = new HashSet<string>
+            {
+                GetConfigurationValueOrDefault(configuration, "WebAuthn:Origin", "http://localhost:3000"),
+            },
             TimestampDriftTolerance = 300_000,
         };
+    }
 
-        _ = services.AddSingleton(new Fido2(fido2Config));
+    private static string GetConfigurationValueOrDefault(
+        IConfiguration configuration,
+        string key,
+        string defaultValue)
+    {
+        string? configuredValue = configuration[key];
+        return string.IsNullOrWhiteSpace(configuredValue) ? defaultValue : configuredValue;
     }
 
     #endregion

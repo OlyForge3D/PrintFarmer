@@ -430,7 +430,10 @@ public class AuthController(
         try
         {
             CredentialCreateOptions options = await _passkeyService.BeginRegistrationAsync(userId, username, ct);
-            return Ok(options);
+
+            // Fido2NetLib owns the browser wire contract; the global enum converter emits
+            // .NET enum names and breaks WebAuthn consumers such as Safari.
+            return Content(options.ToJson(), "application/json");
         }
         catch (Exception ex)
         {
@@ -498,7 +501,9 @@ public class AuthController(
         try
         {
             AssertionOptions options = await _passkeyService.BeginLoginAsync(request.Username, ct);
-            return Ok(options);
+
+            // Keep assertion options on the same Fido2NetLib wire contract as registration.
+            return Content(options.ToJson(), "application/json");
         }
         catch (Exception ex)
         {
