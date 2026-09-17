@@ -37,6 +37,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             {
                 ["Security:DevModeBypassAuth"] = "false",
                 ["HostUpdates:HostState:RootPath"] = Path.Combine(Path.GetTempPath(), "printfarmer-system-info-host-state-" + Guid.NewGuid().ToString("N")),
+                ["HostUpdates:HostState:WindowsSecurityAttested"] = OperatingSystem.IsWindows().ToString(),
                 ["HostUpdates:VerifiedReleaseDiscovery:Enabled"] = discoveryEnabled.ToString(),
             })
         {

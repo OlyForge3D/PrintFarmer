@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Authorization;
+﻿using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -148,7 +148,35 @@ public sealed class HostUpdateController(
             return BadRequest(new { code = string.IsNullOrEmpty(error) ? "request_invalid" : error });
         }
 
-        HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(request!, activities, cancellationToken).ConfigureAwait(false);
+        if (!string.Equals(releaseId, request!.ReleaseId, StringComparison.Ordinal))
+        {
+            return Conflict(new { code = "recovery_binding_mismatch" });
+        }
+
+        HostUpdateExecutionRequest[] journalRequests = activities.Select(activity => activity.RequestBinding)
+            .Where(binding => binding is not null)
+            .Select(binding => binding!)
+            .ToArray();
+        string[] journalBindings = activities.Select(activity => activity.RequestBindingHash)
+            .Where(binding => !string.IsNullOrWhiteSpace(binding))
+            .Select(binding => binding!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (journalRequests.Length != activities.Count || journalBindings.Length != 1 ||
+            journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), journalBindings[0], StringComparison.Ordinal)) ||
+            !string.Equals(journalBindings[0], HostUpdateRequestBinding.Compute(request), StringComparison.Ordinal))
+        {
+            string code = journalRequests.Length == 0 || journalBindings.Length == 0 ? "recovery_binding_missing" : "recovery_binding_mismatch";
+            return Conflict(new { code });
+        }
+
+        HostUpdateExecutionRequest failedRequest = journalRequests[0];
+        if (journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), HostUpdateRequestBinding.Compute(failedRequest), StringComparison.Ordinal)))
+        {
+            return Conflict(new { code = "recovery_binding_mixed" });
+        }
+
+        HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
         return Ok(result);
     }
 }

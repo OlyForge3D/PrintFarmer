@@ -1,5 +1,9 @@
 ﻿#pragma warning disable S2681
 #pragma warning disable IDISP007
+#pragma warning disable SA1516
+#pragma warning disable SA1513
+#pragma warning disable SA1518
+#pragma warning disable SA1507, SA1515
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -87,6 +91,8 @@ public sealed record HostUpdateExecutionRequest(string ReleaseId, long Authentic
 public sealed record HostUpdateExecutionActivity(string ActivityId, string ReleaseId, HostUpdateExecutionState State, string Phase, DateTimeOffset RecordedAt)
 {
     public string? RequestBindingHash { get; init; }
+
+    public HostUpdateExecutionRequest? RequestBinding { get; init; }
 }
 
 public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecutionState State, string? FailureCode, IReadOnlyList<HostUpdateExecutionActivity> Activities)
@@ -153,7 +159,7 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
             return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, error, []);
         }
 
-        string bindingHash = BindingHash(request);
+        string bindingHash = HostUpdateRequestBinding.Compute(request);
         using IHostUpdateExecutionLease lease = updateLock.Acquire(TimeSpan.FromSeconds(30), cancellationToken);
         List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList();
         HostUpdateExecutionState current = activities.LastOrDefault()?.State ?? HostUpdateExecutionState.Accepted;
@@ -170,6 +176,17 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
         if (current == HostUpdateExecutionState.Accepted)
         {
             Append(activities, request, current, "accepted");
+        }
+
+        foreach ((HostUpdateExecutionState state, string phase, bool safe) in Plan)
+        {
+            bool started = activities.Any(a => a.State == state && string.Equals(a.Phase, phase + ":before", StringComparison.Ordinal));
+            bool finished = activities.Any(a => a.State == state && string.Equals(a.Phase, phase + ":after", StringComparison.Ordinal));
+            if (!safe && started && !finished)
+            {
+                Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "restart_uncertain:" + phase);
+                return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "unsafe_phase_interrupted", activities);
+            }
         }
 
         try
@@ -222,32 +239,40 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
         _ => Task.CompletedTask,
     };
 
-    private static string BindingHash(HostUpdateExecutionRequest request) => HostUpdateCanonical.Hash(new
-    {
-        request.TrustRoot,
-        request.PolicyRevision,
-        request.PolicyFingerprint,
-        request.ReleaseId,
-        request.Channel,
-        request.RequestId,
-        request.AuthenticatedSequence,
-        request.ManifestDigest,
-        request.SourceCommit,
-        request.HostPlatform,
-        Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
-    });
 
     private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase)
     {
         HostUpdateExecutionActivity activity = new(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow)
         {
-            RequestBindingHash = BindingHash(request),
+            RequestBindingHash = HostUpdateRequestBinding.Compute(request),
+            RequestBinding = request,
         };
         journal.Append(activity);
         activities.Add(activity);
     }
 }
 
+public static class HostUpdateRequestBinding
+{
+    public static string Compute(HostUpdateExecutionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return HostUpdateCanonical.Hash(new
+        {
+            request.TrustRoot,
+            request.PolicyRevision,
+            request.PolicyFingerprint,
+            request.ReleaseId,
+            request.Channel,
+            request.RequestId,
+            request.AuthenticatedSequence,
+            request.ManifestDigest,
+            request.SourceCommit,
+            request.HostPlatform,
+            Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
+        });
+    }
+}
 public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecutionLock
 {
     public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken)
@@ -259,6 +284,7 @@ public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecut
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
+                HostStateFileSecurity.RejectReparseTarget(path);
                 FileStream stream = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
                 stream.SetLength(0);
                 using (StreamWriter writer = new(stream, leaveOpen: true))
@@ -289,18 +315,50 @@ public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecut
 
 public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExecutionJournal
 {
+    private readonly string stagedPath = path + ".staged";
+
     private sealed record JournalRecord(string PreviousHash, string Payload, string Hash, HostUpdateExecutionActivity Activity);
 
-    public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId)
+    public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) =>
+        ReadValidatedRecords().Where(record => record.Activity.ReleaseId == releaseId).Select(record => record.Activity).ToArray();
+
+    public void Append(HostUpdateExecutionActivity activity)
     {
+        ArgumentNullException.ThrowIfNull(activity);
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+        RecoverStagedFile();
+        List<JournalRecord> records = ReadValidatedRecords();
+        string previous = records.LastOrDefault()?.Hash ?? string.Empty;
+        string payload = JsonSerializer.Serialize(activity);
+        string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(previous + payload)));
+        records.Add(new JournalRecord(previous, payload, hash, activity));
+        string contents = string.Join('\n', records.Select(record => JsonSerializer.Serialize(record))) + "\n";
+        _ = Parse(contents);
+        AtomicRewrite(contents);
+    }
+
+    private List<JournalRecord> ReadValidatedRecords()
+    {
+        RecoverStagedFile();
         if (!File.Exists(path))
         {
             return [];
         }
 
-        List<HostUpdateExecutionActivity> result = [];
+        HostStateFileSecurity.RejectReparseTarget(path);
+        return Parse(File.ReadAllText(path));
+    }
+
+    private static List<JournalRecord> Parse(string contents)
+    {
+        if (contents.Length != 0 && !contents.EndsWith('\n'))
+        {
+            throw new InvalidDataException("journal_corrupt");
+        }
+
+        List<JournalRecord> records = [];
         string previous = string.Empty;
-        foreach (string line in File.ReadLines(path))
+        foreach (string line in contents.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             JournalRecord? record;
             try
@@ -312,46 +370,66 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
                 throw new InvalidDataException("journal_corrupt", ex);
             }
 
-            if (record is null || record.Activity is null || !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) || !CryptographicOperations.FixedTimeEquals(Convert.FromHexString(record.Hash), SHA256.HashData(Encoding.UTF8.GetBytes(record.PreviousHash + record.Payload))))
+            byte[] expected = SHA256.HashData(Encoding.UTF8.GetBytes((record?.PreviousHash ?? string.Empty) + (record?.Payload ?? string.Empty)));
+            byte[] actual;
+            try
+            {
+                actual = Convert.FromHexString(record?.Hash ?? string.Empty);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidDataException("journal_integrity_failure", ex);
+            }
+
+            if (record?.Activity is null || !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) ||
+                !CryptographicOperations.FixedTimeEquals(actual, expected))
             {
                 throw new InvalidDataException("journal_integrity_failure");
             }
 
+            records.Add(record);
             previous = record.Hash;
-            if (record.Activity.ReleaseId == releaseId)
-            {
-                result.Add(record.Activity);
-            }
         }
 
-        return result;
+        return records;
     }
 
-    public void Append(HostUpdateExecutionActivity activity)
+    private void AtomicRewrite(string contents)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
-        string previous = string.Empty;
-        if (File.Exists(path))
+        HostStateFileSecurity.RejectReparseTarget(stagedPath);
+        try
         {
-            string? last = File.ReadLines(path).LastOrDefault();
-            if (last is null)
+            using (FileStream stream = new(stagedPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            using (StreamWriter writer = new(stream, new UTF8Encoding(false), leaveOpen: true))
             {
-                throw new InvalidDataException("journal_corrupt");
+                writer.Write(contents);
+                writer.Flush();
+                stream.Flush(true);
             }
 
-            previous = JsonSerializer.Deserialize<JournalRecord>(last)?.Hash ?? throw new InvalidDataException("journal_corrupt");
+            _ = Parse(File.ReadAllText(stagedPath));
+            HostStateFileSecurity.RejectReparseTarget(path);
+            File.Move(stagedPath, path, true);
         }
-
-        string payload = JsonSerializer.Serialize(activity);
-        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(previous + payload))).ToLowerInvariant();
-        string line = JsonSerializer.Serialize(new JournalRecord(previous, payload, hash, activity));
-        string temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        File.WriteAllText(temp, line + Environment.NewLine, new UTF8Encoding(false));
-        using (FileStream stream = new(temp, FileMode.Open, FileAccess.Read, FileShare.Read))
+        finally
         {
-            stream.Flush(true);
+            if (File.Exists(stagedPath) && !HostStateFileSecurity.IsReparsePoint(stagedPath))
+            {
+                File.Delete(stagedPath);
+            }
+        }
+    }
+
+    private void RecoverStagedFile()
+    {
+        if (!File.Exists(stagedPath))
+        {
+            return;
         }
 
-        File.Move(temp, path, true);
+        HostStateFileSecurity.RejectReparseTarget(stagedPath);
+        // Rename is the commit point. A surviving stage was never committed, so the validated
+        // authoritative chain wins even when the staged rewrite is complete.
+        File.Delete(stagedPath);
     }
 }

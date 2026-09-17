@@ -1,4 +1,5 @@
-﻿#pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
+﻿#pragma warning disable SA1516, SA1513, SA1408, SA1501, SA1515
+#pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -226,28 +227,30 @@ public interface IHostUpdateReplayAnchor
 {
     Task<long> ReadEpochAsync(CancellationToken ct);
 
-    Task AdvanceEpochAsync(long epoch, CancellationToken ct);
+    Task<string> ReadStateHashAsync(CancellationToken ct);
+
+    Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct);
 }
 
 public sealed class UnavailableHostUpdateReplayAnchor : IHostUpdateReplayAnchor
 {
     public Task<long> ReadEpochAsync(CancellationToken ct) => throw new NotSupportedException("host_update_replay_anchor_not_available");
 
-    public Task AdvanceEpochAsync(long epoch, CancellationToken ct) => throw new NotSupportedException("host_update_replay_anchor_not_available");
+    public Task<string> ReadStateHashAsync(CancellationToken ct) => throw new NotSupportedException("host_update_replay_anchor_not_available");
+
+    public Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct) => throw new NotSupportedException("host_update_replay_anchor_not_available");
 }
 
-public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplayAnchor anchor) : IHostUpdateReplayStore, IDisposable
+public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplayAnchor anchor, Action<string>? commitBoundary = null) : IHostUpdateReplayStore, IDisposable
 {
-    private const int CurrentVersion = 1;
-
     private readonly string _path = Path.Combine(rootPath ?? throw new ArgumentNullException(nameof(rootPath)), "host-update-replay.json");
+    private readonly string _stagedPath = Path.Combine(rootPath, "host-update-replay.json.staged");
     private readonly IHostUpdateReplayAnchor _anchor = anchor ?? throw new ArgumentNullException(nameof(anchor));
     private readonly SemaphoreSlim _gate = new(1, 1);
 
     public async Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(candidate);
-
         if (!candidate.CryptographicallyVerified || string.IsNullOrWhiteSpace(candidate.TrustRoot))
         {
             return new(HostUpdateReplayDisposition.Rejected, "unauthenticated:" + candidate.Identity, false);
@@ -257,29 +260,23 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
         try
         {
             long anchorEpoch = await ReadAnchorEpochAsync(ct);
-            HostUpdateReplayFileState state = await LoadFileAsync(anchorEpoch, ct);
+            string anchorStateHash = await ReadAnchorStateHashAsync(ct);
+            HostUpdateReplayFileState state = await LoadAndRecoverAsync(anchorEpoch, anchorStateHash, ct);
             string ns = Namespace(candidate);
-
             if (state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing))
             {
                 return new(existing.Disposition, existing.CorrelationId, true);
             }
 
             state.HighWaterByNamespace.TryGetValue(ns, out HostUpdateReplayHighWater? highWater);
-
-            if (highWater is not null && candidate.Sequence < highWater.Sequence)
-            {
-                return await PersistRejectionAsync(state, candidate, anchorEpoch, ct);
-            }
-
-            if (highWater is not null && candidate.Sequence == highWater.Sequence && !string.Equals(highWater.Identity, candidate.Identity, StringComparison.Ordinal))
+            if (highWater is not null && (candidate.Sequence < highWater.Sequence ||
+                (candidate.Sequence == highWater.Sequence && !string.Equals(highWater.Identity, candidate.Identity, StringComparison.Ordinal))))
             {
                 return await PersistRejectionAsync(state, candidate, anchorEpoch, ct);
             }
 
             HostUpdateReplayDisposition disposition = intent == HostUpdateReplayIntent.Admit ? HostUpdateReplayDisposition.Accepted : HostUpdateReplayDisposition.Rejected;
             string correlationId = "decision:" + candidate.Identity;
-
             if (highWater is not null && candidate.Sequence > highWater.Sequence &&
                 state.Identities.TryGetValue(highWater.Identity, out HostUpdateReplayIdentityRecord? previous) &&
                 previous.Disposition == HostUpdateReplayDisposition.Accepted)
@@ -320,34 +317,179 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
         }
     }
 
-    private async Task<HostUpdateReplayFileState> LoadFileAsync(long anchorEpoch, CancellationToken ct)
+    private async Task<string> ReadAnchorStateHashAsync(CancellationToken ct)
     {
-        if (!File.Exists(_path))
-        {
-            throw new InvalidDataException("host_update_replay_state_missing");
-        }
-
-        string json;
         try
         {
-            json = await File.ReadAllTextAsync(_path, ct);
+            return await _anchor.ReadStateHashAsync(ct);
         }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            throw new InvalidDataException("host_update_replay_state_io_error", ex);
+            throw new InvalidDataException("host_update_replay_anchor_unavailable", ex);
+        }
+    }
+
+    private static string StateHash(string path) =>
+        Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(path)));
+    private async Task<HostUpdateReplayFileState> LoadAndRecoverAsync(long anchorEpoch, string anchorStateHash, CancellationToken ct)
+    {
+        HostUpdateReplayFileState? current = File.Exists(_path) ? await ReadStateAsync(_path, ct) : null;
+
+        if (current is not null && current.Epoch > anchorEpoch)
+        {
+            throw new InvalidDataException("host_update_replay_anchor_rollback");
         }
 
-        HostUpdateReplayFileDto? dto;
+        if (current?.Epoch == anchorEpoch)
+        {
+            if (!string.Equals(StateHash(_path), anchorStateHash, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("host_update_replay_state_anchor_hash_mismatch");
+            }
+
+            DeleteUncommittedStage();
+            return current;
+        }
+        // The anchor journal append is the commit record. A snapshot exactly one committed epoch
+        // behind may move forward only from the durable, checksummed stage for that anchor head.
+        HostUpdateReplayFileState? staged = File.Exists(_stagedPath) ? await ReadStateAsync(_stagedPath, ct) : null;
+        if ((current is null && anchorEpoch == 0 || current?.Epoch == anchorEpoch - 1) && staged?.Epoch == anchorEpoch &&
+            string.Equals(StateHash(_stagedPath), anchorStateHash, StringComparison.Ordinal))
+        {
+            HostStateFileSecurity.RejectReparseTarget(_path);
+            File.Move(_stagedPath, _path, true);
+            commitBoundary?.Invoke("forward-recovered");
+            return staged;
+        }
+
+        if (current is not null && current.Epoch < anchorEpoch)
+        {
+            throw new InvalidDataException("host_update_replay_state_rollback");
+        }
+
+        throw new InvalidDataException("host_update_replay_state_missing");
+    }
+
+    private static async Task<HostUpdateReplayFileState> ReadStateAsync(string path, CancellationToken ct)
+    {
+        HostStateFileSecurity.RejectReparseTarget(path);
         try
         {
-            dto = JsonSerializer.Deserialize<HostUpdateReplayFileDto>(json);
+            return HostUpdateReplayPersistenceCodec.Deserialize(await File.ReadAllTextAsync(path, ct));
         }
-        catch (JsonException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException or FormatException)
         {
             throw new InvalidDataException("host_update_replay_state_invalid", ex);
         }
+    }
 
-        if (dto is null || dto.HighWaterByNamespace is null || dto.Identities is null || dto.Version != CurrentVersion)
+    private async Task SaveAsync(HostUpdateReplayFileState state, long anchorEpoch, CancellationToken ct)
+    {
+        long epoch = Math.Max(state.Epoch, anchorEpoch) + 1;
+        state.Epoch = epoch;
+        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
+        HostStateFileSecurity.RejectReparseTarget(_stagedPath);
+        try
+        {
+            await WriteDurablyAsync(_stagedPath, HostUpdateReplayPersistenceCodec.Serialize(state), ct);
+            _ = await ReadStateAsync(_stagedPath, ct);
+            commitBoundary?.Invoke("stage-durable");
+            try
+            {
+                await _anchor.AdvanceEpochAsync(epoch, StateHash(_stagedPath), ct);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                throw new InvalidDataException("host_update_replay_anchor_unavailable", ex);
+            }
+
+            commitBoundary?.Invoke("anchor-committed");
+            HostStateFileSecurity.RejectReparseTarget(_path);
+            File.Move(_stagedPath, _path, true);
+            commitBoundary?.Invoke("snapshot-replaced");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException && ex is not InvalidDataException)
+        {
+            throw new InvalidDataException("host_update_replay_state_io_error", ex);
+        }
+        finally
+        {
+            // Before anchor commit, this is safely discardable. After anchor commit, retain it for
+            // startup forward recovery if snapshot replacement did not happen.
+            long committed = await ReadAnchorEpochBestEffortAsync();
+            if (committed < epoch || File.Exists(_path) && TryReadEpoch(_path) == epoch)
+            {
+                DeleteUncommittedStage();
+            }
+        }
+    }
+
+    private async Task<long> ReadAnchorEpochBestEffortAsync()
+    {
+        try
+        { return await _anchor.ReadEpochAsync(CancellationToken.None); }
+        catch { return -1; }
+    }
+
+    private static long TryReadEpoch(string path)
+    {
+        try
+        { return HostUpdateReplayPersistenceCodec.Deserialize(File.ReadAllText(path)).Epoch; }
+        catch { return -1; }
+    }
+
+    internal static async Task WriteDurablyAsync(string path, string json, CancellationToken ct)
+    {
+        await using FileStream stream = new(path, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.Asynchronous | FileOptions.WriteThrough);
+        await stream.WriteAsync(Encoding.UTF8.GetBytes(json), ct);
+        await stream.FlushAsync(ct);
+        stream.Flush(true);
+    }
+
+    private void DeleteUncommittedStage()
+    {
+        if (File.Exists(_stagedPath))
+        {
+            HostStateFileSecurity.RejectReparseTarget(_stagedPath);
+            File.Delete(_stagedPath);
+        }
+    }
+
+    public void Dispose() => _gate.Dispose();
+}
+
+internal sealed record HostUpdateReplayHighWater(long Sequence, string Identity);
+internal sealed record HostUpdateReplayIdentityRecord(long Sequence, HostUpdateReplayDisposition Disposition, string CorrelationId);
+
+internal sealed class HostUpdateReplayFileState
+{
+    public int Version { get; init; } = HostUpdateReplayPersistenceCodec.CurrentVersion;
+    public long Epoch { get; set; }
+    public Dictionary<string, HostUpdateReplayHighWater> HighWaterByNamespace { get; set; } = new(StringComparer.Ordinal);
+    public Dictionary<string, HostUpdateReplayIdentityRecord> Identities { get; set; } = new(StringComparer.Ordinal);
+}
+
+internal static class HostUpdateReplayPersistenceCodec
+{
+    internal const int CurrentVersion = 1;
+    private sealed record HighWaterDto(long Sequence, string Identity);
+    private sealed record IdentityDto(long Sequence, string Disposition, string CorrelationId);
+    private sealed record FileDto(int Version, long Epoch, string Checksum, Dictionary<string, HighWaterDto> HighWaterByNamespace, Dictionary<string, IdentityDto> Identities);
+
+    internal static HostUpdateReplayFileState Empty(long epoch = 0) => new() { Epoch = epoch };
+
+    internal static string Serialize(HostUpdateReplayFileState state)
+    {
+        FileDto dto = new(CurrentVersion, state.Epoch, ComputeChecksum(state),
+            state.HighWaterByNamespace.ToDictionary(kv => kv.Key, kv => new HighWaterDto(kv.Value.Sequence, kv.Value.Identity), StringComparer.Ordinal),
+            state.Identities.ToDictionary(kv => kv.Key, kv => new IdentityDto(kv.Value.Sequence, kv.Value.Disposition.ToString(), kv.Value.CorrelationId), StringComparer.Ordinal));
+        return JsonSerializer.Serialize(dto);
+    }
+
+    internal static HostUpdateReplayFileState Deserialize(string json)
+    {
+        FileDto? dto = JsonSerializer.Deserialize<FileDto>(json);
+        if (dto is null || dto.Version != CurrentVersion || dto.Epoch < 0 || dto.HighWaterByNamespace is null || dto.Identities is null)
         {
             throw new InvalidDataException("host_update_replay_state_invalid");
         }
@@ -356,114 +498,24 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
         {
             Epoch = dto.Epoch,
             HighWaterByNamespace = dto.HighWaterByNamespace.ToDictionary(kv => kv.Key, kv => new HostUpdateReplayHighWater(kv.Value.Sequence, kv.Value.Identity), StringComparer.Ordinal),
-            Identities = dto.Identities.ToDictionary(kv => kv.Key, kv => new HostUpdateReplayIdentityRecord(kv.Value.Sequence, Enum.Parse<HostUpdateReplayDisposition>(kv.Value.Disposition), kv.Value.CorrelationId), StringComparer.Ordinal)
+            Identities = dto.Identities.ToDictionary(kv => kv.Key, kv => new HostUpdateReplayIdentityRecord(kv.Value.Sequence, Enum.Parse<HostUpdateReplayDisposition>(kv.Value.Disposition), kv.Value.CorrelationId), StringComparer.Ordinal),
         };
-
         if (!string.Equals(ComputeChecksum(state), dto.Checksum, StringComparison.Ordinal))
         {
             throw new InvalidDataException("host_update_replay_state_corrupt");
         }
 
-        if (state.Epoch < anchorEpoch)
-        {
-            throw new InvalidDataException("host_update_replay_state_rollback");
-        }
-
         return state;
-    }
-
-    private async Task SaveAsync(HostUpdateReplayFileState state, long anchorEpoch, CancellationToken ct)
-    {
-        long epoch = Math.Max(state.Epoch, anchorEpoch) + 1;
-        try
-        {
-            await _anchor.AdvanceEpochAsync(epoch, ct);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            throw new InvalidDataException("host_update_replay_anchor_unavailable", ex);
-        }
-
-        state.Epoch = epoch;
-        string checksum = ComputeChecksum(state);
-        HostUpdateReplayFileDto dto = new(
-            CurrentVersion,
-            epoch,
-            checksum,
-            state.HighWaterByNamespace.ToDictionary(kv => kv.Key, kv => new HostUpdateReplayHighWaterDto(kv.Value.Sequence, kv.Value.Identity), StringComparer.Ordinal),
-            state.Identities.ToDictionary(kv => kv.Key, kv => new HostUpdateReplayIdentityDto(kv.Value.Sequence, kv.Value.Disposition.ToString(), kv.Value.CorrelationId), StringComparer.Ordinal));
-
-        Directory.CreateDirectory(Path.GetDirectoryName(_path)!);
-        string temporary = _path + ".tmp-" + Guid.NewGuid().ToString("N");
-        try
-        {
-            string json = JsonSerializer.Serialize(dto);
-            await using (FileStream stream = new(temporary, FileMode.CreateNew, FileAccess.Write, FileShare.None))
-            {
-                byte[] bytes = Encoding.UTF8.GetBytes(json);
-                await stream.WriteAsync(bytes, ct);
-                await stream.FlushAsync(ct);
-                stream.Flush(true);
-            }
-
-            File.Move(temporary, _path, true);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException)
-        {
-            if (File.Exists(temporary))
-            {
-                try
-                {
-                    File.Delete(temporary);
-                }
-                catch (IOException)
-                {
-                }
-            }
-
-            throw new InvalidDataException("host_update_replay_state_io_error", ex);
-        }
     }
 
     private static string ComputeChecksum(HostUpdateReplayFileState state) => HostUpdateCanonical.Hash(new
     {
         state.Version,
         state.Epoch,
-        HighWater = state.HighWaterByNamespace.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => new { Namespace = kv.Key, kv.Value.Sequence, kv.Value.Identity }),
-        Identities = state.Identities.OrderBy(kv => kv.Key, StringComparer.Ordinal)
-            .Select(kv => new { Identity = kv.Key, kv.Value.Sequence, Disposition = kv.Value.Disposition.ToString(), kv.Value.CorrelationId })
+        HighWater = state.HighWaterByNamespace.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => new { Namespace = kv.Key, kv.Value.Sequence, kv.Value.Identity }),
+        Identities = state.Identities.OrderBy(kv => kv.Key, StringComparer.Ordinal).Select(kv => new { Identity = kv.Key, kv.Value.Sequence, Disposition = kv.Value.Disposition.ToString(), kv.Value.CorrelationId }),
     });
-
-    private sealed record HostUpdateReplayHighWater(long Sequence, string Identity);
-
-    private sealed record HostUpdateReplayIdentityRecord(long Sequence, HostUpdateReplayDisposition Disposition, string CorrelationId);
-
-    private sealed class HostUpdateReplayFileState
-    {
-        public int Version { get; init; } = CurrentVersion;
-
-        public long Epoch { get; set; }
-
-        public Dictionary<string, HostUpdateReplayHighWater> HighWaterByNamespace { get; set; } = new(StringComparer.Ordinal);
-
-        public Dictionary<string, HostUpdateReplayIdentityRecord> Identities { get; set; } = new(StringComparer.Ordinal);
-    }
-
-    private sealed record HostUpdateReplayHighWaterDto(long Sequence, string Identity);
-
-    private sealed record HostUpdateReplayIdentityDto(long Sequence, string Disposition, string CorrelationId);
-
-    private sealed record HostUpdateReplayFileDto(
-        int Version,
-        long Epoch,
-        string Checksum,
-        Dictionary<string, HostUpdateReplayHighWaterDto> HighWaterByNamespace,
-        Dictionary<string, HostUpdateReplayIdentityDto> Identities);
-
-    public void Dispose() => _gate.Dispose();
 }
-
 public interface IHostUpdatePolicyFence
 {
     Task<bool> TryAdvanceAsync(long revision, string fingerprint, CancellationToken ct);
@@ -513,6 +565,7 @@ public sealed class FileHostUpdatePolicyFence(string rootPath) : IHostUpdatePoli
         string json;
         try
         {
+            HostStateFileSecurity.RejectReparseTarget(_path);
             json = await File.ReadAllTextAsync(_path, ct);
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
@@ -560,6 +613,8 @@ public sealed class FileHostUpdatePolicyFence(string rootPath) : IHostUpdatePoli
                 stream.Flush(true);
             }
 
+            HostStateFileSecurity.RejectReparseTarget(temporary);
+            HostStateFileSecurity.RejectReparseTarget(_path);
             File.Move(temporary, _path, true);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -14,7 +14,8 @@ using System.Text.Json.Serialization;
 #pragma warning disable SA1513 // Adjacent bounded contracts are intentionally grouped.
 #pragma warning disable SA1514 // Adjacent bounded contracts are intentionally grouped.
 #pragma warning disable SA1516 // Adjacent bounded contracts are intentionally grouped.
-#pragma warning disable SA1519 // Closed validation guards remain concise.
+#pragma warning disable SA1519
+#pragma warning disable SA1515 // Closed validation guards remain concise.
 #pragma warning disable S3878 // Span-compatible delimiter arrays avoid ambiguous string.Split overloads.
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -693,19 +694,38 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             IntegrityHash = string.Empty,
         };
         durable = durable with { IntegrityHash = HostUpdateValidation.ComputeJournalIntegrityHash(durable, entries.Count == 0 ? null : entries[^1].IntegrityHash) };
-        await using FileStream stream = new(journalPath, new FileStreamOptions
+        string contents = string.Concat(entries.Select(existing => JsonSerializer.Serialize(existing, HostUpdateValidation.JournalSerializerOptions) + "\n")) +
+            JsonSerializer.Serialize(durable, HostUpdateValidation.JournalSerializerOptions) + "\n";
+        _ = await ReadContentsAsync(contents);
+        string stagedPath = journalPath + ".staged";
+        HostStateFileSecurity.RejectReparseTarget(stagedPath);
+        try
         {
-            Mode = FileMode.OpenOrCreate,
-            Access = FileAccess.Write,
-            Share = FileShare.Read,
-            Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
-        });
-        stream.Seek(0, SeekOrigin.End);
-        await stream.WriteAsync(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(durable, HostUpdateValidation.JournalSerializerOptions) + "\n"), ct);
-        await stream.FlushAsync(ct);
-        stream.Flush(flushToDisk: true);
-    }
+            await using (FileStream stream = new(stagedPath, new FileStreamOptions
+            {
+                Mode = FileMode.Create,
+                Access = FileAccess.Write,
+                Share = FileShare.None,
+                Options = FileOptions.Asynchronous | FileOptions.WriteThrough,
+            }))
+            {
+                await stream.WriteAsync(Encoding.UTF8.GetBytes(contents), ct);
+                await stream.FlushAsync(ct);
+                stream.Flush(flushToDisk: true);
+            }
 
+            _ = await ReadContentsAsync(await File.ReadAllTextAsync(stagedPath, ct));
+            HostStateFileSecurity.RejectReparseTarget(journalPath);
+            File.Move(stagedPath, journalPath, true);
+        }
+        finally
+        {
+            if (File.Exists(stagedPath) && !HostStateFileSecurity.IsReparsePoint(stagedPath))
+            {
+                File.Delete(stagedPath);
+            }
+        }
+    }
     public async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
@@ -727,6 +747,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
 
     private async Task<FileStream> AcquireLeaseAsync(CancellationToken ct)
     {
+        HostStateFileSecurity.RejectReparseTarget(lockPath);
         return await HostUpdateFileLease.AcquireAsync(
             lockPath,
             acquisitionTimeout,
@@ -737,14 +758,23 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
 
     private async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadUnsafeAsync(CancellationToken ct)
     {
+        string stagedPath = journalPath + ".staged";
+        if (File.Exists(stagedPath))
+        {
+            HostStateFileSecurity.RejectReparseTarget(stagedPath);
+            // Atomic replacement is the sole commit point. A surviving staged chain was never
+            // committed and cannot supersede the authoritative validated journal.
+            File.Delete(stagedPath);
+        }
+
         if (!File.Exists(journalPath))
         {
             return [];
         }
 
+        HostStateFileSecurity.RejectReparseTarget(journalPath);
         return await ReadContentsAsync(await File.ReadAllTextAsync(journalPath, ct));
     }
-
     private static Task<IReadOnlyList<HostUpdateJournalEntry>> ReadContentsAsync(string contents)
     {
         if (contents.Length == 0)

@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Services.HostUpdates;
+﻿using System.Text.Json;
+using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.Extensions.Options;
 using Xunit;
 
@@ -6,20 +7,27 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 public sealed class HostStatePersistenceTests
 {
+    private static HostStateOptions OptionsFor(string root) => new()
+    {
+        RootPath = root,
+        WindowsSecurityAttested = OperatingSystem.IsWindows(),
+    };
     [Fact]
     public async Task ReplayAnchor_RequiresProvisioning_AndRejectsRollback()
     {
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
-            HostStatePath paths = new(Options.Create(new HostStateOptions { RootPath = root }));
+            HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using FileHostUpdateReplayAnchor anchor = new(paths);
             await Assert.ThrowsAsync<InvalidDataException>(() => anchor.ReadEpochAsync(CancellationToken.None));
             await anchor.ProvisionAsync(CancellationToken.None);
             Assert.Equal(0, await anchor.ReadEpochAsync(CancellationToken.None));
-            await anchor.AdvanceEpochAsync(1, CancellationToken.None);
+            await anchor.AdvanceEpochAsync(1, FileHash(Path.Combine(root, "host-update-replay.json")), CancellationToken.None);
             Assert.Equal(1, await anchor.ReadEpochAsync(CancellationToken.None));
             File.WriteAllText(Path.Combine(root, "replay-anchor.json"), "{}");
+            Assert.Equal(1, await anchor.ReadEpochAsync(CancellationToken.None));
+            File.AppendAllText(Path.Combine(root, "replay-anchor.journal"), "truncated");
             await Assert.ThrowsAsync<InvalidDataException>(() => anchor.ReadEpochAsync(CancellationToken.None));
         }
         finally
@@ -37,7 +45,7 @@ public sealed class HostStatePersistenceTests
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
-            HostStatePath paths = new(Options.Create(new HostStateOptions { RootPath = root }));
+            HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using FileHostUpdateAutomationPolicyRepository repository = new(paths);
             Assert.False(repository.Read().Policy.Enabled);
             HostUpdatePolicyReadResult applied = await repository.ReplaceAsync(new HostUpdateAutomationPolicy(Enabled: true), 0, CancellationToken.None);
@@ -62,7 +70,7 @@ public sealed class HostStatePersistenceTests
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
-            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, new HostStateOptions { RootPath = root });
+            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, OptionsFor(root));
 
             Assert.True(result.Succeeded);
             Assert.True(Directory.Exists(root));
@@ -83,15 +91,160 @@ public sealed class HostStatePersistenceTests
         File.WriteAllText(file, "not a directory");
         try
         {
-            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, new HostStateOptions { RootPath = file });
+            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, OptionsFor(file));
 
             Assert.False(result.Succeeded);
-            Assert.Contains("unavailable or unwritable", result.FailureMessage);
+            Assert.Contains("security validation failed", result.FailureMessage);
         }
         finally
         {
             File.Delete(file);
         }
+    }
+
+    [Theory]
+    [InlineData("provision-replay-staged")]
+    [InlineData("provision-anchor-journal-committed")]
+    [InlineData("provision-anchor-snapshot-replaced")]
+    [InlineData("provision-replay-committed")]
+    public async Task ReplayProvisioner_recovers_interruption_at_every_boundary(string boundary)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            HostStatePath paths = new(Options.Create(OptionsFor(root)));
+            using (FileHostUpdateReplayAnchor interrupted = new(paths, reached =>
+            {
+                if (reached == boundary)
+                {
+                    throw new InvalidOperationException();
+                }
+            }))
+            {
+                await Assert.ThrowsAsync<InvalidOperationException>(() => interrupted.ProvisionAsync(default));
+            }
+
+            using FileHostUpdateReplayAnchor restarted = new(paths);
+            await restarted.ProvisionAsync(default);
+            Assert.Equal(0, await restarted.ReadEpochAsync(default));
+            Assert.True(File.Exists(Path.Combine(root, "host-update-replay.json")));
+            using FileHostUpdateReplayStore store = new(root, restarted);
+            Assert.Equal(HostUpdateReplayDisposition.Accepted, (await store.DecideAsync(Candidate(), HostUpdateReplayIntent.Admit, default)).Disposition);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData("stage-durable")]
+    [InlineData("anchor-committed")]
+    [InlineData("snapshot-replaced")]
+    public async Task Replay_commit_recovers_forward_after_each_interruption_boundary(string boundary)
+    {
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            HostStatePath paths = new(Options.Create(OptionsFor(root)));
+            using FileHostUpdateReplayAnchor anchor = new(paths);
+            await anchor.ProvisionAsync(default);
+            using (FileHostUpdateReplayStore interrupted = new(root, anchor, reached =>
+            {
+                if (reached == boundary)
+                {
+                    throw new InvalidOperationException();
+                }
+            }))
+            {
+                await Assert.ThrowsAsync<InvalidDataException>(() => interrupted.DecideAsync(Candidate(), HostUpdateReplayIntent.Admit, default));
+            }
+
+            using FileHostUpdateReplayStore restarted = new(root, anchor);
+            HostUpdateReplayDecision decision = await restarted.DecideAsync(Candidate(), HostUpdateReplayIntent.Admit, default);
+            Assert.Equal(HostUpdateReplayDisposition.Accepted, decision.Disposition);
+            Assert.Equal(await anchor.ReadEpochAsync(default), ReadReplayEpoch(root));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void HostStateOptionsValidator_rejects_reparse_component()
+    {
+        string parent = Path.Combine(Path.GetTempPath(), "printfarmer-host-parent-" + Guid.NewGuid().ToString("N"));
+        string target = Path.Combine(Path.GetTempPath(), "printfarmer-host-target-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(parent);
+        Directory.CreateDirectory(target);
+        string link = Path.Combine(parent, "linked");
+        try
+        {
+            try
+            { Directory.CreateSymbolicLink(link, target); }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, OptionsFor(Path.Combine(link, "state")));
+            Assert.False(result.Succeeded);
+            Assert.Contains("reparse", result.FailureMessage, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            if (Directory.Exists(link))
+            {
+                Directory.Delete(link);
+            }
+
+            if (Directory.Exists(parent))
+            {
+                Directory.Delete(parent, true);
+            }
+
+            if (Directory.Exists(target))
+            {
+                Directory.Delete(target, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void HostStateOptionsValidator_rejects_insecure_unix_permissions()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupWrite);
+            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, OptionsFor(root));
+            Assert.False(result.Succeeded);
+            Assert.Contains("permissions", result.FailureMessage, StringComparison.OrdinalIgnoreCase);
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+    }
+
+    private static VerifiedHostUpdateCandidate Candidate() => new("release-1", "commit-1", 1, "sha256:manifest", "stable", true, true, true, true, true, true,
+        new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
+
+    private static string FileHash(string path) => Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path)));
+
+    private static long ReadReplayEpoch(string root)
+    {
+        using JsonDocument document = JsonDocument.Parse(File.ReadAllText(Path.Combine(root, "host-update-replay.json")));
+        return document.RootElement.GetProperty("Epoch").GetInt64();
     }
 
     [Fact]
@@ -100,7 +253,7 @@ public sealed class HostStatePersistenceTests
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
-            HostStatePath paths = new(Options.Create(new HostStateOptions { RootPath = root }));
+            HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using FileHostUpdateAutomationPolicyRepository repository = new(paths);
             File.WriteAllText(paths.Resolve("update-automation-policy.json"), "{\"version\":1,\"policy\":{\"enabled\":true}}");
 

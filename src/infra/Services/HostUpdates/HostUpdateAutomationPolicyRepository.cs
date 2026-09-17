@@ -104,6 +104,8 @@ public sealed class FileHostUpdateAutomationPolicyRepository : IHostUpdateAutoma
                     stream.Flush(true);
                 }
 
+                HostStateFileSecurity.RejectReparseTarget(temp);
+                HostStateFileSecurity.RejectReparseTarget(_path);
                 File.Move(temp, _path, true);
                 return new(true, next, null);
             }
@@ -129,6 +131,7 @@ public sealed class FileHostUpdateAutomationPolicyRepository : IHostUpdateAutoma
             ct.ThrowIfCancellationRequested();
             try
             {
+                HostStateFileSecurity.RejectReparseTarget(_lockPath);
                 return new FileStream(_lockPath, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
             }
             catch (IOException)

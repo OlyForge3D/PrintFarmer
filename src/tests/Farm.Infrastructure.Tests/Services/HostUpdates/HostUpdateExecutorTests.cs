@@ -1,4 +1,4 @@
-#pragma warning disable VSTHRD003
+﻿#pragma warning disable VSTHRD003
 using Farm.Infrastructure.Services.HostUpdates;
 using Xunit;
 
@@ -24,9 +24,10 @@ public sealed class HostUpdateExecutorTests
 
     [Fact] public void Request_requires_exact_unique_six_targets() { var request = Request() with { Targets = Request().Targets.Take(5).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_invalid", error); }
     [Fact] public void Request_rejects_duplicate_service_ids() { var request = Request() with { Targets = Request().Targets.Select((t, i) => i == 5 ? t with { ServiceId = "svc-1" } : t).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_set_invalid", error); }
-    [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)); Assert.Single(journal.Read("r")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("r")); } finally { if (File.Exists(path)) File.Delete(path); } }
+    [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)); Assert.Single(journal.Read("r")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("r")); } finally { if (File.Exists(path)) { File.Delete(path); } } }
     [Fact] public async Task Executor_persists_transition_order_and_completion_async() { var steps = new FakeSteps(); var journal = new MemoryJournal(); var executor = new HostUpdateExecutor(steps, journal, new NoopLock()); var result = await executor.ExecuteAsync(Request()); Assert.True(result.Succeeded); Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls); }
-    [Fact] public async Task Executor_defers_safe_checkpoint_cancellation_until_after_unsafe_apply()
+    [Fact]
+    public async Task Executor_defers_safe_checkpoint_cancellation_until_after_unsafe_apply()
     {
         var steps = new CancellationObservingSteps();
         var executor = new HostUpdateExecutor(steps, new MemoryJournal(), new NoopLock());
@@ -44,7 +45,8 @@ public sealed class HostUpdateExecutorTests
         Assert.DoesNotContain("verify", steps.Calls);
     }
 
-    [Fact] public async Task Executor_restart_in_recovery_remains_recovery_required()
+    [Fact]
+    public async Task Executor_restart_in_recovery_remains_recovery_required()
     {
         var journal = new MemoryJournal();
         var failing = new FailingSteps();
@@ -57,6 +59,68 @@ public sealed class HostUpdateExecutorTests
     }
 
 
+    [Fact]
+    public void File_journal_preserves_complete_history_and_discards_interrupted_stage()
+    {
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal");
+        try
+        {
+            FileHostUpdateExecutionJournal journal = new(path);
+            journal.Append(new("1", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow));
+            journal.Append(new("2", "r", HostUpdateExecutionState.Preflight, "preflight:before", DateTimeOffset.UtcNow));
+            journal.Append(new("3", "r", HostUpdateExecutionState.Preflight, "preflight:after", DateTimeOffset.UtcNow));
+            Assert.Equal(3, journal.Read("r").Count);
+
+            File.WriteAllText(path + ".staged", "{truncated");
+            Assert.Equal(3, new FileHostUpdateExecutionJournal(path).Read("r").Count);
+            Assert.False(File.Exists(path + ".staged"));
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+
+            if (File.Exists(path + ".staged"))
+            {
+                File.Delete(path + ".staged");
+            }
+        }
+    }
+
+    [Theory]
+    [InlineData(HostUpdateExecutionState.Migrating, "migration")]
+    [InlineData(HostUpdateExecutionState.Applying, "apply")]
+    public async Task Real_file_restart_marks_unmatched_unsafe_phase_recovery_without_reinvocation(HostUpdateExecutionState state, string phase)
+    {
+        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal");
+        try
+        {
+            HostUpdateExecutionRequest request = Request();
+            FileHostUpdateExecutionJournal journal = new(path);
+            journal.Append(new("before", request.ReleaseId, state, phase + ":before", DateTimeOffset.UtcNow)
+            {
+                RequestBindingHash = HostUpdateRequestBinding.Compute(request),
+            });
+            FakeSteps steps = new();
+
+            HostUpdateExecutionResult result = await new HostUpdateExecutor(steps, new FileHostUpdateExecutionJournal(path), new NoopLock()).ExecuteAsync(request);
+
+            Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
+            Assert.Equal("unsafe_phase_interrupted", result.FailureCode);
+            Assert.Empty(steps.Calls);
+            HostUpdateExecutionActivity durable = Assert.Single(new FileHostUpdateExecutionJournal(path).Read(request.ReleaseId), activity => activity.State == HostUpdateExecutionState.RecoveryRequired);
+            Assert.Equal("restart_uncertain:" + phase, durable.Phase);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
     private sealed class CancellationObservingSteps : IHostUpdateExecutionSteps
     {
         public List<string> Calls { get; } = [];

@@ -336,7 +336,11 @@ public static class FeatureServicesStartup
             .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.HostUpdates.HostStateOptions>, Farm.Infrastructure.Services.HostUpdates.HostStateOptionsValidator>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostStatePath>();
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor, Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>());
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchorProvisioner>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>());
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore>(sp =>
             new Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayStore(
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Root,

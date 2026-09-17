@@ -1,4 +1,5 @@
-﻿#pragma warning disable VSTHRD003
+﻿#pragma warning disable VSTHRD003, S3398
+using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Settings;
@@ -496,7 +497,7 @@ public sealed class HostUpdateSchedulerTests
         FileHostUpdateReplayStore store = new(root, anchor);
         await store.DecideAsync(Candidate() with { Sequence = 1 }, HostUpdateReplayIntent.Admit, default);
 
-        await File.WriteAllTextAsync(Path.Combine(root, "host-update-replay.json.tmp-leftover"), "garbage");
+        await File.WriteAllTextAsync(Path.Combine(root, "host-update-replay.json.staged"), "garbage");
 
         FileHostUpdateReplayStore restarted = new(root, anchor);
         HostUpdateReplayDecision decision = await restarted.DecideAsync(Candidate() with { Sequence = 2 }, HostUpdateReplayIntent.Admit, default);
@@ -550,6 +551,25 @@ public sealed class HostUpdateSchedulerTests
         await File.WriteAllTextAsync(Path.Combine(root, "host-update-replay.json"), JsonSerializer.Serialize(dto));
     }
 
+    private static string EmptyReplayStateHash()
+    {
+        string checksum = HostUpdateCanonical.Hash(new
+        {
+            Version = 1,
+            Epoch = 0L,
+            HighWater = Array.Empty<object>(),
+            Identities = Array.Empty<object>(),
+        });
+        string json = JsonSerializer.Serialize(new
+        {
+            Version = 1,
+            Epoch = 0L,
+            Checksum = checksum,
+            HighWaterByNamespace = new Dictionary<string, object>(),
+            Identities = new Dictionary<string, object>(),
+        });
+        return Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(Encoding.UTF8.GetBytes(json)));
+    }
     private static VerifiedHostUpdateCandidate Candidate(string channel = UpdateChannelSettings.StableChannel) => new("release-1", "commit-1", 1, "sha256:manifest", channel, true, true, true, true, true, true, new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
 
     private static HostUpdateScheduler Create(HostUpdateSchedulerSettings? settings = null, VerifiedHostUpdateCandidate? candidate = null, FakeExecutor? executor = null, IHostUpdateReplayStore? replay = null) =>
@@ -572,8 +592,10 @@ public sealed class HostUpdateSchedulerTests
     private sealed class InMemoryReplayAnchor : IHostUpdateReplayAnchor
     {
         private long _epoch;
+        private string _stateHash = EmptyReplayStateHash();
         public Task<long> ReadEpochAsync(CancellationToken ct) => Task.FromResult(_epoch);
-        public Task AdvanceEpochAsync(long epoch, CancellationToken ct) { _epoch = epoch; return Task.CompletedTask; }
+        public Task<string> ReadStateHashAsync(CancellationToken ct) => Task.FromResult(_stateHash);
+        public Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct) { _epoch = epoch; _stateHash = stateHash; return Task.CompletedTask; }
     }
 
     private class FakeExecutor : IHostUpdateSchedulerExecutor
