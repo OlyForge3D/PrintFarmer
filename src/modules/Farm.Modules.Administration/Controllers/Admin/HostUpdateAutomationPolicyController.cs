@@ -63,6 +63,11 @@ public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPo
             return Conflict(new { code = result.Error, current = result.Policy });
         }
 
+        if (result.Error == "host_update_policy_invalid")
+        {
+            return BadRequest(new { code = "policy_invalid" });
+        }
+
         if (!result.Available)
         {
             return AvailabilityProblem(result.Error ?? "host_update_policy_unavailable");

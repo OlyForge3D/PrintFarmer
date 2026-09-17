@@ -274,6 +274,14 @@ public sealed class HostStatePersistenceTests
         }
     }
 
+    [Fact]
+    public void HostStateOwnerValidation_UsesArchitectureSpecificStatxSyscallNumbers()
+    {
+        Assert.Equal(332, HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.X64));
+        Assert.Equal(397, HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.Arm64));
+        Assert.Throws<PlatformNotSupportedException>(() => HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.X86));
+    }
+
     private static VerifiedHostUpdateCandidate Candidate() => new("release-1", "commit-1", 1, "sha256:manifest", "stable", true, true, true, true, true, true,
         new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
 

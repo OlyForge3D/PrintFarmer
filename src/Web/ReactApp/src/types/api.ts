@@ -4257,6 +4257,7 @@ export interface SystemInfo {
   disk: SystemDiskInfo;
   services: SystemServiceInfo[];
   database: SystemDatabaseInfo;
+  updateScheduling?: UpdateSchedulingStatus | null;
 }
 
 // ============ Dispatch History Types ============
@@ -5078,7 +5079,6 @@ export interface ServiceInventory {
   eligibility: InventoryEligibility;
   eligibilityReasons: string[];
   readiness: ReleaseReadiness | null;
-  updateScheduling?: UpdateSchedulingStatus | null;
   snapshotOrigin: InventorySnapshotOrigin;
   snapshotSource: string | null;
   snapshotExportedAt: string | null;

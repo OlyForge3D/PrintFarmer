@@ -78,6 +78,84 @@ public sealed class HostUpdateManualAuthorizationTests
     }
 
     [Fact]
+    public async Task AuthorizeCurrentAsync_ExpiredAuthorizationCanBeReauthorizedForSameCandidate()
+    {
+        ResolverHarness harness = new(ttl: TimeSpan.FromSeconds(1));
+        HostUpdateManualAuthorizationResponse expired = await harness.Resolver.AuthorizeCurrentAsync(new(), default);
+        harness.Clock.UtcNow = harness.Clock.UtcNow.AddSeconds(2);
+        HostUpdateExecutionResolutionResult expiredResult = await harness.Resolver.ResolveManualAsync(new(expired.AuthorizationId), default);
+
+        HostUpdateManualAuthorizationResponse fresh = await harness.Resolver.AuthorizeCurrentAsync(new(), default);
+        HostUpdateExecutionResolutionResult freshResult = await harness.Resolver.ResolveManualAsync(new(fresh.AuthorizationId), default);
+
+        Assert.False(expiredResult.Succeeded);
+        Assert.Equal("authorization_expired", expiredResult.Error);
+        Assert.True(freshResult.Succeeded, freshResult.Error);
+        Assert.NotEqual(expired.AuthorizationId, fresh.AuthorizationId);
+    }
+
+    [Fact]
+    public async Task AuthorizeCurrentAsync_LostResponseCanBeRetriedWithoutReplayBurn()
+    {
+        ResolverHarness harness = new();
+        HostUpdateManualAuthorizationResponse abandoned = await harness.Resolver.AuthorizeCurrentAsync(new(), default);
+
+        HostUpdateManualAuthorizationResponse replacement = await harness.Resolver.AuthorizeCurrentAsync(new(), default);
+        HostUpdateExecutionResolutionResult result = await harness.Resolver.ResolveManualAsync(new(replacement.AuthorizationId), default);
+
+        Assert.True(result.Succeeded, result.Error);
+        Assert.NotEqual(abandoned.AuthorizationId, replacement.AuthorizationId);
+    }
+
+    [Fact]
+    public async Task ResolveManualAsync_PreparedAuthorizationWithoutReplayAdmissionAllowsReauthorization()
+    {
+        ResolverHarness harness = new();
+        HostUpdateManualAuthorizationResponse abandoned = await harness.Resolver.AuthorizeCurrentAsync(new(), default);
+        HostUpdateReplayDecision reserve = await harness.Replay.DecideAsync(harness.Candidate, HostUpdateReplayIntent.Reserve, default);
+        HostUpdateAuthorizationConsumeResult prepared = await harness.AuthorizationStore.PrepareConsumeAsync(
+            abandoned.AuthorizationId,
+            harness.Candidate,
+            harness.Settings.Current,
+            reserve,
+            harness.Clock.UtcNow,
+            default);
+
+        HostUpdateManualAuthorizationResponse replacement = await harness.Resolver.AuthorizeCurrentAsync(new(), default);
+        HostUpdateExecutionResolutionResult result = await harness.Resolver.ResolveManualAsync(new(replacement.AuthorizationId), default);
+
+        Assert.True(prepared.Succeeded, prepared.Error);
+        Assert.True(result.Succeeded, result.Error);
+        Assert.NotEqual(abandoned.AuthorizationId, replacement.AuthorizationId);
+    }
+
+    [Fact]
+    public async Task ResolveManualAsync_ReplaysAuthorizationPreparedBeforeCrashAfterReplayAdmission()
+    {
+        ResolverHarness harness = new();
+        HostUpdateManualAuthorizationResponse authorization = await harness.Resolver.AuthorizeCurrentAsync(new(), default);
+        HostUpdateReplayDecision reserve = await harness.Replay.DecideAsync(harness.Candidate, HostUpdateReplayIntent.Reserve, default);
+        HostUpdateAuthorizationConsumeResult prepared = await harness.AuthorizationStore.PrepareConsumeAsync(
+            authorization.AuthorizationId,
+            harness.Candidate,
+            harness.Settings.Current,
+            reserve,
+            harness.Clock.UtcNow,
+            default);
+        HostUpdateReplayDecision admitted = await harness.Replay.DecideAsync(harness.Candidate, HostUpdateReplayIntent.Admit, default);
+        HostUpdateExecutionRequestResolver restarted = harness.CreateResolver();
+
+        HostUpdateExecutionResolutionResult result = await restarted.ResolveManualAsync(new(authorization.AuthorizationId), default);
+        HostUpdateExecutionResolutionResult duplicate = await restarted.ResolveManualAsync(new(authorization.AuthorizationId), default);
+
+        Assert.True(prepared.Succeeded, prepared.Error);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, admitted.Disposition);
+        Assert.True(result.Succeeded, result.Error);
+        Assert.False(duplicate.Succeeded);
+        Assert.Equal("authorization_consumed", duplicate.Error);
+    }
+
+    [Fact]
     public async Task ResolveManualAsync_RejectsStaleCacheLastKnownGood()
     {
         ResolverHarness harness = new();
@@ -147,8 +225,11 @@ public sealed class HostUpdateManualAuthorizationTests
             AuthorizationStore = new FileHostUpdateManualAuthorizationStore(root, ttl);
             Replay = new MemoryReplayStore();
             Cache = new MutableCache(Candidate);
-            Resolver = new HostUpdateExecutionRequestResolver(Settings, Cache, Replay, new MemoryManifestBindingStore(), AuthorizationStore, fence ?? new InactiveHostUpdateAdmissionFence(), Clock);
+            Fence = fence ?? new InactiveHostUpdateAdmissionFence();
+            Resolver = CreateResolver();
         }
+
+        public HostUpdateExecutionRequestResolver CreateResolver() => new(Settings, Cache, Replay, new MemoryManifestBindingStore(), AuthorizationStore, Fence, Clock);
 
         public VerifiedHostUpdateCandidate Candidate { get; } = new(
             "release-1",
@@ -176,6 +257,7 @@ public sealed class HostUpdateManualAuthorizationTests
         public FileHostUpdateManualAuthorizationStore AuthorizationStore { get; }
         public MemoryReplayStore Replay { get; }
         public MutableCache Cache { get; }
+        public IHostUpdateAdmissionFence Fence { get; }
         public HostUpdateExecutionRequestResolver Resolver { get; }
     }
 
@@ -236,6 +318,11 @@ public sealed class HostUpdateManualAuthorizationTests
             {
                 _identities[candidate.Identity] = (HostUpdateReplayDisposition.Rejected, correlationId);
                 return Task.FromResult(new HostUpdateReplayDecision(HostUpdateReplayDisposition.Rejected, correlationId, false));
+            }
+
+            if (intent == HostUpdateReplayIntent.Reserve)
+            {
+                return Task.FromResult(new HostUpdateReplayDecision(HostUpdateReplayDisposition.Accepted, correlationId, false));
             }
 
             HostUpdateReplayDisposition disposition = intent == HostUpdateReplayIntent.Admit ? HostUpdateReplayDisposition.Accepted : HostUpdateReplayDisposition.Rejected;

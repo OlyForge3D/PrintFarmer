@@ -113,12 +113,8 @@ public static class HostStateFileSecurity
 
             try
             {
-                NativeMethods.LinuxStat stat = default;
-                if (OperatingSystem.IsLinux() && NativeMethods.Stat(root, out stat) != 0)
-                {
-                    throw new IOException("host_state_owner_stat_failed");
-                }
-                else if (OperatingSystem.IsLinux() && stat.UserId != NativeMethods.GetEffectiveUserId())
+                uint owner = NativeMethods.GetLinuxOwnerUserId(root);
+                if (owner != NativeMethods.GetEffectiveUserId())
                 {
                     throw new SecurityException("host_state_owner_mismatch");
                 }
@@ -185,37 +181,91 @@ public static class HostStateFileSecurity
         }
     }
 
-    private static class NativeMethods
+    internal static class NativeMethods
     {
+        private const int AtFdcwd = -100;
+        private const uint StatxBasicStats = 0x7ff;
+        private const long SysStatxX64 = 332;
+        private const long SysStatxArm64 = 397;
+
         [StructLayout(LayoutKind.Sequential)]
-        internal struct LinuxStat
+        internal struct LinuxStatx
         {
-            internal ulong Device;
-            internal ulong Inode;
-            internal ulong HardLinks;
-            internal uint Mode;
+            internal uint Mask;
+            internal uint BlockSize;
+            internal ulong Attributes;
+            internal uint HardLinks;
             internal uint UserId;
             internal uint GroupId;
-            internal int Padding;
-            internal ulong RDevice;
-            internal long Size;
-            internal long BlockSize;
-            internal long Blocks;
-            internal long AccessTime;
-            internal long AccessTimeNanoseconds;
-            internal long ModificationTime;
-            internal long ModificationTimeNanoseconds;
-            internal long ChangeTime;
-            internal long ChangeTimeNanoseconds;
-            internal long Reserved1;
-            internal long Reserved2;
-            internal long Reserved3;
+            internal ushort Mode;
+            internal ushort Padding0;
+            internal ulong Inode;
+            internal ulong Size;
+            internal ulong Blocks;
+            internal ulong AttributesMask;
+            internal StatxTimestamp AccessTime;
+            internal StatxTimestamp BirthTime;
+            internal StatxTimestamp ChangeTime;
+            internal StatxTimestamp ModificationTime;
+            internal uint RdevMajor;
+            internal uint RdevMinor;
+            internal uint DevMajor;
+            internal uint DevMinor;
+            internal ulong MountId;
+            internal uint DirectIoMemAlign;
+            internal uint DirectIoOffsetAlign;
+            internal ulong Spare0;
+            internal ulong Spare1;
+            internal ulong Spare2;
+            internal ulong Spare3;
+            internal ulong Spare4;
+            internal ulong Spare5;
+            internal ulong Spare6;
+            internal ulong Spare7;
+            internal ulong Spare8;
+            internal ulong Spare9;
+            internal ulong Spare10;
+            internal ulong Spare11;
         }
+
+        [StructLayout(LayoutKind.Sequential)]
+        internal struct StatxTimestamp
+        {
+            internal long Seconds;
+            internal uint Nanoseconds;
+            internal int Reserved;
+        }
+
+        internal static uint GetLinuxOwnerUserId(string path)
+        {
+            if (!OperatingSystem.IsLinux())
+            {
+                throw new PlatformNotSupportedException("host_state_owner_validation_unavailable");
+            }
+
+            long syscallNumber = StatxSyscallNumberForArchitecture(RuntimeInformation.ProcessArchitecture);
+
+            LinuxStatx stat = default;
+            long result = Syscall(syscallNumber, AtFdcwd, path, 0, StatxBasicStats, ref stat);
+            if (result != 0 || (stat.Mask & StatxBasicStats) == 0)
+            {
+                throw new IOException("host_state_owner_stat_failed");
+            }
+
+            return stat.UserId;
+        }
+
+        internal static long StatxSyscallNumberForArchitecture(Architecture architecture) => architecture switch
+        {
+            Architecture.X64 => SysStatxX64,
+            Architecture.Arm64 => SysStatxArm64,
+            _ => throw new PlatformNotSupportedException("host_state_owner_validation_unavailable"),
+        };
 
         [DllImport("libc", EntryPoint = "geteuid")]
         internal static extern uint GetEffectiveUserId();
 
-        [DllImport("libc", EntryPoint = "stat", SetLastError = true)]
-        internal static extern int Stat([MarshalAs(UnmanagedType.LPUTF8Str)] string path, out LinuxStat stat);
+        [DllImport("libc", EntryPoint = "syscall", SetLastError = true)]
+        private static extern long Syscall(long number, int dirfd, [MarshalAs(UnmanagedType.LPUTF8Str)] string path, int flags, uint mask, ref LinuxStatx stat);
     }
 }

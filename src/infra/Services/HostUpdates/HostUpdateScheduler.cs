@@ -18,6 +18,9 @@ public enum HostUpdateSchedulerReason
     KillSwitch,
     NoCandidate,
     CandidateInvalid,
+    CandidateEvidenceStale,
+    CandidateNotEligible,
+    PolicyUnavailable,
     ChannelMismatch,
     InsiderAcknowledgementRequired,
     MaintenanceWindowClosed,
@@ -215,7 +218,8 @@ public enum HostUpdateReplayDisposition
 public enum HostUpdateReplayIntent
 {
     Admit,
-    Reject
+    Reject,
+    Reserve
 }
 
 public sealed record HostUpdateReplayDecision(HostUpdateReplayDisposition Disposition, string CorrelationId, bool Reused);
@@ -281,8 +285,13 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
                 return await PersistRejectionAsync(state, candidate, anchorEpoch, ct);
             }
 
-            HostUpdateReplayDisposition disposition = intent == HostUpdateReplayIntent.Admit ? HostUpdateReplayDisposition.Accepted : HostUpdateReplayDisposition.Rejected;
             string correlationId = "decision:" + candidate.Identity;
+            if (intent == HostUpdateReplayIntent.Reserve)
+            {
+                return new(HostUpdateReplayDisposition.Accepted, correlationId, false);
+            }
+
+            HostUpdateReplayDisposition disposition = intent == HostUpdateReplayIntent.Admit ? HostUpdateReplayDisposition.Accepted : HostUpdateReplayDisposition.Rejected;
             if (highWater is not null && candidate.Sequence > highWater.Sequence &&
                 state.Identities.TryGetValue(highWater.Identity, out HostUpdateReplayIdentityRecord? previous) &&
                 previous.Disposition == HostUpdateReplayDisposition.Accepted)
@@ -675,12 +684,22 @@ public sealed class HostUpdateScheduler(
     private readonly IHostUpdateAdmissionFence _admissionFence = admissionFence ?? new InactiveHostUpdateAdmissionFence();
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private HostUpdateSchedulerStatus _status = new(false, false, false, UpdateChannelSettings.StableChannel, 0, null, null, 0, HostUpdateSchedulerReason.Disabled);
+    private readonly object _cancellationGate = new();
     private string? _activeRequestId;
-    private string? _signaledRequestId;
+    private bool _activeRequestSignaled;
 
     public HostUpdateSchedulerStatus Status => _status;
 
-    public string? ActiveRequestId => Volatile.Read(ref _activeRequestId);
+    public string? ActiveRequestId
+    {
+        get
+        {
+            lock (_cancellationGate)
+            {
+                return _activeRequestId;
+            }
+        }
+    }
 
     public async Task<HostUpdateSchedulerStatus> TickAsync(CancellationToken ct = default)
     {
@@ -706,6 +725,15 @@ public sealed class HostUpdateScheduler(
             if (_status.NextPollAt is DateTimeOffset nextPollAt && now < nextPollAt)
             {
                 return _status with { Reason = HostUpdateSchedulerReason.TooEarly };
+            }
+
+            if (settings is IHostUpdatePolicyBackedSchedulerSettings policyBackedSettings)
+            {
+                HostUpdatePolicyReadResult policyResult = policyBackedSettings.ReadPolicy();
+                if (!policyResult.Available)
+                {
+                    return _status with { Reason = HostUpdateSchedulerReason.PolicyUnavailable };
+                }
             }
 
             HostUpdateSchedulerSettings current = settings.Current;
@@ -747,7 +775,7 @@ public sealed class HostUpdateScheduler(
 
             if (cache.LastError is not null)
             {
-                return Backoff(HostUpdateSchedulerReason.CandidateInvalid, "cache_error");
+                return Backoff(HostUpdateSchedulerReason.CandidateEvidenceStale, "cache_error");
             }
 
             VerifiedHostUpdateCandidate? candidate = cache.Current;
@@ -794,6 +822,15 @@ public sealed class HostUpdateScheduler(
                 return Backoff(reason, candidate.Identity);
             }
 
+            if (settings is IHostUpdatePolicyBackedSchedulerSettings freshPolicyBackedSettings)
+            {
+                HostUpdatePolicyReadResult freshPolicyResult = freshPolicyBackedSettings.ReadPolicy();
+                if (!freshPolicyResult.Available)
+                {
+                    return Backoff(HostUpdateSchedulerReason.PolicyUnavailable, candidate.Identity);
+                }
+            }
+
             HostUpdateSchedulerSettings fresh = settings.Current;
             VerifiedHostUpdateCandidate? freshCandidate = cache.Current;
 
@@ -832,8 +869,11 @@ public sealed class HostUpdateScheduler(
                 fresh.Fingerprint,
                 candidate.PlatformDigests);
 
-            Interlocked.Exchange(ref _signaledRequestId, null);
-            Interlocked.Exchange(ref _activeRequestId, request.RequestId);
+            lock (_cancellationGate)
+            {
+                _activeRequestId = request.RequestId;
+                _activeRequestSignaled = false;
+            }
             try
             {
                 HostUpdateExecutorResponse response = await executor.ExecuteAsync(request, ct);
@@ -852,7 +892,14 @@ public sealed class HostUpdateScheduler(
             }
             finally
             {
-                Interlocked.Exchange(ref _activeRequestId, null);
+                lock (_cancellationGate)
+                {
+                    if (string.Equals(_activeRequestId, request.RequestId, StringComparison.Ordinal))
+                    {
+                        _activeRequestId = null;
+                        _activeRequestSignaled = false;
+                    }
+                }
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -867,15 +914,16 @@ public sealed class HostUpdateScheduler(
 
     public Task SignalSafeCheckpointCancellationAsync(CancellationToken ct = default)
     {
-        string? requestId = Volatile.Read(ref _activeRequestId);
-        if (requestId is null)
+        string? requestId;
+        lock (_cancellationGate)
         {
-            return Task.CompletedTask;
-        }
+            if (_activeRequestId is null || _activeRequestSignaled)
+            {
+                return Task.CompletedTask;
+            }
 
-        if (Interlocked.CompareExchange(ref _signaledRequestId, requestId, null) is not null)
-        {
-            return Task.CompletedTask;
+            requestId = _activeRequestId;
+            _activeRequestSignaled = true;
         }
 
         return executor.SignalSafeCheckpointCancellationAsync(requestId, ct);
@@ -886,15 +934,13 @@ public sealed class HostUpdateScheduler(
     private static bool ShouldPersistTerminalRejection(VerifiedHostUpdateCandidate candidate, HostUpdateSchedulerReason reason) =>
         candidate.CryptographicallyVerified && reason is
             HostUpdateSchedulerReason.CandidateInvalid or
-            HostUpdateSchedulerReason.ChannelMismatch or
-            HostUpdateSchedulerReason.InsiderAcknowledgementRequired or
-            HostUpdateSchedulerReason.CompatibilityNotReady;
+            HostUpdateSchedulerReason.ChannelMismatch;
 
     private HostUpdateSchedulerReason? Gate(VerifiedHostUpdateCandidate candidate, HostUpdateSchedulerSettings current, DateTimeOffset now)
     {
         if (!candidate.IsWithinFreshnessWindow(now) || !string.IsNullOrWhiteSpace(cache.LastError))
         {
-            return HostUpdateSchedulerReason.CandidateInvalid;
+            return HostUpdateSchedulerReason.CandidateEvidenceStale;
         }
 
         if (candidate.Channel != current.Channel)
@@ -932,7 +978,12 @@ public sealed class HostUpdateScheduler(
             return HostUpdateSchedulerReason.SafetyCheckFailed;
         }
 
-        if (!candidate.IsNewer || !candidate.IsEligible)
+        if (!candidate.IsNewer)
+        {
+            return HostUpdateSchedulerReason.CandidateNotEligible;
+        }
+
+        if (!candidate.IsEligible)
         {
             return HostUpdateSchedulerReason.CandidateInvalid;
         }

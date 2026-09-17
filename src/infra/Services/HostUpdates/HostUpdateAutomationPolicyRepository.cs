@@ -212,17 +212,26 @@ public sealed class FileHostUpdateAutomationPolicyRepository : IHostUpdateAutoma
     public void Dispose() => _gate.Dispose();
 }
 
-public sealed class HostStateHostUpdateSchedulerSettings(IHostUpdateAutomationPolicyRepository repository) : IHostUpdateSchedulerSettings
+public interface IHostUpdatePolicyBackedSchedulerSettings
+{
+    HostUpdatePolicyReadResult ReadPolicy();
+}
+
+public sealed class HostStateHostUpdateSchedulerSettings(IHostUpdateAutomationPolicyRepository repository) : IHostUpdateSchedulerSettings, IHostUpdatePolicyBackedSchedulerSettings
 {
     public HostUpdateSchedulerSettings Current
     {
         get
         {
-            HostUpdatePolicyReadResult result = repository.Read();
-            HostUpdateAutomationPolicy p = result.Policy;
-            return new(p.Enabled, p.KillSwitch, p.Channel, p.InsiderAcknowledged, p.Revision, p.PollIntervalSeconds, p.InsiderPollIntervalSeconds, p.MaintenanceWindowStartHour, p.MaintenanceWindowEndHour);
+            HostUpdatePolicyReadResult result = ReadPolicy();
+            return result.Available ? ToSchedulerSettings(result.Policy) : new HostUpdateSchedulerSettings();
         }
     }
+
+    public HostUpdatePolicyReadResult ReadPolicy() => repository.Read();
+
+    public static HostUpdateSchedulerSettings ToSchedulerSettings(HostUpdateAutomationPolicy p) =>
+        new(p.Enabled, p.KillSwitch, p.Channel, p.InsiderAcknowledged, p.Revision, p.PollIntervalSeconds, p.InsiderPollIntervalSeconds, p.MaintenanceWindowStartHour, p.MaintenanceWindowEndHour);
 }
 
 public sealed class StaticHostUpdateSchedulerSettings(HostUpdateSchedulerSettings current) : IHostUpdateSchedulerSettings

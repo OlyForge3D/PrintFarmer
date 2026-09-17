@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
@@ -76,8 +76,38 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
         }
 
         string json = JsonSerializer.Serialize(new ManifestBinding(releaseId, manifestDigest));
-        await _repository.SetAsync(key, json, cancellationToken);
-        await _repository.SaveChangesAsync(cancellationToken);
+        if (await _repository.TryCreateAsync(key, json, cancellationToken).ConfigureAwait(false))
+        {
+            return;
+        }
+
+        AppSettingsEntity? raced = await _repository.GetReadOnlyAsync(key, cancellationToken).ConfigureAwait(false);
+        if (raced is null)
+        {
+            throw new InvalidDataException($"Manifest binding race for release '{releaseId}' could not be resolved.");
+        }
+
+        ManifestBinding? racedBinding;
+        try
+        {
+            racedBinding = JsonSerializer.Deserialize<ManifestBinding>(raced.SettingsJson);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                $"Persisted manifest binding for release '{releaseId}' is invalid.",
+                ex);
+        }
+
+        if (racedBinding is null || racedBinding.ReleaseId != releaseId || string.IsNullOrWhiteSpace(racedBinding.ManifestDigest))
+        {
+            throw new InvalidDataException($"Persisted manifest binding for release '{releaseId}' is invalid.");
+        }
+
+        if (racedBinding.ManifestDigest != manifestDigest)
+        {
+            throw new InvalidDataException($"Manifest digest conflict for immutable release '{releaseId}'.");
+        }
     }
 
     private sealed record ManifestBinding(string ReleaseId, string ManifestDigest);

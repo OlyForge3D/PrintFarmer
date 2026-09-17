@@ -4,11 +4,12 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { inventory } from '@/test/features/system/serviceInventoryFixture';
 import { UpdateChannelSaveRejectedError } from '@/features/admin/utils/updateChannelSaveErrors';
-import type { ServiceInventory, UpdateChannelSettings } from '@/types/api';
+import type { ServiceInventory, SystemInfo, UpdateChannelSettings, UpdateSchedulingStatus } from '@/types/api';
 
 
 interface InstallerPagePropsSnapshot {
   inventory: ServiceInventory | null | undefined;
+  updateScheduling?: UpdateSchedulingStatus | null;
   observation: 'connected' | 'unknown';
   updateChannelSettings?: UpdateChannelSettings;
   updateChannelIsLoading?: boolean;
@@ -59,6 +60,7 @@ vi.mock('@/features/admin/components/InstallerUpdatesExperience', () => ({
         data-update-channel-loading={props.updateChannelIsLoading ? 'true' : 'false'}
         data-update-channel-error={props.updateChannelIsError ? 'true' : 'false'}
         data-update-channel={props.updateChannelSettings?.channel ?? ''}
+        data-scheduler-state={props.updateScheduling?.backoff.state ?? ''}
       >
         {props.observation === 'unknown' && (
           <div role="status" aria-live="polite" aria-label="Connection observation unknown">
@@ -70,6 +72,35 @@ vi.mock('@/features/admin/components/InstallerUpdatesExperience', () => ({
   },
 }));
 
+
+
+const updateScheduling: UpdateSchedulingStatus = {
+  configuredEnabled: true,
+  effectiveEnabled: false,
+  selectedChannel: 'stable',
+  effectiveChannel: null,
+  policyRevision: 7,
+  lastAttemptAt: null,
+  nextAttemptAt: null,
+  backoff: { state: 'Due', consecutiveFailures: 1, until: null, reasons: ['policy_unavailable'] },
+  killSwitch: { enabled: false, reason: null },
+  executor: { state: 'Unavailable', reason: 'automatic_scheduler_executor_not_provisioned' },
+  reasons: ['policy_unavailable'],
+};
+
+function systemInfo(overrides: Partial<SystemInfo> = {}): SystemInfo {
+  return {
+    inventory: inventory(),
+    updateScheduling,
+    app: { version: '1.0.0', uptime: '1s', hostname: 'host' },
+    cpu: { cores: 1, usagePercent: 0 },
+    memory: { usedBytes: 1, totalBytes: 2 },
+    disk: { usedBytes: 1, totalBytes: 2, archiveBytes: 0, databaseBytes: 0 },
+    services: [],
+    database: { migrationHeads: [], engine: 'sqlite', version: '3', printerCount: 0, archiveCount: 0 },
+    ...overrides,
+  };
+}
 
 const stableSettings: UpdateChannelSettings = { channel: 'stable', insiderAcknowledged: false };
 const insiderSettings: UpdateChannelSettings = { channel: 'insider', insiderAcknowledged: true };
@@ -91,9 +122,20 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
     vi.clearAllMocks();
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: true });
     onlineManager.setOnline(true);
-    setGetSystemInfoImpl(() => Promise.resolve({ inventory: inventory() }));
+    setGetSystemInfoImpl(() => Promise.resolve(systemInfo()));
     setGetUpdateChannelSettingsImpl(() => Promise.resolve(stableSettings));
     setUpdateUpdateChannelSettingsImpl(() => Promise.resolve(undefined));
+  });
+
+
+  it('passes SystemInfo-owned updateScheduling from the full system info fixture', async () => {
+    setGetSystemInfoImpl(() => Promise.resolve(systemInfo({ updateScheduling })));
+
+    await renderPage();
+    await screen.findByTestId('installer-updates');
+
+    expect(installerPropsRef.current?.updateScheduling).toEqual(updateScheduling);
+    expect(screen.getByTestId('installer-updates')).toHaveAttribute('data-scheduler-state', 'Due');
   });
 
   it('makes exactly one explicit request for one online event', async () => {
@@ -131,11 +173,11 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
   it('keeps a failed reconciliation unknown and allows a successful retry', async () => {
     {
       const responses = [
-        () => Promise.resolve({ inventory: inventory() }),
+        () => Promise.resolve(systemInfo()),
         () => Promise.reject(new Error('network unavailable')),
-        () => Promise.resolve({ inventory: inventory() }),
+        () => Promise.resolve(systemInfo()),
       ];
-      setGetSystemInfoImpl(() => responses.shift()?.() ?? Promise.resolve({ inventory: inventory() }));
+      setGetSystemInfoImpl(() => responses.shift()?.() ?? Promise.resolve(systemInfo()));
     }
     await renderPage();
     await screen.findByTestId('installer-updates');
@@ -151,12 +193,12 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
     let completeReconnect: (() => void) | undefined;
     {
       const responses = [
-        () => Promise.resolve({ inventory: inventory() }),
+        () => Promise.resolve(systemInfo()),
         () => new Promise((resolve) => {
-          completeReconnect = () => resolve({ inventory: inventory() });
+          completeReconnect = () => resolve(systemInfo());
         }),
       ];
-      setGetSystemInfoImpl(() => responses.shift()?.() ?? Promise.resolve({ inventory: inventory() }));
+      setGetSystemInfoImpl(() => responses.shift()?.() ?? Promise.resolve(systemInfo()));
     }
     await renderPage();
     await screen.findByTestId('installer-updates');

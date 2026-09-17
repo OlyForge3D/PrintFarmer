@@ -31,7 +31,7 @@ public sealed class HostUpdateFoundationTests
             Assert.Equal(3, (await journal.ReadAsync(default)).Count);
             await File.WriteAllTextAsync(Path.Combine(directory, "host-update.journal.jsonl.staged"), "{truncated");
             Assert.Equal(3, (await new FileHostUpdateJournal(directory).ReadAsync(default)).Count);
-            Assert.False(File.Exists(Path.Combine(directory, "host-update.journal.jsonl.staged")));
+            Assert.True(File.Exists(Path.Combine(directory, "host-update.journal.jsonl.staged")));
         }
         finally
         {
@@ -454,6 +454,33 @@ public sealed class HostUpdateFoundationTests
                 await Assert.ThrowsAsync<IOException>(() => journal.ReadAsync(default));
                 Assert.True(stopwatch.Elapsed >= timeout);
             }
+        }
+        finally
+        {
+            if (Directory.Exists(directory))
+            {
+                Directory.Delete(directory, true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task FileHostUpdateJournal_ReadDoesNotDeleteConcurrentStagedAppend()
+    {
+        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+        try
+        {
+            Directory.CreateDirectory(directory);
+            FileHostUpdateJournal journal = new(directory);
+            HostUpdateFoundation sut = CreateSut(journal: journal);
+            await sut.PlanAsync(Request(), default);
+            string stagedPath = Path.Combine(directory, "host-update.journal.jsonl.staged");
+            await File.WriteAllTextAsync(stagedPath, "writer-owned-stage");
+
+            IReadOnlyList<HostUpdateJournalEntry> entries = await journal.ReadAsync(default);
+
+            Assert.NotEmpty(entries);
+            Assert.True(File.Exists(stagedPath));
         }
         finally
         {

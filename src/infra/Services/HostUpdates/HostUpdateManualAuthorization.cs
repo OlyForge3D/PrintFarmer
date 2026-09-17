@@ -53,6 +53,7 @@ public sealed record HostUpdateManualAuthorizationRecord(
     string PolicyFingerprint,
     DateTimeOffset CreatedAt,
     DateTimeOffset ExpiresAt,
+    DateTimeOffset? ExecutionAdmissionStartedAt,
     DateTimeOffset? ConsumedAt,
     string BindingHash);
 
@@ -82,7 +83,15 @@ public interface IHostUpdateManualAuthorizationStore
         DateTimeOffset now,
         CancellationToken ct);
 
-    Task<HostUpdateAuthorizationConsumeResult> ConsumeAsync(
+    Task<HostUpdateAuthorizationConsumeResult> PrepareConsumeAsync(
+        string authorizationId,
+        VerifiedHostUpdateCandidate candidate,
+        HostUpdateSchedulerSettings policy,
+        HostUpdateReplayDecision replayDecision,
+        DateTimeOffset now,
+        CancellationToken ct);
+
+    Task<HostUpdateAuthorizationConsumeResult> CompleteConsumeAsync(
         string authorizationId,
         VerifiedHostUpdateCandidate candidate,
         HostUpdateSchedulerSettings policy,
@@ -147,12 +156,43 @@ public sealed class FileHostUpdateManualAuthorizationStore(string rootPath, Time
         }
     }
 
-    public async Task<HostUpdateAuthorizationConsumeResult> ConsumeAsync(
+    public Task<HostUpdateAuthorizationConsumeResult> PrepareConsumeAsync(
         string authorizationId,
         VerifiedHostUpdateCandidate candidate,
         HostUpdateSchedulerSettings policy,
         HostUpdateReplayDecision replayDecision,
         DateTimeOffset now,
+        CancellationToken ct) => UpdateConsumptionAsync(
+            authorizationId,
+            candidate,
+            policy,
+            replayDecision,
+            now,
+            record => record.ExecutionAdmissionStartedAt is null ? record with { ExecutionAdmissionStartedAt = now } : record,
+            ct);
+
+    public Task<HostUpdateAuthorizationConsumeResult> CompleteConsumeAsync(
+        string authorizationId,
+        VerifiedHostUpdateCandidate candidate,
+        HostUpdateSchedulerSettings policy,
+        HostUpdateReplayDecision replayDecision,
+        DateTimeOffset now,
+        CancellationToken ct) => UpdateConsumptionAsync(
+            authorizationId,
+            candidate,
+            policy,
+            replayDecision,
+            now,
+            record => record with { ExecutionAdmissionStartedAt = record.ExecutionAdmissionStartedAt ?? now, ConsumedAt = now },
+            ct);
+
+    private async Task<HostUpdateAuthorizationConsumeResult> UpdateConsumptionAsync(
+        string authorizationId,
+        VerifiedHostUpdateCandidate candidate,
+        HostUpdateSchedulerSettings policy,
+        HostUpdateReplayDecision replayDecision,
+        DateTimeOffset now,
+        Func<HostUpdateManualAuthorizationRecord, HostUpdateManualAuthorizationRecord> update,
         CancellationToken ct)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(authorizationId);
@@ -173,10 +213,10 @@ public sealed class FileHostUpdateManualAuthorizationStore(string rootPath, Time
                 return HostUpdateAuthorizationConsumeResult.Fail(rejection);
             }
 
-            HostUpdateManualAuthorizationRecord consumed = record with { ConsumedAt = now };
-            state.Authorizations[authorizationId] = consumed;
+            HostUpdateManualAuthorizationRecord updated = update(record);
+            state.Authorizations[authorizationId] = updated;
             await SaveAsync(state, ct);
-            return HostUpdateAuthorizationConsumeResult.Ok(consumed);
+            return HostUpdateAuthorizationConsumeResult.Ok(updated);
         }
         finally
         {
@@ -227,6 +267,7 @@ public sealed class FileHostUpdateManualAuthorizationStore(string rootPath, Time
             policy.Fingerprint,
             now,
             now + _ttl,
+            consumedAt,
             consumedAt,
             string.Empty);
         return unsigned with { BindingHash = ComputeBindingHash(unsigned) };
@@ -421,7 +462,7 @@ public sealed class HostUpdateExecutionRequestResolver(
         HostUpdateReplayDecision replay;
         try
         {
-            replay = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Admit, ct).ConfigureAwait(false);
+            replay = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Reserve, ct).ConfigureAwait(false);
         }
         catch (InvalidDataException ex)
         {
@@ -465,10 +506,11 @@ public sealed class HostUpdateExecutionRequestResolver(
             return HostUpdateExecutionResolutionResult.Fail("manifest_binding_conflict");
         }
 
+        bool hasAuthorizationId = !string.IsNullOrWhiteSpace(intent.AuthorizationId);
         HostUpdateReplayDecision replay;
         try
         {
-            replay = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Admit, ct).ConfigureAwait(false);
+            replay = await replayStore.DecideAsync(candidate, hasAuthorizationId ? HostUpdateReplayIntent.Reserve : HostUpdateReplayIntent.Admit, ct).ConfigureAwait(false);
         }
         catch (InvalidDataException)
         {
@@ -481,7 +523,7 @@ public sealed class HostUpdateExecutionRequestResolver(
         }
 
         HostUpdateAuthorizationConsumeResult consumed;
-        if (string.IsNullOrWhiteSpace(intent.AuthorizationId))
+        if (!hasAuthorizationId)
         {
             if (replay.Reused)
             {
@@ -492,7 +534,27 @@ public sealed class HostUpdateExecutionRequestResolver(
         }
         else
         {
-            consumed = await authorizationStore.ConsumeAsync(intent.AuthorizationId!, candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            consumed = await authorizationStore.PrepareConsumeAsync(intent.AuthorizationId!, candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            if (!consumed.Succeeded || consumed.Authorization is null)
+            {
+                return HostUpdateExecutionResolutionResult.Fail(consumed.Error ?? "authorization_invalid");
+            }
+
+            try
+            {
+                replay = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Admit, ct).ConfigureAwait(false);
+            }
+            catch (InvalidDataException)
+            {
+                return HostUpdateExecutionResolutionResult.Fail("replay_unavailable");
+            }
+
+            if (replay.Disposition != HostUpdateReplayDisposition.Accepted)
+            {
+                return HostUpdateExecutionResolutionResult.Fail("candidate_replay_rejected");
+            }
+
+            consumed = await authorizationStore.CompleteConsumeAsync(intent.AuthorizationId!, candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
         }
 
         if (!consumed.Succeeded || consumed.Authorization is null)
@@ -532,7 +594,22 @@ public sealed class HostUpdateExecutionRequestResolver(
 
     private (HostUpdateSchedulerSettings Policy, VerifiedHostUpdateCandidate Candidate) ResolveCurrentCandidate(HostUpdateManualAuthorizationIntent intent)
     {
-        HostUpdateSchedulerSettings policy = settings.Current;
+        HostUpdateSchedulerSettings policy;
+        if (settings is IHostUpdatePolicyBackedSchedulerSettings policyBackedSettings)
+        {
+            HostUpdatePolicyReadResult result = policyBackedSettings.ReadPolicy();
+            if (!result.Available)
+            {
+                throw new InvalidOperationException("policy_unavailable");
+            }
+
+            policy = HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(result.Policy);
+        }
+        else
+        {
+            policy = settings.Current;
+        }
+
         if (intent.ExpectedPolicyRevision is long expectedRevision && expectedRevision != policy.PolicyRevision)
         {
             throw new InvalidOperationException("policy_revision_drift");

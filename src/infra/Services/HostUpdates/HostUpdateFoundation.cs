@@ -681,7 +681,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
 
         Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
         await using FileStream lease = await AcquireLeaseAsync(ct);
-        IReadOnlyList<HostUpdateJournalEntry> entries = await ReadUnsafeAsync(ct);
+        IReadOnlyList<HostUpdateJournalEntry> entries = await ReadUnsafeAsync(cleanupStaged: true, ct);
         HostUpdateJournalEntry? previous = entries.LastOrDefault(existing => HostUpdateValidation.HasSameOperation(existing, entry));
         if (!HostUpdateValidation.IsLifecycleTransition(previous, entry))
         {
@@ -730,7 +730,7 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
     {
         Directory.CreateDirectory(Path.GetDirectoryName(journalPath)!);
         await using FileStream lease = await AcquireLeaseAsync(ct);
-        return await ReadUnsafeAsync(ct);
+        return await ReadUnsafeAsync(cleanupStaged: false, ct);
     }
 
     /// <summary>Reads an existing journal without creating state, directories, or a lock file.</summary>
@@ -756,14 +756,14 @@ public sealed class FileHostUpdateJournal : IHostUpdateJournal
             ct);
     }
 
-    private async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadUnsafeAsync(CancellationToken ct)
+    private async Task<IReadOnlyList<HostUpdateJournalEntry>> ReadUnsafeAsync(bool cleanupStaged, CancellationToken ct)
     {
         string stagedPath = journalPath + ".staged";
-        if (File.Exists(stagedPath))
+        if (cleanupStaged && File.Exists(stagedPath))
         {
             HostStateFileSecurity.RejectReparseTarget(stagedPath);
-            // Atomic replacement is the sole commit point. A surviving staged chain was never
-            // committed and cannot supersede the authoritative validated journal.
+            // Atomic replacement is the sole commit point. Cleanup is allowed only while the
+            // append owner holds the execution journal lease, never from read-only status paths.
             File.Delete(stagedPath);
         }
 

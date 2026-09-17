@@ -80,6 +80,63 @@ public sealed class HostUpdateSchedulerTests
     }
 
     [Fact]
+    public async Task TickAsync_ExpiredEvidenceAllowsFreshSameCandidateAfterRefresh()
+    {
+        FakeExecutor expiredExecutor = new();
+        VerifiedHostUpdateCandidate expired = Candidate() with { ExpiresAt = new DateTimeOffset(2025, 12, 31, 23, 0, 0, TimeSpan.Zero) };
+        HostUpdateScheduler expiredScheduler = Create(new HostUpdateSchedulerSettings(true), expired, expiredExecutor);
+
+        HostUpdateSchedulerStatus expiredStatus = await expiredScheduler.TickAsync();
+
+        FakeExecutor freshExecutor = new();
+        HostUpdateScheduler freshScheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), freshExecutor);
+        HostUpdateSchedulerStatus freshStatus = await freshScheduler.TickAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.CandidateEvidenceStale, expiredStatus.Reason);
+        Assert.Equal(HostUpdateSchedulerReason.Admitted, freshStatus.Reason);
+        Assert.Empty(expiredExecutor.Requests);
+        Assert.Single(freshExecutor.Requests);
+    }
+
+    [Fact]
+    public async Task TickAsync_CompatibilityDeferralAllowsCompatibleSameCandidateAfterRefresh()
+    {
+        string root = TempRoot();
+        await SeedEmptyReplayFileAsync(root);
+        using FileHostUpdateReplayStore store = new(root, new InMemoryReplayAnchor());
+        FakeExecutor incompatibleExecutor = new();
+        HostUpdateScheduler incompatible = Create(new HostUpdateSchedulerSettings(true), Candidate() with { CompatibilityReady = false }, incompatibleExecutor, store);
+
+        HostUpdateSchedulerStatus incompatibleStatus = await incompatible.TickAsync();
+        FakeExecutor compatibleExecutor = new();
+        HostUpdateScheduler compatible = Create(new HostUpdateSchedulerSettings(true), Candidate(), compatibleExecutor, store);
+        HostUpdateSchedulerStatus compatibleStatus = await compatible.TickAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.CompatibilityNotReady, incompatibleStatus.Reason);
+        Assert.Equal(HostUpdateSchedulerReason.Admitted, compatibleStatus.Reason);
+        Assert.Empty(incompatibleExecutor.Requests);
+        Assert.Single(compatibleExecutor.Requests);
+    }
+
+    [Fact]
+    public async Task ReplayStore_ReserveDoesNotAdvanceHighWaterOrPoisonIdentity()
+    {
+        string root = TempRoot();
+        await SeedEmptyReplayFileAsync(root);
+        using FileHostUpdateReplayStore store = new(root, new InMemoryReplayAnchor());
+        VerifiedHostUpdateCandidate candidate = Candidate() with { Sequence = 99 };
+
+        HostUpdateReplayDecision reservation = await store.DecideAsync(candidate, HostUpdateReplayIntent.Reserve, default);
+        HostUpdateReplayDecision lower = await store.DecideAsync(Candidate() with { Sequence = 1 }, HostUpdateReplayIntent.Admit, default);
+        HostUpdateReplayDecision final = await store.DecideAsync(candidate, HostUpdateReplayIntent.Admit, default);
+
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, reservation.Disposition);
+        Assert.False(reservation.Reused);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, lower.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, final.Disposition);
+    }
+
+    [Fact]
     public async Task TickAsync_ExecutorFailure_BackOffsAndPreservesPolicyRevision()
     {
         FakeExecutor executor = new() { Response = new(HostUpdateExecutorResult.Failed, "failed") };
@@ -728,6 +785,11 @@ public sealed class HostUpdateSchedulerTests
             {
                 _identities[candidate.Identity] = (HostUpdateReplayDisposition.Rejected, correlationId);
                 return Task.FromResult(new HostUpdateReplayDecision(HostUpdateReplayDisposition.Rejected, correlationId, false));
+            }
+
+            if (intent == HostUpdateReplayIntent.Reserve)
+            {
+                return Task.FromResult(new HostUpdateReplayDecision(HostUpdateReplayDisposition.Accepted, correlationId, false));
             }
 
             HostUpdateReplayDisposition disposition = intent == HostUpdateReplayIntent.Admit ? HostUpdateReplayDisposition.Accepted : HostUpdateReplayDisposition.Rejected;

@@ -4,6 +4,7 @@ using System.Threading.Tasks;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 
 namespace Farm.Infrastructure.Repositories.Settings;
 
@@ -54,6 +55,12 @@ public interface IAppSettingsRepository
     /// if the key already exists. Sets UpdatedAt to current UTC time.
     /// </remarks>
     Task SetAsync(string key, string value, CancellationToken ct = default);
+
+    /// <summary>
+    /// Creates a setting only when the key is absent and commits it atomically.
+    /// </summary>
+    /// <returns><c>true</c> when this call inserted the row; <c>false</c> when a concurrent writer won.</returns>
+    Task<bool> TryCreateAsync(string key, string value, CancellationToken ct = default);
 
     /// <summary>
     /// Deletes a setting by its key.
@@ -107,6 +114,28 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
                 UpdatedAt = DateTime.UtcNow
             };
             await _db.AppSettingsEntities.AddAsync(setting, ct);
+        }
+    }
+
+    public async Task<bool> TryCreateAsync(string key, string value, CancellationToken ct = default)
+    {
+        var setting = new AppSettingsEntity
+        {
+            Key = key,
+            SettingsJson = value,
+            UpdatedAt = DateTime.UtcNow
+        };
+
+        EntityEntry<AppSettingsEntity> entry = await _db.AppSettingsEntities.AddAsync(setting, ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+            return true;
+        }
+        catch (DbUpdateException)
+        {
+            entry.State = EntityState.Detached;
+            return false;
         }
     }
 

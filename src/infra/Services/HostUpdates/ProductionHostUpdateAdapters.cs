@@ -176,7 +176,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
     {
         _ = settings;
         HostUpdatePolicyReadResult policyResult = policyRepository?.Read() ?? new(true, new HostUpdateAutomationPolicy(), null);
-        HostUpdateAutomationPolicy policy = policyResult.Policy;
+        HostUpdateAutomationPolicy policy = policyResult.Available ? policyResult.Policy : new HostUpdateAutomationPolicy();
         string selectedChannel = policyResult.Available ? policy.Channel : UpdateChannelSettings.StableChannel;
         List<string> reasons = [];
         if (!policyResult.Available)

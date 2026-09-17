@@ -111,9 +111,35 @@ public sealed class HostUpdateSchedulingStatusDtoTests
     }
 
     [Fact]
+    public void UnavailableProvider_DoesNotFabricatePolicyAuthorityWhenPolicyStorageFails()
+    {
+        var provider = new UnavailableHostUpdateSchedulingStatusProvider(
+            settings: null!,
+            policyRepository: new UnavailablePolicyRepository("host_update_policy_corrupt"),
+            replayAnchor: null,
+            replayStore: new UnavailableHostUpdateReplayStore(),
+            executor: new UnavailableHostUpdateExecutor(),
+            admissionFence: new InactiveHostUpdateAdmissionFence());
+
+        HostUpdateSchedulingStatusDto status = provider.GetStatus();
+
+        status.ConfiguredEnabled.Should().BeFalse();
+        status.PolicyRevision.Should().Be(0);
+        status.Reasons.Should().Contain("host_update_policy_corrupt");
+    }
+
+    [Fact]
     public void UnwiredStatus_IsNull()
     {
         new UnwiredHostUpdateSchedulingStatusProvider().GetStatus().Should().BeNull();
+    }
+
+    private sealed class UnavailablePolicyRepository(string error) : IHostUpdateAutomationPolicyRepository
+    {
+        public HostUpdatePolicyReadResult Read() => new(false, new HostUpdateAutomationPolicy(Enabled: true, Revision: 99), error);
+
+        public Task<HostUpdatePolicyReadResult> ReplaceAsync(HostUpdateAutomationPolicy policy, long expectedRevision, CancellationToken ct) =>
+            Task.FromResult(new HostUpdatePolicyReadResult(false, policy, error));
     }
 
     private sealed class FixedPolicyRepository(HostUpdateAutomationPolicy policy) : IHostUpdateAutomationPolicyRepository

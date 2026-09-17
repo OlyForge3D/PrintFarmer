@@ -51,6 +51,10 @@ public sealed class HostUpdateController(
                 cancellationToken).ConfigureAwait(false);
             return Ok(response);
         }
+        catch (InvalidOperationException ex) when (ex.Message == "policy_unavailable")
+        {
+            return AvailabilityProblem("policy_unavailable");
+        }
         catch (InvalidOperationException ex)
         {
             return Conflict(new { code = ex.Message });
@@ -87,7 +91,13 @@ public sealed class HostUpdateController(
             cancellationToken).ConfigureAwait(false);
         if (!resolution.Succeeded || resolution.Request is null)
         {
-            return Conflict(new { code = resolution.Error ?? "request_not_authorized" });
+            string code = resolution.Error ?? "request_not_authorized";
+            if (code == "policy_unavailable")
+            {
+                return AvailabilityProblem(code);
+            }
+
+            return Conflict(new { code });
         }
 
         HostUpdateExecutionResult result = await executor.ExecuteAsync(resolution.Request, cancellationToken).ConfigureAwait(false);
