@@ -143,9 +143,25 @@ public class VerifiedReleaseEvidenceCacheTests
 
         DateTimeOffset newerVerifiedAt = DateTimeOffset.UtcNow;
         cache.SetVerified(newerStable, newerVerifiedAt);
-        cache.SetVerified(olderStable, newerVerifiedAt.AddMinutes(5));
+        bool accepted = cache.SetVerified(olderStable, newerVerifiedAt.AddMinutes(5));
 
+        accepted.Should().BeFalse();
         cache.Current.Should().BeSameAs(newerStable);
         cache.LastVerifiedAt.Should().Be(newerVerifiedAt);
+    }
+
+    [Fact]
+    public void GetSnapshot_ReturnsAtomicViewOfEvidenceState()
+    {
+        var cache = new VerifiedReleaseEvidenceCache();
+        VerifiedReleaseEvidenceDto evidence = Evidence();
+        DateTimeOffset verifiedAt = DateTimeOffset.UtcNow;
+        cache.SetVerified(evidence, verifiedAt);
+
+        VerifiedReleaseEvidenceCacheSnapshot snapshot = cache.GetSnapshot();
+
+        snapshot.Current.Should().BeSameAs(evidence);
+        snapshot.LastVerifiedAt.Should().Be(verifiedAt);
+        snapshot.LastError.Should().BeNull();
     }
 }

@@ -8,6 +8,7 @@ using System.Runtime.InteropServices;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -70,13 +71,15 @@ public class SystemInfoService(
         string channel = _settingsService.Get<Farm.Infrastructure.Settings.UpdateChannelSettings>().Channel;
         DateTimeOffset now = DateTimeOffset.UtcNow;
         ServiceInventoryDto inventory = ServiceInventoryEvaluator.Evaluate(observations, channel, now);
-        ReleaseReadinessDto? unavailable = GetUnavailableReleaseReadiness(now);
+        ServiceInventoryDto inventoryWithUpdater = inventory with { HostUpdaterVersion = hostUpdaterVersion };
+        VerifiedReleaseEvidenceCacheSnapshot cacheSnapshot = _verifiedReleaseEvidenceCache.GetSnapshot();
+        ReleaseReadinessDto? unavailable = GetUnavailableReleaseReadiness(now, cacheSnapshot);
         ReleaseReadinessDto readiness = unavailable
-            ?? ReleaseReadinessEvaluator.Evaluate(inventory, _verifiedReleaseEvidenceCache.Current, now);
-        return inventory with { HostUpdaterVersion = hostUpdaterVersion, Readiness = readiness };
+            ?? ReleaseReadinessEvaluator.Evaluate(inventoryWithUpdater, cacheSnapshot.Current, now);
+        return inventoryWithUpdater with { Readiness = readiness };
     }
 
-    private ReleaseReadinessDto? GetUnavailableReleaseReadiness(DateTimeOffset now)
+    private ReleaseReadinessDto? GetUnavailableReleaseReadiness(DateTimeOffset now, VerifiedReleaseEvidenceCacheSnapshot cacheSnapshot)
     {
         Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
             _verifiedReleaseDiscoveryOptions.CurrentValue;
@@ -90,7 +93,7 @@ public class SystemInfoService(
             };
         }
 
-        if (_verifiedReleaseEvidenceCache.Current is null)
+        if (cacheSnapshot.Current is null)
         {
             return new ReleaseReadinessDto
             {
@@ -100,7 +103,7 @@ public class SystemInfoService(
             };
         }
 
-        if (_verifiedReleaseEvidenceCache.LastError is not null)
+        if (cacheSnapshot.LastError is not null)
         {
             return new ReleaseReadinessDto
             {
@@ -110,7 +113,7 @@ public class SystemInfoService(
             };
         }
 
-        DateTimeOffset? verifiedAt = _verifiedReleaseEvidenceCache.LastVerifiedAt;
+        DateTimeOffset? verifiedAt = cacheSnapshot.LastVerifiedAt;
         TimeSpan maximumAge = TimeSpan.FromSeconds(checked(options.IntervalSeconds * 2L));
         if (verifiedAt is null || verifiedAt > now || now - verifiedAt > maximumAge)
         {
@@ -220,7 +223,12 @@ public class SystemInfoService(
             return informationalVersion.Split('+', 2)[0];
         }
 
-        return assembly.GetName().Version?.ToString() ?? "0.0.0";
+        // The monolith uses its API assembly version as the updater version; keep the fallback
+        // semantic and three-part so signed minimum-updater comparisons remain well-defined.
+        Version? assemblyVersion = assembly.GetName().Version;
+        return assemblyVersion is null
+            ? "0.0.0"
+            : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{assemblyVersion.Build}";
     }
 
     // Uses the gcode storage root because archiveBytes is derived from that tree.

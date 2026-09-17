@@ -336,6 +336,30 @@ public sealed class ServiceInventoryTests
         Assert.False(result.Hops is string[]);
     }
 
+    [Fact]
+    public void Readiness_UnknownUpdaterVersion_IsNotEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
+            with { HostUpdaterVersion = null };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("HostUpdaterVersionUnknown", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_TooOldUpdaterVersion_IsNotEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
+            with { HostUpdaterVersion = "1.2.2" };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("HostUpdaterVersionTooOld", Assert.Single(result.Reasons));
+    }
+
     [Theory]
     [InlineData("stale")]
     [InlineData("incomplete")]
@@ -502,7 +526,7 @@ public sealed class ServiceInventoryTests
     }
 
     private static ServiceInventoryDto Evaluate(ServiceReplicaObservationDto[] rows, string? selection = null) =>
-        ServiceInventoryEvaluator.Evaluate(rows, selection, Now);
+        ServiceInventoryEvaluator.Evaluate(rows, selection, Now) with { HostUpdaterVersion = "1.2.3" };
 
     private static ServiceReplicaObservationDto Verified(string instance, string channel = "stable")
     {
@@ -546,6 +570,7 @@ public sealed class ServiceInventoryTests
     private static VerifiedReleaseEvidenceDto Release(string? migrationHead) => new()
     {
         Sequence = 200_004_999_999,
+        MinimumUpdaterVersion = "1.2.3",
         SignatureVerified = true,
         IsComplete = true,
         ManifestDigest = Digest,

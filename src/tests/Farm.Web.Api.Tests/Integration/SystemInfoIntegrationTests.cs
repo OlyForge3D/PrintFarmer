@@ -125,6 +125,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
         dto.Should().NotBeNull();
         dto!.App.Version.Should().NotBeNullOrWhiteSpace();
+        dto.Inventory!.HostUpdaterVersion.Should().Be(dto.App.Version);
         dto.App.Uptime.Should().NotBeNullOrWhiteSpace();
         dto.App.Hostname.Should().NotBeNullOrWhiteSpace();
         dto.Cpu.Cores.Should().BeGreaterThan(0);
@@ -250,6 +251,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             new VerifiedReleaseEvidenceDto
             {
                 Sequence = 999_999,
+                MinimumUpdaterVersion = "1.0.0",
                 SignatureVerified = true,
                 IsComplete = true,
                 ManifestDigest = "sha256:" + new string('a', 64),
@@ -281,6 +283,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         VerifiedReleaseEvidenceDto evidence = new()
         {
             Sequence = 99_999,
+            MinimumUpdaterVersion = "1.0.0",
             SignatureVerified = true,
             IsComplete = true,
             ManifestDigest = "sha256:" + new string('a', 64),
@@ -318,6 +321,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             new VerifiedReleaseEvidenceDto
             {
                 Sequence = 99_999,
+                MinimumUpdaterVersion = "1.0.0",
                 SignatureVerified = true,
                 IsComplete = true,
                 ManifestDigest = "sha256:" + new string('a', 64),
@@ -352,6 +356,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             new VerifiedReleaseEvidenceDto
             {
                 Sequence = 99_999,
+                MinimumUpdaterVersion = "1.0.0",
                 SignatureVerified = true,
                 IsComplete = true,
                 ManifestDigest = "sha256:" + new string('a', 64),

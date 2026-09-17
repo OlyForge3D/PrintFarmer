@@ -22,6 +22,11 @@ public static partial class ReleaseReadinessEvaluator
             return Result(InventoryEligibility.Blocked, ["ReleaseEvidenceIncompleteOrUnverified"], hops);
         }
 
+        if (inventory.SnapshotOrigin == InventorySnapshotOrigin.Imported)
+        {
+            return Result(InventoryEligibility.Unknown, ["ImportedSnapshotIsNotLiveObservation"], hops);
+        }
+
         if (!HostUpdateValidation.TryParseSemanticVersion(release.MinimumUpdaterVersion, out Version minimumUpdater))
         {
             return Result(InventoryEligibility.Unknown, ["MinimumUpdaterVersionUnknown"], hops);
@@ -35,11 +40,6 @@ public static partial class ReleaseReadinessEvaluator
         if (hostUpdater < minimumUpdater)
         {
             return Result(InventoryEligibility.Blocked, ["HostUpdaterVersionTooOld"], hops);
-        }
-
-        if (inventory.SnapshotOrigin == InventorySnapshotOrigin.Imported)
-        {
-            return Result(InventoryEligibility.Unknown, ["ImportedSnapshotIsNotLiveObservation"], hops);
         }
 
         hops.Add("FreshHostEvidence");

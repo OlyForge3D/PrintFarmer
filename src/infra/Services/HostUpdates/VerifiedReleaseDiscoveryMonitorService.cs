@@ -111,7 +111,7 @@ public class VerifiedReleaseDiscoveryMonitorService(
     /// <c>InternalsVisibleTo</c> — can exercise a single discovery round directly, exactly like
     /// <c>CatalogUpdateDetectionService.DetectAndHandleUpdatesAsync</c>.
     /// </summary>
-    internal async Task DiscoverAndCacheAsync(CancellationToken ct)
+    internal async Task<bool> DiscoverAndCacheAsync(CancellationToken ct)
     {
         using IServiceScope scope = _serviceProvider.CreateScope();
 
@@ -132,12 +132,20 @@ public class VerifiedReleaseDiscoveryMonitorService(
             metadata.Identity.ReleaseId,
             metadata.Identity.ManifestDigest,
             ct);
-        _cache.SetVerified(evidence, DateTimeOffset.UtcNow);
+        if (!_cache.SetVerified(evidence, DateTimeOffset.UtcNow))
+        {
+            string message = $"Rejected rollback release for channel '{channel}' (sequence={metadata.Sequence}).";
+            _logger.LogWarning("[VerifiedReleaseDiscovery] {Message}", message);
+            _cache.SetError(message);
+            return false;
+        }
+
         _logger.LogInformation(
             "[VerifiedReleaseDiscovery] Cached verified release for channel '{Channel}' (releaseId={ReleaseId}, sequence={Sequence})",
             channel,
             metadata.Identity.ReleaseId,
             metadata.Sequence);
+        return true;
     }
 
     /// <summary>Runs one monitored discovery round and reports exactly one outcome.</summary>
@@ -145,7 +153,13 @@ public class VerifiedReleaseDiscoveryMonitorService(
     {
         try
         {
-            await DiscoverAndCacheAsync(stoppingToken);
+            bool cached = await DiscoverAndCacheAsync(stoppingToken);
+            if (!cached)
+            {
+                _serviceMonitor.ReportError(ServiceId, _cache.GetSnapshot().LastError!);
+                return false;
+            }
+
             _serviceMonitor.ReportSuccess(ServiceId, intervalSeconds);
             return true;
         }
