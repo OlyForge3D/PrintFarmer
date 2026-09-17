@@ -54,6 +54,71 @@ release-workflow, release-guide and test changes inspected on 2026-09-12.
 Target updater contracts, routes and remaining delivery increments are
 **proposed**; channel-policy decisions fix their defaults and safeguards.
 
+### Host updater foundation (#2662)
+
+The foundation accepts only bounded identifiers from a caller. It obtains installation,
+topology, current release/configuration, and required-component evidence from the
+trusted host inspector during planning and again while holding the installation lock.
+Planning and staging records use the validated metadata identity (or no identity for
+invalid metadata), never a caller-provided identity. A complete staging receipt binds
+every topology-selected platform digest plus the immutable target manifest and inspected
+prior release/configuration identity; failed or incomplete staging requires operator
+reconciliation and is never replayed. The host-local read-only journal inspection
+operation works while the API is stopped and accepts only a validated installation ID
+and absolute host state directory.
+
+The shared host-updater foundation implements only the `Planned`, `Approved`,
+and `Staged` boundary. It is one host-local engine for future operator-triggered
+one-time requests and administrator-enabled standing policies; neither caller
+may provide arbitrary commands, URLs, or filesystem paths. The engine has no
+apply, recovery, scheduler, Docker-control, or API/UI request-integration
+capability.
+
+Each plan accepts only typed, explicitly configured installation/source-target
+fingerprints; topology/replica/remote-worker inventory; provider/schema/config
+fingerprints; updater/resource/disk/recovery/maintenance evidence; and registry
+and backup readiness. It binds the source and target channels plus the
+channel-policy revision to canonical signed release identity: release/version,
+source tag/branch/commit and authorized branch head, build metadata, OCI labels,
+provenance subject, manifest/index, and every required component platform
+digest. Required components are derived from trusted installation topology,
+never caller-selected. All immutable evidence is hashed. Before artifact transfer, staging reacquires a single-installation OS file lock,
+reconciles the operation/idempotency journal, and revalidates current signed
+metadata and the hash. A latest `Approved` record is unreconciled and blocks
+staging; only the later execution increment may advance it. Drift, channel
+changes, incompatible evidence, incomplete component sets, mixed identity,
+invalid signatures, or digest conflicts reject the handoff.
+Staging adapters receive only the approved immutable plan and verified metadata,
+must retain a verified receipt for every component/platform byte plus the prior
+recovery set and configuration digests, and report failures as recoverable
+while leaving the running release untouched. An unresolved staging intent is
+`NeedsOperator`; this increment never replays, applies, or recovers it.
+
+The append-only JSON-lines operation journal and installation lock are
+host-local files, outside replaced containers and application databases. The
+configured state directory supplies that host-local root. State directories use
+only the current OS's local absolute-path grammar (a
+drive-rooted local path on Windows or a POSIX absolute path on Unix); UNC,
+device, foreign-platform, relative, and traversal paths are rejected. Both
+locks use the same bounded exponential contention retry and timeout behavior.
+Journal intent is flushed before staging, outcomes are durable and monotonic
+across process restarts and concurrent instances through same-process and
+file-system serialization. JSON-valid per-record mutations and blank, gapped,
+corrupt, partial, or non-terminated JSONL records fail closed, as does a record
+whose deterministic hash chain no longer matches. The hash chain does not
+detect deletion of an otherwise valid complete tail. Trusted plan identity
+remains separate from an authorization
+attempt audit: accepted and rejected attempts retain sanitized bounded
+presented actor, nonce, installation, plan-hash, source/target-channel and
+policy-revision values without replacing the trusted-plan fields. Arbitrary
+paths, URLs, commands, exception text, and malformed policy values are never
+journalled. A missing audit expiry explicitly records a rejected, invalid or
+default presented expiry; accepted authorization records require a future
+expiry. Journal corruption is a fail-closed reconciliation condition.
+Issue #2663 owns all transitions after `Staged`, including drain, backup,
+migration, apply, verification, and recovery. Issue #2666 owns request
+integration and scheduling.
+
 Scope: single-host Docker Compose, monolith and split-service deployments,
 optional/local/remote workers, external databases, and offline installations.
 The [provider matrix](DEPLOYMENT.md#database-configuration) permits PostgreSQL
