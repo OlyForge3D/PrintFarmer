@@ -1713,7 +1713,12 @@ test_installer_lite_slicer_worker_key() {
     assert_contains "$(cat "$install_dir/.env")" "WORKER_SHARED_API_KEY=$expected_key" "Lite installer should persist the shared key"
     assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Lite monolith should receive the shared key"
     assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=http://localhost:18907" "Lite installer should derive the localhost passkey origin"
-    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WebAuthn__Origin=\${WebAuthn__Origin}" "Lite monolith should receive passkey configuration"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}' \
+        "Lite monolith should reject a missing or empty passkey relying party ID"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}' \
+        "Lite monolith should reject a missing or empty passkey origin"
     assert_not_contains "$output" "$expected_key" "Installer output must not expose the shared key"
     local env_mode
     env_mode=$(stat -c '%a' "$install_dir/.env" 2>/dev/null || stat -f '%Lp' "$install_dir/.env")
@@ -1738,7 +1743,12 @@ test_installer_standard_webauthn_configuration() {
 
     assert_contains "$(cat "$install_dir/.env")" "WebAuthn__RelyingPartyId=farm.example.com" "Standard installer should persist the canonical passkey hostname"
     assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=https://farm.example.com" "Standard installer should require HTTPS for a non-loopback passkey origin"
-    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WebAuthn__Origin=\${WebAuthn__Origin}" "Standard installer API should receive passkey configuration"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}' \
+        "Standard installer API should reject a missing or empty passkey relying party ID"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}' \
+        "Standard installer API should reject a missing or empty passkey origin"
 
     pass_test
 }

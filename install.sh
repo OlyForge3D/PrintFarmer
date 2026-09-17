@@ -1226,9 +1226,9 @@ services:
       - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=\${Jwt__Audience:-PrintFarmer}
       - WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}
-      - WebAuthn__RelyingPartyId=\${WebAuthn__RelyingPartyId}
+      - WebAuthn__RelyingPartyId=\${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}
       - WebAuthn__RelyingPartyName=\${WebAuthn__RelyingPartyName:-PrintFarmer}
-      - WebAuthn__Origin=\${WebAuthn__Origin}
+      - WebAuthn__Origin=\${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}
       - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
@@ -1414,9 +1414,9 @@ ${compose_api_depends}
       - Jwt__Key=\${Jwt__Key}
       - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=\${Jwt__Audience:-PrintFarmer}
-      - WebAuthn__RelyingPartyId=\${WebAuthn__RelyingPartyId}
+      - WebAuthn__RelyingPartyId=\${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}
       - WebAuthn__RelyingPartyName=\${WebAuthn__RelyingPartyName:-PrintFarmer}
-      - WebAuthn__Origin=\${WebAuthn__Origin}
+      - WebAuthn__Origin=\${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}
       - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
