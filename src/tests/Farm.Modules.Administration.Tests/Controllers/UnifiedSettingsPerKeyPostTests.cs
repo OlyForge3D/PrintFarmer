@@ -158,6 +158,43 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
         read.MaxConcurrentRequests.Should().Be(10);
     }
 
+    [Fact]
+    public async Task Post_UpdateChannel_RoundTripsStableInsiderStableAndRejectsUnacknowledgedInsider()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        string endpoint = $"/api/settings/{UpdateChannelSettings.SectionName}";
+
+        (await admin.PostAsJsonAsync(
+            endpoint,
+            new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        (await admin.PostAsJsonAsync(
+            endpoint,
+            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+
+        UpdateChannelSettings? insider = await admin.GetFromJsonAsync<UpdateChannelSettings>(
+            endpoint,
+            JsonOptions);
+        insider.Should().BeEquivalentTo(
+            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true });
+
+        (await admin.PostAsJsonAsync(
+            endpoint,
+            new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false }))
+            .StatusCode.Should().Be(HttpStatusCode.OK);
+        HttpResponseMessage rejected = await admin.PostAsJsonAsync(
+            endpoint,
+            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = false });
+
+        rejected.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        UpdateChannelSettings? retained = await admin.GetFromJsonAsync<UpdateChannelSettings>(
+            endpoint,
+            JsonOptions);
+        retained.Should().BeEquivalentTo(
+            new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false });
+    }
+
     // ─── Defect 2: validation must run and return the structured error shape ─
 
     /// <summary>

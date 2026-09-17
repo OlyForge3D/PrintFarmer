@@ -4,7 +4,8 @@ import { Alert, Button } from "@/common/components/ui";
 import { InstallerUpdatesExperience } from "@/features/admin/components/InstallerUpdatesExperience";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 import { apiClient } from "@/services/api";
-import type { SystemInfo } from "@/types/api";
+import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
+import type { SystemInfo, UpdateChannelSettings } from "@/types/api";
 
 type ConnectionObservation = "connected" | "unknown";
 
@@ -33,6 +34,16 @@ export function InstallerUpdatesPage() {
     refetchOnWindowFocus: true,
     // This page owns reconnect reconciliation through its single explicit listener.
     refetchOnReconnect: false,
+  });
+  const {
+    data: updateChannelSettings,
+    isError: updateChannelIsError,
+    isPending: updateChannelIsLoading,
+    refetch: refetchUpdateChannel,
+  } = useQuery<UpdateChannelSettings>({
+    queryKey: ["settings", "UpdateChannel"],
+    queryFn: () => apiClient.getUpdateChannelSettings(),
+    enabled: canView,
   });
 
   // A later successful focus fetch has a newer query timestamp than the
@@ -103,6 +114,55 @@ export function InstallerUpdatesPage() {
   // `updates:execute` has no backend authorization contract yet. A safe admin/view check
   // may display this read-only surface, but it must not imply a runtime permission grant.
   return (
-    <InstallerUpdatesExperience inventory={data?.inventory} observation={effectiveObservation} />
+    <InstallerUpdatesExperience
+      inventory={data?.inventory}
+      observation={effectiveObservation}
+      updateChannelSettings={updateChannelSettings}
+      updateChannelIsLoading={updateChannelIsLoading}
+      updateChannelIsError={updateChannelIsError}
+      onRetryUpdateChannel={async () => {
+        // An explicit GET-only retry: the resolved (or thrown) value here is
+        // the authoritative contract the child component reconciles from
+        // directly, rather than inferring success from the
+        // `updateChannelSettings` prop changing identity. TanStack Query's
+        // structural sharing can return the exact same cached object
+        // reference for a deep-equal refetch result, which would otherwise
+        // never re-trigger a prop-identity effect.
+        const result = await refetchUpdateChannel();
+        if (result.isError || !result.data) {
+          throw new Error("UpdateChannel settings could not be confirmed.");
+        }
+        return result.data;
+      }}
+      onSaveUpdateChannel={async (settings) => {
+        // A POST rejection (including a timeout or lost response) is not by
+        // itself authoritative. Always attempt the refetch below so the UI
+        // reconciles to the server's real state instead of guessing from the
+        // POST outcome alone.
+        try {
+          await apiClient.updateUpdateChannelSettings(settings);
+        } catch {
+          // Fall through to the refetch below regardless of this rejection.
+        }
+        const result = await refetchUpdateChannel();
+        if (result.isError || !result.data) {
+          // Neither the POST nor the refetch confirmed anything: the outcome
+          // is genuinely unknown.
+          throw new Error("UpdateChannel settings could not be confirmed after save.");
+        }
+        const authoritative = result.data;
+        const matchesRequested =
+          authoritative.channel === settings.channel &&
+          authoritative.insiderAcknowledged === settings.insiderAcknowledged;
+        if (!matchesRequested) {
+          // The authoritative refetch is the source of truth: a mismatch
+          // means the save was rejected or left unchanged, regardless of
+          // whether the POST promise itself resolved or rejected.
+          throw new UpdateChannelSaveRejectedError(authoritative);
+        }
+        void refetchInventory();
+        return authoritative;
+      }}
+    />
   );
 }

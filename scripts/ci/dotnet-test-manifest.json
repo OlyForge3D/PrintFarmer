@@ -189,8 +189,8 @@
         },
         {
           "name": "admin",
-          "namespacePrefixes": ["Repositories", "DataManagement", "Domain", "Logging", "Migrations", "Network", "Dtos", "Services/Idempotency", "Services/RateLimiting", "Services/Statistics"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Repositories.|FullyQualifiedName~Farm.Infrastructure.Tests.DataManagement.|FullyQualifiedName~Farm.Infrastructure.Tests.Domain.|FullyQualifiedName~Farm.Infrastructure.Tests.Logging.|FullyQualifiedName~Farm.Infrastructure.Tests.Migrations.|FullyQualifiedName~Farm.Infrastructure.Tests.Network.|FullyQualifiedName~Farm.Infrastructure.Tests.Dtos.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Idempotency.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.RateLimiting.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Statistics."
+          "namespacePrefixes": ["Repositories", "DataManagement", "Domain", "Logging", "Migrations", "Network", "Dtos", "Settings", "Services/Idempotency", "Services/RateLimiting", "Services/Statistics"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Repositories.|FullyQualifiedName~Farm.Infrastructure.Tests.DataManagement.|FullyQualifiedName~Farm.Infrastructure.Tests.Domain.|FullyQualifiedName~Farm.Infrastructure.Tests.Logging.|FullyQualifiedName~Farm.Infrastructure.Tests.Migrations.|FullyQualifiedName~Farm.Infrastructure.Tests.Network.|FullyQualifiedName~Farm.Infrastructure.Tests.Dtos.|FullyQualifiedName~Farm.Infrastructure.Tests.Settings.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Idempotency.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.RateLimiting.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Statistics."
         }
       ],
       "requiresProviders": ["postgres", "sqlserver"],

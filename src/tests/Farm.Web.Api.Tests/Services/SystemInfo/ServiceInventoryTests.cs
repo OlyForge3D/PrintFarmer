@@ -336,6 +336,83 @@ public sealed class ServiceInventoryTests
         Assert.False(result.Hops is string[]);
     }
 
+    [Fact]
+    public void Readiness_ValidButDifferentPlatformDigest_Blocks()
+    {
+        string observedDigest = "sha256:" + new string('c', 64);
+        string signedDigest = "sha256:" + new string('d', 64);
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { PlatformDigest = observedDigest }]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                Release(null).Services.Single() with { PlatformDigest = signedDigest },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("PlatformMismatchOrInvalidDigestEvidence:api", Assert.Single(result.Reasons));
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence"], result.Hops);
+    }
+
+    [Fact]
+    public void Readiness_UnknownUpdaterVersion_IsNotEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
+            with { HostUpdaterVersion = null };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.Equal(InventoryEligibility.Unknown, result.State);
+        Assert.Equal("HostUpdaterVersionUnknown", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_TooOldUpdaterVersion_IsNotEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
+            with { HostUpdaterVersion = "1.2.2" };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("HostUpdaterVersionTooOld", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_LowerInsiderSerial_IsNotEligible()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
+            with { HostUpdaterVersion = "1.2.3-insider.1" };
+        VerifiedReleaseEvidenceDto release = Release("202609150001_Initial") with
+        {
+            MinimumUpdaterVersion = "1.2.3-insider.10",
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("HostUpdaterVersionTooOld", Assert.Single(result.Reasons));
+    }
+
+    [Fact]
+    public void Readiness_PrereleaseUpdaterIsOlderThanStableMinimum()
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
+            with { HostUpdaterVersion = "1.2.3-insider.10" };
+        VerifiedReleaseEvidenceDto release = Release("202609150001_Initial") with
+        {
+            MinimumUpdaterVersion = "1.2.3",
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Blocked, result.State);
+        Assert.Equal("HostUpdaterVersionTooOld", Assert.Single(result.Reasons));
+    }
+
     [Theory]
     [InlineData("stale")]
     [InlineData("incomplete")]
@@ -425,6 +502,7 @@ public sealed class ServiceInventoryTests
                     ServiceId = "frontend",
                     Platform = "linux/amd64",
                     PlatformDigest = Digest,
+                    IndexDigest = Digest,
                 },
             ],
         };
@@ -471,6 +549,7 @@ public sealed class ServiceInventoryTests
                     ServiceId = "worker",
                     Platform = "linux/amd64",
                     PlatformDigest = Digest,
+                    IndexDigest = Digest,
                 },
             ],
         };
@@ -500,7 +579,7 @@ public sealed class ServiceInventoryTests
     }
 
     private static ServiceInventoryDto Evaluate(ServiceReplicaObservationDto[] rows, string? selection = null) =>
-        ServiceInventoryEvaluator.Evaluate(rows, selection, Now);
+        ServiceInventoryEvaluator.Evaluate(rows, selection, Now) with { HostUpdaterVersion = "1.2.3" };
 
     private static ServiceReplicaObservationDto Verified(string instance, string channel = "stable")
     {
@@ -521,6 +600,7 @@ public sealed class ServiceInventoryTests
             VerifiedAt = Now,
             Platform = "linux/amd64",
             PlatformDigest = Digest,
+            IndexDigest = Digest,
             ManifestDigest = Digest,
             Identity = new()
             {
@@ -542,6 +622,8 @@ public sealed class ServiceInventoryTests
 
     private static VerifiedReleaseEvidenceDto Release(string? migrationHead) => new()
     {
+        Sequence = 200_004_999_999,
+        MinimumUpdaterVersion = "1.2.3",
         SignatureVerified = true,
         IsComplete = true,
         ManifestDigest = Digest,
@@ -556,8 +638,9 @@ public sealed class ServiceInventoryTests
             new()
             {
                 ServiceId = "api",
-                Platform = "linux/amd64",
+                Platform = "linux-amd64",
                 PlatformDigest = Digest,
+                IndexDigest = Digest,
                 RequiredMigrationHead = migrationHead,
             },
         ],

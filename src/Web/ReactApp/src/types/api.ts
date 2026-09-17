@@ -4971,6 +4971,48 @@ export type InventoryCompatibilityState = 'Compatible' | 'Incompatible' | 'Unkno
 export type InventoryChannelState = 'Observed' | 'Stale' | 'Unknown' | 'Mismatch' | 'Mixed';
 export type InventoryEligibility = 'Blocked' | 'Eligible' | 'Unknown' | 'NotManaged';
 
+export type UpdateChannel = 'stable' | 'insider';
+
+export interface UpdateChannelSettings {
+  channel: UpdateChannel;
+  insiderAcknowledged: boolean;
+}
+
+export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';
+
+export interface UpdateSchedulingBackoff {
+  state: UpdateSchedulingBackoffState;
+  consecutiveFailures: number;
+  until: string | null;
+  reasons: string[];
+}
+
+export interface UpdateSchedulingKillSwitch {
+  enabled: boolean;
+  reason: string | null;
+}
+
+export type UpdateSchedulingExecutorState = 'Unknown' | 'Unavailable' | 'Available' | 'Busy' | 'RecoveryRequired';
+
+export interface UpdateSchedulingExecutor {
+  state: UpdateSchedulingExecutorState;
+  reason: string | null;
+}
+
+export interface UpdateSchedulingStatus {
+  configuredEnabled: boolean;
+  effectiveEnabled: boolean;
+  selectedChannel: UpdateChannel;
+  effectiveChannel: UpdateChannel | null;
+  policyRevision: number;
+  lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  backoff: UpdateSchedulingBackoff;
+  killSwitch: UpdateSchedulingKillSwitch;
+  executor: UpdateSchedulingExecutor;
+  reasons: string[];
+}
+
 export interface CanonicalReleaseIdentity {
   canonicalVersion: string | null;
   baseVersion: string | null;
@@ -5025,6 +5067,7 @@ export interface ServiceReplicaObservation {
 }
 
 export interface ServiceInventory {
+  hostUpdaterVersion: string | null;
   selectedChannel: string;
   selectionSource: string;
   collectedAt: string;
@@ -5036,6 +5079,7 @@ export interface ServiceInventory {
   eligibility: InventoryEligibility;
   eligibilityReasons: string[];
   readiness: ReleaseReadiness | null;
+  updateScheduling?: UpdateSchedulingStatus | null;
   snapshotOrigin: InventorySnapshotOrigin;
   snapshotSource: string | null;
   snapshotExportedAt: string | null;
