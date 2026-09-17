@@ -1589,6 +1589,25 @@ export function enrichSbomDocument(sbom, inventory, dependencyPolicy, options) {
     }
   }
 
+  // Some Syft catalogers (e.g. the generic binary classifier) emit native artifacts with no
+  // package-manager identity at all: no PURL, no download location, and no supplier. Those
+  // components cannot be matched by packageEvidence/runtimePackageEvidence above, both of which
+  // require an already-parsed PURL. nativeComponentEvidence matches directly on the SBOM
+  // package's own generated name and versionInfo instead, so it only ever resolves the exact
+  // reviewed component it names and leaves every other unmatched/unknown component fail-closed.
+  for (const packageRecord of sbom.packages ?? []) {
+    const packageName = packageRecord.name ?? '';
+    const evidence = (dependencyPolicy.sbom?.nativeComponentEvidence ?? []).find((record) =>
+      new RegExp(record.namePattern, 'i').test(packageName)
+      && new RegExp(record.versionPattern).test(packageRecord.versionInfo ?? ''));
+    if (evidence) {
+      packageRecord.licenseDeclared = evidence.approvedExpression;
+      packageRecord.supplier = evidence.supplier;
+      packageRecord.downloadLocation = evidence.sourceUrl;
+      appendSourceInfo(packageRecord, `license resolved from reviewed native component evidence: ${evidence.evidence}`);
+    }
+  }
+
   for (const packageRecord of distroPackages.values()) {
     const parsedPurl = parsePurl(getPackagePurl(packageRecord));
     const alias = (dependencyPolicy.sbom?.distroAliases ?? [])
