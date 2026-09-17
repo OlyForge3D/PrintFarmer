@@ -219,7 +219,8 @@ async function main() {
   await verifyOwnerDispatch(env, api);
   const release = await selectRelease(env, api);
   const operation = process.argv[2];
-  requireThat(['select', 'build', 'publish'].includes(operation), 'Unknown release command');
+  requireThat(['select', 'verify', 'build', 'publish'].includes(operation), 'Unknown release command');
+  if (operation === 'verify') return;
   if (operation === 'select') {
     for (const [key, value] of Object.entries({ source_sha: release.sourceCommit,
       version: release.version, environment: `release-${release.channel}` })) {

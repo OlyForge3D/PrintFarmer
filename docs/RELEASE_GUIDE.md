@@ -45,8 +45,10 @@ Server tags remain separate from the mobile `ios/` namespace.
 
 The read-only first job validates the live owner dispatch, approved channel
 environment, source ancestry, VERSION and unused version. CI runs its full
-selected-source checks. One job in the existing `release-stable` or
-`release-insider` environment builds and verifies the following set:
+selected-source checks. Separate jobs in the existing `release-stable` or
+`release-insider` environment build evidence, sign only an immutable artifact
+boundary, and publish without OIDC authority. The build job verifies the
+following set:
 
 | Image suffix | Docker target | Platforms |
 | --- | --- | --- |
@@ -61,14 +63,17 @@ Repositories are `ghcr.io/olyforge3d/printfarmer-<suffix>`. Builds push by diges
 with BuildKit provenance and SBOMs. Every expected platform and its source/version
 labels are verified; ARM64 runtime smoke checks precede release creation.
 
-Only after all builds succeed does the publisher create the permanent
+Only after all builds and the isolated signing job succeed does the publisher create the permanent
 `v<version>` Git tag and a draft GitHub release, upload and check its asset
 inventory, publish versioned image tags, and advance permitted stable aliases.
 The manifest is canonical JSON with schema `1`, binds all six OCI index
 digests plus every declared platform child digest, and sets
 `managedUpdateEligible: true`. The exact bytes are signed with keyless Cosign
-through GitHub Actions OIDC and verified three times before release visibility:
-twice by the workflow (sign, then re-verify) and once more by
+through GitHub Actions OIDC in a dedicated signing job that runs no
+selected-source code. The unsigned build evidence and signature/evidence
+artifacts are immutable and separate; publication binds them with a SHA-256
+check before upload. The exact bytes are verified twice before release
+visibility: once in the signing job and once more by
 `publish-release.mjs` itself immediately before the `gh release upload` call,
 so nothing can substitute an unsigned or mismatched manifest between those
 workflow steps and the actual upload. Its `sequence` field is a collision-free,
@@ -137,11 +142,19 @@ channel-scoped branch routing: stable dispatches only from `main`, insider only
 from `development`. Both existing release environments retain their branch
 policy, disabled administrator bypass and no-second-reviewer configuration.
 This change neither alters protections nor edits App grants, environments or secrets.
+Before the first stable signed publication, a maintainer must update the live
+`release-stable` environment deployment-branch policy to allow only `main`;
+`release-insider` must allow only `development`. The workflow queries these live
+policies and fails closed if they are missing, permissive, or cross-channel, so
+a stable signature cannot be represented as ready while the environment still
+allows `development`. This is a one-time migration prerequisite, not a cloud
+mutation performed by the workflow.
 
 The approved publisher App/installation remains PrintFarmer-only. The workflow
 requests Contents/Workflows write and Actions/Administration read, and mints its
-short-lived token **after** the long build. Only the publication job requests
-`id-token: write`, and the official Cosign installer is pinned to `v3.9.2`
+short-lived token **after** the long build. Only the isolated signing job requests
+`id-token: write` (the isolated signing job; the build and publication jobs do
+not), and the official Cosign installer is pinned to `v3.9.2`
 while the binary is pinned to `v3.0.6`.
 Cosign verification requires issuer
 `https://token.actions.githubusercontent.com` and the exact workflow identity for

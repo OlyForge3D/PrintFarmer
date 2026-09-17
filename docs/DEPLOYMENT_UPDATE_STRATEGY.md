@@ -60,9 +60,11 @@ identity for the selected channel:
 Keyless Cosign trust is bootstrapped from Sigstore's OIDC certificate and
 transparency log; rotation is performed by changing the pinned official
 Cosign/tooling versions and the explicitly reviewed workflow identity, never by
-accepting a wildcard issuer or subject. The exact manifest bytes and their
-Sigstore bundle are verified three times: twice by the workflow (sign, then
-re-verify) before `publish-release.mjs` even runs, and once more by
+accepting a wildcard issuer or subject. The isolated signing job receives only
+immutable build evidence and runs no selected-source code; the publication job
+has no OIDC permission and binds its separate signature artifact to the exact
+manifest bytes before upload. The exact manifest bytes and their
+Sigstore bundle are verified twice before `publish-release.mjs` even runs, and once more by
 `publish-release.mjs` itself immediately before the `gh release upload` call,
 so nothing between those workflow steps and the actual upload can present an
 unsigned or mismatched manifest as the release's signed contract. Existing
@@ -70,6 +72,13 @@ unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
 `v0.2.3-insider.2`. A valid signature authenticates the publisher and exact
 manifest bytes; it does not authorize or implement apply, installation,
 active-print handling, staging, recovery, or runtime safety.
+
+Before the first stable signed publication, a maintainer must update the live
+`release-stable` environment deployment-branch policy to allow only `main`;
+`release-insider` must allow only `development`. The release tooling queries
+these live policies and fails closed when they are missing, permissive, or
+cross-channel. This migration is a prerequisite for stable signing and is not
+performed by the workflow; no cloud environment or grant is changed here.
 
 ### Read-only inventory and installation readiness
 

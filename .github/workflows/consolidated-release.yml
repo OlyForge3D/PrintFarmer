@@ -67,8 +67,8 @@ jobs:
       source_sha: ${{ needs.select.outputs.source_sha }}
       source_branch: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
 
-  publish:
-    name: Build containers and publish release
+  build:
+    name: Build containers and release evidence
     needs: [select, checks]
     runs-on: ubuntu-latest
     timeout-minutes: 360
@@ -76,12 +76,9 @@ jobs:
     permissions:
       contents: read
       actions: read
-      id-token: write
     env:
       RELEASE_SELECTED_SOURCE: ${{ needs.select.outputs.source_sha }}
       RELEASE_PUBLICATION_ENVIRONMENT: ${{ needs.select.outputs.environment }}
-    outputs:
-      release_url: ${{ steps.publish.outputs.release_url }}
     steps:
       - name: Checkout release tooling
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
@@ -119,33 +116,109 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/ci/publish-release.mjs build
-      - name: Install pinned Cosign
-        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159  # v3.9.2
+      - name: Upload immutable unsigned release evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-build-${{ github.run_id }}
+          path: release-assets/
+          if-no-files-found: error
+          retention-days: 30
+
+  sign:
+    name: Sign immutable release manifest
+    needs: [select, checks, build]
+    runs-on: ubuntu-latest
+    environment: ${{ needs.select.outputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    env:
+      RELEASE_SELECTED_SOURCE: ${{ needs.select.outputs.source_sha }}
+      RELEASE_PUBLICATION_ENVIRONMENT: ${{ needs.select.outputs.environment }}
+    steps:
+      - name: Checkout release tooling only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Download immutable unsigned release evidence
+        uses: actions/download-artifact@v8
+        with:
+          name: release-build-${{ github.run_id }}
+          path: release-assets
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159  # v3.9.2
         with:
           cosign-release: 'v3.0.6'
-      - name: Sign and verify exact update manifest
+      - name: Verify owner dispatch and environment policy
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/publish-release.mjs verify
+      - name: Sign exact immutable manifest
         env:
           MANIFEST: release-assets/update-manifest.json
-          BUNDLE: release-assets/update-manifest.sigstore.json
+          BUNDLE: signed-release/update-manifest.sigstore.json
           EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
           EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
         run: |
           set -euo pipefail
-          expected_ref="refs/heads/${EXPECTED_IDENTITY_REF}"
-          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@${expected_ref}"
+          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
+          mkdir -p signed-release
+          sha256sum "$MANIFEST" > signed-release/update-manifest.sha256
           cosign sign-blob --yes --bundle "$BUNDLE" "$MANIFEST"
           cosign verify-blob --bundle "$BUNDLE" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$EXPECTED_IDENTITY" "$MANIFEST"
-      - name: Re-verify exact manifest before publication
-        env:
-          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
+      - name: Upload immutable signature evidence
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-signature-${{ github.run_id }}
+          path: signed-release/
+          if-no-files-found: error
+          retention-days: 30
+
+  publish:
+    name: Publish verified release
+    needs: [select, checks, build, sign]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    environment: ${{ needs.select.outputs.environment }}
+    permissions:
+      contents: read
+      actions: read
+    env:
+      RELEASE_SELECTED_SOURCE: ${{ needs.select.outputs.source_sha }}
+      RELEASE_PUBLICATION_ENVIRONMENT: ${{ needs.select.outputs.environment }}
+    outputs:
+      release_url: ${{ steps.publish.outputs.release_url }}
+    steps:
+      - name: Checkout release tooling only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Download immutable unsigned release evidence
+        uses: actions/download-artifact@v8
+        with:
+          name: release-build-${{ github.run_id }}
+          path: release-assets
+      - name: Download immutable signature evidence
+        uses: actions/download-artifact@v8
+        with:
+          name: release-signature-${{ github.run_id }}
+          path: signed-release
+      - name: Bind signature to exact manifest bytes
         run: |
           set -euo pipefail
-          cosign verify-blob --bundle release-assets/update-manifest.sigstore.json \
-            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
-            --certificate-identity "$EXPECTED_IDENTITY" release-assets/update-manifest.json
-      - name: Obtain approved publisher token after the long build
+          sha256sum --check signed-release/update-manifest.sha256
+          cp signed-release/update-manifest.sigstore.json release-assets/update-manifest.sigstore.json
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: 24
+      - uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159  # v3.9.2
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Obtain approved publisher token after verification
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
         with:
@@ -166,7 +239,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
-          name: release-build-${{ github.run_id }}
+          name: release-publish-${{ github.run_id }}
           path: release-assets/
           if-no-files-found: warn
           retention-days: 30
@@ -174,7 +247,7 @@ jobs:
   summary:
     name: Release result
     if: always()
-    needs: [select, checks, publish]
+    needs: [select, checks, build, sign, publish]
     runs-on: ubuntu-latest
     permissions: {}
     steps:

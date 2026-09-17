@@ -663,31 +663,40 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.equal(workflow.jobs.select.outputs.source_sha, '${{ steps.select.outputs.source_sha }}');
   assert.equal(workflow.jobs.checks.with.source_sha, '${{ needs.select.outputs.source_sha }}');
   assert.equal(workflow.jobs.checks.with.release_qualification, true);
-  assert.deepEqual(workflow.jobs.publish.needs, ['select', 'checks']);
+  assert.deepEqual(workflow.jobs.build.needs, ['select', 'checks']);
+  assert.deepEqual(workflow.jobs.sign.needs, ['select', 'checks', 'build']);
+  assert.deepEqual(workflow.jobs.publish.needs, ['select', 'checks', 'build', 'sign']);
+  assert.equal(workflow.jobs.build.environment, '${{ needs.select.outputs.environment }}');
+  assert.equal(workflow.jobs.sign.environment, '${{ needs.select.outputs.environment }}');
   assert.equal(workflow.jobs.publish.environment, '${{ needs.select.outputs.environment }}');
-  assert.equal(workflow.jobs.publish.permissions['id-token'], 'write');
+  assert.equal(workflow.jobs.build.permissions['id-token'], undefined);
+  assert.equal(workflow.jobs.sign.permissions['id-token'], 'write');
+  assert.equal(workflow.jobs.publish.permissions['id-token'], undefined);
   assert.equal(workflow.jobs.select.permissions['id-token'], undefined);
-  assert.equal(workflow.jobs.publish.env.RELEASE_SELECTED_SOURCE, '${{ needs.select.outputs.source_sha }}');
-  const steps = workflow.jobs.publish.steps;
-  assert.equal(steps.find(step => step.name === 'Checkout pinned application source').with.ref,
+  assert.equal(workflow.jobs.build.env.RELEASE_SELECTED_SOURCE, '${{ needs.select.outputs.source_sha }}');
+  const buildSteps = workflow.jobs.build.steps;
+  const signSteps = workflow.jobs.sign.steps;
+  const publishSteps = workflow.jobs.publish.steps;
+  assert.equal(buildSteps.find(step => step.name === 'Checkout pinned application source').with.ref,
     '${{ needs.select.outputs.source_sha }}');
-  const build = steps.findIndex(step => step.run === 'node scripts/ci/publish-release.mjs build');
-  const sign = steps.findIndex(step => step.name === 'Sign and verify exact update manifest');
-  const reverify = steps.findIndex(step => step.name === 'Re-verify exact manifest before publication');
-  const mint = steps.findIndex(step => step.id === 'publisher');
-  const publish = steps.findIndex(step => step.run === 'node scripts/ci/publish-release.mjs publish');
-  assert.ok(build < sign && sign < reverify && reverify < mint && mint < publish);
-  assert.equal(steps[sign].env.MANIFEST, 'release-assets/update-manifest.json');
-  assert.equal(steps[sign].env.BUNDLE, 'release-assets/update-manifest.sigstore.json');
-  assert.equal(steps[sign].env.EXPECTED_IDENTITY, manifestIdentityTemplate);
-  assert.match(steps[sign].run, /cosign sign-blob --yes --bundle "\$BUNDLE" "\$MANIFEST"/);
-  assert.match(steps[sign].run, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
-  assert.match(steps[sign].run, /--certificate-identity "\$EXPECTED_IDENTITY" "\$MANIFEST"/);
-  assert.equal(steps[reverify].env.EXPECTED_IDENTITY, manifestIdentityTemplate);
-  assert.match(steps[reverify].run, /--certificate-identity "\$EXPECTED_IDENTITY" release-assets\/update-manifest\.json/);
-  assert.equal(steps[mint].with['permission-workflows'], 'write');
-  assert.equal(steps[mint].with.repositories, 'PrintFarmer');
-  assert.equal(steps[publish].env.GH_TOKEN, '${{ steps.publisher.outputs.token }}');
+  assert.equal(signSteps.find(step => step.name === 'Verify owner dispatch and environment policy').run,
+    'node scripts/ci/publish-release.mjs verify');
+  assert.equal(signSteps.some(step => step.name === 'Checkout pinned application source'), false);
+  assert.equal(signSteps.some(step => step.run === 'node scripts/ci/publish-release.mjs build'), false);
+  assert.match(signSteps.find(step => step.name === 'Sign exact immutable manifest').run,
+    /cosign sign-blob --yes --bundle "\$BUNDLE" "\$MANIFEST"/);
+  assert.match(signSteps.find(step => step.name === 'Sign exact immutable manifest').run,
+    /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
+  assert.equal(signSteps.find(step => step.name === 'Sign exact immutable manifest').env.EXPECTED_IDENTITY,
+    manifestIdentityTemplate);
+  assert.equal(publishSteps.find(step => step.id === 'publisher').with['permission-workflows'], 'write');
+  assert.equal(publishSteps.find(step => step.id === 'publisher').with.repositories, 'PrintFarmer');
+  assert.equal(publishSteps.find(step => step.run === 'node scripts/ci/publish-release.mjs publish').env.GH_TOKEN,
+    '${{ steps.publisher.outputs.token }}');
+  assert.match(publishSteps.find(step => step.name === 'Bind signature to exact manifest bytes').run,
+    /sha256sum --check signed-release\/update-manifest\.sha256/);
+  assert.equal(publishSteps.some(step => step.name === 'Checkout pinned application source'), false);
+  assert.equal(publishSteps.some(step => step.uses?.includes('sigstore/cosign-installer')), true);
   assert.equal(workflow.jobs.publish.outputs.release_url, '${{ steps.publish.outputs.release_url }}');
   assert.equal(workflow.jobs.summary.if, 'always()');
   assert.match(workflow.jobs.summary.steps[0].run, /Partial images, tags, aliases or a draft may remain/);
