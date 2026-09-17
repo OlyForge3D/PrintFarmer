@@ -127,4 +127,3 @@ public sealed class HostUpdatePreflightStepTests
         exception.Code.Should().StartWith("unsupported_provider:");
     }
 }
-
