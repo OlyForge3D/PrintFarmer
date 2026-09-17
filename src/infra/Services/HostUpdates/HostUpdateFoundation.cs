@@ -498,10 +498,10 @@ public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool S
 
 /// <summary>Canonical immutable release identity, including its channel.</summary>
 public sealed record CanonicalReleaseIdentity(string ReleaseId, string Version, string Channel, string SourceTag, string SourceBranch, string SourceCommit,
-    string AuthorizedBranchHead, string BuildMetadata, string OciReleaseLabel, string OciVersionLabel, string ProvenanceSubjectDigest, string ManifestDigest, string IndexDigest)
+    string AuthorizedBranchHead, string BuildMetadata, string OciReleaseLabel, string OciVersionLabel, string ManifestDigest)
 {
     public string CanonicalValue => string.Join('|', ReleaseId, Version, Channel, SourceTag, SourceBranch, SourceCommit, AuthorizedBranchHead, BuildMetadata,
-        OciReleaseLabel, OciVersionLabel, ProvenanceSubjectDigest, ManifestDigest, IndexDigest);
+        OciReleaseLabel, OciVersionLabel, ManifestDigest);
 }
 
 /// <summary>Reports fresh planning output derived exclusively from trusted evidence.</summary>
@@ -949,8 +949,8 @@ internal static class HostUpdateValidation
         IsCanonicalReleaseVersion(identity.Version, channel) && identity.ReleaseId == $"{channel}:{identity.Version}" &&
         IsChannel(identity.Channel) && identity.Channel == channel && identity.SourceTag == $"v{identity.Version}" && HasExpectedSourceBranch(identity.SourceBranch, channel) &&
         IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
-        IsIdentifier(identity.BuildMetadata) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel && IsDigest(identity.ProvenanceSubjectDigest) &&
-        IsDigest(identity.ManifestDigest) && IsDigest(identity.IndexDigest);
+        IsIdentifier(identity.BuildMetadata) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel &&
+        IsDigest(identity.ManifestDigest);
     private static bool HasExpectedSourceBranch(string sourceBranch, string channel) =>
         (channel == "stable" && sourceBranch == "main") || (channel == "insider" && sourceBranch == "development");
     /// <summary>Accepts only the release-channel version grammar used in immutable publication identities.</summary>

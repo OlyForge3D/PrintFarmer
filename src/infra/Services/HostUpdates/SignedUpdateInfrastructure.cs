@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Security.Cryptography;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -32,6 +33,8 @@ public sealed record SignedUpdateValidationResult(bool IsValid, IReadOnlyList<st
     public static SignedUpdateValidationResult Valid { get; } = new(true, []);
 }
 
+public sealed record VerifiedSignedUpdateRelease(SignedUpdateManifest Manifest, byte[] ManifestBytes);
+
 public static partial class SignedUpdateManifestValidator
 {
     private static readonly HashSet<string> ServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
@@ -41,9 +44,26 @@ public static partial class SignedUpdateManifestValidator
     {
         ArgumentNullException.ThrowIfNull(json);
         using JsonDocument document = JsonDocument.Parse(json);
+        if (document.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("Manifest must be an object.");
+        }
         HashSet<string> known = ["schema", "tag", "version", "channel", "sourceBranch", "sourceCommit", "buildId", "sequence",
             "managedUpdateEligible", "services", "platforms", "platformDigests", "minimumUpdaterVersion", "compatibility"];
-        string[] unknown = document.RootElement.EnumerateObject().Select(property => property.Name).Where(name => !known.Contains(name)).ToArray();
+        JsonProperty[] properties = document.RootElement.EnumerateObject().ToArray();
+        if (properties.Select(property => property.Name).Distinct(StringComparer.Ordinal).Count() != properties.Length)
+        {
+            throw new JsonException("Manifest contains duplicate fields.");
+        }
+
+        string[] required = ["schema", "tag", "version", "channel", "sourceBranch", "sourceCommit", "buildId", "sequence",
+            "managedUpdateEligible", "services", "platforms", "platformDigests"];
+        if (required.Any(name => !properties.Any(property => property.Name == name)))
+        {
+            throw new JsonException("Manifest is missing required fields.");
+        }
+
+        string[] unknown = properties.Select(property => property.Name).Where(name => !known.Contains(name)).ToArray();
         if (unknown.Length > 0)
         {
             throw new JsonException($"Unsupported manifest fields: {string.Join(", ", unknown)}");
@@ -75,6 +95,12 @@ public static partial class SignedUpdateManifestValidator
             if (ids.Distinct(StringComparer.Ordinal).Count() != ids.Length || ids.Any(id => !ServiceIds.Contains(id))) errors.Add("service_set_invalid");
             foreach (SignedUpdateService service in manifest.Services)
             {
+                if (service is null)
+                {
+                    errors.Add("service_set_invalid");
+                    continue;
+                }
+
                 if (!IsApprovedImage(service.Id, service.Image)) errors.Add("image_reference_invalid");
                 if (service.Platforms is not null && service.Platforms.Any(platform => !IsPlatform(platform))) errors.Add("platform_invalid");
             }
@@ -128,7 +154,7 @@ public interface ISignedReleaseVerifier
 public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedReleaseVerifier verifier)
 {
     private const string Repository = "OlyForge3D/PrintFarmer";
-    public async Task<SignedUpdateManifest?> DiscoverAsync(string channel, CancellationToken cancellationToken)
+    public async Task<VerifiedSignedUpdateRelease?> DiscoverAsync(string channel, CancellationToken cancellationToken)
     {
         if (channel is not ("stable" or "insider")) throw new ArgumentException("Unsupported channel.", nameof(channel));
         List<GitHubRelease> releases = [];
@@ -147,7 +173,7 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
         string identity = channel == "stable"
             ? "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"
             : "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development";
-        List<SignedUpdateManifest> verified = [];
+        List<VerifiedSignedUpdateRelease> verified = [];
         foreach (GitHubRelease release in releases.Where(candidate => !candidate.Draft && candidate.Prerelease == (channel == "insider")))
         {
             string? tag = release.TagName;
@@ -162,9 +188,9 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             catch (JsonException) { continue; }
             if (parsed.Tag != tag || !SignedUpdateManifestValidator.Validate(parsed).IsValid ||
                 !await verifier.VerifyAsync(manifestBytes, bundleBytes, identity, cancellationToken)) continue;
-            verified.Add(parsed);
+            verified.Add(new(parsed, manifestBytes));
         }
-        return verified.OrderByDescending(candidate => candidate.Sequence).FirstOrDefault();
+        return verified.OrderByDescending(candidate => candidate.Manifest.Sequence).FirstOrDefault();
     }
 }
 
@@ -225,9 +251,18 @@ public sealed class VerifiedGitHubReleaseMetadataProvider(GitHubSignedReleaseDis
 {
     public async Task<SignedReleaseMetadata> GetCurrentAsync(string channel, CancellationToken ct)
     {
-        SignedUpdateManifest manifest = await discovery.DiscoverAsync(channel, ct) ?? throw new InvalidDataException("No verified release is available.");
+        VerifiedSignedUpdateRelease verifiedRelease = await discovery.DiscoverAsync(channel, ct) ?? throw new InvalidDataException("No verified release is available.");
+        SignedUpdateManifest manifest = verifiedRelease.Manifest;
         SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
         if (!validation.IsValid) throw new InvalidDataException(string.Join(',', validation.Errors));
-        throw new InvalidDataException("Manifest is valid but cannot satisfy the existing metadata contract: provenanceSubjectDigest, manifestDigest, and indexDigest are not declared.");
+        string version = manifest.Version;
+        string releaseId = $"{manifest.Channel}:{version}";
+        string manifestDigest = $"sha256:{Convert.ToHexString(SHA256.HashData(verifiedRelease.ManifestBytes)).ToLowerInvariant()}";
+        Dictionary<string, string> componentPlatformDigests = manifest.Services
+            .SelectMany(service => (service.Platforms ?? manifest.Platforms).Select(platform => (Key: $"{service.Id}/{platform}", Value: service.Image[(service.Image.IndexOf("@sha256:", StringComparison.Ordinal) + 1)..])))
+            .ToDictionary(item => item.Key, item => item.Value, StringComparer.Ordinal);
+        CanonicalReleaseIdentity identity = new(releaseId, version, manifest.Channel, manifest.Tag, manifest.SourceBranch, manifest.SourceCommit,
+            manifest.SourceCommit, manifest.BuildId, releaseId, version, manifestDigest);
+        return new(manifest.Channel, manifest.Sequence, true, identity, componentPlatformDigests, manifest.MinimumUpdaterVersion ?? "0.0.0");
     }
 }
