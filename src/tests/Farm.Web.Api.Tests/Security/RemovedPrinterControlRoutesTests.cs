@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Net.Http.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
@@ -47,27 +47,15 @@ public sealed class RemovedPrinterControlRoutesTests : IAsyncLifetime, IDisposab
             db.AddRange(manufacturer, model);
             db.Users.Add(new User
             {
-                Id = userId,
-                Username = $"direct-{userId:N}",
-                Email = $"{userId:N}@example.invalid",
-                PasswordHash = "unused",
-                FirstName = "Direct",
-                LastName = "Operator",
-                IsActive = true,
-                EmailConfirmed = true,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
+                Id = userId, Username = $"direct-{userId:N}", Email = $"{userId:N}@example.invalid",
+                PasswordHash = "unused", FirstName = "Direct", LastName = "Operator",
+                IsActive = true, EmailConfirmed = true, CreatedAt = DateTime.UtcNow, UpdatedAt = DateTime.UtcNow,
             });
             db.Printers.Add(new Printer
             {
-                Id = printerId,
-                Name = "Removed route fixture",
-                Backend = (int)PrinterBackend.Moonraker,
-                ServerUrl = "http://removed-route.invalid",
-                IsEnabled = true,
-                IsAvailable = true,
-                ManufacturerId = manufacturer.Id,
-                ModelId = model.Id,
+                Id = printerId, Name = "Removed route fixture", Backend = (int)PrinterBackend.Moonraker,
+                ServerUrl = "http://removed-route.invalid", IsEnabled = true, IsAvailable = true,
+                ManufacturerId = manufacturer.Id, ModelId = model.Id,
             });
             db.PrinterDispatchStates.Add(new PrinterDispatchState { PrinterId = printerId });
             await db.SaveChangesAsync();

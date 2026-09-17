@@ -1,10 +1,27 @@
-# Normalize text files
-* text=auto
 
-# Shell scripts must retain LF for Unix execution
+# Use bd merge for beads JSONL files
+.beads/issues.jsonl merge=beads
+# Squad: union merge for append-only team state files
+.squad/decisions.md merge=union
+.squad/agents/*/history.md merge=union
+.squad/log/** merge=union
+.squad/orchestration-log/** merge=union
+
+# Shell scripts must always use LF line endings
 *.sh text eol=lf
 install.sh text eol=lf
-scripts/**/*.sh text eol=lf
+
+# GitHub Actions workflows are linted on Linux and must remain LF-stable
+.github/workflows/*.yml text eol=lf
+.github/workflows/*.yaml text eol=lf
+
+# Embedded slicer assets must not be modified by line-ending conversion
+*.png binary
+*.stl binary
+*.hdr binary
+
+# OrcaSlicer profile fixtures mirror upstream JSON byte formatting
+/sample_profiles/orcaslicer/**/*.json text eol=lf
 
 # CI tooling manifest is read by bash/python via process substitution; keep LF
 scripts/ci/dotnet-test-manifest.json text eol=lf
@@ -13,4 +30,34 @@ scripts/ci/fixtures/*.json text eol=lf
 
 # Release metadata pins these source artifacts by SHA-256; keep checkout bytes LF-stable.
 /scripts/docker/configs/security-config.json text eol=lf
-/scripts/docker/configs/security-config.production.json text eol=lf
+/scripts/docker/database-templates/postgres.yml text eol=lf
+/scripts/docker/compose-templates/docker-compose.common.yml text eol=lf
+
+# Git hooks must always use LF line endings
+.githooks/pre-commit text eol=lf
+.githooks/pre-push text eol=lf
+
+# Compliance inputs and MSBuild metadata must remain stable across platforms
+*.conf text eol=lf
+# Reviewed compliance license evidence is pinned by SHA-256 hash in
+# compliance/dependency-license-policy.json against its LF-normalized bytes.
+# Use **/*.txt (not *.txt) so this also covers subdirectories such as
+# compliance/licenses/npm/*.txt — a single-star glob does not cross path
+# separators, so it silently missed those files on Windows checkouts and let
+# Git convert them to CRLF, breaking the pinned-hash integrity check.
+/compliance/licenses/**/*.txt text eol=lf
+/Directory.Build.props whitespace=cr-at-eol
+/src/.editorconfig whitespace=cr-at-eol
+/.squad/templates/ralph-triage.js -text whitespace=cr-at-eol
+
+# EF Core migration scaffolding is machine-generated and enormous: every
+# *.Designer.cs embeds a full ~10,000-line model snapshot, and each new migration
+# rewrites the ~7,300-line *ModelSnapshot.cs for all three providers. A migration
+# PR therefore shows ~31,000 changed lines for ~120 lines of real SQL.
+# Marking these generated collapses them by default in GitHub diffs and drops
+# them from language stats. They remain on disk and fully expandable.
+#
+# Deliberately NOT marked: the migration files themselves (*_Name.cs). Those hold
+# the hand-written Up()/Down() SQL and must stay visible for review.
+src/migrations/**/*.Designer.cs linguist-generated=true
+src/migrations/**/*ModelSnapshot.cs linguist-generated=true

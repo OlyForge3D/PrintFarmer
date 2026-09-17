@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -119,11 +119,8 @@ public class PrinterBackendCapabilitiesServiceTests
         clients.Setup(value => value.GetClient(backend)).Returns(client.Object);
         var printer = new Printer
         {
-            Id = Guid.NewGuid(),
-            Backend = (int)backend,
-            ServerUrl = "http://printer.local",
-            BackendPort = 9000,
-            FrontendPort = 8000,
+            Id = Guid.NewGuid(), Backend = (int)backend,
+            ServerUrl = "http://printer.local", BackendPort = 9000, FrontendPort = 8000,
         };
         var repo = new Mock<IPrintersRepository>();
         repo.Setup(value => value.FindByIdAsync(printer.Id, It.IsAny<CancellationToken>())).ReturnsAsync(printer);

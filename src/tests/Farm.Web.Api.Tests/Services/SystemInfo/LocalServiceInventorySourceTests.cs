@@ -1,4 +1,4 @@
-﻿extern alias PrinterDiscoveryRef;
+extern alias PrinterDiscoveryRef;
 
 using System.Reflection;
 using System.Reflection.Emit;

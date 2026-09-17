@@ -361,8 +361,7 @@ public sealed class ServiceInventoryTests
     public void Readiness_UnknownUpdaterVersion_IsNotEligible()
     {
         ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
-            with
-        { HostUpdaterVersion = null };
+            with { HostUpdaterVersion = null };
 
         ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
 
@@ -374,8 +373,7 @@ public sealed class ServiceInventoryTests
     public void Readiness_TooOldUpdaterVersion_IsNotEligible()
     {
         ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
-            with
-        { HostUpdaterVersion = "1.2.2" };
+            with { HostUpdaterVersion = "1.2.2" };
 
         ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, Release("202609150001_Initial"), Now);
 
@@ -387,8 +385,7 @@ public sealed class ServiceInventoryTests
     public void Readiness_LowerInsiderSerial_IsNotEligible()
     {
         ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
-            with
-        { HostUpdaterVersion = "1.2.3-insider.1" };
+            with { HostUpdaterVersion = "1.2.3-insider.1" };
         VerifiedReleaseEvidenceDto release = Release("202609150001_Initial") with
         {
             MinimumUpdaterVersion = "1.2.3-insider.10",
@@ -404,8 +401,7 @@ public sealed class ServiceInventoryTests
     public void Readiness_PrereleaseUpdaterIsOlderThanStableMinimum()
     {
         ServiceInventoryDto inventory = Evaluate([Verified("a") with { MigrationHead = "202609150001_Initial" }])
-            with
-        { HostUpdaterVersion = "1.2.3-insider.10" };
+            with { HostUpdaterVersion = "1.2.3-insider.10" };
         VerifiedReleaseEvidenceDto release = Release("202609150001_Initial") with
         {
             MinimumUpdaterVersion = "1.2.3",

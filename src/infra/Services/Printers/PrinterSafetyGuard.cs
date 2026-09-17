@@ -1,4 +1,4 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>Safety-sensitive operations governed by verified printer evidence.</summary>
 public enum PrinterSafetyOperation
@@ -284,10 +284,10 @@ public sealed class PrinterSafetyGuard(
         bool requireClearance)
     {
         if (safety.Positioning.CoordinateOriginMm is not
-            { State: VerifiedSafetyFactState.Verified, Value: { } origin } ||
+                { State: VerifiedSafetyFactState.Verified, Value: { } origin } ||
             !IsFinite(origin) ||
             safety.Positioning.TravelEnvelopeMm is not
-            { State: VerifiedSafetyFactState.Verified, Value: { } envelope } ||
+                { State: VerifiedSafetyFactState.Verified, Value: { } envelope } ||
             !IsValidEnvelope(envelope))
         {
             return PrinterSafetyValidationResult.Reject(
@@ -300,7 +300,7 @@ public sealed class PrinterSafetyGuard(
         if (requireClearance)
         {
             if (safety.Positioning.MinimumClearanceZMm is not
-                { State: VerifiedSafetyFactState.Verified, Value: double verifiedClearance } ||
+                    { State: VerifiedSafetyFactState.Verified, Value: double verifiedClearance } ||
                 !double.IsFinite(verifiedClearance))
             {
                 return PrinterSafetyValidationResult.Reject(

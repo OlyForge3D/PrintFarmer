@@ -1,4 +1,4 @@
-﻿using System.Reflection;
+using System.Reflection;
 using Farm.Infrastructure.Services.Printers;
 
 namespace Farm.Infrastructure.Tests.Services.Printers;

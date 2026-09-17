@@ -1,8 +1,8 @@
 ﻿using Farm.Web.Api.Startup;
+using Xunit;
 using Microsoft.AspNetCore.Cors.Infrastructure;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using Xunit;
 
 namespace Farm.Web.Api.Tests.Startup;
 

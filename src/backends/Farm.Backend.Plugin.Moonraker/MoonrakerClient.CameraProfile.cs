@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Cameras;
 using Farm.Infrastructure.Services.Printers;
 

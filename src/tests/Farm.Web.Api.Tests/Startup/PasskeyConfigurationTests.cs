@@ -1,4 +1,4 @@
-﻿using Farm.Web.Api.Infrastructure;
+using Farm.Web.Api.Infrastructure;
 using Fido2NetLib;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;

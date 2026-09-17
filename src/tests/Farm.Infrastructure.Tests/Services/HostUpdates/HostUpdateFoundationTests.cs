@@ -1,5 +1,5 @@
-﻿using System.Diagnostics;
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -275,18 +275,14 @@ public sealed class HostUpdateFoundationTests
             SourceBranch = "development",
         };
         HostUpdatePlanRequest insiderRequest = Request() with { SourceChannel = "insider", TargetChannel = "insider" };
-        Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with
+        Assert.Contains("release_identity_invalid", (await CreateSut(new Provider(Metadata() with { Channel = "insider", Identity = insider with
         {
-            Channel = "insider",
-            Identity = insider with
-            {
-                Version = "1.0.0-insider.01",
-                ReleaseId = "insider:1.0.0-insider.01",
-                OciReleaseLabel = "insider:1.0.0-insider.01",
-                OciVersionLabel = "1.0.0-insider.01",
-                SourceTag = "v1.0.0-insider.01",
-            }
-        })).PlanAsync(insiderRequest, default)).Reasons);
+            Version = "1.0.0-insider.01",
+            ReleaseId = "insider:1.0.0-insider.01",
+            OciReleaseLabel = "insider:1.0.0-insider.01",
+            OciVersionLabel = "1.0.0-insider.01",
+            SourceTag = "v1.0.0-insider.01",
+        } })).PlanAsync(insiderRequest, default)).Reasons);
     }
 
     [Fact]
@@ -372,10 +368,7 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 
@@ -393,10 +386,7 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 
@@ -428,10 +418,7 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 
@@ -454,10 +441,7 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 
@@ -563,10 +547,7 @@ public sealed class HostUpdateFoundationTests
                 secondResult.RequiredComponents, Assert.IsType<HostInstallationEvidence>(secondResult.Installation));
             HostUpdateAuthorization standing = Authorization(secondPlan) with
             {
-                Kind = HostUpdateAuthorizationKind.StandingPolicy,
-                StandingPolicyActive = true,
-                SourceChannel = "stable",
-                TargetChannel = "stable",
+                Kind = HostUpdateAuthorizationKind.StandingPolicy, StandingPolicyActive = true, SourceChannel = "stable", TargetChannel = "stable",
             };
             Assert.True((await secondSut.StageAsync(secondPlan, standing, default)).IsStaged);
             HostUpdateAuthorizationAudit accepted = Assert.IsType<HostUpdateAuthorizationAudit>((await new FileHostUpdateJournal(directory).ReadAsync(default))
@@ -578,10 +559,7 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 
@@ -608,111 +586,94 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 
     [Fact]
     public async Task FileJournal_ForgedAuthorizationAuditRoundTripsWithoutChangingTrustedPlanIdentity()
-    {
-        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
-        try
         {
-            FileHostUpdateJournal journal = new(directory);
-            HostUpdateFoundation sut = CreateSut(journal: journal);
-            HostUpdatePlan plan = await EligiblePlanAsync(sut);
-            HostUpdateAuthorization forged = Authorization(plan) with
+            string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+            try
             {
-                ActorId = "attacker",
-                Nonce = "other-nonce",
-                InstallationId = "other-installation",
-                PlanHash = Hash("other"),
-                SourceChannel = "insider",
-                TargetChannel = "insider",
-                ChannelPolicyRevision = "../invalid",
-            };
+                FileHostUpdateJournal journal = new(directory);
+                HostUpdateFoundation sut = CreateSut(journal: journal);
+                HostUpdatePlan plan = await EligiblePlanAsync(sut);
+                HostUpdateAuthorization forged = Authorization(plan) with
+                {
+                    ActorId = "attacker", Nonce = "other-nonce", InstallationId = "other-installation", PlanHash = Hash("other"),
+                    SourceChannel = "insider", TargetChannel = "insider", ChannelPolicyRevision = "../invalid",
+                };
 
-            Assert.Equal("authorization_invalid", (await sut.StageAsync(plan, forged, default)).Code);
-            HostUpdateJournalEntry entry = (await new FileHostUpdateJournal(directory).ReadAsync(default))[^1];
-            HostUpdateAuthorizationAudit audit = Assert.IsType<HostUpdateAuthorizationAudit>(entry.Snapshot.AuthorizationAudit);
-            Assert.Equal(plan.Request.ActorId, entry.Snapshot.ActorId);
-            Assert.Equal(plan.Request.Nonce, entry.Snapshot.Nonce);
-            Assert.Equal(plan.InstallationId, entry.Snapshot.InstallationId);
-            Assert.Equal("attacker", audit.ActorId);
-            Assert.Equal("other-nonce", audit.Nonce);
-            Assert.Equal("other-installation", audit.InstallationId);
-            Assert.Equal(Hash("other"), audit.PlanHash);
-            Assert.Equal("insider", audit.SourceChannel);
-            Assert.Equal("insider", audit.TargetChannel);
-            Assert.Equal("redacted", audit.ChannelPolicyRevision);
-            Assert.False(audit.Accepted);
-        }
-        finally
-        {
-            if (Directory.Exists(directory))
+                Assert.Equal("authorization_invalid", (await sut.StageAsync(plan, forged, default)).Code);
+                HostUpdateJournalEntry entry = (await new FileHostUpdateJournal(directory).ReadAsync(default))[^1];
+                HostUpdateAuthorizationAudit audit = Assert.IsType<HostUpdateAuthorizationAudit>(entry.Snapshot.AuthorizationAudit);
+                Assert.Equal(plan.Request.ActorId, entry.Snapshot.ActorId);
+                Assert.Equal(plan.Request.Nonce, entry.Snapshot.Nonce);
+                Assert.Equal(plan.InstallationId, entry.Snapshot.InstallationId);
+                Assert.Equal("attacker", audit.ActorId);
+                Assert.Equal("other-nonce", audit.Nonce);
+                Assert.Equal("other-installation", audit.InstallationId);
+                Assert.Equal(Hash("other"), audit.PlanHash);
+                Assert.Equal("insider", audit.SourceChannel);
+                Assert.Equal("insider", audit.TargetChannel);
+                Assert.Equal("redacted", audit.ChannelPolicyRevision);
+                Assert.False(audit.Accepted);
+            }
+            finally
             {
-                Directory.Delete(directory, true);
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
             }
         }
-    }
 
     [Fact]
     public async Task FileJournal_JsonValidMutation_FailsIntegrityValidation()
-    {
-        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
-        try
         {
-            FileHostUpdateJournal journal = new(directory);
-            HostUpdatePlan plan = await EligiblePlanAsync(CreateSut());
-            await journal.AppendAsync(HostUpdateJournalEntry.Planned(plan.Request, Metadata(), HostUpdatePlanResult.Rejected("request_invalid")), default);
-            string path = Path.Combine(directory, "host-update.journal.jsonl");
-            HostUpdateJournalEntry entry = JsonSerializer.Deserialize<HostUpdateJournalEntry>(await File.ReadAllTextAsync(path))!;
-            entry = entry with { Code = "tampered" };
-            await File.WriteAllTextAsync(path, JsonSerializer.Serialize(entry) + "\n");
-
-            await Assert.ThrowsAsync<InvalidDataException>(() => new FileHostUpdateJournal(directory).ReadAsync(default));
-        }
-        finally
-        {
-            if (Directory.Exists(directory))
+            string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+            try
             {
-                Directory.Delete(directory, true);
+                FileHostUpdateJournal journal = new(directory);
+                HostUpdatePlan plan = await EligiblePlanAsync(CreateSut());
+                await journal.AppendAsync(HostUpdateJournalEntry.Planned(plan.Request, Metadata(), HostUpdatePlanResult.Rejected("request_invalid")), default);
+                string path = Path.Combine(directory, "host-update.journal.jsonl");
+                HostUpdateJournalEntry entry = JsonSerializer.Deserialize<HostUpdateJournalEntry>(await File.ReadAllTextAsync(path))!;
+                entry = entry with { Code = "tampered" };
+                await File.WriteAllTextAsync(path, JsonSerializer.Serialize(entry) + "\n");
+
+                await Assert.ThrowsAsync<InvalidDataException>(() => new FileHostUpdateJournal(directory).ReadAsync(default));
+            }
+            finally
+            {
+                if (Directory.Exists(directory)) Directory.Delete(directory, true);
             }
         }
-    }
 
     [Fact]
     public async Task FileJournal_ApprovedEntryRejectsInvalidAuthorizationAuditPolicy()
-    {
-        string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
-        try
-        {
-            FileHostUpdateJournal journal = new(directory);
-            HostUpdatePlan plan = await EligiblePlanAsync(CreateSut());
-            HostUpdateJournalEntry invalid = HostUpdateJournalEntry.Approved(plan, Metadata(), Authorization(plan)) with
             {
-                Snapshot = HostUpdateJournalEntry.Approved(plan, Metadata(), Authorization(plan)).Snapshot with
+                string directory = Path.Combine(Directory.GetCurrentDirectory(), "host-update-test-artifacts", Guid.NewGuid().ToString("N"));
+                try
                 {
-                    AuthorizationAudit = HostUpdateJournalEntry.Approved(plan, Metadata(), Authorization(plan)).Snapshot.AuthorizationAudit! with
+                    FileHostUpdateJournal journal = new(directory);
+                    HostUpdatePlan plan = await EligiblePlanAsync(CreateSut());
+                    HostUpdateJournalEntry invalid = HostUpdateJournalEntry.Approved(plan, Metadata(), Authorization(plan)) with
                     {
-                        Kind = "invalid",
-                    },
-                },
-            };
+                        Snapshot = HostUpdateJournalEntry.Approved(plan, Metadata(), Authorization(plan)).Snapshot with
+                        {
+                            AuthorizationAudit = HostUpdateJournalEntry.Approved(plan, Metadata(), Authorization(plan)).Snapshot.AuthorizationAudit! with
+                            {
+                                Kind = "invalid",
+                            },
+                        },
+                    };
 
-            await Assert.ThrowsAsync<InvalidDataException>(() => journal.AppendAsync(invalid, default));
-        }
-        finally
-        {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
+                    await Assert.ThrowsAsync<InvalidDataException>(() => journal.AppendAsync(invalid, default));
+                }
+                finally
+                {
+                    if (Directory.Exists(directory)) Directory.Delete(directory, true);
+                }
             }
-        }
-    }
 
     [Fact]
     public async Task FileJournal_ApprovedEntryRejectsMismatchedAcceptedAuthorizationAuditTuple()
@@ -735,10 +696,7 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
 
@@ -780,10 +738,7 @@ public sealed class HostUpdateFoundationTests
         }
         finally
         {
-            if (Directory.Exists(directory))
-            {
-                Directory.Delete(directory, true);
-            }
+            if (Directory.Exists(directory)) Directory.Delete(directory, true);
         }
     }
     private static HostUpdateFoundation CreateSut(Provider? provider = null, Inspector? inspector = null, IHostUpdateStager? stager = null, IHostUpdateJournal? journal = null, IHostUpdateAuthorizationEvaluator? authorizationEvaluator = null) =>

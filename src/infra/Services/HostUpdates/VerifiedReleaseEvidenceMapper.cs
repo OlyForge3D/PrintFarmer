@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;

@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Xunit;

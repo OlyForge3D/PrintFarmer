@@ -1,4 +1,4 @@
-﻿using System.Net;
+using System.Net;
 using System.Text;
 using Farm.Backend.Plugin.Moonraker;
 using Farm.Infrastructure.Domain;

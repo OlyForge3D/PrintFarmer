@@ -1,4 +1,4 @@
-﻿namespace Farm.Infrastructure.Services.Printers;
+namespace Farm.Infrastructure.Services.Printers;
 
 /// <summary>Creates complete fact-specific safety telemetry at backend receipt time.</summary>
 public static class PrinterSafetyTelemetryNormalizer
