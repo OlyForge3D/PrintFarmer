@@ -294,7 +294,13 @@ test('real workflow gates every protected route with a blocking no-secret live d
   const steps = publisher.jobs.publish.steps;
   const recheck = steps.findIndex(step => step.run === 'node scripts/ci/release-dispatch.mjs verify');
   const mint = steps.findIndex(step => step.id === 'publisher');
+  const abandonMint = steps.findIndex(step => step.id === 'abandonment_publisher');
   assert.ok(recheck >= 0 && recheck < mint);
+  assert.ok(abandonMint > mint);
+  assert.equal(
+    steps.filter(step => step.uses === 'actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349').length,
+    2,
+  );
   assert.equal(steps[recheck].if, undefined);
   assert.equal(steps[recheck]['continue-on-error'], undefined);
   assert.equal(steps[recheck].env.GH_TOKEN, '${{ github.token }}');
@@ -304,8 +310,28 @@ test('real workflow gates every protected route with a blocking no-secret live d
     'private-key': '${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}',
     'permission-contents': 'write', 'permission-checks': 'read',
     'permission-statuses': 'read', 'permission-administration': 'write', 'permission-actions': 'read',
+    'permission-workflows': 'write',
   });
   assert.equal(steps[mint]['continue-on-error'], undefined);
+  assert.equal(steps[mint].if, "inputs.operation == 'publish'");
+  assert.deepEqual(steps[abandonMint].with, {
+    owner: 'OlyForge3D', repositories: 'PrintFarmer',
+    'app-id': '${{ vars.RELEASE_PUBLISHER_APP_ID }}',
+    'private-key': '${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}',
+    'permission-contents': 'write', 'permission-checks': 'read',
+    'permission-statuses': 'read', 'permission-administration': 'write', 'permission-actions': 'read',
+  });
+  assert.equal(steps[abandonMint].if, "inputs.operation == 'abandon'");
+  assert.equal(steps[abandonMint]['continue-on-error'], undefined);
+  for (const step of steps) {
+    const serialized = JSON.stringify(step);
+    if (serialized.includes('${{ steps.publisher.outputs.token }}')) {
+      assert.equal(step.if, "inputs.operation == 'publish'");
+    }
+    if (serialized.includes('${{ steps.abandonment_publisher.outputs.token }}')) {
+      assert.equal(step.if, "inputs.operation == 'abandon'");
+    }
+  }
   assert.equal(workflow.jobs.publish.secrets, 'inherit');
   assert.doesNotMatch(JSON.stringify(workflow.jobs.admit), /secrets\./);
   assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);
