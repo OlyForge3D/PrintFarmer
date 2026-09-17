@@ -96,12 +96,12 @@ public interface IHostUpdateFenceCoordinator
 /// Fences the HTTP admission perimeter. <see cref="IsQuiescedAsync"/> reports the gate's own
 /// closed/open state; the gate genuinely blocks a submission only where a real call site
 /// explicitly consults <see cref="IHostUpdateAdmissionGate.IsClosedAsync"/> before admitting new
-/// work (currently: new job-queue submissions via
-/// <see cref="Farm.Infrastructure.Services.Queue.JobQueueService.AddJobToQueueAsync"/> --
-/// see <c>docs/HOST_UPDATE_EXECUTOR.md</c>'s "Known limitations" for exactly which
-/// submission/scheduling/slicing/printer-command/bridge paths are not yet wired). Closing the
-/// gate without every real call site wired does not, by itself, guarantee no new write starts;
-/// this class only proves the gate itself flipped, not that every producer honors it.
+/// work. Current consumers cover queue submission, manual dispatch, batch dispatch,
+/// auto-dispatch ready acknowledgement, the auto-dispatch background loop, and monolith slicer
+/// job enqueue; split slicer-host ingress and bridge/webhook producers remain explicit gaps in
+/// <c>docs/HOST_UPDATE_EXECUTOR.md</c>. Closing the gate without every real call site wired does
+/// not, by itself, guarantee no new write starts; this class only proves the gate itself flipped,
+/// not that every producer honors it.
 /// </summary>
 public sealed class AdmissionFenceableWriter(IHostUpdateAdmissionGate admissionGate) : IFenceableWriter
 {

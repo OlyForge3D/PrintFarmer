@@ -36,7 +36,7 @@ public sealed class HostUpdateExecutionOptions
     public string DiskWatchPath => RootDirectory;
 
     private string Combine(string child) =>
-        string.IsNullOrWhiteSpace(RootDirectory) ? child : Path.Combine(RootDirectory, child);
+        string.IsNullOrWhiteSpace(RootDirectory) ? throw new InvalidOperationException("root_directory_not_configured") : Path.Combine(RootDirectory, child);
 
     /// <summary>Minimum free bytes required on <see cref="DiskWatchPath"/>'s volume for preflight to pass.</summary>
     public long MinimumFreeBytes { get; set; } = 2_000_000_000;
@@ -98,6 +98,7 @@ public sealed class HostUpdateExecutionOptions
         "queue-outbox-publisher",
         "power-reading-prune",
         "queue-retention-prune",
+        "auto-dispatch",
     ];
 
     /// <summary>

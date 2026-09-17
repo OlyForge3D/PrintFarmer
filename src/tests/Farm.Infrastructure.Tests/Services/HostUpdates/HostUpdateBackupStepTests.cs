@@ -79,6 +79,60 @@ public sealed class HostUpdateBackupStepTests
     }
 
     [Fact]
+    public async Task BackupCoordinator_RequiredDirectoryWithZeroByteFile_WritesManifestInsteadOfFailingIncomplete()
+    {
+        string source = Path.Combine(Path.GetTempPath(), "hu-src-" + Guid.NewGuid());
+        Directory.CreateDirectory(source);
+        await File.WriteAllBytesAsync(Path.Combine(source, "empty.bin"), []);
+        var target = new DirectoryCopyBackupTarget("app-data", source, isRequired: true);
+        string root = Path.Combine(Path.GetTempPath(), "hu-root-" + Guid.NewGuid());
+        var coordinator = new HostUpdateBackupCoordinator([target], root);
+        try
+        {
+            await coordinator.RunAsync(Request(), CancellationToken.None);
+
+            string manifest = Directory.EnumerateFiles(root, "manifest.json", SearchOption.AllDirectories).Single();
+            string json = await File.ReadAllTextAsync(manifest);
+            json.Should().Contain("empty.bin");
+            json.Should().Contain("\"Length\": 0");
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public async Task BackupCoordinator_RequiredDirectoryWithOnlyEmptyDirectories_WritesExplicitDirectoryCoverage()
+    {
+        string source = Path.Combine(Path.GetTempPath(), "hu-src-" + Guid.NewGuid());
+        Directory.CreateDirectory(Path.Combine(source, "profiles", "empty-child"));
+        var target = new DirectoryCopyBackupTarget("profiles", source, isRequired: true);
+        string root = Path.Combine(Path.GetTempPath(), "hu-root-" + Guid.NewGuid());
+        var coordinator = new HostUpdateBackupCoordinator([target], root);
+        try
+        {
+            await coordinator.RunAsync(Request(), CancellationToken.None);
+
+            string directoryManifest = Directory.EnumerateFiles(root, ".printfarmer-directories.json", SearchOption.AllDirectories).Single();
+            string json = await File.ReadAllTextAsync(directoryManifest);
+            json.Should().Contain("profiles");
+            json.Should().Contain("empty-child");
+        }
+        finally
+        {
+            Directory.Delete(source, recursive: true);
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+    [Fact]
     public async Task BackupCoordinator_RequiredDirectoryMissing_FailsRunClosed()
     {
         string missingSource = Path.Combine(Path.GetTempPath(), "hu-missing-" + Guid.NewGuid());
@@ -99,4 +153,3 @@ public sealed class HostUpdateBackupStepTests
         }
     }
 }
-

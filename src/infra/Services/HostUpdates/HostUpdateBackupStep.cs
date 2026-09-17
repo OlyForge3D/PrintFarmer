@@ -11,7 +11,7 @@ public sealed class HostUpdateBackupUnsupportedOwnerException(IReadOnlyList<stri
     public IReadOnlyList<string> ExternallyOwnedTargetNames { get; } = externallyOwnedTargetNames;
 }
 
-/// <summary>Thrown when a backup target fails to produce any files, or produces zero-byte output.</summary>
+/// <summary>Thrown when a backup target fails to produce any files or explicit directory coverage.</summary>
 public sealed class HostUpdateBackupIncompleteException(string targetName) : InvalidOperationException($"backup_incomplete:{targetName}");
 #pragma warning restore CA1032
 
@@ -90,7 +90,7 @@ public sealed class HostUpdateBackupCoordinator(
             files.Add(new HostUpdateBackupManifestFile(Path.GetRelativePath(runDirectory, filePath), hash, bytes.LongLength));
         }
 
-        if (files.Count == 0 || files.Any(f => f.Length == 0))
+        if (files.Count == 0)
         {
             throw new HostUpdateBackupIncompleteException("manifest");
         }
@@ -184,7 +184,24 @@ public sealed class DirectoryCopyBackupTarget(string name, string sourceDirector
             return;
         }
 
-        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        string[] relativeDirectories =
+        [
+            ".",
+            .. Directory.EnumerateDirectories(sourceDirectory, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(sourceDirectory, path))
+                .OrderBy(path => path, StringComparer.Ordinal),
+        ];
+        string[] sourceFiles = [.. Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)];
+        if (relativeDirectories.Length > 1 || sourceFiles.Length == 0)
+        {
+            string directoryManifest = JsonSerializer.Serialize(relativeDirectories, new JsonSerializerOptions { WriteIndented = true });
+            await File.WriteAllTextAsync(
+                Path.Combine(destinationDirectory, ".printfarmer-directories.json"),
+                directoryManifest,
+                cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (string sourcePath in sourceFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
             string relative = Path.GetRelativePath(sourceDirectory, sourcePath);

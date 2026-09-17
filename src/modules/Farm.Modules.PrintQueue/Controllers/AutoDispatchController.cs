@@ -22,7 +22,8 @@ public class AutoDispatchController(
     IAutoDispatchService autoDispatchService,
     ILogger<AutoDispatchController> logger,
     IQueueResourceAuthorizationService? resourceAuthorization = null,
-    AppDbContext? db = null) : ControllerBase
+    AppDbContext? db = null,
+    Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null) : ControllerBase
 {
     /// <summary>
     /// Get the auto-dispatch status for a printer.
@@ -76,6 +77,11 @@ public class AutoDispatchController(
         [FromHeader(Name = "X-Job-If-Match")] string? jobIfMatch = null,
         [FromHeader(Name = "X-Filament-Check-If-Match")] string? filamentCheckIfMatch = null)
     {
+        if (await IsHostUpdateAdmissionClosedAsync(ct))
+        {
+            return Conflict(new { error = "host_update_admission_closed" });
+        }
+
         if (await CheckDispatchPreconditionAsync(printerId, ct) is { } precondition)
         {
             return precondition;
@@ -450,6 +456,9 @@ public class AutoDispatchController(
                 new { error = "precondition_required", detail = exception.Message });
         }
     }
+
+    private async Task<bool> IsHostUpdateAdmissionClosedAsync(CancellationToken cancellationToken) =>
+        hostUpdateAdmissionGate is not null && await hostUpdateAdmissionGate.IsClosedAsync(cancellationToken).ConfigureAwait(false);
 
     private async Task<ObjectResult?> CheckDispatchPreconditionAsync(
         Guid printerId,

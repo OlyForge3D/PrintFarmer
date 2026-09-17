@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -43,6 +43,17 @@ public class HostUpdateExecutionOptionsValidatorTests
         result.Succeeded.Should().BeTrue();
     }
 
+    [Fact]
+    public void DerivedStatePaths_MissingRootDirectory_ThrowInsteadOfResolvingRelative()
+    {
+        var options = new HostUpdateExecutionOptions { RootDirectory = string.Empty };
+
+        Action state = () => _ = options.StateDirectory;
+        Action backups = () => _ = options.BackupRootDirectory;
+
+        state.Should().Throw<InvalidOperationException>().WithMessage("root_directory_not_configured");
+        backups.Should().Throw<InvalidOperationException>().WithMessage("root_directory_not_configured");
+    }
     [Fact]
     public void Validate_RelativeRootDirectory_Fails()
     {

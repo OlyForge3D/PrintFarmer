@@ -1,7 +1,7 @@
 # Host update executor
 
-The safe-executor core (`HostUpdateExecutor`, unmodified since the foundation commit) supplies
-immutable release identity contracts, exact six-target validation, a bounded process/installation
+The safe-executor core (`HostUpdateExecutor`) supplies
+immutable release identity contracts, durable canonical request fingerprint binding, exact six-target validation, a bounded process/installation
 lock, a durable hash-chained journal, and a checkpoint-aware state machine. On top of that
 foundation, issue #2663 adds concrete, repository-appropriate step adapters that turn the
 foundation into a functional **manual-first** update path: an operator (or, later, #2666's
@@ -13,8 +13,8 @@ failure. There is still no automatic/unattended execution path.
 ## Configuration: `HostUpdateExecutionOptions`
 
 Bound from the `HostUpdateExecution` configuration section (see
-`src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`) and enforced at process start by
-`HostUpdateExecutionOptionsValidator` via `ValidateOnStart()`:
+`src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`) and validated by
+`HostUpdateExecutionOptionsValidator`. The executor remains default-off when the root is unset: validation permits process startup, but all derived executor paths now throw `root_directory_not_configured` instead of resolving under the current working directory, and the runtime availability provider reports `Unavailable` until a writable host-controlled root is configured:
 
 - **`RootDirectory`** (required, no default): an absolute, host-controlled, persistent directory
   that owns all executor state — the durable journal, the execution lock, installed-state, and
@@ -47,7 +47,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 | Fence | `HostUpdateFenceCoordinator` | Proves every registered `IFenceableWriter` (the admission gate; the queue-outbox publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService` via their own independent `IHostUpdateWriterActivityFlag`-derived instances) has actually quiesced before backup — bounded-polled, not assumed. The executor's availability provider also fails closed (`insufficient_fenced_writers:<names>`) if `HostUpdateExecutionOptions.RequiredFencedWriterNames` names a writer with no registered `IFenceableWriter`. |
 | Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
 | Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Wraps the existing `ProviderAwareMigrationRunner` under the executor's own single-writer lock; inspects the actual installed provider state and fails closed on an unsupported/mixed configuration rather than duplicating migration logic. |
-| Apply | `HostUpdateImageApplier` | Applies immutable `repository@sha256` images via the existing compose templates and `docker compose up -d`, using an explicit process argument list — never shell interpolation, never a mutable tag. |
+| Apply | `HostUpdateImageApplier` | Stages each immutable `repository@sha256` image first with `docker image pull` (`--platform` on forward execution), then applies via the existing compose templates and `docker compose up -d --no-build --pull never`, using an explicit process argument list — never shell interpolation, never a mutable tag. If staging any image fails, compose mutation is not attempted. |
 | Verify | `HostUpdateHealthVerifier` + `AggregateHostUpdateHealthCheck` + `DigestHostUpdateHealthCheck` | Confirms exact running digests via a two-step `docker container inspect --format {{.Image}}` → `docker image inspect --format {{index .RepoDigests 0}}` probe (`.RepoDigests` exists only on image-inspect output, never on container-inspect output -- see "Known limitations" for the bug this replaced) plus the aggregated `/health` endpoint's JSON body has a top-level `Status` of exactly `"Healthy"` (never merely an HTTP 200 — ASP.NET Core's default health middleware also returns 200 for `"Degraded"`) before reporting healthy and allowing writers to reopen. |
 | Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` + `FileHostUpdateRecoveryOutcomeStore` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling (structured process args/env only — no shell string, no password on argv), and durably persists the `RolledBack`/`NeedsOperator` outcome itself (survives a crash immediately after cancellation) before reporting it. Resumable/idempotent via the same durable journal after a process restart. |
 
@@ -79,16 +79,7 @@ permission.
 
 `HostUpdateController` (`Farm.Modules.Administration`) exposes the manual, operator-invoked
 surface: `[RequirePermission("system_settings", "admin")]`-gated execute/recover endpoints that
-bind one immutable request per call. Both endpoints now gate on the same
-`HostUpdateExecutionAvailabilityHolder` the availability hosted service maintains: a request that
-arrives while the executor reports `Unavailable` (including while restart reconciliation still
-reports an unresolved prior release) is rejected with `503 Service Unavailable` and the exact
-reasons, before it ever reaches `IHostUpdateExecutor`/`IHostUpdateRecoveryCoordinator` — see
-`HostUpdateControllerAvailabilityTests`. Replay/duplicate-submission protection currently relies on the
-executor's own file-based journal/lock rather than a controller-level idempotency key; stale-plan
-checking against the separate staging/authorization layer (`HostUpdateFoundation`/
-`SignedUpdateInfrastructure`) is a known remaining gap — see the acceptance-gap list tracked
-against issue #2663.
+bind one immutable request per call. Both endpoints now gate on the same `HostUpdateExecutionAvailabilityHolder` the availability hosted service maintains: a request that arrives while the executor reports `Unavailable` (including while restart reconciliation still reports an unresolved prior release) is rejected with `503 Service Unavailable` and the exact reasons, before it ever reaches `IHostUpdateExecutor`/`IHostUpdateRecoveryCoordinator` — see `HostUpdateControllerAvailabilityTests`. Replay/duplicate-submission protection relies on the executor's file-based journal/lock plus the durable request fingerprint. If migration or apply has a `:before` journal receipt without the matching `:after`, the executor does not replay the external side effect automatically; it records `RecoveryRequired` with `uncertain_side_effect:<phase>` so an operator must reconcile or recover while fences remain closed.
 
 ## Known limitations
 
@@ -151,7 +142,7 @@ against issue #2663.
 - Owned application directories (blobs/profiles/calibration/config/certs/keyrings) are fail-closed
   by default: a configured, required owned directory that is missing at backup time throws
   `HostUpdateBackupIncompleteException` instead of writing a `.empty` sentinel and reporting
-  success. A directory can be explicitly opted into the old empty-sentinel behavior via
+  success. Real zero-byte files are valid and are checksummed in the manifest with length 0; real empty directory trees are represented by `.printfarmer-directories.json` so empty profiles/config subtrees are explicit backup content rather than false omissions. A directory can be explicitly opted into the old empty-sentinel behavior via
   `HostUpdateExecutionOptions.OptionalOwnedDirectories` only when its absence is genuinely
   expected (e.g. an optional feature that was never enabled on this host).
 - Preflight also fails closed (`unmapped_service_target:<serviceId>`) if a request names a service
@@ -161,7 +152,7 @@ against issue #2663.
   earlier guard having run.
 - Five writers are concretely fenced today (the admission gate, the queue outbox
   publisher, `PowerReadingPruneService`, `QueueRetentionPruneService`, and
-  `AutoDispatchBackgroundService`); other background schedulers/bridges/API replicas/workers
+  `AutoDispatchBackgroundService`, now included in the default required writer inventory); other background schedulers/bridges/API replicas/workers
   still need `IFenceableWriter` implementations registered as they are identified. Remaining
   known unfenced hosted services:
   `MaintenanceAlertHostedService`, `CatalogUpdateDetectionService`,
@@ -171,23 +162,18 @@ against issue #2663.
   in `HostUpdateExecutionOptions.RequiredFencedWriterNames`; it cannot detect a writer that was
   never added to that list in the first place, so extending coverage still requires deliberate,
   audited work per writer rather than a generic scan. The admission gate itself
-  (`IHostUpdateAdmissionGate`) is now wired into two real submission chokepoints:
-  `JobQueueService.AddJobToQueueAsync` (which "OctoPrint upload+print", "Manual queue from UI",
-  and "Direct API calls" all funnel through) and `DbSlicerJobQueue.EnqueueAsync` (the sole slicer
-  job submission path in monolith topology, where `Farm.Web.Api` hosts `Farm.Slicer.Module`
-  in-process; the split `Farm.Slicer.Host` process registers no `IHostUpdateAdmissionGate` at
+  (`IHostUpdateAdmissionGate`) is now wired into real submission/physical-dispatch chokepoints:
+  `JobQueueService.AddJobToQueueAsync`, `JobQueueController.QueueJobAsync`, manual start endpoints
+  (`DispatchJobAsync`, `DispatchToAsync`, `BatchDispatchAsync`), `AutoDispatchController.MarkReadyAsync`, and `DbSlicerJobQueue.EnqueueAsync` (the sole slicer
+  job submission path in monolith topology, where `Farm.Web.Api` hosts `Farm.Slicer.Module` in-process; the split `Farm.Slicer.Host` process registers no `IHostUpdateAdmissionGate` at
   all today, so slicer submissions in a split topology are **not** fenced -- see the topology
-  caveat below). Both consult `IsClosedAsync` and throw `HostUpdateAdmissionClosedException`
-  rather than admitting new work while the drain step has the gate closed.
+  caveat below). Bridge/webhook ingress remains an open gap and is not claimed fenced.
   `AutoDispatchBackgroundService` -- the loop that physically starts new printer-dispatch
   workers -- now consults its own dedicated `AutoDispatchFenceFlag` at the top of each trigger
   iteration: while paused it skips starting a new dispatch worker entirely (relying on the
   existing 30s durable database scan to rediscover the same eligible printer once the fence
   releases) and only acknowledges quiescence once `TrackedWorkerCount` is zero, so the fence
   coordinator cannot observe "paused" while a printer command is still physically executing.
-  It is **still not** wired into printer-command dispatch's *manual* entry points
-  (`JobQueueController`'s `/dispatch`/`/dispatch-to`), or any bridge/webhook ingress path --
-  those remain open call sites that can still admit new work during a drain.
   `AdmissionFenceableWriter.IsQuiescedAsync` reports only that the gate itself has flipped
   closed, not that every producer honors it; do not read a quiesced admission-gate report as
   proof that no new physical work can start until the remaining call sites above are wired and
@@ -204,11 +190,6 @@ against issue #2663.
   `FileHostUpdateRecoveryOutcomeStore` (one JSON file per release, atomic write-then-rename) as
   part of `RecoverAsync` itself — including when recovery is cancelled mid-flight — so the outcome
   survives a process crash immediately afterward even if whatever invoked recovery never gets a
-  chance to persist it. It does not yet expose an operator-facing read API beyond the store
+  chance to persist it. A successful rollback releases the writer fence only after the durable `RolledBack` outcome is written; if fence release fails, recovery overwrites the outcome with `NeedsOperator` and keeps the system closed. It does not yet expose an operator-facing read API beyond the store
   itself; the admin API does not currently surface historical recovery outcomes.
-- The manual admin API's request fingerprint binding (same `ReleaseId` with a changed
-  sequence/manifest/source/channel/targets resuming a stale plan) and the executor's crash-resume
-  idempotency semantics for individual side-effecting operations are owned by the scheduler
-  integration work (issue #2665/#2666) rather than this physical-adapter slice; see that work's
-  acceptance criteria for current status.
-
+- Remaining #2663 gaps are explicit: migration/apply uncertainty is fail-closed rather than reconciled by operation-specific probes; recovery `ApplyByDigestsAsync` can stage immutable rollback digests but lacks persisted platform evidence to pass `--platform`; exact health still verifies configured service/container digests plus aggregate `/health`, not a full canonical six-subsystem topology matrix with every bridge/worker; split `Farm.Slicer.Host` admission and bridge/webhook ingress are not wired; the admin API still lacks a historical recovery-outcome/status reader beyond current availability and synchronous execute/recover responses.

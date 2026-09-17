@@ -113,6 +113,42 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     }
 
     [Fact]
+    public async Task RecoverAsync_RequestFingerprintMismatch_PersistsNeedsOperatorAndNeverStartsRollback()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        HostUpdateExecutionRequest original = Request;
+        HostUpdateExecutionRequest tampered = original with { SourceCommit = "def456" };
+        IReadOnlyList<HostUpdateExecutionActivity> activities =
+        [
+            new HostUpdateExecutionActivity(
+                "accepted",
+                original.ReleaseId,
+                HostUpdateExecutionState.Accepted,
+                "accepted",
+                DateTimeOffset.UtcNow,
+                HostUpdateRequestFingerprint.Compute(original)),
+        ];
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            new ThrowingDigestApplier(),
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore);
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(tampered, activities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be("request_fingerprint_mismatch");
+        HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(original.ReleaseId, CancellationToken.None);
+        persisted.Should().NotBeNull();
+        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        persisted.Detail.Should().Be("request_fingerprint_mismatch");
+    }
+    [Fact]
     public async Task OutcomeStore_SurvivesFreshInstanceAfterRestart()
     {
         string root = CreateTempDir();
@@ -128,11 +164,84 @@ public sealed class HostUpdateRecoveryCoordinatorTests
         read!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
     }
 
+    [Fact]
+    public async Task RecoverAsync_RolledBackOutcomeIsPersistedBeforeFenceRelease()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        var fence = new RecordingFenceCoordinator(async () =>
+        {
+            HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
+            persisted.Should().NotBeNull();
+            persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        });
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            fence);
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        fence.ReleaseCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task RecoverAsync_FenceReleaseFails_PersistsNeedsOperatorAndReturnsClosedOutcome()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        var fence = new RecordingFenceCoordinator(() => throw new InvalidOperationException("release_failed"));
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            fence);
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be("fence_release_failed:InvalidOperationException");
+        HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
+        persisted.Should().NotBeNull();
+        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        persisted.Detail.Should().Be("fence_release_failed:InvalidOperationException");
+    }
     private static string CreateTempDir()
     {
         string path = Path.Combine(Path.GetTempPath(), "pf-recovery-outcome-tests-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(path);
         return path;
+    }
+
+
+    private sealed class RecordingFenceCoordinator(Func<Task> onRelease) : IHostUpdateFenceCoordinator
+    {
+        public int ReleaseCount { get; private set; }
+
+        public RecordingFenceCoordinator(Action onRelease)
+            : this(() => { onRelease(); return Task.CompletedTask; })
+        {
+        }
+
+        public Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public async Task ReleaseAsync(CancellationToken cancellationToken)
+        {
+            ReleaseCount++;
+            await onRelease().ConfigureAwait(false);
+        }
     }
 
     private sealed class FakeInstalledHostStateStore(InstalledHostState? installedState) : IInstalledHostStateStore

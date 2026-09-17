@@ -122,7 +122,8 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateRestoreExecutor restoreExecutor,
     IHostUpdateBackupManifestLocator manifestLocator,
     IHostUpdateDigestVerifier digestVerifier,
-    IHostUpdateRecoveryOutcomeStore outcomeStore) : IHostUpdateRecoveryCoordinator
+    IHostUpdateRecoveryOutcomeStore outcomeStore,
+    IHostUpdateFenceCoordinator? fenceCoordinator = null) : IHostUpdateRecoveryCoordinator
 {
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
@@ -131,6 +132,15 @@ public sealed class HostUpdateRecoveryCoordinator(
     {
         ArgumentNullException.ThrowIfNull(failedRequest);
         ArgumentNullException.ThrowIfNull(activities);
+
+        if (!HostUpdateRequestFingerprint.Matches(activities, failedRequest, out string fingerprintError))
+        {
+            var fingerprintResult = new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, fingerprintError);
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, fingerprintResult.Outcome, fingerprintResult.Detail, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
+            return fingerprintResult;
+        }
 
         HostUpdateRecoveryResult result;
         try
@@ -156,6 +166,21 @@ public sealed class HostUpdateRecoveryCoordinator(
         await outcomeStore.WriteAsync(
             new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, result.Outcome, result.Detail, DateTimeOffset.UtcNow),
             CancellationToken.None).ConfigureAwait(false);
+
+        if (result.Outcome == HostUpdateRecoveryOutcome.RolledBack && fenceCoordinator is not null)
+        {
+            try
+            {
+                await fenceCoordinator.ReleaseAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                result = new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "fence_release_failed:" + exception.GetType().Name);
+                await outcomeStore.WriteAsync(
+                    new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, result.Outcome, result.Detail, DateTimeOffset.UtcNow),
+                    CancellationToken.None).ConfigureAwait(false);
+            }
+        }
 
         return result;
     }
