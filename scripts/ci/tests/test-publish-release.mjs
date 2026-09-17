@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import test from 'node:test';
 import { load } from 'js-yaml';
-import { components, compareVersions, validateVersion, verifyEnvironmentRestrictions } from '../release-policy.mjs';
+import { components, compareVersions, parseTag, validateVersion, verifyEnvironmentRestrictions } from '../release-policy.mjs';
 import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
 import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
@@ -42,6 +42,14 @@ const environment = { name: 'release-insider', can_admins_bypass: false,
   deployment_branch_policy: { custom_branch_policies: true, protected_branches: false },
   protection_rules: [{ type: 'branch_policy' }] };
 const policies = { total_count: 1, branch_policies: [{ name: 'development', type: 'branch' }] };
+const versionFixturePath = 'scripts/ci/fixtures/release-version-sequence.golden.json';
+const versionSchemaPath = 'scripts/ci/fixtures/release-version-sequence.schema.json';
+const versionFixture = JSON.parse(readFileSync(versionFixturePath, 'utf8'));
+const manifestIssuer = 'https://token.actions.githubusercontent.com';
+const manifestIdentity =
+  'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development';
+const manifestIdentityTemplate =
+  'https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/development';
 
 function ownerApi(overrides = {}) {
   const values = {
@@ -247,54 +255,47 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
   }));
 });
 
-test('sequence encoding is collision-free, stable-dominant and stays within safe/C#-compatible bounds', () => {
-  // Stable-dominant: a stable release always outranks every insider prerelease
-  // of the exact same major.minor.patch (the old weighted-decimal encoding
-  // inverted this, since it added the insider suffix on top of the stable
-  // value instead of reserving a dominant sentinel for stable).
-  assert.ok(deriveSequence('0.2.3') > deriveSequence('0.2.3-insider.1'));
-  assert.ok(deriveSequence('0.2.3') > deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX}`));
-  assert.equal(deriveSequence('0.2.3') - deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX}`), 1);
+test('language-neutral golden contract defines parsing, sequences, ordering, bounds and collisions', () => {
+  const schema = JSON.parse(readFileSync(versionSchemaPath, 'utf8'));
+  assert.equal(versionFixture.$schema, './release-version-sequence.schema.json');
+  assert.equal(versionFixture.schemaVersion, 1);
+  assert.equal(schema.properties.schemaVersion.const, versionFixture.schemaVersion);
+  assert.equal(versionFixture.contract.manifestSequenceJsonType, 'integer');
+  assert.equal(versionFixture.contract.implementationType, 'signed 64-bit integer');
+  assert.deepEqual(versionFixture.contract.limits, {
+    major: SEQUENCE_MAJOR_MAX,
+    minor: SEQUENCE_MINOR_MAX,
+    patch: SEQUENCE_PATCH_MAX,
+    insiderSequence: SEQUENCE_PRERELEASE_MAX,
+    stableSuffix: SEQUENCE_STABLE_SUFFIX,
+  });
 
-  // Collision-free at and beyond the previous encoding's known collision
-  // points (patch or insider suffix reaching 1000).
-  assert.notEqual(deriveSequence('0.2.3'), deriveSequence('0.3.0'));
-  assert.notEqual(deriveSequence('0.1.1000'), deriveSequence('0.2.0'));
-  assert.notEqual(deriveSequence('0.2.3-insider.999'), deriveSequence('0.2.3-insider.1000'));
-  assert.notEqual(deriveSequence('0.2.3-insider.1000'), deriveSequence('0.2.4-insider.1'));
-  const seen = new Set();
-  for (const version of [
-    '0.2.3', '0.2.3-insider.1', '0.2.3-insider.2', '0.2.4', '0.2.4-insider.1', '0.3.0', '1.0.0',
-    '0.2.3-insider.999', '0.2.3-insider.1000', '0.2.3-insider.99998', `0.2.${SEQUENCE_PATCH_MAX}`,
-    `${SEQUENCE_MAJOR_MAX}.${SEQUENCE_MINOR_MAX}.${SEQUENCE_PATCH_MAX}`,
-  ]) {
-    const sequence = deriveSequence(version);
-    assert.ok(Number.isSafeInteger(sequence), `${version} produced an unsafe integer`);
-    assert.ok(!seen.has(sequence), `${version} collided with another encoded sequence`);
-    seen.add(sequence);
+  for (const golden of versionFixture.validCases) {
+    const parsed = parseTag(`v${golden.version}`);
+    assert.deepEqual({
+      major: Number(parsed.major),
+      minor: Number(parsed.minor),
+      patch: Number(parsed.patch),
+      kind: parsed.stage ?? 'stable',
+      suffix: parsed.stage ? Number(parsed.sequence) : SEQUENCE_STABLE_SUFFIX,
+    }, golden.parsed, golden.name);
+    const sequence = deriveSequence(golden.version);
+    assert.equal(String(sequence), golden.expectedSequence, golden.name);
+    assert.ok(Number.isSafeInteger(sequence), `${golden.name} produced an unsafe JSON integer`);
   }
 
-  // Monotonic ordering across a patch/suffix rollover that used to collide.
-  assert.ok(deriveSequence('0.2.3-insider.1000') > deriveSequence('0.2.3-insider.999'));
-  assert.ok(deriveSequence('0.1.1000') > deriveSequence('0.1.999'));
-  assert.ok(deriveSequence('0.2.0') > deriveSequence('0.1.1000'));
-
-  // Explicit, validated bounds: at-limit values succeed, one past the limit throws.
-  assert.doesNotThrow(() => deriveSequence(`${SEQUENCE_MAJOR_MAX}.0.0`));
-  assert.throws(() => deriveSequence(`${SEQUENCE_MAJOR_MAX + 1}.0.0`), /Major version exceeds/);
-  assert.doesNotThrow(() => deriveSequence(`0.${SEQUENCE_MINOR_MAX}.0`));
-  assert.throws(() => deriveSequence(`0.${SEQUENCE_MINOR_MAX + 1}.0`), /Minor version exceeds/);
-  assert.doesNotThrow(() => deriveSequence(`0.0.${SEQUENCE_PATCH_MAX}`));
-  assert.throws(() => deriveSequence(`0.0.${SEQUENCE_PATCH_MAX + 1}`), /Patch version exceeds/);
-  assert.doesNotThrow(() => deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX}`));
-  assert.throws(() => deriveSequence(`0.2.3-insider.${SEQUENCE_PRERELEASE_MAX + 1}`), /Prerelease sequence exceeds/);
-  // The prerelease max is exactly one below the reserved stable-dominant sentinel.
-  assert.equal(SEQUENCE_PRERELEASE_MAX, SEQUENCE_STABLE_SUFFIX - 1);
-
-  // The maximum representable sequence is comfortably a safe JS integer and an
-  // ordinary (non-BigInt-requiring) C# long/int; no wire format change needed.
-  const max = deriveSequence(`${SEQUENCE_MAJOR_MAX}.${SEQUENCE_MINOR_MAX}.${SEQUENCE_PATCH_MAX}`);
-  assert.ok(Number.isSafeInteger(max) && max < Number.MAX_SAFE_INTEGER);
+  for (const golden of versionFixture.invalidCases) {
+    assert.throws(() => deriveSequence(golden.version), new RegExp(golden.errorContains), golden.name);
+  }
+  for (const golden of versionFixture.ordering) {
+    assert.ok(deriveSequence(golden.lower) < deriveSequence(golden.higher), golden.name);
+  }
+  for (const golden of versionFixture.distinctGroups) {
+    const sequences = golden.versions.map(deriveSequence);
+    assert.equal(new Set(sequences).size, sequences.length, golden.name);
+  }
+  const maximum = BigInt(versionFixture.validCases.at(-1).expectedSequence);
+  assert.ok(maximum <= 9223372036854775807n && maximum < BigInt(Number.MAX_SAFE_INTEGER));
 });
 
 test('actual build loop passes the six targets/platforms and source metadata, stops on partial failure', t => {
@@ -361,6 +362,12 @@ function publishFixture(t, channel = 'insider') {
   for (const file of files) writeFileSync(join(assets, file), 'asset');
   writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
     { ...chosen, sequence: deriveSequence(chosen.version) }, imageDetails));
+  const signedManifestBytes = readFileSync(join(assets, 'update-manifest.json'));
+  writeFileSync(join(assets, 'update-manifest.sigstore.json'), JSON.stringify({
+    sha256: createHash('sha256').update(signedManifestBytes).digest('hex'),
+    issuer: manifestIssuer,
+    identity: manifestIdentity,
+  }));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   const calls = [];
   const api = async (endpoint, options = {}) => {
@@ -378,10 +385,18 @@ function publishFixture(t, channel = 'insider') {
       prerelease: channel === 'insider', html_url: `https://github.com/${repo.full_name}/releases/tag/${chosen.tag}` };
     throw new Error(`Unexpected endpoint ${endpoint}`);
   };
-  const deps = { run: (name, args) => calls.push({ command: name, args }),
+  const deps = { run: (name, args) => {
+    calls.push({ command: name, args });
+    if (name !== 'cosign') return;
+    const bundle = JSON.parse(readFileSync(args[2], 'utf8'));
+    const manifestBytes = readFileSync(args[7]);
+    assert.equal(bundle.sha256, createHash('sha256').update(manifestBytes).digest('hex'));
+    assert.equal(bundle.issuer, args[4]);
+    assert.equal(bundle.identity, args[6]);
+  },
     verify: () => { calls.push({ verify: true }); return imageDetails; }, rejectImages: () => calls.push({ rejectImages: true }),
     tagImages: () => calls.push({ tagImages: true }) };
-  return { assets, chosen, files, calls, api, deps };
+  return { assets, chosen, files, calls, api, deps, signedManifestBytes };
 }
 
 test('publication creates tag once, uploads a complete draft, tags images, publishes notes last', async t => {
@@ -404,35 +419,55 @@ test('publication creates tag once, uploads a complete draft, tags images, publi
 });
 
 test('the exact manifest bytes and its signature bundle are re-verified immediately before upload', async t => {
-  const { chosen, assets, api, deps, calls } = publishFixture(t);
+  const { chosen, assets, api, deps, calls, signedManifestBytes } = publishFixture(t);
   await publishRelease(chosen, assets, api, deps);
   const commands = calls.filter(call => call.command);
   const cosignIndex = commands.findIndex(call => call.command === 'cosign');
   const ghIndex = commands.findIndex(call => call.command === 'gh');
-  assert.ok(cosignIndex !== -1 && ghIndex !== -1 && cosignIndex < ghIndex,
-    'cosign verify-blob must run, and must run before gh release upload');
+  assert.ok(cosignIndex !== -1 && ghIndex !== -1, 'verification and upload commands must run');
+  assert.equal(ghIndex, cosignIndex + 1, 'cosign verify-blob must be immediately before gh release upload');
   const cosignArgs = commands[cosignIndex].args;
   assert.equal(cosignArgs[0], 'verify-blob');
   assert.equal(cosignArgs[1], '--bundle');
   assert.match(cosignArgs[2], /update-manifest\.sigstore\.json$/);
   assert.equal(cosignArgs[3], '--certificate-oidc-issuer');
-  assert.equal(cosignArgs[4], 'https://token.actions.githubusercontent.com');
+  assert.equal(cosignArgs[4], manifestIssuer);
   assert.equal(cosignArgs[5], '--certificate-identity');
-  assert.match(cosignArgs[6], /^https:\/\/github\.com\/.+\/\.github\/workflows\/consolidated-release\.yml@refs\/heads\/development$/);
+  assert.equal(cosignArgs[6], manifestIdentity);
   assert.match(cosignArgs[7], /update-manifest\.json$/);
+  assert.deepEqual(readFileSync(cosignArgs[7]), signedManifestBytes);
 });
 
-test('a manifest or signature bundle wiped between draft creation and upload blocks the upload', async t => {
-  for (const corrupted of ['update-manifest.json', 'update-manifest.sigstore.json']) {
+test('missing, tampered or wrong-identity signing evidence blocks publication before upload', async t => {
+  const corruptions = [
+    ['missing manifest', (assets) => rmSync(join(assets, 'update-manifest.json'))],
+    ['missing bundle', (assets) => rmSync(join(assets, 'update-manifest.sigstore.json'))],
+    ['tampered manifest', (assets) => writeFileSync(join(assets, 'update-manifest.json'),
+      `${readFileSync(join(assets, 'update-manifest.json'), 'utf8')} `)],
+    ['tampered bundle', (assets) => {
+      const path = join(assets, 'update-manifest.sigstore.json');
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), sha256: '0'.repeat(64) }));
+    }],
+    ['wrong issuer', (assets) => {
+      const path = join(assets, 'update-manifest.sigstore.json');
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')), issuer: 'https://example.invalid' }));
+    }],
+    ['wrong workflow identity', (assets) => {
+      const path = join(assets, 'update-manifest.sigstore.json');
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
+        identity: manifestIdentity.replace('/PrintFarmer/', '/OtherRepository/') }));
+    }],
+  ];
+  for (const [name, corrupt] of corruptions) {
     const fixture = publishFixture(t);
     const { assets, chosen, calls, api, deps } = fixture;
     const draftingApi = async (endpoint, options) => {
       const result = await api(endpoint, options);
-      if (endpoint === 'releases') writeFileSync(join(assets, corrupted), '');
+      if (endpoint === 'releases') corrupt(assets);
       return result;
     };
     await assert.rejects(publishRelease(chosen, assets, draftingApi, deps));
-    assert.ok(!calls.some(call => call.command === 'gh'), `gh upload must not run when ${corrupted} is missing`);
+    assert.ok(!calls.some(call => call.command === 'gh'), `gh upload must not run for ${name}`);
   }
 });
 
@@ -448,7 +483,10 @@ test('duplicate race, upload error, incomplete assets and partial image tagging 
       }
       return api(endpoint, options);
     };
-    if (fail === 'upload') deps.run = () => { throw new Error('upload failed'); };
+    if (fail === 'upload') {
+      const verify = deps.run;
+      deps.run = (name, args) => name === 'gh' ? (() => { throw new Error('upload failed'); })() : verify(name, args);
+    }
     if (fail === 'images') deps.tagImages = () => { throw new Error('second image failed'); };
     await assert.rejects(publishRelease(chosen, assets, failedApi, deps));
     assert.ok(!calls.some(call => call.method === 'PATCH'));
@@ -513,9 +551,19 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.equal(steps.find(step => step.name === 'Checkout pinned application source').with.ref,
     '${{ needs.select.outputs.source_sha }}');
   const build = steps.findIndex(step => step.run === 'node scripts/ci/publish-release.mjs build');
+  const sign = steps.findIndex(step => step.name === 'Sign and verify exact update manifest');
+  const reverify = steps.findIndex(step => step.name === 'Re-verify exact manifest before publication');
   const mint = steps.findIndex(step => step.id === 'publisher');
   const publish = steps.findIndex(step => step.run === 'node scripts/ci/publish-release.mjs publish');
-  assert.ok(build < mint && mint < publish);
+  assert.ok(build < sign && sign < reverify && reverify < mint && mint < publish);
+  assert.equal(steps[sign].env.MANIFEST, 'release-assets/update-manifest.json');
+  assert.equal(steps[sign].env.BUNDLE, 'release-assets/update-manifest.sigstore.json');
+  assert.equal(steps[sign].env.EXPECTED_IDENTITY, manifestIdentityTemplate);
+  assert.match(steps[sign].run, /cosign sign-blob --yes --bundle "\$BUNDLE" "\$MANIFEST"/);
+  assert.match(steps[sign].run, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
+  assert.match(steps[sign].run, /--certificate-identity "\$EXPECTED_IDENTITY" "\$MANIFEST"/);
+  assert.equal(steps[reverify].env.EXPECTED_IDENTITY, manifestIdentityTemplate);
+  assert.match(steps[reverify].run, /--certificate-identity "\$EXPECTED_IDENTITY" release-assets\/update-manifest\.json/);
   assert.equal(steps[mint].with['permission-workflows'], 'write');
   assert.equal(steps[mint].with.repositories, 'PrintFarmer');
   assert.equal(steps[publish].env.GH_TOKEN, '${{ steps.publisher.outputs.token }}');

@@ -46,9 +46,16 @@ with a different version, and let an insider prerelease outrank its own stable
 release at the same major.minor.patch), every distinct version now maps to a
 distinct sequence and a stable release always sorts above every prerelease of
 the same major.minor.patch. The maximum encodable sequence
-(`999_999_999_999_999`) stays a safe JS integer and an ordinary C# `long`/`int`,
-so the wire format is unchanged. It is eligible only when the exact bytes
-verify with the GitHub OIDC issuer
+(`999_999_999_999_999`) stays a safe JS integer and fits a signed 64-bit
+`long`/`Int64` (not a C# `int`), so the manifest wire value remains a JSON
+integer. The language-neutral vectors are checked in at
+`scripts/ci/fixtures/release-version-sequence.golden.json`, with their
+`schemaVersion: 1` JSON Schema at
+`scripts/ci/fixtures/release-version-sequence.schema.json`. Valid vectors
+contain parsed components and lossless decimal-string expected sequences;
+invalid, ordering, and distinct-group vectors define rejection, precedence,
+and historical collision behavior for every consumer. It is eligible only when
+the exact bytes verify with the GitHub OIDC issuer
 `https://token.actions.githubusercontent.com` and the canonical workflow
 identity for the selected channel:
 

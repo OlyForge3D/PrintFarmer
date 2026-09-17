@@ -19,8 +19,8 @@ const imagePattern = /^ghcr\.io\/olyforge3d\/printfarmer-[a-z0-9-]+@sha256:[a-f0
 // All arithmetic is done in BigInt for exactness; the final value is checked
 // against Number.MAX_SAFE_INTEGER before converting to a JS Number, so the
 // contract never emits an unsafe-integer sequence. The encoded range
-// (well under 2**53) also fits an ordinary C# `long`/`int` with no wire
-// format change, so no backend deserialization change is required.
+// (well under 2**53) fits a signed 64-bit C# `long`/`Int64`, but not `int`;
+// the manifest wire value remains a JSON integer.
 export const SEQUENCE_MAJOR_MAX = 99;
 export const SEQUENCE_MINOR_MAX = 999;
 export const SEQUENCE_PATCH_MAX = 99999;
@@ -32,6 +32,7 @@ const SEQUENCE_MINOR_WIDTH = 1000n;
 
 export function deriveSequence(version) {
   const parsed = parseTag(`v${version}`);
+  requireThat(!parsed.stage || parsed.stage === 'insider', 'Sequence version must be stable or insider');
   const major = BigInt(parsed.major);
   const minor = BigInt(parsed.minor);
   const patch = BigInt(parsed.patch);

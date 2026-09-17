@@ -71,6 +71,17 @@ twice by the workflow (sign, then re-verify) and once more by
 so nothing can substitute an unsigned or mismatched manifest between those
 workflow steps and the actual upload. Its `sequence` field is a collision-free,
 stable-dominant encoding (see [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md)).
+
+The language-neutral golden contract lives at
+`scripts/ci/fixtures/release-version-sequence.golden.json`; its JSON Schema is
+`scripts/ci/fixtures/release-version-sequence.schema.json` (`schemaVersion: 1`).
+Valid vectors provide the version, parsed numeric components/channel suffix,
+and a lossless decimal-string expected sequence. Invalid vectors provide the
+rejected version and required error text. Ordering vectors and distinct groups
+cover stable/insider precedence and historical collision boundaries. Consumers
+must calculate with a signed 64-bit integer (`long`/`Int64`, not C# `int`) and
+emit the manifest `sequence` as a JSON integer.
+
 It publishes the GitHub release **last**. Insider releases are prereleases and
 have only their exact version image tag: they never advance `latest`, major or
 minor tags. Stable additionally retains `stable-X.Y.Z` and advances `X.Y`,
