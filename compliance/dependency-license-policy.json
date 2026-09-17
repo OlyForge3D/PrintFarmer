@@ -258,8 +258,8 @@
       {
         "purlType": "apk",
         "namespacePattern": "^alpine$",
-        "namePattern": "^nginx(?:-module-(?:acme|geoip|image-filter|njs|xslt))?$",
-        "versionPattern": "^(?:1\\.31\\.6-r1|1\\.31\\.6\\.0\\.4\\.1-r1|1\\.31\\.6\\.1\\.0\\.1-r1)$",
+        "namePattern": "^(?:nginx|nginx-module-(?:geoip|image-filter|xslt))$",
+        "versionPattern": "^1\\.31\\.6-r1$",
         "observedExpression": "LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license",
         "approvedExpression": "BSD-2-Clause",
         "supplier": "Organization: NGINX, Inc.",
@@ -268,7 +268,37 @@
         "reviewer": "Copilot App",
         "reviewDate": "2026-09-17",
         "reviewAfter": "2027-09-17",
-        "rationale": "Syft 1.51.1 treats the APK metadata phrase BSD-like 2-clause license as three custom license identifiers. This rule is limited to the observed nginx and nginx module package names, release versions, and malformed expression."
+        "rationale": "Syft 1.51.1 treats the APK metadata phrase BSD-like 2-clause license as three custom license identifiers. This rule is limited to the observed nginx and same-version module package names, exact release version, and malformed expression."
+      },
+      {
+        "purlType": "apk",
+        "namespacePattern": "^alpine$",
+        "namePattern": "^nginx-module-acme$",
+        "versionPattern": "^1\\.31\\.6\\.0\\.4\\.1-r1$",
+        "observedExpression": "LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license",
+        "approvedExpression": "BSD-2-Clause",
+        "supplier": "Organization: NGINX, Inc.",
+        "sourceUrl": "https://github.com/nginx/nginx/tree/45a318d05a0fd23f57ffe9579f7f0969c0fe402a",
+        "evidence": "NGINX release 1.31.6 LICENSE is the standard two-clause BSD license; the generated package also contains /usr/share/licenses/nginx-module-acme/COPYRIGHT with those terms",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "Syft 1.51.1 treats the APK metadata phrase BSD-like 2-clause license as three custom license identifiers. This rule is limited to the observed nginx-module-acme package, exact release version, and malformed expression."
+      },
+      {
+        "purlType": "apk",
+        "namespacePattern": "^alpine$",
+        "namePattern": "^nginx-module-njs$",
+        "versionPattern": "^1\\.31\\.6\\.1\\.0\\.1-r1$",
+        "observedExpression": "LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license",
+        "approvedExpression": "BSD-2-Clause",
+        "supplier": "Organization: NGINX, Inc.",
+        "sourceUrl": "https://github.com/nginx/nginx/tree/45a318d05a0fd23f57ffe9579f7f0969c0fe402a",
+        "evidence": "NGINX release 1.31.6 LICENSE is the standard two-clause BSD license; the generated package also contains /usr/share/licenses/nginx-module-njs/COPYRIGHT with those terms",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "Syft 1.51.1 treats the APK metadata phrase BSD-like 2-clause license as three custom license identifiers. This rule is limited to the observed nginx-module-njs package, exact release version, and malformed expression."
       },
       {
         "purlType": "apk",

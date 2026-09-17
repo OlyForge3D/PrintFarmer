@@ -1412,10 +1412,31 @@ test('reviewed Alpine evidence corrects the exact malformed Syft 1.51.1 license 
       { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
     ),
     sbomPackage(
+      'SPDXRef-NginxGeoip',
+      'nginx-module-geoip',
+      '1.31.6-r1',
+      'pkg:apk/alpine/nginx-module-geoip@1.31.6-r1?arch=x86_64&distro=alpine-3.24.1',
+      { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
+    ),
+    sbomPackage(
+      'SPDXRef-NginxImageFilter',
+      'nginx-module-image-filter',
+      '1.31.6-r1',
+      'pkg:apk/alpine/nginx-module-image-filter@1.31.6-r1?arch=x86_64&distro=alpine-3.24.1',
+      { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
+    ),
+    sbomPackage(
       'SPDXRef-NginxNjs',
       'nginx-module-njs',
       '1.31.6.1.0.1-r1',
       'pkg:apk/alpine/nginx-module-njs@1.31.6.1.0.1-r1?arch=x86_64&distro=alpine-3.24.1',
+      { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
+    ),
+    sbomPackage(
+      'SPDXRef-NginxXslt',
+      'nginx-module-xslt',
+      '1.31.6-r1',
+      'pkg:apk/alpine/nginx-module-xslt@1.31.6-r1?arch=x86_64&distro=alpine-3.24.1',
       { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
     ),
     sbomPackage(
@@ -1458,6 +1479,9 @@ test('reviewed Alpine evidence corrects the exact malformed Syft 1.51.1 license 
     [
       'BSD-2-Clause AND LicenseRef-AOM-Patent-1.0',
       'BSD-3-Clause AND BSD-2-Clause AND ISC AND Beerware AND LicenseRef-libmd-Public-Domain',
+      'BSD-2-Clause',
+      'BSD-2-Clause',
+      'BSD-2-Clause',
       'BSD-2-Clause',
       'BSD-2-Clause',
       'BSD-2-Clause',
@@ -1506,6 +1530,13 @@ test('Alpine evidence remains fail-closed for changed expressions, versions, and
     'pkg:apk/alpine/unrelated@1.0.0-r0?arch=x86_64&distro=alpine-3.24.1',
     { licenseDeclared: 'LicenseRef-custom' },
   );
+  const nginxCrossProduct = sbomPackage(
+    'SPDXRef-NginxCrossProduct',
+    'nginx-module-acme',
+    '1.31.6-r1',
+    'pkg:apk/alpine/nginx-module-acme@1.31.6-r1?arch=x86_64&distro=alpine-3.24.1',
+    { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
+  );
   const revision = validCommit;
   const inventory = {
     packages: [],
@@ -1514,7 +1545,12 @@ test('Alpine evidence remains fail-closed for changed expressions, versions, and
     schemaVersion: 1,
     version: 'v0.2.3',
   };
-  const sbom = sbomFixture([changedExpression, changedVersion, unrelated]);
+  const sbom = sbomFixture([
+    changedExpression,
+    changedVersion,
+    unrelated,
+    nginxCrossProduct,
+  ]);
 
   assert.deepEqual(enrichSbomDocument(sbom, inventory, policy, {
     inventoryPath: 'license-inventory.json',
@@ -1526,9 +1562,18 @@ test('Alpine evidence remains fail-closed for changed expressions, versions, and
   assert.equal(changedExpression.licenseDeclared, 'BSD-2-Clause AND LicenseRef-unreviewed');
   assert.equal(changedVersion.licenseDeclared, 'LicenseRef-Public-Domain');
   assert.equal(unrelated.licenseDeclared, 'LicenseRef-custom');
+  assert.equal(
+    nginxCrossProduct.licenseDeclared,
+    'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license',
+  );
 
   const validationErrors = validateSbomDocument(sbom, 'frontend.spdx.json', policy);
-  for (const packageRecord of [changedExpression, changedVersion, unrelated]) {
+  for (const packageRecord of [
+    changedExpression,
+    changedVersion,
+    unrelated,
+    nginxCrossProduct,
+  ]) {
     const contextPath = `frontend.spdx.json:${packageRecord.name}@${packageRecord.versionInfo}`;
     assert.ok(hasCode(
       validationErrors.filter((error) => error.path === contextPath),
