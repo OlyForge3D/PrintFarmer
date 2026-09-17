@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Security;
 using Farm.Infrastructure.Services.Webhooks;
 using Microsoft.Extensions.DependencyInjection;
