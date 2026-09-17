@@ -43,6 +43,10 @@ REGISTRY_HOST="ghcr.io/olyforge3d"
 IMAGE_TAG="${PRINTFARMER_VERSION:-latest}"
 HTTP_PORT="${PRINTFARMER_PORT:-8080}"
 SERVER_HOST="${PRINTFARMER_HOST:-localhost}"
+SERVER_HOST_EXPLICIT=false
+if [[ -n "${PRINTFARMER_HOST+x}" ]]; then
+    SERVER_HOST_EXPLICIT=true
+fi
 INSTALL_DIR="${PRINTFARMER_DIR:-./printfarmer}"
 DB_ENGINE="${PRINTFARMER_DB:-sqlite}"
 DB_EXPLICIT=false
@@ -252,8 +256,8 @@ while [[ $# -gt 0 ]]; do
         --version=*)        IMAGE_TAG="${1#*=}"; shift ;;
         --port)             HTTP_PORT="${2:?--port requires a number}"; shift 2 ;;
         --port=*)           HTTP_PORT="${1#*=}"; shift ;;
-        --host)             SERVER_HOST="${2:?--host requires a DNS hostname}"; shift 2 ;;
-        --host=*)           SERVER_HOST="${1#*=}"; shift ;;
+        --host)             SERVER_HOST="${2:?--host requires a DNS hostname}"; SERVER_HOST_EXPLICIT=true; shift 2 ;;
+        --host=*)           SERVER_HOST="${1#*=}"; SERVER_HOST_EXPLICIT=true; shift ;;
         --dir)              INSTALL_DIR="${2:?--dir requires a path}"; shift 2 ;;
         --dir=*)            INSTALL_DIR="${1#*=}"; shift ;;
         --db)               DB_ENGINE="${2:?--db requires sqlite or postgres}"; DB_EXPLICIT=true; shift 2 ;;
@@ -271,6 +275,19 @@ while [[ $# -gt 0 ]]; do
         *) warn "Unknown option: $1 (ignored)"; shift ;;
     esac
 done
+
+validate_webauthn_host() {
+    local host="$1"
+
+    if [[ ! "$host" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] ||
+       [[ "$host" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+        die "Passkey host must be a bare DNS hostname, not an IP address, scheme, port, or path."
+    fi
+}
+
+if [[ "$SERVER_HOST_EXPLICIT" == "true" ]]; then
+    validate_webauthn_host "$SERVER_HOST"
+fi
 
 # ─── Help ───────────────────────────────────────────────────────────────────
 if [[ "$SHOW_HELP" == "true" ]]; then
@@ -842,6 +859,9 @@ if [[ -n "$EXISTING_ENV" ]]; then
     _existing_profile=$(grep "^DEPLOY_PROFILE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_tag=$(grep "^IMAGE_TAG=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_spoolman=$(grep "^PFARM__Spoolman__BaseUrl=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_webauthn_rp_id=$(read_env_value "$EXISTING_ENV" "WebAuthn__RelyingPartyId")
+    _existing_webauthn_rp_name=$(read_env_value "$EXISTING_ENV" "WebAuthn__RelyingPartyName")
+    _existing_webauthn_origin=$(read_env_value "$EXISTING_ENV" "WebAuthn__Origin")
     _existing_worker_key="$(read_slicer_shared_key "$EXISTING_ENV")"
     _existing_grafana_pw=$(grep "^GRAFANA_ADMIN_PASSWORD=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
 
@@ -874,6 +894,11 @@ if [[ -n "$EXISTING_ENV" ]]; then
     if [[ -n "$_existing_spoolman" && -z "$SPOOLMAN_URL" ]]; then
         SPOOLMAN_URL="$_existing_spoolman"
     fi
+    if [[ "$SERVER_HOST_EXPLICIT" != "true" && -n "$_existing_webauthn_rp_id" && -n "$_existing_webauthn_origin" ]]; then
+        SERVER_HOST="$_existing_webauthn_rp_id"
+        WEBAUTHN_RP_NAME="$_existing_webauthn_rp_name"
+        WEBAUTHN_ORIGIN="$_existing_webauthn_origin"
+    fi
     if [[ -n "$_existing_worker_key" ]]; then
         WORKER_SHARED_API_KEY_PRESERVED="$_existing_worker_key"
     fi
@@ -886,6 +911,8 @@ if [[ -n "$EXISTING_ENV" ]]; then
     if [[ -n "$_existing_port" ]]; then dimtext "Port: $_existing_port"; fi
     if [[ -n "$_existing_profile" ]]; then dimtext "Profile: $_existing_profile"; fi
 fi
+
+validate_webauthn_host "$SERVER_HOST"
 
 # ─── Generate secrets ───────────────────────────────────────────────────────
 JWT_KEY="${JWT_KEY_PRESERVED:-$(generate_secret 64)}"
@@ -924,11 +951,12 @@ else
     CORS_LAN_ORIGIN=""
 fi
 
-if [[ "$SERVER_HOST" == "localhost" ]]; then
+if [[ -z "${WEBAUTHN_ORIGIN:-}" && "$SERVER_HOST" == "localhost" ]]; then
     WEBAUTHN_ORIGIN="http://localhost:${HTTP_PORT}"
-else
+elif [[ -z "${WEBAUTHN_ORIGIN:-}" ]]; then
     WEBAUTHN_ORIGIN="https://${SERVER_HOST}"
 fi
+WEBAUTHN_RP_NAME="${WEBAUTHN_RP_NAME:-PrintFarmer}"
 
 # ─── Generate .env ──────────────────────────────────────────────────────────
 info "Writing configuration..."
@@ -974,7 +1002,7 @@ ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
 CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
 WebAuthn__RelyingPartyId=${SERVER_HOST}
-WebAuthn__RelyingPartyName=PrintFarmer
+WebAuthn__RelyingPartyName=${WEBAUTHN_RP_NAME}
 WebAuthn__Origin=${WEBAUTHN_ORIGIN}
 ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
@@ -1006,7 +1034,7 @@ ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
 CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
 WebAuthn__RelyingPartyId=${SERVER_HOST}
-WebAuthn__RelyingPartyName=PrintFarmer
+WebAuthn__RelyingPartyName=${WEBAUTHN_RP_NAME}
 WebAuthn__Origin=${WEBAUTHN_ORIGIN}
 ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12

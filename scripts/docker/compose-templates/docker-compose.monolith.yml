@@ -18,9 +18,9 @@ services:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:5000
       # Passkey / WebAuthn settings
-      - WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname. Run scripts/deploy-docker.sh to derive it.}
+      - WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:?WebAuthn__RelyingPartyId must be set to the canonical deployment hostname in .env.}
       - WebAuthn__RelyingPartyName=${WebAuthn__RelyingPartyName:-PrintFarmer}
-      - WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin. Run scripts/deploy-docker.sh to derive it.}
+      - WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin in .env.}
       # Storage paths
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models

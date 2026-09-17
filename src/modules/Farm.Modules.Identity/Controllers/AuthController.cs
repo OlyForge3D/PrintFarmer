@@ -444,8 +444,7 @@ public class AuthController(
     }
 
     /// <summary>
-    /// Completes the passkey registration ceremony by verifying the authenticator attestation.
-    /// Credential persistence is deferred to #354.
+    /// Completes the passkey registration ceremony by verifying and storing the authenticator credential.
     /// </summary>
     [HttpPost("passkey/register/complete")]
     [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
@@ -515,8 +514,7 @@ public class AuthController(
     }
 
     /// <summary>
-    /// Completes the passkey login ceremony. Returns a JWT on successful assertion.
-    /// Full assertion verification against stored credentials is deferred to #354.
+    /// Completes the passkey login ceremony by verifying the stored credential assertion and returning a JWT.
     /// </summary>
     [HttpPost("passkey/login/complete")]
     [AllowAnonymous] // Public because the signed passkey assertion is the credential being verified.

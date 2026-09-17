@@ -36,7 +36,9 @@ choose the canonical DNS hostname with `PRINTFARMER_HOST` (or
 `install.sh --host`) and terminate TLS for that hostname. The installer writes
 one `https://<hostname>` WebAuthn origin and prints that HTTPS address in its
 summary; it intentionally does not treat a LAN HTTP address as a passkey
-origin. `localhost` remains supported for local development.
+origin. The deployment script likewise requires `HTTPS_PORT` for a
+non-`localhost` `SERVER_HOST`; `localhost` remains supported for local
+development.
 
 ### 1. Orchestration Layer: `scripts/deploy-docker.sh`
 
