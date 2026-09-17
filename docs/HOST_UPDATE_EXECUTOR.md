@@ -79,7 +79,12 @@ permission.
 
 `HostUpdateController` (`Farm.Modules.Administration`) exposes the manual, operator-invoked
 surface: `[RequirePermission("system_settings", "admin")]`-gated execute/recover endpoints that
-bind one immutable request per call. Replay/duplicate-submission protection currently relies on the
+bind one immutable request per call. Both endpoints now gate on the same
+`HostUpdateExecutionAvailabilityHolder` the availability hosted service maintains: a request that
+arrives while the executor reports `Unavailable` (including while restart reconciliation still
+reports an unresolved prior release) is rejected with `503 Service Unavailable` and the exact
+reasons, before it ever reaches `IHostUpdateExecutor`/`IHostUpdateRecoveryCoordinator` — see
+`HostUpdateControllerAvailabilityTests`. Replay/duplicate-submission protection currently relies on the
 executor's own file-based journal/lock rather than a controller-level idempotency key; stale-plan
 checking against the separate staging/authorization layer (`HostUpdateFoundation`/
 `SignedUpdateInfrastructure`) is a known remaining gap — see the acceptance-gap list tracked

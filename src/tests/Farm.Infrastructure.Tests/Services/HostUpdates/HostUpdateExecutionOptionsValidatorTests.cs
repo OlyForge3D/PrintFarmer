@@ -6,9 +6,14 @@ using Xunit;
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 /// <summary>
-/// Focused coverage for <see cref="HostUpdateExecutionOptionsValidator"/> (issue #2663): proves
-/// the executor can never start with its durable root resolving under a temp directory or the
-/// process's working directory, and that every other required field is enforced at startup.
+/// Focused coverage for <see cref="HostUpdateExecutionOptionsValidator"/> (issue #2663). When
+/// <c>RootDirectory</c> is configured, proves the executor can never start with its durable root
+/// resolving under a temp directory or the process's working directory, and that every other
+/// required field is enforced. When <c>RootDirectory</c> is left empty (the default -- no
+/// supported deployment configures it yet), validation short-circuits to success instead of
+/// crashing every host at startup; runtime unavailability for that case is reported instead by
+/// <see cref="HostUpdateExecutionAvailabilityProvider"/> (see
+/// <c>Validate_MissingRootDirectory_SucceedsAsOptionalDefaultOffFeature</c> below).
 /// </summary>
 public class HostUpdateExecutionOptionsValidatorTests
 {

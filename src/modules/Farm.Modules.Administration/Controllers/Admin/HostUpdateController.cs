@@ -57,7 +57,8 @@ public sealed record HostUpdateStatusResponse(
 public sealed class HostUpdateController(
     IHostUpdateExecutor executor,
     IHostUpdateExecutionJournal journal,
-    IHostUpdateRecoveryCoordinator recoveryCoordinator) : ControllerBase
+    IHostUpdateRecoveryCoordinator recoveryCoordinator,
+    HostUpdateExecutionAvailabilityHolder availabilityHolder) : ControllerBase
 {
     /// <summary>
     /// Executes (or resumes) one manually approved host update to completion or
@@ -70,10 +71,16 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<HostUpdateStatusResponse>> ExecuteAsync(
         [FromBody] HostUpdateExecuteRequestBody body,
         CancellationToken cancellationToken)
     {
+        if (TryRejectWhenUnavailable(out ActionResult? unavailable))
+        {
+            return unavailable!;
+        }
+
         string error = "request_invalid";
         if (body is null || !body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out error))
         {
@@ -113,11 +120,17 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<HostUpdateRecoveryResult>> RecoverAsync(
         string releaseId,
         [FromBody] HostUpdateExecuteRequestBody body,
         CancellationToken cancellationToken)
     {
+        if (TryRejectWhenUnavailable(out ActionResult? unavailable))
+        {
+            return unavailable!;
+        }
+
         IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
         if (activities.Count == 0)
         {
@@ -137,5 +150,29 @@ public sealed class HostUpdateController(
 
         HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(request!, activities, cancellationToken).ConfigureAwait(false);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Bishop/Hicks review (issue #2663): the executor's positively-proven availability (root
+    /// writable, journal intact, every required adapter/writer wired, restart reconciliation
+    /// clean -- see <see cref="HostUpdateExecutionAvailabilityProvider"/>) must gate every
+    /// mutating admin call, not just be exposed as an informational status a caller could choose
+    /// to ignore. A request that arrives while the executor is <c>Unavailable</c> (including,
+    /// critically, while restart reconciliation still reports an unresolved prior release) is
+    /// rejected before it ever touches <see cref="IHostUpdateExecutor"/> or
+    /// <see cref="IHostUpdateRecoveryCoordinator"/>, with the exact unavailability reasons
+    /// surfaced to the operator rather than an opaque failure deeper in the pipeline.
+    /// </summary>
+    private bool TryRejectWhenUnavailable(out ActionResult? result)
+    {
+        HostUpdateExecutionAvailability availability = availabilityHolder.Current;
+        if (availability.State == HostUpdateExecutionAvailabilityState.Available)
+        {
+            result = null;
+            return false;
+        }
+
+        result = StatusCode(StatusCodes.Status503ServiceUnavailable, new { code = "host_update_executor_unavailable", reasons = availability.Reasons });
+        return true;
     }
 }
