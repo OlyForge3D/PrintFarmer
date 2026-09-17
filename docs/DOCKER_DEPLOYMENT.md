@@ -29,6 +29,15 @@ PrintFarmer supports two Docker deployment architectures:
 
 PrintFarmer's Docker deployment system consists of three coordinated layers that work together to enable flexible, repeatable deployments:
 
+## Passkey HTTPS Configuration
+
+Passkeys are bound to the browser origin. For a LAN or public installation,
+choose the canonical DNS hostname with `PRINTFARMER_HOST` (or
+`install.sh --host`) and terminate TLS for that hostname. The installer writes
+one `https://<hostname>` WebAuthn origin and prints that HTTPS address in its
+summary; it intentionally does not treat a LAN HTTP address as a passkey
+origin. `localhost` remains supported for local development.
+
 ### 1. Orchestration Layer: `scripts/deploy-docker.sh`
 
 The main user-facing deployment script that handles interactive setup, validation, and container orchestration.

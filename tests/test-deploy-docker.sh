@@ -387,11 +387,23 @@ test_webauthn_configuration() {
     assert_contains "$env_content" "WebAuthn__Origin=https://pfarm.example.com" \
         "Explicit WebAuthn origin should survive saved configuration loading"
     assert_contains "$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.yml")" \
-        'WebAuthn__Origin=${WebAuthn__Origin:-http://localhost:3000}' \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin. Run scripts/deploy-docker.sh to derive it.}' \
         "Microservices compose should pass WebAuthn configuration to the API"
     assert_contains "$(cat "$REPO_ROOT/scripts/docker/compose-templates/docker-compose.monolith.yml")" \
-        'WebAuthn__Origin=${WebAuthn__Origin:-http://localhost:3000}' \
+        'WebAuthn__Origin=${WebAuthn__Origin:?WebAuthn__Origin must be set to the canonical HTTPS deployment origin. Run scripts/deploy-docker.sh to derive it.}' \
         "Monolith compose should pass WebAuthn configuration to the API"
+
+    capture_output "$(get_deploy_script_command --dry-run --batch \
+        --env SERVER_HOST=first.example.com \
+        --env HTTP_PORT=8080)"
+    capture_output "$(get_deploy_script_command --dry-run --batch \
+        --env SERVER_HOST=second.example.com \
+        --env HTTP_PORT=9090)"
+    env_content=$(cat .env)
+    assert_contains "$env_content" "WebAuthn__RelyingPartyId=second.example.com" \
+        "Redeployment should re-derive the relying party ID from the current host"
+    assert_contains "$env_content" "WebAuthn__Origin=http://second.example.com:9090" \
+        "Redeployment should re-derive the origin from the current host and port"
 
     pass_test
 }
@@ -1686,6 +1698,8 @@ test_installer_lite_slicer_worker_key() {
     assert_file_exists "$install_dir/docker-compose.yml" "Lite installer should create docker-compose.yml"
     assert_contains "$(cat "$install_dir/.env")" "WORKER_SHARED_API_KEY=$expected_key" "Lite installer should persist the shared key"
     assert_contains "$(cat "$install_dir/docker-compose.yml")" "WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}" "Lite monolith should receive the shared key"
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=http://localhost:18907" "Lite installer should derive the localhost passkey origin"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WebAuthn__Origin=\${WebAuthn__Origin}" "Lite monolith should receive passkey configuration"
     assert_not_contains "$output" "$expected_key" "Installer output must not expose the shared key"
     local env_mode
     env_mode=$(stat -c '%a' "$install_dir/.env" 2>/dev/null || stat -f '%Lp' "$install_dir/.env")
@@ -1695,6 +1709,22 @@ test_installer_lite_slicer_worker_key() {
     local preserved_key
     preserved_key=$(grep -m1 '^WORKER_SHARED_API_KEY=' "$install_dir/.env" | cut -d= -f2-)
     assert_equals "$expected_key" "$preserved_key" "Reinstall should preserve the shared key"
+
+    pass_test
+}
+
+test_installer_standard_webauthn_configuration() {
+    start_test "installer standard profile configures canonical passkey origin"
+
+    local install_dir="$TEST_TEMP_DIR/installer-standard"
+    local mock_bin="$TEST_TEMP_DIR/installer-standard-bin"
+    create_installer_docker_stub "$mock_bin"
+
+    capture_output "PATH='$mock_bin:$PATH' PRINTFARMER_HOST='farm.example.com' '$INSTALL_SCRIPT' --non-interactive --profile standard --port 18909 --dir '$install_dir' --dry-run"
+
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__RelyingPartyId=farm.example.com" "Standard installer should persist the canonical passkey hostname"
+    assert_contains "$(cat "$install_dir/.env")" "WebAuthn__Origin=https://farm.example.com" "Standard installer should require HTTPS for a non-loopback passkey origin"
+    assert_contains "$(cat "$install_dir/docker-compose.yml")" "WebAuthn__Origin=\${WebAuthn__Origin}" "Standard installer API should receive passkey configuration"
 
     pass_test
 }
@@ -2105,6 +2135,7 @@ run_all_tests() {
     test_pfarm_variables_complete_set
     test_pfarm_variables_sourcing
     test_installer_lite_slicer_worker_key
+    test_installer_standard_webauthn_configuration
     test_installer_upgrade_adds_slicer_worker_key
     test_installer_env_write_is_atomic
     test_installer_fails_without_secure_entropy

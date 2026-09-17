@@ -469,16 +469,52 @@ public static class ServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
+        string relyingPartyId = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyId", "localhost");
+        string origin = GetConfigurationValueOrDefault(configuration, "WebAuthn:Origin", "http://localhost:3000");
+        ValidateWebAuthnConfiguration(relyingPartyId, origin);
+
         return new Fido2Configuration
         {
-            ServerDomain = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyId", "localhost"),
+            ServerDomain = relyingPartyId,
             ServerName = GetConfigurationValueOrDefault(configuration, "WebAuthn:RelyingPartyName", "PrintFarmer"),
             Origins = new HashSet<string>
             {
-                GetConfigurationValueOrDefault(configuration, "WebAuthn:Origin", "http://localhost:3000"),
+                origin,
             },
             TimestampDriftTolerance = 300_000,
         };
+    }
+
+    private static void ValidateWebAuthnConfiguration(string relyingPartyId, string origin)
+    {
+        if (Uri.CheckHostName(relyingPartyId) != UriHostNameType.Dns)
+        {
+            throw new InvalidOperationException("WebAuthn:RelyingPartyId must be a bare DNS hostname.");
+        }
+
+        if (!Uri.TryCreate(origin, UriKind.Absolute, out Uri? originUri) ||
+            !string.IsNullOrEmpty(originUri.UserInfo) ||
+            originUri.AbsolutePath != "/" ||
+            !string.IsNullOrEmpty(originUri.Query) ||
+            !string.IsNullOrEmpty(originUri.Fragment))
+        {
+            throw new InvalidOperationException("WebAuthn:Origin must be an absolute origin without user info, path, query, or fragment.");
+        }
+
+        bool isLoopbackOrigin = string.Equals(originUri.Host, "localhost", StringComparison.OrdinalIgnoreCase) ||
+                                (System.Net.IPAddress.TryParse(originUri.Host, out System.Net.IPAddress? address) &&
+                                 System.Net.IPAddress.IsLoopback(address));
+        if (!string.Equals(originUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase) && !isLoopbackOrigin)
+        {
+            throw new InvalidOperationException("WebAuthn:Origin must use HTTPS unless it targets a loopback host.");
+        }
+
+        string originHost = originUri.Host;
+        if (!string.Equals(originHost, relyingPartyId, StringComparison.OrdinalIgnoreCase) &&
+            !originHost.EndsWith($".{relyingPartyId}", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException("WebAuthn:Origin host must equal or be a subdomain of WebAuthn:RelyingPartyId.");
+        }
     }
 
     private static string GetConfigurationValueOrDefault(
