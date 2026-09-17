@@ -40,13 +40,14 @@ insiderSuffix`. It is eligible only when the exact bytes verify with the
 GitHub OIDC issuer `https://token.actions.githubusercontent.com` and the
 canonical workflow identity for the selected channel:
 
-- stable and insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
+- stable: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main`
+- insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
 
 Keyless Cosign trust is bootstrapped from Sigstore's OIDC certificate and
 transparency log; rotation is performed by changing the pinned official
 Cosign/tooling versions and the explicitly reviewed workflow identity, never by
 accepting a wildcard issuer or subject. Existing unsigned releases remain
-manual-only, including legacy `v0.2.3-insider.1`. A valid signature
+manual-only, including legacy `v0.2.3-insider.1` and `v0.2.3-insider.2`. A valid signature
 authenticates the publisher and exact manifest bytes; it does not authorize or
 implement apply, installation, active-print handling, staging, recovery, or
 runtime safety.

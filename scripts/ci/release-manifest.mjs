@@ -4,7 +4,6 @@ import { components, parseTag, requireThat } from './release-policy.mjs';
 const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const commitPattern = /^[a-f0-9]{40}$/;
 const platformPattern = /^[a-z0-9][a-z0-9._-]*$/;
-const manifestPlatformPattern = /^[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*$/;
 const imagePattern = /^ghcr\.io\/olyforge3d\/printfarmer-[a-z0-9-]+@sha256:[a-f0-9]{64}$/;
 
 export function deriveSequence(version) {
@@ -69,11 +68,12 @@ export function buildManifest(release, imageDetails, options = {}) {
     return {
       id,
       image: `ghcr.io/olyforge3d/printfarmer-${id}@${details.indexDigest}`,
-      platforms,
+      platforms: platforms.map(platform => platform.replaceAll('/', '-')),
     };
   });
   const platformEntries = Object.entries(components).flatMap(([id, policy]) =>
-    policy.platforms.map(platform => [`${id}/${platform}`, imageDetails[id].platformDigests[platform]]));
+    policy.platforms.map(platform => [`${id}-${platform.replaceAll('/', '-')}`,
+      imageDetails[id].platformDigests[platform]]));
   const manifest = {
     schema: 1,
     tag: normalizedRelease.tag,
@@ -95,7 +95,7 @@ export function buildManifest(release, imageDetails, options = {}) {
   return bytes;
 }
 
-export function validateManifest(bytes, release, digests) {
+export function validateManifest(bytes, release, digests, imageDetails) {
   const manifest = JSON.parse(bytes);
   requireThat(manifest.schema === 1 && manifest.managedUpdateEligible === true,
     'Invalid managed update manifest header');
@@ -117,18 +117,31 @@ export function validateManifest(bytes, release, digests) {
     const policy = components[service.id];
     requireThat(Array.isArray(service.platforms) &&
       service.platforms.length === policy.platforms.length &&
-      [...service.platforms].sort().join() === [...policy.platforms].sort().join(),
+      [...service.platforms].sort().join() === policy.platforms.map(platform => platform.replaceAll('/', '-')).sort().join(),
     `Invalid manifest platforms: ${service.id}`);
   }
-  const expectedPlatforms = Object.entries(components).flatMap(([id, policy]) =>
-    policy.platforms.map(platform => `${id}/${platform}`));
+  const expectedPlatformEntries = Object.entries(components).flatMap(([id, policy]) =>
+    policy.platforms.map(platform => ({ id, platform, key: `${id}-${platform.replaceAll('/', '-')}` })));
+  const expectedPlatforms = expectedPlatformEntries.map(entry => entry.key);
   requireThat(Array.isArray(manifest.platforms) &&
     manifest.platforms.join() === expectedPlatforms.join(), 'Invalid manifest platform list');
   requireThat(manifest.platformDigests && Object.keys(manifest.platformDigests).join() === expectedPlatforms.join(),
     'Invalid manifest child digest map');
-  for (const platform of expectedPlatforms) {
-    requireThat(manifestPlatformPattern.test(platform), `Invalid manifest platform: ${platform}`);
-    validateDigest(manifest.platformDigests[platform], platform);
+  for (const entry of expectedPlatformEntries) {
+    requireThat(platformPattern.test(entry.key), `Invalid manifest platform: ${entry.key}`);
+    validateDigest(manifest.platformDigests[entry.key], entry.key);
+    if (imageDetails) {
+      requireThat(manifest.platformDigests[entry.key] === imageDetails[entry.id].platformDigests[entry.platform],
+        `Manifest child digest mismatch: ${entry.key}`);
+    }
+  }
+  if (manifest.minimumUpdaterVersion !== undefined) {
+    requireThat(typeof manifest.minimumUpdaterVersion === 'string' &&
+      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.minimumUpdaterVersion),
+    'Invalid minimum updater version');
+  }
+  if (manifest.compatibility !== undefined) {
+    requireThat(typeof manifest.compatibility === 'string', 'Invalid compatibility');
   }
   return manifest;
 }

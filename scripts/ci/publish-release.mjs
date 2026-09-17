@@ -143,12 +143,13 @@ export async function publishRelease(release, assets, api, {
   run = command, verify = verifyImages, rejectImages = rejectExistingImages, tagImages = publishImageTags,
 } = {}) {
   const digests = JSON.parse(readFileSync(join(assets, 'digests.json'), 'utf8'));
-  verify(release.version, release.sourceCommit, digests);
+  const imageDetails = verify(release.version, release.sourceCommit, digests);
   const files = releaseAssets(release);
   for (const name of files.filter(name => name !== 'release-notes.md')) {
     requireThat(readFileSync(join(assets, name)).length > 0, `Missing release asset: ${name}`);
   }
-  validateManifest(readFileSync(join(assets, 'update-manifest.json'), 'utf8'), release, digests);
+  validateManifest(readFileSync(join(assets, 'update-manifest.json'), 'utf8'), release, digests,
+    imageDetails && typeof imageDetails === 'object' ? imageDetails : undefined);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
   await rejectExistingVersion(api, release.tag);

@@ -216,7 +216,7 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
   assert.deepEqual(manifest.services.map(service => service.id), Object.keys(components));
   for (const service of manifest.services) {
     assert.match(service.image, new RegExp(`^ghcr\\.io/olyforge3d/printfarmer-${service.id}@sha256:`));
-    assert.deepEqual(service.platforms, components[service.id].platforms);
+    assert.deepEqual(service.platforms, components[service.id].platforms.map(platform => platform.replaceAll('/', '-')));
   }
   validateManifestInput({ ...release, sequence: deriveSequence(release.version) }, imageDetails);
   validateManifest(first, { ...release, sequence: deriveSequence(release.version) }, digests);
@@ -232,12 +232,17 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@', 'docker.io/example/api@'),
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@sha256:', 'ghcr.io/olyforge3d/printfarmer-api:'),
     value => value.replace('"id":"frontend"', '"id":"api"'),
-    value => value.replace(`"api/linux/amd64":"sha256:${'d'.repeat(64)}"`, '"api/linux/amd64":"bad"'),
+    value => value.replace(`"api-linux-amd64":"sha256:${'d'.repeat(64)}"`, '"api-linux-amd64":"bad"'),
   ]) assert.throws(() => validateManifest(mutation(first)));
   assert.throws(() => validateManifest(first, { ...release, version: '0.2.3-insider.3',
     tag: 'v0.2.3-insider.3', sequence: deriveSequence('0.2.3-insider.3') }, digests));
   assert.throws(() => validateManifest(first, { ...release, sequence: deriveSequence(release.version) },
     { ...digests, api: platformDigest }));
+  assert.throws(() => validateManifest(first, release, digests, {
+    ...imageDetails,
+    api: { ...imageDetails.api, platformDigests: { ...imageDetails.api.platformDigests,
+      'linux/amd64': `sha256:${'e'.repeat(64)}` } },
+  }));
 });
 
 test('actual build loop passes the six targets/platforms and source metadata, stops on partial failure', t => {
@@ -442,6 +447,7 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   assert.match(active, /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
   assert.match(active, /--certificate-identity "\$EXPECTED_IDENTITY"/);
   assert.match(active, /update-manifest\.sigstore\.json/);
+  assert.match(active, /inputs\.channel == 'stable' && 'refs\/heads\/main' \|\| 'refs\/heads\/development'/);
   assert.doesNotMatch(active, /--certificate-oidc-issuer\s+\S+\s+\S+\*/);
   assert.doesNotMatch(active, /RELEASE_LEDGER|release-authorization|release-transaction|reservation_target/);
 });

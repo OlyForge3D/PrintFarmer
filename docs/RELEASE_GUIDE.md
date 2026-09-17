@@ -104,10 +104,9 @@ short-lived token **after** the long build. Only the publication job requests
 `id-token: write`, and the official Cosign installer is pinned to `v3.9.2`
 while the binary is pinned to `v3.0.6`.
 Cosign verification requires issuer
-`https://token.actions.githubusercontent.com` and the exact identity
-`https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
-for both stable and insider. The workflow also checks `GITHUB_WORKFLOW_REF`
-against that expected ref, so no
+`https://token.actions.githubusercontent.com` and the exact workflow identity:
+`refs/heads/main` for stable and `refs/heads/development` for insider. The
+workflow also checks `GITHUB_WORKFLOW_REF` against that channel-specific ref, so no
 other workflow, repository, branch, or fork identity is accepted.
 Existing `RELEASE_PUBLISHER_APP_ID`,
 `RELEASE_PUBLISHER_PRIVATE_KEY`, `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN`
@@ -120,8 +119,9 @@ Repository PR review and CI requirements remain unchanged.
 sets `managedUpdateEligible: false`. `update-manifest.json` is the separate,
 signed managed-update contract; its signature authenticates the publisher but
 does not implement installation or apply.
-The workflow does not publish those assets, update a ledger pointer, enroll a
-host, contact an installation, stop a printer or perform a deployment.
+The workflow publishes those metadata assets but does not install them, update a
+ledger pointer, enroll a host, contact an installation, stop a printer or perform
+a deployment.
 
 Builds report the version and full source SHA without inventing an allocation,
 stable sequence or signed release identity. Existing UI inventory consequently
@@ -143,7 +143,8 @@ workflows and mutation/recovery commands are removed from active source.
 Remote ledger records, runs, artifacts and tags remain historical audit data.
 No migration or recovery of them is a prerequisite to this workflow.
 
-In particular, **`v0.2.3-insider.1` remains permanently manual-only**. Its unsigned
+In particular, **`v0.2.3-insider.1` and `v0.2.3-insider.2` remain permanently
+manual-only**. Their unsigned
 reservation is not repaired or abandoned. Do not rerun the consumed diagnostic
 35169805018 or failed abandonment 35177228925, reconstruct the missing
 `release-authorization-1` artifact, reset counters, or mutate remote history.
