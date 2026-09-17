@@ -1,4 +1,4 @@
-﻿using System.Text.RegularExpressions;
+using System.Text.RegularExpressions;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.HostUpdates;
 
@@ -17,6 +17,11 @@ public static partial class ReleaseReadinessEvaluator
         }
 
         hops.Add("SignedReleaseEvidence");
+        if (release.Identity is not null && !string.Equals(release.Identity.Channel, inventory.SelectedChannel, StringComparison.Ordinal))
+        {
+            return Result(InventoryEligibility.Blocked, ["TargetChannelDoesNotMatchSelection"], hops);
+        }
+
         if (!release.SignatureVerified || !release.IsComplete || release.Identity is null || !Digest().IsMatch(release.ManifestDigest ?? string.Empty))
         {
             return Result(InventoryEligibility.Blocked, ["ReleaseEvidenceIncompleteOrUnverified"], hops);

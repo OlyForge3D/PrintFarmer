@@ -326,7 +326,15 @@ public static class FeatureServicesStartup
         // Monitoring services (Grafana/Jaeger auth proxy, Prometheus metrics)
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
-        services.AddSingleton<Farm.Infrastructure.Services.SystemStatus.IHostUpdateSchedulingStatusProvider, Farm.Infrastructure.Services.SystemStatus.UnwiredHostUpdateSchedulingStatusProvider>();
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IHostUpdateSchedulingStatusProvider, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulingStatusProvider>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateCandidateReadiness>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerExecutor, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulerExecutor>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCandidateCache>(sp =>
+            new Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCandidateCache(
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache>(),
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness>(),
+                OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported",
+                TimeSpan.FromHours(2)));
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache, Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCache>();
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseManifestBindingStore,

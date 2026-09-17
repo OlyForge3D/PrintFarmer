@@ -1,4 +1,4 @@
-﻿#pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
+#pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -104,12 +104,12 @@ public sealed record HostUpdateSchedulerSettings(
 public sealed record HostUpdatePlatformDigests(
     string Api,
     string Frontend,
-    string Worker,
-    string Slicer,
-    string Database,
-    string Host)
+    string SlicerHost,
+    string PrinterDiscovery,
+    string OrcaslicerWorker,
+    string Monolith)
 {
-    public IReadOnlyList<string> Values => [Api, Frontend, Worker, Slicer, Database, Host];
+    public IReadOnlyList<string> Values => [Api, Frontend, SlicerHost, PrinterDiscovery, OrcaslicerWorker, Monolith];
 
     public bool IsComplete => Values.Count == 6 && Values.Distinct(StringComparer.Ordinal).Count() == 6 && Values.All(IsSha256);
 
@@ -680,6 +680,11 @@ public sealed class HostUpdateScheduler(
             if (!fenceAdvanced)
             {
                 return Backoff(HostUpdateSchedulerReason.PolicyDrifted, "policy:" + current.Fingerprint);
+            }
+
+            if (cache.LastError is not null)
+            {
+                return Backoff(HostUpdateSchedulerReason.CandidateInvalid, "cache_error");
             }
 
             VerifiedHostUpdateCandidate? candidate = cache.Current;

@@ -29,7 +29,8 @@ public class SystemInfoService(
     IEnumerable<IServiceInventorySource> inventorySources,
     Farm.Infrastructure.Settings.ISettingsService settingsService,
     Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache verifiedReleaseEvidenceCache,
-    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions,`r`n    IHostUpdateSchedulingStatusProvider updateSchedulingStatusProvider) : ISystemInfoService
+    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions,
+    IHostUpdateSchedulingStatusProvider updateSchedulingStatusProvider) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
     private const string CacheKey = "SystemInfo:Snapshot";
@@ -42,7 +43,9 @@ public class SystemInfoService(
     private readonly Farm.Infrastructure.Settings.ISettingsService _settingsService = settingsService;
     private readonly Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache _verifiedReleaseEvidenceCache = verifiedReleaseEvidenceCache;
     private readonly IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> _verifiedReleaseDiscoveryOptions =
-        verifiedReleaseDiscoveryOptions;`r`n    private readonly IHostUpdateSchedulingStatusProvider _updateSchedulingStatusProvider = updateSchedulingStatusProvider;
+        verifiedReleaseDiscoveryOptions;
+
+    private readonly IHostUpdateSchedulingStatusProvider _updateSchedulingStatusProvider = updateSchedulingStatusProvider;
 
     /// <summary>
     /// Returns the current system information snapshot, served from a 10-second cache to avoid
@@ -181,7 +184,8 @@ public class SystemInfoService(
                 ArchiveBytes = archiveBytes,
                 DatabaseBytes = databaseBytes,
             },
-            Services = GetServices(appVersion),`r`n            UpdateScheduling = _updateSchedulingStatusProvider.GetStatus(),
+            Services = GetServices(appVersion),
+            UpdateScheduling = _updateSchedulingStatusProvider.GetStatus(),
             Database = new SystemDatabaseInfoDto
             {
                 MigrationHeads = appMigrationHeads,
@@ -824,4 +828,3 @@ public class SystemInfoService(
     [DllImport("kernel32.dll", SetLastError = true, CharSet = CharSet.Auto)]
     private static extern bool GlobalMemoryStatusEx(ref MemoryStatusEx buffer);
 }
-
