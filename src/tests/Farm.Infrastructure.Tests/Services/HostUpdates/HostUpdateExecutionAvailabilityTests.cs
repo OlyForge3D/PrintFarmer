@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data.Migrations;
+﻿using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Xunit;
@@ -83,6 +83,7 @@ public class HostUpdateExecutionAvailabilityTests
         RootDirectory = root,
         ComposeFiles = [composeFile],
         RequiredFencedWriterNames = [],
+        RequiredUnavailableFacilities = [],
     };
 
     private sealed class FakeFenceableWriter(string name) : IFenceableWriter
@@ -146,6 +147,40 @@ public class HostUpdateExecutionAvailabilityTests
         }
     }
 
+    [Fact]
+    public async Task CheckAsync_DefaultUnavailableFacilities_ReportUnavailableUntilAuditedImplementationClearsThem()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [],
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("facility_unavailable:bridge-webhook-ingress-fence");
+            result.Reasons.Should().Contain("facility_unavailable:split-slicer-host-admission");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
     [Fact]
     public async Task CheckAsync_RootDirectoryNotConfigured_ReportsUnavailableWithReason()
     {
@@ -555,4 +590,3 @@ public class HostUpdateExecutionAvailabilityTests
         public Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken) => Task.FromResult(compute());
     }
 }
-

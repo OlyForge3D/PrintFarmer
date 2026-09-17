@@ -16,7 +16,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 `src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`) and validated by
 `HostUpdateExecutionOptionsValidator`. The executor remains default-off when the root is unset: validation permits process startup, but all derived executor paths now throw `root_directory_not_configured` instead of resolving under the current working directory, and the runtime availability provider reports `Unavailable` until a writable host-controlled root is configured:
 
-- **`RootDirectory`** (required, no default): an absolute, host-controlled, persistent directory
+- **`RootDirectory`** (required for execution, no usable default): an absolute, host-controlled, persistent directory
   that owns all executor state — the durable journal, the execution lock, installed-state, and
   coordinated backups. The validator rejects a relative path, a path under the OS temp directory,
   and the process's current/working directory (or any subdirectory of it), so a container rebuild,
@@ -55,7 +55,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 
 `IHostUpdateExecutionAvailabilityProvider` (`HostUpdateExecutionAvailability.cs`) positively probes
 — never assumes — that the executor is actually usable: the root directory is writable, the
-journal is not corrupt, at least one migration and one backup target are configured, every
+journal is not corrupt, no default `RequiredUnavailableFacilities` entries remain, at least one migration and one backup target are configured, every
 configured compose file exists on disk, and the container runtime (`docker version`) is reachable.
 `HostUpdateExecutionAvailabilityHostedService` computes this immediately at process startup
 ("restart reconciliation" — a fresh process re-proves its own readiness rather than trusting a
@@ -63,7 +63,7 @@ previous run's state) and then periodically rechecks, publishing every result in
 `HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
-`compose_file_missing:...`, `docker_runtime_unavailable`) so an operator is never left guessing.
+`compose_file_missing:...`, `docker_runtime_unavailable`, `facility_unavailable:bridge-webhook-ingress-fence`) so an operator is never left guessing.
 
 ## DI wiring
 
@@ -192,4 +192,4 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   survives a process crash immediately afterward even if whatever invoked recovery never gets a
   chance to persist it. A successful rollback releases the writer fence only after the durable `RolledBack` outcome is written; if fence release fails, recovery overwrites the outcome with `NeedsOperator` and keeps the system closed. It does not yet expose an operator-facing read API beyond the store
   itself; the admin API does not currently surface historical recovery outcomes.
-- Remaining #2663 gaps are explicit: migration/apply uncertainty is fail-closed rather than reconciled by operation-specific probes; recovery `ApplyByDigestsAsync` can stage immutable rollback digests but lacks persisted platform evidence to pass `--platform`; exact health still verifies configured service/container digests plus aggregate `/health`, not a full canonical six-subsystem topology matrix with every bridge/worker; split `Farm.Slicer.Host` admission and bridge/webhook ingress are not wired; the admin API still lacks a historical recovery-outcome/status reader beyond current availability and synchronous execute/recover responses.
+- Remaining #2663 gaps are explicit and now hold availability closed by default through `HostUpdateExecutionOptions.RequiredUnavailableFacilities`: migration/apply uncertainty is fail-closed rather than reconciled by operation-specific probes; recovery `ApplyByDigestsAsync` can stage immutable rollback digests but lacks persisted platform evidence to pass `--platform`; exact health still verifies configured service/container digests plus aggregate `/health`, not a full canonical six-subsystem topology matrix with every bridge/worker; split `Farm.Slicer.Host` admission and bridge/webhook ingress are not wired; the admin API still lacks a historical recovery-outcome/status reader beyond current availability and synchronous execute/recover responses. Do not remove a `RequiredUnavailableFacilities` entry by configuration alone in production; remove it only with the corresponding concrete implementation and tests.

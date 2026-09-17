@@ -1,4 +1,4 @@
-using System.Linq;
+﻿using System.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -93,6 +93,11 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         if (backupTargets.Count == 0)
         {
             reasons.Add("no_backup_targets_configured");
+        }
+
+        foreach (string unavailableFacility in options.RequiredUnavailableFacilities.Where(name => !string.IsNullOrWhiteSpace(name)))
+        {
+            reasons.Add($"facility_unavailable:{unavailableFacility}");
         }
 
         var fencedNames = new HashSet<string>(fenceableWriters.Select(w => w.Name), StringComparer.Ordinal);
