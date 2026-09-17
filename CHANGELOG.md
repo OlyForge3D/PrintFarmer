@@ -8,8 +8,10 @@
 
 - Request the owner-approved `workflows: write` permission explicitly for the
   canonical reusable publisher while retaining its existing pinned action and
-  least-privilege read/write permissions. The consumed tag diagnostic is retired
-  from source; its remote workflow and run history are not deleted or altered.
+  least-privilege read/write permissions. The consumed tag diagnostic workflow
+  file is removed from `development`, retiring future dispatches from that ref;
+  no GitHub API operation disables or deletes the remote workflow record, and
+  existing run history is unaltered.
 - Record the source-only assessment for the unsigned sequence-1 reservation:
   the permanent tag is not a release or recovery, the original discarded HTTP
   422 remains unknown, and no safe recovery operation fits the current
