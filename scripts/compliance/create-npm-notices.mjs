@@ -6,13 +6,14 @@ import {
   readdir,
   writeFile,
 } from 'node:fs/promises';
-import { createHash } from 'node:crypto';
 import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
+  normalizedLicenseText,
   productionNpmPackagesFromLock,
   readJson,
+  sha256,
 } from './compliance-lib.mjs';
 
 function parseArguments(argumentsList) {
@@ -96,9 +97,10 @@ async function main() {
       if (relativeFallbackPath.startsWith('..') || path.isAbsolute(relativeFallbackPath)) {
         throw new Error(`Unsafe npm license fallback path: ${fallback.licenseFile}`);
       }
-      const text = (await readFile(fallbackPath, 'utf8')).trim();
-      const sha256 = createHash('sha256').update(await readFile(fallbackPath)).digest('hex');
-      if (text.length === 0 || sha256 !== fallback.sha256) {
+      const fallbackContent = await readFile(fallbackPath, 'utf8');
+      const text = fallbackContent.trim();
+      const normalizedText = normalizedLicenseText(fallbackContent);
+      if (text.length === 0 || sha256(normalizedText) !== fallback.sha256) {
         throw new Error(
           `Reviewed npm license fallback failed integrity validation: ${fallback.licenseFile}`,
         );
