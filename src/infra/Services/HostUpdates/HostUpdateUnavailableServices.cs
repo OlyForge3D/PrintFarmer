@@ -1,5 +1,42 @@
 ﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
+/// <summary>Raised when durable host-update authority cannot be read or committed safely.</summary>
+public sealed class HostUpdateSubsystemUnavailableException : Exception
+{
+    public HostUpdateSubsystemUnavailableException(string code, Exception? innerException)
+        : base(code, innerException)
+    {
+        if (string.IsNullOrWhiteSpace(code) || code.Any(ch => !(char.IsLetterOrDigit(ch) || ch is '_' or '-')))
+        {
+            throw new ArgumentException("Availability codes must be stable tokens.", nameof(code));
+        }
+
+        Code = code;
+    }
+
+    public string Code { get; }
+
+    public HostUpdateSubsystemUnavailableException()
+        : this(HostUpdateAvailabilityCodes.StoreUnavailable)
+    {
+    }
+
+    public HostUpdateSubsystemUnavailableException(string message)
+        : this(message, null)
+    {
+    }
+}
+
+public static class HostUpdateAvailabilityCodes
+{
+    public const string StoreUnavailable = "host_update_durable_store_unavailable";
+
+    public static string SafeCode(string? value) =>
+        !string.IsNullOrWhiteSpace(value) && value.All(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-')
+            ? value
+            : StoreUnavailable;
+}
+
 /// <summary>Common marker for host-update ports that are registered for routability but unavailable.</summary>
 public interface IHostUpdateAvailability
 {

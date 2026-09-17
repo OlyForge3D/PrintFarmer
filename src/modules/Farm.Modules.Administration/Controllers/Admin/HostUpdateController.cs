@@ -3,6 +3,7 @@ using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Modules.Administration.Controllers.Admin;
 
@@ -52,9 +53,13 @@ public sealed class HostUpdateController(
                 cancellationToken).ConfigureAwait(false);
             return Ok(response);
         }
-        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        catch (HostUpdateSubsystemUnavailableException ex)
         {
-            return AvailabilityProblem(ex.Message);
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
         }
         catch (InvalidOperationException ex) when (ex.Message == "policy_unavailable")
         {
@@ -98,9 +103,13 @@ public sealed class HostUpdateController(
                 intent ?? new HostUpdateManualAuthorizationIntent(),
                 cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        catch (HostUpdateSubsystemUnavailableException ex)
         {
-            return AvailabilityProblem(ex.Message);
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
         }
 
         if (!resolution.Succeeded || resolution.Request is null)
@@ -119,9 +128,13 @@ public sealed class HostUpdateController(
         {
             result = await executor.ExecuteAsync(resolution.Request, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        catch (HostUpdateSubsystemUnavailableException ex)
         {
-            return AvailabilityProblem(ex.Message);
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
         }
 
         var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities);
@@ -146,9 +159,13 @@ public sealed class HostUpdateController(
         {
             activities = journal.Read(releaseId);
         }
-        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException)
+        catch (HostUpdateSubsystemUnavailableException ex)
         {
-            return AvailabilityProblem(ex.Message);
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
         }
 
         if (activities.Count == 0)
@@ -191,9 +208,13 @@ public sealed class HostUpdateController(
         {
             activities = journal.Read(releaseId);
         }
-        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException)
+        catch (HostUpdateSubsystemUnavailableException ex)
         {
-            return AvailabilityProblem(ex.Message);
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
         }
 
         if (activities.Count == 0)
@@ -239,9 +260,13 @@ public sealed class HostUpdateController(
         {
             result = await recoveryCoordinator.RecoverAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        catch (HostUpdateSubsystemUnavailableException ex)
         {
-            return AvailabilityProblem(ex.Message);
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
         }
 
         if (result.Detail == "host_update_recovery_not_available")
@@ -264,8 +289,15 @@ public sealed class HostUpdateController(
         return false;
     }
 
+    private ObjectResult AvailabilityProblem(Exception exception) => Problem(
+        detail: exception is HostUpdateSubsystemUnavailableException typed
+            ? HostUpdateAvailabilityCodes.SafeCode(typed.Code)
+            : HostUpdateAvailabilityCodes.StoreUnavailable,
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Host update subsystem unavailable");
+
     private ObjectResult AvailabilityProblem(string reason) => Problem(
-        detail: reason,
+        detail: HostUpdateAvailabilityCodes.SafeCode(reason),
         statusCode: StatusCodes.Status503ServiceUnavailable,
         title: "Host update subsystem unavailable");
 }

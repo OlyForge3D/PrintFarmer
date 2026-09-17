@@ -21,6 +21,12 @@ namespace Farm.Infrastructure.Repositories.Settings;
 /// - System initialization state tracking
 /// - Cross-instance state synchronization
 /// </remarks>
+public enum AppSettingsCreateResult
+{
+    Created,
+    DuplicateKey,
+}
+
 public interface IAppSettingsRepository
 {
     /// <summary>
@@ -61,6 +67,11 @@ public interface IAppSettingsRepository
     /// </summary>
     /// <returns><c>true</c> when this call inserted the row; <c>false</c> when a concurrent writer won.</returns>
     Task<bool> TryCreateAsync(string key, string value, CancellationToken ct = default);
+
+    async Task<AppSettingsCreateResult> TryCreateDetailedAsync(string key, string value, CancellationToken ct = default) =>
+        await TryCreateAsync(key, value, ct).ConfigureAwait(false)
+            ? AppSettingsCreateResult.Created
+            : AppSettingsCreateResult.DuplicateKey;
 
     /// <summary>
     /// Deletes a setting by its key.
@@ -107,19 +118,19 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
         }
         else
         {
-            var setting = new AppSettingsEntity
+            AppSettingsEntity setting = new AppSettingsEntity
             {
                 Key = key,
                 SettingsJson = value,
                 UpdatedAt = DateTime.UtcNow
             };
-            await _db.AppSettingsEntities.AddAsync(setting, ct);
+            _ = await _db.AppSettingsEntities.AddAsync(setting, ct);
         }
     }
 
     public async Task<bool> TryCreateAsync(string key, string value, CancellationToken ct = default)
     {
-        var setting = new AppSettingsEntity
+        AppSettingsEntity setting = new AppSettingsEntity
         {
             Key = key,
             SettingsJson = value,
@@ -129,14 +140,41 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
         EntityEntry<AppSettingsEntity> entry = await _db.AppSettingsEntities.AddAsync(setting, ct);
         try
         {
-            await _db.SaveChangesAsync(ct);
+            _ = await _db.SaveChangesAsync(ct);
             return true;
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException exception)
         {
             entry.State = EntityState.Detached;
-            return false;
+            if (IsDuplicateKey(exception))
+            {
+                return false;
+            }
+
+            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateSubsystemUnavailableException(
+                "host_update_manifest_binding_database_unavailable", exception);
         }
+    }
+
+    public async Task<AppSettingsCreateResult> TryCreateDetailedAsync(string key, string value, CancellationToken ct = default) =>
+        await TryCreateAsync(key, value, ct).ConfigureAwait(false)
+            ? AppSettingsCreateResult.Created
+            : AppSettingsCreateResult.DuplicateKey;
+
+    private static bool IsDuplicateKey(DbUpdateException exception)
+    {
+        for (Exception? current = exception.InnerException; current is not null; current = current.InnerException)
+        {
+            int? number = current.GetType().GetProperty("Number")?.GetValue(current) as int?;
+            string? sqlState = current.GetType().GetProperty("SqlState")?.GetValue(current) as string;
+            int? sqliteCode = current.GetType().GetProperty("SqliteErrorCode")?.GetValue(current) as int?;
+            if (number is 2601 or 2627 || sqliteCode is 19 or 1555 or 2067 || sqlState == "23505")
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public async Task<bool> DeleteAsync(string key, CancellationToken ct = default)
@@ -147,12 +185,12 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
             return false;
         }
 
-        _db.AppSettingsEntities.Remove(existing);
+        _ = _db.AppSettingsEntities.Remove(existing);
         return true;
     }
 
     public async Task SaveChangesAsync(CancellationToken ct = default)
     {
-        await _db.SaveChangesAsync(ct);
+        _ = await _db.SaveChangesAsync(ct);
     }
 }

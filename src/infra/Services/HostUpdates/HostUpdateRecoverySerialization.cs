@@ -77,12 +77,12 @@ public sealed class JournaledHostUpdateRecoveryCoordinator(
                 // terminal entry bound to the original request so a fresh coordinator reconstruction
                 // (for example, after a restart) never observes an open-ended "recovery:started" and
                 // instead sees the operation left the host in a state that still requires an operator.
-                AppendTerminal(failedRequest, "recovery:interrupted");
+                AppendTerminalOrThrow(failedRequest, "recovery:interrupted");
                 throw;
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                AppendTerminal(failedRequest, "recovery:unknown");
+                AppendTerminalOrThrow(failedRequest, "recovery:unknown");
                 return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "recovery_unknown_failure");
             }
 
@@ -91,15 +91,28 @@ public sealed class JournaledHostUpdateRecoveryCoordinator(
             : HostUpdateExecutionState.RecoveryRequired;
             string terminalPhase = result.Outcome == HostUpdateRecoveryOutcome.RolledBack
             ? "recovery:rolled_back"
-            : "recovery:needs_operator:" + result.Detail;
-            Append(failedRequest, terminalState, terminalPhase);
+            : "recovery:needs_operator";
+            AppendTerminalOrThrow(failedRequest, terminalState, terminalPhase);
             return result;
         }
     }
 
-    private void AppendTerminal(HostUpdateExecutionRequest request, string phase)
+    private void AppendTerminalOrThrow(HostUpdateExecutionRequest request, string phase)
     {
-        Append(request, HostUpdateExecutionState.RecoveryRequired, phase);
+        AppendTerminalOrThrow(request, HostUpdateExecutionState.RecoveryRequired, phase);
+    }
+
+    private void AppendTerminalOrThrow(HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase)
+    {
+        try
+        {
+            Append(request, state, phase);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new HostUpdateSubsystemUnavailableException(
+                "host_update_execution_journal_unavailable", exception);
+        }
     }
 
     private void Append(HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase)

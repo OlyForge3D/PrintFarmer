@@ -135,7 +135,7 @@ public sealed class HostUpdateControllerRecoveryTests
 
         Assert.Equal("no_backup_available", result.Detail);
         Assert.Equal("recovery_binding_mismatch", mismatch.Detail);
-        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.Phase == "recovery:needs_operator:no_backup_available");
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.Phase == "recovery:needs_operator");
     }
 
     [Fact]
