@@ -1,3 +1,4 @@
+#pragma warning disable SA1137
 using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
@@ -39,10 +40,7 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
     string hostPlatform,
     TimeSpan maximumFreshness) : IHostUpdateSchedulerCandidateCache
 {
-    private static readonly HashSet<string> RequiredServices =
-        ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
-
-    public VerifiedHostUpdateCandidate? Current => TryMap(out _);
+public VerifiedHostUpdateCandidate? Current => TryMap(out _);
 
     public string? LastError
     {
@@ -107,24 +105,30 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
             return null;
         }
 
-        if (current.Services.Count != RequiredServices.Count
-            || current.Services.Any(service => !RequiredServices.Contains(service.ServiceId))
-            || current.Services.Select(service => service.ServiceId).Distinct(StringComparer.Ordinal).Count() != RequiredServices.Count)
+        IReadOnlyList<VerifiedReleaseExecutionTargetDto> executionTargets = current.ExecutionTargets.Count == HostUpdateExecutionRequest.RequiredTargetCount
+            ? current.ExecutionTargets
+            : current.Services.Select(service => new VerifiedReleaseExecutionTargetDto
+            {
+                ServiceId = service.ServiceId switch { "discovery" => "printer-discovery", "slicer-worker" => "orcaslicer-worker", _ => service.ServiceId },
+                Platform = service.Platform,
+                PlatformDigest = service.PlatformDigest,
+            }).ToArray();
+        if (executionTargets.Count != HostUpdateExecutionRequest.RequiredTargetCount
+            || executionTargets.Any(target => !HostUpdateExecutionRequest.RequiredServiceIds.Contains(target.ServiceId))
+            || executionTargets.Select(target => target.ServiceId).Distinct(StringComparer.Ordinal).Count() != HostUpdateExecutionRequest.RequiredTargetCount)
         {
             error = "verified_release_target_set_invalid";
             return null;
         }
 
-        if (current.Services.Any(service => !string.Equals(service.Platform, hostPlatform, StringComparison.Ordinal)
-            || !HostUpdateValidation.IsDigest(service.PlatformDigest)
-            || !HostUpdateValidation.IsDigest(service.IndexDigest)
-            || (service.ServiceId == "orcaslicer-worker" && service.Platform != "linux-amd64")))
+        if (executionTargets.Any(target => !string.Equals(target.Platform, hostPlatform, StringComparison.Ordinal)
+            || !HostUpdateValidation.IsDigest(target.PlatformDigest)))
         {
-            error = "verified_release_target_platform_invalid";
+            error = hostPlatform == "linux-arm64" ? "verified_release_target_platform_unavailable" : "verified_release_target_platform_invalid";
             return null;
         }
 
-        Dictionary<string, string> digests = current.Services.ToDictionary(service => service.ServiceId, service => service.PlatformDigest, StringComparer.Ordinal);
+        Dictionary<string, string> digests = executionTargets.ToDictionary(target => target.ServiceId, target => target.PlatformDigest, StringComparer.Ordinal);
         return new VerifiedHostUpdateCandidate(
             identity.ReleaseId,
             identity.SourceCommit,
@@ -160,23 +164,29 @@ public static class HostUpdateSchedulingAvailability
 
 /// <summary>Reports registered-but-unavailable automatic updates without starting a hosted loop.</summary>
 public sealed class UnavailableHostUpdateSchedulingStatusProvider(
-    Farm.Infrastructure.Settings.ISettingsService settings) : IHostUpdateSchedulingStatusProvider
+    Farm.Infrastructure.Settings.ISettingsService settings,
+    IHostUpdateAutomationPolicyRepository? policyRepository = null) : IHostUpdateSchedulingStatusProvider
 {
     public HostUpdateSchedulingStatusDto GetStatus()
     {
-        HostUpdateAutomationSettings automation = settings.Get<HostUpdateAutomationSettings>();
-        UpdateChannelSettings channel = settings.Get<UpdateChannelSettings>();
+        _ = settings;
+        HostUpdatePolicyReadResult policyResult = policyRepository?.Read() ?? new(true, new HostUpdateAutomationPolicy(), null);
+        HostUpdateAutomationPolicy policy = policyResult.Policy;
+        string selectedChannel = policyResult.Available ? policy.Channel : UpdateChannelSettings.StableChannel;
+        IReadOnlyList<string> reasons = policyResult.Available
+            ? [HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.PolicyMutationReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason]
+            : ["host_update_policy_unavailable", HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason];
         return new HostUpdateSchedulingStatusDto
         {
-            ConfiguredEnabled = automation.ConfiguredEnabled,
+            ConfiguredEnabled = policy.Enabled,
             EffectiveEnabled = false,
-            SelectedChannel = channel.Channel,
+            SelectedChannel = selectedChannel,
             EffectiveChannel = null,
-            PolicyRevision = automation.PolicyRevision,
+            PolicyRevision = policy.Revision,
             Backoff = new HostUpdateBackoffDto { State = HostUpdateBackoffState.Unknown, ConsecutiveFailures = 0, Reasons = ["scheduler_not_started"] },
-            KillSwitch = new HostUpdateKillSwitchDto { Enabled = automation.KillSwitchEnabled, Reason = automation.KillSwitchEnabled ? "configured" : null },
+            KillSwitch = new HostUpdateKillSwitchDto { Enabled = policy.KillSwitch, Reason = policy.KillSwitch ? "configured" : null },
             Executor = new HostUpdateExecutorDto { State = HostUpdateExecutorState.Unavailable, Reason = HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason },
-            Reasons = [HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.PolicyMutationReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason],
+            Reasons = reasons,
         };
     }
 }

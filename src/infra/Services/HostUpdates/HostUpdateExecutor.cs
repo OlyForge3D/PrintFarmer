@@ -73,7 +73,10 @@ public sealed record HostUpdateExecutionRequest(string ReleaseId, long Authentic
     private static bool Digest(string value) => !string.IsNullOrWhiteSpace(value) && value.StartsWith("sha256:", StringComparison.Ordinal) && value.Length == 71 && value[7..].All(Uri.IsHexDigit);
     private static bool Commit(string value) => !string.IsNullOrWhiteSpace(value) && value.Length is >= 40 and <= 64 && value.All(Uri.IsHexDigit);
 }
-public sealed record HostUpdateExecutionActivity(string ActivityId, string ReleaseId, HostUpdateExecutionState State, string Phase, DateTimeOffset RecordedAt);
+public sealed record HostUpdateExecutionActivity(string ActivityId, string ReleaseId, HostUpdateExecutionState State, string Phase, DateTimeOffset RecordedAt)
+{
+    public string? RequestBindingHash { get; init; }
+}
 public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecutionState State, string? FailureCode, IReadOnlyList<HostUpdateExecutionActivity> Activities) { public bool Succeeded => State == HostUpdateExecutionState.Completed; }
 public interface IHostUpdateExecutor { Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default); }
 public interface IHostUpdateExecutionSteps
@@ -92,8 +95,11 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
     {
         ArgumentNullException.ThrowIfNull(request);
         if (!request.IsValid(out string error)) return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, error, []);
+        string bindingHash = BindingHash(request);
         using IHostUpdateExecutionLease lease = updateLock.Acquire(TimeSpan.FromSeconds(30), cancellationToken);
         List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList(); HostUpdateExecutionState current = activities.LastOrDefault()?.State ?? HostUpdateExecutionState.Accepted;
+        if (activities.Any(activity => activity.RequestBindingHash is not null && activity.RequestBindingHash != bindingHash))
+            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "request_binding_conflict", activities);
         if (current == HostUpdateExecutionState.Completed || current == HostUpdateExecutionState.RecoveryRequired) return new(request.ReleaseId, current, current == HostUpdateExecutionState.Completed ? null : "recovery_required", activities);
         if (current == HostUpdateExecutionState.Accepted) Append(activities, request, current, "accepted");
         try
@@ -117,7 +123,8 @@ public sealed class HostUpdateExecutor(IHostUpdateExecutionSteps steps, IHostUpd
         catch (Exception ex) when (ex is not OperationCanceledException) { Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + ex.GetType().Name); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities); }
     }
     private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => state switch { HostUpdateExecutionState.Preflight => steps.PreflightAsync(request, cancellationToken), HostUpdateExecutionState.Draining => steps.DrainAsync(request, cancellationToken), HostUpdateExecutionState.Fenced => steps.FenceAsync(request, cancellationToken), HostUpdateExecutionState.BackedUp => steps.BackupAsync(request, cancellationToken), HostUpdateExecutionState.Migrating => steps.MigrateAsync(request, cancellationToken), HostUpdateExecutionState.Applying => steps.ApplyAsync(request, cancellationToken), HostUpdateExecutionState.Verifying => steps.VerifyAsync(request, cancellationToken), _ => Task.CompletedTask };
-    private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase) { var activity = new HostUpdateExecutionActivity(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow); journal.Append(activity); activities.Add(activity); }
+    private static string BindingHash(HostUpdateExecutionRequest request) => HostUpdateCanonical.Hash(new { request.TrustRoot, request.PolicyRevision, request.PolicyFingerprint, request.ReleaseId, request.Channel, request.RequestId, request.AuthenticatedSequence, request.ManifestDigest, request.SourceCommit, request.HostPlatform, Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal) });
+    private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase) { var activity = new HostUpdateExecutionActivity(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow) { RequestBindingHash = BindingHash(request) }; journal.Append(activity); activities.Add(activity); }
 }
 
 public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecutionLock

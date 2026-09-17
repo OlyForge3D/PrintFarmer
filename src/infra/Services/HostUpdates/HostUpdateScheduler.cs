@@ -728,12 +728,6 @@ public sealed class HostUpdateScheduler(
                 return Backoff(reason, candidate.Identity);
             }
 
-            if (decision.Reused)
-            {
-                _status = _status with { ConsecutiveFailures = 0, NextPollAt = SafeAdd(now, current.EffectivePollInterval), Reason = HostUpdateSchedulerReason.Admitted };
-                return _status;
-            }
-
             HostUpdateSchedulerSettings fresh = settings.Current;
             VerifiedHostUpdateCandidate? freshCandidate = cache.Current;
 

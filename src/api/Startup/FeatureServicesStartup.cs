@@ -326,7 +326,26 @@ public static class FeatureServicesStartup
         // Monitoring services (Grafana/Jaeger auth proxy, Prometheus metrics)
         services.AddSingleton<Farm.Infrastructure.Services.Monitoring.IMonitoringSessionService, Farm.Infrastructure.Services.Monitoring.MonitoringSessionService>();
         services.AddScoped<Farm.Infrastructure.Services.Monitoring.IMonitoringHealthService, Farm.Infrastructure.Services.Monitoring.MonitoringHealthService>();
-        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IHostUpdateSchedulingStatusProvider, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulingStatusProvider>();
+        services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IHostUpdateSchedulingStatusProvider>(sp =>
+            new Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulingStatusProvider(
+                sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>(),
+                sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository>()));
+
+        services.AddOptions<Farm.Infrastructure.Services.HostUpdates.HostStateOptions>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.HostUpdates.HostStateOptions.SectionName))
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.HostUpdates.HostStateOptions>, Farm.Infrastructure.Services.HostUpdates.HostStateOptionsValidator>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostStatePath>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor, Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayAnchor>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore>(sp =>
+            new Farm.Infrastructure.Services.HostUpdates.FileHostUpdateReplayStore(
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Root,
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor>()));
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdatePolicyFence>(sp =>
+            new Farm.Infrastructure.Services.HostUpdates.FileHostUpdatePolicyFence(
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Root));
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository, Farm.Infrastructure.Services.HostUpdates.FileHostUpdateAutomationPolicyRepository>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerSettings, Farm.Infrastructure.Services.HostUpdates.HostStateHostUpdateSchedulerSettings>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateCandidateReadiness>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCandidateCache>(sp =>
             new Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCandidateCache(

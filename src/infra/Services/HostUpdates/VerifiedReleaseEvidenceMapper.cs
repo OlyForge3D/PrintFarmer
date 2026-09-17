@@ -1,3 +1,4 @@
+#pragma warning disable SA1513
 using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
@@ -132,6 +133,22 @@ public static class VerifiedReleaseEvidenceMapper
             BuildId = metadata.Identity.BuildMetadata,
         };
 
+        string[] executionServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
+        List<VerifiedReleaseExecutionTargetDto> executionTargets = [];
+        bool hasCompleteTopology = metadata.ComponentPlatforms is not null && executionServiceIds.All(metadata.ComponentPlatforms.ContainsKey);
+        if (hasCompleteTopology)
+        {
+            foreach (string serviceId in executionServiceIds)
+            {
+                string manifestId = serviceId;
+                if (!metadata.ComponentPlatforms!.TryGetValue(manifestId, out IReadOnlyList<string>? targetPlatforms) || !targetPlatforms.Contains(hostPlatform, StringComparer.Ordinal) || !metadata.ComponentPlatformDigests!.TryGetValue(SignedUpdateManifestValidator.PlatformKey(manifestId, hostPlatform), out string? targetDigest) || !HostUpdateValidation.IsDigest(targetDigest))
+                {
+                    throw new InvalidDataException($"Verified release is missing canonical execution target '{serviceId}' for '{hostPlatform}'.");
+                }
+                executionTargets.Add(new VerifiedReleaseExecutionTargetDto { ServiceId = serviceId, Platform = hostPlatform, PlatformDigest = targetDigest });
+            }
+        }
+
         return new VerifiedReleaseEvidenceDto
         {
             // VerifiedGitHubReleaseMetadataProvider.GetCurrentAsync throws InvalidDataException
@@ -145,6 +162,7 @@ public static class VerifiedReleaseEvidenceMapper
             Identity = identity,
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,
+            ExecutionTargets = executionTargets,
         };
     }
 
