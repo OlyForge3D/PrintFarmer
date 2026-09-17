@@ -6,6 +6,7 @@ import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import {
   enrichSbomDocument,
+  loadSbomPackageLicenseEvidence,
   readJson,
   validateSbomDocument,
 } from './compliance-lib.mjs';
@@ -68,6 +69,12 @@ async function main() {
 
   if (!/^[0-9a-f]{40}$/.test(revision ?? '')) {
     throw new Error(`Revision must be a full commit SHA, got ${revision}`);
+  }
+
+  const evidenceErrors = await loadSbomPackageLicenseEvidence(options.repoRoot, dependencyPolicy);
+  if (evidenceErrors.length > 0) {
+    throw new Error(evidenceErrors.map((error) =>
+      `[${error.code}] ${error.path}: ${error.message}`).join('\n'));
   }
 
   const enrichmentErrors = enrichSbomDocument(sbom, inventory, dependencyPolicy, {

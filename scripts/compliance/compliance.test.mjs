@@ -22,6 +22,7 @@ import {
   enrichSbomDocument,
   scanPublicationFiles,
   findNugetAssetsFiles,
+  loadSbomPackageLicenseEvidence,
   normalizedLicenseText,
   readJson,
   sha256,
@@ -1370,6 +1371,170 @@ test('the reviewed dependency-license-policy.json resolves the exact e_sqlite3 n
     validationErrors.filter((error) => error.path === unrelatedContext),
     'SBOM_COMPONENT_SOURCE',
   ));
+});
+
+test('reviewed Alpine evidence corrects the exact malformed Syft 1.51.1 license shapes', async () => {
+  const policy = JSON.parse(await readFile(
+    path.join(repositoryRoot, 'compliance', 'dependency-license-policy.json'),
+    'utf8',
+  ));
+  assert.deepEqual(await loadSbomPackageLicenseEvidence(repositoryRoot, policy), []);
+
+  const generatedPackages = [
+    sbomPackage(
+      'SPDXRef-Aom',
+      'aom-libs',
+      '3.14.1-r0',
+      'pkg:apk/alpine/aom-libs@3.14.1-r0?arch=x86_64&distro=alpine-3.24.1&upstream=aom',
+      { licenseDeclared: 'LicenseRef-AND AND BSD-2-Clause AND LicenseRef-custom' },
+    ),
+    sbomPackage(
+      'SPDXRef-Libmd',
+      'libmd',
+      '1.2.0-r0',
+      'pkg:apk/alpine/libmd@1.2.0-r0?arch=x86_64&distro=alpine-3.24.1',
+      {
+        licenseDeclared: 'LicenseRef-AND AND BSD-2-Clause AND BSD-3-Clause AND Beerware AND LicenseRef-Domain AND ISC AND LicenseRef-Public',
+      },
+    ),
+    sbomPackage(
+      'SPDXRef-Nginx',
+      'nginx',
+      '1.31.6-r1',
+      'pkg:apk/alpine/nginx@1.31.6-r1?arch=x86_64&distro=alpine-3.24.1',
+      { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
+    ),
+    sbomPackage(
+      'SPDXRef-NginxAcme',
+      'nginx-module-acme',
+      '1.31.6.0.4.1-r1',
+      'pkg:apk/alpine/nginx-module-acme@1.31.6.0.4.1-r1?arch=x86_64&distro=alpine-3.24.1',
+      { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
+    ),
+    sbomPackage(
+      'SPDXRef-NginxNjs',
+      'nginx-module-njs',
+      '1.31.6.1.0.1-r1',
+      'pkg:apk/alpine/nginx-module-njs@1.31.6.1.0.1-r1?arch=x86_64&distro=alpine-3.24.1',
+      { licenseDeclared: 'LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license' },
+    ),
+    sbomPackage(
+      'SPDXRef-Tzdata',
+      'tzdata',
+      '2026d-r0',
+      'pkg:apk/alpine/tzdata@2026d-r0?arch=x86_64&distro=alpine-3.24.1',
+      { licenseDeclared: 'LicenseRef-Public-Domain' },
+    ),
+    sbomPackage(
+      'SPDXRef-Xz',
+      'xz-libs',
+      '5.8.4-r0',
+      'pkg:apk/alpine/xz-libs@5.8.4-r0?arch=x86_64&distro=alpine-3.24.1&upstream=xz',
+      {
+        licenseDeclared: '0BSD AND LicenseRef-AND AND GPL-2.0-or-later AND LGPL-2.1-or-later AND LicenseRef-Public-Domain',
+      },
+    ),
+  ];
+  const revision = validCommit;
+  const inventory = {
+    packages: [],
+    projects: [],
+    revision,
+    schemaVersion: 1,
+    version: 'v0.2.3',
+  };
+  const sbom = sbomFixture(generatedPackages);
+
+  assert.deepEqual(enrichSbomDocument(sbom, inventory, policy, {
+    inventoryPath: 'license-inventory.json',
+    licenseExpression: 'AGPL-3.0-only',
+    repositoryUrl: 'https://github.com/OlyForge3D/PrintFarmer',
+    revision,
+    version: 'v0.2.3',
+  }), []);
+  assert.deepEqual(validateSbomDocument(sbom, 'frontend.spdx.json', policy), []);
+  assert.deepEqual(
+    generatedPackages.map((packageRecord) => packageRecord.licenseDeclared),
+    [
+      'BSD-2-Clause AND LicenseRef-AOM-Patent-1.0',
+      'BSD-3-Clause AND BSD-2-Clause AND ISC AND Beerware AND LicenseRef-libmd-Public-Domain',
+      'BSD-2-Clause',
+      'BSD-2-Clause',
+      'BSD-2-Clause',
+      'LicenseRef-tzdata-Public-Domain',
+      '0BSD',
+    ],
+  );
+  for (const licenseId of [
+    'LicenseRef-AOM-Patent-1.0',
+    'LicenseRef-libmd-Public-Domain',
+    'LicenseRef-tzdata-Public-Domain',
+  ]) {
+    const licenseInfo = sbom.hasExtractedLicensingInfos.find(
+      (record) => record.licenseId === licenseId,
+    );
+    assert.ok(licenseInfo.extractedText.length > 0);
+    assert.notEqual(licenseInfo.extractedText, 'NOASSERTION');
+  }
+});
+
+test('Alpine evidence remains fail-closed for changed expressions, versions, and packages', async () => {
+  const policy = JSON.parse(await readFile(
+    path.join(repositoryRoot, 'compliance', 'dependency-license-policy.json'),
+    'utf8',
+  ));
+  assert.deepEqual(await loadSbomPackageLicenseEvidence(repositoryRoot, policy), []);
+
+  const changedExpression = sbomPackage(
+    'SPDXRef-AomChanged',
+    'aom-libs',
+    '3.14.1-r0',
+    'pkg:apk/alpine/aom-libs@3.14.1-r0?arch=x86_64&distro=alpine-3.24.1',
+    { licenseDeclared: 'BSD-2-Clause AND LicenseRef-unreviewed' },
+  );
+  const changedVersion = sbomPackage(
+    'SPDXRef-TzdataChanged',
+    'tzdata',
+    '2026e-r0',
+    'pkg:apk/alpine/tzdata@2026e-r0?arch=x86_64&distro=alpine-3.24.1',
+    { licenseDeclared: 'LicenseRef-Public-Domain' },
+  );
+  const unrelated = sbomPackage(
+    'SPDXRef-Unrelated',
+    'unrelated',
+    '1.0.0-r0',
+    'pkg:apk/alpine/unrelated@1.0.0-r0?arch=x86_64&distro=alpine-3.24.1',
+    { licenseDeclared: 'LicenseRef-custom' },
+  );
+  const revision = validCommit;
+  const inventory = {
+    packages: [],
+    projects: [],
+    revision,
+    schemaVersion: 1,
+    version: 'v0.2.3',
+  };
+  const sbom = sbomFixture([changedExpression, changedVersion, unrelated]);
+
+  assert.deepEqual(enrichSbomDocument(sbom, inventory, policy, {
+    inventoryPath: 'license-inventory.json',
+    licenseExpression: 'AGPL-3.0-only',
+    repositoryUrl: 'https://github.com/OlyForge3D/PrintFarmer',
+    revision,
+    version: 'v0.2.3',
+  }), []);
+  assert.equal(changedExpression.licenseDeclared, 'BSD-2-Clause AND LicenseRef-unreviewed');
+  assert.equal(changedVersion.licenseDeclared, 'LicenseRef-Public-Domain');
+  assert.equal(unrelated.licenseDeclared, 'LicenseRef-custom');
+
+  const validationErrors = validateSbomDocument(sbom, 'frontend.spdx.json', policy);
+  for (const packageRecord of [changedExpression, changedVersion, unrelated]) {
+    const contextPath = `frontend.spdx.json:${packageRecord.name}@${packageRecord.versionInfo}`;
+    assert.ok(hasCode(
+      validationErrors.filter((error) => error.path === contextPath),
+      'LICENSE_UNREVIEWED',
+    ));
+  }
 });
 
 test('validateDependencyLicenses accepts only the reviewed NuGet license file hash', async () => {

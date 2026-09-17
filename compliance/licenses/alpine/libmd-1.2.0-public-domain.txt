@@ -1,0 +1,31 @@
+Files:
+ include/md4.h
+ src/md4.c
+Copyright:
+ Colin Plumb
+ Todd C. Miller
+License: public-domain-md4
+ This code implements the MD4 message-digest algorithm.
+ The algorithm is due to Ron Rivest.  This code was
+ written by Colin Plumb in 1993, no copyright is claimed.
+ This code is in the public domain; do with it what you wish.
+ Todd C. Miller modified the MD5 code to do MD4 based on RFC 1186.
+
+Files:
+ include/md5.h
+ src/md5.c
+Copyright:
+ Colin Plumb
+License: public-domain-md5
+ This code implements the MD5 message-digest algorithm.
+ The algorithm is due to Ron Rivest.  This code was
+ written by Colin Plumb in 1993, no copyright is claimed.
+ This code is in the public domain; do with it what you wish.
+
+Files:
+ include/sha1.h
+ src/sha1.c
+Copyright:
+ Steve Reid <steve@edmweb.com>
+License: public-domain-sha1
+ 100% Public Domain

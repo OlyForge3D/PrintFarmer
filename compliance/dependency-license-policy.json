@@ -10,7 +10,9 @@
     "AGPL-3.0-only",
     "Apache-2.0",
     "BSD-2-Clause",
+    "BSD-2-Clause AND LicenseRef-AOM-Patent-1.0",
     "BSD-3-Clause",
+    "BSD-3-Clause AND BSD-2-Clause AND ISC AND Beerware AND LicenseRef-libmd-Public-Domain",
     "BlueOak-1.0.0",
     "CC-BY-4.0",
     "CC0-1.0",
@@ -18,6 +20,7 @@
     "ISC",
     "LicenseRef-Microsoft-SNI-Distributable-Code",
     "LicenseRef-Sonar-Source-Available-1.0",
+    "LicenseRef-tzdata-Public-Domain",
     "MIT",
     "MIT AND ISC",
     "MIT-0",
@@ -206,6 +209,105 @@
       }
     ],
     "packageEvidence": [
+      {
+        "purlType": "apk",
+        "namespacePattern": "^alpine$",
+        "namePattern": "^aom-libs$",
+        "versionPattern": "^3\\.14\\.1-r0$",
+        "observedExpression": "LicenseRef-AND AND BSD-2-Clause AND LicenseRef-custom",
+        "approvedExpression": "BSD-2-Clause AND LicenseRef-AOM-Patent-1.0",
+        "supplier": "Organization: Alliance for Open Media",
+        "sourceUrl": "https://aomedia.googlesource.com/aom/+/33c921efad52392d6c7047a6768a1337cd106998",
+        "evidence": "Alpine aports commit ca6a710df98ad5e2b596cf06b44cd82a5ceefc4e declares BSD-2-Clause AND custom for aom 3.14.1-r0 and installs upstream LICENSE and PATENTS; upstream AOM commit 33c921efad52392d6c7047a6768a1337cd106998 identifies the custom term as Alliance for Open Media Patent License 1.0",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "Syft 1.51.1 tokenizes the Alpine free-form license field as whitespace-separated license symbols, turning the operator AND and generic custom marker into unrelated LicenseRef values. This exact package, version, and observed-expression correction preserves both the SPDX BSD license and the hash-bound AOM patent terms.",
+        "extractedLicensingInfos": [
+          {
+            "licenseId": "LicenseRef-AOM-Patent-1.0",
+            "name": "Alliance for Open Media Patent License 1.0",
+            "licenseFile": "compliance/licenses/alpine/aom-3.14.1-PATENTS.txt",
+            "sha256": "eb1955a99d10bf2bbb37c375e7a61bdb560b76ab8590c1a45be6c2a20245146e"
+          }
+        ]
+      },
+      {
+        "purlType": "apk",
+        "namespacePattern": "^alpine$",
+        "namePattern": "^libmd$",
+        "versionPattern": "^1\\.2\\.0-r0$",
+        "observedExpression": "LicenseRef-AND AND BSD-2-Clause AND BSD-3-Clause AND Beerware AND LicenseRef-Domain AND ISC AND LicenseRef-Public",
+        "approvedExpression": "BSD-3-Clause AND BSD-2-Clause AND ISC AND Beerware AND LicenseRef-libmd-Public-Domain",
+        "supplier": "Organization: libmd contributors",
+        "sourceUrl": "https://github.com/guillemj/libmd/tree/7e37c7e5f9e581a7211a296e187434079dfc7a04",
+        "evidence": "Alpine aports commit 87b78bc6890645c317d3167bdbb0187502d0cda9 declares BSD-3-Clause AND BSD-2-Clause AND ISC AND Beerware AND Public Domain for libmd 1.2.0-r0; upstream libmd 1.2.0 COPYING identifies the exact public-domain source files and declarations",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "Syft 1.51.1 tokenizes AND and the two-word Public Domain marker as separate custom licenses. This exact package, version, and observed-expression correction retains every declared standard license and binds the public-domain portions to extracted upstream declarations.",
+        "extractedLicensingInfos": [
+          {
+            "licenseId": "LicenseRef-libmd-Public-Domain",
+            "name": "libmd 1.2.0 public-domain source declarations",
+            "licenseFile": "compliance/licenses/alpine/libmd-1.2.0-public-domain.txt",
+            "sha256": "9d9a159dd69e574bb77017ee5c4a02f6ae631533779648d00e0c66ea43c40c58"
+          }
+        ]
+      },
+      {
+        "purlType": "apk",
+        "namespacePattern": "^alpine$",
+        "namePattern": "^nginx(?:-module-(?:acme|geoip|image-filter|njs|xslt))?$",
+        "versionPattern": "^(?:1\\.31\\.6-r1|1\\.31\\.6\\.0\\.4\\.1-r1|1\\.31\\.6\\.1\\.0\\.1-r1)$",
+        "observedExpression": "LicenseRef-2-clause AND LicenseRef-BSD-like AND LicenseRef-license",
+        "approvedExpression": "BSD-2-Clause",
+        "supplier": "Organization: NGINX, Inc.",
+        "sourceUrl": "https://github.com/nginx/nginx/tree/45a318d05a0fd23f57ffe9579f7f0969c0fe402a",
+        "evidence": "NGINX release 1.31.6 LICENSE is the standard two-clause BSD license; each generated package also contains /usr/share/licenses/<package>/COPYRIGHT with those terms",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "Syft 1.51.1 treats the APK metadata phrase BSD-like 2-clause license as three custom license identifiers. This rule is limited to the observed nginx and nginx module package names, release versions, and malformed expression."
+      },
+      {
+        "purlType": "apk",
+        "namespacePattern": "^alpine$",
+        "namePattern": "^tzdata$",
+        "versionPattern": "^2026d-r0$",
+        "observedExpression": "LicenseRef-Public-Domain",
+        "approvedExpression": "LicenseRef-tzdata-Public-Domain",
+        "supplier": "Organization: IANA Time Zone Database contributors",
+        "sourceUrl": "https://github.com/eggert/tz/tree/bac9223f4b125629da479852d2f4ef04b17491bb",
+        "evidence": "Alpine aports commit a19caf9fe771707618d4d9e4fa2dd9db8155b461 declares Public-Domain for tzdata 2026d-r0; upstream tzdb commit bac9223f4b125629da479852d2f4ef04b17491bb provides the exact public-domain notice and BSD-3-Clause carve-out",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "Syft 1.51.1 converts Alpine's non-SPDX Public-Domain marker to a custom identifier without text. This exact package, version, and observed-expression correction supplies a package-specific LicenseRef with hash-bound upstream terms.",
+        "extractedLicensingInfos": [
+          {
+            "licenseId": "LicenseRef-tzdata-Public-Domain",
+            "name": "IANA Time Zone Database public-domain notice",
+            "licenseFile": "compliance/licenses/alpine/tzdata-2026d-LICENSE.txt",
+            "sha256": "0613408568889f5739e5ae252b722a2659c02002839ad970a63dc5e9174b27cf"
+          }
+        ]
+      },
+      {
+        "purlType": "apk",
+        "namespacePattern": "^alpine$",
+        "namePattern": "^xz-libs$",
+        "versionPattern": "^5\\.8\\.4-r0$",
+        "observedExpression": "0BSD AND LicenseRef-AND AND GPL-2.0-or-later AND LGPL-2.1-or-later AND LicenseRef-Public-Domain",
+        "approvedExpression": "0BSD",
+        "supplier": "Organization: XZ Utils authors and contributors",
+        "sourceUrl": "https://github.com/tukaani-project/xz/tree/9151b328e76bbc468aa64f85c741886b6227cec1",
+        "evidence": "Alpine aports commit 0c088d609f9fe69eedd6b4c7f4b99cdad847c20a builds xz 5.8.4 and emits the aggregate source-package license; upstream XZ Utils 5.8.4 COPYING states that the shipped liblzma library represented by xz-libs is under 0BSD",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "Syft 1.51.1 copies the aggregate xz source-package license to the xz-libs subpackage and additionally tokenizes AND as a custom license. This exact subpackage and version correction uses the upstream file-level license for liblzma rather than broadening acceptance of the malformed aggregate expression."
+      },
       {
         "purlType": "deb",
         "namePattern": "^(gcc-14|gcc-14-base|libgcc-s1|libstdc\\+\\+6)$",

@@ -331,6 +331,82 @@ function validateObservedLicense(policy, ecosystem, packageName, version, observ
   )];
 }
 
+export async function loadSbomPackageLicenseEvidence(repoRoot, dependencyPolicy) {
+  const errors = [];
+  for (const evidence of dependencyPolicy.sbom?.packageEvidence ?? []) {
+    const contextPath = `compliance/dependency-license-policy.json:sbom:${evidence.namePattern}`;
+    const licenseInfos = evidence.extractedLicensingInfos ?? [];
+    const licenseInfoIds = new Set(licenseInfos.map((licenseInfo) => licenseInfo.licenseId));
+    for (const match of (evidence.approvedExpression ?? '').matchAll(/LicenseRef-[A-Za-z0-9.-]+/g)) {
+      if (!licenseInfoIds.has(match[0])) {
+        errors.push(createError(
+          'LICENSE_POLICY_INVALID',
+          contextPath,
+          `custom license ${match[0]} requires hash-bound extractedLicensingInfos`,
+        ));
+      }
+    }
+
+    for (const licenseInfo of licenseInfos) {
+      if (!/^LicenseRef-[A-Za-z0-9.-]+$/.test(licenseInfo.licenseId ?? '')
+        || ![...(evidence.approvedExpression ?? '').matchAll(/LicenseRef-[A-Za-z0-9.-]+/g)]
+          .some((match) => match[0] === licenseInfo.licenseId)) {
+        errors.push(createError(
+          'LICENSE_POLICY_INVALID',
+          contextPath,
+          `custom license ${licenseInfo.licenseId ?? '<missing>'} must appear in approvedExpression`,
+        ));
+        continue;
+      }
+
+      if (typeof licenseInfo.name !== 'string' || licenseInfo.name.trim().length === 0) {
+        errors.push(createError(
+          'LICENSE_POLICY_INVALID',
+          contextPath,
+          `custom license ${licenseInfo.licenseId} requires a name`,
+        ));
+        continue;
+      }
+
+      if (!isSafeRepositoryPath(licenseInfo.licenseFile ?? '')
+        || !/^[0-9a-f]{64}$/.test(licenseInfo.sha256 ?? '')) {
+        errors.push(createError(
+          'LICENSE_POLICY_INVALID',
+          contextPath,
+          `custom license ${licenseInfo.licenseId} requires a safe licenseFile and lowercase SHA-256`,
+        ));
+        continue;
+      }
+
+      try {
+        const licenseText = normalizedLicenseText(await readFile(
+          path.join(repoRoot, licenseInfo.licenseFile),
+          'utf8',
+        ));
+        const digest = sha256(licenseText);
+        if (digest !== licenseInfo.sha256) {
+          errors.push(createError(
+            'LICENSE_EVIDENCE_MISMATCH',
+            contextPath,
+            `${licenseInfo.licenseFile} SHA-256 ${digest} does not match reviewed ${licenseInfo.sha256}`,
+          ));
+          continue;
+        }
+
+        licenseInfo.extractedText = licenseText;
+      } catch (error) {
+        errors.push(createError(
+          'LICENSE_EVIDENCE_MISSING',
+          contextPath,
+          `cannot read ${licenseInfo.licenseFile}: ${error.message}`,
+        ));
+      }
+    }
+  }
+
+  return errors;
+}
+
 async function validateNpmLicenses(repoRoot, policy) {
   const errors = [];
 
@@ -685,6 +761,7 @@ export async function validateDependencyLicenses(repoRoot, dependencyPolicy) {
     }
   }
 
+  errors.push(...await loadSbomPackageLicenseEvidence(repoRoot, dependencyPolicy));
   errors.push(...await validateNpmLicenses(repoRoot, dependencyPolicy));
   errors.push(...await validateNugetLicenses(repoRoot, dependencyPolicy));
   return errors;
@@ -1431,6 +1508,42 @@ function addInventoryLicenseText(sbom, inventoryPackage) {
   return errors;
 }
 
+function addPackageEvidenceLicenseText(sbom, evidence, contextPath) {
+  const errors = [];
+  for (const licenseInfo of evidence.extractedLicensingInfos ?? []) {
+    if (!licenseInfo.extractedText) {
+      errors.push(createError(
+        'SBOM_LICENSE_TEXT_MISSING',
+        contextPath,
+        `custom license ${licenseInfo.licenseId} requires loaded reviewed text`,
+      ));
+      continue;
+    }
+
+    sbom.hasExtractedLicensingInfos ??= [];
+    const existing = sbom.hasExtractedLicensingInfos
+      .find((license) => license.licenseId === licenseInfo.licenseId);
+    if (existing) {
+      if (existing.extractedText !== licenseInfo.extractedText) {
+        errors.push(createError(
+          'SBOM_LICENSE_TEXT_CONFLICT',
+          contextPath,
+          `custom license ${licenseInfo.licenseId} has conflicting extracted text`,
+        ));
+      }
+      continue;
+    }
+
+    sbom.hasExtractedLicensingInfos.push({
+      extractedText: licenseInfo.extractedText,
+      licenseId: licenseInfo.licenseId,
+      name: licenseInfo.name,
+    });
+  }
+
+  return errors;
+}
+
 function applyInventoryPackage(sbom, packageRecord, inventoryPackage) {
   packageRecord.versionInfo = inventoryPackage.version;
   packageRecord.licenseDeclared = inventoryPackage.licenseExpression;
@@ -1581,12 +1694,19 @@ export function enrichSbomDocument(sbom, inventory, dependencyPolicy, options) {
       && new RegExp(record.namePattern, 'i').test(parsedPurl.name)
       && (!record.namespacePattern
         || new RegExp(record.namespacePattern, 'i').test(parsedPurl.namespace))
-      && new RegExp(record.versionPattern).test(packageRecord.versionInfo ?? ''));
+      && new RegExp(record.versionPattern).test(packageRecord.versionInfo ?? '')
+      && (!record.observedExpression
+        || record.observedExpression === packageRecord.licenseDeclared));
     if (evidence) {
       packageRecord.licenseDeclared = evidence.approvedExpression;
       packageRecord.supplier = evidence.supplier;
       packageRecord.downloadLocation = evidence.sourceUrl;
       appendSourceInfo(packageRecord, `license resolved from reviewed evidence: ${evidence.evidence}`);
+      errors.push(...addPackageEvidenceLicenseText(
+        sbom,
+        evidence,
+        `${parsedPurl.type}:${parsedPurl.name}@${packageRecord.versionInfo}`,
+      ));
     }
   }
 

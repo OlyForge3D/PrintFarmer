@@ -20,6 +20,9 @@
     "compliance/calibration-provenance.json",
     "compliance/calibration-provenance.schema.json",
     "compliance/dependency-license-policy.json",
+    "compliance/licenses/alpine/aom-3.14.1-PATENTS.txt",
+    "compliance/licenses/alpine/libmd-1.2.0-public-domain.txt",
+    "compliance/licenses/alpine/tzdata-2026d-LICENSE.txt",
     "compliance/licenses/dotnet-install-MIT.txt",
     "docs/LICENSING_AND_SOURCE.md"
   ],
