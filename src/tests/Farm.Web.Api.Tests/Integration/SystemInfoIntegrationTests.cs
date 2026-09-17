@@ -126,6 +126,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         dto.Should().NotBeNull();
         dto!.App.Version.Should().NotBeNullOrWhiteSpace();
         dto.Inventory!.HostUpdaterVersion.Should().Be(dto.App.Version);
+        HostUpdateValidation.IsSemanticVersion(dto.Inventory.HostUpdaterVersion).Should().BeTrue();
         dto.App.Uptime.Should().NotBeNullOrWhiteSpace();
         dto.App.Hostname.Should().NotBeNullOrWhiteSpace();
         dto.Cpu.Cores.Should().BeGreaterThan(0);
@@ -282,7 +283,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
         VerifiedReleaseEvidenceDto evidence = new()
         {
-            Sequence = 99_999,
+            Sequence = 3,
             MinimumUpdaterVersion = "1.0.0",
             SignatureVerified = true,
             IsComplete = true,
@@ -295,8 +296,11 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
                 ReleaseId = "stable:0.0.0",
             },
         };
-        cache.SetVerified(evidence, DateTimeOffset.UtcNow);
-        cache.SetError("GitHub release listing failed");
+        DateTimeOffset verifiedAt = DateTimeOffset.UtcNow;
+        cache.SetVerified(evidence, verifiedAt);
+        cache.SetVerified(evidence with { Sequence = 2 }, verifiedAt.AddMinutes(1)).Should().BeFalse();
+        const string rollbackMessage = "Rejected rollback release for channel 'stable' (sequence=2).";
+        cache.SetError(rollbackMessage);
 
         HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
         using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -306,7 +310,18 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
             .Should().Contain("VerifiedReleaseDiscoveryFailed");
         cache.Current.Should().BeSameAs(evidence);
-        cache.LastError.Should().Be("GitHub release listing failed");
+        cache.Current!.Sequence.Should().Be(3);
+        cache.LastVerifiedAt.Should().Be(verifiedAt);
+        cache.LastError.Should().Be(rollbackMessage);
+    }
+
+    [Fact]
+    public void NormalizeAssemblyVersion_FourPartVersion_ProducesSemanticVersion()
+    {
+        string normalized = SystemInfoService.NormalizeAssemblyVersion(new Version(1, 2, 3, 4));
+
+        normalized.Should().Be("1.2.3");
+        HostUpdateValidation.IsSemanticVersion(normalized).Should().BeTrue();
     }
 
     [Fact]

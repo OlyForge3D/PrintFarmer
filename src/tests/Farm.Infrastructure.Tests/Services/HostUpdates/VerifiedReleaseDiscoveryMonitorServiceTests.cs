@@ -220,6 +220,43 @@ public class VerifiedReleaseDiscoveryMonitorServiceTests
     }
 
     [Fact]
+    public async Task RunDiscoveryRoundAsync_SameChannelRollback_ReportsFailureAndRetainsNewerEvidence()
+    {
+        SignedReleaseMetadata sequence3 = new(
+            Channel: "stable",
+            Sequence: 3,
+            SignatureVerified: true,
+            Identity: Identity("stable"),
+            ComponentPlatformDigests: PlatformDigests,
+            MinimumUpdaterVersion: "1.0.0",
+            ComponentIndexDigests: IndexDigests,
+            ComponentPlatforms: ComponentPlatforms);
+        SignedReleaseMetadata sequence2 = sequence3 with { Sequence = 2 };
+        var provider = new Mock<IHostUpdateMetadataProvider>();
+        provider.SetupSequence(p => p.GetCurrentAsync("stable", It.IsAny<CancellationToken>()))
+            .ReturnsAsync(sequence3)
+            .ReturnsAsync(sequence2);
+        var logger = new CountingLogger();
+        (VerifiedReleaseDiscoveryMonitorService service, IVerifiedReleaseEvidenceCache cache, Mock<IBackgroundServiceMonitor> monitor) =
+            CreateService("stable", provider.Object, logger: logger);
+
+        (await service.RunDiscoveryRoundAsync(3600, CancellationToken.None)).Should().BeTrue();
+        VerifiedReleaseEvidenceCacheSnapshot accepted = cache.GetSnapshot();
+        (await service.RunDiscoveryRoundAsync(3600, CancellationToken.None)).Should().BeFalse();
+
+        const string rollbackMessage = "Rejected rollback release for channel 'stable' (sequence=2).";
+        VerifiedReleaseEvidenceCacheSnapshot rejected = cache.GetSnapshot();
+        rejected.Current.Should().BeSameAs(accepted.Current);
+        rejected.Current!.Sequence.Should().Be(3);
+        rejected.LastVerifiedAt.Should().Be(accepted.LastVerifiedAt);
+        rejected.LastError.Should().Be(rollbackMessage);
+        logger.ErrorCount.Should().Be(1);
+        monitor.Verify(
+            item => item.ReportError("VerifiedReleaseDiscoveryMonitorService", rollbackMessage),
+            Times.Once);
+    }
+
+    [Fact]
     public async Task RunDiscoveryRoundAsync_InternalCancellation_ReportsOnceAndNextRoundRecovers()
     {
         SignedReleaseMetadata metadata = new(

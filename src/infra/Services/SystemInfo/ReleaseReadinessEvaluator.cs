@@ -27,17 +27,20 @@ public static partial class ReleaseReadinessEvaluator
             return Result(InventoryEligibility.Unknown, ["ImportedSnapshotIsNotLiveObservation"], hops);
         }
 
-        if (!HostUpdateValidation.TryParseSemanticVersion(release.MinimumUpdaterVersion, out Version minimumUpdater))
+        if (!HostUpdateValidation.IsSemanticVersion(release.MinimumUpdaterVersion))
         {
             return Result(InventoryEligibility.Unknown, ["MinimumUpdaterVersionUnknown"], hops);
         }
 
-        if (!HostUpdateValidation.TryParseSemanticVersion(inventory.HostUpdaterVersion, out Version hostUpdater))
+        if (!HostUpdateValidation.TryCompareSemanticVersions(
+                inventory.HostUpdaterVersion,
+                release.MinimumUpdaterVersion,
+                out int updaterComparison))
         {
             return Result(InventoryEligibility.Unknown, ["HostUpdaterVersionUnknown"], hops);
         }
 
-        if (hostUpdater < minimumUpdater)
+        if (updaterComparison < 0)
         {
             return Result(InventoryEligibility.Blocked, ["HostUpdaterVersionTooOld"], hops);
         }

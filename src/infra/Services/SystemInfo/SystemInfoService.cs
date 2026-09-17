@@ -226,10 +226,13 @@ public class SystemInfoService(
         // The monolith uses its API assembly version as the updater version; keep the fallback
         // semantic and three-part so signed minimum-updater comparisons remain well-defined.
         Version? assemblyVersion = assembly.GetName().Version;
-        return assemblyVersion is null
-            ? "0.0.0"
-            : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{assemblyVersion.Build}";
+        return NormalizeAssemblyVersion(assemblyVersion);
     }
+
+    internal static string NormalizeAssemblyVersion(Version? assemblyVersion) =>
+        assemblyVersion is null
+            ? "0.0.0"
+            : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{Math.Max(assemblyVersion.Build, 0)}";
 
     // Uses the gcode storage root because archiveBytes is derived from that tree.
     private string ResolveStorageDirectory()

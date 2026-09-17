@@ -111,7 +111,7 @@ public class VerifiedReleaseDiscoveryMonitorService(
     /// <c>InternalsVisibleTo</c> — can exercise a single discovery round directly, exactly like
     /// <c>CatalogUpdateDetectionService.DetectAndHandleUpdatesAsync</c>.
     /// </summary>
-    internal async Task<bool> DiscoverAndCacheAsync(CancellationToken ct)
+    internal async Task<VerifiedReleaseDiscoveryOutcome> DiscoverAndCacheAsync(CancellationToken ct)
     {
         using IServiceScope scope = _serviceProvider.CreateScope();
 
@@ -135,9 +135,9 @@ public class VerifiedReleaseDiscoveryMonitorService(
         if (!_cache.SetVerified(evidence, DateTimeOffset.UtcNow))
         {
             string message = $"Rejected rollback release for channel '{channel}' (sequence={metadata.Sequence}).";
-            _logger.LogWarning("[VerifiedReleaseDiscovery] {Message}", message);
+            _logger.LogError("[VerifiedReleaseDiscovery] {Message}", message);
             _cache.SetError(message);
-            return false;
+            return VerifiedReleaseDiscoveryOutcome.Failure(message);
         }
 
         _logger.LogInformation(
@@ -145,7 +145,7 @@ public class VerifiedReleaseDiscoveryMonitorService(
             channel,
             metadata.Identity.ReleaseId,
             metadata.Sequence);
-        return true;
+        return VerifiedReleaseDiscoveryOutcome.Success;
     }
 
     /// <summary>Runs one monitored discovery round and reports exactly one outcome.</summary>
@@ -153,10 +153,10 @@ public class VerifiedReleaseDiscoveryMonitorService(
     {
         try
         {
-            bool cached = await DiscoverAndCacheAsync(stoppingToken);
-            if (!cached)
+            VerifiedReleaseDiscoveryOutcome outcome = await DiscoverAndCacheAsync(stoppingToken);
+            if (!outcome.Succeeded)
             {
-                _serviceMonitor.ReportError(ServiceId, _cache.GetSnapshot().LastError!);
+                _serviceMonitor.ReportError(ServiceId, outcome.Error);
                 return false;
             }
 
@@ -181,6 +181,14 @@ public class VerifiedReleaseDiscoveryMonitorService(
             : exception.Message;
         _logger.LogError(exception, "[VerifiedReleaseDiscovery] Failed to discover/verify a release");
         _cache.SetError(message);
-        _serviceMonitor.ReportError(ServiceId, _cache.LastError!);
+        _serviceMonitor.ReportError(ServiceId, message);
     }
+}
+
+/// <summary>Represents one cache attempt with a non-null failure message.</summary>
+internal readonly record struct VerifiedReleaseDiscoveryOutcome(bool Succeeded, string Error)
+{
+    public static VerifiedReleaseDiscoveryOutcome Success { get; } = new(true, string.Empty);
+
+    public static VerifiedReleaseDiscoveryOutcome Failure(string error) => new(false, error);
 }

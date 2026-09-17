@@ -469,9 +469,11 @@ public sealed record SignedReleaseMetadata(string Channel, long Sequence, bool S
             reasons.Add("release_identity_invalid");
         }
 
-        if (HostUpdateValidation.TryParseSemanticVersion(installation.UpdaterVersion, out Version installedUpdater) &&
-            HostUpdateValidation.TryParseSemanticVersion(MinimumUpdaterVersion, out Version minimumUpdater) &&
-            installedUpdater.CompareTo(minimumUpdater) < 0)
+        if (HostUpdateValidation.TryCompareSemanticVersions(
+                installation.UpdaterVersion,
+                MinimumUpdaterVersion,
+                out int updaterComparison) &&
+            updaterComparison < 0)
         {
             reasons.Add("updater_too_old");
         }
@@ -940,24 +942,122 @@ internal static class HostUpdateValidation
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes($"{previousHash ?? string.Empty}\n{payload}")));
     }
     public static bool DigestsEqual(string? left, string? right) => IsDigest(left) && IsDigest(right) && CryptographicOperations.FixedTimeEquals(Convert.FromHexString(left![7..]), Convert.FromHexString(right![7..]));
-    public static bool IsSemanticVersion(string? value) => TryParseSemanticVersion(value, out _);
+    public static bool IsSemanticVersion(string? value) => TryParseSemanticVersionParts(value, out _);
     public static bool TryParseSemanticVersion(string? value, out Version version)
     {
         version = new Version(0, 0, 0);
-        if (string.IsNullOrWhiteSpace(value))
+        if (!TryParseSemanticVersionParts(value, out ParsedSemanticVersion parsed) ||
+            !Version.TryParse($"{parsed.Major}.{parsed.Minor}.{parsed.Patch}", out Version? coreVersion))
         {
             return false;
         }
 
-        string core = value.Split(['-', '+'])[0];
-        if (!Version.TryParse(core, out Version? parsed) || parsed is null || parsed.Major < 0 || parsed.Minor < 0 || parsed.Build < 0 || parsed.Revision is not -1)
-        {
-            return false;
-        }
-
-        version = parsed;
+        version = coreVersion;
         return true;
     }
+    public static bool TryCompareSemanticVersions(string? left, string? right, out int comparison)
+    {
+        comparison = 0;
+        if (!TryParseSemanticVersionParts(left, out ParsedSemanticVersion parsedLeft) ||
+            !TryParseSemanticVersionParts(right, out ParsedSemanticVersion parsedRight))
+        {
+            return false;
+        }
+
+        comparison = CompareNumericIdentifier(parsedLeft.Major, parsedRight.Major);
+        if (comparison == 0)
+        {
+            comparison = CompareNumericIdentifier(parsedLeft.Minor, parsedRight.Minor);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = CompareNumericIdentifier(parsedLeft.Patch, parsedRight.Patch);
+        }
+
+        if (comparison == 0)
+        {
+            comparison = ComparePrerelease(parsedLeft.Prerelease, parsedRight.Prerelease);
+        }
+
+        return true;
+    }
+    private static bool TryParseSemanticVersionParts(string? value, out ParsedSemanticVersion version)
+    {
+        version = default;
+        if (string.IsNullOrWhiteSpace(value) || value.Any(char.IsWhiteSpace))
+        {
+            return false;
+        }
+
+        string[] versionAndBuild = value.Split('+');
+        if (versionAndBuild.Length > 2 ||
+            (versionAndBuild.Length == 2 && !HasValidSemanticIdentifiers(versionAndBuild[1], allowNumericLeadingZeroes: true)))
+        {
+            return false;
+        }
+
+        string withoutBuild = versionAndBuild[0];
+        string[] versionAndPrerelease = withoutBuild.Split('-', 2);
+        string[] core = versionAndPrerelease[0].Split('.');
+        string[] prerelease = versionAndPrerelease.Length == 2 ? versionAndPrerelease[1].Split('.') : [];
+        if (core.Length != 3 ||
+            core.Any(identifier => identifier.Length == 0 ||
+                !identifier.All(char.IsAsciiDigit) ||
+                HasInvalidNumericIdentifier(identifier)) ||
+            (versionAndPrerelease.Length == 2 &&
+                !HasValidSemanticIdentifiers(versionAndPrerelease[1], allowNumericLeadingZeroes: false)))
+        {
+            return false;
+        }
+
+        version = new ParsedSemanticVersion(core[0], core[1], core[2], prerelease);
+        return true;
+    }
+    private static bool HasInvalidNumericIdentifier(string identifier) =>
+        identifier.Length > 1 && identifier[0] == '0';
+    private static bool HasValidSemanticIdentifiers(string value, bool allowNumericLeadingZeroes) =>
+        value.Split('.').All(identifier =>
+            identifier.Length > 0 &&
+            identifier.All(character => char.IsAsciiLetterOrDigit(character) || character == '-') &&
+            (allowNumericLeadingZeroes ||
+                !identifier.All(char.IsAsciiDigit) ||
+                !HasInvalidNumericIdentifier(identifier)));
+    private static int ComparePrerelease(IReadOnlyList<string> left, IReadOnlyList<string> right)
+    {
+        if (left.Count == 0 || right.Count == 0)
+        {
+            return left.Count == right.Count ? 0 : left.Count == 0 ? 1 : -1;
+        }
+
+        for (int index = 0; index < Math.Min(left.Count, right.Count); index++)
+        {
+            string leftIdentifier = left[index];
+            string rightIdentifier = right[index];
+            bool leftNumeric = leftIdentifier.All(char.IsAsciiDigit);
+            bool rightNumeric = rightIdentifier.All(char.IsAsciiDigit);
+            int comparison = leftNumeric && rightNumeric
+                ? CompareNumericIdentifier(leftIdentifier, rightIdentifier)
+                : leftNumeric != rightNumeric
+                    ? leftNumeric ? -1 : 1
+                    : string.CompareOrdinal(leftIdentifier, rightIdentifier);
+            if (comparison != 0)
+            {
+                return comparison;
+            }
+        }
+
+        return left.Count.CompareTo(right.Count);
+    }
+    private static int CompareNumericIdentifier(string left, string right) =>
+        left.Length != right.Length
+            ? left.Length.CompareTo(right.Length)
+            : string.CompareOrdinal(left, right);
+    private readonly record struct ParsedSemanticVersion(
+        string Major,
+        string Minor,
+        string Patch,
+        IReadOnlyList<string> Prerelease);
     public static bool IsReleaseIdentity(CanonicalReleaseIdentity? identity, string channel) => identity is not null && IsChannel(channel) &&
         IsCanonicalReleaseVersion(identity.Version, channel) && identity.ReleaseId == $"{channel}:{identity.Version}" &&
         IsChannel(identity.Channel) && identity.Channel == channel && identity.SourceTag == $"v{identity.Version}" && HasExpectedSourceBranch(identity.SourceBranch, channel) &&
