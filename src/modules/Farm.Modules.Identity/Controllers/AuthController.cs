@@ -415,7 +415,8 @@ public class AuthController(
     /// </summary>
     [HttpPost("passkey/register/begin")]
     [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
-    [ProducesResponseType(typeof(CredentialCreateOptions), StatusCodes.Status200OK)]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PasskeyRegisterBeginAsync(CancellationToken ct)
     {
@@ -486,7 +487,8 @@ public class AuthController(
     /// </summary>
     [HttpPost("passkey/login/begin")]
     [AllowAnonymous] // Public because passkey assertion options are required to start authentication.
-    [ProducesResponseType(typeof(AssertionOptions), StatusCodes.Status200OK)]
+    [Produces("application/json")]
+    [ProducesResponseType(typeof(object), StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     public async Task<IActionResult> PasskeyLoginBeginAsync(
         [FromBody] PasskeyLoginBeginRequest request,

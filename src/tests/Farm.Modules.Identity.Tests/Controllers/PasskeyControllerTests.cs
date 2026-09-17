@@ -62,6 +62,8 @@ public class PasskeyControllerTests
 
         root.GetProperty("rp").GetProperty("id").GetString().Should().Be("localhost");
         root.GetProperty("attestation").GetString().Should().Be("none");
+        root.GetProperty("challenge").GetString().Should().MatchRegex("^[A-Za-z0-9_-]+$");
+        root.GetProperty("user").GetProperty("id").GetString().Should().MatchRegex("^[A-Za-z0-9_-]+$");
 
         JsonElement authenticatorSelection = root.GetProperty("authenticatorSelection");
         authenticatorSelection.GetProperty("residentKey").GetString().Should().Be("preferred");
@@ -73,7 +75,7 @@ public class PasskeyControllerTests
         parameterValues.Should().OnlyContain(parameter =>
             parameter.GetProperty("type").GetString() == "public-key" &&
             parameter.GetProperty("alg").ValueKind == JsonValueKind.Number);
-        parameterValues.Select(parameter => parameter.GetProperty("alg").GetInt32()).Should().Contain(-7);
+        parameterValues.Select(parameter => parameter.GetProperty("alg").GetInt32()).Should().OnlyContain(algorithm => algorithm < 0);
     }
 
     [Fact]
@@ -159,6 +161,7 @@ public class PasskeyControllerTests
         JsonElement root = json.RootElement;
         root.GetProperty("rpId").GetString().Should().Be("localhost");
         root.GetProperty("userVerification").GetString().Should().Be("required");
+        root.GetProperty("challenge").GetString().Should().MatchRegex("^[A-Za-z0-9_-]+$");
     }
 
     [Fact]

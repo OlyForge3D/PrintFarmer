@@ -3140,12 +3140,22 @@ capture_config_overrides() {
 
 restore_config_overrides() {
     local name
+    local webauthn_override_set=false
     for name in $CONFIG_OVERRIDE_VARS; do
+        if [ "$name" = "WebAuthn__RelyingPartyId" ] ||
+           [ "$name" = "WebAuthn__RelyingPartyName" ] ||
+           [ "$name" = "WebAuthn__Origin" ]; then
+            eval "if [ \"\${_CONFIG_OVERRIDE_SET_${name}:-0}\" = \"1\" ]; then webauthn_override_set=true; fi"
+        fi
         eval "if [ \"\${_CONFIG_OVERRIDE_SET_${name}:-0}\" = \"1\" ]; then
                   ${name}=\"\${_CONFIG_OVERRIDE_VAL_${name}}\"
               fi
               unset _CONFIG_OVERRIDE_SET_${name} _CONFIG_OVERRIDE_VAL_${name}"
     done
+
+    if [ "$webauthn_override_set" = "true" ]; then
+        WEBAUTHN_CONFIG_EXPLICIT=true
+    fi
 }
 
 resolve_webauthn_configuration() {
@@ -3182,6 +3192,11 @@ load_previous_config() {
         # Source the config file to load variables
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
+        if [ "${WebAuthn__ConfigurationSource:-}" = "explicit" ]; then
+            WEBAUTHN_CONFIG_EXPLICIT=true
+        else
+            unset WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin
+        fi
         validate_deployment_network || exit 1
         apply_discovery_override
         enforce_supported_orcaslicer_release
@@ -3305,10 +3320,20 @@ HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${HTTPS_PORT:-0}
 SERVER_HOST=${SERVER_HOST:-localhost}
 
-# Passkey / WebAuthn Configuration
+# Passkey / WebAuthn configuration is derived from the current network settings
+# unless the caller explicitly supplied an override.
+WebAuthn__ConfigurationSource=${WEBAUTHN_CONFIG_EXPLICIT:-false}
+EOF
+
+    if [ "${WEBAUTHN_CONFIG_EXPLICIT:-false}" = "true" ]; then
+        cat >> "$CONFIG_FILE" << EOF
 WebAuthn__RelyingPartyId=$(printf '%q' "$WebAuthn__RelyingPartyId")
 WebAuthn__RelyingPartyName=$(printf '%q' "$WebAuthn__RelyingPartyName")
 WebAuthn__Origin=$(printf '%q' "$WebAuthn__Origin")
+EOF
+    fi
+
+    cat >> "$CONFIG_FILE" << EOF
 
 # Application Settings - Pre-populate Setup Wizard  
 PFARM__NetworkDiscovery__EnableDiscovery=${ENABLE_DISCOVERY}

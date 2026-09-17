@@ -13,6 +13,7 @@
 #   --profile PROFILE     Deployment profile: lite, standard, or full
 #   --version TAG         Container image tag (default: latest)
 #   --port PORT           HTTP port (default: 8080)
+#   --host HOST           Canonical browser hostname for passkeys (default: localhost)
 #   --dir DIR             Install directory (default: ./printfarmer)
 #   --db sqlite|postgres  Database engine (default: sqlite)
 #   --with-spoolman URL   Enable Spoolman filament tracking
@@ -25,6 +26,7 @@
 #
 # Environment variables:
 #   PRINTFARMER_PORT      Same as --port
+#   PRINTFARMER_HOST      Same as --host
 #   PRINTFARMER_DIR       Same as --dir
 #   PRINTFARMER_VERSION   Same as --version
 #   PRINTFARMER_DB        Same as --db
@@ -40,6 +42,7 @@ INSTALLER_VERSION="1.0.0"
 REGISTRY_HOST="ghcr.io/olyforge3d"
 IMAGE_TAG="${PRINTFARMER_VERSION:-latest}"
 HTTP_PORT="${PRINTFARMER_PORT:-8080}"
+SERVER_HOST="${PRINTFARMER_HOST:-localhost}"
 INSTALL_DIR="${PRINTFARMER_DIR:-./printfarmer}"
 DB_ENGINE="${PRINTFARMER_DB:-sqlite}"
 DB_EXPLICIT=false
@@ -249,6 +252,8 @@ while [[ $# -gt 0 ]]; do
         --version=*)        IMAGE_TAG="${1#*=}"; shift ;;
         --port)             HTTP_PORT="${2:?--port requires a number}"; shift 2 ;;
         --port=*)           HTTP_PORT="${1#*=}"; shift ;;
+        --host)             SERVER_HOST="${2:?--host requires a DNS hostname}"; shift 2 ;;
+        --host=*)           SERVER_HOST="${1#*=}"; shift ;;
         --dir)              INSTALL_DIR="${2:?--dir requires a path}"; shift 2 ;;
         --dir=*)            INSTALL_DIR="${1#*=}"; shift ;;
         --db)               DB_ENGINE="${2:?--db requires sqlite or postgres}"; DB_EXPLICIT=true; shift 2 ;;
@@ -283,6 +288,7 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     --profile PROFILE     Deployment profile (lite, standard, full)
     --version TAG         Container image tag to pull (default: latest)
     --port PORT           HTTP port to expose (default: 8080)
+    --host HOST           Canonical browser hostname for passkeys (default: localhost)
     --dir DIR             Where to install (default: ./printfarmer)
     --db sqlite|postgres  Database engine (default: sqlite — zero config)
     --with-spoolman URL   Connect to Spoolman for filament tracking
@@ -300,6 +306,7 @@ if [[ "$SHOW_HELP" == "true" ]]; then
 
   ENVIRONMENT VARIABLES
     PRINTFARMER_PORT      Equivalent to --port
+    PRINTFARMER_HOST      Equivalent to --host
     PRINTFARMER_DIR       Equivalent to --dir
     PRINTFARMER_VERSION   Equivalent to --version
     PRINTFARMER_DB        Equivalent to --db
@@ -310,8 +317,8 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     # Simplest install — everything defaults, just works
     ./install.sh
 
-    # Automated install on port 9090 with PostgreSQL
-    ./install.sh --non-interactive --port 9090 --db postgres
+    # Automated install behind HTTPS at farm.example.com
+    ./install.sh --non-interactive --host farm.example.com --port 9090 --db postgres
 
     # Lightweight install for Raspberry Pi
     ./install.sh --profile lite
@@ -917,6 +924,12 @@ else
     CORS_LAN_ORIGIN=""
 fi
 
+if [[ "$SERVER_HOST" == "localhost" ]]; then
+    WEBAUTHN_ORIGIN="http://localhost:${HTTP_PORT}"
+else
+    WEBAUTHN_ORIGIN="https://${SERVER_HOST}"
+fi
+
 # ─── Generate .env ──────────────────────────────────────────────────────────
 info "Writing configuration..."
 
@@ -960,6 +973,9 @@ WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
 CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
+WebAuthn__RelyingPartyId=${SERVER_HOST}
+WebAuthn__RelyingPartyName=PrintFarmer
+WebAuthn__Origin=${WEBAUTHN_ORIGIN}
 ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
@@ -989,6 +1005,9 @@ WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
 ASPNETCORE_ENVIRONMENT=Production
 DEVMODE_BYPASS_AUTH=false
 CORS__AllowedOrigins=http://localhost:${HTTP_PORT}${CORS_LAN_ORIGIN}
+WebAuthn__RelyingPartyId=${SERVER_HOST}
+WebAuthn__RelyingPartyName=PrintFarmer
+WebAuthn__Origin=${WEBAUTHN_ORIGIN}
 ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
@@ -1179,6 +1198,9 @@ services:
       - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=\${Jwt__Audience:-PrintFarmer}
       - WorkerAuth__SharedKey=\${WORKER_SHARED_API_KEY}
+      - WebAuthn__RelyingPartyId=\${WebAuthn__RelyingPartyId}
+      - WebAuthn__RelyingPartyName=\${WebAuthn__RelyingPartyName:-PrintFarmer}
+      - WebAuthn__Origin=\${WebAuthn__Origin}
       - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
@@ -1364,6 +1386,9 @@ ${compose_api_depends}
       - Jwt__Key=\${Jwt__Key}
       - Jwt__Issuer=\${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=\${Jwt__Audience:-PrintFarmer}
+      - WebAuthn__RelyingPartyId=\${WebAuthn__RelyingPartyId}
+      - WebAuthn__RelyingPartyName=\${WebAuthn__RelyingPartyName:-PrintFarmer}
+      - WebAuthn__Origin=\${WebAuthn__Origin}
       - Security__DevModeBypassAuth=\${DEVMODE_BYPASS_AUTH:-false}
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
@@ -1506,6 +1531,11 @@ printf "  ${BOLD}Profile${NC}      %s\n" "$DEPLOY_PROFILE"
 printf "  ${BOLD}Directory${NC}    %s\n" "$INSTALL_DIR"
 printf "  ${BOLD}Database${NC}     %s\n" "$DB_ENGINE"
 printf "  ${BOLD}Port${NC}         %s\n" "$HTTP_PORT"
+if [[ "$SERVER_HOST" == "localhost" ]]; then
+    printf "  ${BOLD}Passkeys${NC}     http://localhost:%s\n" "$HTTP_PORT"
+else
+    printf "  ${BOLD}Passkeys${NC}     https://%s (configure HTTPS at this hostname)\n" "$SERVER_HOST"
+fi
 printf "  ${BOLD}Version${NC}      %s\n" "$IMAGE_TAG"
 if [[ -n "$SPOOLMAN_URL" ]]; then
     printf "  ${BOLD}Spoolman${NC}     %s\n" "$SPOOLMAN_URL"
@@ -1596,9 +1626,13 @@ if [[ "$START" == "true" ]]; then
     printf "  ${BOLD}${GREEN}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}\n"
     echo ""
     printf "  ${BOLD}Open in your browser:${NC}\n"
-    printf "    Local:   ${BOLD}${CYAN}http://localhost:${HTTP_PORT}${NC}\n"
-    if [[ "$LAN_IP" != "localhost" ]]; then
-        printf "    Network: ${BOLD}${CYAN}http://${LAN_IP}:${HTTP_PORT}${NC}\n"
+    if [[ "$SERVER_HOST" == "localhost" ]]; then
+        printf "    Local:   ${BOLD}${CYAN}http://localhost:${HTTP_PORT}${NC}\n"
+        if [[ "$LAN_IP" != "localhost" ]]; then
+            printf "    Network: ${BOLD}${CYAN}http://${LAN_IP}:${HTTP_PORT}${NC}\n"
+        fi
+    else
+        printf "    HTTPS:   ${BOLD}${CYAN}https://${SERVER_HOST}${NC}\n"
     fi
     echo ""
     printf "  ${BOLD}First time?${NC} You'll create your admin account in the browser.\n"
