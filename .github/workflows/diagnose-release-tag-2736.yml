@@ -67,6 +67,7 @@ jobs:
           permission-statuses: read
           permission-administration: write
           permission-actions: read
+          permission-workflows: write
       - name: One POST only; no release transitions
         env:
           GH_TOKEN: ${{ github.token }}
