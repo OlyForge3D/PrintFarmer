@@ -22,6 +22,7 @@ import {
   enrichSbomDocument,
   scanPublicationFiles,
   findNugetAssetsFiles,
+  normalizedLicenseText,
   readJson,
   sha256,
   validateLicenseMetadata,
@@ -1251,13 +1252,10 @@ test('reviewed npm license fallbacks are pinned to LF checkout in .gitattributes
   // Regression coverage for OlyForge3D/PrintFarmer#1526: on Windows, Git
   // converted compliance/licenses/npm/*.txt to CRLF because .gitattributes
   // only pinned eol=lf for files directly inside compliance/licenses/, not
-  // its subdirectories. create-npm-notices.mjs hashes the checked-out bytes
-  // and compares them against the LF-normalized sha256 recorded here, so a
-  // CRLF checkout breaks the pinned-hash integrity check. This test asserts
-  // the .gitattributes rule itself covers every reviewed fallback file
-  // (platform-independent: it checks the attribute, not the current OS's
-  // checkout bytes) and that the working tree bytes still match the pinned
-  // hash.
+  // its subdirectories. This test asserts the .gitattributes rule itself
+  // covers every reviewed fallback file (platform-independent: it checks the
+  // attribute, not the current OS's checkout bytes) and that normalized
+  // working-tree bytes still match the pinned hash.
   const policyPath = path.join(repositoryRoot, 'compliance', 'dependency-license-policy.json');
   const policy = JSON.parse(await readFile(policyPath, 'utf8'));
   const fallbacks = policy.npm?.licenseTextFallbacks ?? [];
@@ -1282,9 +1280,137 @@ test('reviewed npm license fallbacks are pinned to LF checkout in .gitattributes
 
     const fileBytes = await readFile(path.join(repositoryRoot, fallback.licenseFile));
     assert.equal(
-      sha256(fileBytes),
+      sha256(normalizedLicenseText(fileBytes.toString('utf8'))),
       fallback.sha256,
-      `${fallback.licenseFile} checked-out bytes no longer match the reviewed policy sha256`,
+      `${fallback.licenseFile} normalized bytes no longer match the reviewed policy sha256`,
     );
+  }
+});
+
+test('createNpmLicenseInventory rejects incomplete, invalid-date, and stale-hash fallbacks', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-npm-fallback-'));
+  const lockRelativePath = 'src/Web/ReactApp/package-lock.json';
+  const licenseFile = 'compliance/licenses/npm/fixture.txt';
+  const licenseText = 'MIT license evidence\n';
+  const fallback = {
+    ecosystem: 'npm',
+    package: 'fixture',
+    version: '1.0.0',
+    license: 'MIT',
+    licenseFile,
+    sha256: sha256(Buffer.from(licenseText)),
+    source: 'https://licenses.example.test/fixture',
+    evidence: 'Immutable fixture license text',
+    reviewer: 'Maintainer',
+    reviewDate: '2026-07-24',
+    reviewAfter: '2099-07-24',
+    rationale: 'Fixture for fallback validation.',
+  };
+  const policy = {
+    allowedExpressions: ['MIT'],
+    deniedValues: ['', 'UNKNOWN'],
+    npmLockFiles: [lockRelativePath],
+    npm: { licenseTextFallbacks: [fallback] },
+    reviewedExceptions: [],
+    sbom: { npmBundleLockFile: lockRelativePath },
+  };
+
+  try {
+    await mkdir(path.join(root, path.dirname(lockRelativePath)), { recursive: true });
+    await mkdir(path.join(root, path.dirname(licenseFile)), { recursive: true });
+    await writeFile(path.join(root, lockRelativePath), JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'fixture-root', version: '1.0.0' },
+        'node_modules/fixture': { license: 'MIT', version: '1.0.0' },
+      },
+    }));
+    await writeFile(path.join(root, licenseFile), licenseText);
+
+    assert.deepEqual((await createNpmLicenseInventory(root, policy)).errors, []);
+
+    const incomplete = structuredClone(policy);
+    incomplete.npm.licenseTextFallbacks[0].evidence = '';
+    assert.ok(hasCode(
+      (await createNpmLicenseInventory(root, incomplete)).errors,
+      'LICENSE_EXCEPTION_INCOMPLETE',
+    ));
+
+    const invalidDate = structuredClone(policy);
+    invalidDate.npm.licenseTextFallbacks[0].reviewDate = '2026-7-24';
+    assert.ok(hasCode(
+      (await createNpmLicenseInventory(root, invalidDate)).errors,
+      'LICENSE_EXCEPTION_DATE',
+    ));
+
+    const staleHash = structuredClone(policy);
+    staleHash.npm.licenseTextFallbacks[0].sha256 = '0'.repeat(64);
+    assert.ok(hasCode(
+      (await createNpmLicenseInventory(root, staleHash)).errors,
+      'LICENSE_EVIDENCE_MISMATCH',
+    ));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('create-npm-notices accepts normalized fallback evidence without a terminal newline', async () => {
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-npm-notices-'));
+  const packageRoot = 'src/Web/ReactApp';
+  const lockRelativePath = `${packageRoot}/package-lock.json`;
+  const licenseFile = 'compliance/licenses/npm/fixture.txt';
+  const licenseText = 'MIT license evidence';
+  const outputPath = 'dist/THIRD-PARTY-LICENSES.npm.txt';
+  const policy = {
+    allowedExpressions: ['MIT'],
+    deniedValues: ['', 'UNKNOWN'],
+    npm: {
+      licenseTextFallbacks: [{
+        package: 'fixture',
+        version: '1.0.0',
+        license: 'MIT',
+        licenseFile,
+        sha256: sha256(normalizedLicenseText(licenseText)),
+        source: 'https://licenses.example.test/fixture',
+        evidence: 'Immutable fixture license text',
+        reviewer: 'Maintainer',
+        reviewDate: '2026-07-24',
+        reviewAfter: '2099-07-24',
+        rationale: 'Fixture for notice generation.',
+      }],
+    },
+  };
+
+  try {
+    await mkdir(path.join(root, packageRoot, 'node_modules', 'fixture'), { recursive: true });
+    await mkdir(path.join(root, path.dirname(licenseFile)), { recursive: true });
+    await writeFile(path.join(root, lockRelativePath), JSON.stringify({
+      lockfileVersion: 3,
+      packages: {
+        '': { name: 'fixture-root', version: '1.0.0' },
+        'node_modules/fixture': {
+          license: 'MIT',
+          resolved: 'https://registry.npmjs.org/fixture/-/fixture-1.0.0.tgz',
+          version: '1.0.0',
+        },
+      },
+    }));
+    await writeFile(path.join(root, licenseFile), licenseText);
+    const policyPath = path.join(root, 'compliance', 'dependency-license-policy.json');
+    await writeFile(policyPath, JSON.stringify(policy));
+
+    await execFileAsync(process.execPath, [
+      path.join(repositoryRoot, 'scripts', 'compliance', 'create-npm-notices.mjs'),
+      '--repo', root,
+      '--package-root', packageRoot,
+      '--policy', 'compliance/dependency-license-policy.json',
+      '--output', outputPath,
+    ], { cwd: repositoryRoot });
+
+    const output = await readFile(path.join(root, outputPath), 'utf8');
+    assert.match(output, /fixture@1\.0\.0/);
+    assert.match(output, /MIT license evidence/);
+  } finally {
+    await rm(root, { force: true, recursive: true });
   }
 });
