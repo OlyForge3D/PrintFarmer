@@ -35,6 +35,30 @@ describe("ApiClient", () => {
     });
   });
 
+  describe("update channel settings", () => {
+    it("round-trips the selected channel and acknowledgement state", async () => {
+      const getMock = vi.fn().mockResolvedValue({
+        data: { channel: "insider", insiderAcknowledged: true },
+      });
+      (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
+
+      await expect(apiClient.getUpdateChannelSettings()).resolves.toEqual({
+        channel: "insider",
+        insiderAcknowledged: true,
+      });
+      expect(getMock).toHaveBeenCalledWith("/settings/UpdateChannel");
+
+      const postMock = vi.fn().mockResolvedValue({});
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await apiClient.updateUpdateChannelSettings({ channel: "stable", insiderAcknowledged: false });
+      expect(postMock).toHaveBeenCalledWith("/settings/UpdateChannel", {
+        channel: "stable",
+        insiderAcknowledged: false,
+      });
+    });
+  });
+
   describe("getPrinters", () => {
     it("should call the correct endpoint", async () => {
       const mockResponse = {

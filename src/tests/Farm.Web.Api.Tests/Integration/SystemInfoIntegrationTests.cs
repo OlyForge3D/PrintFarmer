@@ -6,15 +6,20 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Slicer.Module.Services.SystemInfo;
 using FluentAssertions;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Options;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration;
@@ -26,12 +31,41 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
 {
     public class Factory : CustomWebApplicationFactory
     {
+        private readonly bool _throwDiscoveryOptions;
+
         public Factory()
+            : this(discoveryEnabled: true, throwDiscoveryOptions: false)
+        {
+        }
+
+        private Factory(bool discoveryEnabled, bool throwDiscoveryOptions)
             : base(new Dictionary<string, string?>
             {
                 ["Security:DevModeBypassAuth"] = "false",
+                ["HostUpdates:VerifiedReleaseDiscovery:Enabled"] = discoveryEnabled.ToString(),
             })
         {
+            _throwDiscoveryOptions = throwDiscoveryOptions;
+        }
+
+        public static Factory WithDiscoveryDisabled() => new(discoveryEnabled: false, throwDiscoveryOptions: false);
+
+        public static Factory WithInvalidDiscoveryOptions() => new(discoveryEnabled: true, throwDiscoveryOptions: true);
+
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            base.ConfigureWebHost(builder);
+            if (!_throwDiscoveryOptions)
+            {
+                return;
+            }
+
+            builder.ConfigureTestServices(services =>
+            {
+                services.RemoveAll<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>();
+                services.AddSingleton<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>(
+                    new ThrowingVerifiedReleaseDiscoveryOptionsMonitor());
+            });
         }
     }
 
@@ -116,6 +150,8 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
         dto.Should().NotBeNull();
         dto!.App.Version.Should().NotBeNullOrWhiteSpace();
+        dto.Inventory!.HostUpdaterVersion.Should().Be(dto.App.Version);
+        HostUpdateValidation.IsSemanticVersion(dto.Inventory.HostUpdaterVersion).Should().BeTrue();
         dto.App.Uptime.Should().NotBeNullOrWhiteSpace();
         dto.App.Hostname.Should().NotBeNullOrWhiteSpace();
         dto.Cpu.Cores.Should().BeGreaterThan(0);
@@ -215,6 +251,212 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         workers.Should().Contain(row => row.InstanceId == second.ToString() && row.ApplicationVersion == null && row.ObservationState == InventoryObservationState.Unavailable);
         workers.Should().OnlyContain(row => row.PlatformDigest == null && row.Identity == null);
         json.Should().NotContain("private-worker").And.NotContain("never-return-registry-key").And.NotContain("not-attestation").And.NotContain("capabilitiesJson");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_ReadinessReflectsVerifiedReleaseEvidenceCacheInIsolatedHost()
+    {
+        await using Factory isolatedFactory = new();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+
+        HttpResponseMessage before = await isolatedAdmin.GetAsync("/api/system/info");
+        using (JsonDocument beforeJson = JsonDocument.Parse(await before.Content.ReadAsStringAsync()))
+        {
+            JsonElement readiness = beforeJson.RootElement.GetProperty("inventory").GetProperty("readiness");
+            readiness.GetProperty("state").GetString().Should().Be("Unknown");
+            readiness.GetProperty("reasons").EnumerateArray().Select(r => r.GetString()).Should().Contain("VerifiedReleaseEvidenceUnavailable");
+        }
+
+        // A release whose channel does not match the host's selected channel ("stable" by
+        // default) is unambiguously Blocked, proving the evaluator is wired against a
+        // *populated* cache, not always the "no evidence" branch.
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        cache.SetVerified(
+            new VerifiedReleaseEvidenceDto
+            {
+                Sequence = 999_999,
+                MinimumUpdaterVersion = "1.0.0",
+                SignatureVerified = true,
+                IsComplete = true,
+                ManifestDigest = "sha256:" + new string('a', 64),
+                Identity = new CanonicalReleaseIdentityDto
+                {
+                    CanonicalVersion = "9.9.9",
+                    BaseVersion = "9.9.9",
+                    Channel = "insider",
+                    ReleaseId = "insider:9.9.9",
+                },
+                Services = [],
+            },
+            DateTimeOffset.UtcNow);
+        isolatedFactory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
+
+        HttpResponseMessage after = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument afterJson = JsonDocument.Parse(await after.Content.ReadAsStringAsync());
+        afterJson.RootElement.GetProperty("inventory").GetProperty("readiness").GetProperty("state").GetString().Should().Be("Blocked");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_DiscoveryFailureRevokesPriorReadinessWithoutDiscardingDiagnostics()
+    {
+        await using Factory isolatedFactory = new();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        VerifiedReleaseEvidenceDto evidence = new()
+        {
+            Sequence = 3,
+            MinimumUpdaterVersion = "1.0.0",
+            SignatureVerified = true,
+            IsComplete = true,
+            ManifestDigest = "sha256:" + new string('a', 64),
+            Identity = new CanonicalReleaseIdentityDto
+            {
+                CanonicalVersion = "0.0.0",
+                BaseVersion = "0.0.0",
+                Channel = "stable",
+                ReleaseId = "stable:0.0.0",
+            },
+        };
+        DateTimeOffset verifiedAt = DateTimeOffset.UtcNow;
+        cache.SetVerified(evidence, verifiedAt);
+        cache.SetVerified(evidence with { Sequence = 2 }, verifiedAt.AddMinutes(1)).Should().BeFalse();
+        const string rollbackMessage = "Rejected rollback release for channel 'stable' (sequence=2).";
+        cache.SetError(rollbackMessage);
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseDiscoveryFailed");
+        cache.Current.Should().BeSameAs(evidence);
+        cache.Current!.Sequence.Should().Be(3);
+        cache.LastVerifiedAt.Should().Be(verifiedAt);
+        cache.LastError.Should().Be(rollbackMessage);
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_InvalidDiscoveryOptionsReportsReadinessUnavailable()
+    {
+        await using Factory isolatedFactory = Factory.WithInvalidDiscoveryOptions();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        isolatedFactory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseDiscoveryOptionsInvalid");
+    }
+
+    [Theory]
+    [MemberData(nameof(NormalizeAssemblyVersionCases))]
+    public void NormalizeAssemblyVersion_ProducesExpectedSemanticVersion(Version? assemblyVersion, string expected)
+    {
+        string normalized = SystemInfoService.NormalizeAssemblyVersion(assemblyVersion);
+
+        normalized.Should().Be(expected);
+        HostUpdateValidation.IsSemanticVersion(normalized).Should().BeTrue();
+    }
+
+    // Build == -1 (no third component, e.g. `new Version(1, 2)`) previously fell through to Math.Max, but this
+    // case must stay covered explicitly so a regression there fails a test instead of only field observation.
+    public static TheoryData<Version?, string> NormalizeAssemblyVersionCases => new()
+    {
+        { new Version(1, 2, 3, 4), "1.2.3" },
+        { new Version(1, 2), "1.2.0" },
+        { null, "0.0.0" },
+    };
+
+    private sealed class ThrowingVerifiedReleaseDiscoveryOptionsMonitor : IOptionsMonitor<VerifiedReleaseDiscoveryOptions>
+    {
+        public VerifiedReleaseDiscoveryOptions CurrentValue => throw new OptionsValidationException(
+            Options.DefaultName,
+            typeof(VerifiedReleaseDiscoveryOptions),
+            ["invalid interval"]);
+
+        public VerifiedReleaseDiscoveryOptions Get(string? name) => new();
+
+        public IDisposable? OnChange(Action<VerifiedReleaseDiscoveryOptions, string?> listener) => null;
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_DisabledDiscoveryRevokesPriorReadiness()
+    {
+        await using Factory isolatedFactory = Factory.WithDiscoveryDisabled();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        cache.SetVerified(
+            new VerifiedReleaseEvidenceDto
+            {
+                Sequence = 99_999,
+                MinimumUpdaterVersion = "1.0.0",
+                SignatureVerified = true,
+                IsComplete = true,
+                ManifestDigest = "sha256:" + new string('a', 64),
+                Identity = new CanonicalReleaseIdentityDto
+                {
+                    CanonicalVersion = "0.0.0",
+                    BaseVersion = "0.0.0",
+                    Channel = "stable",
+                    ReleaseId = "stable:0.0.0",
+                },
+            },
+            DateTimeOffset.UtcNow);
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseDiscoveryDisabled");
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_StaleVerifiedReleaseEvidenceIsNotEligible()
+    {
+        await using Factory isolatedFactory = new();
+        await isolatedFactory.ResetDataAsync();
+        using HttpClient isolatedAdmin = await isolatedFactory.CreateAdminClientAsync();
+        IVerifiedReleaseEvidenceCache cache =
+            isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
+        cache.SetVerified(
+            new VerifiedReleaseEvidenceDto
+            {
+                Sequence = 99_999,
+                MinimumUpdaterVersion = "1.0.0",
+                SignatureVerified = true,
+                IsComplete = true,
+                ManifestDigest = "sha256:" + new string('a', 64),
+                Identity = new CanonicalReleaseIdentityDto
+                {
+                    CanonicalVersion = "0.0.0",
+                    BaseVersion = "0.0.0",
+                    Channel = "stable",
+                    ReleaseId = "stable:0.0.0",
+                },
+            },
+            DateTimeOffset.UtcNow.AddHours(-3));
+
+        HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
+        using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
+        JsonElement readiness = json.RootElement.GetProperty("inventory").GetProperty("readiness");
+
+        readiness.GetProperty("state").GetString().Should().Be("Unknown");
+        readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
+            .Should().Contain("VerifiedReleaseEvidenceStale");
     }
 
     [Fact]

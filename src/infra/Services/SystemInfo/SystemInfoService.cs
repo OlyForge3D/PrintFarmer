@@ -1,4 +1,4 @@
-﻿using System.Data;
+using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
@@ -8,12 +8,13 @@ using System.Runtime.InteropServices;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.Background;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.SystemStatus;
 
@@ -27,7 +28,9 @@ public class SystemInfoService(
     IMemoryCache cache,
     ILogger<SystemInfoService> logger,
     IEnumerable<IServiceInventorySource> inventorySources,
-    IConfiguration configuration) : ISystemInfoService
+    Farm.Infrastructure.Settings.ISettingsService settingsService,
+    Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache verifiedReleaseEvidenceCache,
+    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
     private const string CacheKey = "SystemInfo:Snapshot";
@@ -37,6 +40,10 @@ public class SystemInfoService(
     private readonly IBackgroundServiceMonitor _backgroundServiceMonitor = backgroundServiceMonitor;
     private readonly IMemoryCache _cache = cache;
     private readonly ILogger<SystemInfoService> _logger = logger;
+    private readonly Farm.Infrastructure.Settings.ISettingsService _settingsService = settingsService;
+    private readonly Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache _verifiedReleaseEvidenceCache = verifiedReleaseEvidenceCache;
+    private readonly IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> _verifiedReleaseDiscoveryOptions =
+        verifiedReleaseDiscoveryOptions;
 
     /// <summary>
     /// Returns the current system information snapshot, served from a 10-second cache to avoid
@@ -49,6 +56,90 @@ public class SystemInfoService(
             entry.AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(10);
             return await CollectSystemInfoAsync(cancellationToken);
         }) ?? await CollectSystemInfoAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Builds the service inventory snapshot for the currently persisted
+    /// <see cref="Farm.Infrastructure.Settings.UpdateChannelSettings.Channel"/>, then layers on a
+    /// production release-readiness evaluation (issue #2757) using whatever independently
+    /// verified release evidence <see cref="Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache"/>
+    /// currently holds. When no verified release has been discovered yet (cache empty, or the
+    /// discovery background service is disabled/still starting), readiness is explicitly unknown.
+    /// </summary>
+    private ServiceInventoryDto BuildInventory(IReadOnlyList<ServiceReplicaObservationDto> observations, string hostUpdaterVersion)
+    {
+        string channel = _settingsService.Get<Farm.Infrastructure.Settings.UpdateChannelSettings>().Channel;
+        DateTimeOffset now = DateTimeOffset.UtcNow;
+        ServiceInventoryDto inventory = ServiceInventoryEvaluator.Evaluate(observations, channel, now);
+        ServiceInventoryDto inventoryWithUpdater = inventory with { HostUpdaterVersion = hostUpdaterVersion };
+        VerifiedReleaseEvidenceCacheSnapshot cacheSnapshot = _verifiedReleaseEvidenceCache.GetSnapshot();
+        ReleaseReadinessDto? unavailable = GetUnavailableReleaseReadiness(now, cacheSnapshot);
+        ReleaseReadinessDto readiness = unavailable
+            ?? ReleaseReadinessEvaluator.Evaluate(inventoryWithUpdater, cacheSnapshot.Current, now);
+        return inventoryWithUpdater with { Readiness = readiness };
+    }
+
+    private ReleaseReadinessDto? GetUnavailableReleaseReadiness(DateTimeOffset now, VerifiedReleaseEvidenceCacheSnapshot cacheSnapshot)
+    {
+        Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options;
+        try
+        {
+            options = _verifiedReleaseDiscoveryOptions.CurrentValue;
+        }
+        catch (OptionsValidationException ex)
+        {
+            _logger.LogError(ex, "Verified release discovery options are invalid.");
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseDiscoveryOptionsInvalid"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        if (!options.Enabled)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseDiscoveryDisabled"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        if (cacheSnapshot.Current is null)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseEvidenceUnavailable"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        if (cacheSnapshot.LastError is not null)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseDiscoveryFailed"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        DateTimeOffset? verifiedAt = cacheSnapshot.LastVerifiedAt;
+        TimeSpan maximumAge = TimeSpan.FromSeconds(checked(options.IntervalSeconds * 2L));
+        if (verifiedAt is null || verifiedAt > now || now - verifiedAt > maximumAge)
+        {
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseEvidenceStale"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
+        return null;
     }
 
     /// <summary>
@@ -83,7 +174,7 @@ public class SystemInfoService(
         string databaseProvider = NormalizeDatabaseEngine(_db.Database.ProviderName);
         return new SystemInfoDto
         {
-            Inventory = ServiceInventoryEvaluator.Evaluate(observations, configuration["Deployment:SelectedChannel"], DateTimeOffset.UtcNow),
+            Inventory = BuildInventory(observations, appVersion),
             App = new SystemAppInfoDto
             {
                 Version = appVersion,
@@ -146,8 +237,16 @@ public class SystemInfoService(
             return informationalVersion.Split('+', 2)[0];
         }
 
-        return assembly.GetName().Version?.ToString() ?? "0.0.0";
+        // The monolith uses its API assembly version as the updater version; keep the fallback
+        // semantic and three-part so signed minimum-updater comparisons remain well-defined.
+        Version? assemblyVersion = assembly.GetName().Version;
+        return NormalizeAssemblyVersion(assemblyVersion);
     }
+
+    internal static string NormalizeAssemblyVersion(Version? assemblyVersion) =>
+        assemblyVersion is null
+            ? "0.0.0"
+            : $"{assemblyVersion.Major}.{assemblyVersion.Minor}.{Math.Max(assemblyVersion.Build, 0)}";
 
     // Uses the gcode storage root because archiveBytes is derived from that tree.
     private string ResolveStorageDirectory()
