@@ -1192,7 +1192,7 @@ calibration run. This is enforced by
   artifact (`pinned-orca-publication.json`) records repository, tags, digest and the pinned upstream
   checksum.
 
-General 2.4.x slicing is unaffected: it is built and published by `docker-publish.yml` and
+General 2.4.x slicing is unaffected: it is built and published by `consolidated-release.yml` and
 `orcaslicer-base-image.yml`, which this workflow does not touch.
 
 **Mandatory smoke gate (`calibration-pinned-smoke`)**

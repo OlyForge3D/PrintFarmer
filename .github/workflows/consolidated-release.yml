@@ -1,52 +1,47 @@
 name: Consolidated Release
+run-name: Release ${{ inputs.version }} (${{ inputs.channel }})
 
 on:
   workflow_dispatch:
     inputs:
       channel:
-        description: Release channel (not installation enrollment)
+        description: Stable uses main; insider uses development
         type: choice
         options: [stable, insider]
-        default: stable
+        default: insider
+        required: true
+      version:
+        description: X.Y.Z or X.Y.Z-insider.N; base must match selected-source VERSION
+        type: string
         required: true
       source_sha:
-        description: Optional full selected-channel ancestor SHA; blank pins that branch HEAD once
-        type: string
-        required: false
-      operation:
-        description: Protected operation
-        type: choice
-        options: [publish, abandon]
-        default: publish
-        required: true
-      reservation_target:
-        description: Immutable insider reservation allocation key required only for abandonment
+        description: Optional full channel-branch ancestor SHA; blank pins current HEAD
         type: string
         required: false
 
 permissions:
   contents: read
-  pull-requests: read
 
 concurrency:
-  group: release-${{ inputs.channel }}
+  group: server-release
   cancel-in-progress: false
 
+env:
+  RELEASE_CHANNEL: ${{ inputs.channel }}
+  RELEASE_VERSION: ${{ inputs.version }}
+  RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
+  RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
+
 jobs:
-  admit:
-    name: Pin release transaction
+  select:
+    name: Check owner, version and source
     runs-on: ubuntu-latest
     permissions:
       contents: read
       actions: read
-      checks: read
-      statuses: read
-      pull-requests: read
     outputs:
-      source_sha: ${{ steps.admit.outputs.source_sha }}
-      channel: ${{ steps.admit.outputs.channel }}
-      approval_mode: ${{ steps.admit.outputs.approval_mode }}
-      transaction: ${{ steps.select.outputs.transaction }}
+      source_sha: ${{ steps.select.outputs.source_sha }}
+      environment: ${{ steps.select.outputs.environment }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
@@ -55,161 +50,124 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - name: Resolve and bind canonical source once
+      - name: Check manual authority and reject used versions
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_CHANNEL: ${{ inputs.channel }}
-          RELEASE_SOURCE_SHA: ${{ inputs.source_sha }}
-          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-        run: |
-          set -euo pipefail
-          transaction="$(node scripts/ci/release-transaction.mjs select)"
-          echo "transaction=$transaction" >> "$GITHUB_OUTPUT"
-      - name: Admit immutable release transaction
-        if: inputs.operation == 'publish'
-        id: admit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          RELEASE_TRANSACTION: ${{ steps.select.outputs.transaction }}
-          RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
-          RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
-          RELEASE_OPERATION: ${{ inputs.operation }}
-          RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
-        run: node scripts/ci/release-control.mjs admit
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
-        with:
-          name: release-transaction-${{ github.run_id }}-${{ github.run_attempt }}
-          path: .artifacts/release-transaction/transaction.json
-          include-hidden-files: true
-          if-no-files-found: error
-          retention-days: 30
+        run: node scripts/ci/publish-release.mjs select
 
-  qualification:
-    if: inputs.operation == 'publish'
-    name: Automatic exact-source qualification
-    needs: admit
+  checks:
+    name: Check selected source
+    needs: select
     uses: ./.github/workflows/ci.yml
     permissions:
       contents: read
     with:
       release_qualification: true
-      source_sha: ${{ needs.admit.outputs.source_sha }}
-      source_branch: ${{ needs.admit.outputs.channel == 'stable' && 'main' || 'development' }}
+      source_sha: ${{ needs.select.outputs.source_sha }}
+      source_branch: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
 
-  collect-qualification:
-    if: inputs.operation == 'publish'
-    name: Collect genuine qualification evidence
-    needs: [admit, qualification]
+  publish:
+    name: Build containers and publish release
+    needs: [select, checks]
     runs-on: ubuntu-latest
+    timeout-minutes: 360
+    environment: ${{ needs.select.outputs.environment }}
     permissions:
       contents: read
       actions: read
-      checks: read
-      statuses: read
-      pull-requests: read
+    env:
+      RELEASE_SELECTED_SOURCE: ${{ needs.select.outputs.source_sha }}
+      RELEASE_PUBLICATION_ENVIRONMENT: ${{ needs.select.outputs.environment }}
     outputs:
-      run_url: ${{ steps.evidence.outputs.run_url }}
-      review_url: ${{ steps.evidence.outputs.review_url }}
-      expires_at: ${{ steps.evidence.outputs.expires_at }}
+      release_url: ${{ steps.publish.outputs.release_url }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+      - name: Checkout release tooling
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
         with:
-          ref: ${{ fromJSON(needs.admit.outputs.transaction).workflowCommit }}
+          ref: ${{ github.workflow_sha }}
+          persist-credentials: false
+      - name: Checkout pinned application source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          ref: ${{ needs.select.outputs.source_sha }}
+          path: source
+          fetch-depth: 0
           persist-credentials: false
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
-      - name: Verify exact-SHA checks and review evidence
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Recheck owner and protected route before credentials
         env:
           GH_TOKEN: ${{ github.token }}
-          RELEASE_TRANSACTION: ${{ needs.admit.outputs.transaction }}
-        run: |
-          set -euo pipefail
-          umask 077
-          qualification="$(node scripts/ci/release-transaction.mjs qualify)"
-          qualification_bytes="$(printf '%s' "$qualification" | wc -c)"
-          if [[ "$qualification_bytes" -le 0 || "$qualification_bytes" -gt 1048576 ]]; then
-            echo "Qualification evidence is empty or oversized"
-            exit 1
-          fi
-          mkdir -p .artifacts/release-transaction
-          if [[ -e .artifacts/release-transaction/qualification.json ]]; then
-            echo "Qualification evidence path already exists"
-            exit 1
-          fi
-          printf '%s\n' "$qualification" > .artifacts/release-transaction/qualification.json
-          node -e "JSON.parse(require('fs').readFileSync('.artifacts/release-transaction/qualification.json', 'utf8'))"
-      - name: Export bounded qualification references
-        id: evidence
-        run: |
-          set -euo pipefail
-          echo "run_url=$(jq -r '.run.url' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
-          echo "review_url=$(jq -r '.sourceEvidence.reviewUrl' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
-          echo "expires_at=$(jq -r '.expiresAt' .artifacts/release-transaction/qualification.json)" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        run: node scripts/ci/publish-release.mjs select
+      - uses: docker/setup-qemu-action@1f40c72289eff860ee54a304f1438e3cff362e0a  # v4
         with:
-          name: release-qualification-${{ github.run_id }}
-          overwrite: true
-          path: .artifacts/release-transaction/qualification.json
-          include-hidden-files: true
-          if-no-files-found: error
+          platforms: arm64,amd64
+      - uses: docker/setup-buildx-action@37fe631027851001ddb9b187196cc803df7f5f0e  # v4
+      - uses: docker/login-action@dbcb813823bdd20940b903addbd779551569679f  # v4
+        with:
+          registry: ghcr.io
+          username: ${{ vars.RELEASE_REGISTRY_USER }}
+          password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
+      - uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
+      - name: Build and verify all six images by digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: node scripts/ci/publish-release.mjs build
+      - name: Obtain approved publisher token after the long build
+        id: publisher
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
+        with:
+          owner: OlyForge3D
+          repositories: PrintFarmer
+          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
+          permission-contents: write
+          permission-actions: read
+          permission-administration: read
+          permission-workflows: write
+      - name: Publish version tags, assets and release notes last
+        id: publish
+        env:
+          GH_TOKEN: ${{ steps.publisher.outputs.token }}
+        run: node scripts/ci/publish-release.mjs publish
+      - name: Retain build results for diagnosis
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
+        with:
+          name: release-build-${{ github.run_id }}
+          path: release-assets/
+          if-no-files-found: warn
           retention-days: 30
 
-  publish:
-    if: >-
-      always() && needs.admit.result == 'success' && (inputs.operation == 'abandon' ||
-      (needs.qualification.result == 'success' && needs.collect-qualification.result == 'success'))
-    name: Approve and execute immutable release operation
-    needs: [admit, qualification, collect-qualification]
-    uses: ./.github/workflows/docker-publish.yml
-    permissions:
-      actions: read
-      checks: read
-      contents: read
-      packages: read
-      pull-requests: read
-      statuses: read
-      id-token: write
-    with:
-      transaction: ${{ needs.admit.outputs.transaction }}
-      operation: ${{ inputs.operation }}
-      reservation_target: ${{ inputs.reservation_target }}
-    secrets: inherit
-
   summary:
-    name: Release transaction summary
+    name: Release result
     if: always()
-    needs: [admit, qualification, collect-qualification, publish]
+    needs: [select, checks, publish]
     runs-on: ubuntu-latest
     permissions: {}
     steps:
-      - name: Write bounded result
+      - name: Report actual publication result
         env:
-          CHANNEL: ${{ inputs.channel }}
-          SOURCE_SHA: ${{ needs.admit.outputs.source_sha }}
-          QUALIFICATION: ${{ needs.qualification.result }}
-          EVIDENCE: ${{ needs.collect-qualification.result }}
-          PUBLICATION: ${{ needs.publish.result }}
-          PUBLIC_IDENTITY: ${{ needs.publish.outputs.public_identity }}
-          QUALIFICATION_URL: ${{ needs.collect-qualification.outputs.run_url }}
-          REVIEW_URL: ${{ needs.collect-qualification.outputs.review_url }}
-          QUALIFICATION_EXPIRES: ${{ needs.collect-qualification.outputs.expires_at }}
-          PUBLISHED_SET_DIGEST: ${{ needs.publish.outputs.published_set_digest }}
+          SOURCE: ${{ needs.select.outputs.source_sha }}
+          CHECKS: ${{ needs.checks.result }}
+          RESULT: ${{ needs.publish.result }}
+          RELEASE_URL: ${{ needs.publish.outputs.release_url }}
         run: |
           {
-            echo "## Release transaction"
-            echo "- channel: \`$CHANNEL\`"
-            echo "- source: \`$SOURCE_SHA\`"
-            echo "- qualification: \`$QUALIFICATION\`"
-            echo "- evidence: \`$EVIDENCE\`"
-            echo "- publication: \`$PUBLICATION\`"
-            echo "- qualification run: ${QUALIFICATION_URL:-unavailable}"
-            echo "- review evidence: ${REVIEW_URL:-unavailable}"
-            echo "- qualification expires: \`${QUALIFICATION_EXPIRES:-unavailable}\`"
-            echo "- canonical identity: \`${PUBLIC_IDENTITY:-not-authorized}\`"
-            echo "- published set digest: \`${PUBLISHED_SET_DIGEST:-not-published}\`"
-            if [ "$PUBLICATION" != success ]; then
-              echo "- action: inspect the failed admission, qualification, authorization, or publication job above; no secret values are included here"
+            echo "## Server release"
+            printf -- '- Version/channel: `%s` / `%s`\n' "$RELEASE_VERSION" "$RELEASE_CHANNEL"
+            printf -- '- Source: `%s`\n- Checks: `%s`\n- Publisher: `%s`\n' "$SOURCE" "$CHECKS" "$RESULT"
+            if [ "$RESULT" = success ] && [ -n "$RELEASE_URL" ]; then
+              printf -- '- Published: %s\n' "$RELEASE_URL"
+            else
+              echo '- Not confirmed complete. Inspect failed steps and retained artifacts.'
+              echo '- Partial images, tags, aliases or a draft may remain. Never overwrite/delete them.'
+              echo '- Start a fresh dispatch; if the version tag exists, choose a new version.'
             fi
+            echo '- Publication does not authorize installation or managed updates.'
           } >> "$GITHUB_STEP_SUMMARY"

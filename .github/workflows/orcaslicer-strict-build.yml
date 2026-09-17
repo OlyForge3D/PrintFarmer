@@ -5,7 +5,7 @@ name: OrcaSlicer Strict Build
 # a double-guard (repo var + workflow input) so it remains effectively disabled by default.
 #
 # Scope: this workflow owns the digest-pinned calibration worker for the latest supported OrcaSlicer
-# version. General slicing is built and published separately by docker-publish.yml and
+# version. General slicing is built and published separately by consolidated-release.yml and
 # orcaslicer-base-image.yml.
 on:
   workflow_dispatch:

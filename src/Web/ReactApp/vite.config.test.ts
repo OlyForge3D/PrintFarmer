@@ -4,7 +4,6 @@ import { copyFileSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSy
 import { resolve } from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { buildMetadata } from '../../../scripts/ci/release-metadata.mjs';
-import { allocationKey } from '../../../scripts/ci/release-policy.mjs';
 import { frontendVersionMetadata, resolveGitHash } from './vite.config';
 import { identity as inventoryIdentity } from './src/test/features/system/serviceInventoryFixture';
 
@@ -29,26 +28,17 @@ afterEach(restoreEnvironment);
 describe('canonical frontend release identity', () => {
   it.each(['stable', 'insider'])('embeds the production consumer output for %s releases', (channel) => {
     const root = resolve('.artifacts', `production-identity-${channel}-${process.pid}`);
-    const branch = channel === 'stable' ? 'main' : 'development';
     const version = channel === 'stable' ? '1.2.3' : '1.2.3-insider.10';
     const record = {
-      repository: 'OlyForge3D/PrintFarmer', releaseId: `${channel}:${version}`,
-      channel, canonicalVersion: version, baseVersion: '1.2.3',
-      sourceBranch: branch, sourceTag: `v${version}`, sourceCommit: 'a'.repeat(40),
-      authorizedBranchHead: 'a'.repeat(40), buildId: '45', buildAttempt: '2',
-      workflowIdentity: 'OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development',
-      stableSequence: channel === 'stable' ? '1' : '0',
-      created: '2026-09-12T20:00:00.000Z',
+      channel, version, sourceCommit: 'a'.repeat(40), buildId: '45',
     };
-    const allocation = allocationKey(record);
-    const metadata = buildMetadata({ ...record, allocationKey: allocation,
+    const metadata = buildMetadata({ ...record,
       protection: { reviewerId: 'private-reviewer' }, futurePrivate: 'private-value' });
-    const expectedIdentity = { ...JSON.parse(metadata.frontendIdentity), promotionOrigin: null };
     const vite = resolve('node_modules/vite/bin/vite.js');
     const build = () => execFileSync(process.execPath, [vite, 'build', '--config', resolve(root, 'vite.config.ts')], {
       cwd: root, encoding: 'utf8', timeout: 60_000, stdio: 'pipe',
       env: { ...process.env, VITE_GIT_SHA: record.sourceCommit,
-        PRINTFARMER_RELEASE_IDENTITY: metadata.frontendIdentity },
+        PRINTFARMER_RELEASE_IDENTITY: '' },
     });
     mkdirSync(resolve(root, 'public'), { recursive: true });
     mkdirSync(resolve(root, 'src/common/utils'), { recursive: true });
@@ -64,7 +54,8 @@ describe('canonical frontend release identity', () => {
       build();
       for (const file of ['version.json', 'release-identity.json']) {
         const emitted = readFileSync(resolve(root, 'dist', file), 'utf8');
-        expect(JSON.parse(emitted).releaseIdentity).toEqual(expectedIdentity);
+        expect(JSON.parse(emitted)).toMatchObject(JSON.parse(metadata.frontend));
+        expect(JSON.parse(emitted).releaseIdentity).toBeUndefined();
         expect(emitted).not.toMatch(/protection|reviewerId|futurePrivate|private-/);
       }
       const bundle = readdirSync(resolve(root, 'dist/assets')).find(file => /^index-.*\.js$/.test(file))!;
@@ -73,15 +64,12 @@ describe('canonical frontend release identity', () => {
         document: { createElement: () => ({ relList: { supports: () => true } }) },
       };
       runInNewContext(javascript, browser);
-      expect(browser.releaseIdentity).toEqual(expectedIdentity);
-      expect(browser.releaseIdentity).toMatchObject({
-        releaseId: record.releaseId, channel, sourceCommit: record.sourceCommit, allocationIdentity: allocation,
-      });
+      expect(browser.releaseIdentity).toBeNull();
       expect(javascript).not.toMatch(/protection|reviewerId|futurePrivate|private-/);
 
       writeFileSync(resolve(root, 'public/release-identity.json'),
-        JSON.stringify({ ...JSON.parse(metadata.frontend), releaseId: 'different-release' }));
-      expect(build).toThrow(/Frontend release identity inputs disagree on releaseId/);
+        JSON.stringify({ ...JSON.parse(metadata.frontend), sourceCommit: 'b'.repeat(40) }));
+      expect(build).toThrow(/does not match/);
     } finally {
       rmSync(root, { recursive: true, force: true });
     }

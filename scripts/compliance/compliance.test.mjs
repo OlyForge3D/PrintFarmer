@@ -506,7 +506,7 @@ test('validateLicenseMetadata rejects release gates in the wrong order', async (
   }
 });
 
-test('release publisher metadata rejects omitted signed boundaries and promotion before validation', async () => {
+test('release publisher metadata rejects missing compliance and publication before validation', async () => {
   const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-publisher-policy-'));
   try {
     const policy = JSON.parse(await readFile(
@@ -514,7 +514,7 @@ test('release publisher metadata rejects omitted signed boundaries and promotion
       'utf8',
     ));
     const assertion = structuredClone(policy.metadataAssertions.find(
-      ({ path: assertionPath }) => assertionPath === '.github/workflows/docker-publish.yml',
+      ({ path: assertionPath }) => assertionPath === 'scripts/ci/publish-release.mjs',
     ));
     assertion.path = 'release.yml';
     const metadataPolicy = {
@@ -530,28 +530,28 @@ test('release publisher metadata rejects omitted signed boundaries and promotion
     };
     const publisher = await readFile(path.join(
       repositoryRoot,
-      '.github',
-      'workflows',
-      'docker-publish.yml',
+      'scripts',
+      'ci',
+      'publish-release.mjs',
     ), 'utf8');
     const releasePath = path.join(root, 'release.yml');
     await writeFile(path.join(root, 'LICENSE'), 'canonical\n');
     await writeFile(path.join(root, 'VERSION'), 'v0.2.3\n');
 
     for (const boundary of [
-      'cosign attest --yes --new-bundle-format --type spdxjson',
-      'Validate complete immutable set and stage verifier evidence',
-      'create_args=(release create "$VERSION" --draft --verify-tag',
-      '--draft=false --prerelease',
-      'Advance the complete channel pointer last',
+      'scripts/compliance/create-source-bundle.mjs',
+      'scripts/compliance/enrich-sbom.mjs',
+      'verifyImages(release.version',
+      'draft: true',
+      'draft: false',
     ]) {
       await writeFile(releasePath, publisher.replaceAll(boundary, ''));
       assert.ok((await validateLicenseMetadata(root, metadataPolicy)).some((error) =>
         error.code === 'METADATA_ASSERTION' || error.code === 'METADATA_ORDER'));
     }
 
-    const validation = 'Validate complete immutable set and stage verifier evidence';
-    const promotion = 'Promote validated immutable image tags';
+    const validation = 'Draft release asset inventory is incomplete';
+    const promotion = 'tagImages(release.version';
     const unsafeOrder = publisher
       .replace(promotion, '')
       .replace(validation, `${promotion}\n${validation}`);

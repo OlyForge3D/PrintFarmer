@@ -351,15 +351,10 @@ jobs:
       - name: Test compliance controls
         run: node --test scripts/compliance/compliance.test.mjs
 
-      - name: Test release tag-trigger policy
+      - name: Test manual server release path
         run: >-
-          node --test scripts/ci/tests/test-release-tag-triggers.mjs
-          scripts/ci/tests/test-canonical-qualification.mjs
+          node --test scripts/ci/tests/test-publish-release.mjs
           scripts/ci/tests/test-release-evidence.mjs
-          scripts/ci/tests/test-release-source-metadata.mjs
-          scripts/ci/tests/test-release-transaction.mjs
-          scripts/ci/tests/test-release-dispatch.mjs
-          scripts/ci/tests/test-github-evidence-pages.mjs
 
       - name: Test daily development image-set policy
         run: node --test scripts/ci/tests/test-daily-development-images.mjs
