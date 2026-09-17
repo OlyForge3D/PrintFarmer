@@ -119,3 +119,88 @@ public sealed class AggregateHostUpdateHealthCheckTests
         }
     }
 }
+
+/// <summary>
+/// Bishop/Hicks review (issue #2663): <see cref="DigestHostUpdateHealthCheck"/> previously ran a
+/// single <c>docker inspect --format {{index .RepoDigests 0}} &lt;container&gt;</c>, but
+/// <c>.RepoDigests</c> does not exist on <c>docker container inspect</c> output at all -- only on
+/// <c>docker image inspect</c>. These tests exercise the fixed two-step probe: (1) container
+/// inspect resolves the running image reference via <c>.Image</c>; (2) that reference is fed to
+/// image inspect to resolve the real repo digest. A fake <see cref="IHostUpdateProcessRunner"/>
+/// asserts both commands are issued with the exact expected arguments, in order.
+/// </summary>
+public sealed class DigestHostUpdateHealthCheckTests
+{
+    private sealed class FakeProcessRunner(
+        HostUpdateProcessResult containerInspectResult,
+        HostUpdateProcessResult? imageInspectResult = null) : IHostUpdateProcessRunner
+    {
+        public List<IReadOnlyList<string>> Calls { get; } = [];
+
+        public Task<HostUpdateProcessResult> RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyDictionary<string, string>? environment = null)
+        {
+            Calls.Add(arguments);
+            bool isContainerInspect = arguments.Count > 0 && string.Equals(arguments[0], "container", StringComparison.Ordinal);
+            return Task.FromResult(isContainerInspect ? containerInspectResult : (imageInspectResult ?? containerInspectResult));
+        }
+    }
+
+    [Fact]
+    public async Task IsHealthyAsync_ContainerImageResolvesToMatchingRepoDigest_ReturnsTrue()
+    {
+        var runner = new FakeProcessRunner(
+            new HostUpdateProcessResult(0, "sha256:" + new string('a', 64), string.Empty),
+            new HostUpdateProcessResult(0, "example.com/api@sha256:" + new string('b', 64), string.Empty));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+
+        bool result = await check.IsHealthyAsync(CancellationToken.None);
+
+        result.Should().BeTrue();
+        runner.Calls.Should().HaveCount(2);
+        runner.Calls[0].Should().ContainInOrder("container", "inspect", "--format", "{{.Image}}", "api-1");
+        runner.Calls[1].Should().ContainInOrder("image", "inspect", "--format", "{{index .RepoDigests 0}}", "sha256:" + new string('a', 64));
+    }
+
+    [Fact]
+    public async Task IsHealthyAsync_RepoDigestDoesNotMatchExpected_ReturnsFalse()
+    {
+        var runner = new FakeProcessRunner(
+            new HostUpdateProcessResult(0, "sha256:" + new string('a', 64), string.Empty),
+            new HostUpdateProcessResult(0, "example.com/api@sha256:" + new string('c', 64), string.Empty));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+
+        bool result = await check.IsHealthyAsync(CancellationToken.None);
+
+        result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsHealthyAsync_ContainerInspectFails_ReturnsFalseAndNeverInspectsImage()
+    {
+        var runner = new FakeProcessRunner(new HostUpdateProcessResult(1, string.Empty, "no such container"));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+
+        bool result = await check.IsHealthyAsync(CancellationToken.None);
+
+        result.Should().BeFalse();
+        runner.Calls.Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task IsHealthyAsync_ImageInspectFails_ReturnsFalse()
+    {
+        var runner = new FakeProcessRunner(
+            new HostUpdateProcessResult(0, "sha256:" + new string('a', 64), string.Empty),
+            new HostUpdateProcessResult(1, string.Empty, "no such image"));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+
+        bool result = await check.IsHealthyAsync(CancellationToken.None);
+
+        result.Should().BeFalse();
+    }
+}

@@ -80,6 +80,20 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
 }
 
 /// <summary>Verifies the exact running image digest of one container against an expected pinned digest.</summary>
+/// <summary>
+/// Verifies one service's exact running image digest by inspecting the live container, never
+/// trusting a mutable tag. Bishop/Hicks review (issue #2663): <c>docker container inspect</c>
+/// has no <c>.RepoDigests</c> field at all -- that property only exists on <c>docker image
+/// inspect</c> output -- so the original single-step <c>docker inspect --format
+/// {{index .RepoDigests 0}} &lt;container&gt;</c> could never succeed against a real container;
+/// it either errored or (worse, if a stale/mocked runner ever returned a plausible-looking
+/// string) silently matched by coincidence. The correct two-step probe is: (1)
+/// <c>docker container inspect --format {{.Image}} &lt;container&gt;</c> to get the exact image
+/// reference (by ID or digest) the running container was created from, then (2) <c>docker image
+/// inspect --format {{index .RepoDigests 0}} &lt;imageRef&gt;</c> to resolve that image's
+/// registry-assigned repo digest, which is then compared (suffix match against the expected
+/// <c>sha256:...</c> manifest digest) exactly as before.
+/// </summary>
 public sealed class DigestHostUpdateHealthCheck(
     string name,
     IHostUpdateProcessRunner processRunner,
@@ -90,12 +104,28 @@ public sealed class DigestHostUpdateHealthCheck(
 
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
     {
-        HostUpdateProcessResult result = await processRunner.RunAsync(
+        HostUpdateProcessResult containerInspect = await processRunner.RunAsync(
             "docker",
-            ["inspect", "--format", "{{index .RepoDigests 0}}", containerName],
+            ["container", "inspect", "--format", "{{.Image}}", containerName],
             TimeSpan.FromSeconds(15),
             cancellationToken).ConfigureAwait(false);
-        return result.Succeeded && result.StandardOutput.Trim().EndsWith(expectedDigest, StringComparison.Ordinal);
+        if (!containerInspect.Succeeded)
+        {
+            return false;
+        }
+
+        string imageRef = containerInspect.StandardOutput.Trim();
+        if (string.IsNullOrEmpty(imageRef))
+        {
+            return false;
+        }
+
+        HostUpdateProcessResult imageInspect = await processRunner.RunAsync(
+            "docker",
+            ["image", "inspect", "--format", "{{index .RepoDigests 0}}", imageRef],
+            TimeSpan.FromSeconds(15),
+            cancellationToken).ConfigureAwait(false);
+        return imageInspect.Succeeded && imageInspect.StandardOutput.Trim().EndsWith(expectedDigest, StringComparison.Ordinal);
     }
 }
 
