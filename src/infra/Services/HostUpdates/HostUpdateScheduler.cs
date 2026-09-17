@@ -1,4 +1,4 @@
-#pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
+﻿#pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;

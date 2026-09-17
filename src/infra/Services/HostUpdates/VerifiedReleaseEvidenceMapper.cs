@@ -1,5 +1,4 @@
-#pragma warning disable SA1513
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -145,6 +144,7 @@ public static class VerifiedReleaseEvidenceMapper
                 {
                     throw new InvalidDataException($"Verified release is missing canonical execution target '{serviceId}' for '{hostPlatform}'.");
                 }
+
                 executionTargets.Add(new VerifiedReleaseExecutionTargetDto { ServiceId = serviceId, Platform = hostPlatform, PlatformDigest = targetDigest });
             }
         }

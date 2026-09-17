@@ -1,5 +1,4 @@
-#pragma warning disable SA1137
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Infrastructure.Settings;
@@ -40,7 +39,7 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
     string hostPlatform,
     TimeSpan maximumFreshness) : IHostUpdateSchedulerCandidateCache
 {
-public VerifiedHostUpdateCandidate? Current => TryMap(out _);
+    public VerifiedHostUpdateCandidate? Current => TryMap(out _);
 
     public string? LastError
     {

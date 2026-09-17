@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -9,12 +9,12 @@ using Farm.Infrastructure.Services.Background;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.StorageManagement;
 using Farm.Infrastructure.Services.SystemStatus;
+using Farm.Slicer.Module.Data;
+using Farm.Slicer.Module.Domain;
 using Farm.Slicer.Module.Services.SystemInfo;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
-using Farm.Slicer.Module.Data;
-using Farm.Slicer.Module.Domain;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
@@ -36,6 +36,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             : base(new Dictionary<string, string?>
             {
                 ["Security:DevModeBypassAuth"] = "false",
+                ["HostUpdates:HostState:RootPath"] = Path.Combine(Path.GetTempPath(), "printfarmer-system-info-host-state-" + Guid.NewGuid().ToString("N")),
                 ["HostUpdates:VerifiedReleaseDiscovery:Enabled"] = discoveryEnabled.ToString(),
             })
         {
@@ -211,8 +212,17 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         {
             SlicerDbContext db = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
             db.SlicerServices.AddRange(
-                new SlicerService { Id = first, Name = "first", Version = "2.4.2", Host = "http://private-worker.invalid", ApiKey = "never-return-registry-key", Status = "Online", LastSeen = DateTime.UtcNow,
-                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}" },
+                new SlicerService
+                {
+                    Id = first,
+                    Name = "first",
+                    Version = "2.4.2",
+                    Host = "http://private-worker.invalid",
+                    ApiKey = "never-return-registry-key",
+                    Status = "Online",
+                    LastSeen = DateTime.UtcNow,
+                    CapabilitiesJson = "{\"applicationBuild\":\"1.2.3\",\"slicerContainerDigest\":\"not-attestation\"}"
+                },
                 new SlicerService { Id = second, Name = "second", Version = "2.4.2", Host = "http://private-worker.invalid", Status = "Offline", LastSeen = DateTime.UtcNow.AddHours(-1) });
             await db.SaveChangesAsync();
         }
