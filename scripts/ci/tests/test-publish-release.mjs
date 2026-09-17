@@ -12,7 +12,7 @@ import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, sele
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
 import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
   SEQUENCE_MAJOR_MAX, SEQUENCE_MINOR_MAX, SEQUENCE_PATCH_MAX, SEQUENCE_PRERELEASE_MAX,
-  SEQUENCE_STABLE_SUFFIX } from '../release-manifest.mjs';
+  SEQUENCE_STABLE_SUFFIX, MINIMUM_UPDATER_VERSION } from '../release-manifest.mjs';
 
 const sha = 'a'.repeat(40);
 const head = 'b'.repeat(40);
@@ -45,6 +45,10 @@ const policies = { total_count: 1, branch_policies: [{ name: 'development', type
 const versionFixturePath = 'scripts/ci/fixtures/release-version-sequence.golden.json';
 const versionSchemaPath = 'scripts/ci/fixtures/release-version-sequence.schema.json';
 const versionFixture = JSON.parse(readFileSync(versionFixturePath, 'utf8'));
+const manifestFixturePath = 'scripts/ci/fixtures/update-manifest.golden.json';
+const manifestSchemaPath = 'scripts/ci/fixtures/update-manifest.schema.json';
+const manifestFixtureBytes = readFileSync(manifestFixturePath);
+const manifestFixture = JSON.parse(manifestFixtureBytes);
 const manifestIssuer = 'https://token.actions.githubusercontent.com';
 const manifestIdentity =
   'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development';
@@ -223,11 +227,22 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
   assert.equal(manifest.schema, 1);
   assert.equal(manifest.managedUpdateEligible, true);
   assert.equal(manifest.sequence, deriveSequence(release.version));
+  assert.equal(manifest.minimumUpdaterVersion, MINIMUM_UPDATER_VERSION);
   assert.deepEqual(manifest.services.map(service => service.id), Object.keys(components));
+  assert.deepEqual(manifest.platforms, ['linux-amd64', 'linux-arm64']);
   for (const service of manifest.services) {
     assert.match(service.image, new RegExp(`^ghcr\\.io/olyforge3d/printfarmer-${service.id}@sha256:`));
     assert.deepEqual(service.platforms, components[service.id].platforms.map(platform => platform.replaceAll('/', '-')));
   }
+  assert.deepEqual(manifest.services.find(service => service.id === 'orcaslicer-worker').platforms, ['linux-amd64']);
+  assert.deepEqual(Object.keys(manifest.platformDigests), [
+    'api/linux-amd64', 'api/linux-arm64',
+    'frontend/linux-amd64', 'frontend/linux-arm64',
+    'slicer-host/linux-amd64', 'slicer-host/linux-arm64',
+    'printer-discovery/linux-amd64', 'printer-discovery/linux-arm64',
+    'orcaslicer-worker/linux-amd64',
+    'monolith/linux-amd64', 'monolith/linux-arm64',
+  ]);
   validateManifestInput({ ...release, sequence: deriveSequence(release.version) }, imageDetails);
   validateManifest(first, { ...release, sequence: deriveSequence(release.version) }, digests);
   for (const mutation of [
@@ -242,7 +257,10 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@', 'docker.io/example/api@'),
     value => value.replace('ghcr.io/olyforge3d/printfarmer-api@sha256:', 'ghcr.io/olyforge3d/printfarmer-api:'),
     value => value.replace('"id":"frontend"', '"id":"api"'),
-    value => value.replace(`"api-linux-amd64":"sha256:${'d'.repeat(64)}"`, '"api-linux-amd64":"bad"'),
+    value => value.replace(`"api/linux-amd64":"sha256:${'d'.repeat(64)}"`, '"api/linux-amd64":"bad"'),
+    value => value.replace('"platforms":["linux-amd64","linux-arm64"]', '"platforms":["api-linux-amd64"]'),
+    value => value.replace('"platforms":["linux-amd64"]', '"platforms":["linux-amd64","linux-arm64"]'),
+    value => value.replace(',"minimumUpdaterVersion":"0.0.0"', ''),
   ]) assert.throws(() => validateManifest(mutation(first)));
   assert.throws(() => validateManifest(first, { ...release, version: '0.2.3-insider.3',
     tag: 'v0.2.3-insider.3', sequence: deriveSequence('0.2.3-insider.3') }, digests));
@@ -253,6 +271,47 @@ test('managed update manifest is canonical, complete, sequence-bound and child-d
     api: { ...imageDetails.api, platformDigests: { ...imageDetails.api.platformDigests,
       'linux/amd64': `sha256:${'e'.repeat(64)}` } },
   }));
+});
+
+test('shared update manifest fixture is the exact generated cross-language contract', () => {
+  const schema = JSON.parse(readFileSync(manifestSchemaPath, 'utf8'));
+  const fixtureRelease = {
+    tag: manifestFixture.tag,
+    version: manifestFixture.version,
+    channel: manifestFixture.channel,
+    sourceBranch: manifestFixture.sourceBranch,
+    sourceCommit: manifestFixture.sourceCommit,
+    buildId: manifestFixture.buildId,
+    sequence: manifestFixture.sequence,
+  };
+  const fixtureImageDetails = Object.fromEntries(manifestFixture.services.map(service => {
+    const policy = components[service.id];
+    return [service.id, {
+      indexDigest: service.image.split('@')[1],
+      platforms: [...policy.platforms],
+      platformDigests: Object.fromEntries(policy.platforms.map(platform => [
+        platform,
+        manifestFixture.platformDigests[`${service.id}/${platform.replaceAll('/', '-')}`],
+      ])),
+    }];
+  }));
+  const fixtureDigests = Object.fromEntries(manifestFixture.services.map(service =>
+    [service.id, service.image.split('@')[1]]));
+
+  assert.deepEqual(manifestFixture.services.map(service => service.id), Object.keys(components));
+  assert.deepEqual(manifestFixture.platforms, schema.properties.platforms.const);
+  assert.ok(schema.required.includes('minimumUpdaterVersion'));
+  assert.equal(manifestFixture.minimumUpdaterVersion, MINIMUM_UPDATER_VERSION);
+  assert.equal(manifestFixture.sequence, 10020000300042);
+  assert.ok(Number.isSafeInteger(manifestFixture.sequence));
+  assert.ok(BigInt(manifestFixture.sequence) <= 9223372036854775807n);
+  assert.equal(deriveSequence(manifestFixture.version), manifestFixture.sequence);
+  assert.deepEqual(manifestFixture.services.find(service => service.id === 'orcaslicer-worker').platforms,
+    ['linux-amd64']);
+
+  const generated = Buffer.from(buildManifest(fixtureRelease, fixtureImageDetails));
+  assert.equal(Buffer.compare(generated, manifestFixtureBytes), 0);
+  validateManifest(manifestFixtureBytes, fixtureRelease, fixtureDigests, fixtureImageDetails);
 });
 
 test('language-neutral golden contract defines parsing, sequences, ordering, bounds and collisions', () => {
@@ -295,7 +354,7 @@ test('language-neutral golden contract defines parsing, sequences, ordering, bou
     assert.equal(new Set(sequences).size, sequences.length, golden.name);
   }
   const maximum = BigInt(versionFixture.validCases.at(-1).expectedSequence);
-  assert.ok(maximum <= 9223372036854775807n && maximum < BigInt(Number.MAX_SAFE_INTEGER));
+  assert.ok(maximum <= 9223372036854775807n && maximum <= BigInt(Number.MAX_SAFE_INTEGER));
 });
 
 test('actual build loop passes the six targets/platforms and source metadata, stops on partial failure', t => {

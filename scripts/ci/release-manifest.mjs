@@ -5,6 +5,7 @@ const digestPattern = /^sha256:[a-f0-9]{64}$/;
 const commitPattern = /^[a-f0-9]{40}$/;
 const platformPattern = /^[a-z0-9][a-z0-9._-]*$/;
 const imagePattern = /^ghcr\.io\/olyforge3d\/printfarmer-[a-z0-9-]+@sha256:[a-f0-9]{64}$/;
+const semanticVersionPattern = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 
 // Cross-channel sequence contract (see docs/DEPLOYMENT_UPDATE_STRATEGY.md):
 // a collision-free, stable-dominant, positional mixed-radix encoding of
@@ -17,18 +18,20 @@ const imagePattern = /^ghcr\.io\/olyforge3d\/printfarmer-[a-z0-9-]+@sha256:[a-f0
 // prerelease of the same major.minor.patch (the prior encoding inverted this:
 // an insider suffix >= 1 always outranked the matching stable release).
 // All arithmetic is done in BigInt for exactness; the final value is checked
-// against Number.MAX_SAFE_INTEGER before converting to a JS Number, so the
-// contract never emits an unsafe-integer sequence. The encoded range
-// (well under 2**53) fits a signed 64-bit C# `long`/`Int64`, but not `int`;
-// the manifest wire value remains a JSON integer.
+// against signed C# Int64 and Number.MAX_SAFE_INTEGER before converting to a
+// JS Number, so the contract never emits an unsafe JSON integer. The supported
+// range fits a signed 64-bit C# `long`/`Int64`, but not `int`; the manifest
+// wire value remains a JSON integer.
 export const SEQUENCE_MAJOR_MAX = 99;
 export const SEQUENCE_MINOR_MAX = 999;
 export const SEQUENCE_PATCH_MAX = 99999;
 export const SEQUENCE_PRERELEASE_MAX = 99998;
 export const SEQUENCE_STABLE_SUFFIX = 99999;
+export const MINIMUM_UPDATER_VERSION = '0.0.0';
 const SEQUENCE_SUFFIX_WIDTH = 100000n;
 const SEQUENCE_PATCH_WIDTH = 100000n;
 const SEQUENCE_MINOR_WIDTH = 1000n;
+const INT64_MAX = 9223372036854775807n;
 
 export function deriveSequence(version) {
   const parsed = parseTag(`v${version}`);
@@ -52,8 +55,19 @@ export function deriveSequence(version) {
     minor * SEQUENCE_PATCH_WIDTH * SEQUENCE_SUFFIX_WIDTH +
     patch * SEQUENCE_SUFFIX_WIDTH +
     suffix;
+  requireThat(encoded <= INT64_MAX, 'Encoded sequence exceeds C# Int64 range');
   requireThat(encoded <= BigInt(Number.MAX_SAFE_INTEGER), 'Encoded sequence exceeds safe integer range');
   return Number(encoded);
+}
+
+function manifestPlatform(platform) {
+  const normalized = platform.replaceAll('/', '-');
+  validatePlatform(normalized, platform);
+  return normalized;
+}
+
+function manifestPlatforms() {
+  return [...new Set(Object.values(components).flatMap(policy => policy.platforms.map(manifestPlatform)))];
 }
 
 function validatePlatform(platform, label) {
@@ -104,17 +118,17 @@ export function validateManifestInput(release, imageDetails) {
 export function buildManifest(release, imageDetails, options = {}) {
   const normalizedRelease = { ...release, sequence: release.sequence ?? deriveSequence(release.version) };
   validateManifestInput(normalizedRelease, imageDetails);
+  const minimumUpdaterVersion = options.minimumUpdaterVersion ?? MINIMUM_UPDATER_VERSION;
   const services = Object.entries(components).map(([id, policy]) => {
     const details = imageDetails[id];
-    const platforms = [...policy.platforms];
     return {
       id,
       image: `ghcr.io/olyforge3d/printfarmer-${id}@${details.indexDigest}`,
-      platforms: platforms.map(platform => platform.replaceAll('/', '-')),
+      platforms: policy.platforms.map(manifestPlatform),
     };
   });
   const platformEntries = Object.entries(components).flatMap(([id, policy]) =>
-    policy.platforms.map(platform => [`${id}-${platform.replaceAll('/', '-')}`,
+    policy.platforms.map(platform => [`${id}/${manifestPlatform(platform)}`,
       imageDetails[id].platformDigests[platform]]));
   const manifest = {
     schema: 1,
@@ -127,9 +141,9 @@ export function buildManifest(release, imageDetails, options = {}) {
     sequence: normalizedRelease.sequence,
     managedUpdateEligible: true,
     services,
-    platforms: platformEntries.map(([platform]) => platform),
+    platforms: manifestPlatforms(),
     platformDigests: Object.fromEntries(platformEntries),
-    ...(options.minimumUpdaterVersion ? { minimumUpdaterVersion: options.minimumUpdaterVersion } : {}),
+    minimumUpdaterVersion,
     ...(options.compatibility ? { compatibility: options.compatibility } : {}),
   };
   const bytes = `${JSON.stringify(manifest)}\n`;
@@ -139,6 +153,12 @@ export function buildManifest(release, imageDetails, options = {}) {
 
 export function validateManifest(bytes, release, digests, imageDetails) {
   const manifest = JSON.parse(bytes);
+  const requiredFields = ['schema', 'tag', 'version', 'channel', 'sourceBranch', 'sourceCommit', 'buildId',
+    'sequence', 'managedUpdateEligible', 'services', 'platforms', 'platformDigests', 'minimumUpdaterVersion'];
+  const permittedFields = [...requiredFields, 'compatibility'];
+  requireThat(requiredFields.every(field => Object.hasOwn(manifest, field)) &&
+    Object.keys(manifest).every(field => permittedFields.includes(field)),
+  'Invalid managed update manifest fields');
   requireThat(manifest.schema === 1 && manifest.managedUpdateEligible === true,
     'Invalid managed update manifest header');
   requireThat(Array.isArray(manifest.services) && manifest.services.length === Object.keys(components).length,
@@ -153,35 +173,37 @@ export function validateManifest(bytes, release, digests, imageDetails) {
   requireThat(new Set(ids).size === ids.length &&
     ids.sort().join() === Object.keys(components).sort().join(), 'Invalid managed update service IDs');
   for (const service of manifest.services) {
+    requireThat(service && Object.keys(service).sort().join() === ['id', 'image', 'platforms'].sort().join(),
+      'Invalid managed update service fields');
     requireThat(imagePattern.test(service.image), `Mutable or unapproved image reference: ${service.id}`);
     if (digests) requireThat(service.image === `ghcr.io/olyforge3d/printfarmer-${service.id}@${digests[service.id]}`,
       `Manifest image mismatch: ${service.id}`);
     const policy = components[service.id];
     requireThat(Array.isArray(service.platforms) &&
       service.platforms.length === policy.platforms.length &&
-      [...service.platforms].sort().join() === policy.platforms.map(platform => platform.replaceAll('/', '-')).sort().join(),
+      [...service.platforms].sort().join() === policy.platforms.map(manifestPlatform).sort().join(),
     `Invalid manifest platforms: ${service.id}`);
   }
   const expectedPlatformEntries = Object.entries(components).flatMap(([id, policy]) =>
-    policy.platforms.map(platform => ({ id, platform, key: `${id}-${platform.replaceAll('/', '-')}` })));
-  const expectedPlatforms = expectedPlatformEntries.map(entry => entry.key);
+    policy.platforms.map(platform => ({ id, platform, key: `${id}/${manifestPlatform(platform)}` })));
+  const expectedPlatforms = manifestPlatforms();
   requireThat(Array.isArray(manifest.platforms) &&
     manifest.platforms.join() === expectedPlatforms.join(), 'Invalid manifest platform list');
-  requireThat(manifest.platformDigests && Object.keys(manifest.platformDigests).join() === expectedPlatforms.join(),
+  const expectedPlatformDigestKeys = expectedPlatformEntries.map(entry => entry.key);
+  requireThat(manifest.platformDigests &&
+    Object.keys(manifest.platformDigests).join() === expectedPlatformDigestKeys.join(),
     'Invalid manifest child digest map');
   for (const entry of expectedPlatformEntries) {
-    requireThat(platformPattern.test(entry.key), `Invalid manifest platform: ${entry.key}`);
+    validatePlatform(manifestPlatform(entry.platform), entry.key);
     validateDigest(manifest.platformDigests[entry.key], entry.key);
     if (imageDetails) {
       requireThat(manifest.platformDigests[entry.key] === imageDetails[entry.id].platformDigests[entry.platform],
         `Manifest child digest mismatch: ${entry.key}`);
     }
   }
-  if (manifest.minimumUpdaterVersion !== undefined) {
-    requireThat(typeof manifest.minimumUpdaterVersion === 'string' &&
-      /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/.test(manifest.minimumUpdaterVersion),
+  requireThat(typeof manifest.minimumUpdaterVersion === 'string' &&
+      semanticVersionPattern.test(manifest.minimumUpdaterVersion),
     'Invalid minimum updater version');
-  }
   if (manifest.compatibility !== undefined) {
     requireThat(typeof manifest.compatibility === 'string', 'Invalid compatibility');
   }

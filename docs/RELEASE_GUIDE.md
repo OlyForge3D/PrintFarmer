@@ -72,6 +72,24 @@ so nothing can substitute an unsigned or mismatched manifest between those
 workflow steps and the actual upload. Its `sequence` field is a collision-free,
 stable-dominant encoding (see [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md)).
 
+The cross-language wire contract uses exactly these service IDs: `api`,
+`frontend`, `slicer-host`, `printer-discovery`, `orcaslicer-worker`, and
+`monolith`. Top-level `platforms` is the bare union
+`["linux-amd64","linux-arm64"]`; each service declares a subset of that union,
+and `orcaslicer-worker` declares only `linux-amd64`. `platformDigests` is a flat
+string map keyed as `<service-id>/<bare-platform>`, for example
+`api/linux-amd64`. A nested per-service map is not accepted by the C# consumer.
+The canonical byte fixture is
+`scripts/ci/fixtures/update-manifest.golden.json`, with its Draft 2020-12 schema
+at `scripts/ci/fixtures/update-manifest.schema.json`. Node tests regenerate the
+fixture and compare every byte, including the trailing line feed; C# consumers
+can deserialize those same checked-in bytes.
+
+`minimumUpdaterVersion` is required in every generated manifest. Until a higher
+compatibility floor is approved, the publisher intentionally emits `0.0.0`;
+this makes the no-additional-floor policy explicit instead of silently treating
+an omitted field as permissive. Producer validation rejects omission.
+
 The language-neutral golden contract lives at
 `scripts/ci/fixtures/release-version-sequence.golden.json`; its JSON Schema is
 `scripts/ci/fixtures/release-version-sequence.schema.json` (`schemaVersion: 1`).
@@ -79,8 +97,9 @@ Valid vectors provide the version, parsed numeric components/channel suffix,
 and a lossless decimal-string expected sequence. Invalid vectors provide the
 rejected version and required error text. Ordering vectors and distinct groups
 cover stable/insider precedence and historical collision boundaries. Consumers
-must calculate with a signed 64-bit integer (`long`/`Int64`, not C# `int`) and
-emit the manifest `sequence` as a JSON integer.
+must calculate with `BigInt` or a signed 64-bit integer (`long`/`Int64`, not C#
+`int`), reject values above either signed `Int64` or JavaScript's safe-integer
+maximum, and emit the manifest `sequence` as an exact JSON integer.
 
 It publishes the GitHub release **last**. Insider releases are prereleases and
 have only their exact version image tag: they never advance `latest`, major or
