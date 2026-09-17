@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { generateKeyPairSync } from 'node:crypto';
 import {
   copyFile,
   mkdtemp,
@@ -710,6 +711,143 @@ test('scanPublicationFiles permits variable credential templates', async () => {
       ),
       [],
     );
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('publication policy exceptions match the current reviewed files and archive paths', async () => {
+  const { publication } = await readJson(path.join(repositoryRoot, 'compliance', 'licensing-policy.json'));
+  const exceptions = publication.secretPatternExceptions;
+  const paths = [...new Set(exceptions.map((exception) => exception.path))];
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-reviewed-source-'));
+  const payloadDirectory = path.join(root, 'PrintFarmer-v0.2.3-insider.2');
+  const archivePath = path.join(root, 'source.tar.gz');
+  try {
+    assert.ok(paths.includes('.github/skills/secret-handling/SKILL.md'));
+    assert.ok(!paths.includes('.copilot/skills/secret-handling/SKILL.md'));
+    assert.deepEqual(
+      await scanPublicationFiles(repositoryRoot, paths, publication.secretPatterns, exceptions),
+      [],
+    );
+    for (const relativePath of paths) {
+      const destination = path.join(payloadDirectory, relativePath);
+      await mkdir(path.dirname(destination), { recursive: true });
+      await copyFile(path.join(repositoryRoot, relativePath), destination);
+    }
+    await execFileAsync('tar', ['-czf', archivePath, '-C', root, path.basename(payloadDirectory)]);
+    await scanSourceArchive(archivePath, publication.secretPatterns, exceptions);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('publication policy scans the complete committed source archive without stale exceptions', async () => {
+  const { publication } = await readJson(path.join(repositoryRoot, 'compliance', 'licensing-policy.json'));
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-committed-source-'));
+  const archivePath = path.join(root, 'source.tar.gz');
+  try {
+    await execFileAsync('git', [
+      'archive', '--format=tar.gz', '--prefix=PrintFarmer-v0.2.3-insider.2/',
+      `--output=${archivePath}`, 'HEAD',
+    ], { cwd: repositoryRoot });
+    await scanSourceArchive(archivePath, publication.secretPatterns, publication.secretPatternExceptions);
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('content-bound exceptions reject changed fixtures even when the matched marker is unchanged', async () => {
+  const { publication } = await readJson(path.join(repositoryRoot, 'compliance', 'licensing-policy.json'));
+  const exceptions = publication.secretPatternExceptions.filter((exception) => exception.contentSha256);
+  const paths = [...new Set(exceptions.map((exception) => exception.path))];
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-content-bound-'));
+  try {
+    assert.ok(paths.length > 0);
+    for (const relativePath of paths) {
+      const destination = path.join(root, relativePath);
+      const content = (await readFile(path.join(repositoryRoot, relativePath), 'utf8'))
+        .replaceAll('\r\n', '\n');
+      await mkdir(path.dirname(destination), { recursive: true });
+      await writeFile(destination, content.replaceAll('\n', '\r\n'));
+    }
+    assert.deepEqual(
+      await scanPublicationFiles(root, paths, publication.secretPatterns, exceptions),
+      [],
+    );
+    for (const relativePath of paths) {
+      const destination = path.join(root, relativePath);
+      const content = await readFile(destination, 'utf8');
+      await writeFile(destination, `${content}\nUnreviewed additional content.\n`);
+    }
+    const errors = await scanPublicationFiles(root, paths, publication.secretPatterns, exceptions);
+    for (const relativePath of paths) {
+      assert.ok(errors.some((error) => error.path === relativePath && error.code === 'PUBLICATION_SECRET'));
+      assert.ok(errors.some((error) => error.path === relativePath && error.code === 'PUBLICATION_SECRET_EXCEPTION_STALE'));
+    }
+    const invalidErrors = await scanPublicationFiles(root, paths, publication.secretPatterns, [
+      { ...exceptions[0], contentSha256: 'invalid' },
+    ]);
+    assert.ok(hasCode(invalidErrors, 'PUBLICATION_SECRET_EXCEPTION_INVALID'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('reviewed documentation cannot hide a usable private key with the same allowed marker', async () => {
+  const { publication } = await readJson(path.join(repositoryRoot, 'compliance', 'licensing-policy.json'));
+  const relativePath = '.github/skills/secret-handling/SKILL.md';
+  const exceptions = publication.secretPatternExceptions.filter((exception) => exception.path === relativePath);
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-key-rejection-'));
+  const payloadDirectory = path.join(root, 'PrintFarmer-v0.2.3-insider.2');
+  const archivePath = path.join(root, 'source.tar.gz');
+  try {
+    const { privateKey } = generateKeyPairSync('ec', {
+      namedCurve: 'prime256v1',
+      privateKeyEncoding: { type: 'pkcs8', format: 'pem' },
+      publicKeyEncoding: { type: 'spki', format: 'pem' },
+    });
+    const destination = path.join(payloadDirectory, relativePath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    const content = await readFile(path.join(repositoryRoot, relativePath), 'utf8');
+    await writeFile(destination, `${content}\n${privateKey}`);
+    await execFileAsync('tar', ['-czf', archivePath, '-C', root, path.basename(payloadDirectory)]);
+    await assert.rejects(
+      scanSourceArchive(archivePath, publication.secretPatterns, exceptions),
+      /\[PUBLICATION_SECRET\]/,
+    );
+    const errors = await scanPublicationFiles(
+      payloadDirectory, [relativePath], publication.secretPatterns, exceptions,
+    );
+    assert.ok(hasCode(errors, 'PUBLICATION_SECRET'));
+    assert.ok(hasCode(errors, 'PUBLICATION_SECRET_EXCEPTION_STALE'));
+  } finally {
+    await rm(root, { force: true, recursive: true });
+  }
+});
+
+test('fixture exceptions do not authorize new tokens or matches at unreviewed paths', async () => {
+  const { publication } = await readJson(path.join(repositoryRoot, 'compliance', 'licensing-policy.json'));
+  const relativePath = 'src/tests/Farm.Infrastructure.Tests/Network/EgressGuardTests.cs';
+  const exceptions = publication.secretPatternExceptions.filter((exception) => exception.path === relativePath);
+  const root = await mkdtemp(path.join(tmpdir(), 'printfarmer-unreviewed-source-'));
+  try {
+    const content = await readFile(path.join(repositoryRoot, relativePath), 'utf8');
+    const newPath = 'src/tests/UnreviewedTests.cs';
+    await mkdir(path.join(root, path.dirname(newPath)), { recursive: true });
+    await writeFile(path.join(root, newPath), content);
+    const movedErrors = await scanPublicationFiles(root, [newPath], publication.secretPatterns, exceptions);
+    assert.ok(hasCode(movedErrors, 'PUBLICATION_SECRET'));
+    assert.ok(hasCode(movedErrors, 'PUBLICATION_SECRET_EXCEPTION_STALE'));
+
+    const destination = path.join(root, relativePath);
+    await mkdir(path.dirname(destination), { recursive: true });
+    const token = ['ghp', 'z'.repeat(36)].join('_');
+    await writeFile(destination, `${content}\n${token}\n`);
+    const errors = await scanPublicationFiles(root, [relativePath], publication.secretPatterns, exceptions);
+    const tokenPattern = publication.secretPatterns.find((pattern) => new RegExp(pattern, 'i').test(token));
+    assert.ok(errors.some((error) =>
+      error.code === 'PUBLICATION_SECRET' && error.message.includes(tokenPattern)));
   } finally {
     await rm(root, { force: true, recursive: true });
   }

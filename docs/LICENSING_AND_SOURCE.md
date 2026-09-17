@@ -180,6 +180,16 @@ development metadata remains included. Release files are scanned for credential
 patterns before publication. Synthetic scanner fixtures and security
 documentation examples require an exact path, pattern, matched-value SHA-256,
 and rationale in policy; changed or additional matches fail publication.
+The reviewed security-test fixtures and private-key documentation markers also
+carry `contentSha256`, the SHA-256 of the entire UTF-8 file with CRLF converted
+to LF (no other whitespace normalization). A marker-only exception must not
+authorize adding real key material after that marker; any file-content change
+invalidates these content-bound exceptions and requires fresh review. Moved or
+removed files fail as stale exceptions rather than being silently ignored.
+Do not refresh hashes automatically or exempt whole test/documentation folders.
+The compliance tests scan the current exception files both directly and in a
+release-prefixed archive; source-bundle creation still scans the complete
+immutable source archive before publication.
 
 ## Deployment and verification procedure
 

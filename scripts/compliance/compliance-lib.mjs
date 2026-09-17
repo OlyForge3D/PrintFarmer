@@ -1883,13 +1883,15 @@ export async function scanPublicationFiles(
     const isValid = isSafeRepositoryPath(exceptionPath)
       && secretPatterns.includes(exception.pattern)
       && /^[a-f0-9]{64}$/.test(exception.matchSha256 ?? '')
+      && (exception.contentSha256 === undefined
+        || /^[a-f0-9]{64}$/.test(exception.contentSha256))
       && typeof exception.reason === 'string'
       && exception.reason.trim().length > 0;
     if (!isValid) {
       errors.push(createError(
         'PUBLICATION_SECRET_EXCEPTION_INVALID',
         `secretPatternExceptions[${index}]`,
-        'exception requires a safe path, known pattern, SHA-256 match hash, and rationale',
+        'exception requires a safe path, known pattern, SHA-256 match hash, rationale, and a valid optional content hash',
       ));
       continue;
     }
@@ -1931,6 +1933,7 @@ export async function scanPublicationFiles(
       await handle.close();
     }
     scannedPaths.push(relativeToRoot);
+    const contentSha256 = sha256(content.replaceAll('\r\n', '\n'));
     for (const pattern of patterns) {
       pattern.expression.lastIndex = 0;
       for (const match of content.matchAll(pattern.expression)) {
@@ -1942,7 +1945,9 @@ export async function scanPublicationFiles(
         const exception = validExceptions.find((candidate) =>
           scanPathMatchesException(relativeToRoot, candidate.path)
           && candidate.pattern === pattern.source
-          && candidate.matchSha256 === matchSha256);
+          && candidate.matchSha256 === matchSha256
+          && (candidate.contentSha256 === undefined
+            || candidate.contentSha256 === contentSha256));
         if (exception) {
           usedExceptions.add(exception.index);
           continue;
