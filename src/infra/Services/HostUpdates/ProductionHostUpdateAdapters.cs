@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.SystemStatus;
 using Farm.Infrastructure.Settings;
@@ -166,7 +166,11 @@ public static class HostUpdateSchedulingAvailability
 /// <summary>Reports registered-but-unavailable automatic updates without starting a hosted loop.</summary>
 public sealed class UnavailableHostUpdateSchedulingStatusProvider(
     Farm.Infrastructure.Settings.ISettingsService settings,
-    IHostUpdateAutomationPolicyRepository? policyRepository = null) : IHostUpdateSchedulingStatusProvider
+    IHostUpdateAutomationPolicyRepository? policyRepository = null,
+    IHostUpdateReplayAnchor? replayAnchor = null,
+    IHostUpdateReplayStore? replayStore = null,
+    IHostUpdateExecutor? executor = null,
+    IHostUpdateAdmissionFence? admissionFence = null) : IHostUpdateSchedulingStatusProvider
 {
     public HostUpdateSchedulingStatusDto GetStatus()
     {
@@ -174,9 +178,29 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
         HostUpdatePolicyReadResult policyResult = policyRepository?.Read() ?? new(true, new HostUpdateAutomationPolicy(), null);
         HostUpdateAutomationPolicy policy = policyResult.Policy;
         string selectedChannel = policyResult.Available ? policy.Channel : UpdateChannelSettings.StableChannel;
-        IReadOnlyList<string> reasons = policyResult.Available
-            ? [HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.PolicyMutationReason, HostUpdateSchedulingAvailability.AdmissionFenceReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason]
-            : ["host_update_policy_unavailable", HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason, HostUpdateSchedulingAvailability.AdmissionFenceReason, HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason];
+        List<string> reasons = [];
+        if (!policyResult.Available)
+        {
+            reasons.Add(policyResult.Error ?? "host_update_policy_unavailable");
+        }
+
+        AddUnavailable(reasons, replayAnchor, HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason);
+        AddUnavailable(reasons, replayStore, "host_update_replay_store_unavailable");
+        HostUpdateAdmissionFenceStatus? admission = admissionFence?.GetStatus();
+        if (admission?.BlocksAdmission == true)
+        {
+            reasons.Add(string.IsNullOrWhiteSpace(admission.Reason) ? HostUpdateSchedulingAvailability.AdmissionFenceReason : admission.Reason);
+        }
+
+        string executorReason = executor is IHostUpdateAvailability { IsAvailable: false } executorAvailability
+            ? executorAvailability.UnavailableReason
+            : HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason;
+        AddUnavailable(reasons, executor, executorReason);
+        if (reasons.Count == 0)
+        {
+            reasons.Add("scheduler_not_started");
+        }
+
         return new HostUpdateSchedulingStatusDto
         {
             ConfiguredEnabled = policy.Enabled,
@@ -186,8 +210,20 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
             PolicyRevision = policy.Revision,
             Backoff = new HostUpdateBackoffDto { State = HostUpdateBackoffState.Unknown, ConsecutiveFailures = 0, Reasons = ["scheduler_not_started"] },
             KillSwitch = new HostUpdateKillSwitchDto { Enabled = policy.KillSwitch, Reason = policy.KillSwitch ? "configured" : null },
-            Executor = new HostUpdateExecutorDto { State = HostUpdateExecutorState.Unavailable, Reason = HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason },
-            Reasons = reasons,
+            Executor = new HostUpdateExecutorDto { State = HostUpdateExecutorState.Unavailable, Reason = executorReason },
+            Reasons = reasons.Distinct(StringComparer.Ordinal).ToArray(),
         };
+    }
+
+    private static void AddUnavailable(List<string> reasons, object? service, string fallback)
+    {
+        if (service is IHostUpdateAvailability { IsAvailable: false } availability)
+        {
+            reasons.Add(availability.UnavailableReason);
+        }
+        else if (service is null)
+        {
+            reasons.Add(fallback);
+        }
     }
 }

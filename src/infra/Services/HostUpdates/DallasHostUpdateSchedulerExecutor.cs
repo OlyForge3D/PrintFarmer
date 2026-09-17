@@ -1,4 +1,4 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -36,7 +36,7 @@ public sealed class DallasHostUpdateSchedulerExecutor(
             return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, validationError);
         }
 
-        using CancellationTokenSource safeCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        CancellationTokenSource safeCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
         if (!_activeRequests.TryAdd(request.RequestId, safeCancellation))
         {
             return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
@@ -69,6 +69,7 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         finally
         {
             _activeRequests.TryRemove(new KeyValuePair<string, CancellationTokenSource>(request.RequestId, safeCancellation));
+            safeCancellation.Dispose();
         }
     }
 
@@ -77,17 +78,26 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         ct.ThrowIfCancellationRequested();
         if (!string.IsNullOrWhiteSpace(requestId) && _activeRequests.TryGetValue(requestId, out CancellationTokenSource? cancellation))
         {
-            await cancellation.CancelAsync().ConfigureAwait(false);
+            try
+            {
+                await cancellation.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+                // The request completed between lookup and cancellation delivery.
+            }
         }
     }
 
     public void Dispose()
     {
-        foreach (CancellationTokenSource cancellation in _activeRequests.Values)
+        foreach (KeyValuePair<string, CancellationTokenSource> entry in _activeRequests.ToArray())
         {
-            cancellation.Cancel();
+            if (_activeRequests.TryRemove(entry))
+            {
+                entry.Value.Cancel();
+                entry.Value.Dispose();
+            }
         }
-
-        _activeRequests.Clear();
     }
 }

@@ -1,6 +1,7 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Dtos;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.SystemStatus;
 using FluentAssertions;
 using Xunit;
@@ -86,8 +87,40 @@ public sealed class HostUpdateSchedulingStatusDtoTests
     }
 
     [Fact]
+    public void UnavailableProvider_UsesConcretePolicyAndReportsPhysicalGapsAsIneffectiveReasons()
+    {
+        var provider = new UnavailableHostUpdateSchedulingStatusProvider(
+            settings: null!,
+            policyRepository: new FixedPolicyRepository(new HostUpdateAutomationPolicy(Enabled: true, Channel: "stable", Revision: 7)),
+            replayAnchor: null,
+            replayStore: new UnavailableHostUpdateReplayStore(),
+            executor: new UnavailableHostUpdateExecutor(),
+            admissionFence: new UnavailableHostUpdateAdmissionFence());
+
+        HostUpdateSchedulingStatusDto status = provider.GetStatus();
+
+        status.ConfiguredEnabled.Should().BeTrue();
+        status.EffectiveEnabled.Should().BeFalse();
+        status.SelectedChannel.Should().Be("stable");
+        status.EffectiveChannel.Should().BeNull();
+        status.PolicyRevision.Should().Be(7);
+        status.Reasons.Should().Contain(HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason);
+        status.Reasons.Should().Contain("host_update_recovery_unavailable");
+        status.Reasons.Should().Contain(HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason);
+        status.Reasons.Should().NotContain(HostUpdateSchedulingAvailability.PolicyMutationReason);
+    }
+
+    [Fact]
     public void UnwiredStatus_IsNull()
     {
         new UnwiredHostUpdateSchedulingStatusProvider().GetStatus().Should().BeNull();
+    }
+
+    private sealed class FixedPolicyRepository(HostUpdateAutomationPolicy policy) : IHostUpdateAutomationPolicyRepository
+    {
+        public HostUpdatePolicyReadResult Read() => new(true, policy, null);
+
+        public Task<HostUpdatePolicyReadResult> ReplaceAsync(HostUpdateAutomationPolicy policy, long expectedRevision, CancellationToken ct) =>
+            Task.FromResult(new HostUpdatePolicyReadResult(true, policy, null));
     }
 }

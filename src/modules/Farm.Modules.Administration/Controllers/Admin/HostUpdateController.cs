@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -39,6 +39,11 @@ public sealed class HostUpdateController(
         [FromBody] HostUpdateManualAuthorizationIntent? intent,
         CancellationToken cancellationToken)
     {
+        if (Unavailable(requestResolver, out ObjectResult? unavailable))
+        {
+            return unavailable;
+        }
+
         try
         {
             HostUpdateManualAuthorizationResponse response = await requestResolver.AuthorizeCurrentAsync(
@@ -67,6 +72,16 @@ public sealed class HostUpdateController(
         [FromBody] HostUpdateManualAuthorizationIntent? intent,
         CancellationToken cancellationToken)
     {
+        if (Unavailable(requestResolver, out ObjectResult? resolverUnavailable))
+        {
+            return resolverUnavailable;
+        }
+
+        if (Unavailable(executor, out ObjectResult? executorUnavailable))
+        {
+            return executorUnavailable;
+        }
+
         HostUpdateExecutionResolutionResult resolution = await requestResolver.ResolveManualAsync(
             intent ?? new HostUpdateManualAuthorizationIntent(),
             cancellationToken).ConfigureAwait(false);
@@ -88,7 +103,21 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public ActionResult<HostUpdateStatusResponse> GetStatus(string releaseId)
     {
-        IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
+        if (Unavailable(journal, out ObjectResult? unavailable))
+        {
+            return unavailable;
+        }
+
+        IReadOnlyList<HostUpdateExecutionActivity> activities;
+        try
+        {
+            activities = journal.Read(releaseId);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return AvailabilityProblem(ex.Message);
+        }
+
         if (activities.Count == 0)
         {
             return NotFound();
@@ -114,7 +143,26 @@ public sealed class HostUpdateController(
         [FromBody] HostUpdateRecoveryRequestBody? body,
         CancellationToken cancellationToken)
     {
-        IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
+        if (Unavailable(journal, out ObjectResult? journalUnavailable))
+        {
+            return journalUnavailable;
+        }
+
+        if (Unavailable(recoveryCoordinator, out ObjectResult? recoveryUnavailable))
+        {
+            return recoveryUnavailable;
+        }
+
+        IReadOnlyList<HostUpdateExecutionActivity> activities;
+        try
+        {
+            activities = journal.Read(releaseId);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException)
+        {
+            return AvailabilityProblem(ex.Message);
+        }
+
         if (activities.Count == 0)
         {
             return NotFound();
@@ -154,6 +202,28 @@ public sealed class HostUpdateController(
         }
 
         HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
+        if (result.Detail == "host_update_recovery_not_available")
+        {
+            return AvailabilityProblem(result.Detail);
+        }
+
         return Ok(result);
     }
+
+    private bool Unavailable(object service, out ObjectResult result)
+    {
+        if (service is IHostUpdateAvailability { IsAvailable: false } availability)
+        {
+            result = AvailabilityProblem(availability.UnavailableReason);
+            return true;
+        }
+
+        result = null!;
+        return false;
+    }
+
+    private ObjectResult AvailabilityProblem(string reason) => Problem(
+        detail: reason,
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Host update subsystem unavailable");
 }

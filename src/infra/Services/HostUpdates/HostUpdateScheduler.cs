@@ -1,4 +1,4 @@
-﻿#pragma warning disable SA1516, SA1513, SA1408, SA1501, SA1515
+#pragma warning disable SA1516, SA1513, SA1408, SA1501, SA1515
 #pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
 using System.Security.Cryptography;
 using System.Text;
@@ -234,8 +234,12 @@ public interface IHostUpdateReplayAnchor
     Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct);
 }
 
-public sealed class UnavailableHostUpdateReplayAnchor : IHostUpdateReplayAnchor
+public sealed class UnavailableHostUpdateReplayAnchor : IHostUpdateReplayAnchor, IHostUpdateAvailability
 {
+    public bool IsAvailable => false;
+
+    public string UnavailableReason => "host_update_replay_anchor_not_available";
+
     public Task<long> ReadEpochAsync(CancellationToken ct) => throw new NotSupportedException("host_update_replay_anchor_not_available");
 
     public Task<string> ReadStateHashAsync(CancellationToken ct) => throw new NotSupportedException("host_update_replay_anchor_not_available");
@@ -676,7 +680,7 @@ public sealed class HostUpdateScheduler(
 
     public HostUpdateSchedulerStatus Status => _status;
 
-    public string? ActiveRequestId => _activeRequestId;
+    public string? ActiveRequestId => Volatile.Read(ref _activeRequestId);
 
     public async Task<HostUpdateSchedulerStatus> TickAsync(CancellationToken ct = default)
     {
@@ -755,14 +759,17 @@ public sealed class HostUpdateScheduler(
             HostUpdateSchedulerReason? gateFailure = Gate(candidate, current, now);
             if (gateFailure is not null)
             {
-                try
+                if (ShouldPersistTerminalRejection(candidate, gateFailure.Value))
                 {
-                    await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Reject, ct);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    _logger.LogError(ex, "host_update_replay_store_unavailable");
-                    return _status with { Reason = HostUpdateSchedulerReason.ReplayStoreUnavailable };
+                    try
+                    {
+                        await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Reject, ct);
+                    }
+                    catch (Exception ex) when (ex is not OperationCanceledException)
+                    {
+                        _logger.LogError(ex, "host_update_replay_store_unavailable");
+                        return _status with { Reason = HostUpdateSchedulerReason.ReplayStoreUnavailable };
+                    }
                 }
 
                 return Backoff(gateFailure.Value, candidate.Identity);
@@ -826,7 +833,7 @@ public sealed class HostUpdateScheduler(
                 candidate.PlatformDigests);
 
             Interlocked.Exchange(ref _signaledRequestId, null);
-            _activeRequestId = request.RequestId;
+            Interlocked.Exchange(ref _activeRequestId, request.RequestId);
             try
             {
                 HostUpdateExecutorResponse response = await executor.ExecuteAsync(request, ct);
@@ -845,7 +852,7 @@ public sealed class HostUpdateScheduler(
             }
             finally
             {
-                _activeRequestId = null;
+                Interlocked.Exchange(ref _activeRequestId, null);
             }
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
@@ -860,7 +867,7 @@ public sealed class HostUpdateScheduler(
 
     public Task SignalSafeCheckpointCancellationAsync(CancellationToken ct = default)
     {
-        string? requestId = _activeRequestId;
+        string? requestId = Volatile.Read(ref _activeRequestId);
         if (requestId is null)
         {
             return Task.CompletedTask;
@@ -875,6 +882,13 @@ public sealed class HostUpdateScheduler(
     }
 
     public void Dispose() => _tickGate.Dispose();
+
+    private static bool ShouldPersistTerminalRejection(VerifiedHostUpdateCandidate candidate, HostUpdateSchedulerReason reason) =>
+        candidate.CryptographicallyVerified && reason is
+            HostUpdateSchedulerReason.CandidateInvalid or
+            HostUpdateSchedulerReason.ChannelMismatch or
+            HostUpdateSchedulerReason.InsiderAcknowledgementRequired or
+            HostUpdateSchedulerReason.CompatibilityNotReady;
 
     private HostUpdateSchedulerReason? Gate(VerifiedHostUpdateCandidate candidate, HostUpdateSchedulerSettings current, DateTimeOffset now)
     {

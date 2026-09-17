@@ -1,4 +1,4 @@
-﻿using System.Text.Json;
+using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -9,6 +9,7 @@ public sealed class HostStatePersistenceTests
 {
     private static HostStateOptions OptionsFor(string root) => new()
     {
+        Enabled = true,
         RootPath = root,
         WindowsSecurityAttested = OperatingSystem.IsWindows(),
     };
@@ -18,6 +19,7 @@ public sealed class HostStatePersistenceTests
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
+            Directory.CreateDirectory(root);
             HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using FileHostUpdateReplayAnchor anchor = new(paths);
             await Assert.ThrowsAsync<InvalidDataException>(() => anchor.ReadEpochAsync(CancellationToken.None));
@@ -40,13 +42,19 @@ public sealed class HostStatePersistenceTests
     }
 
     [Fact]
-    public async Task PolicyRepository_DefaultsOff_AndUsesRevisionCas()
+    public async Task PolicyRepository_RequiresProvisioning_DefaultsOff_AndUsesRevisionCas()
     {
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
+            Directory.CreateDirectory(root);
             HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using FileHostUpdateAutomationPolicyRepository repository = new(paths);
+            Assert.Equal("host_update_policy_not_provisioned", repository.Read().Error);
+            Assert.Equal("host_update_policy_not_provisioned", (await repository.ReplaceAsync(new HostUpdateAutomationPolicy(Enabled: true), 0, CancellationToken.None)).Error);
+
+            await repository.ProvisionAsync(CancellationToken.None);
+            await repository.ProvisionAsync(CancellationToken.None);
             Assert.False(repository.Read().Policy.Enabled);
             HostUpdatePolicyReadResult applied = await repository.ReplaceAsync(new HostUpdateAutomationPolicy(Enabled: true), 0, CancellationToken.None);
             Assert.True(applied.Available);
@@ -64,16 +72,44 @@ public sealed class HostStatePersistenceTests
         }
     }
 
+
     [Fact]
-    public void HostStateOptionsValidator_CreatesMissingRoot()
+    public async Task PolicyProvisioner_RefusesCorruptExistingState()
     {
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
-            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, OptionsFor(root));
+            Directory.CreateDirectory(root);
+            HostStatePath paths = new(Options.Create(OptionsFor(root)));
+            File.WriteAllText(paths.Resolve("update-automation-policy.json"), "{\"version\":1,\"policy\":{\"enabled\":true}}");
+            using FileHostUpdateAutomationPolicyRepository repository = new(paths);
 
-            Assert.True(result.Succeeded);
-            Assert.True(Directory.Exists(root));
+            InvalidDataException ex = await Assert.ThrowsAsync<InvalidDataException>(() => repository.ProvisionAsync(CancellationToken.None));
+
+            Assert.Equal("host_update_policy_corrupt", ex.Message);
+            Assert.Equal("host_update_policy_corrupt", repository.Read().Error);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void HostStateOptionsValidator_DefaultDisabledAllowsEmptyRoot_AndEnabledMissingRootFails()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            ValidateOptionsResult disabled = new HostStateOptionsValidator().Validate(null, new HostStateOptions());
+            Assert.True(disabled.Succeeded);
+
+            ValidateOptionsResult enabled = new HostStateOptionsValidator().Validate(null, OptionsFor(root));
+            Assert.False(enabled.Succeeded);
+            Assert.False(Directory.Exists(root));
         }
         finally
         {
@@ -112,6 +148,7 @@ public sealed class HostStatePersistenceTests
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
+            Directory.CreateDirectory(root);
             HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using (FileHostUpdateReplayAnchor interrupted = new(paths, reached =>
             {
@@ -149,6 +186,7 @@ public sealed class HostStatePersistenceTests
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
+            Directory.CreateDirectory(root);
             HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using FileHostUpdateReplayAnchor anchor = new(paths);
             await anchor.ProvisionAsync(default);
@@ -253,6 +291,7 @@ public sealed class HostStatePersistenceTests
         string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
+            Directory.CreateDirectory(root);
             HostStatePath paths = new(Options.Create(OptionsFor(root)));
             using FileHostUpdateAutomationPolicyRepository repository = new(paths);
             File.WriteAllText(paths.Resolve("update-automation-policy.json"), "{\"version\":1,\"policy\":{\"enabled\":true}}");

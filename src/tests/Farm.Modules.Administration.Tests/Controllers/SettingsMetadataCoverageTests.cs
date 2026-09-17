@@ -1,8 +1,9 @@
-﻿using System.Reflection;
+using System.Reflection;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Settings;
 using Farm.Modules.Administration.Controllers;
 using Farm.Settings;
+using FluentAssertions;
 using Xunit;
 
 namespace Farm.Modules.Administration.Tests.Controllers;
@@ -140,6 +141,14 @@ public class SettingsMetadataCoverageTests
             unguarded.Length == 0,
             $"{string.Join(", ", unguarded)} is hidden from the settings page but does not " +
             "implement IValidatableSetting, so nothing stops it being saved half-configured.");
+    }
+
+
+    [Fact]
+    public void HostUpdateAutomationSettings_IsNotGenericMutableSettingsSurface()
+    {
+        typeof(HostUpdateAutomationSettings).GetCustomAttribute<AppSettingAttribute>().Should().BeNull();
+        typeof(IAppSetting).IsAssignableFrom(typeof(HostUpdateAutomationSettings)).Should().BeFalse();
     }
 
     [Fact]

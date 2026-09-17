@@ -1,10 +1,12 @@
-﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Logging;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -23,8 +25,9 @@ public static class CliCommandExtensions
         List<string> rawArgs = args.ToList();
         bool headlessCreateAdmin = rawArgs.Contains("--create-admin", StringComparer.OrdinalIgnoreCase);
         bool headlessListUsers = rawArgs.Contains("--list-users", StringComparer.OrdinalIgnoreCase);
+        bool provisionHostUpdates = rawArgs.Contains("--provision-host-updates", StringComparer.OrdinalIgnoreCase);
 
-        if (!headlessCreateAdmin && !headlessListUsers)
+        if (!headlessCreateAdmin && !headlessListUsers && !provisionHostUpdates)
         {
             return false; // No CLI command, continue with normal startup
         }
@@ -41,6 +44,12 @@ public static class CliCommandExtensions
         catch (InvalidOperationException)
         {
             // No logger registered - fall back to Console output as before
+        }
+
+        if (provisionHostUpdates)
+        {
+            await ProvisionHostUpdatesAsync(app, scope.ServiceProvider, logger);
+            return true;
         }
 
         // Ensure database is initialized for CLI operations
@@ -122,6 +131,66 @@ public static class CliCommandExtensions
 
         // All CLI code paths return above; no further action required here.
         // Method intentionally falls through when a CLI command was handled.
+    }
+
+    private static async Task ProvisionHostUpdatesAsync(WebApplication app, IServiceProvider services, ILogger? logger)
+    {
+        bool explicitlyAllowed = app.Configuration.GetValue<bool>("HostUpdates:HostState:ProvisioningEnabled");
+        if (!explicitlyAllowed)
+        {
+            await WriteCliErrorAsync(logger, "Usage: --provision-host-updates requires HostUpdates:HostState:Enabled=true and HostUpdates:HostState:ProvisioningEnabled=true.");
+            Environment.Exit(1);
+            return;
+        }
+
+        IHostUpdateReplayAnchorProvisioner? provisioner = services.GetService<IHostUpdateReplayAnchorProvisioner>();
+        IHostUpdateAutomationPolicyProvisioner? policyProvisioner = services.GetService<IHostUpdateAutomationPolicyProvisioner>();
+        IHostUpdateAutomationPolicyRepository? policyRepository = services.GetService<IHostUpdateAutomationPolicyRepository>();
+        if (provisioner is null || policyProvisioner is null || policyRepository is null || policyRepository is IHostUpdateAvailability { IsAvailable: false })
+        {
+            await WriteCliErrorAsync(logger, "Host update host-state services are not enabled.");
+            Environment.Exit(1);
+            return;
+        }
+
+        try
+        {
+            await provisioner.ProvisionAsync(CancellationToken.None);
+            await policyProvisioner.ProvisionAsync(CancellationToken.None);
+            HostUpdatePolicyReadResult policy = policyRepository.Read();
+            if (!policy.Available)
+            {
+                await WriteCliErrorAsync(logger, $"Host update policy state is unavailable: {policy.Error}");
+                Environment.Exit(1);
+                return;
+            }
+
+            if (logger != null)
+            {
+                logger.LogInformation("Host update replay and policy state provisioned. PolicyRevision={PolicyRevision}", policy.Policy.Revision);
+            }
+            else
+            {
+                Console.WriteLine($"Host update replay and policy state provisioned. PolicyRevision={policy.Policy.Revision}");
+            }
+        }
+        catch (Exception ex) when (ex is InvalidDataException or InvalidOperationException or IOException or UnauthorizedAccessException or System.Security.SecurityException)
+        {
+            await WriteCliErrorAsync(logger, $"Host update provisioning failed: {ex.Message}");
+            Environment.Exit(1);
+        }
+    }
+
+    private static async Task WriteCliErrorAsync(ILogger? logger, string message)
+    {
+        if (logger != null)
+        {
+            logger.LogError("{Message}", message);
+        }
+        else
+        {
+            await Console.Error.WriteLineAsync(message);
+        }
     }
 
     private static async Task ListUsersAsync(AppDbContext db, ILogger? logger)

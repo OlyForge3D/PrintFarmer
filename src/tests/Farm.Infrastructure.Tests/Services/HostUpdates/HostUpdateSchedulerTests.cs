@@ -1,4 +1,4 @@
-﻿#pragma warning disable VSTHRD003, S3398
+#pragma warning disable VSTHRD003, S3398
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
@@ -459,6 +459,66 @@ public sealed class HostUpdateSchedulerTests
 
         HostUpdateReplayDecision real = await store.DecideAsync(authenticated, HostUpdateReplayIntent.Admit, default);
         Assert.Equal(HostUpdateReplayDisposition.Accepted, real.Disposition);
+    }
+
+
+    [Fact]
+    public async Task TickAsync_InvalidSignature_DoesNotTouchReplayHighWater()
+    {
+        string root = TempRoot();
+        await SeedEmptyReplayFileAsync(root);
+        InMemoryReplayAnchor anchor = new();
+        using FileHostUpdateReplayStore store = new(root, anchor);
+        FakeExecutor executor = new();
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate() with { Sequence = 99, CryptographicallyVerified = false }, executor, store);
+
+        HostUpdateSchedulerStatus status = await scheduler.TickAsync();
+        HostUpdateReplayDecision lowerAuthenticated = await store.DecideAsync(Candidate() with { Sequence = 1 }, HostUpdateReplayIntent.Admit, default);
+
+        Assert.Equal(HostUpdateSchedulerReason.CandidateInvalid, status.Reason);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, lowerAuthenticated.Disposition);
+        Assert.Empty(executor.Requests);
+    }
+
+    [Fact]
+    public async Task TickAsync_MaintenanceWindowClosed_DoesNotTerminallyRejectCandidate()
+    {
+        string root = TempRoot();
+        await SeedEmptyReplayFileAsync(root);
+        using FileHostUpdateReplayStore store = new(root, new InMemoryReplayAnchor());
+        VerifiedHostUpdateCandidate candidate = Candidate();
+        FakeExecutor blockedExecutor = new();
+        HostUpdateScheduler blocked = Create(new HostUpdateSchedulerSettings(true, MaintenanceWindowStartHour: 1, MaintenanceWindowEndHour: 2), candidate, blockedExecutor, store);
+
+        HostUpdateSchedulerStatus blockedStatus = await blocked.TickAsync();
+        FakeExecutor allowedExecutor = new();
+        HostUpdateScheduler allowed = Create(new HostUpdateSchedulerSettings(true), candidate, allowedExecutor, store);
+        HostUpdateSchedulerStatus allowedStatus = await allowed.TickAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.MaintenanceWindowClosed, blockedStatus.Reason);
+        Assert.Equal(HostUpdateSchedulerReason.Admitted, allowedStatus.Reason);
+        Assert.Empty(blockedExecutor.Requests);
+        Assert.Single(allowedExecutor.Requests);
+    }
+
+    [Fact]
+    public async Task ReplayStore_TerminalRejectedSequence41RemainsRejectedAfterSequence42SupersedesHighWater()
+    {
+        string root = TempRoot();
+        await SeedEmptyReplayFileAsync(root);
+        InMemoryReplayAnchor anchor = new();
+        using FileHostUpdateReplayStore store = new(root, anchor);
+        VerifiedHostUpdateCandidate c41 = Candidate() with { Sequence = 41, ReleaseId = "release-1.5", SourceCommit = new string('4', 40) };
+        VerifiedHostUpdateCandidate c42 = Candidate() with { Sequence = 42, ReleaseId = "release-1.6", SourceCommit = new string('5', 40) };
+
+        HostUpdateReplayDecision rejected = await store.DecideAsync(c41, HostUpdateReplayIntent.Reject, default);
+        HostUpdateReplayDecision accepted = await store.DecideAsync(c42, HostUpdateReplayIntent.Admit, default);
+        HostUpdateReplayDecision rejectedAgain = await new FileHostUpdateReplayStore(root, anchor).DecideAsync(c41, HostUpdateReplayIntent.Admit, default);
+
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, rejected.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Accepted, accepted.Disposition);
+        Assert.Equal(HostUpdateReplayDisposition.Rejected, rejectedAgain.Disposition);
+        Assert.True(rejectedAgain.Reused);
     }
 
     [Fact]

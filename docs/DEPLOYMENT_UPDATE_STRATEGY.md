@@ -35,14 +35,25 @@ protected admission, readiness and executor gates described below.
 ### Active host-update scheduler and execution policy (#2666, 2026-09-17)
 
 The active baseline remains **default off**. `configuredEnabled` means an
-administrator saved policy intent; it is not the same as `effectiveEnabled`.
-Effective automatic execution is true only when concrete verified release
-discovery, protected replay/high-water state, policy-fence state, readiness and
-compatibility adapters, an admission fence, and a constrained executor are all
-provisioned. Channel selection alone authorizes neither checks nor installation,
-and insider still requires explicit acknowledgement before it can become
-effective. A generic socket, Docker, container-control, or host-command proxy is
-not an acceptable substitute for those typed adapters.
+administrator saved durable policy intent; it is not the same as
+`effectiveEnabled`. Channel selection alone authorizes neither checks nor
+installation, and insider still requires explicit acknowledgement before it can
+become effective. Effective automatic execution is true only when concrete
+verified release discovery, protected replay/high-water state, policy-fence
+state, readiness and compatibility adapters, a physical admission fence with
+real consumers, and a constrained executor are all provisioned and verified. A
+generic socket, Docker, container-control, or host-command proxy is not an
+acceptable substitute for those typed adapters.
+
+The current implementation includes the explicit host-state replay store/anchor,
+policy fence, and farm-admin CAS policy repository when
+`HostUpdates:HostState:Enabled=true` is configured against a validated secure
+root and provisioned by an operator. That does not make execution effective: the
+hosted scheduler loop, constrained executor, concrete recovery port, installation
+readiness adapter, and physical admission producers/consumers remain absent. The
+logical `IHostUpdateAdmissionFence` is obeyed by scheduler/admin code, but print,
+slice, queue, printer-command, and recovery subsystems do not yet enforce or
+publish physical admission state.
 
 The current admin Update Now path is a one-time operator authorization path,
 not standing automatic policy. The API accepts only an authorization/operation
@@ -1394,11 +1405,11 @@ does not create issues or mutate graph relationships.
 
 ## Host update durable state
 
-Automatic host updates keep their replay anchor and `UpdateAutomation` policy outside the application database and cache. Configure the required absolute `HostUpdates:HostState:RootPath` (or `PFARM__HostUpdates__HostState__RootPath`) to a persistent host volume mounted at the same path after container replacement. Provision the directory before service startup. Every existing path component and the root itself must be a real directory, never a symbolic link, junction, mount reparse point, or other reparse target.
+Automatic host updates keep their replay anchor, replay snapshot, execution journal, and CAS policy outside the application database and cache. The file-backed host-state services are registered only when `HostUpdates:HostState:Enabled=true`; ordinary web startup with the empty default config leaves explicit unavailable ports in DI and returns 503 availability details for admin host-update operations. Configure the required absolute `HostUpdates:HostState:RootPath` (or `PFARM__HostUpdates__HostState__RootPath`) to a persistent host volume mounted at the same path after container replacement. Provision the directory before service startup. Every existing path component and the root itself must be a real directory, never a symbolic link, junction, mount reparse point, or other reparse target.
 
 On Linux, the root must be owned by the service effective UID and must not be group- or other-writable (normally mode `0700`; `0750` is acceptable only when it has no group write bit). Unsupported Unix platforms fail closed because owner validation is unavailable. On Windows, portable .NET APIs cannot robustly establish ownership and effective ACL safety for local, domain, and container identities. Deployment must therefore apply an ACL granting only Administrators/SYSTEM and the dedicated service identity access, then set `HostUpdates:HostState:WindowsSecurityAttested=true` (`PFARM__HostUpdates__HostState__WindowsSecurityAttested=true`). This option is an explicit deployment attestation, not an ACL enforcement mechanism; incorrect attestation leaves host-state protection dependent on the deployment ACL.
 
-Replay state is never scheduler-self-provisioned. A trusted installation/provisioning action invokes `IHostUpdateReplayAnchorProvisioner`, which atomically establishes the hash-chained anchor journal and an empty versioned, checksummed replay snapshot. Decision commits write and flush a fixed staged next snapshot, append the durable next anchor epoch (the commit record), atomically replace the snapshot, and finalize the stage. Startup discards an uncommitted stage or, only when epoch, checksum, and the full staged-file hash exactly match the committed anchor head, completes an interrupted forward replacement. Older replay snapshots, anchor rollback, malformed chains, truncation, and corruption fail closed.
+Replay/policy state is never scheduler-self-provisioned. A trusted operator runs the API host with `--provision-host-updates` while `HostUpdates:HostState:Enabled=true` and `HostUpdates:HostState:ProvisioningEnabled=true` are both explicitly set. The command exits after provisioning, logs no secrets, and refuses missing, corrupt, or inconsistent existing state. It invokes `IHostUpdateReplayAnchorProvisioner` and `IHostUpdateAutomationPolicyProvisioner`, which atomically establish the hash-chained anchor journal, an empty versioned/checksummed replay snapshot, and the durable default-off policy record. Decision commits write and flush a fixed staged next snapshot, append the durable next anchor epoch (the commit record), atomically replace the snapshot, and finalize the stage. Startup discards an uncommitted stage or, only when epoch, checksum, and the full staged-file hash exactly match the committed anchor head, completes an interrupted forward replacement. Older replay snapshots, anchor rollback, malformed chains, truncation, and corruption fail closed.
 
 Executor journals atomically rewrite and flush the complete validated hash chain. A staged rewrite has no authority until atomic replacement. After restart, an unmatched unsafe `migration:before` or `apply:before` is durably converted to `RecoveryRequired`; those phases are never invoked again. Operator recovery remains admin-authorized and is allowed to select backups or perform side effects only after the submitted complete immutable request hashes exactly to the request binding stored in every journal activity. Production installation/recovery provisioning remains disabled pending its separate audit; automatic hosting remains unregistered and effective policy remains false.
 

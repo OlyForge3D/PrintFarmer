@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Modules.Administration.Controllers.Admin;
 using Microsoft.AspNetCore.Mvc;
 using Xunit;
@@ -89,6 +89,72 @@ public sealed class HostUpdateControllerRecoveryTests
         Assert.Equal(1, recovery.Calls);
     }
 
+
+    [Fact]
+    public async Task Recovery_returns_503_when_recovery_port_unavailable()
+    {
+        HostUpdateExecutionRequest request = Request();
+        MemoryJournal journal = new(new HostUpdateExecutionActivity("failure", request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
+        {
+            RequestBindingHash = HostUpdateRequestBinding.Compute(request),
+            RequestBinding = request,
+        });
+        HostUpdateController controller = new(new NoopExecutor(), new NoopResolver(), journal, new UnavailableHostUpdateRecoveryCoordinator());
+
+        ActionResult<HostUpdateRecoveryResult> result = await controller.RecoverAsync(request.ReleaseId, null, default);
+
+        ObjectResult unavailable = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(503, unavailable.StatusCode);
+    }
+
+    [Fact]
+    public async Task JournaledRecovery_appends_started_and_terminal_success_and_blocks_replay()
+    {
+        HostUpdateExecutionRequest request = Request();
+        MutableJournal journal = MutableJournal.InRecovery(request);
+        JournaledHostUpdateRecoveryCoordinator coordinator = new(journal, new MemoryRecoveryLeaseProvider(), new FixedRecovery(HostUpdateRecoveryOutcome.RolledBack, "image_only_rollback"));
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(request, journal.Read(request.ReleaseId), default);
+        HostUpdateRecoveryResult replay = await coordinator.RecoverAsync(request, journal.Read(request.ReleaseId), default);
+
+        Assert.Equal(HostUpdateRecoveryOutcome.RolledBack, result.Outcome);
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.Phase == "recovery:started" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.State == HostUpdateExecutionState.Completed && activity.Phase == "recovery:rolled_back");
+        Assert.Equal("not_in_recovery", replay.Detail);
+    }
+
+    [Fact]
+    public async Task JournaledRecovery_reconstructs_after_restart_and_rejects_binding_mismatch()
+    {
+        HostUpdateExecutionRequest request = Request();
+        MutableJournal journal = MutableJournal.InRecovery(request);
+        JournaledHostUpdateRecoveryCoordinator restarted = new(journal, new MemoryRecoveryLeaseProvider(), new FixedRecovery(HostUpdateRecoveryOutcome.NeedsOperator, "no_backup_available"));
+
+        HostUpdateRecoveryResult result = await restarted.RecoverAsync(request, Array.Empty<HostUpdateExecutionActivity>(), default);
+        HostUpdateRecoveryResult mismatch = await restarted.RecoverAsync(request with { PolicyRevision = 9 }, journal.Read(request.ReleaseId), default);
+
+        Assert.Equal("no_backup_available", result.Detail);
+        Assert.Equal("recovery_binding_mismatch", mismatch.Detail);
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.Phase == "recovery:needs_operator:no_backup_available");
+    }
+
+    [Fact]
+    public async Task JournaledRecovery_prevents_concurrent_recovery()
+    {
+        HostUpdateExecutionRequest request = Request();
+        MutableJournal journal = MutableJournal.InRecovery(request);
+        BlockingRecovery inner = new();
+        JournaledHostUpdateRecoveryCoordinator coordinator = new(journal, new SingleRecoveryLeaseProvider(), inner);
+
+        Task<HostUpdateRecoveryResult> first = Task.Run(() => coordinator.RecoverAsync(request, journal.Read(request.ReleaseId), default));
+        Assert.True(inner.Started.Wait(TimeSpan.FromSeconds(5)), "Recovery did not start before timeout.");
+        HostUpdateRecoveryResult second = await coordinator.RecoverAsync(request, journal.Read(request.ReleaseId), default);
+        inner.Release.SetResult();
+        await first;
+
+        Assert.Equal("recovery_already_running", second.Detail);
+    }
+
     private static HostUpdateExecutionRequest Request() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, Targets())
     {
         RequestId = "request-1",
@@ -135,6 +201,74 @@ public sealed class HostUpdateControllerRecoveryTests
         {
             Calls++;
             return Task.FromResult(new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "test"));
+        }
+    }
+
+
+    private sealed class MutableJournal : IHostUpdateExecutionJournal
+    {
+        private readonly List<HostUpdateExecutionActivity> activities;
+
+        private MutableJournal(IEnumerable<HostUpdateExecutionActivity> activities) => this.activities = activities.ToList();
+
+        public static MutableJournal InRecovery(HostUpdateExecutionRequest request) => new([new HostUpdateExecutionActivity("failure", request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "failure", DateTimeOffset.UtcNow)
+        {
+            RequestBindingHash = HostUpdateRequestBinding.Compute(request),
+            RequestBinding = request,
+        }]);
+
+        public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => activities.Where(activity => activity.ReleaseId == releaseId).ToArray();
+
+        public void Append(HostUpdateExecutionActivity activity) => activities.Add(activity);
+    }
+
+    private sealed class FixedRecovery(HostUpdateRecoveryOutcome outcome, string detail) : IHostUpdateRecoveryCoordinator
+    {
+        public Task<HostUpdateRecoveryResult> RecoverAsync(HostUpdateExecutionRequest failedRequest, IReadOnlyList<HostUpdateExecutionActivity> activities, CancellationToken cancellationToken) =>
+            Task.FromResult(new HostUpdateRecoveryResult(outcome, detail));
+    }
+
+    private sealed class BlockingRecovery : IHostUpdateRecoveryCoordinator
+    {
+        public ManualResetEventSlim Started { get; } = new();
+
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<HostUpdateRecoveryResult> RecoverAsync(HostUpdateExecutionRequest failedRequest, IReadOnlyList<HostUpdateExecutionActivity> activities, CancellationToken cancellationToken)
+        {
+            Started.Set();
+            await Release.Task.WaitAsync(cancellationToken);
+            return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "blocked");
+        }
+    }
+
+    private sealed class MemoryRecoveryLeaseProvider : IHostUpdateRecoveryLeaseProvider
+    {
+        public IHostUpdateRecoveryLease Acquire(TimeSpan timeout, CancellationToken cancellationToken) => new Lease();
+
+        private sealed class Lease : IHostUpdateRecoveryLease
+        {
+            public void Dispose() { }
+        }
+    }
+
+    private sealed class SingleRecoveryLeaseProvider : IHostUpdateRecoveryLeaseProvider
+    {
+        private int active;
+
+        public IHostUpdateRecoveryLease Acquire(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            if (Interlocked.CompareExchange(ref active, 1, 0) != 0)
+            {
+                throw new TimeoutException();
+            }
+
+            return new Lease(this);
+        }
+
+        private sealed class Lease(SingleRecoveryLeaseProvider owner) : IHostUpdateRecoveryLease
+        {
+            public void Dispose() => Volatile.Write(ref owner.active, 0);
         }
     }
 

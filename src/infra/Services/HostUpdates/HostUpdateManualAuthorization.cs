@@ -1,4 +1,4 @@
-﻿using System.Security.Cryptography;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Settings;
@@ -380,8 +380,12 @@ public interface IHostUpdateExecutionRequestResolver
     Task<HostUpdateExecutionResolutionResult> ResolveManualAsync(HostUpdateManualAuthorizationIntent intent, CancellationToken ct);
 }
 
-public sealed class UnavailableHostUpdateExecutor : IHostUpdateExecutor
+public sealed class UnavailableHostUpdateExecutor : IHostUpdateExecutor, IHostUpdateAvailability
 {
+    public bool IsAvailable => false;
+
+    public string UnavailableReason => HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason;
+
     public Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);

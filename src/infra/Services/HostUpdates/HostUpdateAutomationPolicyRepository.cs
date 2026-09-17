@@ -1,4 +1,4 @@
-﻿#pragma warning disable CA1849 // The policy file must synchronously flush to durable storage before replacement.
+#pragma warning disable CA1849 // The policy file must synchronously flush to durable storage before replacement.
 #pragma warning disable S3218 // Persisted record property names are part of the on-disk JSON contract.
 using System.Security.Cryptography;
 using System.Text;
@@ -21,6 +21,11 @@ public sealed record HostUpdateAutomationPolicy(
 
 public sealed record HostUpdatePolicyReadResult(bool Available, HostUpdateAutomationPolicy Policy, string? Error);
 
+public interface IHostUpdateAutomationPolicyProvisioner
+{
+    Task ProvisionAsync(CancellationToken ct);
+}
+
 public interface IHostUpdateAutomationPolicyRepository
 {
     HostUpdatePolicyReadResult Read();
@@ -29,7 +34,7 @@ public interface IHostUpdateAutomationPolicyRepository
 }
 
 /// <summary>Single-record durable CAS repository for standing automatic-update authorization.</summary>
-public sealed class FileHostUpdateAutomationPolicyRepository : IHostUpdateAutomationPolicyRepository, IDisposable
+public sealed class FileHostUpdateAutomationPolicyRepository : IHostUpdateAutomationPolicyRepository, IHostUpdateAutomationPolicyProvisioner, IDisposable
 {
     private const int Version = 1;
     private readonly string _path;
@@ -44,11 +49,15 @@ public sealed class FileHostUpdateAutomationPolicyRepository : IHostUpdateAutoma
         _lockPath = paths.Resolve("update-automation-policy.lock");
     }
 
-    public HostUpdatePolicyReadResult Read()
+    public HostUpdatePolicyReadResult Read() => Read(requireExisting: true);
+
+    private HostUpdatePolicyReadResult Read(bool requireExisting)
     {
         if (!File.Exists(_path))
         {
-            return new(true, new HostUpdateAutomationPolicy(), null);
+            return requireExisting
+                ? new(false, new HostUpdateAutomationPolicy(), "host_update_policy_not_provisioned")
+                : new(true, new HostUpdateAutomationPolicy(), null);
         }
 
         try
@@ -64,6 +73,54 @@ public sealed class FileHostUpdateAutomationPolicyRepository : IHostUpdateAutoma
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or JsonException)
         {
             return new(false, new(), "host_update_policy_unavailable");
+        }
+    }
+
+    public async Task ProvisionAsync(CancellationToken ct)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            using FileStream processLock = AcquireProcessLock(ct);
+            HostUpdatePolicyReadResult current = Read(requireExisting: false);
+            if (!current.Available)
+            {
+                throw new InvalidDataException(current.Error ?? "host_update_policy_unavailable");
+            }
+
+            if (File.Exists(_path))
+            {
+                return;
+            }
+
+            HostUpdateAutomationPolicy initial = new() { Fingerprint = Fingerprint(new HostUpdateAutomationPolicy()) };
+            string json = JsonSerializer.Serialize(new PolicyFile(Version, initial, Checksum(initial)));
+            string temp = _path + ".tmp-" + Guid.NewGuid().ToString("N");
+            try
+            {
+                await using (FileStream stream = new(temp, FileMode.CreateNew, FileAccess.Write, FileShare.None))
+                {
+                    byte[] bytes = Encoding.UTF8.GetBytes(json);
+                    await stream.WriteAsync(bytes, ct).ConfigureAwait(false);
+                    await stream.FlushAsync(ct).ConfigureAwait(false);
+                    stream.Flush(true);
+                }
+
+                HostStateFileSecurity.RejectReparseTarget(temp);
+                HostStateFileSecurity.RejectReparseTarget(_path);
+                File.Move(temp, _path, true);
+            }
+            finally
+            {
+                if (File.Exists(temp))
+                {
+                    File.Delete(temp);
+                }
+            }
+        }
+        finally
+        {
+            _gate.Release();
         }
     }
 
@@ -166,4 +223,9 @@ public sealed class HostStateHostUpdateSchedulerSettings(IHostUpdateAutomationPo
             return new(p.Enabled, p.KillSwitch, p.Channel, p.InsiderAcknowledged, p.Revision, p.PollIntervalSeconds, p.InsiderPollIntervalSeconds, p.MaintenanceWindowStartHour, p.MaintenanceWindowEndHour);
         }
     }
+}
+
+public sealed class StaticHostUpdateSchedulerSettings(HostUpdateSchedulerSettings current) : IHostUpdateSchedulerSettings
+{
+    public HostUpdateSchedulerSettings Current { get; } = current;
 }

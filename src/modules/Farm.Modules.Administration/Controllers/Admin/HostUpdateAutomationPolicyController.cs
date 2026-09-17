@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -28,8 +28,13 @@ public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPo
     [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public ActionResult<HostUpdateAutomationPolicy> Get()
     {
+        if (repository is IHostUpdateAvailability { IsAvailable: false } unavailable)
+        {
+            return AvailabilityProblem(unavailable.UnavailableReason);
+        }
+
         HostUpdatePolicyReadResult result = repository.Read();
-        return result.Available ? Ok(result.Policy) : StatusCode(StatusCodes.Status503ServiceUnavailable, new { code = result.Error });
+        return result.Available ? Ok(result.Policy) : AvailabilityProblem(result.Error ?? "host_update_policy_unavailable");
     }
 
     [HttpPut]
@@ -41,6 +46,11 @@ public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPo
         [FromBody] HostUpdateAutomationPolicyRequest request,
         CancellationToken ct)
     {
+        if (repository is IHostUpdateAvailability { IsAvailable: false } unavailable)
+        {
+            return AvailabilityProblem(unavailable.UnavailableReason);
+        }
+
         if (request is null || string.IsNullOrWhiteSpace(request.Channel))
         {
             return BadRequest(new { code = "policy_invalid" });
@@ -55,9 +65,14 @@ public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPo
 
         if (!result.Available)
         {
-            return StatusCode(StatusCodes.Status503ServiceUnavailable, new { code = result.Error });
+            return AvailabilityProblem(result.Error ?? "host_update_policy_unavailable");
         }
 
         return Ok(result.Policy);
     }
+
+    private ObjectResult AvailabilityProblem(string reason) => Problem(
+        detail: reason,
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Host update policy unavailable");
 }

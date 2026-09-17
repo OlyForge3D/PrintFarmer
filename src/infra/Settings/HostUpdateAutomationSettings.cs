@@ -1,17 +1,12 @@
-﻿using System.ComponentModel.DataAnnotations;
+using System.ComponentModel.DataAnnotations;
 using System.Text.Json.Serialization;
-using Farm.Settings;
 
 namespace Farm.Infrastructure.Settings;
 
-/// <summary>Persisted policy controlling the not-yet-wired automatic host update scheduler.</summary>
-[AppSetting(HostUpdateAutomationSettings.SectionName)]
-[SettingDisplay(Name = "Update Automation", Description = "Controls automatic host update scheduling; execution remains unavailable until adapters are installed.", Icon = "pf-icon-refresh", Group = "System", Order = 8)]
-public sealed class HostUpdateAutomationSettings : IAppSetting, IValidatableSetting
+/// <summary>Legacy DTO retained for deserialization compatibility only. Standing authorization is mutated exclusively through IHostUpdateAutomationPolicyRepository/CAS.</summary>
+public sealed class HostUpdateAutomationSettings : IValidatableSetting
 {
     public const string SectionName = "UpdateAutomation";
-
-    public static string SectionKey => SectionName;
 
     /// <summary>Enables scheduler policy evaluation. Defaults to disabled.</summary>
     [JsonPropertyName("configuredEnabled")]

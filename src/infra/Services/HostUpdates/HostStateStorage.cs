@@ -1,4 +1,4 @@
-﻿#pragma warning disable SA1501, SA1503, SA1515, SA1408, SA1518, SA1513, CA5392, CA2101
+#pragma warning disable SA1501, SA1503, SA1515, SA1408, SA1518, SA1513, CA5392, CA2101
 using System.ComponentModel.DataAnnotations;
 using System.Runtime.InteropServices;
 using System.Security;
@@ -9,6 +9,10 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 public sealed class HostStateOptions
 {
     public const string SectionName = "HostUpdates:HostState";
+
+    public bool Enabled { get; set; }
+
+    public bool ProvisioningEnabled { get; set; }
 
     public string RootPath { get; set; } = string.Empty;
 
@@ -24,6 +28,11 @@ public sealed class HostStateOptionsValidator : IValidateOptions<HostStateOption
 {
     public ValidateOptionsResult Validate(string? name, HostStateOptions options)
     {
+        if (!options.Enabled)
+        {
+            return ValidateOptionsResult.Success;
+        }
+
         try
         {
             _ = HostStateFileSecurity.PrepareAndValidateRoot(options);
@@ -77,11 +86,9 @@ public static class HostStateFileSecurity
 
         string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(options.RootPath));
         ValidateExistingPathComponents(root);
-        bool created = !Directory.Exists(root);
-        Directory.CreateDirectory(root);
-        if (created && !OperatingSystem.IsWindows())
+        if (!Directory.Exists(root))
         {
-            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+            throw new DirectoryNotFoundException("host_state_root_missing");
         }
 
         ValidateExistingPathComponents(root);
@@ -104,14 +111,21 @@ public static class HostStateFileSecurity
                 throw new SecurityException("host_state_unix_permissions_insecure");
             }
 
-            NativeMethods.LinuxStat stat = default;
-            if (OperatingSystem.IsLinux() && NativeMethods.Stat(root, out stat) != 0)
+            try
             {
-                throw new IOException("host_state_owner_stat_failed");
+                NativeMethods.LinuxStat stat = default;
+                if (OperatingSystem.IsLinux() && NativeMethods.Stat(root, out stat) != 0)
+                {
+                    throw new IOException("host_state_owner_stat_failed");
+                }
+                else if (OperatingSystem.IsLinux() && stat.UserId != NativeMethods.GetEffectiveUserId())
+                {
+                    throw new SecurityException("host_state_owner_mismatch");
+                }
             }
-            else if (OperatingSystem.IsLinux() && stat.UserId != NativeMethods.GetEffectiveUserId())
+            catch (Exception ex) when (ex is EntryPointNotFoundException or DllNotFoundException or PlatformNotSupportedException)
             {
-                throw new SecurityException("host_state_owner_mismatch");
+                throw new SecurityException("host_state_owner_validation_unavailable", ex);
             }
         }
 

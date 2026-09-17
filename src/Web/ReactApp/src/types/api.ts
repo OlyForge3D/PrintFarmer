@@ -4978,7 +4978,7 @@ export interface UpdateChannelSettings {
   insiderAcknowledged: boolean;
 }
 
-export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';
+export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting' | 'Due';
 
 export interface UpdateSchedulingBackoff {
   state: UpdateSchedulingBackoffState;
@@ -5092,3 +5092,4 @@ export interface ReleaseReadiness {
   reasons: string[];
   hops: readonly string[];
 }
+
