@@ -15,6 +15,7 @@ import { githubClient, verifyOwnerDispatch } from './release-dispatch.mjs';
 import { emitBuildMetadata } from './release-metadata.mjs';
 import { command, imageRepository, rejectExistingImages, verifyImages, publishImageTags } from './release-set.mjs';
 import { releaseNotes } from './release-notes.mjs';
+import { buildManifest, deriveSequence, validateManifest } from './release-manifest.mjs';
 
 export async function rejectExistingVersion(api, tag) {
   requireThat(!await api(`git/ref/tags/${tag}`, { allowMissing: true }), `Tag ${tag} already exists; choose a new version`);
@@ -98,7 +99,7 @@ export function buildImages(release, source, assets, run = command, rejectImages
   copyFileSync(join(assets, `printfarmer-monolith-${release.tag}.spdx.json`),
     join(assets, `printfarmer-${release.tag}.spdx.json`));
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) copyFileSync(join(source, file), join(assets, file));
-  verifyImages(release.version, release.sourceCommit, digests, run);
+  const imageDetails = verifyImages(release.version, release.sourceCommit, digests, run);
   const smokeCommands = {
     api: 'test -f /app/Farm.Web.Api.dll && dotnet --info >/dev/null',
     'slicer-host': 'test -f /app/Farm.Slicer.Host.dll && test -d /app/plugins/slicer && dotnet --info >/dev/null',
@@ -115,6 +116,8 @@ export function buildImages(release, source, assets, run = command, rejectImages
       Object.keys(components).map(name => [name, { reference: `${imageRepository(name)}@${digests[name]}`,
         platforms: components[name].platforms }])),
   }, undefined, 2)}\n`);
+  writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
+    { ...release, sequence: deriveSequence(release.version) }, imageDetails));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   return digests;
 }
@@ -130,6 +133,7 @@ export function releaseAssets(release) {
   return [
     ...sourceBundleFiles(release),
     'LICENSE', 'THIRD-PARTY-NOTICES.md', 'license-inventory.json', 'container-images.json', 'release-notes.md',
+    'update-manifest.json', 'update-manifest.sigstore.json',
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
   ];
@@ -144,6 +148,7 @@ export async function publishRelease(release, assets, api, {
   for (const name of files.filter(name => name !== 'release-notes.md')) {
     requireThat(readFileSync(join(assets, name)).length > 0, `Missing release asset: ${name}`);
   }
+  validateManifest(readFileSync(join(assets, 'update-manifest.json'), 'utf8'));
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
   await rejectExistingVersion(api, release.tag);

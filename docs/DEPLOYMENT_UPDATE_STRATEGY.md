@@ -31,6 +31,27 @@ missing signed feed must not be advertised as ready. There is no production
 GitHub metadata-provider adapter in the current host-updater foundation.
 Future updater work is separate and must not silently trust publication alone.
 
+The first signed managed-update release is a new boundary: it publishes
+`update-manifest.json` and `update-manifest.sigstore.json` only after all six
+OCI images, platform child digests, compliance checks, and release inventory
+checks pass. The manifest uses schema `1`, deterministic canonical JSON, and
+the sequence `major*1_000_000_000 + minor*1_000_000 + patch*1_000 +
+insiderSuffix`. It is eligible only when the exact bytes verify with the
+GitHub OIDC issuer `https://token.actions.githubusercontent.com` and the
+canonical workflow identity for the selected channel:
+
+- stable: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main`
+- insider: `https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development`
+
+Keyless Cosign trust is bootstrapped from Sigstore's OIDC certificate and
+transparency log; rotation is performed by changing the pinned official
+Cosign/tooling versions and the explicitly reviewed workflow identity, never by
+accepting a wildcard issuer or subject. Existing unsigned releases remain
+manual-only, including legacy `v0.2.3-insider.2`. A valid signature
+authenticates the publisher and exact manifest bytes; it does not authorize or
+implement apply, installation, active-print handling, staging, recovery, or
+runtime safety.
+
 ### Read-only inventory and installation readiness
 
 `GET /api/system/info` returns the additive, administrator-only `inventory` read

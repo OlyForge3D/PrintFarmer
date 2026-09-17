@@ -10,6 +10,7 @@ import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
 import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
+import { buildManifest, deriveSequence, validateManifest, validateManifestInput } from '../release-manifest.mjs';
 
 const sha = 'a'.repeat(40);
 const head = 'b'.repeat(40);
@@ -18,6 +19,11 @@ const platformDigest = `sha256:${'d'.repeat(64)}`;
 const release = { version: '0.2.3-insider.2', tag: 'v0.2.3-insider.2', channel: 'insider',
   sourceBranch: 'development', sourceCommit: sha, buildId: '42' };
 const digests = Object.fromEntries(Object.keys(components).map(name => [name, digest]));
+const imageDetails = Object.fromEntries(Object.entries(components).map(([name, component]) => [name, {
+  indexDigest: digest,
+  platforms: component.platforms,
+  platformDigests: Object.fromEntries(component.platforms.map(platform => [platform, platformDigest])),
+}]));
 const owner = { login: 'jpapiez', id: 5460061, type: 'User' };
 const repo = { id: 123, full_name: 'OlyForge3D/PrintFarmer' };
 const env = {
@@ -199,6 +205,38 @@ test('complete image verification enforces exact platform set, provenance and so
   }));
 });
 
+test('managed update manifest is canonical, complete, sequence-bound and child-digest pinned', () => {
+  const first = buildManifest(release, imageDetails);
+  const second = buildManifest(release, imageDetails);
+  assert.equal(first, second);
+  const manifest = JSON.parse(first);
+  assert.equal(manifest.schema, 1);
+  assert.equal(manifest.managedUpdateEligible, true);
+  assert.equal(manifest.sequence, deriveSequence(release.version));
+  assert.deepEqual(manifest.services.map(service => service.id), Object.keys(components));
+  for (const service of manifest.services) {
+    assert.match(service.image, new RegExp(`^ghcr\\.io/olyforge3d/printfarmer-${service.id}@sha256:`));
+    assert.deepEqual(Object.keys(service.platformDigests), components[service.id].platforms);
+    assert.ok(Object.values(service.platformDigests).every(value => /^sha256:[a-f0-9]{64}$/.test(value)));
+  }
+  validateManifestInput({ ...release, sequence: deriveSequence(release.version) }, imageDetails);
+  validateManifest(first);
+  for (const mutation of [
+    () => validateManifestInput(release, { ...imageDetails, api: undefined }),
+    () => validateManifestInput(release, { ...imageDetails, api: { ...imageDetails.api, indexDigest: 'latest' } }),
+    () => validateManifestInput(release, { ...imageDetails, api: { ...imageDetails.api,
+      platformDigests: { ...imageDetails.api.platformDigests, 'linux/amd64': 'sha256:bad' } } }),
+    () => validateManifestInput(release, { ...imageDetails, api: { ...imageDetails.api,
+      platforms: ['linux/amd64', 'linux/amd64'] } }),
+  ]) assert.throws(mutation);
+  for (const mutation of [
+    value => value.replace('ghcr.io/olyforge3d/printfarmer-api@', 'docker.io/example/api@'),
+    value => value.replace('ghcr.io/olyforge3d/printfarmer-api@sha256:', 'ghcr.io/olyforge3d/printfarmer-api:'),
+    value => value.replace('"id":"frontend"', '"id":"api"'),
+    value => value.replace(`"linux/amd64":"sha256:${'d'.repeat(64)}"`, '"linux/amd64":"bad"'),
+  ]) assert.throws(() => validateManifest(mutation(first)));
+});
+
 test('actual build loop passes the six targets/platforms and source metadata, stops on partial failure', t => {
   const root = workspace(t);
   const source = join(root, 'source');
@@ -261,6 +299,8 @@ function publishFixture(t, channel = 'insider') {
   const chosen = channel === 'stable' ? { ...release, channel, version: '0.2.3', tag: 'v0.2.3', sourceBranch: 'main' } : release;
   const files = releaseAssets(chosen);
   for (const file of files) writeFileSync(join(assets, file), 'asset');
+  writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
+    { ...chosen, sequence: deriveSequence(chosen.version) }, imageDetails));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   const calls = [];
   const api = async (endpoint, options = {}) => {
@@ -392,5 +432,7 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   }
   const active = ['.github/workflows/consolidated-release.yml', 'scripts/ci/publish-release.mjs',
     'scripts/ci/release-dispatch.mjs', 'scripts/ci/release-set.mjs'].map(file => readFileSync(file, 'utf8')).join('\n');
-  assert.doesNotMatch(active, /RELEASE_LEDGER|release-authorization|release-transaction|cosign sign-blob|reservation_target/);
+  assert.match(active, /cosign sign-blob --yes --bundle/);
+  assert.match(active, /cosign verify-blob --bundle/);
+  assert.doesNotMatch(active, /RELEASE_LEDGER|release-authorization|release-transaction|reservation_target/);
 });

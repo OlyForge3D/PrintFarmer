@@ -39,6 +39,7 @@ jobs:
     permissions:
       contents: read
       actions: read
+      id-token: write
     outputs:
       source_sha: ${{ steps.select.outputs.source_sha }}
       environment: ${{ steps.select.outputs.environment }}
@@ -118,6 +119,31 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: node scripts/ci/publish-release.mjs build
+      - name: Install pinned Cosign
+        uses: sigstore/cosign-installer@d58896d6a1865668819e1d91763c7751a165e159  # v3.9.2
+        with:
+          cosign-release: 'v3.0.6'
+      - name: Sign and verify exact update manifest
+        env:
+          MANIFEST: release-assets/update-manifest.json
+          BUNDLE: release-assets/update-manifest.sigstore.json
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@${{ inputs.channel == 'stable' && 'refs/heads/main' || 'refs/heads/development' }}
+        run: |
+          set -euo pipefail
+          expected_ref="${{ inputs.channel == 'stable' && 'refs/heads/main' || 'refs/heads/development' }}"
+          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@${expected_ref}"
+          cosign sign-blob --yes --bundle "$BUNDLE" "$MANIFEST"
+          cosign verify-blob --bundle "$BUNDLE" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$EXPECTED_IDENTITY" "$MANIFEST"
+      - name: Re-verify exact manifest before publication
+        env:
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@${{ inputs.channel == 'stable' && 'refs/heads/main' || 'refs/heads/development' }}
+        run: |
+          set -euo pipefail
+          cosign verify-blob --bundle release-assets/update-manifest.sigstore.json \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$EXPECTED_IDENTITY" release-assets/update-manifest.json
       - name: Obtain approved publisher token after the long build
         id: publisher
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2

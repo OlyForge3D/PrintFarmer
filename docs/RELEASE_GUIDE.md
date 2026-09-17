@@ -16,15 +16,17 @@ post_date: "2026-09-16"
 1. Review `VERSION` on `main` for **stable**, or `development` for **insider**.
    It contains the base version, for example `v0.2.3`. Change the base through
    the normal reviewed PR process when needed; keep monorepo versions synchronized.
-2. As **jpapiez**, open **Actions > Consolidated Release > Run workflow**.
-   Always use the workflow on **development**. Choose the channel and enter
+2. As **jpapiez**, open **Actions > Consolidated Release > Run workflow** on the
+   channel's canonical workflow ref: `main` for stable or `development` for
+   insider. Choose the channel and enter
    `0.2.3` for stable or an unused `0.2.3-insider.N` for insider, such as
    `0.2.3-insider.2`. The base must match the selected source's `VERSION`.
    Leave `source_sha` blank for that channel branch's current HEAD, or supply
    its full 40-character ancestor SHA.
 3. Run it once. The summary identifies the pinned source, check results and
-   release URL. A successful release contains generated GitHub release notes,
-   pinned image references, corresponding source, license notices and SBOMs.
+   release URL. A    successful release contains generated GitHub release notes, pinned image
+   references, corresponding source, license notices, SBOMs, and a signed
+   `update-manifest.json` plus its `update-manifest.sigstore.json` bundle.
 
 There is no release ledger, reservation, signing ceremony, qualification receipt,
 counter recovery or abandonment step. The explicit version and permanent Git tag
@@ -61,6 +63,10 @@ labels are verified; ARM64 runtime smoke checks precede release creation.
 Only after all builds succeed does the publisher create the permanent
 `v<version>` Git tag and a draft GitHub release, upload and check its asset
 inventory, publish versioned image tags, and advance permitted stable aliases.
+The manifest is canonical JSON with schema `1`, binds all six OCI index
+digests plus every declared platform child digest, and sets
+`managedUpdateEligible: true`. The exact bytes are signed with keyless Cosign
+through GitHub Actions OIDC and verified twice before release visibility.
 It publishes the GitHub release **last**. Insider releases are prereleases and
 have only their exact version image tag: they never advance `latest`, major or
 minor tags. Stable additionally retains `stable-X.Y.Z` and advances `X.Y`,
@@ -95,16 +101,26 @@ This change neither alters protections nor edits App grants, environments or sec
 
 The approved publisher App/installation remains PrintFarmer-only. The workflow
 requests Contents/Workflows write and Actions/Administration read, and mints its
-short-lived token **after** the long build. Existing `RELEASE_PUBLISHER_APP_ID`,
+short-lived token **after** the long build. Only the publication job requests
+`id-token: write`, and the official Cosign installer is pinned to `v3.9.2`
+while the binary is pinned to `v3.0.6`.
+Cosign verification requires issuer
+`https://token.actions.githubusercontent.com` and the exact identity
+`https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main`
+for stable or the corresponding `refs/heads/development` identity for insider.
+The workflow also checks `GITHUB_WORKFLOW_REF` against that expected ref, so no
+other workflow, repository, branch, or fork identity is accepted.
+Existing `RELEASE_PUBLISHER_APP_ID`,
 `RELEASE_PUBLISHER_PRIVATE_KEY`, `RELEASE_REGISTRY_USER`, `RELEASE_REGISTRY_TOKEN`
 and `RELEASE_APPROVAL_MODE` configuration is reused. No ledger anchor is needed.
 Repository PR review and CI requirements remain unchanged.
 
 ## Publication is not installation authorization
 
-`container-images.json` lists the verified image digests/platforms and explicitly
-sets `managedUpdateEligible: false`. It is **not** the former signed
-`release-manifest.json`, signed envelope or authenticated channel pointer.
+`container-images.json` remains the informational image inventory and explicitly
+sets `managedUpdateEligible: false`. `update-manifest.json` is the separate,
+signed managed-update contract; its signature authenticates the publisher but
+does not implement installation or apply.
 The workflow does not publish those assets, update a ledger pointer, enroll a
 host, contact an installation, stop a printer or perform a deployment.
 
@@ -128,7 +144,7 @@ workflows and mutation/recovery commands are removed from active source.
 Remote ledger records, runs, artifacts and tags remain historical audit data.
 No migration or recovery of them is a prerequisite to this workflow.
 
-In particular, **`v0.2.3-insider.1` remains permanently used**. Its unsigned
+In particular, **`v0.2.3-insider.2` remains permanently manual-only**. Its unsigned
 reservation is not repaired or abandoned. Do not rerun the consumed diagnostic
 35169805018 or failed abandonment 35177228925, reconstruct the missing
 `release-authorization-1` artifact, reset counters, or mutate remote history.
