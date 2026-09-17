@@ -9,41 +9,52 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// the single choke point that guarantees the executor never writes journal/lock/backup state
 /// somewhere an OS/container temp-cleanup or an application-DB restore could destroy it.
 /// </summary>
+/// <remarks>
+/// Bishop/Hicks review (issue #2663): <c>RootDirectory</c> is optional/default-off. No supported
+/// deployment shape (bare compose, split monolith/microservices, local dev) mounts or configures
+/// a value for it today, so requiring it unconditionally crashed every host on startup the moment
+/// <c>AddHostUpdateExecution</c> is registered (which happens unconditionally from
+/// <c>FeatureServicesStartup</c>). When <c>RootDirectory</c> is not configured at all, this
+/// validator succeeds without checking any other host-update-execution option -- the executor's
+/// own <see cref="HostUpdateExecutionAvailabilityProvider"/> is the correct place to report
+/// <c>root_directory_not_configured</c> as a runtime-queryable <c>Unavailable</c> reason, not a
+/// process crash. Once an operator explicitly configures a <c>RootDirectory</c> (opting into the
+/// feature for that deployment), every check below still runs and still fails process start fast
+/// on a genuine misconfiguration.
+/// </remarks>
 public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostUpdateExecutionOptions>
 {
     public ValidateOptionsResult Validate(string? name, HostUpdateExecutionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        var failures = new List<string>();
-
         if (string.IsNullOrWhiteSpace(options.RootDirectory))
         {
-            failures.Add("HostUpdateExecution:RootDirectory is required (no default is provided).");
+            return ValidateOptionsResult.Success;
+        }
+
+        var failures = new List<string>();
+
+        string root = options.RootDirectory;
+        if (!Path.IsPathRooted(root))
+        {
+            failures.Add("HostUpdateExecution:RootDirectory must be an absolute path.");
         }
         else
         {
-            string root = options.RootDirectory;
-            if (!Path.IsPathRooted(root))
+            string fullRoot = Path.GetFullPath(root);
+            string tempRoot = Path.GetFullPath(Path.GetTempPath());
+            string currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
+
+            if (IsWithin(fullRoot, tempRoot))
             {
-                failures.Add("HostUpdateExecution:RootDirectory must be an absolute path.");
+                failures.Add("HostUpdateExecution:RootDirectory must not be under the OS temp directory.");
             }
-            else
+
+            if (string.Equals(fullRoot, currentDirectory, StringComparison.OrdinalIgnoreCase)
+                || IsWithin(fullRoot, currentDirectory))
             {
-                string fullRoot = Path.GetFullPath(root);
-                string tempRoot = Path.GetFullPath(Path.GetTempPath());
-                string currentDirectory = Path.GetFullPath(Directory.GetCurrentDirectory());
-
-                if (IsWithin(fullRoot, tempRoot))
-                {
-                    failures.Add("HostUpdateExecution:RootDirectory must not be under the OS temp directory.");
-                }
-
-                if (string.Equals(fullRoot, currentDirectory, StringComparison.OrdinalIgnoreCase)
-                    || IsWithin(fullRoot, currentDirectory))
-                {
-                    failures.Add("HostUpdateExecution:RootDirectory must not be the process's current/working directory or a subdirectory of it.");
-                }
+                failures.Add("HostUpdateExecution:RootDirectory must not be the process's current/working directory or a subdirectory of it.");
             }
         }
 

@@ -7,6 +7,15 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
 /// <summary>Thrown when active work has not safely finished within the bounded drain timeout.</summary>
 public sealed class HostUpdateDrainTimeoutException(string detail) : TimeoutException(detail);
+
+/// <summary>
+/// Thrown by a real submission/scheduling call site (Kane audit follow-up, issue #2663) when it
+/// consults <see cref="IHostUpdateAdmissionGate.IsClosedAsync"/> and finds the gate closed by an
+/// in-progress host update's drain step. Not thrown by the gate itself -- each protected call
+/// site owns checking the gate and throwing this so the failure is attributable to exactly the
+/// submission path that was rejected.
+/// </summary>
+public sealed class HostUpdateAdmissionClosedException() : InvalidOperationException("host_update_admission_closed");
 #pragma warning restore CA1032
 
 /// <summary>

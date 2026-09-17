@@ -165,7 +165,16 @@ public static class HostUpdateExecutionStartup
                 TimeSpan.FromSeconds(options.BackupTimeoutSeconds),
                 options.DatabaseExternallyOwned);
         });
-        services.AddScoped<IEnumerable<IHostUpdateBackupTarget>>(sp =>
+
+        // Bishop/Hicks review (issue #2663): do NOT register IEnumerable<IHostUpdateBackupTarget>
+        // explicitly. The .NET container implements GetServices<T>() as GetRequiredService<IEnumerable<T>>();
+        // an explicit registration for IEnumerable<IHostUpdateBackupTarget> whose own factory calls
+        // sp.GetServices<IHostUpdateBackupTarget>() therefore resolves itself and recurses without bound
+        // (a self-referential registration graph, confirmed reproducible via
+        // HostUpdateBackupDiStartupTests). Build the concrete IReadOnlyList<IHostUpdateBackupTarget>
+        // directly instead: GetServices<IHostUpdateBackupTarget>() safely uses the container's built-in
+        // multi-registration aggregation because no IEnumerable<IHostUpdateBackupTarget> override exists.
+        services.AddScoped<IReadOnlyList<IHostUpdateBackupTarget>>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             List<IHostUpdateBackupTarget> targets = [.. sp.GetServices<IHostUpdateBackupTarget>()];
@@ -174,7 +183,6 @@ public static class HostUpdateExecutionStartup
                 new DirectoryCopyBackupTarget(pair.Key, pair.Value, isRequired: !optionalDirectoryNames.Contains(pair.Key))));
             return targets;
         });
-        services.AddScoped<IReadOnlyList<IHostUpdateBackupTarget>>(sp => [.. sp.GetRequiredService<IEnumerable<IHostUpdateBackupTarget>>()]);
         services.AddScoped<IHostUpdateBackupCoordinator>(sp => new HostUpdateBackupCoordinator(
             sp.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>(),
             sp.GetRequiredService<HostUpdateExecutionOptions>().BackupRootDirectory));

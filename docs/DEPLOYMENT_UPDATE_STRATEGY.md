@@ -171,9 +171,13 @@ beyond the admission gate, queue outbox publisher,
 `MaintenanceAlertHostedService`, `CatalogUpdateDetectionService`,
 `VerifiedReleaseDiscoveryMonitorService`, `OrphanedJobSyncStartupService`,
 `HistorySeedingBackgroundService`, `ActiveExternalJobSyncBackgroundService`);
-the admission gate is not yet wired into every real submission/scheduling/
-slicing/printer-command/bridge call site; and controller-level request
-fingerprint binding, replay/stale-plan checks, and crash-resume idempotency
+the admission gate is wired into exactly one real chokepoint today
+(`JobQueueService.AddJobToQueueAsync`, covering OctoPrint upload+print, manual UI
+queue-add, and direct API calls) and is not yet wired into printer-command
+dispatch (`JobQueueController`'s `/dispatch`/`/dispatch-to`,
+`AutoDispatchController`), slicer-job submission, or bridge/webhook ingress; and
+controller-level request fingerprint binding, replay/stale-plan checks, and
+crash-resume idempotency
 for individual side-effecting operations are owned by the scheduler
 integration work (issues #2665/#2666), not this physical-adapter slice.
 

@@ -93,9 +93,15 @@ public interface IHostUpdateFenceCoordinator
 }
 
 /// <summary>
-/// Fences the HTTP admission perimeter: once quiesced, the perimeter reports quiesced
-/// immediately because <see cref="IHostUpdateAdmissionGate"/> is consulted synchronously by
-/// every new request (there is no window for a new write to start after closing).
+/// Fences the HTTP admission perimeter. <see cref="IsQuiescedAsync"/> reports the gate's own
+/// closed/open state; the gate genuinely blocks a submission only where a real call site
+/// explicitly consults <see cref="IHostUpdateAdmissionGate.IsClosedAsync"/> before admitting new
+/// work (currently: new job-queue submissions via
+/// <see cref="Farm.Infrastructure.Services.Queue.JobQueueService.AddJobToQueueAsync"/> --
+/// see <c>docs/HOST_UPDATE_EXECUTOR.md</c>'s "Known limitations" for exactly which
+/// submission/scheduling/slicing/printer-command/bridge paths are not yet wired). Closing the
+/// gate without every real call site wired does not, by itself, guarantee no new write starts;
+/// this class only proves the gate itself flipped, not that every producer honors it.
 /// </summary>
 public sealed class AdmissionFenceableWriter(IHostUpdateAdmissionGate admissionGate) : IFenceableWriter
 {

@@ -111,8 +111,36 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
     }
     public void Append(HostUpdateExecutionActivity activity)
     {
-        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? "."); string previous = string.Empty; if (File.Exists(path)) { string? last = File.ReadLines(path).LastOrDefault(); if (last is null) throw new InvalidDataException("journal_corrupt"); previous = JsonSerializer.Deserialize<JournalRecord>(last)?.Hash ?? throw new InvalidDataException("journal_corrupt"); }
+        Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
+
+        // Kane/Bishop/Hicks review (issue #2663): the atomic temp-file-then-move pattern used here
+        // for crash safety must still preserve every prior record. An earlier version wrote only
+        // the newest line to the temp file before moving it over `path`, which silently truncated
+        // the entire hash-chained journal down to its last entry on every append. Read the full
+        // existing chain first and re-write it in full (existing lines + the new one) so a crash
+        // between the write and the move can never observe a shorter-than-before journal, and a
+        // successful move preserves the full chain rather than replacing it.
+        string[] existingLines = File.Exists(path) ? File.ReadAllLines(path) : [];
+        string previous = string.Empty;
+        if (File.Exists(path))
+        {
+            if (existingLines.Length == 0)
+            {
+                throw new InvalidDataException("journal_corrupt");
+            }
+
+            string last = existingLines[^1];
+            previous = JsonSerializer.Deserialize<JournalRecord>(last)?.Hash ?? throw new InvalidDataException("journal_corrupt");
+        }
+
         string payload = JsonSerializer.Serialize(activity); string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(previous + payload))).ToLowerInvariant(); string line = JsonSerializer.Serialize(new JournalRecord(previous, payload, hash, activity)); string temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        File.WriteAllText(temp, line + Environment.NewLine, new UTF8Encoding(false)); using (FileStream stream = new(temp, FileMode.Open, FileAccess.Read, FileShare.Read)) stream.Flush(true); File.Move(temp, path, true);
+        var builder = new StringBuilder();
+        foreach (string existingLine in existingLines)
+        {
+            builder.Append(existingLine).Append(Environment.NewLine);
+        }
+
+        builder.Append(line).Append(Environment.NewLine);
+        File.WriteAllText(temp, builder.ToString(), new UTF8Encoding(false)); using (FileStream stream = new(temp, FileMode.Open, FileAccess.Read, FileShare.Read)) stream.Flush(true); File.Move(temp, path, true);
     }
 }

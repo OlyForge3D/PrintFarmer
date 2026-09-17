@@ -26,12 +26,16 @@ public class HostUpdateExecutionOptionsValidatorTests
     }
 
     [Fact]
-    public void Validate_MissingRootDirectory_Fails()
+    public void Validate_MissingRootDirectory_SucceedsAsOptionalDefaultOffFeature()
     {
+        // Bishop/Hicks review (issue #2663): RootDirectory is optional/default-off. No supported
+        // deployment shape configures it today, so requiring it unconditionally crashed every
+        // host at startup the instant AddHostUpdateExecution is registered. An unconfigured root
+        // must not fail process start; HostUpdateExecutionAvailabilityProvider is the runtime
+        // choke point that reports root_directory_not_configured as Unavailable to callers.
         ValidateOptionsResult result = Validator.Validate(null, new HostUpdateExecutionOptions { RootDirectory = string.Empty });
 
-        result.Failed.Should().BeTrue();
-        result.FailureMessage.Should().Contain("RootDirectory is required");
+        result.Succeeded.Should().BeTrue();
     }
 
     [Fact]

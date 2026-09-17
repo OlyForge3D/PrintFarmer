@@ -1,0 +1,97 @@
+using System.Collections.Generic;
+using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Web.Api.Startup;
+using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
+using Xunit;
+
+namespace Farm.Web.Api.Tests.Startup;
+
+/// <summary>
+/// Bishop/Hicks review (issue #2663): <c>HostUpdateExecutionStartup.AddHostUpdateExecution</c>
+/// previously registered <c>IEnumerable&lt;IHostUpdateBackupTarget&gt;</c> explicitly, whose own
+/// factory called <c>sp.GetServices&lt;IHostUpdateBackupTarget&gt;()</c> -- which the .NET
+/// container implements as <c>GetRequiredService&lt;IEnumerable&lt;IHostUpdateBackupTarget&gt;&gt;()</c>,
+/// so the explicit registration resolved itself and recursed without bound (an unrecoverable
+/// <see cref="System.StackOverflowException"/> the first time anything actually asked for the
+/// backup target list -- not merely a slow/incorrect result). This test proves the real DI graph
+/// this startup method wires resolves <see cref="IReadOnlyList{T}"/> of
+/// <see cref="IHostUpdateBackupTarget"/> (and its dependents) without recursing.
+/// </summary>
+public sealed class HostUpdateExecutionStartupDiGraphTests
+{
+    private static IConfiguration BuildConfiguration(string rootDirectory) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["HostUpdateExecution:RootDirectory"] = rootDirectory,
+            })
+            .Build();
+
+    // Must satisfy HostUpdateExecutionOptionsValidator (absolute; not under the OS temp
+    // directory; not the current/working directory or a subdirectory of it) because resolving
+    // IOptions<HostUpdateExecutionOptions>.Value always runs IValidateOptions, independent of
+    // ValidateOnStart's eager host-startup hook.
+    private static string CreateValidRoot() =>
+        Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "pf-hostupdate-di-graph-" + Guid.NewGuid().ToString("N"));
+
+    [Fact]
+    public void AddHostUpdateExecution_ResolvingBackupTargetList_DoesNotRecurseAndReturnsRealTargets()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            using IServiceScope scope = provider.CreateScope();
+
+            IReadOnlyList<IHostUpdateBackupTarget> targets = scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>();
+
+            // At minimum, every directory in HostUpdateExecutionOptions.OwnedDirectories plus the
+            // database target itself must be present -- proving the factory actually built a
+            // real, non-empty list rather than merely avoiding an exception.
+            Assert.True(targets.Count >= 2);
+            Assert.Contains(targets, t => t.Name == "database");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_ResolvingBackupCoordinator_DoesNotRecurse()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            using IServiceScope scope = provider.CreateScope();
+
+            IHostUpdateBackupCoordinator coordinator = scope.ServiceProvider.GetRequiredService<IHostUpdateBackupCoordinator>();
+
+            Assert.NotNull(coordinator);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+}

@@ -59,14 +59,24 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
             using HttpResponseMessage response = await client.GetAsync(relativeUrl, cancellationToken).ConfigureAwait(false);
             string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
             using JsonDocument document = JsonDocument.Parse(body);
-            return document.RootElement.TryGetProperty("Status", out JsonElement statusElement) &&
-                string.Equals(statusElement.GetString(), "Healthy", StringComparison.Ordinal);
+
+            // Bishop/Hicks review (issue #2663): the real /health response is serialized with
+            // Program.HealthJsonOptions (PropertyNamingPolicy = JsonNamingPolicy.CamelCase), so
+            // the wire property is "status", never "Status". JsonElement.TryGetProperty is
+            // ordinal/case-sensitive, so looking up the PascalCase name here always missed --
+            // this health check silently reported unhealthy for every real response, which was
+            // caught only by feeding it an actual serialized fixture instead of a hand-built one.
+            return TryGetStatusProperty(document.RootElement, out JsonElement statusElement) &&
+                string.Equals(statusElement.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
         {
             return false;
         }
     }
+
+    private static bool TryGetStatusProperty(JsonElement root, out JsonElement statusElement) =>
+        root.TryGetProperty("status", out statusElement) || root.TryGetProperty("Status", out statusElement);
 }
 
 /// <summary>Verifies the exact running image digest of one container against an expected pinned digest.</summary>

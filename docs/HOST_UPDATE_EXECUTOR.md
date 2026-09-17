@@ -87,6 +87,34 @@ against issue #2663.
 
 ## Known limitations
 
+- Bishop/Hicks review of the base commit surfaced (and this slice fixed, with tests) five
+  critical defects: `FileHostUpdateExecutionJournal.Append` silently truncated the entire
+  hash-chained journal to its newest record on every append (a temp-file-then-move pattern that
+  wrote only the new line before moving it over the real path); `AddHostUpdateExecution`
+  registered `IEnumerable<IHostUpdateBackupTarget>` explicitly with a factory that itself called
+  `sp.GetServices<IHostUpdateBackupTarget>()`, which the .NET container resolves as
+  `IEnumerable<IHostUpdateBackupTarget>` again -- an unbounded self-recursive registration that
+  would `StackOverflowException` the process the first time anything resolved the backup target
+  list; `HostUpdateExecutionOptionsValidator`'s `.ValidateOnStart()` required `RootDirectory` (and
+  every other host-update-execution option) unconditionally, but no supported deployment shape
+  configures it, so the entire API crashed at startup the moment `AddHostUpdateExecution` was
+  registered; and `AggregateHostUpdateHealthCheck` looked up the real `/health` payload's status
+  under the PascalCase key `Status`, but `ProgramHelpers.WriteHealthResponseAsync` serializes with
+  `Program.HealthJsonOptions` (`PropertyNamingPolicy = JsonNamingPolicy.CamelCase`), so the wire
+  property is `status` -- the lookup silently always missed, meaning verify always reported
+  unhealthy for a real response (masked in the original tests, which used a hand-built PascalCase
+  fixture that happened to match the bug). See `HostUpdateExecutorTests`,
+  `HostUpdateExecutionStartupDiGraphTests`, `HostUpdateExecutionOptionsValidatorTests`, and
+  `AggregateHostUpdateHealthCheckTests` for the regression coverage.
+- **Still open, not yet implemented**: a startup reconciliation hosted service that reads durable
+  nonterminal/recovery journal state on process restart and re-establishes the persistent fence
+  before any writer resumes (releasing the fence only after a verified successful recovery, and
+  persisting `NeedsOperator` when release itself fails or recovery is uncertain) does not exist
+  yet. Today, a process restart mid-execution leaves the journal's last recorded state on disk,
+  but nothing on startup reads it and re-drives recovery/fencing automatically; an operator must
+  currently notice and drive `IHostUpdateRestoreExecutor`/recovery manually. This is the next
+  planned increment; the executor remains explicitly `Unavailable`-reportable, never
+  silently-successful, until it lands.
 - Split-topology deployments where `AppDbContext` and `SlicerDbContext` point at genuinely
   different physical databases are not yet handled by the single shared database backup/restore
   target. Preflight now fails closed (`split_database_not_supported`) whenever the two contexts'
@@ -116,9 +144,17 @@ against issue #2663.
   in `HostUpdateExecutionOptions.RequiredFencedWriterNames`; it cannot detect a writer that was
   never added to that list in the first place, so extending coverage still requires deliberate,
   audited work per writer rather than a generic scan. The admission gate itself
-  (`IHostUpdateAdmissionGate`) is also not yet wired into every real submission/scheduling/
-  slicing/printer-command/bridge call site — only the paths that already call it are actually
-  protected from admitting new work during a drain.
+  (`IHostUpdateAdmissionGate`) is wired into exactly one real submission chokepoint today:
+  `JobQueueService.AddJobToQueueAsync` (which "OctoPrint upload+print", "Manual queue from UI",
+  and "Direct API calls" all funnel through) consults `IsClosedAsync` and throws
+  `HostUpdateAdmissionClosedException` rather than admitting a new print job while the drain step
+  has the gate closed. It is **not yet** wired into printer-command dispatch
+  (`JobQueueController`'s `/dispatch`/`/dispatch-to`, `AutoDispatchController`), slicer-job
+  submission, or any bridge/webhook ingress path — those remain open call sites that can still
+  admit new work during a drain. `AdmissionFenceableWriter.IsQuiescedAsync` reports only that the
+  gate itself has flipped closed, not that every producer honors it; do not read a quiesced
+  admission-gate report as proof that no new physical work can start until the remaining call
+  sites above are wired and audited the same way.
 - PostgreSQL/SQL Server backup and restore commands are invoked as a structured process argument
   list with the connection password passed only via an environment variable (`PGPASSWORD` /
   `SQLCMDPASSWORD`), never on the command line and never through a shell (`sh -c`) string — closing
