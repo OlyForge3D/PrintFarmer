@@ -234,6 +234,20 @@
         "rationale": "Syft detects the installed gosu binary from its Go module path but cannot recover a build version or license; the exact upstream module and immutable license blob supply the missing declaration."
       }
     ],
+    "nativeComponentEvidence": [
+      {
+        "namePattern": "^e_sqlite3$",
+        "versionPattern": "^3\\.52\\.0(\\.0)?$",
+        "approvedExpression": "blessing",
+        "supplier": "Organization: SQLite (public domain dedication)",
+        "sourceUrl": "https://sqlite.org/copyright.html",
+        "evidence": "Syft's generic binary cataloger detects the native e_sqlite3 shared library bundled by SQLitePCLRaw.lib.e_sqlite3 without a package-manager identity or license marker; the embedded SQLite amalgamation version 3.52.0 corresponds to SQLitePCLRaw.lib.e_sqlite3 3.53.3, whose reviewed LICENSE.txt (SHA-256 99464c3a88df7b708ce59e462cdcb85f72dfc9b1335b4fcc68be56131b634b95) states SQLite is public domain and links https://sqlite.org/copyright.html",
+        "reviewer": "Copilot App",
+        "reviewDate": "2026-09-17",
+        "reviewAfter": "2027-09-17",
+        "rationale": "This binary carries no PURL, download location, or supplier because Syft classifies it as an unmanaged native artifact rather than a NuGet package; matching on the exact generated name and embedded SQLite version (not the NuGet package version) supplies the same reviewed SQLite public-domain conclusion already approved for SQLitePCLRaw.lib.e_sqlite3 and SourceGear.sqlite3 without broadening acceptance of other unresolved components."
+      }
+    ],
     "distroAliases": [
       {
         "name": "libzstd",
