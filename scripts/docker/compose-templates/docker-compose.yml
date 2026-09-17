@@ -93,6 +93,9 @@ services:
       - Jwt__Key=${Jwt__Key:?Jwt__Key must be set to a unique 32+ byte secret. Run the deploy installer (scripts/deploy-docker.sh) to generate one, or set Jwt__Key in your environment/.env file.}
       - Jwt__Issuer=${Jwt__Issuer:-PrintFarmer}
       - Jwt__Audience=${Jwt__Audience:-PrintFarmer}
+      - WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:-localhost}
+      - WebAuthn__RelyingPartyName=${WebAuthn__RelyingPartyName:-PrintFarmer}
+      - WebAuthn__Origin=${WebAuthn__Origin:-http://localhost:3000}
       # Slicer host that owns the calibration profile store in split deployments.
       # The API resolves calibration profiles over an authenticated internal HTTP hop to this
       # address, forwarding the caller's own bearer token. Without a reachable resolver,

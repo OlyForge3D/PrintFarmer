@@ -3124,7 +3124,7 @@ CONFIG_FILE="$REPO_ROOT/.deploy-config"
 # empty override is preserved and still fails validation downstream rather than
 # being silently replaced by a persisted value. Uses eval rather than an
 # associative array to stay Bash 3.2 compatible (macOS /bin/bash).
-CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT"
+CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
 
 capture_config_overrides() {
     local name
@@ -3146,6 +3146,28 @@ restore_config_overrides() {
               fi
               unset _CONFIG_OVERRIDE_SET_${name} _CONFIG_OVERRIDE_VAL_${name}"
     done
+}
+
+resolve_webauthn_configuration() {
+    local server_host="${SERVER_HOST:-localhost}"
+    local port_suffix=""
+
+    WebAuthn__RelyingPartyId="${WebAuthn__RelyingPartyId:-$server_host}"
+    WebAuthn__RelyingPartyName="${WebAuthn__RelyingPartyName:-PrintFarmer}"
+
+    if [ -z "${WebAuthn__Origin:-}" ]; then
+        if [ "${HTTPS_PORT:-0}" != "0" ]; then
+            if [ "${HTTPS_PORT}" != "443" ]; then
+                port_suffix=":${HTTPS_PORT}"
+            fi
+            WebAuthn__Origin="https://${server_host}${port_suffix}"
+        else
+            if [ "${HTTP_PORT:-80}" != "80" ]; then
+                port_suffix=":${HTTP_PORT}"
+            fi
+            WebAuthn__Origin="http://${server_host}${port_suffix}"
+        fi
+    fi
 }
 
 load_previous_config() {
@@ -3229,6 +3251,7 @@ save_deployment_config() {
     print_header "💾 Saving Deployment Configuration"
     
     print_info "Saving configuration to $CONFIG_FILE for future deployments"
+    resolve_webauthn_configuration
     
     # Decide which DB include flags to persist. Only persist flags for the
     # actively selected DB provider to avoid accidentally saving unrelated
@@ -3281,6 +3304,11 @@ NETWORK_MODE=${NETWORK_MODE:-bridge}
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${HTTPS_PORT:-0}
 SERVER_HOST=${SERVER_HOST:-localhost}
+
+# Passkey / WebAuthn Configuration
+WebAuthn__RelyingPartyId=$(printf '%q' "$WebAuthn__RelyingPartyId")
+WebAuthn__RelyingPartyName=$(printf '%q' "$WebAuthn__RelyingPartyName")
+WebAuthn__Origin=$(printf '%q' "$WebAuthn__Origin")
 
 # Application Settings - Pre-populate Setup Wizard  
 PFARM__NetworkDiscovery__EnableDiscovery=${ENABLE_DISCOVERY}
@@ -4790,6 +4818,7 @@ generate_env_file() {
 
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
     resolve_deployment_shared_keys || return 1
+    resolve_webauthn_configuration
     
     # Preserve existing secrets before overwriting .env file
     # This ensures JWT key and other secrets persist across redeploys
@@ -4963,6 +4992,11 @@ NETWORK_MODE=${NETWORK_MODE:-bridge}
 
 # CORS Configuration
 CORS__AllowedOrigins=$CORS_ORIGINS
+
+# Passkey / WebAuthn Configuration
+WebAuthn__RelyingPartyId=$WebAuthn__RelyingPartyId
+WebAuthn__RelyingPartyName=$WebAuthn__RelyingPartyName
+WebAuthn__Origin=$WebAuthn__Origin
 
 # Feature Flags  
 ENABLE_SWAGGER=$ENABLE_SWAGGER

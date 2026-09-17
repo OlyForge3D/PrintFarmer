@@ -17,6 +17,10 @@ services:
       # ASP.NET Core settings
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:5000
+      # Passkey / WebAuthn settings
+      - WebAuthn__RelyingPartyId=${WebAuthn__RelyingPartyId:-localhost}
+      - WebAuthn__RelyingPartyName=${WebAuthn__RelyingPartyName:-PrintFarmer}
+      - WebAuthn__Origin=${WebAuthn__Origin:-http://localhost:3000}
       # Storage paths
       - GCODE_STORAGE_PATH=/app/gcode
       - MODEL_UPLOAD_PATH=/app/models
