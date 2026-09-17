@@ -69,7 +69,7 @@ public class OpenApiDocumentTests
         using JsonDocument document = await JsonDocument.ParseAsync(content);
         JsonElement paths = document.RootElement.GetProperty("paths");
 
-        foreach (string path in ["/api/auth/passkey/register/begin", "/api/auth/passkey/login/begin"])
+        foreach (string path in new string[] { "/api/auth/passkey/register/begin", "/api/auth/passkey/login/begin" })
         {
             JsonElement schema = paths.GetProperty(path)
                 .GetProperty("post")
