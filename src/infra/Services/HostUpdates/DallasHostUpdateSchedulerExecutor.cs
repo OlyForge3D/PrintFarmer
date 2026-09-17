@@ -12,9 +12,20 @@ public sealed class DallasHostUpdateSchedulerExecutor(
     string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable
 {
     private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeRequests = new(StringComparer.Ordinal);
+    private int _disposed;
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
     {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
+        }
+
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
+        }
+
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
 
@@ -89,15 +100,5 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         }
     }
 
-    public void Dispose()
-    {
-        foreach (KeyValuePair<string, CancellationTokenSource> entry in _activeRequests.ToArray())
-        {
-            if (_activeRequests.TryRemove(entry))
-            {
-                entry.Value.Cancel();
-                entry.Value.Dispose();
-            }
-        }
-    }
+    public void Dispose() => Interlocked.Exchange(ref _disposed, 1);
 }

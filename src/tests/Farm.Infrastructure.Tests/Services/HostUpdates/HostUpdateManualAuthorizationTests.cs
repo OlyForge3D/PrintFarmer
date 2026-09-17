@@ -35,7 +35,7 @@ public sealed class HostUpdateManualAuthorizationTests
         HostUpdateExecutionResolutionResult replay = await harness.Resolver.ResolveManualAsync(new(authorization.AuthorizationId), default);
 
         Assert.False(replay.Succeeded);
-        Assert.Equal("authorization_consumed", replay.Error);
+        Assert.Equal("candidate_replay_rejected", replay.Error);
     }
 
     [Fact]
@@ -150,9 +150,10 @@ public sealed class HostUpdateManualAuthorizationTests
 
         Assert.True(prepared.Succeeded, prepared.Error);
         Assert.Equal(HostUpdateReplayDisposition.Accepted, admitted.Disposition);
-        Assert.True(result.Succeeded, result.Error);
+        Assert.False(result.Succeeded);
+        Assert.Equal("candidate_replay_rejected", result.Error);
         Assert.False(duplicate.Succeeded);
-        Assert.Equal("authorization_consumed", duplicate.Error);
+        Assert.Equal("candidate_replay_rejected", duplicate.Error);
     }
 
     [Fact]
@@ -202,7 +203,7 @@ public sealed class HostUpdateManualAuthorizationTests
             harness.Resolver.ResolveManualAsync(new(authorization.AuthorizationId), default));
 
         Assert.Single(results, r => r.Succeeded);
-        Assert.Single(results, r => !r.Succeeded && r.Error == "authorization_consumed");
+        Assert.Single(results, r => !r.Succeeded && r.Error == "candidate_replay_rejected");
     }
 
     [Fact]

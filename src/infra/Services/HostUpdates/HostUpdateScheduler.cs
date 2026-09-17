@@ -687,6 +687,8 @@ public sealed class HostUpdateScheduler(
     private readonly object _cancellationGate = new();
     private string? _activeRequestId;
     private bool _activeRequestSignaled;
+    private int _disposed;
+    private int _tickGateDisposed;
 
     public HostUpdateSchedulerStatus Status => _status;
 
@@ -703,19 +705,29 @@ public sealed class HostUpdateScheduler(
 
     public async Task<HostUpdateSchedulerStatus> TickAsync(CancellationToken ct = default)
     {
-        if (ct.IsCancellationRequested)
+        if (Volatile.Read(ref _disposed) != 0 || ct.IsCancellationRequested)
         {
             return _status with { Reason = HostUpdateSchedulerReason.HostShutdown };
         }
 
-        if (!await _tickGate.WaitAsync(0, ct))
+        bool entered;
+        try
+        {
+            entered = await _tickGate.WaitAsync(0, ct);
+        }
+        catch (ObjectDisposedException)
+        {
+            return _status with { Reason = HostUpdateSchedulerReason.HostShutdown };
+        }
+
+        if (!entered)
         {
             return _status with { Reason = HostUpdateSchedulerReason.UpdateAlreadyRunning };
         }
 
         try
         {
-            if (ct.IsCancellationRequested)
+            if (Volatile.Read(ref _disposed) != 0 || ct.IsCancellationRequested)
             {
                 return _status with { Reason = HostUpdateSchedulerReason.HostShutdown };
             }
@@ -909,27 +921,63 @@ public sealed class HostUpdateScheduler(
         finally
         {
             _tickGate.Release();
+            TryDisposeTickGate();
         }
     }
 
-    public Task SignalSafeCheckpointCancellationAsync(CancellationToken ct = default)
+    public async Task SignalSafeCheckpointCancellationAsync(CancellationToken ct = default)
     {
         string? requestId;
         lock (_cancellationGate)
         {
-            if (_activeRequestId is null || _activeRequestSignaled)
+            if (Volatile.Read(ref _disposed) != 0 || _activeRequestId is null || _activeRequestSignaled)
             {
-                return Task.CompletedTask;
+                return;
             }
 
             requestId = _activeRequestId;
             _activeRequestSignaled = true;
         }
 
-        return executor.SignalSafeCheckpointCancellationAsync(requestId, ct);
+        try
+        {
+            await executor.SignalSafeCheckpointCancellationAsync(requestId, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            lock (_cancellationGate)
+            {
+                if (string.Equals(_activeRequestId, requestId, StringComparison.Ordinal))
+                {
+                    _activeRequestSignaled = false;
+                }
+            }
+            throw;
+        }
     }
 
-    public void Dispose() => _tickGate.Dispose();
+    public void Dispose()
+    {
+        Interlocked.Exchange(ref _disposed, 1);
+        TryDisposeTickGate();
+    }
+
+    private void TryDisposeTickGate()
+    {
+        if (Volatile.Read(ref _disposed) == 0 || Interlocked.CompareExchange(ref _tickGateDisposed, 1, 0) != 0)
+        {
+            return;
+        }
+
+        if (_tickGate.Wait(0))
+        {
+            _tickGate.Release();
+            _tickGate.Dispose();
+            return;
+        }
+
+        Volatile.Write(ref _tickGateDisposed, 0);
+    }
 
     private static bool ShouldPersistTerminalRejection(VerifiedHostUpdateCandidate candidate, HostUpdateSchedulerReason reason) =>
         candidate.CryptographicallyVerified && reason is

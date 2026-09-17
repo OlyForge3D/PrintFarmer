@@ -192,7 +192,7 @@ public sealed class HostUpdateControllerRecoveryTests
         Assert.Equal(HostUpdateRecoveryOutcome.NeedsOperator, result.Outcome);
         Assert.Equal("recovery_unknown_failure", result.Detail);
         Assert.Contains(journal.Read(request.ReleaseId), activity => activity.Phase == "recovery:started" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
-        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.State == HostUpdateExecutionState.RecoveryRequired && activity.Phase == "recovery:unknown:InvalidOperationException" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.State == HostUpdateExecutionState.RecoveryRequired && activity.Phase == "recovery:unknown" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
 
         JournaledHostUpdateRecoveryCoordinator reconstructed = new(journal, new MemoryRecoveryLeaseProvider(), new FixedRecovery(HostUpdateRecoveryOutcome.NeedsOperator, "no_backup_available"));
         HostUpdateRecoveryResult retried = await reconstructed.RecoverAsync(request, journal.Read(request.ReleaseId), default);

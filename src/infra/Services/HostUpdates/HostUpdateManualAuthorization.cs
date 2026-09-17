@@ -517,7 +517,7 @@ public sealed class HostUpdateExecutionRequestResolver(
             return HostUpdateExecutionResolutionResult.Fail("replay_unavailable");
         }
 
-        if (replay.Disposition != HostUpdateReplayDisposition.Accepted)
+        if (replay.Disposition != HostUpdateReplayDisposition.Accepted || replay.Reused)
         {
             return HostUpdateExecutionResolutionResult.Fail("candidate_replay_rejected");
         }
@@ -564,7 +564,7 @@ public sealed class HostUpdateExecutionRequestResolver(
                 return HostUpdateExecutionResolutionResult.Fail("replay_unavailable");
             }
 
-            if (replay.Disposition != HostUpdateReplayDisposition.Accepted)
+            if (replay.Disposition != HostUpdateReplayDisposition.Accepted || replay.Reused)
             {
                 return HostUpdateExecutionResolutionResult.Fail("candidate_replay_rejected");
             }

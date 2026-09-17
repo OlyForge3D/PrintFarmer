@@ -278,7 +278,7 @@ public sealed class HostStatePersistenceTests
     public void HostStateOwnerValidation_UsesArchitectureSpecificStatxSyscallNumbers()
     {
         Assert.Equal(332, HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.X64));
-        Assert.Equal(397, HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.Arm64));
+        Assert.Equal(291, HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.Arm64));
         Assert.Throws<PlatformNotSupportedException>(() => HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.X86));
     }
 
@@ -292,7 +292,7 @@ public sealed class HostStatePersistenceTests
         // not overlapping offsets into a raw/fragile stat buffer, so swapping owner/group can never
         // happen regardless of which architecture selected the syscall.
         long syscallNumber = HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(architecture);
-        Assert.True(syscallNumber is 332 or 397);
+        Assert.True(syscallNumber is 332 or 291);
 
         HostStateFileSecurity.NativeMethods.LinuxStatx stat = default;
         stat.Mask = 0x7ff;

@@ -185,8 +185,9 @@ public static class HostStateFileSecurity
     {
         private const int AtFdcwd = -100;
         private const uint StatxBasicStats = 0x7ff;
+        private const uint StatxUid = 0x0008;
         private const long SysStatxX64 = 332;
-        private const long SysStatxArm64 = 397;
+        private const long SysStatxArm64 = 291;
 
         [StructLayout(LayoutKind.Sequential)]
         internal struct LinuxStatx
@@ -247,7 +248,7 @@ public static class HostStateFileSecurity
 
             LinuxStatx stat = default;
             long result = Syscall(syscallNumber, AtFdcwd, path, 0, StatxBasicStats, ref stat);
-            if (result != 0 || (stat.Mask & StatxBasicStats) == 0)
+            if (result != 0 || (stat.Mask & StatxUid) == 0)
             {
                 throw new IOException("host_state_owner_stat_failed");
             }
