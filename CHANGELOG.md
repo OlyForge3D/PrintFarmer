@@ -6,6 +6,10 @@
 
 ### Fixes
 
+- Prepare the diagnostic-only Workflows-write hypothesis test for #2741,
+  admitting only run 3 / attempt 1 with both prior runs preserved. Parent-approved
+  App/installation grants and one invocation remain separate; this is not a
+  verified fix, release publication, or unsigned-reservation recovery.
 - Add the owner-authorized, fixed-target one-shot tag diagnostic for #2736;
   success creates only the tag and leaves the release reservation incomplete.
 - Release GitHub failures preserve bounded, sanitized validation and permission

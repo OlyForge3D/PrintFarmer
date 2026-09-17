@@ -128,25 +128,51 @@ run `35046281532`, attempt 1. An already-existing ref fails closed, even when ex
 No new allocation, ledger read/write, signing, qualification, tests, builds,
 containers, assets, releases, aliases or pointers run in this workflow.
 
-The parent coordinator owns merge permission and the single live invocation.
-Before invoking, read-only checks must establish:
+Issue #2741 authorizes a **Workflows-write hypothesis test**, not a proven fix.
+The second diagnostic's bounded result reported HTTP 403 `permission-denied`,
+not a recognized workflow-specific denial. The original publisher's discarded
+422 body remains unexplained. GitHub's [create-reference documentation](https://docs.github.com/en/rest/git/refs#create-a-reference)
+lists Contents and Contents-plus-Workflows permission sets; it does not establish
+which applies to this exact request.
+
+The parent coordinator owns merge approval, action-specific live App/installation
+grant confirmations and readback, and the single authorized invocation.
+Before invoking, establish:
 
 1. The reviewed PR is merged and its implementation is present on `development`.
    The original workflow ID `359999367` is active at that unchanged path and has
-   **exactly one** previous run: `35159038922`, number 1 / attempt 1 at
+   **exactly two** previous runs: `35159038922`, number 1 / attempt 1 at
    `c517cea2a78e176b2cec436986290c8a767fba04`. Its read-only admission failed;
    request job `105005305468` was skipped with no steps. Boundary job
    `105005241763` must still show the exact failed `Read-only admission` step,
    successful setup and unchanged terminal job/step evidence.
+   Run `35163951895`, number 2 / attempt 1 at
+   `62e8d5c80296ea6de72e986b725524b4acbb0343`, must preserve successful boundary
+   job `105020735400` and failed request job `105020794364`: both preflights
+   and mint succeeded, the request step failed, and token cleanup completed.
+   These job/step conclusions do **not** prove an HTTP status or its cause.
    Do not use a dispatch as a dry run: even a failed or cancelled admission spends
-   the single successor slot explicitly authorized in #2739.
+   the single run-3 slot explicitly authorized in #2741.
 2. No `consolidated-release.yml` run is queued, requested, pending, waiting or in
    progress, for **either** channel. Keep publishers quiescent throughout the
    diagnostic; start no canonical run until it stops.
 3. The owner still authorizes possible **permanent tag creation**. The fixed ref
    remains absent and the annotation/source binding is unchanged. Existing
    `release-insider`, owner mode and App `4927270` / installation `161288519`
-   are unchanged; no extra permissions or copied secrets are authorized.
+   retain their identities. The parent must obtain action-specific approval
+   immediately before adding **Workflows: write** to that App registration and
+   accepting it on that installation, then read back both grants. Retain
+   PrintFarmer-only repository selection, Administration/Contents write and
+   Actions/Checks/Statuses/Metadata read; no unrelated permission changes.
+   Workflows write permits modifying workflow files. No new App, environment,
+   credentials or configuration copying is authorized. Keep the existing
+   environment development-only, with no review gate and admin bypass false.
+4. Confirm the merged diagnostic requests `permission-workflows: write`
+   explicitly, in addition to its unchanged existing permissions and pinned
+   token action. Both the App/installation grant **and** the explicit token
+   request are necessary: a token cannot exceed its installation's grants.
+   See [installation-token permissions](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
+   Canonical publication/abandonment token requests remain unchanged.
 
 Only after those checks and approved merge, the parent may perform the one
 invocation as `jpapiez` (not performed by the implementation session):
@@ -165,17 +191,20 @@ pinned token action. A missing or wrong protected value fails before minting.
 The no-secret boundary verifies the live owner account and administrator role,
 run/workflow/control identity, complete history, environment, source binding and
 publisher quiescence. The protected job repeats these checks before obtaining
-the same pinned publisher App token with exactly the existing permissions.
+the same pinned publisher App token with only Workflows write added to its
+explicit permission request for this diagnostic.
 Before the POST it rechecks history/quiescence and live protection twice, using
 the canonical protection validators without manufacturing a release transaction
 or signed authority. Additional active tag/push rules fail closed for review;
 no claim is made that an unknown rule or Workflows permission cannot matter.
 
-**Bounded successor enforcement:** the live API must report `run_number: 2` and
+**Bounded successor enforcement:** the live API must report `run_number: 3` and
 `run_attempt: 1`, matching the runner, and complete unfiltered history must contain
-exactly that run plus the prior run above. The prior run is re-read live and
-its attempt-specific jobs must prove the exact admission failure and skipped
-request, not merely an overall failed conclusion. First/third runs, any rerun,
+exactly that run plus both prior runs above. Both prior runs are re-read live with
+their exact source/identity and complete attempt-specific job/step evidence.
+Run 1 must retain its admission failure/skipped request; run 2 must retain its
+successful preflights/mint, failed request step and completed cleanup.
+First/second/fourth or later runs, any rerun,
 deleted, extra, missing, malformed or incomplete run/job evidence fail closed.
 This is not a generic retry mechanism. Complete pagination is required.
 This relies on GitHub's
@@ -192,7 +221,7 @@ and lock acquisition can still lose that pending slot. Stable has a different
 lock, and an API snapshot is not atomic exclusion. The quiescence prerequisite
 above is essential; this is not a global-lock redesign.
 
-The client performs at most one POST, including on HTTP 422 or a transport error,
+The client performs at most one POST, including on HTTP 403/422, timeout or transport error,
 then only an exact ref/type/object read-back on success. Failure diagnostics use
 the existing 8 KiB bounded sanitizer; unknown transport/runtime details are
 omitted. No raw policy, annotation, response body, URL, header or credential is
@@ -204,10 +233,16 @@ Read the final request step's bounded result. Verified success says **tag create
 only; reservation remains incomplete**, never recovered/published. A timeout,
 transport loss or failed verification can leave tag creation uncertain: inspect
 read-only, never retry. A 422 category is evidence from this new request, not a
-reconstruction of the discarded original body. Preserve that distinction.
-After **any successor attempt**, retire/remove this diagnostic workflow and its
+reconstruction of the discarded original body. A changed outcome tests this
+permission hypothesis only; a generic 403 still does not establish a
+workflow-specific cause. Preserve that distinction. The unsigned sequence-1
+allocation still has no signed authority and remains unresolved even if the
+tag succeeds; do not reconstruct, sign, abandon, delete/reset/reuse the tag,
+or proceed to publication.
+After **any run-3 attempt**, retire/remove this diagnostic workflow and its
 single-purpose script in a reviewed change. Do not rerun or redispatch; retirement
-does not abandon or repair the unresolved reservation.
+does not abandon or repair the unresolved reservation. Preserve all run history;
+never delete history or recreate/reset the workflow to reopen a slot.
 
 ## Signed release-set consumer contract
 

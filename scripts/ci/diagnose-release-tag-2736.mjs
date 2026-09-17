@@ -15,6 +15,8 @@ export const diagnostic = Object.freeze({
   workflowId: 359999367,
   priorRun: 35159038922,
   priorSource: 'c517cea2a78e176b2cec436986290c8a767fba04',
+  priorRequestRun: 35163951895,
+  priorRequestSource: '62e8d5c80296ea6de72e986b725524b4acbb0343',
 });
 const historyEndpoint = 'actions/workflows/diagnose-release-tag-2736.yml/runs?per_page=100';
 let requestSpent = false;
@@ -28,17 +30,22 @@ function sameRun(entry, run) {
       ['id', 'full_name'].every(field => entry?.[key]?.[field] === run[key][field]));
 }
 
-async function verifyPriorAdmission(api, run) {
-  const prior = await api(`actions/runs/${diagnostic.priorRun}`);
-  requireThat(prior?.id === diagnostic.priorRun && prior.run_number === 1 && prior.run_attempt === 1 &&
+async function verifyPriorFailure(api, run, id, number, source) {
+  const prior = await api(`actions/runs/${id}`);
+  requireThat(prior?.id === id && prior.run_number === number && prior.run_attempt === 1 &&
     prior.workflow_id === diagnostic.workflowId && prior.path === diagnostic.workflow &&
-    prior.head_sha === diagnostic.priorSource && prior.head_branch === 'development' &&
+    prior.head_sha === source && prior.head_branch === 'development' &&
     prior.event === 'workflow_dispatch' && prior.status === 'completed' && prior.conclusion === 'failure' &&
     ['repository', 'head_repository'].every(key =>
       prior[key]?.full_name === repository && prior[key]?.id === run.repository.id) &&
     ['actor', 'triggering_actor'].every(key =>
       ['id', 'login', 'type'].every(field => prior[key]?.[field] === run.actor[field])),
-  'Exact prior diagnostic run must remain an initial terminal admission failure');
+  'Exact prior diagnostic run must remain an initial terminal failure');
+  return prior;
+}
+
+async function verifyPriorAdmission(api, run) {
+  const prior = await verifyPriorFailure(api, run, diagnostic.priorRun, 1, diagnostic.priorSource);
   const evidence = await api(`actions/runs/${diagnostic.priorRun}/attempts/1/jobs?per_page=100`);
   const boundary = evidence?.jobs?.find(job => job?.id === 105005241763);
   const request = evidence?.jobs?.find(job => job?.id === 105005305468);
@@ -63,19 +70,59 @@ async function verifyPriorAdmission(api, run) {
   return prior;
 }
 
+async function verifyPriorRequest(api, run) {
+  const prior = await verifyPriorFailure(api, run, diagnostic.priorRequestRun, 2, diagnostic.priorRequestSource);
+  const evidence = await api(`actions/runs/${diagnostic.priorRequestRun}/attempts/1/jobs?per_page=100`);
+  const boundary = evidence?.jobs?.find(job => job?.id === 105020735400);
+  const request = evidence?.jobs?.find(job => job?.id === 105020794364);
+  requireThat(evidence?.total_count === 2 && Array.isArray(evidence.jobs) && evidence.jobs.length === 2 &&
+    boundary?.name === 'Verify owner and successor boundary without publisher credentials' &&
+    boundary.conclusion === 'success' &&
+    request?.name === 'Attempt the single fixed tag request and stop' && request.conclusion === 'failure' &&
+    [boundary, request].every(job => job.run_id === diagnostic.priorRequestRun && job.run_attempt === 1 &&
+      job.head_sha === diagnostic.priorRequestSource && job.status === 'completed') &&
+    Array.isArray(boundary.steps) && isDeepStrictEqual(boundary.steps.map(step =>
+      [step?.number, step?.name, step?.status, step?.conclusion]), [
+      [1, 'Set up job', 'completed', 'success'],
+      [2, 'Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'completed', 'success'],
+      [3, 'Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'completed', 'success'],
+      [4, 'Read-only admission', 'completed', 'success'],
+      [7, 'Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'completed', 'success'],
+      [8, 'Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'completed', 'success'],
+      [9, 'Complete job', 'completed', 'success'],
+    ]) &&
+    Array.isArray(request.steps) && isDeepStrictEqual(request.steps.map(step =>
+      [step?.number, step?.name, step?.status, step?.conclusion]), [
+      [1, 'Set up job', 'completed', 'success'],
+      [2, 'Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'completed', 'success'],
+      [3, 'Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'completed', 'success'],
+      [4, 'Recheck before publisher credentials', 'completed', 'success'],
+      [5, 'Obtain existing protected publisher token', 'completed', 'success'],
+      [6, 'One POST only; no release transitions', 'completed', 'failure'],
+      [10, 'Post Obtain existing protected publisher token', 'completed', 'success'],
+      [11, 'Post Run actions/setup-node@820762786026740c76f36085b0efc47a31fe5020', 'completed', 'skipped'],
+      [12, 'Post Run actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1', 'completed', 'success'],
+      [13, 'Complete job', 'completed', 'success'],
+    ]),
+  'Exact prior jobs must prove preflights and mint succeeded, request step failed and cleanup completed; not an HTTP result');
+  return prior;
+}
+
 async function verifyOneShot(env, api, event) {
   requireOwnerReleaseMode(env.RELEASE_APPROVAL_MODE);
   requireKeys(event.inputs ?? {}, [], [], 'diagnostic inputs');
   const run = await verifyOwnerRun(env, api, event, diagnostic.workflow);
-  requireThat(run.workflow_id === diagnostic.workflowId && run.id !== diagnostic.priorRun &&
-    run.run_number === 2 && env.GITHUB_RUN_NUMBER === '2',
+  requireThat(run.workflow_id === diagnostic.workflowId &&
+    ![diagnostic.priorRun, diagnostic.priorRequestRun].includes(run.id) &&
+    run.run_number === 3 && env.GITHUB_RUN_NUMBER === '3',
   'Diagnostic permits only the authorized successor on the original workflow, including failure or cancellation');
   const prior = await verifyPriorAdmission(api, run);
+  const priorRequest = await verifyPriorRequest(api, run);
   const history = await api(historyEndpoint);
-  requireThat(history?.total_count === 2 && Array.isArray(history.workflow_runs) &&
-    history.workflow_runs.length === 2 && [run, prior].every(expected =>
+  requireThat(history?.total_count === 3 && Array.isArray(history.workflow_runs) &&
+    history.workflow_runs.length === 3 && [run, prior, priorRequest].every(expected =>
       history.workflow_runs.filter(entry => sameRun(entry, expected)).length === 1),
-  'Diagnostic history must contain exactly the authorized successor and preserved prior run');
+  'Diagnostic history must contain exactly the authorized successor and both preserved prior runs');
   return run;
 }
 
