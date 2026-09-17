@@ -56,6 +56,15 @@ jobs:
       - name: Provide default registry host env
         run: echo "REGISTRY_HOST=local.registry:5000" >> $GITHUB_ENV
 
+      - name: Provide localhost WebAuthn settings for validation
+        # This matrix only renders/validates Compose and never deploys publicly.
+        # Production deployments must still provide their canonical HTTPS host
+        # and origin through the generated .env file.
+        run: |
+          echo "WebAuthn__RelyingPartyId=localhost" >> "$GITHUB_ENV"
+          echo "WebAuthn__RelyingPartyName=PrintFarmer CI" >> "$GITHUB_ENV"
+          echo "WebAuthn__Origin=http://localhost:8080" >> "$GITHUB_ENV"
+
       - name: Provide throwaway JWT signing key for validation
         # docker-compose.yml requires Jwt__Key (${Jwt__Key:?...}) so it fails closed instead of
         # booting with a shipped placeholder. CI only renders/validates the template here — it
