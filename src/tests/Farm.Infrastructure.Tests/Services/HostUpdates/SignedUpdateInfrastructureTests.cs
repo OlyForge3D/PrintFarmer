@@ -61,6 +61,16 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Throws<JsonException>(() => SignedUpdateManifestValidator.Parse(JsonSerializer.Serialize(fields, JsonOptions)));
     }
 
+    [Theory]
+    [InlineData("""{"id":"api","image":"ghcr.io/olyforge3d/printfarmer-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","extra":true}""")]
+    [InlineData("""{"id":"api","image":null}""")]
+    public void Parse_InvalidNestedService_RejectsStrictJson(string service)
+    {
+        string json = JsonSerializer.Serialize(CreateManifest("1.2.3", "stable", "main"), JsonOptions);
+        json = json.Replace("\"services\":[", $"\"services\":[{service},", StringComparison.Ordinal);
+        Assert.Throws<JsonException>(() => SignedUpdateManifestValidator.Parse(json));
+    }
+
     [Fact]
     public async Task Provider_MapsVerifiedManifestAndComputesDigestFromExactBytes()
     {
@@ -111,6 +121,101 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Contains("platform_digest_invalid", result.Errors);
     }
 
+    [Fact]
+    public async Task Discovery_PaginatesAndOnlyOrdersVerifiedExactStableTags()
+    {
+        SignedUpdateManifest first = CreateManifest("1.2.3", "stable", "main");
+        SignedUpdateManifest latest = CreateManifest("2.0.0", "stable", "main");
+        string firstJson = JsonSerializer.Serialize(first, JsonOptions);
+        string latestJson = JsonSerializer.Serialize(latest, JsonOptions);
+        string[] drafts = Enumerable.Range(1, 99).Select(index =>
+            $$"""{"id":{{index}},"tagName":"v99.0.0","draft":true,"prerelease":false,"assets":[]}""").ToArray();
+        string pageOne = "[" + string.Join(',', drafts.Append(ReleaseJson(100, "v1.2.3", false, false, true))) + "]";
+        string pageTwo = "[" + string.Join(',', new[]
+        {
+            ReleaseJson(101, "v2.0.0-insider.9", false, false, true),
+            ReleaseJson(102, "v9.0.0", false, false, false),
+            ReleaseJson(103, "v3.0.0", false, false, true),
+            ReleaseJson(104, "v2.0.0", false, false, true),
+        }) + "]";
+        ReleaseHandler handler = new(new Dictionary<int, string> { [1] = pageOne, [2] = pageTwo },
+            new Dictionary<string, byte[]> { ["manifest-100"] = System.Text.Encoding.UTF8.GetBytes(firstJson), ["manifest-103"] = System.Text.Encoding.UTF8.GetBytes(firstJson), ["manifest-104"] = System.Text.Encoding.UTF8.GetBytes(latestJson) });
+        RecordingVerifier verifier = new(manifest => manifest.Span.SequenceEqual(System.Text.Encoding.UTF8.GetBytes(latestJson)));
+        GitHubSignedReleaseDiscovery discovery = new(new HttpClient(handler), verifier);
+
+        VerifiedSignedUpdateRelease? result = await discovery.DiscoverAsync("stable", default);
+
+        Assert.NotNull(result);
+        Assert.Equal("2.0.0", result.Manifest.Version);
+        Assert.Equal(
+            [
+                "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main",
+                "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main",
+            ],
+            verifier.Identities);
+        Assert.Equal(new[] { 1, 2 }, handler.ReleasePages);
+    }
+
+    [Fact]
+    public async Task Discovery_OnlyAcceptsExactInsiderTagAndIdentity()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3-insider.4", "insider", "development");
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        ReleaseHandler handler = new(new Dictionary<int, string>
+        {
+            [1] = "[" + string.Join(',', new[]
+            {
+                ReleaseJson(1, "v1.2.3", false, true, true),
+                ReleaseJson(2, "v1.2.3-insider.4", false, true, true),
+            }) + "]",
+        }, new Dictionary<string, byte[]> { ["manifest-1"] = bytes, ["manifest-2"] = bytes });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(new HttpClient(handler), verifier).DiscoverAsync("insider", default);
+
+        Assert.NotNull(result);
+        Assert.Equal("1.2.3-insider.4", result.Manifest.Version);
+        Assert.Equal(["https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development"], verifier.Identities);
+    }
+
+    [Fact]
+    public async Task CosignVerifier_UsesExactArgumentListAndCleansTemporaryDirectory()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        RecordingRunner runner = new();
+        ProcessCosignVerifier verifier = new(new("cosign-path", TimeSpan.FromSeconds(2), 9), runner, () =>
+        {
+            Directory.CreateDirectory(directory);
+            return directory;
+        });
+
+        Assert.True(await verifier.VerifyAsync("manifest"u8.ToArray(), "bundle"u8.ToArray(), "identity", default));
+
+        Assert.False(Directory.Exists(directory));
+        Assert.Equal("cosign-path", runner.Command!.ExecutablePath);
+        Assert.Equal(["verify-blob", "--bundle", Path.Combine(directory, "bundle.json"), "--certificate-oidc-issuer",
+            "https://token.actions.githubusercontent.com", "--certificate-identity", "identity", Path.Combine(directory, "manifest.json")], runner.Command.Arguments);
+        Assert.Equal(TimeSpan.FromSeconds(2), runner.Timeout);
+        Assert.Equal(9, runner.MaxDiagnostics);
+    }
+
+    [Fact]
+    public async Task CosignVerifier_TimeoutReturnsFalseButCallerCancellationPropagates()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), Guid.NewGuid().ToString("N"));
+        ProcessCosignVerifier verifier = new(new("cosign", TimeSpan.FromSeconds(1)), new CancellingRunner(), () =>
+        {
+            Directory.CreateDirectory(directory);
+            return directory;
+        });
+
+        Assert.False(await verifier.VerifyAsync(Array.Empty<byte>(), Array.Empty<byte>(), "identity", default));
+        using CancellationTokenSource cancellation = new();
+        cancellation.Cancel();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => verifier.VerifyAsync(Array.Empty<byte>(), Array.Empty<byte>(), "identity", cancellation.Token));
+        Assert.False(Directory.Exists(directory));
+    }
+
     private static SignedUpdateManifest CreateManifest(string version, string channel, string branch)
     {
         string digest = "sha256:" + new string('a', 64);
@@ -150,5 +255,66 @@ public sealed class SignedUpdateInfrastructureTests
                 : "{}"u8.ToArray();
             return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(content) });
         }
+    }
+
+    private static string ReleaseJson(int id, string tag, bool draft, bool prerelease, bool assets)
+    {
+        string assetJson = assets
+            ? $"[{{\"name\":\"update-manifest.json\",\"browserDownloadUrl\":\"https://assets.test/manifest-{id}\"}},{{\"name\":\"update-manifest.sigstore.json\",\"browserDownloadUrl\":\"https://assets.test/bundle-{id}\"}}]"
+            : "[]";
+        return $"{{\"id\":{id},\"tagName\":\"{tag}\",\"draft\":{draft.ToString().ToLowerInvariant()},\"prerelease\":{prerelease.ToString().ToLowerInvariant()},\"assets\":{assetJson}}}";
+    }
+
+    private sealed class ReleaseHandler(Dictionary<int, string> releasePages, Dictionary<string, byte[]> assets) : HttpMessageHandler
+    {
+        public List<int> ReleasePages { get; } = [];
+
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken cancellationToken)
+        {
+            string path = request.RequestUri!.AbsoluteUri;
+            if (path.Contains("/releases?", StringComparison.Ordinal))
+            {
+                string pageParameter = request.RequestUri.Query.TrimStart('?').Split('&')
+                    .Single(pair => pair.StartsWith("page=", StringComparison.Ordinal));
+                int page = int.Parse(pageParameter["page=".Length..]);
+                ReleasePages.Add(page);
+                return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(releasePages.GetValueOrDefault(page, "[]")) });
+            }
+
+            string key = path[(path.LastIndexOf('/') + 1)..];
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.OK) { Content = new ByteArrayContent(assets.GetValueOrDefault(key, "{}"u8.ToArray())) });
+        }
+    }
+
+    private sealed class RecordingVerifier(Func<ReadOnlyMemory<byte>, bool> accept) : ISignedReleaseVerifier
+    {
+        public List<string> Identities { get; } = [];
+
+        public Task<bool> VerifyAsync(ReadOnlyMemory<byte> manifest, ReadOnlyMemory<byte> bundle, string certificateIdentity, CancellationToken cancellationToken)
+        {
+            Identities.Add(certificateIdentity);
+            return Task.FromResult(accept(manifest));
+        }
+    }
+
+    private sealed class RecordingRunner : ICosignProcessRunner
+    {
+        public CosignProcessCommand? Command { get; private set; }
+        public TimeSpan Timeout { get; private set; }
+        public int MaxDiagnostics { get; private set; }
+
+        public Task<CosignProcessResult> RunAsync(CosignProcessCommand command, TimeSpan timeout, int maxDiagnostics, CancellationToken cancellationToken)
+        {
+            Command = command;
+            Timeout = timeout;
+            MaxDiagnostics = maxDiagnostics;
+            return Task.FromResult(new CosignProcessResult(0, "untrusted tool diagnostics"));
+        }
+    }
+
+    private sealed class CancellingRunner : ICosignProcessRunner
+    {
+        public Task<CosignProcessResult> RunAsync(CosignProcessCommand command, TimeSpan timeout, int maxDiagnostics, CancellationToken cancellationToken) =>
+            Task.FromCanceled<CosignProcessResult>(cancellationToken.IsCancellationRequested ? cancellationToken : new CancellationToken(true));
     }
 }

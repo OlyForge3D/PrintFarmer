@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
@@ -69,6 +70,7 @@ public static partial class SignedUpdateManifestValidator
             throw new JsonException($"Unsupported manifest fields: {string.Join(", ", unknown)}");
         }
 
+        ValidateManifestShape(document.RootElement);
         SignedUpdateManifest? manifest = JsonSerializer.Deserialize<SignedUpdateManifest>(json, JsonOptions);
         return manifest ?? throw new JsonException("Manifest must be an object.");
     }
@@ -125,6 +127,106 @@ public static partial class SignedUpdateManifestValidator
         return checked(major * 1_000_000_000L + minor * 1_000_000L + patch * 1_000L + insider);
     }
 
+    public static bool IsTagForChannel(string? tag, string channel)
+    {
+        return tag is not null && channel switch
+        {
+            "stable" => StableTag().IsMatch(tag),
+            "insider" => InsiderTag().IsMatch(tag),
+            _ => false,
+        };
+    }
+
+    private static void ValidateManifestShape(JsonElement root)
+    {
+        string[] required =
+        [
+            "schema", "tag", "version", "channel", "sourceBranch", "sourceCommit", "buildId", "sequence",
+            "managedUpdateEligible", "services", "platforms", "platformDigests",
+        ];
+        string[] optionalProperties = ["minimumUpdaterVersion", "compatibility"];
+        RequireObjectProperties(root, required, optionalProperties);
+        RequireKind(root, "schema", JsonValueKind.Number);
+        RequireKind(root, "sequence", JsonValueKind.Number);
+        RequireKind(root, "managedUpdateEligible", JsonValueKind.True, JsonValueKind.False);
+        foreach (string name in new[] { "tag", "version", "channel", "sourceBranch", "sourceCommit", "buildId" })
+        {
+            RequireKind(root, name, JsonValueKind.String);
+        }
+
+        foreach (string name in new[] { "minimumUpdaterVersion", "compatibility" })
+        {
+            if (root.TryGetProperty(name, out JsonElement optional) && optional.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            {
+                throw new JsonException($"{name} must be a string.");
+            }
+        }
+
+        JsonElement services = RequireKind(root, "services", JsonValueKind.Array);
+        foreach (JsonElement service in services.EnumerateArray())
+        {
+            RequireObjectProperties(service, ["id", "image"], ["platforms"]);
+            RequireKind(service, "id", JsonValueKind.String);
+            RequireKind(service, "image", JsonValueKind.String);
+            if (service.TryGetProperty("platforms", out JsonElement servicePlatforms))
+            {
+                if (servicePlatforms.ValueKind != JsonValueKind.Null)
+                {
+                    RequireStringArray(servicePlatforms, "service platforms");
+                }
+            }
+        }
+
+        RequireStringArray(RequireKind(root, "platforms", JsonValueKind.Array), "platforms");
+        JsonElement digests = RequireKind(root, "platformDigests", JsonValueKind.Object);
+        EnsureNoDuplicateProperties(digests);
+        if (digests.EnumerateObject().Any(property => property.Value.ValueKind != JsonValueKind.String))
+        {
+            throw new JsonException("Platform digests must be strings.");
+        }
+    }
+
+    private static JsonElement RequireKind(JsonElement element, string name, params JsonValueKind[] kinds)
+    {
+        JsonElement value = element.GetProperty(name);
+        if (!kinds.Contains(value.ValueKind)) throw new JsonException($"{name} has an invalid JSON type.");
+        return value;
+    }
+
+    private static void RequireStringArray(JsonElement element, string name)
+    {
+        if (element.ValueKind != JsonValueKind.Array || element.EnumerateArray().Any(item => item.ValueKind != JsonValueKind.String))
+        {
+            throw new JsonException($"{name} must be an array of strings.");
+        }
+    }
+
+    private static void RequireObjectProperties(JsonElement element, IReadOnlyList<string> required, IReadOnlyList<string> optional)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+        {
+            throw new JsonException("Manifest object expected.");
+        }
+
+        EnsureNoDuplicateProperties(element);
+        HashSet<string> permitted = [.. required, .. optional];
+        JsonProperty[] properties = element.EnumerateObject().ToArray();
+        if (required.Any(name => !properties.Any(property => property.Name == name)) ||
+            properties.Any(property => !permitted.Contains(property.Name)))
+        {
+            throw new JsonException("Manifest object has missing or unsupported fields.");
+        }
+    }
+
+    private static void EnsureNoDuplicateProperties(JsonElement element)
+    {
+        string[] names = element.EnumerateObject().Select(property => property.Name).ToArray();
+        if (names.Distinct(StringComparer.Ordinal).Count() != names.Length)
+        {
+            throw new JsonException("Manifest contains duplicate fields.");
+        }
+    }
+
     private static bool IsVersionForChannel(string version, string channel) =>
         channel == "stable" ? CanonicalVersion().Match(version).Groups["insider"].Success is false :
         channel == "insider" && CanonicalVersion().Match(version).Groups["insider"].Success;
@@ -137,6 +239,10 @@ public static partial class SignedUpdateManifestValidator
     private static bool IsPlatform(string? value) => value is { Length: > 0 and <= 64 } && value.All(character => char.IsAsciiLetterOrDigit(character) || character is '-' or '_' or '.');
     [GeneratedRegex(@"^(?<major>[1-9]\d*)\.(?<minor>\d+)\.(?<patch>\d+)(?:-insider\.(?<insider>[1-9]\d*))?$", RegexOptions.CultureInvariant)]
     private static partial Regex CanonicalVersion();
+    [GeneratedRegex(@"^v[1-9]\d*\.\d+\.\d+$", RegexOptions.CultureInvariant)]
+    private static partial Regex StableTag();
+    [GeneratedRegex(@"^v[1-9]\d*\.\d+\.\d+-insider\.[1-9]\d*$", RegexOptions.CultureInvariant)]
+    private static partial Regex InsiderTag();
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex LowerHex40();
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
@@ -174,10 +280,10 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             ? "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"
             : "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development";
         List<VerifiedSignedUpdateRelease> verified = [];
-        foreach (GitHubRelease release in releases.Where(candidate => !candidate.Draft && candidate.Prerelease == (channel == "insider")))
+        foreach (GitHubRelease release in releases.Where(candidate => !candidate.Draft && candidate.Prerelease == (channel == "insider") &&
+            SignedUpdateManifestValidator.IsTagForChannel(candidate.TagName, channel)))
         {
-            string? tag = release.TagName;
-            if (tag is null || !tag.StartsWith("v", StringComparison.Ordinal)) continue;
+            string tag = release.TagName;
             GitHubReleaseAsset? manifestAsset = release.Assets.FirstOrDefault(asset => asset.Name == "update-manifest.json");
             GitHubReleaseAsset? bundleAsset = release.Assets.FirstOrDefault(asset => asset.Name == "update-manifest.sigstore.json");
             if (manifestAsset is null || bundleAsset is null) continue;
@@ -196,47 +302,102 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
 
 public sealed record CosignVerifierOptions(string ExecutablePath, TimeSpan Timeout, int MaxDiagnostics = 8192);
 
-public sealed class ProcessCosignVerifier(CosignVerifierOptions options) : ISignedReleaseVerifier
+internal sealed record CosignProcessCommand(string ExecutablePath, IReadOnlyList<string> Arguments);
+internal sealed record CosignProcessResult(int ExitCode, string Diagnostics);
+
+internal interface ICosignProcessRunner
 {
+    Task<CosignProcessResult> RunAsync(CosignProcessCommand command, TimeSpan timeout, int maxDiagnostics, CancellationToken cancellationToken);
+}
+
+internal sealed class ProcessCosignRunner : ICosignProcessRunner
+{
+    public async Task<CosignProcessResult> RunAsync(CosignProcessCommand command, TimeSpan timeout, int maxDiagnostics, CancellationToken cancellationToken)
+    {
+        using Process process = new()
+        {
+            StartInfo = new ProcessStartInfo
+            {
+                FileName = command.ExecutablePath,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                UseShellExecute = false,
+                CreateNoWindow = true,
+            },
+        };
+        foreach (string argument in command.Arguments) process.StartInfo.ArgumentList.Add(argument);
+        if (!process.Start()) return new(-1, string.Empty);
+
+        using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+        deadline.CancelAfter(timeout);
+        try
+        {
+            Task<string> output = ReadLimitedAsync(process.StandardOutput, maxDiagnostics, CancellationToken.None);
+            Task<string> error = ReadLimitedAsync(process.StandardError, maxDiagnostics, CancellationToken.None);
+            await process.WaitForExitAsync(deadline.Token);
+            return new(process.ExitCode, (await output) + (await error));
+        }
+        finally
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(true);
+                await process.WaitForExitAsync(CancellationToken.None);
+            }
+        }
+    }
+
+    private static async Task<string> ReadLimitedAsync(StreamReader reader, int maximum, CancellationToken cancellationToken)
+    {
+        StringBuilder captured = new(Math.Min(maximum, 4096));
+        char[] buffer = new char[1024];
+        int read;
+        while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
+        {
+            int remaining = maximum - captured.Length;
+            if (remaining > 0) captured.Append(buffer, 0, Math.Min(remaining, read));
+        }
+
+        return captured.ToString();
+    }
+}
+
+public sealed class ProcessCosignVerifier : ISignedReleaseVerifier
+{
+    private const string Issuer = "https://token.actions.githubusercontent.com";
+    private readonly CosignVerifierOptions options;
+    private readonly ICosignProcessRunner runner;
+    private readonly Func<string> directoryFactory;
+
+    public ProcessCosignVerifier(CosignVerifierOptions options)
+        : this(options, new ProcessCosignRunner(), CreateSecureDirectory)
+    {
+    }
+
+    internal ProcessCosignVerifier(CosignVerifierOptions options, ICosignProcessRunner runner, Func<string> directoryFactory)
+    {
+        this.options = options;
+        this.runner = runner;
+        this.directoryFactory = directoryFactory;
+    }
+
     public async Task<bool> VerifyAsync(ReadOnlyMemory<byte> manifest, ReadOnlyMemory<byte> bundle, string certificateIdentity, CancellationToken cancellationToken)
     {
-        string directory = Path.Combine(Path.GetTempPath(), "printfarmer-cosign-" + Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(directory);
+        if (options.Timeout <= TimeSpan.Zero || options.MaxDiagnostics < 0) throw new InvalidOperationException("Cosign verifier options are invalid.");
+        string directory = directoryFactory();
         string manifestPath = Path.Combine(directory, "manifest.json");
         string bundlePath = Path.Combine(directory, "bundle.json");
         try
         {
             await File.WriteAllBytesAsync(manifestPath, manifest.ToArray(), cancellationToken);
             await File.WriteAllBytesAsync(bundlePath, bundle.ToArray(), cancellationToken);
-            using Process process = new()
-            {
-                StartInfo = new ProcessStartInfo
-                {
-                    FileName = options.ExecutablePath,
-                    RedirectStandardOutput = true,
-                    RedirectStandardError = true,
-                    UseShellExecute = false,
-                    CreateNoWindow = true,
-                },
-            };
-            process.StartInfo.ArgumentList.Add("verify-blob");
-            process.StartInfo.ArgumentList.Add("--bundle");
-            process.StartInfo.ArgumentList.Add(bundlePath);
-            process.StartInfo.ArgumentList.Add("--certificate-oidc-issuer");
-            process.StartInfo.ArgumentList.Add("https://token.actions.githubusercontent.com");
-            process.StartInfo.ArgumentList.Add("--certificate-identity");
-            process.StartInfo.ArgumentList.Add(certificateIdentity);
-            process.StartInfo.ArgumentList.Add(manifestPath);
-            if (!process.Start()) return false;
-            using CancellationTokenSource timeout = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-            timeout.CancelAfter(options.Timeout);
-            Task<string> output = process.StandardOutput.ReadToEndAsync(timeout.Token);
-            Task<string> error = process.StandardError.ReadToEndAsync(timeout.Token);
-            await process.WaitForExitAsync(timeout.Token);
-            _ = (await output + await error)[..Math.Min(options.MaxDiagnostics, (await output + await error).Length)];
-            return process.ExitCode == 0;
+            CosignProcessCommand command = new(
+                options.ExecutablePath,
+                ["verify-blob", "--bundle", bundlePath, "--certificate-oidc-issuer", Issuer, "--certificate-identity", certificateIdentity, manifestPath]);
+            return (await runner.RunAsync(command, options.Timeout, options.MaxDiagnostics, cancellationToken)).ExitCode == 0;
         }
-        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested) { return false; }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested) { throw; }
+        catch (OperationCanceledException) { return false; }
         catch (System.ComponentModel.Win32Exception) { return false; }
         finally
         {
@@ -244,6 +405,18 @@ public sealed class ProcessCosignVerifier(CosignVerifierOptions options) : ISign
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
+    }
+
+    private static string CreateSecureDirectory()
+    {
+        string directory = Path.Combine(Path.GetTempPath(), "printfarmer-cosign-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(directory);
+        if (!OperatingSystem.IsWindows())
+        {
+            File.SetUnixFileMode(directory, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
+        return directory;
     }
 }
 
