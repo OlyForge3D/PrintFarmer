@@ -582,14 +582,15 @@ test_build_and_deploy_paths_enforce_metadata() {
     local docker_utils
     local api_docs
     local container_versions
-    local ensure_orca_job
+    local publisher
     local global_workflow_permissions
     multistage=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.multistage")
     base_dockerfile=$(cat "$REPO_ROOT/scripts/docker/dockerfiles/Dockerfile.base-orcaslicer-binaries")
     deploy_script=$(cat "$REPO_ROOT/scripts/deploy-docker.sh")
     powershell_deploy_script=$(cat "$REPO_ROOT/scripts/deploy-docker.ps1")
     registry_pull_script=$(cat "$REPO_ROOT/scripts/pull-from-registry.sh")
-    publish_workflow=$(cat "$REPO_ROOT/.github/workflows/docker-publish.yml")
+    publish_workflow=$(cat "$REPO_ROOT/.github/workflows/consolidated-release.yml")
+    publisher=$(cat "$REPO_ROOT/scripts/ci/publish-release.mjs")
     base_workflow=$(cat "$REPO_ROOT/.github/workflows/orcaslicer-base-image.yml")
     preseed_workflow=$(cat "$REPO_ROOT/.github/workflows/appimage-preseed-uploader.yml")
     strict_workflow=$(cat "$REPO_ROOT/.github/workflows/orcaslicer-strict-build.yml")
@@ -597,8 +598,7 @@ test_build_and_deploy_paths_enforce_metadata() {
     docker_utils=$(cat "$REPO_ROOT/scripts/docker-utils.sh")
     api_docs=$(cat "$REPO_ROOT/docs/API.md")
     container_versions=$(cat "$REPO_ROOT/scripts/docker/container-versions.conf")
-    ensure_orca_job=$(sed -n '/^  ensure-orca-base:/,/^  build-containers:/p' "$REPO_ROOT/.github/workflows/docker-publish.yml")
-    global_workflow_permissions=$(sed -n '/^permissions:/,/^jobs:/p' "$REPO_ROOT/.github/workflows/docker-publish.yml")
+    global_workflow_permissions=$(sed -n '/^permissions:/,/^jobs:/p' "$REPO_ROOT/.github/workflows/consolidated-release.yml")
 
     assert_contains "$multistage" 'orcaslicer.version="${ORCASLICER_VERSION}"' "Multistage binary layer should label its version"
     assert_contains "$multistage" 'orcaslicer.sha256="${ORCASLICER_SHA256}"' "Multistage binary layer should label its checksum"
@@ -625,17 +625,18 @@ test_build_and_deploy_paths_enforce_metadata() {
     assert_contains "$deploy_script" 'enforce_supported_orcaslicer_release' "Bash deployment should reapply the supported release after loading config"
     assert_contains "$deploy_script" 'Failed to regenerate deployment configuration.' "Bash redeploy should regenerate stale compose files"
     assert_contains "$registry_pull_script" 'validate_orcaslicer_binary_image "$REGISTRY_HOST/orcaslicer-binaries:$ORCASLICER_VERSION"' "Registry cache images should be validated before retagging"
-    assert_contains "$publish_workflow" 'source scripts/docker-utils.sh' "Publishing should use shared cache validation"
-    assert_contains "$ensure_orca_job" 'actions: write' "Base-image bootstrap should receive workflow-dispatch permission"
+    assert_contains "$publish_workflow" 'node scripts/ci/publish-release.mjs build' "Publishing should use the canonical build entry point"
+    assert_contains "$publisher" "'--file', 'scripts/docker/dockerfiles/Dockerfile.multistage'" "Publishing should use the pinned binary template"
     assert_not_contains "$global_workflow_permissions" 'actions: write' "Workflow-dispatch permission should not be granted to unrelated jobs"
-    assert_contains "$publish_workflow" 'validate_orcaslicer_binary_image "$BASE_IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"' "Publishing should fail closed on stale metadata"
-    assert_contains "$publish_workflow" 'base_image: ${{ steps.verify.outputs.base_image }}' "Publishing should export only the verified base image"
-    assert_contains "$publish_workflow" 'echo "base_image=$(docker_image_digest_reference "$BASE_IMAGE")"' "Publishing should resolve the verified image to an immutable digest"
-    assert_contains "$publish_workflow" 'FROM ${{ needs.ensure-orca-base.outputs.base_image }}' "Worker builds should consume the verified digest reference"
+    assert_contains "$multistage" 'ARG ALLOW_STUB=false' "Published binary builds must fail closed without the real binary"
+    assert_contains "$multistage" 'ARG ORCASLICER_SHA256=d12fb8c8eac1aecd2dfb6377acd48f994f8fa439ed5292fa532dd82880f029fd' "Published binary builds should pin the supported checksum"
+    assert_contains "$multistage" 'sha256sum -c orcaslicer.AppImage.sha256' "Published binary builds should verify the downloaded checksum"
+    assert_not_contains "$publisher" 'ALLOW_STUB=true' "Publishing must not override strict binary validation"
+    assert_not_contains "$publisher" '_SKIP_ORCA_BINARY_BUILD=1' "Publishing should build and validate the pinned binary"
     assert_not_contains "$publish_workflow" 'EMBEDDED_VERSION=$(docker run' "Publishing must not execute an untrusted cached image"
     assert_not_contains "$publish_workflow" 'execSync(`docker run' "Publishing polls must not execute an untrusted cached image"
-    assert_contains "$publish_workflow" 'Worker__OrcaSlicerPath=/usr/local/bin/orcaslicer' "Published worker image should retain its AppRun launcher default"
-    assert_contains "$publish_workflow" 'Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256' "Published workers should expose binary attestation"
+    assert_contains "$multistage" 'Worker__OrcaSlicerPath=/opt/orcaslicer/bin/orca-slicer' "Published worker startup should validate the real binary"
+    assert_contains "$multistage" 'Worker__OrcaSlicerAttestationPath=/etc/printfarmer/orcaslicer.sha256' "Published workers should expose binary attestation"
     assert_contains "$base_workflow" 'source scripts/docker-utils.sh' "Base image workflow should use shared cache validation"
     assert_contains "$base_workflow" 'validate_orcaslicer_binary_image "$IMAGE" "$ORCA_VERSION" "$ORCA_SHA256"' "Base image workflow should reject stale metadata"
     assert_contains "$base_workflow" 'docker_image_digest_reference "$IMAGE"' "Base image workflow should expose only an immutable cache reference"

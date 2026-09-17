@@ -110,7 +110,10 @@ host, contact an installation, stop a printer or perform a deployment.
 
 Builds report the version and full source SHA without inventing an allocation,
 stable sequence or signed release identity. Existing UI inventory consequently
-does not acquire managed readiness. The host updater currently exposes a metadata
+does not acquire managed readiness; its canonical identity fields may read
+`Unknown`. Informational version/source remain in `version.json` and
+`release-identity.json`, not a signed identity embedded in the UI.
+The host updater currently exposes a metadata
 provider interface, not a production GitHub-feed adapter; its signature, complete-set,
 installation approval, active-print and runtime safety checks are unchanged.
 Any consumer requiring the old signed set must reject its absence, not treat
