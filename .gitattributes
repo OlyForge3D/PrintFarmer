@@ -25,6 +25,8 @@ install.sh text eol=lf
 
 # CI tooling manifest is read by bash/python via process substitution; keep LF
 scripts/ci/dotnet-test-manifest.json text eol=lf
+# Cross-language CI fixtures include byte-exact signed payloads.
+scripts/ci/fixtures/*.json text eol=lf
 
 # Release metadata pins these source artifacts by SHA-256; keep checkout bytes LF-stable.
 /scripts/docker/configs/security-config.json text eol=lf

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { repository, workflow, requireThat, verifyEnvironmentRestrictions } from './release-policy.mjs';
 
@@ -17,20 +18,52 @@ export function githubClient(token, fetcher = fetch) {
   };
 }
 
-export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8'))) {
+// Each channel dispatches from -- and must be signed and verified as -- its own
+// exact workflow identity: stable from `main`, insider from `development`. This
+// mirrors consolidated-release.yml's channel-aware source_branch/Cosign identity
+// (see manifestSignatureIdentity in publish-release.mjs); no branch is hardcoded
+// here independent of the selected channel.
+// GITHUB_WORKFLOW_SHA (the workflow definition's own commit) and GITHUB_SHA (the
+// dispatched branch/head commit actually checked out for this run) are distinct
+// GitHub-populated fields that legitimately differ on a normal workflow_dispatch.
+// The live repository contents API binds GITHUB_WORKFLOW_SHA to the exact active
+// workflow file; run.head_sha separately binds the selected source commit.
+function gitBlobSha(bytes) {
+  const header = Buffer.from(`blob ${bytes.length}\0`);
+  return createHash('sha1').update(Buffer.concat([header, bytes])).digest('hex');
+}
+
+export async function verifyOwnerDispatch(env, api,
+  event = JSON.parse(readFileSync(env.GITHUB_EVENT_PATH, 'utf8')),
+  localWorkflowBytes = readFileSync(workflow)) {
+  const channel = env.RELEASE_CHANNEL;
+  requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel');
+  const sourceBranch = channel === 'stable' ? 'main' : 'development';
   requireThat(env.GITHUB_REPOSITORY === repository && env.GITHUB_EVENT_NAME === 'workflow_dispatch' &&
-    env.GITHUB_REF === 'refs/heads/development' && env.GITHUB_RUN_ATTEMPT === '1' &&
-    env.GITHUB_WORKFLOW_REF === `${repository}/${workflow}@refs/heads/development` &&
+    env.GITHUB_REF === `refs/heads/${sourceBranch}` && env.GITHUB_RUN_ATTEMPT === '1' &&
+    env.GITHUB_WORKFLOW_REF === `${repository}/${workflow}@refs/heads/${sourceBranch}` &&
     /^[a-f0-9]{40}$/.test(env.GITHUB_WORKFLOW_SHA ?? '') &&
-    env.GITHUB_SHA === env.GITHUB_WORKFLOW_SHA && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? ''),
-  'Use a fresh owner manual dispatch of Consolidated Release on development; reruns cannot publish');
+    /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') && /^[1-9][0-9]*$/.test(env.GITHUB_RUN_ID ?? ''),
+  `Use a fresh owner manual dispatch of Consolidated Release on ${sourceBranch} for the ${channel} channel; reruns cannot publish`);
   const run = await api(`actions/runs/${env.GITHUB_RUN_ID}`);
   const definition = await api('actions/workflows/consolidated-release.yml');
+  const commit = await api(`commits/${env.GITHUB_WORKFLOW_SHA}`);
+  const workflowFile = await api(`contents/${workflow}?ref=${env.GITHUB_WORKFLOW_SHA}`);
+  const tree = await api(`git/trees/${commit?.commit?.tree?.sha}?recursive=1`);
+  const workflowEntry = tree?.tree?.find(entry => entry.path === workflow);
+  const expectedBlobSha = gitBlobSha(localWorkflowBytes);
+  const content = workflowFile?.encoding === 'base64'
+    ? Buffer.from(workflowFile.content.replace(/\s/g, ''), 'base64')
+    : undefined;
   const owner = value => value?.login === 'jpapiez' && value.id === 5460061 && value.type === 'User';
   requireThat(run?.event === 'workflow_dispatch' && run.path === workflow &&
     run.workflow_id === definition?.id && definition.path === workflow && definition.state === 'active' &&
+    commit?.sha === env.GITHUB_WORKFLOW_SHA &&
+    workflowEntry?.type === 'blob' && workflowEntry.sha === workflowFile?.sha &&
+    workflowFile?.type === 'file' && workflowFile.path === workflow &&
+    workflowFile.sha === expectedBlobSha && content?.equals(localWorkflowBytes) &&
     String(run.id) === env.GITHUB_RUN_ID && run.run_attempt === 1 && run.status === 'in_progress' &&
-    run.head_branch === 'development' && run.head_sha === env.GITHUB_WORKFLOW_SHA &&
+    run.head_branch === sourceBranch && run.head_sha === env.GITHUB_SHA &&
     run.repository?.full_name === repository && run.head_repository?.full_name === repository &&
     run.head_repository.id === run.repository.id &&
     owner(run.actor) && owner(run.triggering_actor) && owner(event.sender) &&
@@ -41,14 +74,12 @@ export async function verifyOwnerDispatch(env, api, event = JSON.parse(readFileS
   requireThat(owner(permission?.user) && permission.permission === 'admin' && permission.role_name === 'admin',
     'Owner must retain repository administrator access');
   requireThat(event.repository?.id === run.repository.id && event.repository.full_name === repository &&
-    ['development', 'refs/heads/development'].includes(event.ref) &&
+    [sourceBranch, `refs/heads/${sourceBranch}`].includes(event.ref) &&
     event.inputs?.channel === env.RELEASE_CHANNEL && event.inputs.version === env.RELEASE_VERSION &&
     (event.inputs.source_sha ?? '') === (env.RELEASE_SOURCE_SHA ?? '') &&
     Object.keys(event.inputs).every(key => ['channel', 'version', 'source_sha'].includes(key)),
   'Executing inputs differ from the owner dispatch');
   requireThat(env.RELEASE_APPROVAL_MODE === 'single-maintainer', 'Approved release mode must remain single-maintainer');
-  const channel = env.RELEASE_CHANNEL;
-  requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel');
   await verifyEnvironmentRestrictions(await api(`environments/release-${channel}`),
     await api(`environments/release-${channel}/deployment-branch-policies`), channel);
 }
