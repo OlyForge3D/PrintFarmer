@@ -1,5 +1,7 @@
-import { Alert, Button, Card, Input } from "@/common/components/ui";
-import type { ServiceInventory } from "@/types/api";
+import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/common/components/ui";
+import { Modal } from "@/common/components/modals/Modal";
+import type { ServiceInventory, UpdateChannel, UpdateChannelSettings } from "@/types/api";
+import { useEffect, useState } from "react";
 
 const INSIDER_WARNING =
   "Insider updates may arrive more frequently and have reduced stability compared with stable releases.";
@@ -12,6 +14,8 @@ const AUTO_DISABLED_REASON =
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
   observation: ConnectionObservation;
+  updateChannelSettings?: UpdateChannelSettings;
+  onSaveUpdateChannel?: (settings: UpdateChannelSettings) => Promise<void>;
 }
 
 function text(value: string | null | undefined) {
@@ -192,11 +196,47 @@ function observedIdentityDetails(inventory: ServiceInventory | null | undefined)
 export function InstallerUpdatesExperience({
   inventory,
   observation,
+  updateChannelSettings,
+  onSaveUpdateChannel,
 }: InstallerUpdatesExperienceProps) {
+  const initialChannel: UpdateChannel = updateChannelSettings?.channel ?? (
+    inventory?.selectedChannel === "stable" || inventory?.selectedChannel === "insider"
+      ? inventory.selectedChannel
+      : "stable"
+  );
+  const [channel, setChannel] = useState<UpdateChannel>(initialChannel);
+  const [insiderAcknowledged, setInsiderAcknowledged] = useState(updateChannelSettings?.insiderAcknowledged ?? false);
+  const [acknowledgementOpen, setAcknowledgementOpen] = useState(false);
+  const [savingChannel, setSavingChannel] = useState(false);
+  const [channelError, setChannelError] = useState<string | null>(null);
+  const [channelStatus, setChannelStatus] = useState<string | null>(null);
 
-  const insider =
-    inventory?.selectedChannel === "insider" ||
-    inventory?.observedChannel === "insider";
+  useEffect(() => {
+    if (!updateChannelSettings) return;
+    setChannel(updateChannelSettings.channel);
+    setInsiderAcknowledged(updateChannelSettings.insiderAcknowledged);
+  }, [updateChannelSettings]);
+
+  const saveChannel = async (settings: UpdateChannelSettings) => {
+    if (!onSaveUpdateChannel) return;
+    setSavingChannel(true);
+    setChannelError(null);
+    try {
+      await onSaveUpdateChannel(settings);
+      setChannel(settings.channel);
+      setInsiderAcknowledged(settings.insiderAcknowledged);
+      setChannelStatus("Update channel saved.");
+    } catch {
+      setChannel(updateChannelSettings?.channel ?? "stable");
+      setInsiderAcknowledged(updateChannelSettings?.insiderAcknowledged ?? false);
+      setChannelError("Failed to save the update channel. Your previous selection remains active.");
+    } finally {
+      setSavingChannel(false);
+    }
+  };
+
+  const selectedTrain = channel ?? inventory?.selectedChannel ?? UNKNOWN;
+  const insider = channel === "insider" || inventory?.selectedChannel === "insider";
   const readiness = inventory?.readiness;
   const blocked =
     readiness?.state === "Blocked" ||
@@ -249,7 +289,7 @@ export function InstallerUpdatesExperience({
           <dl className="grid gap-2 sm:grid-cols-3">
             <div>
               <dt>Selected train</dt>
-              <dd>{inventory?.selectedChannel ?? UNKNOWN}</dd>
+              <dd>{selectedTrain}</dd>
             </div>
             <div>
               <dt>Observed train</dt>
@@ -411,6 +451,67 @@ export function InstallerUpdatesExperience({
           </p>
         </Card.Body>
       </Card>
+      <Card>
+        <Card.Header>
+          <h2 className="text-lg font-semibold">Update channel</h2>
+        </Card.Header>
+        <Card.Body className="space-y-3">
+          <p id="update-channel-help">Choose which verified release train may be discovered. Choosing Insider does not enable installation; safe apply and recovery controls remain unavailable.</p>
+          <FormField label="Release channel" htmlFor="update-channel" helper="Stable is the default. Insider may contain prerelease changes.">
+            <Select
+              id="update-channel"
+              value={channel}
+              aria-describedby="update-channel-help"
+              onChange={(event) => {
+                setChannel(event.target.value as UpdateChannel);
+                setChannelError(null);
+                setChannelStatus(null);
+              }}
+            >
+              <option value="stable">Stable</option>
+              <option value="insider">Insider</option>
+            </Select>
+          </FormField>
+          {channel === "insider" && (
+            <Alert type="warning" title="Insider channel">{INSIDER_WARNING} Installation controls remain unavailable until safe apply and recovery are implemented.</Alert>
+          )}
+          {channelError && <p role="alert" className="text-pf-error">{channelError}</p>}
+          {channelStatus && <p role="status" aria-live="polite">{channelStatus}</p>}
+          <Button
+            type="button"
+            variant="secondary"
+            loading={savingChannel}
+            disabled={!onSaveUpdateChannel}
+            onClick={() => {
+              setChannelError(null);
+              setChannelStatus(null);
+              if (channel === "insider" && !insiderAcknowledged) {
+                setAcknowledgementOpen(true);
+                return;
+              }
+              void saveChannel({ channel, insiderAcknowledged: channel === "insider" ? insiderAcknowledged : false });
+            }}
+          >
+            Save update channel
+          </Button>
+        </Card.Body>
+      </Card>
+      <Modal
+        isOpen={acknowledgementOpen}
+        onClose={() => setAcknowledgementOpen(false)}
+        title="Acknowledge Insider channel risk"
+        footer={<div className="flex justify-end gap-2"><Button type="button" variant="secondary" onClick={() => setAcknowledgementOpen(false)}>Cancel</Button><Button type="button" disabled={!insiderAcknowledged || savingChannel} loading={savingChannel} onClick={() => { setAcknowledgementOpen(false); void saveChannel({ channel: "insider", insiderAcknowledged: true }); }}>Acknowledge and save</Button></div>}
+      >
+        <div className="space-y-3">
+          <p>{INSIDER_WARNING} Insider is intended for administrators who accept prerelease behavior and possible regressions. It only changes discovery eligibility; it does not install releases.</p>
+          <Checkbox
+            id="insider-acknowledgement"
+            checked={insiderAcknowledged}
+            onChange={(event) => setInsiderAcknowledged(event.target.checked)}
+            label="I understand and accept the prerelease risk of Insider updates."
+          />
+        </div>
+      </Modal>
       <Card>
         <Card.Header>
           <h2 className="text-lg font-semibold">

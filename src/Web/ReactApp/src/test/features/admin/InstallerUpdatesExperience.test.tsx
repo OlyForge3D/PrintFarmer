@@ -1,6 +1,6 @@
-import { render, screen, within } from '@testing-library/react';
+import { render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { InstallerUpdatesExperience } from '@/features/admin/components/InstallerUpdatesExperience';
 import { blockedReadinessInventory, conflictingReplicaInventory, digest, identity, inventory, replica } from '@/test/features/system/serviceInventoryFixture';
 
@@ -162,5 +162,59 @@ describe('InstallerUpdatesExperience', () => {
       expect(screen.getByText(new RegExp(`Observed compatibility is ${compatibilityState}`))).toBeVisible();
     },
   );
+
+  it('keeps the selected train distinct from observed readiness and does not infer installability from inventory alone', async () => {
+    const user = userEvent.setup();
+    render(<InstallerUpdatesExperience inventory={inventory({ selectedChannel: 'stable', observedChannel: 'insider', readiness: { state: 'Blocked', reasons: ['Host maintenance is required'], hops: ['host-check'] }, eligibility: 'NotManaged' })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+
+    expect(screen.getByText(/Selected train/).parentElement).toHaveTextContent('stable');
+    expect(screen.getByText(/Observed train/).parentElement).toHaveTextContent('insider');
+    expect(screen.getByText(/Readiness: Blocked/)).toBeVisible();
+    expect(screen.queryByText(/Insider channel/)).not.toBeInTheDocument();
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
+    expect(screen.getByText(/Selected train/).parentElement).toHaveTextContent('insider');
+    expect(screen.getByText(/Observed train/).parentElement).toHaveTextContent('insider');
+    expect(screen.getByRole('button', { name: 'Save update channel' })).toBeVisible();
+  });
+
+  it('defaults to stable and saves the complete UpdateChannel group', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+
+    expect(screen.getByRole('combobox', { name: 'Release channel' })).toHaveValue('stable');
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'stable');
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ channel: 'stable', insiderAcknowledged: false }));
+    expect(screen.getByRole('status')).toHaveTextContent('Update channel saved.');
+  });
+
+  it('requires explicit acknowledgement before saving Insider', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockResolvedValue(undefined);
+    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    expect(screen.getByRole('dialog', { name: 'Acknowledge Insider channel risk' })).toBeVisible();
+    expect(save).not.toHaveBeenCalled();
+    await user.click(screen.getByRole('checkbox', { name: /accept the prerelease risk/i }));
+    await user.click(screen.getByRole('button', { name: 'Acknowledge and save' }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ channel: 'insider', insiderAcknowledged: true }));
+  });
+
+  it('rolls back the channel and exposes an error when saving fails', async () => {
+    const user = userEvent.setup();
+    const save = vi.fn().mockRejectedValue(new Error('rejected'));
+    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    await user.click(screen.getByRole('checkbox', { name: /accept the prerelease risk/i }));
+    await user.click(screen.getByRole('button', { name: 'Acknowledge and save' }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/Failed to save the update channel/));
+    expect(screen.getByRole('combobox', { name: 'Release channel' })).toHaveValue('stable');
+  });
 
 });

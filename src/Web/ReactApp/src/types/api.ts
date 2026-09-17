@@ -4971,6 +4971,13 @@ export type InventoryCompatibilityState = 'Compatible' | 'Incompatible' | 'Unkno
 export type InventoryChannelState = 'Observed' | 'Stale' | 'Unknown' | 'Mismatch' | 'Mixed';
 export type InventoryEligibility = 'Blocked' | 'Eligible' | 'Unknown' | 'NotManaged';
 
+export type UpdateChannel = 'stable' | 'insider';
+
+export interface UpdateChannelSettings {
+  channel: UpdateChannel;
+  insiderAcknowledged: boolean;
+}
+
 export interface CanonicalReleaseIdentity {
   canonicalVersion: string | null;
   baseVersion: string | null;

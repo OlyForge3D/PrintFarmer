@@ -4,7 +4,7 @@ import { Alert, Button } from "@/common/components/ui";
 import { InstallerUpdatesExperience } from "@/features/admin/components/InstallerUpdatesExperience";
 import { useAuth } from "@/features/auth/hooks/useAuth";
 import { apiClient } from "@/services/api";
-import type { SystemInfo } from "@/types/api";
+import type { SystemInfo, UpdateChannelSettings } from "@/types/api";
 
 type ConnectionObservation = "connected" | "unknown";
 
@@ -33,6 +33,11 @@ export function InstallerUpdatesPage() {
     refetchOnWindowFocus: true,
     // This page owns reconnect reconciliation through its single explicit listener.
     refetchOnReconnect: false,
+  });
+  const { data: updateChannelSettings, refetch: refetchUpdateChannel } = useQuery<UpdateChannelSettings>({
+    queryKey: ["settings", "UpdateChannel"],
+    queryFn: () => apiClient.getUpdateChannelSettings(),
+    enabled: canView,
   });
 
   // A later successful focus fetch has a newer query timestamp than the
@@ -103,6 +108,14 @@ export function InstallerUpdatesPage() {
   // `updates:execute` has no backend authorization contract yet. A safe admin/view check
   // may display this read-only surface, but it must not imply a runtime permission grant.
   return (
-    <InstallerUpdatesExperience inventory={data?.inventory} observation={effectiveObservation} />
+    <InstallerUpdatesExperience
+      inventory={data?.inventory}
+      observation={effectiveObservation}
+      updateChannelSettings={updateChannelSettings}
+      onSaveUpdateChannel={async (settings) => {
+        await apiClient.updateUpdateChannelSettings(settings);
+        await Promise.all([refetchUpdateChannel(), refetchInventory()]);
+      }}
+    />
   );
 }

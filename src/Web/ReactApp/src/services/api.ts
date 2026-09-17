@@ -475,6 +475,16 @@ export class ApiClient {
     await this.client.post(`/settings/${className}`, settings);
   }
 
+  async getUpdateChannelSettings(): Promise<import("@/types/api").UpdateChannelSettings> {
+    return this.getSettings<import("@/types/api").UpdateChannelSettings>("UpdateChannel");
+  }
+
+  async updateUpdateChannelSettings(
+    settings: import("@/types/api").UpdateChannelSettings,
+  ): Promise<void> {
+    return this.saveSettings("UpdateChannel", settings);
+  }
+
   /**
    * Get all settings metadata for dynamic UI generation
    */
