@@ -4978,6 +4978,41 @@ export interface UpdateChannelSettings {
   insiderAcknowledged: boolean;
 }
 
+export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';
+
+export interface UpdateSchedulingBackoff {
+  state: UpdateSchedulingBackoffState;
+  consecutiveFailures: number;
+  until: string | null;
+  reasons: string[];
+}
+
+export interface UpdateSchedulingKillSwitch {
+  enabled: boolean;
+  reason: string | null;
+}
+
+export type UpdateSchedulingExecutorState = 'Unknown' | 'Unavailable' | 'Available' | 'Busy' | 'RecoveryRequired';
+
+export interface UpdateSchedulingExecutor {
+  state: UpdateSchedulingExecutorState;
+  reason: string | null;
+}
+
+export interface UpdateSchedulingStatus {
+  configuredEnabled: boolean;
+  effectiveEnabled: boolean;
+  selectedChannel: UpdateChannel;
+  effectiveChannel: UpdateChannel | null;
+  policyRevision: number;
+  lastAttemptAt: string | null;
+  nextAttemptAt: string | null;
+  backoff: UpdateSchedulingBackoff;
+  killSwitch: UpdateSchedulingKillSwitch;
+  executor: UpdateSchedulingExecutor;
+  reasons: string[];
+}
+
 export interface CanonicalReleaseIdentity {
   canonicalVersion: string | null;
   baseVersion: string | null;
@@ -5043,6 +5078,7 @@ export interface ServiceInventory {
   eligibility: InventoryEligibility;
   eligibilityReasons: string[];
   readiness: ReleaseReadiness | null;
+  updateScheduling: UpdateSchedulingStatus | null;
   snapshotOrigin: InventorySnapshotOrigin;
   snapshotSource: string | null;
   snapshotExportedAt: string | null;

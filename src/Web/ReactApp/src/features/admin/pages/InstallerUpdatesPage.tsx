@@ -34,7 +34,12 @@ export function InstallerUpdatesPage() {
     // This page owns reconnect reconciliation through its single explicit listener.
     refetchOnReconnect: false,
   });
-  const { data: updateChannelSettings, refetch: refetchUpdateChannel } = useQuery<UpdateChannelSettings>({
+  const {
+    data: updateChannelSettings,
+    isError: updateChannelIsError,
+    isPending: updateChannelIsLoading,
+    refetch: refetchUpdateChannel,
+  } = useQuery<UpdateChannelSettings>({
     queryKey: ["settings", "UpdateChannel"],
     queryFn: () => apiClient.getUpdateChannelSettings(),
     enabled: canView,
@@ -112,9 +117,17 @@ export function InstallerUpdatesPage() {
       inventory={data?.inventory}
       observation={effectiveObservation}
       updateChannelSettings={updateChannelSettings}
+      updateChannelIsLoading={updateChannelIsLoading}
+      updateChannelIsError={updateChannelIsError}
+      onRetryUpdateChannel={() => { void refetchUpdateChannel(); }}
       onSaveUpdateChannel={async (settings) => {
         await apiClient.updateUpdateChannelSettings(settings);
-        await Promise.all([refetchUpdateChannel(), refetchInventory()]);
+        const result = await refetchUpdateChannel();
+        if (result.isError || !result.data) {
+          throw new Error("UpdateChannel settings could not be confirmed after save.");
+        }
+        void refetchInventory();
+        return result.data;
       }}
     />
   );
