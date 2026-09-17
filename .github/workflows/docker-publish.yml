@@ -143,6 +143,7 @@ jobs:
         run: node scripts/ci/release-dispatch.mjs verify
       - name: Obtain protected publisher App token
         id: publisher
+        if: inputs.operation == 'publish'
         uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
         with:
           owner: OlyForge3D
@@ -155,11 +156,25 @@ jobs:
           permission-administration: write
           permission-actions: read
           permission-workflows: write
+      - name: Obtain protected abandonment App token
+        id: abandonment_publisher
+        if: inputs.operation == 'abandon'
+        uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2
+        with:
+          owner: OlyForge3D
+          repositories: PrintFarmer
+          app-id: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
+          private-key: ${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}
+          permission-contents: write
+          permission-checks: read
+          permission-statuses: read
+          permission-administration: write
+          permission-actions: read
       - name: Recover original signed authorization for immutable abandonment
         if: inputs.operation == 'abandon'
         id: recover_abandonment
         env:
-          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.abandonment_publisher.outputs.token }}
           RELEASE_LEDGER_ANCHOR: ${{ vars.RELEASE_LEDGER_ANCHOR }}
           RELEASE_TRANSACTION: ${{ inputs.transaction }}
           RELEASE_ABANDONMENT_TARGET: ${{ inputs.reservation_target }}
@@ -184,7 +199,7 @@ jobs:
       - name: Record approved immutable reservation abandonment
         if: inputs.operation == 'abandon'
         env:
-          RELEASE_PUBLISHER_TOKEN: ${{ steps.publisher.outputs.token }}
+          RELEASE_PUBLISHER_TOKEN: ${{ steps.abandonment_publisher.outputs.token }}
           RELEASE_PUBLISHER_APP_ID: ${{ vars.RELEASE_PUBLISHER_APP_ID }}
           RELEASE_APPROVAL_MODE: ${{ vars.RELEASE_APPROVAL_MODE }}
           RELEASE_PUBLIC_IDENTITY: ${{ steps.recover_abandonment.outputs.public_identity }}

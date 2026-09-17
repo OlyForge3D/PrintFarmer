@@ -1986,6 +1986,15 @@ test('release-writer scanner handles long option prefixes without backtracking',
   assert.deepEqual(releaseWriteKinds(`${prefix}push --force-with-lease=main:abc origin main`), ['force-push']);
 });
 
+test('consumed tag diagnostic remains retired from source and CI/API contracts', () => {
+  assert.equal(existsSync('.github/workflows/diagnose-release-tag-2736.yml'), false);
+  assert.equal(existsSync('scripts/ci/diagnose-release-tag-2736.mjs'), false);
+  assert.equal(existsSync('scripts/ci/tests/test-diagnose-release-tag-2736.mjs'), false);
+  assert.doesNotMatch(readFileSync('.github/workflows/ci.yml', 'utf8'), /diagnose-release-tag-2736/);
+  assert.doesNotMatch(readFileSync('scripts/ci/release-github.mjs', 'utf8'), /diagnose-release-tag-2736/);
+  assert.doesNotMatch(readFileSync('scripts/ci/github-evidence-pages.mjs', 'utf8'), /diagnose-release-tag-2736/);
+});
+
 test('all executable scripts, actions and workflows have only the reviewed release writers and no force pushes', t => {
   const gitOptions = { encoding: 'utf8', maxBuffer: 16 * 1024 * 1024 };
   const executables = new Set(execFileSync('git', ['ls-files', '--stage', '-z'], gitOptions)

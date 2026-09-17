@@ -294,6 +294,7 @@ test('real workflow gates every protected route with a blocking no-secret live d
   const steps = publisher.jobs.publish.steps;
   const recheck = steps.findIndex(step => step.run === 'node scripts/ci/release-dispatch.mjs verify');
   const mint = steps.findIndex(step => step.id === 'publisher');
+  const abandonMint = steps.findIndex(step => step.id === 'abandonment_publisher');
   assert.ok(recheck >= 0 && recheck < mint);
   assert.equal(steps[recheck].if, undefined);
   assert.equal(steps[recheck]['continue-on-error'], undefined);
@@ -307,6 +308,16 @@ test('real workflow gates every protected route with a blocking no-secret live d
     'permission-workflows': 'write',
   });
   assert.equal(steps[mint]['continue-on-error'], undefined);
+  assert.equal(steps[mint].if, "inputs.operation == 'publish'");
+  assert.deepEqual(steps[abandonMint].with, {
+    owner: 'OlyForge3D', repositories: 'PrintFarmer',
+    'app-id': '${{ vars.RELEASE_PUBLISHER_APP_ID }}',
+    'private-key': '${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}',
+    'permission-contents': 'write', 'permission-checks': 'read',
+    'permission-statuses': 'read', 'permission-administration': 'write', 'permission-actions': 'read',
+  });
+  assert.equal(steps[abandonMint].if, "inputs.operation == 'abandon'");
+  assert.equal(steps[abandonMint]['continue-on-error'], undefined);
   assert.equal(workflow.jobs.publish.secrets, 'inherit');
   assert.doesNotMatch(JSON.stringify(workflow.jobs.admit), /secrets\./);
   assert.deepEqual(Object.keys(workflow.on), ['workflow_dispatch']);

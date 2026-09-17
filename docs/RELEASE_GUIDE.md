@@ -135,7 +135,8 @@ Known sanitized evidence is limited to the following:
 - `refs/tags/v0.2.3-insider.1` is permanent and points to the known annotated
   object and source commit. It is not a GitHub release, signed publication,
   ledger transition, or recovery.
-- The sequence-1 unsigned allocation has no signed authorization. The existing
+- The sequence-1 unsigned allocation for `v0.2.3-insider.1` has no signed
+  authorization. The existing
   owner-only manual abandon path therefore cannot safely operate on it.
 
 No safe recovery implementation is authorized in this issue. The available
@@ -158,8 +159,13 @@ authority; invoking abandon; or rerunning the diagnostic are not safe options
 under the current contract. The owner must decide whether to retain the unresolved
 reservation or open a separately scoped recovery change.
 
-The canonical publisher now explicitly requests `workflows: write` alongside its
-existing pinned action and other permissions. `release-stable` and
+The owner explicitly authorized retaining the existing App/installation
+`workflows: write` grant for the canonical publisher; the 403/422 evidence does
+not prove that permission was the sole cause. The installation grant must remain
+present or the publish token mint fails closed. The canonical publisher explicitly
+requests `workflows: write` alongside its
+existing pinned action and other permissions, while the abandonment token keeps
+the former permission set. `release-stable` and
 `release-insider` retain their existing owner-only manual boundaries,
 `can_admins_bypass: false`, development-only routing, and no-reviewer contract.
 
