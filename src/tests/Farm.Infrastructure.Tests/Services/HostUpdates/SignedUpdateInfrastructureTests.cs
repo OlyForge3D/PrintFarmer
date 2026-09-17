@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 
@@ -56,23 +56,29 @@ public sealed class SignedUpdateInfrastructureTests
             .GetProperty("$ref")
             .GetString()!;
         Assert.Equal("#/$defs/validCase", pattern);
-        string versionPattern = schemaDocument.RootElement
+        JsonElement validCaseProperties = schemaDocument.RootElement
             .GetProperty("$defs")
             .GetProperty("validCase")
-            .GetProperty("properties")
-            .GetProperty("version")
-            .GetProperty("pattern")
-            .GetString()!;
+            .GetProperty("properties");
+        Assert.Equal(1, validCaseProperties.GetProperty("version").GetProperty("minLength").GetInt32());
+        Assert.Equal("#/$defs/parsedVersion", validCaseProperties
+            .GetProperty("parsed")
+            .GetProperty("$ref")
+            .GetString());
+        JsonElement parsedProperties = schemaDocument.RootElement
+            .GetProperty("$defs")
+            .GetProperty("parsedVersion")
+            .GetProperty("properties");
+        Assert.Equal(1, parsedProperties.GetProperty("major").GetProperty("minimum").GetInt32());
 
         SequenceGoldenFixture fixture = LoadSequenceFixture();
         foreach (SequenceValidCase testCase in fixture.ValidCases)
         {
-            Assert.Matches(versionPattern, testCase.Version);
+            Assert.True(testCase.Parsed.Major >= 1, testCase.Name);
+            Assert.Equal(
+                SignedUpdateManifestValidator.DeriveSequence(testCase.Version),
+                long.Parse(testCase.ExpectedSequence, System.Globalization.CultureInfo.InvariantCulture));
         }
-
-        Assert.DoesNotMatch(versionPattern, "01.2.3");
-        Assert.DoesNotMatch(versionPattern, "1.02.3");
-        Assert.DoesNotMatch(versionPattern, "1.2.03");
     }
 
     [Fact]
@@ -621,13 +627,13 @@ public sealed class SignedUpdateInfrastructureTests
     [Fact]
     public void Parse_GeneratedSignerManifest_ConsumesCompositePlatformContract()
     {
-        string json = JsonSerializer.Serialize(CreateManifest("0.0.0", "stable", "main"), JsonOptions);
+        string json = JsonSerializer.Serialize(CreateManifest("1.0.0", "stable", "main"), JsonOptions);
 
         SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(json);
         SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
 
         Assert.True(validation.IsValid, string.Join(',', validation.Errors));
-        Assert.Equal(99_999, manifest.Sequence);
+        Assert.Equal(SignedUpdateManifestValidator.DeriveSequence("1.0.0"), manifest.Sequence);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Platforms);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Services[0].Platforms);
         Assert.Equal(["linux-amd64"], manifest.Services[4].Platforms);

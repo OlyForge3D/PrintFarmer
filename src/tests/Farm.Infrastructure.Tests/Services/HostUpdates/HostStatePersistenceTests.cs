@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.Extensions.Options;
 using Xunit;

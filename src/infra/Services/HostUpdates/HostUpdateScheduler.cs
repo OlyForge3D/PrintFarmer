@@ -1,4 +1,4 @@
-#pragma warning disable SA1516, SA1513, SA1408, SA1501, SA1515
+﻿#pragma warning disable SA1516, SA1513, SA1408, SA1501, SA1515
 #pragma warning disable CA1849 // The replay store and policy fence deliberately force an OS-level disk flush after the async write completes.
 using System.Security.Cryptography;
 using System.Text;

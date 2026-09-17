@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Services.HostUpdates;
+﻿using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Modules.Administration.Controllers.Admin;
 using Microsoft.AspNetCore.Mvc;
 using Xunit;

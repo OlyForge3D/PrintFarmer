@@ -1,4 +1,4 @@
-#pragma warning disable VSTHRD003, S3398
+﻿#pragma warning disable VSTHRD003, S3398
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;

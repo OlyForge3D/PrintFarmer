@@ -1,4 +1,4 @@
-#pragma warning disable CA1849 // The policy file must synchronously flush to durable storage before replacement.
+﻿#pragma warning disable CA1849 // The policy file must synchronously flush to durable storage before replacement.
 #pragma warning disable S3218 // Persisted record property names are part of the on-disk JSON contract.
 using System.Security.Cryptography;
 using System.Text;

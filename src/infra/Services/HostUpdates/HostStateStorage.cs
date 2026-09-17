@@ -1,4 +1,4 @@
-#pragma warning disable SA1501, SA1503, SA1515, SA1408, SA1518, SA1513, CA5392, CA2101
+﻿#pragma warning disable SA1501, SA1503, SA1515, SA1408, SA1518, SA1513, CA5392, CA2101
 using System.ComponentModel.DataAnnotations;
 using System.Runtime.InteropServices;
 using System.Security;

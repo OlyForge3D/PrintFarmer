@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.HostUpdates;
+﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>Common marker for host-update ports that are registered for routability but unavailable.</summary>
 public interface IHostUpdateAvailability

@@ -1,4 +1,4 @@
-#pragma warning disable IDISP007
+﻿#pragma warning disable IDISP007
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 public interface IHostUpdateRecoveryLease : IDisposable
