@@ -1,4 +1,5 @@
-﻿using Farm.Infrastructure.Authorization;
+﻿using System.Security;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -51,6 +52,10 @@ public sealed class HostUpdateController(
                 cancellationToken).ConfigureAwait(false);
             return Ok(response);
         }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        {
+            return AvailabilityProblem(ex.Message);
+        }
         catch (InvalidOperationException ex) when (ex.Message == "policy_unavailable")
         {
             return AvailabilityProblem("policy_unavailable");
@@ -86,13 +91,22 @@ public sealed class HostUpdateController(
             return executorUnavailable;
         }
 
-        HostUpdateExecutionResolutionResult resolution = await requestResolver.ResolveManualAsync(
-            intent ?? new HostUpdateManualAuthorizationIntent(),
-            cancellationToken).ConfigureAwait(false);
+        HostUpdateExecutionResolutionResult resolution;
+        try
+        {
+            resolution = await requestResolver.ResolveManualAsync(
+                intent ?? new HostUpdateManualAuthorizationIntent(),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        {
+            return AvailabilityProblem(ex.Message);
+        }
+
         if (!resolution.Succeeded || resolution.Request is null)
         {
             string code = resolution.Error ?? "request_not_authorized";
-            if (code == "policy_unavailable")
+            if (code is "policy_unavailable" or "authorization_state_unavailable")
             {
                 return AvailabilityProblem(code);
             }
@@ -100,7 +114,16 @@ public sealed class HostUpdateController(
             return Conflict(new { code });
         }
 
-        HostUpdateExecutionResult result = await executor.ExecuteAsync(resolution.Request, cancellationToken).ConfigureAwait(false);
+        HostUpdateExecutionResult result;
+        try
+        {
+            result = await executor.ExecuteAsync(resolution.Request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        {
+            return AvailabilityProblem(ex.Message);
+        }
+
         var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities);
         return result.State == HostUpdateExecutionState.RecoveryRequired ? Conflict(response) : Ok(response);
     }
@@ -123,7 +146,7 @@ public sealed class HostUpdateController(
         {
             activities = journal.Read(releaseId);
         }
-        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException)
         {
             return AvailabilityProblem(ex.Message);
         }
@@ -168,7 +191,7 @@ public sealed class HostUpdateController(
         {
             activities = journal.Read(releaseId);
         }
-        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException)
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException)
         {
             return AvailabilityProblem(ex.Message);
         }
@@ -211,7 +234,16 @@ public sealed class HostUpdateController(
             return Conflict(new { code = "recovery_request_mismatch" });
         }
 
-        HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
+        HostUpdateRecoveryResult result;
+        try
+        {
+            result = await recoveryCoordinator.RecoverAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException)
+        {
+            return AvailabilityProblem(ex.Message);
+        }
+
         if (result.Detail == "host_update_recovery_not_available")
         {
             return AvailabilityProblem(result.Detail);

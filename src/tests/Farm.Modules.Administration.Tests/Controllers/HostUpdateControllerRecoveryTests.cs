@@ -155,6 +155,52 @@ public sealed class HostUpdateControllerRecoveryTests
         Assert.Equal("recovery_already_running", second.Detail);
     }
 
+
+    [Fact]
+    public async Task JournaledRecovery_persists_interrupted_terminal_outcome_when_inner_recovery_is_canceled_and_fresh_coordinator_sees_it()
+    {
+        HostUpdateExecutionRequest request = Request();
+        MutableJournal journal = MutableJournal.InRecovery(request);
+        CancelingRecovery inner = new();
+        JournaledHostUpdateRecoveryCoordinator coordinator = new(journal, new MemoryRecoveryLeaseProvider(), inner);
+        using CancellationTokenSource cts = new();
+        inner.CancelWith(cts);
+
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => coordinator.RecoverAsync(request, journal.Read(request.ReleaseId), cts.Token));
+
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.Phase == "recovery:started" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.State == HostUpdateExecutionState.RecoveryRequired && activity.Phase == "recovery:interrupted" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
+
+        // Fresh coordinator reconstruction (for example, after a process restart) must observe the
+        // durable terminal entry rather than the open-ended "recovery:started" and must still be able
+        // to admit a subsequent recovery attempt bound to the same request.
+        JournaledHostUpdateRecoveryCoordinator reconstructed = new(journal, new MemoryRecoveryLeaseProvider(), new FixedRecovery(HostUpdateRecoveryOutcome.NeedsOperator, "no_backup_available"));
+        HostUpdateRecoveryResult retried = await reconstructed.RecoverAsync(request, journal.Read(request.ReleaseId), default);
+
+        Assert.Equal("no_backup_available", retried.Detail);
+    }
+
+    [Fact]
+    public async Task JournaledRecovery_persists_unknown_terminal_outcome_when_inner_recovery_throws_and_fresh_coordinator_sees_it()
+    {
+        HostUpdateExecutionRequest request = Request();
+        MutableJournal journal = MutableJournal.InRecovery(request);
+        JournaledHostUpdateRecoveryCoordinator coordinator = new(journal, new MemoryRecoveryLeaseProvider(), new ThrowingRecovery());
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(request, journal.Read(request.ReleaseId), default);
+
+        Assert.Equal(HostUpdateRecoveryOutcome.NeedsOperator, result.Outcome);
+        Assert.Equal("recovery_unknown_failure", result.Detail);
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.Phase == "recovery:started" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
+        Assert.Contains(journal.Read(request.ReleaseId), activity => activity.State == HostUpdateExecutionState.RecoveryRequired && activity.Phase == "recovery:unknown:InvalidOperationException" && activity.RequestBindingHash == HostUpdateRequestBinding.Compute(request));
+
+        JournaledHostUpdateRecoveryCoordinator reconstructed = new(journal, new MemoryRecoveryLeaseProvider(), new FixedRecovery(HostUpdateRecoveryOutcome.NeedsOperator, "no_backup_available"));
+        HostUpdateRecoveryResult retried = await reconstructed.RecoverAsync(request, journal.Read(request.ReleaseId), default);
+
+        Assert.Equal("no_backup_available", retried.Detail);
+    }
+
+
     private static HostUpdateExecutionRequest Request() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, Targets())
     {
         RequestId = "request-1",
@@ -226,6 +272,26 @@ public sealed class HostUpdateControllerRecoveryTests
     {
         public Task<HostUpdateRecoveryResult> RecoverAsync(HostUpdateExecutionRequest failedRequest, IReadOnlyList<HostUpdateExecutionActivity> activities, CancellationToken cancellationToken) =>
             Task.FromResult(new HostUpdateRecoveryResult(outcome, detail));
+    }
+
+    private sealed class CancelingRecovery : IHostUpdateRecoveryCoordinator
+    {
+        private CancellationTokenSource? cancelWith;
+
+        public void CancelWith(CancellationTokenSource cts) => cancelWith = cts;
+
+        public Task<HostUpdateRecoveryResult> RecoverAsync(HostUpdateExecutionRequest failedRequest, IReadOnlyList<HostUpdateExecutionActivity> activities, CancellationToken cancellationToken)
+        {
+            cancelWith?.Cancel();
+            cancellationToken.ThrowIfCancellationRequested();
+            return Task.FromResult(new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "unreachable"));
+        }
+    }
+
+    private sealed class ThrowingRecovery : IHostUpdateRecoveryCoordinator
+    {
+        public Task<HostUpdateRecoveryResult> RecoverAsync(HostUpdateExecutionRequest failedRequest, IReadOnlyList<HostUpdateExecutionActivity> activities, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("physical recovery is not implemented");
     }
 
     private sealed class BlockingRecovery : IHostUpdateRecoveryCoordinator

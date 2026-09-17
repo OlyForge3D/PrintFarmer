@@ -282,6 +282,27 @@ public sealed class HostStatePersistenceTests
         Assert.Throws<PlatformNotSupportedException>(() => HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(System.Runtime.InteropServices.Architecture.X86));
     }
 
+    [Theory]
+    [InlineData(System.Runtime.InteropServices.Architecture.X64)]
+    [InlineData(System.Runtime.InteropServices.Architecture.Arm64)]
+    public void HostStateOwnerValidation_LinuxStatxLayoutNeverReadsGroupIdAsUserId(System.Runtime.InteropServices.Architecture architecture)
+    {
+        // Selecting the architecture-specific syscall number (covering the arm64 branch explicitly)
+        // must not affect the managed struct layout: UserId and GroupId are distinct named fields,
+        // not overlapping offsets into a raw/fragile stat buffer, so swapping owner/group can never
+        // happen regardless of which architecture selected the syscall.
+        long syscallNumber = HostStateFileSecurity.NativeMethods.StatxSyscallNumberForArchitecture(architecture);
+        Assert.True(syscallNumber is 332 or 397);
+
+        HostStateFileSecurity.NativeMethods.LinuxStatx stat = default;
+        stat.Mask = 0x7ff;
+        stat.UserId = 1001;
+        stat.GroupId = 2002;
+
+        Assert.Equal(1001u, stat.UserId);
+        Assert.NotEqual(stat.GroupId, stat.UserId);
+    }
+
     private static VerifiedHostUpdateCandidate Candidate() => new("release-1", "commit-1", 1, "sha256:manifest", "stable", true, true, true, true, true, true,
         new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
 

@@ -66,7 +66,26 @@ public sealed class JournaledHostUpdateRecoveryCoordinator(
             }
 
             Append(failedRequest, HostUpdateExecutionState.RecoveryRequired, "recovery:started");
-            HostUpdateRecoveryResult result = await inner.RecoverAsync(failedRequest, journal.Read(failedRequest.ReleaseId), cancellationToken).ConfigureAwait(false);
+            HostUpdateRecoveryResult result;
+            try
+            {
+                result = await inner.RecoverAsync(failedRequest, journal.Read(failedRequest.ReleaseId), cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                // The physical recovery port never reported a terminal outcome. Persist a sanitized
+                // terminal entry bound to the original request so a fresh coordinator reconstruction
+                // (for example, after a restart) never observes an open-ended "recovery:started" and
+                // instead sees the operation left the host in a state that still requires an operator.
+                Append(failedRequest, HostUpdateExecutionState.RecoveryRequired, "recovery:interrupted");
+                throw;
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                Append(failedRequest, HostUpdateExecutionState.RecoveryRequired, "recovery:unknown:" + ex.GetType().Name);
+                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "recovery_unknown_failure");
+            }
+
             HostUpdateExecutionState terminalState = result.Outcome == HostUpdateRecoveryOutcome.RolledBack
             ? HostUpdateExecutionState.Completed
             : HostUpdateExecutionState.RecoveryRequired;

@@ -530,11 +530,26 @@ public sealed class HostUpdateExecutionRequestResolver(
                 return HostUpdateExecutionResolutionResult.Fail("candidate_replay_rejected");
             }
 
-            consumed = await authorizationStore.CreateConsumedAsync(candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            try
+            {
+                consumed = await authorizationStore.CreateConsumedAsync(candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            }
+            catch (InvalidDataException)
+            {
+                return HostUpdateExecutionResolutionResult.Fail("authorization_state_unavailable");
+            }
         }
         else
         {
-            consumed = await authorizationStore.PrepareConsumeAsync(intent.AuthorizationId!, candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            try
+            {
+                consumed = await authorizationStore.PrepareConsumeAsync(intent.AuthorizationId!, candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            }
+            catch (InvalidDataException)
+            {
+                return HostUpdateExecutionResolutionResult.Fail("authorization_state_unavailable");
+            }
+
             if (!consumed.Succeeded || consumed.Authorization is null)
             {
                 return HostUpdateExecutionResolutionResult.Fail(consumed.Error ?? "authorization_invalid");
@@ -554,7 +569,14 @@ public sealed class HostUpdateExecutionRequestResolver(
                 return HostUpdateExecutionResolutionResult.Fail("candidate_replay_rejected");
             }
 
-            consumed = await authorizationStore.CompleteConsumeAsync(intent.AuthorizationId!, candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            try
+            {
+                consumed = await authorizationStore.CompleteConsumeAsync(intent.AuthorizationId!, candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
+            }
+            catch (InvalidDataException)
+            {
+                return HostUpdateExecutionResolutionResult.Fail("authorization_state_unavailable");
+            }
         }
 
         if (!consumed.Succeeded || consumed.Authorization is null)
