@@ -4874,7 +4874,7 @@ generate_env_file() {
 
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
     resolve_deployment_shared_keys || return 1
-    resolve_webauthn_configuration
+    resolve_webauthn_configuration || return 1
     
     # Preserve existing secrets before overwriting .env file
     # This ensures JWT key and other secrets persist across redeploys
