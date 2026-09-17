@@ -305,6 +305,9 @@ if "$REPO_ROOT/scripts/docker/compose-generator.sh" \
                 {
                     echo "Jwt__Key=test-only-throwaway-key-for-ci-validation-0123456789ab"
                     echo "GRAFANA_ADMIN_PASSWORD=test-only-throwaway-password-for-ci-0123456789"
+                    echo "WebAuthn__RelyingPartyId=localhost"
+                    echo "WebAuthn__RelyingPartyName=PrintFarmer CI"
+                    echo "WebAuthn__Origin=http://localhost:8080"
                 } > "$STACK_DIR/.env"
                 cp "$STACK_DIR/.env" "$STACK_DIR/.env.required"
                 # Ignore an inherited connection string and use only the isolated env

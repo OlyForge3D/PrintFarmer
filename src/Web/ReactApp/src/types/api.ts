@@ -4257,7 +4257,6 @@ export interface SystemInfo {
   disk: SystemDiskInfo;
   services: SystemServiceInfo[];
   database: SystemDatabaseInfo;
-  updateScheduling?: UpdateSchedulingStatus | null;
 }
 
 // ============ Dispatch History Types ============
@@ -4979,7 +4978,7 @@ export interface UpdateChannelSettings {
   insiderAcknowledged: boolean;
 }
 
-export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting' | 'Due';
+export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';
 
 export interface UpdateSchedulingBackoff {
   state: UpdateSchedulingBackoffState;
@@ -5068,6 +5067,7 @@ export interface ServiceReplicaObservation {
 }
 
 export interface ServiceInventory {
+  hostUpdaterVersion: string | null;
   selectedChannel: string;
   selectionSource: string;
   collectedAt: string;
@@ -5079,6 +5079,7 @@ export interface ServiceInventory {
   eligibility: InventoryEligibility;
   eligibilityReasons: string[];
   readiness: ReleaseReadiness | null;
+  updateScheduling?: UpdateSchedulingStatus | null;
   snapshotOrigin: InventorySnapshotOrigin;
   snapshotSource: string | null;
   snapshotExportedAt: string | null;
@@ -5092,4 +5093,3 @@ export interface ReleaseReadiness {
   reasons: string[];
   hops: readonly string[];
 }
-

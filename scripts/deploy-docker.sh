@@ -3124,7 +3124,7 @@ CONFIG_FILE="$REPO_ROOT/.deploy-config"
 # empty override is preserved and still fails validation downstream rather than
 # being silently replaced by a persisted value. Uses eval rather than an
 # associative array to stay Bash 3.2 compatible (macOS /bin/bash).
-CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT"
+CONFIG_OVERRIDE_VARS="ENABLE_DISTRIBUTED_SLICING ENABLE_ORCA_WORKER ORCA_WORKER_COUNT ORCA_HOST_PORT SERVER_HOST HTTP_PORT HTTPS_PORT WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin"
 
 capture_config_overrides() {
     local name
@@ -3140,12 +3140,79 @@ capture_config_overrides() {
 
 restore_config_overrides() {
     local name
+    local webauthn_override_set=false
     for name in $CONFIG_OVERRIDE_VARS; do
+        if [ "$name" = "WebAuthn__RelyingPartyId" ] ||
+           [ "$name" = "WebAuthn__RelyingPartyName" ] ||
+           [ "$name" = "WebAuthn__Origin" ]; then
+            eval "if [ \"\${_CONFIG_OVERRIDE_SET_${name}:-0}\" = \"1\" ]; then webauthn_override_set=true; fi"
+        fi
         eval "if [ \"\${_CONFIG_OVERRIDE_SET_${name}:-0}\" = \"1\" ]; then
                   ${name}=\"\${_CONFIG_OVERRIDE_VAL_${name}}\"
               fi
               unset _CONFIG_OVERRIDE_SET_${name} _CONFIG_OVERRIDE_VAL_${name}"
     done
+
+    if [ "$webauthn_override_set" = "true" ]; then
+        WEBAUTHN_CONFIG_SOURCE=explicit
+    fi
+}
+
+load_webauthn_configuration_source() {
+    case "${WebAuthn__ConfigurationSource:-derived}" in
+        explicit|true)
+            WEBAUTHN_CONFIG_SOURCE=explicit
+            ;;
+        derived|false|"")
+            WEBAUTHN_CONFIG_SOURCE=derived
+            unset WebAuthn__RelyingPartyId WebAuthn__RelyingPartyName WebAuthn__Origin
+            ;;
+        *)
+            print_error "WebAuthn__ConfigurationSource must be 'explicit' or 'derived'."
+            return 1
+            ;;
+    esac
+}
+
+detect_webauthn_configuration_source() {
+    if [ "${WebAuthn__RelyingPartyId+x}" = "x" ] ||
+       [ "${WebAuthn__RelyingPartyName+x}" = "x" ] ||
+       [ "${WebAuthn__Origin+x}" = "x" ]; then
+        WEBAUTHN_CONFIG_SOURCE=explicit
+    else
+        WEBAUTHN_CONFIG_SOURCE=derived
+    fi
+}
+
+resolve_webauthn_configuration() {
+    local server_host="${SERVER_HOST:-localhost}"
+    local port_suffix=""
+
+    if ! [[ "$server_host" =~ ^([A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?\.)*[A-Za-z0-9]([A-Za-z0-9-]{0,61}[A-Za-z0-9])?$ ]] ||
+       [[ "$server_host" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
+        print_error "SERVER_HOST must be a bare DNS hostname, not an IP address, scheme, port, or path."
+        return 1
+    fi
+
+    WebAuthn__RelyingPartyId="${WebAuthn__RelyingPartyId:-$server_host}"
+    WebAuthn__RelyingPartyName="${WebAuthn__RelyingPartyName:-PrintFarmer}"
+
+    if [ -z "${WebAuthn__Origin:-}" ]; then
+        if [ "$server_host" = "localhost" ]; then
+            if [ "${HTTP_PORT:-80}" != "80" ]; then
+                port_suffix=":${HTTP_PORT}"
+            fi
+            WebAuthn__Origin="http://${server_host}${port_suffix}"
+        elif [ "${HTTPS_PORT:-0}" != "0" ]; then
+            if [ "${HTTPS_PORT}" != "443" ]; then
+                port_suffix=":${HTTPS_PORT}"
+            fi
+            WebAuthn__Origin="https://${server_host}${port_suffix}"
+        else
+            print_error "HTTPS_PORT must be configured for a non-localhost SERVER_HOST so WebAuthn can use HTTPS."
+            return 1
+        fi
+    fi
 }
 
 load_previous_config() {
@@ -3160,6 +3227,7 @@ load_previous_config() {
         # Source the config file to load variables
         # shellcheck disable=SC1090
         source "$CONFIG_FILE"
+        load_webauthn_configuration_source || exit 1
         validate_deployment_network || exit 1
         apply_discovery_override
         enforce_supported_orcaslicer_release
@@ -3229,6 +3297,7 @@ save_deployment_config() {
     print_header "💾 Saving Deployment Configuration"
     
     print_info "Saving configuration to $CONFIG_FILE for future deployments"
+    resolve_webauthn_configuration || return 1
     
     # Decide which DB include flags to persist. Only persist flags for the
     # actively selected DB provider to avoid accidentally saving unrelated
@@ -3281,6 +3350,21 @@ NETWORK_MODE=${NETWORK_MODE:-bridge}
 HTTP_PORT=$HTTP_PORT
 HTTPS_PORT=${HTTPS_PORT:-0}
 SERVER_HOST=${SERVER_HOST:-localhost}
+
+# Passkey / WebAuthn configuration is derived from the current network settings
+# unless the caller explicitly supplied an override.
+WebAuthn__ConfigurationSource=${WEBAUTHN_CONFIG_SOURCE:-derived}
+EOF
+
+if [ "${WEBAUTHN_CONFIG_SOURCE:-derived}" = "explicit" ]; then
+        cat >> "$CONFIG_FILE" << EOF
+WebAuthn__RelyingPartyId=$(printf '%q' "$WebAuthn__RelyingPartyId")
+WebAuthn__RelyingPartyName=$(printf '%q' "$WebAuthn__RelyingPartyName")
+WebAuthn__Origin=$(printf '%q' "$WebAuthn__Origin")
+EOF
+    fi
+
+    cat >> "$CONFIG_FILE" << EOF
 
 # Application Settings - Pre-populate Setup Wizard  
 PFARM__NetworkDiscovery__EnableDiscovery=${ENABLE_DISCOVERY}
@@ -4790,6 +4874,7 @@ generate_env_file() {
 
     # Resolve this before reading or truncating ENV_FILE so redeploys retain the key.
     resolve_deployment_shared_keys || return 1
+    resolve_webauthn_configuration || return 1
     
     # Preserve existing secrets before overwriting .env file
     # This ensures JWT key and other secrets persist across redeploys
@@ -4963,6 +5048,11 @@ NETWORK_MODE=${NETWORK_MODE:-bridge}
 
 # CORS Configuration
 CORS__AllowedOrigins=$CORS_ORIGINS
+
+# Passkey / WebAuthn Configuration
+WebAuthn__RelyingPartyId=$WebAuthn__RelyingPartyId
+WebAuthn__RelyingPartyName=$WebAuthn__RelyingPartyName
+WebAuthn__Origin=$WebAuthn__Origin
 
 # Feature Flags  
 ENABLE_SWAGGER=$ENABLE_SWAGGER
@@ -7289,6 +7379,7 @@ display_final_info() {
     
     echo -e "${GREEN}Access URLs:${NC}"
     echo -e "${BLUE}  🌐 Web Interface: http://$SERVER_HOST:$HTTP_PORT${NC}"
+    echo -e "${BLUE}  🔑 Passkeys: ${WebAuthn__Origin}${NC}"
     
     if [ "${HTTPS_PORT:-0}" != "0" ]; then
         echo -e "${BLUE}  🔒 Secure Access: https://$SERVER_HOST:$HTTPS_PORT${NC}"
@@ -7416,6 +7507,7 @@ redeploy_existing() {
     capture_config_overrides
     # shellcheck disable=SC1090
     source "$CONFIG_FILE"
+    load_webauthn_configuration_source || exit 1
     validate_deployment_network || exit 1
     apply_discovery_override
     enforce_supported_orcaslicer_release
@@ -7506,7 +7598,7 @@ redeploy_existing() {
     setup_initial_admin || true
     
     print_success "✅ Redeployment complete!"
-    print_info "All containers have been rebuilt and restarted with the same configuration."
+    print_info "All containers have been rebuilt and restarted with the current configuration."
     print_calibration_status_line
     
     exit 0
@@ -7596,6 +7688,7 @@ main() {
         # Function exits, so we never reach here
     fi
 
+    detect_webauthn_configuration_source
     validate_deployment_network || exit 1
     apply_discovery_override
     
@@ -7624,6 +7717,7 @@ main() {
         capture_config_overrides
         # shellcheck disable=SC1090
         source "$CONFIG_FILE" || { print_error "Failed to load config"; exit 1; }
+        load_webauthn_configuration_source || exit 1
         validate_deployment_network || exit 1
         apply_discovery_override
         enforce_supported_orcaslicer_release

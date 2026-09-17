@@ -30,8 +30,7 @@ public class SystemInfoService(
     IEnumerable<IServiceInventorySource> inventorySources,
     Farm.Infrastructure.Settings.ISettingsService settingsService,
     Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache verifiedReleaseEvidenceCache,
-    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions,
-    IHostUpdateSchedulingStatusProvider updateSchedulingStatusProvider) : ISystemInfoService
+    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
     private const string CacheKey = "SystemInfo:Snapshot";
@@ -45,8 +44,6 @@ public class SystemInfoService(
     private readonly Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache _verifiedReleaseEvidenceCache = verifiedReleaseEvidenceCache;
     private readonly IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> _verifiedReleaseDiscoveryOptions =
         verifiedReleaseDiscoveryOptions;
-
-    private readonly IHostUpdateSchedulingStatusProvider _updateSchedulingStatusProvider = updateSchedulingStatusProvider;
 
     /// <summary>
     /// Returns the current system information snapshot, served from a 10-second cache to avoid
@@ -84,8 +81,22 @@ public class SystemInfoService(
 
     private ReleaseReadinessDto? GetUnavailableReleaseReadiness(DateTimeOffset now, VerifiedReleaseEvidenceCacheSnapshot cacheSnapshot)
     {
-        Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options =
-            _verifiedReleaseDiscoveryOptions.CurrentValue;
+        Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions options;
+        try
+        {
+            options = _verifiedReleaseDiscoveryOptions.CurrentValue;
+        }
+        catch (OptionsValidationException ex)
+        {
+            _logger.LogError(ex, "Verified release discovery options are invalid.");
+            return new ReleaseReadinessDto
+            {
+                State = InventoryEligibility.Unknown,
+                Reasons = ["VerifiedReleaseDiscoveryOptionsInvalid"],
+                Hops = ["InventoryRead", "SignedReleaseEvidence", "DiscoveryUnavailable"],
+            };
+        }
+
         if (!options.Enabled)
         {
             return new ReleaseReadinessDto
@@ -188,7 +199,6 @@ public class SystemInfoService(
                 DatabaseBytes = databaseBytes,
             },
             Services = GetServices(appVersion),
-            UpdateScheduling = _updateSchedulingStatusProvider.GetStatus(),
             Database = new SystemDatabaseInfoDto
             {
                 MigrationHeads = appMigrationHeads,

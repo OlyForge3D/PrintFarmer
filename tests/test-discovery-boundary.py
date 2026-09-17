@@ -459,7 +459,9 @@ export -f bash
     def run_deploy_configuration(self, mode, include, saved_mode="bridge", inherited_mode="bridge"):
         """Run real parser/configuration functions; stop at the generation boundary."""
         deploy = (ROOT / "scripts/deploy-docker.sh").read_text(encoding="utf-8")
-        names = ("main", "redeploy_existing", "load_previous_config",
+        names = ("main", "redeploy_existing", "load_webauthn_configuration_source",
+                 "load_previous_config",
+                 "detect_webauthn_configuration_source",
                  "validate_deployment_network", "apply_discovery_override",
                  "configure_networking", "configure_additional")
         functions = []

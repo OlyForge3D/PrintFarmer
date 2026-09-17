@@ -31,7 +31,7 @@ export function deriveSequence(version) {
   const major = BigInt(parsed.major);
   const minor = BigInt(parsed.minor);
   const patch = BigInt(parsed.patch);
-  requireThat(major >= 1n, 'Signed release major version must be greater than zero');
+  requireThat(parsed.stage || major >= 1n, 'Stable signed release major version must be greater than zero');
   requireThat(major <= BigInt(SEQUENCE_MAJOR_MAX), `Major version exceeds sequence encoding limit of ${SEQUENCE_MAJOR_MAX}`);
   requireThat(minor <= BigInt(SEQUENCE_MINOR_MAX), `Minor version exceeds sequence encoding limit of ${SEQUENCE_MINOR_MAX}`);
   requireThat(patch <= BigInt(SEQUENCE_PATCH_MAX), `Patch version exceeds sequence encoding limit of ${SEQUENCE_PATCH_MAX}`);

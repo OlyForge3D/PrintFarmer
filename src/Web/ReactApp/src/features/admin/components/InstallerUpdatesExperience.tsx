@@ -1,7 +1,7 @@
 import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/common/components/ui";
 import { Modal } from "@/common/components/modals/Modal";
 import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
-import type { ServiceInventory, UpdateChannel, UpdateChannelSettings, UpdateSchedulingStatus } from "@/types/api";
+import type { ServiceInventory, UpdateChannel, UpdateChannelSettings } from "@/types/api";
 import { useEffect, useRef, useState } from "react";
 
 const INSIDER_WARNING =
@@ -14,7 +14,6 @@ const AUTO_DISABLED_REASON =
 
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
-  updateScheduling?: UpdateSchedulingStatus | null;
   observation: ConnectionObservation;
   updateChannelSettings?: UpdateChannelSettings;
   updateChannelIsLoading?: boolean;
@@ -206,7 +205,8 @@ function schedulerReasons(reasons: readonly string[] | null | undefined) {
   return Array.isArray(reasons) && reasons.length > 0 ? reasons.join(", ") : "None reported";
 }
 
-function updateSchedulingDetails(scheduling: UpdateSchedulingStatus | null | undefined) {
+function updateSchedulingDetails(inventory: ServiceInventory | null | undefined) {
+  const scheduling = inventory?.updateScheduling;
 
   if (scheduling == null) {
     return (
@@ -248,7 +248,6 @@ function updateSchedulingDetails(scheduling: UpdateSchedulingStatus | null | und
 /** Read-only M1 installer-update surface. It intentionally has no mutation until the constrained handoff exists. */
 export function InstallerUpdatesExperience({
   inventory,
-  updateScheduling,
   observation,
   updateChannelSettings,
   updateChannelIsLoading = false,
@@ -623,7 +622,7 @@ export function InstallerUpdatesExperience({
           <p>
             Scheduling status is read-only. It reports configured versus effective policy and does not make Update Now or automatic installation available.
           </p>
-          {updateSchedulingDetails(updateScheduling)}
+          {updateSchedulingDetails(inventory)}
         </Card.Body>
       </Card>
       <Card>

@@ -22,6 +22,18 @@
   },
   "validCases": [
     {
+      "name": "minimum zero-major insider",
+      "version": "0.2.3-insider.1",
+      "parsed": {
+        "major": 0,
+        "minor": 2,
+        "patch": 3,
+        "kind": "insider",
+        "suffix": 1
+      },
+      "expectedSequence": "20000300001"
+    },
+    {
       "name": "minimum insider",
       "version": "1.0.0-insider.1",
       "parsed": {
@@ -186,9 +198,9 @@
       "errorContains": "stable or insider"
     },
     {
-      "name": "zero-major signed release",
+      "name": "zero-major stable signed release",
       "version": "0.2.3",
-      "errorContains": "major version must be greater than zero"
+      "errorContains": "Stable"
     },
     {
       "name": "leading zero major",
@@ -238,6 +250,11 @@
   ],
   "ordering": [
     {
+      "name": "zero-major insider remains below first public stable",
+      "lower": "0.2.3-insider.99998",
+      "higher": "1.0.0"
+    },
+    {
       "name": "insider sequence increments",
       "lower": "1.2.3-insider.1",
       "higher": "1.2.3-insider.2"
@@ -274,6 +291,7 @@
     {
       "name": "stable and insider identities",
       "versions": [
+        "0.2.3-insider.1",
         "1.2.3-insider.1",
         "1.2.3-insider.99998",
         "1.2.3"

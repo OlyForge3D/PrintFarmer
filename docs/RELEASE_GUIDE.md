@@ -14,9 +14,10 @@ post_date: "2026-09-16"
 ## Release a version
 
 1. Review `VERSION` on `main` for **stable**, or `development` for **insider**.
-   It contains the base version, for example `v1.2.3`. Signed releases require
-   a nonzero major version; change the base through
-   the normal reviewed PR process when needed; keep monorepo versions synchronized.
+   It contains the base version, for example `v1.2.3`. Stable signed releases
+   require a nonzero major version; insider signed releases may use `0.x.y`
+   until the first public stable `1.x.x` release. Change the base through the
+   normal reviewed PR process when needed; keep monorepo versions synchronized.
 2. As **jpapiez**, open **Actions > Consolidated Release > Run workflow** on
    `main` for **stable** or `development` for **insider** -- the run must
    be dispatched from that same channel's source branch. Choose the channel and
@@ -205,11 +206,12 @@ workflows and mutation/recovery commands are removed from active source.
 Remote ledger records, runs, artifacts and tags remain historical audit data.
 No migration or recovery of them is a prerequisite to this workflow.
 
-In particular, **`v0.2.3-insider.1` and `v0.2.3-insider.2` remain permanently
-manual-only**. Their unsigned
-reservation is not repaired or abandoned. Do not rerun the consumed diagnostic
-35169805018 or failed abandonment 35177228925, reconstruct the missing
-`release-authorization-1` artifact, reset counters, or mutate remote history.
+In particular, historical unsigned **`v0.2.3-insider.1` and
+`v0.2.3-insider.2` remain permanently manual-only**. Their unsigned reservation
+is not repaired or abandoned. Future signed `0.x.y-insider.N` releases from the
+current workflow are managed-update eligible. Do not rerun the consumed
+diagnostic 35169805018 or failed abandonment 35177228925, reconstruct the
+missing `release-authorization-1` artifact, reset counters, or mutate remote history.
 Historical implementation is available in Git history, not an alternate active
 publisher. `scripts/release.sh` and `scripts/publish-to-public.sh` remain retired
 and exit 2; do not restore their former history-rewriting behavior.

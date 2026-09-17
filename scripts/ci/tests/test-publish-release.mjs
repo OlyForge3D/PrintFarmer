@@ -97,6 +97,7 @@ function workspace(t) {
 test('explicit version matches channel and VERSION without allocating any state', () => {
   assert.equal(validateVersion('1.2.3', 'stable', 'v1.2.3\n').baseVersion, '1.2.3');
   assert.equal(validateVersion(release.version, 'insider', 'v1.2.3\r\n').sequence, '2');
+  assert.equal(validateVersion('0.2.3-insider.1', 'insider', 'v0.2.3\n').sequence, '1');
   for (const [version, channel, base] of [
     ['0.2.3', 'insider', 'v0.2.3'], ['1.2.3-insider.2', 'stable', 'v1.2.3'],
     ['1.2.3-beta.2', 'insider', 'v1.2.3'], ['1.2.3-rc.2', 'insider', 'v1.2.3'],

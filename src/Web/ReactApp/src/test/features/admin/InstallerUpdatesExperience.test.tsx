@@ -358,7 +358,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders the canonical scheduler status example without implying installability', () => {
-    render(<InstallerUpdatesExperience inventory={inventory()} updateScheduling={{
+    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: false,
       selectedChannel: 'insider',
@@ -370,7 +370,7 @@ describe('InstallerUpdatesExperience', () => {
       killSwitch: { enabled: false, reason: null },
       executor: { state: 'Unavailable', reason: 'ExecutorNotWired' },
       reasons: ['InsiderAcknowledgementRequired', 'ExecutorNotWired'],
-    }} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    } })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Scheduler status')).toBeVisible();
     expect(screen.getByText('Configured scheduling').parentElement).toHaveTextContent('Enabled');
@@ -385,12 +385,12 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders nullable and executor-unavailable scheduling as unavailable without alarm', () => {
-    const { rerender } = render(<InstallerUpdatesExperience inventory={inventory()} updateScheduling={null} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    const { rerender } = render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: null })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Scheduler unavailable')).toBeVisible();
     expect(screen.getByText(/not wired for this host/)).toBeVisible();
 
-    rerender(<InstallerUpdatesExperience inventory={inventory()} updateScheduling={{
+    rerender(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: false,
       effectiveEnabled: false,
       selectedChannel: 'stable',
@@ -402,7 +402,7 @@ describe('InstallerUpdatesExperience', () => {
       killSwitch: { enabled: true, reason: 'maintenance' },
       executor: { state: 'Unavailable', reason: null },
       reasons: [],
-    }} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    } })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Executor unavailable')).toBeVisible();
     expect(screen.getByText('Kill switch').parentElement).toHaveTextContent('Enabled');
@@ -417,7 +417,7 @@ describe('InstallerUpdatesExperience', () => {
     'Busy',
     'RecoveryRequired',
   ] as const)('keeps Update now/Later/automatic controls unavailable when executor state is %s, including Available and RecoveryRequired', (executorState: UpdateSchedulingExecutorState) => {
-    render(<InstallerUpdatesExperience inventory={inventory()} updateScheduling={{
+    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: true,
       selectedChannel: 'stable',
@@ -429,7 +429,7 @@ describe('InstallerUpdatesExperience', () => {
       killSwitch: { enabled: false, reason: null },
       executor: { state: executorState, reason: executorState === 'Busy' ? 'ApplyInProgress' : null },
       reasons: [],
-    }} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    } })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Executor state').parentElement).toHaveTextContent(executorState);
     expect(screen.getByRole('button', { name: 'Update now' })).toHaveAttribute('aria-disabled', 'true');
@@ -439,7 +439,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('keeps Update now/Later/automatic controls unavailable when updateScheduling is null regardless of executor state', () => {
-    render(<InstallerUpdatesExperience inventory={inventory()} updateScheduling={null} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: null })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Scheduler unavailable')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Update now' })).toHaveAttribute('aria-disabled', 'true');
@@ -449,7 +449,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders Busy executor status as a read-only in-progress report, not permission for another action', () => {
-    render(<InstallerUpdatesExperience inventory={inventory()} updateScheduling={{
+    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: true,
       selectedChannel: 'stable',
@@ -461,7 +461,7 @@ describe('InstallerUpdatesExperience', () => {
       killSwitch: { enabled: false, reason: null },
       executor: { state: 'Busy', reason: 'ApplyInProgress' },
       reasons: [],
-    }} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    } })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Executor state').parentElement).toHaveTextContent('Busy');
     expect(screen.getByText('Executor reason').parentElement).toHaveTextContent('ApplyInProgress');
@@ -471,7 +471,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders RecoveryRequired executor status without suggesting an unsafe recovery action', () => {
-    render(<InstallerUpdatesExperience inventory={inventory()} updateScheduling={{
+    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: true,
       selectedChannel: 'stable',
@@ -483,7 +483,7 @@ describe('InstallerUpdatesExperience', () => {
       killSwitch: { enabled: false, reason: null },
       executor: { state: 'RecoveryRequired', reason: 'PriorApplyIncomplete' },
       reasons: [],
-    }} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    } })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Executor state').parentElement).toHaveTextContent('RecoveryRequired');
     expect(screen.getByText('Executor reason').parentElement).toHaveTextContent('PriorApplyIncomplete');
