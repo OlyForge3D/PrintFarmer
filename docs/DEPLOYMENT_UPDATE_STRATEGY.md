@@ -194,7 +194,7 @@ source-only release or unsigned candidate pointer is an update candidate.
 runs full-safe qualification for the exact selected `main`/`development` source
 before protected publication and binds the resulting job/check evidence to the
 immutable transaction. The
-[retired manual qualification path](RELEASE_GUIDE.md#retired-manual-canonical-qualification-history)
+[retired publication tools](RELEASE_GUIDE.md#historical-data-and-retired-tools)
 is historical context only. Automatic qualification includes the genuine
 `path-casing`, `Contract drift gate` and unsigned `Build (iOS)` archive
 executions in the same run/check suite (#2688).
@@ -236,13 +236,13 @@ no reviewer identities or raw policy evidence. Older unsupported schemas fail cl
 The current review producer targets open PR heads, not subsequent squash commits:
 canonical-SHA review evidence remains an explicit #2668 activation prerequisite,
 never a status copied from another SHA or a fabricated independent approver.
-See [approval configuration](RELEASE_GUIDE.md#explicit-release-approval-configuration)
-for private delegation evidence and cutover. All other #2679 controls,
+See [current configuration](RELEASE_GUIDE.md#existing-protections-and-configuration)
+for the replacement publication path. All other #2679 controls,
 including package ACL isolation and automated negative-path tests, remain
 unchanged.
 
 The local #2668 implementation establishes the following publication policy,
-as documented in the [release guide](RELEASE_GUIDE.md#release-channels-and-branches):
+now superseded by the [release procedure](RELEASE_GUIDE.md#release-a-version):
 
 - Stable dispatch uses `main` and `vX.Y.Z`. Consolidated release rejects
   branch/channel/version mismatches; the legacy release workflow is stable-only.
