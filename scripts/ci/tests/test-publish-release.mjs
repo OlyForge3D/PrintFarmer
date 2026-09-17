@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import test from 'node:test';
 import { load } from 'js-yaml';
 import { components, compareVersions, validateVersion, verifyEnvironmentRestrictions } from '../release-policy.mjs';
@@ -212,7 +212,7 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     if (name === 'git') return sha;
     if (name === 'node' && args[0] === 'scripts/compliance/create-source-bundle.mjs') {
       const outputDirectory = args[args.indexOf('--output') + 1];
-      assert.ok(outputDirectory.startsWith(`${source}${'\\'}`) || outputDirectory.startsWith(`${source}/`));
+      assert.ok(!relative(source, outputDirectory).startsWith('..'));
       mkdirSync(outputDirectory, { recursive: true });
       writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.tar.gz`), 'archive');
       writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.json`), 'manifest');
@@ -226,6 +226,10 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     return '';
   };
   assert.deepEqual(buildImages(release, source, assets, run, () => {}), digests);
+  for (const file of [`PrintFarmer-${release.tag}-source.tar.gz`, `PrintFarmer-${release.tag}-source.json`]) {
+    assert.ok(existsSync(join(assets, file)));
+  }
+  assert.ok(!existsSync(join(source, '.release-assets')));
   assert.equal(builds.length, 6);
   assert.equal(smokes.length, 5);
   for (const [index, [, component]] of Object.entries(components).entries()) {
