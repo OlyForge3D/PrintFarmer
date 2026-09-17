@@ -37,7 +37,7 @@ public class VerifiedReleaseEvidenceMapperTests
             Identity: Identity(),
             ComponentPlatformDigests: new Dictionary<string, string>
             {
-                ["api-linux-amd64"] = "sha256:" + new string('b', 64),
+                ["api/linux-amd64"] = "sha256:" + new string('b', 64),
             },
             MinimumUpdaterVersion: "1.0.0",
             ComponentIndexDigests: IndexDigests("api"),
@@ -66,10 +66,10 @@ public class VerifiedReleaseEvidenceMapperTests
             Identity: Identity(),
             ComponentPlatformDigests: new Dictionary<string, string>
             {
-                ["api-linux-amd64"] = "sha256:" + new string('b', 64),
-                ["api-linux-arm64"] = "sha256:" + new string('c', 64),
-                ["orcaslicer-worker-linux-amd64"] = "sha256:" + new string('d', 64),
-                ["orcaslicer-worker-linux-arm64"] = "sha256:" + new string('e', 64),
+                ["api/linux-amd64"] = "sha256:" + new string('b', 64),
+                ["api/linux-arm64"] = "sha256:" + new string('c', 64),
+                ["orcaslicer-worker/linux-amd64"] = "sha256:" + new string('d', 64),
+                ["orcaslicer-worker/linux-arm64"] = "sha256:" + new string('e', 64),
             },
             MinimumUpdaterVersion: "1.0.0",
             ComponentIndexDigests: IndexDigests("api", "orcaslicer-worker"),
@@ -77,12 +77,10 @@ public class VerifiedReleaseEvidenceMapperTests
 
         VerifiedReleaseEvidenceDto dto = metadata.ToEvidenceDto("linux-arm64");
 
-        dto.Services.Should().HaveCount(2);
+        dto.Services.Should().HaveCount(1);
         dto.Services.Select(service => service.ServiceId).Should().OnlyHaveUniqueItems();
         dto.Services.Should().ContainSingle(service =>
             service.ServiceId == "api" && service.Platform == "linux-arm64" && service.PlatformDigest == "sha256:" + new string('c', 64));
-        dto.Services.Should().ContainSingle(service =>
-            service.ServiceId == "slicer-worker" && service.Platform == "linux-arm64" && service.PlatformDigest == "sha256:" + new string('e', 64));
     }
 
     [Fact]
@@ -95,7 +93,7 @@ public class VerifiedReleaseEvidenceMapperTests
             Identity: Identity(),
             ComponentPlatformDigests: new Dictionary<string, string>
             {
-                ["api-linux-amd64"] = "sha256:" + new string('e', 64),
+                ["api/linux-amd64"] = "sha256:" + new string('e', 64),
             },
             MinimumUpdaterVersion: "1.0.0",
             ComponentIndexDigests: IndexDigests("api"),
@@ -123,7 +121,7 @@ public class VerifiedReleaseEvidenceMapperTests
             Identity(),
             new Dictionary<string, string>
             {
-                ["api-linux-amd64"] = "sha256:" + new string('b', 64),
+                ["api/linux-amd64"] = "sha256:" + new string('b', 64),
             },
             "1.0.0",
             IndexDigests("api"),
@@ -161,7 +159,7 @@ public class VerifiedReleaseEvidenceMapperTests
             true,
             Identity(),
             manifestServices.ToDictionary(
-                id => $"{id}-linux-amd64",
+                id => $"{id}/linux-amd64",
                 _ => platformDigest,
                 StringComparer.Ordinal),
             "1.0.0",
@@ -195,6 +193,8 @@ public class VerifiedReleaseEvidenceMapperTests
     private static Dictionary<string, IReadOnlyList<string>> Platforms(params string[] services) =>
         services.ToDictionary(
             service => service,
-            _ => (IReadOnlyList<string>)["linux-amd64", "linux-arm64"],
+            service => service == "orcaslicer-worker"
+                ? (IReadOnlyList<string>)["linux-amd64"]
+                : ["linux-amd64", "linux-arm64"],
             StringComparer.Ordinal);
 }

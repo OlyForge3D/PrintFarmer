@@ -64,9 +64,9 @@ public sealed class HostUpdateFoundationTests
     public async Task PlanAsync_ExtraPlatformMetadata_ProjectsExactTopologySet()
     {
         SignedReleaseMetadata metadata = Metadata(components: Digests(
-            ("api-linux-x64", Digest("api")),
-            ("frontend-linux-x64", Digest("frontend")),
-            ("extra-linux-arm64", Digest("extra"))));
+            ("api/linux-amd64", Digest("api")),
+            ("frontend/linux-amd64", Digest("frontend")),
+            ("extra/linux-arm64", Digest("extra"))));
         MemoryJournal journal = new();
         HostUpdateFoundation sut = CreateSut(new Provider(metadata), journal: journal);
 
@@ -78,7 +78,7 @@ public sealed class HostUpdateFoundationTests
     [Fact]
     public async Task PlanAsync_StaleInspectorTopology_DerivesComponentsAndRejectsMissingPlatformDigest()
     {
-        HostUpdateFoundation sut = CreateSut(new Provider(Metadata(components: Digests(("api-linux-x64", Digest("api"))))), inspector: new Inspector(Installation() with { RequiredComponents = new HashSet<string>(["api", "worker"]) }));
+        HostUpdateFoundation sut = CreateSut(new Provider(Metadata(components: Digests(("api/linux-amd64", Digest("api"))))), inspector: new Inspector(Installation() with { RequiredComponents = new HashSet<string>(["api", "worker"]) }));
         Assert.Contains("release_set_incomplete", (await sut.PlanAsync(Request(), default)).Reasons);
     }
 
@@ -177,7 +177,7 @@ public sealed class HostUpdateFoundationTests
         {
             Snapshot = journal.Entries[stagedIndex].Snapshot with
             {
-                Receipt = first.Receipt! with { ComponentPlatformDigests = Digests(("api-linux-x64", Digest("api"))) },
+                Receipt = first.Receipt! with { ComponentPlatformDigests = Digests(("api/linux-amd64", Digest("api"))) },
             },
         };
         Assert.Equal("staged_receipt_untrusted", (await sut.StageAsync(plan, Authorization(plan), default)).Code);
@@ -748,8 +748,8 @@ public sealed class HostUpdateFoundationTests
     private static HostUpdateAuthorization Authorization(HostUpdatePlan plan) => new(plan.Request.ActorId, plan.Request.Nonce, plan.InstallationId, plan.PlanHash,
         plan.Request.SourceChannel, plan.TargetChannel, plan.Request.ChannelPolicyRevision, DateTimeOffset.UtcNow.AddMinutes(1), HostUpdateAuthorizationKind.Manual,
         false, false, false, false);
-    private static HostInstallationEvidence Installation() => new("installation-1", Digest("installation"), Digest("topology"), "linux-x64", new HashSet<string>(["api", "frontend"]), "postgres", Digest("schema"), Digest("config"), "1.0.0", 1, Identity(), Digest("previous"), 200, 100, true, true, true);
-    private static SignedReleaseMetadata Metadata(long sequence = 1, IReadOnlyDictionary<string, string>? components = null, string minimumUpdater = "1.0.0") => new("stable", sequence, true, Identity(), components ?? Digests(("api-linux-x64", Digest("api")), ("frontend-linux-x64", Digest("frontend"))), minimumUpdater);
+    private static HostInstallationEvidence Installation() => new("installation-1", Digest("installation"), Digest("topology"), "linux-amd64", new HashSet<string>(["api", "frontend"]), "postgres", Digest("schema"), Digest("config"), "1.0.0", 1, Identity(), Digest("previous"), 200, 100, true, true, true);
+    private static SignedReleaseMetadata Metadata(long sequence = 1, IReadOnlyDictionary<string, string>? components = null, string minimumUpdater = "1.0.0") => new("stable", sequence, true, Identity(), components ?? Digests(("api/linux-amd64", Digest("api")), ("frontend/linux-amd64", Digest("frontend"))), minimumUpdater);
     private static HostUpdateStagingReceipt Receipt(SignedReleaseMetadata metadata) => new(true, "staged", metadata.Identity, metadata.Identity.ManifestDigest, metadata.ComponentPlatformDigests, Installation().PriorReleaseIdentity, Digest("previous"), Digest("config"));
     private static CanonicalReleaseIdentity Identity() => new("stable:1.0.0", "1.0.0", "stable", "v1.0.0", "main", Hash("commit"), Hash("commit"), "build_1", "stable:1.0.0", "1.0.0", Digest("manifest"));
     private static Dictionary<string, string> Digests(params (string Key, string Value)[] values) => values.ToDictionary(value => value.Key, value => value.Value);

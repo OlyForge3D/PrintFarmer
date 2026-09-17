@@ -87,6 +87,51 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Throws<JsonException>(() => SignedUpdateManifestValidator.Parse(JsonSerializer.Serialize(fields, JsonOptions)));
     }
 
+    [Fact]
+    public void Parse_ProducerGoldenFixture_PreservesLfAndExpectedSequence()
+    {
+        byte[] bytes = File.ReadAllBytes(Path.Combine(
+            FindRepositoryRoot(),
+            "scripts", "ci", "fixtures", "update-manifest.golden.json"));
+
+        Assert.DoesNotContain((byte)'\r', bytes);
+        SignedUpdateManifest manifest = SignedUpdateManifestValidator.Parse(System.Text.Encoding.UTF8.GetString(bytes));
+
+        Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
+        Assert.Equal(10020000300042, manifest.Sequence);
+        Assert.Equal("0.0.0", manifest.MinimumUpdaterVersion);
+    }
+
+    [Fact]
+    public void Parse_MissingMinimumUpdaterVersion_Rejects()
+    {
+        string json = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "ci", "fixtures", "update-manifest.golden.json"))
+            .Replace(",\"minimumUpdaterVersion\":\"0.0.0\"", string.Empty, StringComparison.Ordinal);
+
+        Assert.Throws<JsonException>(() => SignedUpdateManifestValidator.Parse(json));
+    }
+
+    [Fact]
+    public void Parse_NestedPlatformDigestMap_Rejects()
+    {
+        string json = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "scripts", "ci", "fixtures", "update-manifest.golden.json"))
+            .Replace("\"api/linux-amd64\":\"sha256:", "\"api\":{\"linux-amd64\":\"sha256:", StringComparison.Ordinal)
+            .Replace(new string('0', 64) + "\",\"api/linux-arm64\"", new string('0', 64) + "\"},\"api/linux-arm64\"", StringComparison.Ordinal);
+
+        Assert.Throws<JsonException>(() => SignedUpdateManifestValidator.Parse(json));
+    }
+
+    [Fact]
+    public void Validate_WrongTopLevelPlatformEntries_Rejects()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main") with
+        {
+            Platforms = ["linux-amd64", "linux-arm64", "windows-amd64"],
+        };
+
+        Assert.Contains("platform_invalid", SignedUpdateManifestValidator.Validate(manifest).Errors);
+    }
+
     [Theory]
     [InlineData("""{"id":"api","image":"ghcr.io/olyforge3d/printfarmer-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa","extra":true}""")]
     [InlineData("""{"id":"api","image":null}""")]
@@ -102,7 +147,7 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         Dictionary<string, string> childDigests = manifest.PlatformDigests.ToDictionary(StringComparer.Ordinal);
-        childDigests["api-linux-amd64"] = "sha256:" + new string('b', 64);
+        childDigests["api/linux-amd64"] = "sha256:" + new string('b', 64);
         manifest = manifest with { PlatformDigests = childDigests };
         byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
         TestHandler handler = new(bytes);
@@ -116,9 +161,9 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Equal("1.2.3", metadata.Identity.OciVersionLabel);
         Assert.Equal(manifest.BuildId, metadata.Identity.BuildMetadata);
         Assert.Equal(manifest.Sequence, metadata.Sequence);
-        Assert.Equal("sha256:" + new string('b', 64), metadata.ComponentPlatformDigests["api-linux-amd64"]);
+        Assert.Equal("sha256:" + new string('b', 64), metadata.ComponentPlatformDigests["api/linux-amd64"]);
         Assert.Equal("sha256:" + new string('a', 64), metadata.ComponentIndexDigests!["api"]);
-        Assert.Equal(["linux-amd64"], metadata.ComponentPlatforms!["api"]);
+        Assert.Equal(["linux-amd64", "linux-arm64"], metadata.ComponentPlatforms!["api"]);
     }
 
     [Fact]
@@ -145,7 +190,7 @@ public sealed class SignedUpdateInfrastructureTests
             Channel = "insider",
             Tag = "v9.9.9",
             Sequence = 1,
-            PlatformDigests = new Dictionary<string, string> { ["api-linux-amd64"] = "sha256:bad" },
+            PlatformDigests = new Dictionary<string, string> { ["api/linux-amd64"] = "sha256:bad" },
         };
         SignedUpdateValidationResult result = SignedUpdateManifestValidator.Validate(manifest);
         Assert.Contains("sequence_mismatch", result.Errors);
@@ -158,10 +203,10 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         Dictionary<string, string> incomplete = manifest.PlatformDigests
-            .Where(pair => pair.Key != "api-linux-amd64")
+            .Where(pair => pair.Key != "api/linux-amd64")
             .ToDictionary(StringComparer.Ordinal);
         Dictionary<string, string> mismatched = incomplete.ToDictionary(StringComparer.Ordinal);
-        mismatched["unknown-linux-amd64"] = "sha256:" + new string('a', 64);
+        mismatched["unknown/linux-amd64"] = "sha256:" + new string('a', 64);
 
         Assert.Contains(
             "platform_digest_invalid",
@@ -506,24 +551,40 @@ public sealed class SignedUpdateInfrastructureTests
 
         Assert.True(validation.IsValid, string.Join(',', validation.Errors));
         Assert.Equal(99_999, manifest.Sequence);
-        Assert.All(manifest.Services, service => Assert.Equal(["linux-amd64"], service.Platforms));
-        Assert.Equal(manifest.Platforms, manifest.PlatformDigests.Keys);
-        Assert.Contains("printer-discovery-linux-amd64", manifest.Platforms);
+        Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Platforms);
+        Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Services[0].Platforms);
+        Assert.Equal(["linux-amd64"], manifest.Services[4].Platforms);
+        Assert.Contains("printer-discovery/linux-amd64", manifest.PlatformDigests.Keys);
     }
 
     private static SignedUpdateManifest CreateManifest(string version, string channel, string branch)
     {
         string digest = "sha256:" + new string('a', 64);
-        string[] platforms = ["linux-amd64"];
+        string[] platforms = ["linux-amd64", "linux-arm64"];
         string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
         return new(1, $"v{version}", version, channel, branch, new string('b', 40), "build-1",
             SignedUpdateManifestValidator.DeriveSequence(version), true,
             services.Select(id => new SignedUpdateService(
                 id,
                 $"ghcr.io/olyforge3d/printfarmer-{id}@{digest}",
-                platforms)).ToArray(),
-            services.Select(id => $"{id}-linux-amd64").ToArray(),
-            services.ToDictionary(id => $"{id}-linux-amd64", _ => digest, StringComparer.Ordinal));
+                id == "orcaslicer-worker" ? ["linux-amd64"] : platforms)).ToArray(),
+            platforms,
+            services.SelectMany(id => (id == "orcaslicer-worker" ? new[] { "linux-amd64" } : platforms)
+                .Select(platform => $"{id}/{platform}"))
+                .ToDictionary(key => key, _ => digest, StringComparer.Ordinal),
+            "0.0.0");
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "VERSION")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        return root.FullName;
     }
 
     private static SequenceGoldenFixture LoadSequenceFixture()

@@ -65,7 +65,7 @@ public static partial class SignedUpdateManifestValidator
         }
 
         string[] required = ["schema", "tag", "version", "channel", "sourceBranch", "sourceCommit", "buildId", "sequence",
-            "managedUpdateEligible", "services", "platforms", "platformDigests"];
+            "managedUpdateEligible", "services", "platforms", "platformDigests", "minimumUpdaterVersion"];
         if (required.Any(name => !properties.Any(property => property.Name == name)))
         {
             throw new JsonException("Manifest is missing required fields.");
@@ -105,13 +105,13 @@ public static partial class SignedUpdateManifestValidator
         }
         if (!manifest.ManagedUpdateEligible) errors.Add("managed_update_ineligible");
         IReadOnlyList<string> manifestPlatforms = manifest.Platforms ?? [];
+        string[] expectedTopLevelPlatforms = ["linux-amd64", "linux-arm64"];
         HashSet<string> expectedPlatformDigestKeys = new(StringComparer.Ordinal);
-        List<string> expectedPlatformOrder = [];
         if (manifest.Services is null || manifest.Services.Count != ServiceIds.Count) errors.Add("service_set_invalid");
         else
         {
             string[] ids = manifest.Services.Select(service => service?.Id ?? string.Empty).ToArray();
-            if (ids.Distinct(StringComparer.Ordinal).Count() != ids.Length || ids.Any(id => !ServiceIds.Contains(id))) errors.Add("service_set_invalid");
+            if (!ids.SequenceEqual(ServiceIds, StringComparer.Ordinal)) errors.Add("service_set_invalid");
             foreach (SignedUpdateService service in manifest.Services)
             {
                 if (service is null)
@@ -130,15 +130,18 @@ public static partial class SignedUpdateManifestValidator
                 }
                 else
                 {
+                    string[] expectedServicePlatforms = service.Id == "orcaslicer-worker"
+                        ? ["linux-amd64"]
+                        : expectedTopLevelPlatforms;
+                    if (!servicePlatforms.SequenceEqual(expectedServicePlatforms, StringComparer.Ordinal))
+                    {
+                        errors.Add("platform_invalid");
+                    }
+
                     foreach (string platform in servicePlatforms)
                     {
                         string key = PlatformKey(service.Id, platform);
                         expectedPlatformDigestKeys.Add(key);
-                        expectedPlatformOrder.Add(key);
-                        if (!manifestPlatforms.Contains(key, StringComparer.Ordinal))
-                        {
-                            errors.Add("platform_invalid");
-                        }
                     }
                 }
             }
@@ -146,7 +149,7 @@ public static partial class SignedUpdateManifestValidator
 
         if (manifest.Platforms is null || manifest.Platforms.Count == 0 || manifest.Platforms.Distinct(StringComparer.Ordinal).Count() != manifest.Platforms.Count ||
             manifest.Platforms.Any(platform => !IsPlatform(platform))
-            || !manifest.Platforms.SequenceEqual(expectedPlatformOrder, StringComparer.Ordinal)) errors.Add("platform_invalid");
+            || !manifest.Platforms.SequenceEqual(expectedTopLevelPlatforms, StringComparer.Ordinal)) errors.Add("platform_invalid");
         if (manifest.PlatformDigests is null
             || manifest.PlatformDigests.Count != expectedPlatformDigestKeys.Count
             || manifest.PlatformDigests.Keys.Any(key => !expectedPlatformDigestKeys.Contains(key))
@@ -154,7 +157,7 @@ public static partial class SignedUpdateManifestValidator
         {
             errors.Add("platform_digest_invalid");
         }
-        if (manifest.MinimumUpdaterVersion is not null && !HostUpdateValidation.IsSemanticVersion(manifest.MinimumUpdaterVersion)) errors.Add("compatibility_invalid");
+        if (manifest.MinimumUpdaterVersion is null || !HostUpdateValidation.IsSemanticVersion(manifest.MinimumUpdaterVersion)) errors.Add("compatibility_invalid");
         return errors.Count == 0 ? SignedUpdateValidationResult.Valid : new(false, errors.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
     }
 
@@ -183,7 +186,7 @@ public static partial class SignedUpdateManifestValidator
         return checked((((major * 1_000L) + minor) * 100_000L + patch) * 100_000L + suffix);
     }
 
-    internal static string PlatformKey(string serviceId, string platform) => $"{serviceId}-{platform}";
+    internal static string PlatformKey(string serviceId, string platform) => $"{serviceId}/{platform}";
 
     public static bool IsTagForChannel(string? tag, string channel)
     {
@@ -200,9 +203,9 @@ public static partial class SignedUpdateManifestValidator
         string[] required =
         [
             "schema", "tag", "version", "channel", "sourceBranch", "sourceCommit", "buildId", "sequence",
-            "managedUpdateEligible", "services", "platforms", "platformDigests",
+            "managedUpdateEligible", "services", "platforms", "platformDigests", "minimumUpdaterVersion",
         ];
-        string[] optionalProperties = ["minimumUpdaterVersion", "compatibility"];
+        string[] optionalProperties = ["compatibility"];
         RequireObjectProperties(root, required, optionalProperties);
         RequireKind(root, "schema", JsonValueKind.Number);
         RequireKind(root, "sequence", JsonValueKind.Number);
@@ -212,27 +215,26 @@ public static partial class SignedUpdateManifestValidator
             RequireKind(root, name, JsonValueKind.String);
         }
 
-        foreach (string name in new[] { "minimumUpdaterVersion", "compatibility" })
+        foreach (string name in new[] { "minimumUpdaterVersion" })
         {
-            if (root.TryGetProperty(name, out JsonElement optional) && optional.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+            if (root.TryGetProperty(name, out JsonElement optional) && optional.ValueKind != JsonValueKind.String)
             {
                 throw new JsonException($"{name} must be a string.");
             }
+        }
+        if (root.TryGetProperty("compatibility", out JsonElement compatibility)
+            && compatibility.ValueKind is not (JsonValueKind.String or JsonValueKind.Null))
+        {
+            throw new JsonException("compatibility must be a string.");
         }
 
         JsonElement services = RequireKind(root, "services", JsonValueKind.Array);
         foreach (JsonElement service in services.EnumerateArray())
         {
-            RequireObjectProperties(service, ["id", "image"], ["platforms"]);
+            RequireObjectProperties(service, ["id", "image", "platforms"], []);
             RequireKind(service, "id", JsonValueKind.String);
             RequireKind(service, "image", JsonValueKind.String);
-            if (service.TryGetProperty("platforms", out JsonElement servicePlatforms))
-            {
-                if (servicePlatforms.ValueKind != JsonValueKind.Null)
-                {
-                    RequireStringArray(servicePlatforms, "service platforms");
-                }
-            }
+            RequireStringArray(service.GetProperty("platforms"), "service platforms");
         }
 
         RequireStringArray(RequireKind(root, "platforms", JsonValueKind.Array), "platforms");
@@ -309,7 +311,7 @@ public static partial class SignedUpdateManifestValidator
         !image[(image.IndexOf('/') + 1)..image.IndexOf('@')].Contains(':', StringComparison.Ordinal) &&
         IsSha256Digest(image[(image.IndexOf("@sha256:", StringComparison.Ordinal) + 1)..]);
     private static bool IsSha256Digest(string? value) => value is not null && Sha256().IsMatch(value);
-    internal static bool IsPlatform(string? value) => value is { Length: > 0 and <= 64 } && Platform().IsMatch(value);
+    internal static bool IsPlatform(string? value) => value is "linux-amd64" or "linux-arm64";
     [GeneratedRegex(@"^(?<major>0|[1-9]\d*)\.(?<minor>0|[1-9]\d*)\.(?<patch>0|[1-9]\d*)(?:-insider\.(?<insider>[1-9]\d*))?$", RegexOptions.CultureInvariant)]
     private static partial Regex CanonicalVersion();
     [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)$", RegexOptions.CultureInvariant)]
@@ -719,7 +721,7 @@ public sealed class VerifiedGitHubReleaseMetadataProvider(GitHubSignedReleaseDis
             true,
             identity,
             componentPlatformDigests,
-            manifest.MinimumUpdaterVersion ?? "0.0.0",
+            manifest.MinimumUpdaterVersion!,
             componentIndexDigests,
             componentPlatforms);
     }
