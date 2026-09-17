@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import test from 'node:test';
 import { load } from 'js-yaml';
 import { components, compareVersions, validateVersion, verifyEnvironmentRestrictions } from '../release-policy.mjs';
@@ -206,10 +206,20 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   mkdirSync(join(source, 'src'), { recursive: true });
   writeFileSync(join(source, 'VERSION'), 'v0.2.3');
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) writeFileSync(join(source, file), file);
+  mkdirSync(join(source, '.release-assets'));
+  writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
   const builds = [];
   const smokes = [];
   const run = (name, args) => {
     if (name === 'git') return sha;
+    if (name === 'node' && args[0] === 'scripts/compliance/create-source-bundle.mjs') {
+      const outputDirectory = args[args.indexOf('--output') + 1];
+      assert.ok(!relative(source, outputDirectory).startsWith('..'));
+      assert.ok(outputDirectory.includes('.release-assets-'));
+      mkdirSync(outputDirectory, { recursive: true });
+      writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.tar.gz`), 'archive');
+      writeFileSync(join(outputDirectory, `PrintFarmer-${release.tag}-source.json`), 'manifest');
+    }
     if (name === 'docker' && args[1] === 'build') {
       builds.push(args);
       writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify({ 'containerimage.digest': digest }));
@@ -219,6 +229,10 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     return '';
   };
   assert.deepEqual(buildImages(release, source, assets, run, () => {}), digests);
+  for (const file of [`PrintFarmer-${release.tag}-source.tar.gz`, `PrintFarmer-${release.tag}-source.json`]) {
+    assert.ok(existsSync(join(assets, file)));
+  }
+  assert.ok(existsSync(join(source, '.release-assets', 'preserved.txt')));
   assert.equal(builds.length, 6);
   assert.equal(smokes.length, 5);
   for (const [index, [, component]] of Object.entries(components).entries()) {

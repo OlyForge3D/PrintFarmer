@@ -1,4 +1,12 @@
-import { appendFileSync, copyFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import {
+  appendFileSync,
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { createHash } from 'node:crypto';
 import { resolve, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -45,8 +53,16 @@ export function buildImages(release, source, assets, run = command, rejectImages
   const execute = (name, args) => run(name, args, { cwd: source, stdio: ['ignore', 'inherit', 'pipe'] });
   run('dotnet', ['restore', 'farm-web.sln'], { cwd: join(source, 'src'), stdio: ['ignore', 'inherit', 'pipe'] });
   execute('node', ['scripts/compliance/validate-compliance.mjs']);
-  execute('node', ['scripts/compliance/create-source-bundle.mjs',
-    '--revision', release.sourceCommit, '--version', release.tag, '--output', assets]);
+  const sourceBundleAssets = mkdtempSync(join(source, '.release-assets-'));
+  try {
+    execute('node', ['scripts/compliance/create-source-bundle.mjs',
+      '--revision', release.sourceCommit, '--version', release.tag, '--output', sourceBundleAssets]);
+    for (const file of sourceBundleFiles(release)) {
+      copyFileSync(join(sourceBundleAssets, file), join(assets, file));
+    }
+  } finally {
+    rmSync(sourceBundleAssets, { force: true, recursive: true });
+  }
   execute('node', ['scripts/compliance/create-license-inventory.mjs', '--version', release.tag,
     '--revision', release.sourceCommit, '--output', join(assets, 'license-inventory.json')]);
   emitBuildMetadata(release, source);
@@ -103,9 +119,16 @@ export function buildImages(release, source, assets, run = command, rejectImages
   return digests;
 }
 
+export function sourceBundleFiles(release) {
+  return [
+    `PrintFarmer-${release.tag}-source.tar.gz`,
+    `PrintFarmer-${release.tag}-source.json`,
+  ];
+}
+
 export function releaseAssets(release) {
   return [
-    `PrintFarmer-${release.tag}-source.tar.gz`, `PrintFarmer-${release.tag}-source.json`,
+    ...sourceBundleFiles(release),
     'LICENSE', 'THIRD-PARTY-NOTICES.md', 'license-inventory.json', 'container-images.json', 'release-notes.md',
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
