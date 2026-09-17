@@ -98,7 +98,7 @@ test('release workflow injects the full source commit into container builds', ()
 });
 
 test('versioned frontend and monolith builds do not require retired allocation metadata', () => {
-  const frontendStage = multistage.split(' AS frontend-build\n')[1]?.split('\nFROM ')[0];
+  const frontendStage = multistage.split(/ AS frontend-build\r?\n/)[1]?.split(/\r?\nFROM /)[0];
   assert.ok(frontendStage, 'The publisher must use the real frontend build stage');
   assert.match(publisher, /--file', 'scripts\/docker\/dockerfiles\/Dockerfile.multistage'/);
   assert.match(publisher, /'--build-arg', `BUILD_VERSION=\$\{release.version\}`/);
