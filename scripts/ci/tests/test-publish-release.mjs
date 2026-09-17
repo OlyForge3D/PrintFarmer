@@ -147,7 +147,7 @@ test('stable owner dispatch runs from main and reaches the channel-aware signing
     'environments/release-stable/deployment-branch-policies': stablePolicies,
   });
   await verifyOwnerDispatch(stableEnv, stableApi, stableEvent);
-  assert.equal(verifyEnvironmentRestrictions(stableEnvironment, stablePolicies, stableChannel), undefined);
+  assert.doesNotThrow(() => verifyEnvironmentRestrictions(stableEnvironment, stablePolicies, stableChannel));
   // Integration assertion: the exact dispatch just verified for `stable` ran from
   // `main`; the channel's Cosign signing identity (see manifestSignatureIdentity
   // in publish-release.mjs) must reference that same branch, and never
