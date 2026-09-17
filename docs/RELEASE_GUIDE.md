@@ -89,8 +89,8 @@ approval evidence remains verifiable without changing its original claims.
 
 By owner decision, release validation is limited to automated tests,
 static analysis, code review, and fail-closed checks. There is no general rehearsal
-or alternate publication path. The narrowly authorized, single-use
-[tag diagnostic for #2736](#one-shot-tag-diagnostic-2736) is not release authority.
+or alternate publication path. The consumed one-shot tag diagnostic is retired
+from source and is not release authority.
 
 `release-stable` and `release-insider` are the only release environments. Retain
 their credentials and history; remove only redundant approval gates after the
@@ -116,133 +116,52 @@ Stable is the installation default. Insider requires separate administrator
 opt-in and a reduced-stability warning; running a release workflow does not
 enroll or update any host. Versions and channels do not prove compatibility.
 
-## One-shot tag diagnostic #2736
+## Retired tag diagnostic and unsigned reservation assessment
 
-[`diagnose-release-tag-2736.yml`](../.github/workflows/diagnose-release-tag-2736.yml)
-is a temporary, owner-only exception for **one request**, not a release or
-reservation recovery. It has no inputs and runs only from `development`.
-The fixed request is `POST git/refs` for `refs/tags/v0.2.3-insider.1` at annotated
-object `68b1513644bf62265b8797240f56520c1e6d5600`, whose tag and direct commit
-binding must match source `a9253ae4d8578934ee27903d39ae69e2dc1cf769` and failed
-run `35046281532`, attempt 1. An already-existing ref fails closed, even when exact.
-No new allocation, ledger read/write, signing, qualification, tests, builds,
-containers, assets, releases, aliases or pointers run in this workflow.
+The owner-authorized diagnostic consumed its single request and is retired from
+source. Its remote workflow definition and all run history remain preserved; this
+source change does not dispatch, disable, delete, rename, reset, or recreate any
+workflow or run.
 
-Issue #2741 authorizes a **Workflows-write hypothesis test**, not a proven fix.
-The second diagnostic's bounded result reported HTTP 403 `permission-denied`,
-not a recognized workflow-specific denial. The original publisher's discarded
-422 body remains unexplained. GitHub's [create-reference documentation](https://docs.github.com/en/rest/git/refs#create-a-reference)
-lists Contents and Contents-plus-Workflows permission sets; it does not establish
-which applies to this exact request.
+Known sanitized evidence is limited to the following:
 
-The parent coordinator owns merge approval, action-specific live App/installation
-grant confirmations and readback, and the single authorized invocation.
-Before invoking, establish:
+- The original canonical publisher request failed with HTTP 422 after its body
+  was discarded. Its cause remains unknown and cannot be reconstructed.
+- The bounded Workflows-write comparison reached the exact `git/refs` request
+  and returned a generic HTTP 403 permission denial. The later identical
+  request succeeded after the owner-approved App/installation grant included
+  `workflows: write`, which supports a missing-permission hypothesis but does not
+  prove it was the sole cause of either response.
+- `refs/tags/v0.2.3-insider.1` is permanent and points to the known annotated
+  object and source commit. It is not a GitHub release, signed publication,
+  ledger transition, or recovery.
+- The sequence-1 unsigned allocation has no signed authorization. The existing
+  owner-only manual abandon path therefore cannot safely operate on it.
 
-1. The reviewed PR is merged and its implementation is present on `development`.
-   The original workflow ID `359999367` is active at that unchanged path and has
-   **exactly two** previous runs: `35159038922`, number 1 / attempt 1 at
-   `c517cea2a78e176b2cec436986290c8a767fba04`. Its read-only admission failed;
-   request job `105005305468` was skipped with no steps. Boundary job
-   `105005241763` must still show the exact failed `Read-only admission` step,
-   successful setup and unchanged terminal job/step evidence.
-   Run `35163951895`, number 2 / attempt 1 at
-   `62e8d5c80296ea6de72e986b725524b4acbb0343`, must preserve successful boundary
-   job `105020735400` and failed request job `105020794364`: both preflights
-   and mint succeeded, the request step failed, and token cleanup completed.
-   These job/step conclusions do **not** prove an HTTP status or its cause.
-   Do not use a dispatch as a dry run: even a failed or cancelled admission spends
-   the single run-3 slot explicitly authorized in #2741.
-2. No `consolidated-release.yml` run is queued, requested, pending, waiting or in
-   progress, for **either** channel. Keep publishers quiescent throughout the
-   diagnostic; start no canonical run until it stops.
-3. The owner still authorizes possible **permanent tag creation**. The fixed ref
-   remains absent and the annotation/source binding is unchanged. Existing
-   `release-insider`, owner mode and App `4927270` / installation `161288519`
-   retain their identities. The parent must obtain action-specific approval
-   immediately before adding **Workflows: write** to that App registration and
-   accepting it on that installation, then read back both grants. Retain
-   PrintFarmer-only repository selection, Administration/Contents write and
-   Actions/Checks/Statuses/Metadata read; no unrelated permission changes.
-   Workflows write permits modifying workflow files. No new App, environment,
-   credentials or configuration copying is authorized. Keep the existing
-   environment development-only, with no review gate and admin bypass false.
-4. Confirm the merged diagnostic requests `permission-workflows: write`
-   explicitly, in addition to its unchanged existing permissions and pinned
-   token action. Both the App/installation grant **and** the explicit token
-   request are necessary: a token cannot exceed its installation's grants.
-   See [installation-token permissions](https://docs.github.com/en/apps/creating-github-apps/authenticating-with-a-github-app/generating-an-installation-access-token-for-a-github-app).
-   Canonical publication/abandonment token requests remain unchanged.
+No safe recovery implementation is authorized in this issue. The available
+options are intentionally bounded:
 
-Only after those checks and approved merge, the parent may perform the one
-invocation as `jpapiez` (not performed by the implementation session):
+1. **Leave the reservation unresolved** until the owner chooses a new, separately
+   reviewed recovery protocol that can prove original signed authority. This is
+   the only option that preserves the current invariants without live mutation.
+2. **Create a new release allocation and publication** through the canonical
+   owner dispatch, only as a future release decision. A fresh allocation is not a
+   repair of the historical reservation and must not reuse its tag or authority.
+3. **Change the recovery invariant** to support unsigned-reservation cleanup only
+   after an explicit owner decision, a new threat-model review, and dedicated
+   implementation. This issue does not grant that decision and does not add the
+   mechanism.
 
-```shell
-gh workflow run diagnose-release-tag-2736.yml --repo OlyForge3D/PrintFarmer --ref development
-```
+Deleting, resetting, recreating, or reusing the permanent tag; reading or writing
+the ledger; minting new credentials; reconstructing or signing historical
+authority; invoking abandon; or rerunning the diagnostic are not safe options
+under the current contract. The owner must decide whether to retain the unresolved
+reservation or open a separately scoped recovery change.
 
-The original diagnostic failed before minting or POST because its environment-free
-boundary required an environment-scoped App variable. #2739 corrects that scope
-without copying variables or secrets: the boundary uses fixed public App ID
-`4927270`; only the protected `release-insider` job explicitly resolves the
-existing `vars.RELEASE_PUBLISHER_APP_ID` and validates it before the unchanged
-pinned token action. A missing or wrong protected value fails before minting.
-
-The no-secret boundary verifies the live owner account and administrator role,
-run/workflow/control identity, complete history, environment, source binding and
-publisher quiescence. The protected job repeats these checks before obtaining
-the same pinned publisher App token with only Workflows write added to its
-explicit permission request for this diagnostic.
-Before the POST it rechecks history/quiescence and live protection twice, using
-the canonical protection validators without manufacturing a release transaction
-or signed authority. Additional active tag/push rules fail closed for review;
-no claim is made that an unknown rule or Workflows permission cannot matter.
-
-**Bounded successor enforcement:** the live API must report `run_number: 3` and
-`run_attempt: 1`, matching the runner, and complete unfiltered history must contain
-exactly that run plus both prior runs above. Both prior runs are re-read live with
-their exact source/identity and complete attempt-specific job/step evidence.
-Run 1 must retain its admission failure/skipped request; run 2 must retain its
-successful preflights/mint, failed request step and completed cleanup.
-First/second/fourth or later runs, any rerun,
-deleted, extra, missing, malformed or incomplete run/job evidence fail closed.
-This is not a generic retry mechanism. Complete pagination is required.
-This relies on GitHub's
-[per-workflow monotonic run number](https://docs.github.com/en/actions/reference/workflows-and-actions/variables)
-and normal workflow identity continuity; it is **not tamper-proof against the
-repository owner deleting/recreating the workflow or changing its code**.
-Never rename/recreate/reset it to obtain another first run.
-
-The diagnostic has a private workflow concurrency group; only its request job,
-after read-only admission, takes the canonical `release-insider` group with
-`cancel-in-progress: false`. This does not cancel a running publisher, but GitHub
-can replace a pending concurrency slot. A publisher arriving between admission
-and lock acquisition can still lose that pending slot. Stable has a different
-lock, and an API snapshot is not atomic exclusion. The quiescence prerequisite
-above is essential; this is not a global-lock redesign.
-
-The client performs at most one POST, including on HTTP 403/422, timeout or transport error,
-then only an exact ref/type/object read-back on success. Failure diagnostics use
-the existing 8 KiB bounded sanitizer; unknown transport/runtime details are
-omitted. No raw policy, annotation, response body, URL, header or credential is
-emitted by diagnostic code. The unchanged pinned token action owns its own
-mint/revocation logging; that third-party logging is outside this sanitizer.
-Do not enable debug tracing or echo token-action outputs.
-
-Read the final request step's bounded result. Verified success says **tag created
-only; reservation remains incomplete**, never recovered/published. A timeout,
-transport loss or failed verification can leave tag creation uncertain: inspect
-read-only, never retry. A 422 category is evidence from this new request, not a
-reconstruction of the discarded original body. A changed outcome tests this
-permission hypothesis only; a generic 403 still does not establish a
-workflow-specific cause. Preserve that distinction. The unsigned sequence-1
-allocation still has no signed authority and remains unresolved even if the
-tag succeeds; do not reconstruct, sign, abandon, delete/reset/reuse the tag,
-or proceed to publication.
-After **any run-3 attempt**, retire/remove this diagnostic workflow and its
-single-purpose script in a reviewed change. Do not rerun or redispatch; retirement
-does not abandon or repair the unresolved reservation. Preserve all run history;
-never delete history or recreate/reset the workflow to reopen a slot.
+The canonical publisher now explicitly requests `workflows: write` alongside its
+existing pinned action and other permissions. `release-stable` and
+`release-insider` retain their existing owner-only manual boundaries,
+`can_admins_bypass: false`, development-only routing, and no-reviewer contract.
 
 ## Signed release-set consumer contract
 

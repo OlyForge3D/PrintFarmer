@@ -154,6 +154,7 @@ jobs:
           permission-statuses: read
           permission-administration: write
           permission-actions: read
+          permission-workflows: write
       - name: Recover original signed authorization for immutable abandonment
         if: inputs.operation == 'abandon'
         id: recover_abandonment

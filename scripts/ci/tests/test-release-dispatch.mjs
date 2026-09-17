@@ -304,6 +304,7 @@ test('real workflow gates every protected route with a blocking no-secret live d
     'private-key': '${{ secrets.RELEASE_PUBLISHER_PRIVATE_KEY }}',
     'permission-contents': 'write', 'permission-checks': 'read',
     'permission-statuses': 'read', 'permission-administration': 'write', 'permission-actions': 'read',
+    'permission-workflows': 'write',
   });
   assert.equal(steps[mint]['continue-on-error'], undefined);
   assert.equal(workflow.jobs.publish.secrets, 'inherit');
