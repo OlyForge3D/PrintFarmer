@@ -16,11 +16,14 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// <c>ReleaseReadinessEvaluator</c> to consume.
 /// <para>
 /// Modeled directly on <see cref="Farm.Infrastructure.Services.Catalog.CatalogUpdateDetectionService"/>:
-/// registers with <see cref="IBackgroundServiceMonitor"/>, delays before its first iteration (so
-/// short-lived hosts/tests never trigger a real discovery round), re-reads its enable/interval
-/// configuration every iteration, and exposes an <c>internal</c> method
+/// registers with <see cref="IBackgroundServiceMonitor"/>, re-reads its enable/interval
+/// configuration on every iteration, and exposes an <c>internal</c> method
 /// (<see cref="DiscoverAndCacheAsync"/>) so tests can exercise discovery without running the
-/// polling loop.
+/// polling loop. Unlike an earlier revision of this service, the loop no longer delays before
+/// its first iteration: it evaluates <c>Enabled</c> and, when enabled, runs one discovery round
+/// immediately on <see cref="ExecuteAsync"/> entry, then delays for the configured interval
+/// before repeating. Tests still avoid triggering a real discovery round by calling
+/// <see cref="DiscoverAndCacheAsync"/> directly rather than starting the polling loop.
 /// </para>
 /// <para>
 /// <b>Scope boundary (issue #2757, production discovery slice):</b> this service ONLY

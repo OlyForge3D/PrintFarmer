@@ -106,4 +106,46 @@ public class VerifiedReleaseEvidenceCacheTests
         cache.Current.Should().BeSameAs(newer);
         cache.LastVerifiedAt.Should().NotBeNull();
     }
+
+    [Fact]
+    public void SetVerified_LowerSequenceOnDifferentChannel_ReplacesEvidence()
+    {
+        // Insider sequences are always numerically higher than stable sequences for the same
+        // major.minor.patch (see SignedUpdateManifestValidator.DeriveSequence's suffix ranges),
+        // so a global sequence comparison would permanently lock the cache onto insider evidence
+        // once an operator has ever discovered an insider release. Monotonicity must be scoped
+        // to the evidence's own channel: an operator switching the update channel setting back
+        // to stable must see that stable evidence replace the cached insider evidence, even
+        // though its Sequence is numerically lower.
+        var cache = new VerifiedReleaseEvidenceCache();
+        VerifiedReleaseEvidenceDto insider = Evidence(channel: "insider") with { Sequence = 100_000_000_000 };
+        VerifiedReleaseEvidenceDto stable = Evidence(channel: "stable") with { Sequence = 1_000_000 };
+
+        DateTimeOffset insiderVerifiedAt = DateTimeOffset.UtcNow;
+        cache.SetVerified(insider, insiderVerifiedAt);
+        cache.Current.Should().BeSameAs(insider);
+
+        DateTimeOffset stableVerifiedAt = insiderVerifiedAt.AddMinutes(5);
+        cache.SetVerified(stable, stableVerifiedAt);
+
+        cache.Current.Should().BeSameAs(stable, "an operator channel switch must not be blocked by the other channel's higher sequence");
+        cache.LastVerifiedAt.Should().Be(stableVerifiedAt, "the replacement must record its own verification timestamp, not retain the prior channel's");
+    }
+
+    [Fact]
+    public void SetVerified_LowerSequenceOnSameChannel_StillRejected()
+    {
+        // Companion to the cross-channel test above: monotonicity protection must still apply
+        // within a single channel -- only the cross-channel comparison is disabled.
+        var cache = new VerifiedReleaseEvidenceCache();
+        VerifiedReleaseEvidenceDto newerStable = Evidence(channel: "stable") with { Sequence = 2_000_000 };
+        VerifiedReleaseEvidenceDto olderStable = Evidence(channel: "stable") with { Sequence = 1_000_000 };
+
+        DateTimeOffset newerVerifiedAt = DateTimeOffset.UtcNow;
+        cache.SetVerified(newerStable, newerVerifiedAt);
+        cache.SetVerified(olderStable, newerVerifiedAt.AddMinutes(5));
+
+        cache.Current.Should().BeSameAs(newerStable);
+        cache.LastVerifiedAt.Should().Be(newerVerifiedAt);
+    }
 }

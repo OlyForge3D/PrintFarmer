@@ -21,6 +21,18 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// is disabled, the latest round failed, or verification is older than twice the configured
 /// polling interval. <see cref="LastError"/> remains visible until the next successful discovery.
 /// </para>
+/// <para>
+/// <b>Monotonicity is scoped to the evidence's identity channel (stable vs. insider), not global.</b>
+/// The two channels are distinct release topologies with independent sequence numbering (the
+/// insider suffix and the stable suffix are disjoint ranges — see
+/// <c>SignedUpdateManifestValidator.DeriveSequence</c>), so an insider sequence is never
+/// comparable to a stable sequence. <see cref="SetVerified"/> only rejects a lower sequence when
+/// it shares <see cref="VerifiedReleaseEvidenceDto.Identity"/>'s <c>Channel</c> with the
+/// currently cached evidence. When the channel differs — e.g. an operator switches the update
+/// channel setting from insider back to stable — the newly discovered evidence always replaces
+/// <see cref="Current"/> regardless of its <c>Sequence</c>, because that switch is an operator
+/// decision to re-target a different release line, not a downgrade within one.
+/// </para>
 /// </summary>
 public interface IVerifiedReleaseEvidenceCache
 {
@@ -96,7 +108,13 @@ public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
         ArgumentNullException.ThrowIfNull(evidence);
         lock (_gate)
         {
-            if (_current is not null && evidence.Sequence < _current.Sequence)
+            // Rollback protection only applies within the same identity channel. Sequences from
+            // different channels (stable vs. insider) are independent topologies and are never
+            // comparable, so a channel switch always replaces the cached evidence — see class
+            // remarks.
+            bool sameChannel = _current is not null
+                && string.Equals(_current.Identity?.Channel, evidence.Identity?.Channel, StringComparison.Ordinal);
+            if (sameChannel && evidence.Sequence < _current!.Sequence)
             {
                 return;
             }
