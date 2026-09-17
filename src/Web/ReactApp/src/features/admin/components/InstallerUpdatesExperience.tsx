@@ -1,5 +1,8 @@
-import { Alert, Button, Card, Input } from "@/common/components/ui";
-import type { ServiceInventory } from "@/types/api";
+import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/common/components/ui";
+import { Modal } from "@/common/components/modals/Modal";
+import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
+import type { ServiceInventory, UpdateChannel, UpdateChannelSettings } from "@/types/api";
+import { useEffect, useRef, useState } from "react";
 
 const INSIDER_WARNING =
   "Insider updates may arrive more frequently and have reduced stability compared with stable releases.";
@@ -12,6 +15,11 @@ const AUTO_DISABLED_REASON =
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
   observation: ConnectionObservation;
+  updateChannelSettings?: UpdateChannelSettings;
+  updateChannelIsLoading?: boolean;
+  updateChannelIsError?: boolean;
+  onRetryUpdateChannel?: () => Promise<UpdateChannelSettings>;
+  onSaveUpdateChannel?: (settings: UpdateChannelSettings) => Promise<UpdateChannelSettings>;
 }
 
 function text(value: string | null | undefined) {
@@ -188,15 +196,210 @@ function observedIdentityDetails(inventory: ServiceInventory | null | undefined)
   );
 }
 
+
+function formatDateTime(value: string | null | undefined, fallback: string) {
+  return value ?? fallback;
+}
+
+function schedulerReasons(reasons: readonly string[] | null | undefined) {
+  return Array.isArray(reasons) && reasons.length > 0 ? reasons.join(", ") : "None reported";
+}
+
+function updateSchedulingDetails(inventory: ServiceInventory | null | undefined) {
+  const scheduling = inventory?.updateScheduling;
+
+  if (scheduling == null) {
+    return (
+      <Alert type="info" title="Scheduler unavailable">
+        Automatic update scheduling is not wired for this host. Update Now and automatic controls remain unavailable until the scheduler and constrained executor gates are integrated.
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="space-y-3">
+      <dl className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        <div><dt>Configured scheduling</dt><dd>{scheduling.configuredEnabled ? "Enabled" : "Disabled"}</dd></div>
+        <div><dt>Effective scheduling</dt><dd>{scheduling.effectiveEnabled ? "Enabled" : "Disabled"}</dd></div>
+        <div><dt>Selected channel</dt><dd>{scheduling.selectedChannel}</dd></div>
+        <div><dt>Effective channel</dt><dd>{scheduling.effectiveChannel ?? UNKNOWN}</dd></div>
+        <div><dt>Policy revision</dt><dd>{scheduling.policyRevision}</dd></div>
+        <div><dt>Last attempt</dt><dd>{formatDateTime(scheduling.lastAttemptAt, "Never attempted")}</dd></div>
+        <div><dt>Next attempt</dt><dd>{formatDateTime(scheduling.nextAttemptAt, "Not scheduled")}</dd></div>
+        <div><dt>Backoff state</dt><dd>{scheduling.backoff.state}</dd></div>
+        <div><dt>Consecutive failures</dt><dd>{scheduling.backoff.consecutiveFailures}</dd></div>
+        <div><dt>Backoff until</dt><dd>{formatDateTime(scheduling.backoff.until, "Not waiting")}</dd></div>
+        <div><dt>Kill switch</dt><dd>{scheduling.killSwitch.enabled ? "Enabled" : "Disabled"}</dd></div>
+        <div><dt>Kill switch reason</dt><dd>{scheduling.killSwitch.reason ?? "None reported"}</dd></div>
+        <div><dt>Executor state</dt><dd>{scheduling.executor.state}</dd></div>
+        <div><dt>Executor reason</dt><dd>{scheduling.executor.reason ?? "None reported"}</dd></div>
+      </dl>
+      <p>Scheduler reasons: {schedulerReasons(scheduling.reasons)}.</p>
+      <p>Backoff reasons: {schedulerReasons(scheduling.backoff.reasons)}.</p>
+      {scheduling.executor.state === "Unavailable" && (
+        <Alert type="info" title="Executor unavailable">
+          The executor is unavailable{scheduling.executor.reason ? `: ${scheduling.executor.reason}` : ""}. This page does not infer installability from inventory or scheduling status.
+        </Alert>
+      )}
+    </div>
+  );
+}
+
 /** Read-only M1 installer-update surface. It intentionally has no mutation until the constrained handoff exists. */
 export function InstallerUpdatesExperience({
   inventory,
   observation,
+  updateChannelSettings,
+  updateChannelIsLoading = false,
+  updateChannelIsError = false,
+  onRetryUpdateChannel,
+  onSaveUpdateChannel,
 }: InstallerUpdatesExperienceProps) {
+  const [channel, setChannel] = useState<UpdateChannel>(updateChannelSettings?.channel ?? "stable");
+  const [acknowledgementOpen, setAcknowledgementOpen] = useState(false);
+  const [insiderAcknowledgementDraft, setInsiderAcknowledgementDraft] = useState(false);
+  const [savingChannel, setSavingChannel] = useState(false);
+  const [channelError, setChannelError] = useState<string | null>(null);
+  const [channelStatus, setChannelStatus] = useState("");
+  // True only while a save outcome could not be confirmed by either the POST
+  // or an authoritative refetch. Mutation controls stay disabled the whole
+  // time this is true. This is cleared explicitly from the resolved value of
+  // an operation (save/reject/retry) below -- never inferred from whether
+  // the `updateChannelSettings` prop object changed identity, since TanStack
+  // Query's structural sharing can return the exact same cached reference
+  // for a deep-equal refetch result and would otherwise leave this stuck.
+  const [saveOutcomeUnknown, setSaveOutcomeUnknown] = useState(false);
+  // True only while an explicit GET-only retry (triggered from this
+  // component) is in flight, so a double-click cannot fire it twice.
+  const [retryingUpdateChannel, setRetryingUpdateChannel] = useState(false);
+  // Set immediately (synchronously, before any state update) by an
+  // operation outcome handler -- save success, confirmed rejection, or
+  // GET-only retry -- to the exact settings it just reconciled the UI to.
+  // The props synchronization effect below consumes this once to avoid
+  // clobbering that outcome's error/status text when the parent's query
+  // cache produces a new `updateChannelSettings` object with the same
+  // content immediately afterward (e.g. the same refetch the operation
+  // itself awaited). It is intentionally transient (consumed on first
+  // matching render), not a persistent last-known-content cache, so an
+  // unrelated later settings arrival with coincidentally equal content is
+  // still processed normally.
+  const pendingLocalReconciliationRef = useRef<UpdateChannelSettings | null>(null);
 
-  const insider =
-    inventory?.selectedChannel === "insider" ||
-    inventory?.observedChannel === "insider";
+  useEffect(() => {
+    if (!updateChannelSettings) return;
+    const pending = pendingLocalReconciliationRef.current;
+    const matchesPending =
+      pending != null &&
+      pending.channel === updateChannelSettings.channel &&
+      pending.insiderAcknowledged === updateChannelSettings.insiderAcknowledged;
+    pendingLocalReconciliationRef.current = null;
+    if (matchesPending) {
+      // This settings arrival is the same content an operation outcome
+      // handler already reconciled the UI to explicitly; do not clobber
+      // that outcome's error/status text.
+      return;
+    }
+    setChannel(updateChannelSettings.channel);
+    // A genuinely new authoritative settings value (initial load, an
+    // external change, or a GET-only retry not already handled explicitly)
+    // resolves any prior unknown outcome and clears stale error text.
+    setSaveOutcomeUnknown(false);
+    setChannelError(null);
+  }, [updateChannelSettings]);
+
+  const settingsLoaded = updateChannelSettings != null && !updateChannelIsLoading && !updateChannelIsError;
+  const channelControlDisabled = savingChannel || !settingsLoaded || !onSaveUpdateChannel || saveOutcomeUnknown || retryingUpdateChannel;
+  const persistedInsiderAcknowledged = updateChannelSettings?.insiderAcknowledged ?? false;
+  const fieldError = channelError ?? (updateChannelIsError ? "Failed to load the authoritative UpdateChannel settings. Retry before changing the release channel." : null);
+  const channelDescribedBy = fieldError ? "update-channel-help update-channel-error" : "update-channel-help";
+
+  const closeAcknowledgementDialog = () => {
+    if (savingChannel) return;
+    setAcknowledgementOpen(false);
+    setInsiderAcknowledgementDraft(false);
+  };
+
+  const retryUpdateChannel = async () => {
+    if (!onRetryUpdateChannel || retryingUpdateChannel) return;
+    setRetryingUpdateChannel(true);
+    try {
+      // An explicit successful GET is authoritative on its own: reconcile
+      // and unlock from this resolved value directly, regardless of
+      // whether the parent's query cache later hands this component the
+      // same object reference (structural sharing) or a new one.
+      const authoritative = await onRetryUpdateChannel();
+      pendingLocalReconciliationRef.current = authoritative;
+      setChannel(authoritative.channel);
+      setSaveOutcomeUnknown(false);
+      setChannelError(null);
+      setChannelStatus("");
+    } catch {
+      // The retry itself could not confirm anything; leave the existing
+      // unknown-outcome/error state as-is so the admin can retry again.
+    } finally {
+      setRetryingUpdateChannel(false);
+    }
+  };
+
+  const saveChannel = async (
+    settings: UpdateChannelSettings,
+    options: { closeAcknowledgementOnSuccess?: boolean } = {},
+  ) => {
+    if (!onSaveUpdateChannel) return;
+    setSavingChannel(true);
+    setChannelError(null);
+    setChannelStatus("");
+    try {
+      // A resolved promise means an authoritative refetch confirmed the
+      // requested settings were actually applied; only then is success
+      // reported, regardless of whether the POST itself resolved or
+      // rejected.
+      const authoritativeSettings = await onSaveUpdateChannel(settings);
+      pendingLocalReconciliationRef.current = authoritativeSettings;
+      setChannel(authoritativeSettings.channel);
+      setChannelStatus("Update channel saved.");
+      setInsiderAcknowledgementDraft(false);
+      setSaveOutcomeUnknown(false);
+      if (options.closeAcknowledgementOnSuccess) {
+        setAcknowledgementOpen(false);
+      }
+    } catch (error) {
+      if (error instanceof UpdateChannelSaveRejectedError) {
+        // The authoritative refetch succeeded and disagrees with the
+        // request: this is a confirmed rejection/unchanged state, not an
+        // unknown one. Reconcile the UI to the real server value instead of
+        // claiming success, and leave mutation controls enabled since the
+        // state is known.
+        pendingLocalReconciliationRef.current = error.authoritative;
+        setChannel(error.authoritative.channel);
+        const acknowledgementMismatch =
+          error.authoritative.channel === settings.channel &&
+          error.authoritative.insiderAcknowledged !== settings.insiderAcknowledged;
+        setChannelError(
+          acknowledgementMismatch
+            ? "Update channel was not saved. The server did not record the Insider acknowledgement."
+            : `Update channel was not saved. The server still reports "${error.authoritative.channel}".`,
+        );
+        setSaveOutcomeUnknown(false);
+        // The outcome is conclusively known (not pending): close the
+        // acknowledgement dialog rather than leaving it open over a control
+        // that has already reverted to the authoritative value.
+        setAcknowledgementOpen(false);
+        setInsiderAcknowledgementDraft(false);
+      } else {
+        // Neither the POST nor the refetch could confirm the outcome. Keep
+        // mutation controls disabled until a fresh authoritative GET
+        // resolves this.
+        setSaveOutcomeUnknown(true);
+        setChannelError("Update channel save outcome is unknown because the authoritative UpdateChannel settings could not be confirmed. Retry before saving again.");
+      }
+    } finally {
+      setSavingChannel(false);
+    }
+  };
+
+  const selectedTrain = updateChannelSettings?.channel ?? inventory?.selectedChannel ?? UNKNOWN;
+  const insider = updateChannelSettings?.channel === "insider" || inventory?.selectedChannel === "insider" || inventory?.observedChannel === "insider";
   const readiness = inventory?.readiness;
   const blocked =
     readiness?.state === "Blocked" ||
@@ -232,7 +435,7 @@ export function InstallerUpdatesExperience({
       >
         {blocked
           ? "The observed installation is blocked. Wait, fix forward, or use the documented restore path; downgrade is not offered as a bypass."
-          : "Availability is read-only until trusted host evidence and the constrained executor are accepted. Missing evidence is not Ready to install."}
+          : "Availability is read-only until trusted host evidence and the constrained executor are accepted. Missing evidence is not treated as installable."}
       </Alert>
       {insider && (
         <Alert type="warning" title="Insider channel">
@@ -249,7 +452,7 @@ export function InstallerUpdatesExperience({
           <dl className="grid gap-2 sm:grid-cols-3">
             <div>
               <dt>Selected train</dt>
-              <dd>{inventory?.selectedChannel ?? UNKNOWN}</dd>
+              <dd>{selectedTrain}</dd>
             </div>
             <div>
               <dt>Observed train</dt>
@@ -411,6 +614,111 @@ export function InstallerUpdatesExperience({
           </p>
         </Card.Body>
       </Card>
+      <Card>
+        <Card.Header>
+          <h2 className="text-lg font-semibold">Scheduler status</h2>
+        </Card.Header>
+        <Card.Body className="space-y-3">
+          <p>
+            Scheduling status is read-only. It reports configured versus effective policy and does not make Update Now or automatic installation available.
+          </p>
+          {updateSchedulingDetails(inventory)}
+        </Card.Body>
+      </Card>
+      <Card>
+        <Card.Header>
+          <h2 className="text-lg font-semibold">Update channel</h2>
+        </Card.Header>
+        <Card.Body className="space-y-3">
+          <p id="update-channel-help">Choose which verified release train may be discovered. Choosing Insider does not enable installation; safe apply and recovery controls remain unavailable.</p>
+          {updateChannelIsLoading && !updateChannelSettings && <p role="status">Loading update channel settings...</p>}
+          {updateChannelIsError && (
+            <Alert type="warning" title="Update channel settings unavailable">
+              The authoritative UpdateChannel settings could not be loaded. The selector shows the stable default until settings load successfully.
+              {onRetryUpdateChannel && (
+                <Button className="mt-2" type="button" variant="secondary" disabled={retryingUpdateChannel} loading={retryingUpdateChannel} onClick={() => { void retryUpdateChannel(); }}>
+                  Retry UpdateChannel settings
+                </Button>
+              )}
+            </Alert>
+          )}
+          {saveOutcomeUnknown && !updateChannelIsError && (
+            <Alert type="warning" title="Update channel save outcome unknown">
+              A fresh authoritative confirmation is required before the update channel can be changed again.
+              {onRetryUpdateChannel && (
+                <Button className="mt-2" type="button" variant="secondary" disabled={retryingUpdateChannel} loading={retryingUpdateChannel} onClick={() => { void retryUpdateChannel(); }}>
+                  Retry UpdateChannel settings
+                </Button>
+              )}
+            </Alert>
+          )}
+          <FormField
+            label="Release channel"
+            htmlFor="update-channel"
+            helper="Stable is the default. Insider may contain prerelease changes."
+            error={fieldError}
+            errorId="update-channel-error"
+          >
+            <Select
+              id="update-channel"
+              value={channel}
+              aria-describedby={channelDescribedBy}
+              aria-invalid={fieldError ? true : undefined}
+              invalid={fieldError != null}
+              disabled={channelControlDisabled}
+              onChange={(event) => {
+                setChannel(event.target.value as UpdateChannel);
+                setChannelError(null);
+                setChannelStatus("");
+              }}
+            >
+              <option value="stable">Stable</option>
+              <option value="insider">Insider</option>
+            </Select>
+          </FormField>
+          {channel === "insider" && (
+            <Alert type="warning" title="Pending Insider channel selection">{INSIDER_WARNING} Installation controls remain unavailable until safe apply and recovery are implemented.</Alert>
+          )}
+          <p role="status" aria-live="polite" aria-label="Update channel save status" className="min-h-5">{channelStatus}</p>
+          <Button
+            type="button"
+            variant="secondary"
+            loading={savingChannel && !acknowledgementOpen}
+            disabled={channelControlDisabled}
+            onClick={() => {
+              setChannelError(null);
+              setChannelStatus("");
+              if (channel === "insider" && !persistedInsiderAcknowledged) {
+                setInsiderAcknowledgementDraft(false);
+                setAcknowledgementOpen(true);
+                return;
+              }
+              void saveChannel({ channel, insiderAcknowledged: channel === "insider" ? persistedInsiderAcknowledged : false });
+            }}
+          >
+            Save update channel
+          </Button>
+        </Card.Body>
+      </Card>
+      <Modal
+        isOpen={acknowledgementOpen}
+        onClose={closeAcknowledgementDialog}
+        title="Acknowledge Insider channel risk"
+        isDisabled={savingChannel}
+        footer={<div className="flex justify-end gap-2"><Button type="button" variant="secondary" disabled={savingChannel} onClick={closeAcknowledgementDialog}>Cancel</Button><Button type="button" disabled={!insiderAcknowledgementDraft || savingChannel || saveOutcomeUnknown} loading={savingChannel} onClick={() => { void saveChannel({ channel: "insider", insiderAcknowledged: true }, { closeAcknowledgementOnSuccess: true }); }}>Acknowledge and save</Button></div>}
+      >
+        <div className="space-y-3">
+          <p>{INSIDER_WARNING} Insider is intended for administrators who accept prerelease behavior and possible regressions. It only changes discovery eligibility; it does not install releases.</p>
+          {channelError && <Alert type="error" title="Update channel not confirmed">{channelError}</Alert>}
+          <Checkbox
+            id="insider-acknowledgement"
+            checked={insiderAcknowledgementDraft}
+            disabled={savingChannel || saveOutcomeUnknown}
+            onChange={(event) => setInsiderAcknowledgementDraft(event.target.checked)}
+            label="I understand and accept the prerelease risk of Insider updates."
+          />
+        </div>
+      </Modal>
       <Card>
         <Card.Header>
           <h2 className="text-lg font-semibold">

@@ -4,6 +4,7 @@ import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import type {
   PrinterStatus,
+  UpdateChannelSettings,
 } from "@/types/api";
 import {
   PrintJobStatusDto,
@@ -473,6 +474,16 @@ export class ApiClient {
     settings: T
   ): Promise<void> {
     await this.client.post(`/settings/${className}`, settings);
+  }
+
+  async getUpdateChannelSettings(): Promise<UpdateChannelSettings> {
+    return this.getSettings<UpdateChannelSettings>("UpdateChannel");
+  }
+
+  async updateUpdateChannelSettings(
+    settings: UpdateChannelSettings,
+  ): Promise<void> {
+    return this.saveSettings("UpdateChannel", settings);
   }
 
   /**

@@ -126,6 +126,8 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
         dto.Should().NotBeNull();
         dto!.App.Version.Should().NotBeNullOrWhiteSpace();
+        dto.Inventory!.HostUpdaterVersion.Should().Be(dto.App.Version);
+        HostUpdateValidation.IsSemanticVersion(dto.Inventory.HostUpdaterVersion).Should().BeTrue();
         dto.App.Uptime.Should().NotBeNullOrWhiteSpace();
         dto.App.Hostname.Should().NotBeNullOrWhiteSpace();
         dto.Cpu.Cores.Should().BeGreaterThan(0);
@@ -260,6 +262,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             new VerifiedReleaseEvidenceDto
             {
                 Sequence = 999_999,
+                MinimumUpdaterVersion = "1.0.0",
                 SignatureVerified = true,
                 IsComplete = true,
                 ManifestDigest = "sha256:" + new string('a', 64),
@@ -290,7 +293,8 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             isolatedFactory.Services.GetRequiredService<IVerifiedReleaseEvidenceCache>();
         VerifiedReleaseEvidenceDto evidence = new()
         {
-            Sequence = 99_999,
+            Sequence = 3,
+            MinimumUpdaterVersion = "1.0.0",
             SignatureVerified = true,
             IsComplete = true,
             ManifestDigest = "sha256:" + new string('a', 64),
@@ -302,8 +306,11 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
                 ReleaseId = "stable:0.0.0",
             },
         };
-        cache.SetVerified(evidence, DateTimeOffset.UtcNow);
-        cache.SetError("GitHub release listing failed");
+        DateTimeOffset verifiedAt = DateTimeOffset.UtcNow;
+        cache.SetVerified(evidence, verifiedAt);
+        cache.SetVerified(evidence with { Sequence = 2 }, verifiedAt.AddMinutes(1)).Should().BeFalse();
+        const string rollbackMessage = "Rejected rollback release for channel 'stable' (sequence=2).";
+        cache.SetError(rollbackMessage);
 
         HttpResponseMessage response = await isolatedAdmin.GetAsync("/api/system/info");
         using JsonDocument json = JsonDocument.Parse(await response.Content.ReadAsStringAsync());
@@ -313,8 +320,29 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         readiness.GetProperty("reasons").EnumerateArray().Select(reason => reason.GetString())
             .Should().Contain("VerifiedReleaseDiscoveryFailed");
         cache.Current.Should().BeSameAs(evidence);
-        cache.LastError.Should().Be("GitHub release listing failed");
+        cache.Current!.Sequence.Should().Be(3);
+        cache.LastVerifiedAt.Should().Be(verifiedAt);
+        cache.LastError.Should().Be(rollbackMessage);
     }
+
+    [Theory]
+    [MemberData(nameof(NormalizeAssemblyVersionCases))]
+    public void NormalizeAssemblyVersion_ProducesExpectedSemanticVersion(Version? assemblyVersion, string expected)
+    {
+        string normalized = SystemInfoService.NormalizeAssemblyVersion(assemblyVersion);
+
+        normalized.Should().Be(expected);
+        HostUpdateValidation.IsSemanticVersion(normalized).Should().BeTrue();
+    }
+
+    // Build == -1 (no third component, e.g. `new Version(1, 2)`) previously fell through to Math.Max, but this
+    // case must stay covered explicitly so a regression there fails a test instead of only field observation.
+    public static TheoryData<Version?, string> NormalizeAssemblyVersionCases => new()
+    {
+        { new Version(1, 2, 3, 4), "1.2.3" },
+        { new Version(1, 2), "1.2.0" },
+        { null, "0.0.0" },
+    };
 
     [Fact]
     public async Task GetInfo_Admin_DisabledDiscoveryRevokesPriorReadiness()
@@ -328,6 +356,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             new VerifiedReleaseEvidenceDto
             {
                 Sequence = 99_999,
+                MinimumUpdaterVersion = "1.0.0",
                 SignatureVerified = true,
                 IsComplete = true,
                 ManifestDigest = "sha256:" + new string('a', 64),
@@ -362,6 +391,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             new VerifiedReleaseEvidenceDto
             {
                 Sequence = 99_999,
+                MinimumUpdaterVersion = "1.0.0",
                 SignatureVerified = true,
                 IsComplete = true,
                 ManifestDigest = "sha256:" + new string('a', 64),

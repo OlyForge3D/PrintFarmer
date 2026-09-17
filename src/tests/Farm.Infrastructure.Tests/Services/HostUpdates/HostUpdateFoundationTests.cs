@@ -257,11 +257,11 @@ public sealed class HostUpdateFoundationTests
             })).PlanAsync(request, default)).Reasons);
         }
 
-        foreach (string channel in new[] { "beta", "rc" })
+        foreach (string channel in new[] { "", "beta", "rc" })
         {
             HostUpdatePlanRequest request = Request() with { SourceChannel = channel, TargetChannel = channel };
             Assert.False(request.IsValid);
-            Assert.Contains("request_invalid", (await CreateSut().PlanAsync(request, default)).Reasons);
+            Assert.Equal(["request_invalid"], (await CreateSut().PlanAsync(request, default)).Reasons);
         }
 
         CanonicalReleaseIdentity insider = Identity() with

@@ -36,6 +36,9 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// </summary>
 public interface IVerifiedReleaseEvidenceCache
 {
+    /// <summary>Returns one immutable, point-in-time view of all cached evidence state.</summary>
+    VerifiedReleaseEvidenceCacheSnapshot GetSnapshot();
+
     /// <summary>The most recently verified evidence, or <c>null</c> if discovery has never
     /// succeeded since process start.</summary>
     VerifiedReleaseEvidenceDto? Current { get; }
@@ -49,12 +52,18 @@ public interface IVerifiedReleaseEvidenceCache
 
     /// <summary>Records a freshly verified release as the new current evidence and clears
     /// <see cref="LastError"/>.</summary>
-    void SetVerified(VerifiedReleaseEvidenceDto evidence, DateTimeOffset verifiedAt);
+    bool SetVerified(VerifiedReleaseEvidenceDto evidence, DateTimeOffset verifiedAt);
 
     /// <summary>Records a discovery failure. <see cref="Current"/>/<see cref="LastVerifiedAt"/>
     /// are deliberately left unchanged — see class remarks.</summary>
     void SetError(string error);
 }
+
+/// <summary>Atomic point-in-time view of verified release cache state.</summary>
+public sealed record VerifiedReleaseEvidenceCacheSnapshot(
+    VerifiedReleaseEvidenceDto? Current,
+    DateTimeOffset? LastVerifiedAt,
+    string? LastError);
 
 /// <inheritdoc cref="IVerifiedReleaseEvidenceCache"/>
 public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
@@ -65,6 +74,15 @@ public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
     private VerifiedReleaseEvidenceDto? _current;
     private DateTimeOffset? _lastVerifiedAt;
     private string? _lastError;
+
+    /// <inheritdoc/>
+    public VerifiedReleaseEvidenceCacheSnapshot GetSnapshot()
+    {
+        lock (_gate)
+        {
+            return new(_current, _lastVerifiedAt, _lastError);
+        }
+    }
 
     /// <inheritdoc/>
     public VerifiedReleaseEvidenceDto? Current
@@ -103,7 +121,7 @@ public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
     }
 
     /// <inheritdoc/>
-    public void SetVerified(VerifiedReleaseEvidenceDto evidence, DateTimeOffset verifiedAt)
+    public bool SetVerified(VerifiedReleaseEvidenceDto evidence, DateTimeOffset verifiedAt)
     {
         ArgumentNullException.ThrowIfNull(evidence);
         lock (_gate)
@@ -116,12 +134,13 @@ public sealed class VerifiedReleaseEvidenceCache : IVerifiedReleaseEvidenceCache
                 && string.Equals(_current.Identity?.Channel, evidence.Identity?.Channel, StringComparison.Ordinal);
             if (sameChannel && evidence.Sequence < _current!.Sequence)
             {
-                return;
+                return false;
             }
 
             _current = evidence;
             _lastVerifiedAt = verifiedAt;
             _lastError = null;
+            return true;
         }
     }
 
