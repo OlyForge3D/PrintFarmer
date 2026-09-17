@@ -24,7 +24,8 @@ public sealed class QueueOutboxPublisherService(
     IServiceScopeFactory scopeFactory,
     IHubContext<PrinterHub> hub,
     ILogger<QueueOutboxPublisherService> logger,
-    IQueueSubscriptionMembershipNotifier? membershipNotifier = null) : BackgroundService
+    IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
+    Farm.Infrastructure.Services.HostUpdates.IHostUpdateWriterActivityFlag? hostUpdateFence = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(10);
@@ -74,8 +75,18 @@ public sealed class QueueOutboxPublisherService(
         {
             try
             {
-                await RecoverStaleLeasesAsync(stoppingToken);
-                await ProcessPendingEventsAsync(stoppingToken);
+                // #2663: while a host update has fenced background writers, stop starting new
+                // publish work and acknowledge quiescence rather than blindly cancelling
+                // in-flight sends. Resumes automatically once the fence is released.
+                if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
+                {
+                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+                }
+                else
+                {
+                    await RecoverStaleLeasesAsync(stoppingToken);
+                    await ProcessPendingEventsAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException)
             {

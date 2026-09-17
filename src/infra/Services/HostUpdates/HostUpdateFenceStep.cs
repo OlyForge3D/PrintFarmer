@@ -1,0 +1,179 @@
+namespace Farm.Infrastructure.Services.HostUpdates;
+
+#pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
+/// <summary>Thrown when one or more writers could not be proven fenced within the bounded timeout.</summary>
+public sealed class HostUpdateFenceProofFailedException(IReadOnlyList<string> unfencedWriterNames)
+    : InvalidOperationException($"writers_not_fenced:{string.Join(',', unfencedWriterNames)}")
+{
+    public IReadOnlyList<string> UnfencedWriterNames { get; } = unfencedWriterNames;
+}
+#pragma warning restore CA1032
+
+/// <summary>
+/// One writer/background component (API replica admission, a scheduler, the outbox publisher,
+/// a bridge, or a worker pool) that must stop making new writes and prove it has quiesced
+/// before a coordinated backup/migration/apply may proceed.
+/// </summary>
+public interface IFenceableWriter
+{
+    string Name { get; }
+
+    /// <summary>Requests that this writer stop starting new work. Must not cancel in-flight work.</summary>
+    Task QuiesceAsync(CancellationToken cancellationToken);
+
+    /// <summary>Reports whether this writer has actually stopped producing new writes.</summary>
+    Task<bool> IsQuiescedAsync(CancellationToken cancellationToken);
+
+    /// <summary>Resumes normal operation after a successful update, a rollback, or an abort.</summary>
+    Task ResumeAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Fences every registered writer and proves each one quiesced, with a bounded verification
+/// timeout, before allowing the executor to proceed to backup. Fails closed: any writer that
+/// cannot be proven fenced blocks the update rather than proceeding on an assumption.
+/// </summary>
+public sealed class HostUpdateFenceCoordinator(
+    IReadOnlyList<IFenceableWriter> writers,
+    TimeSpan proofTimeout,
+    TimeSpan pollInterval,
+    TimeProvider? timeProvider = null) : IHostUpdateFenceCoordinator
+{
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
+    public async Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        foreach (IFenceableWriter writer in writers)
+        {
+            await writer.QuiesceAsync(cancellationToken).ConfigureAwait(false);
+        }
+
+        DateTimeOffset deadline = _timeProvider.GetUtcNow() + proofTimeout;
+        while (true)
+        {
+            var unproven = new List<string>();
+            foreach (IFenceableWriter writer in writers)
+            {
+                if (!await writer.IsQuiescedAsync(cancellationToken).ConfigureAwait(false))
+                {
+                    unproven.Add(writer.Name);
+                }
+            }
+
+            if (unproven.Count == 0)
+            {
+                return;
+            }
+
+            if (_timeProvider.GetUtcNow() >= deadline)
+            {
+                throw new HostUpdateFenceProofFailedException(unproven);
+            }
+
+            await Task.Delay(pollInterval, cancellationToken).ConfigureAwait(false);
+        }
+    }
+
+    public async Task ReleaseAsync(CancellationToken cancellationToken)
+    {
+        foreach (IFenceableWriter writer in writers)
+        {
+            await writer.ResumeAsync(cancellationToken).ConfigureAwait(false);
+        }
+    }
+}
+
+/// <summary>Runs the fence step of the host update executor, and releases the fence on recovery.</summary>
+public interface IHostUpdateFenceCoordinator
+{
+    Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
+
+    Task ReleaseAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Fences the HTTP admission perimeter: once quiesced, the perimeter reports quiesced
+/// immediately because <see cref="IHostUpdateAdmissionGate"/> is consulted synchronously by
+/// every new request (there is no window for a new write to start after closing).
+/// </summary>
+public sealed class AdmissionFenceableWriter(IHostUpdateAdmissionGate admissionGate) : IFenceableWriter
+{
+    public string Name => "api-admission";
+
+    public Task QuiesceAsync(CancellationToken cancellationToken) => admissionGate.CloseAsync(cancellationToken);
+
+    public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => admissionGate.IsClosedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => admissionGate.OpenAsync(cancellationToken);
+}
+
+/// <summary>
+/// Fences a background writer (a scheduler, the outbox publisher, a SignalR bridge, or a
+/// worker pool) that reports its own quiesced state through a shared <see cref="IHostUpdateWriterActivityFlag"/>
+/// consulted at the top of each of its work loop iterations.
+/// </summary>
+public sealed class BackgroundWriterFenceableWriter(string name, IHostUpdateWriterActivityFlag flag) : IFenceableWriter
+{
+    public string Name { get; } = name;
+
+    public Task QuiesceAsync(CancellationToken cancellationToken) => flag.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => flag.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => flag.ResumeAsync(cancellationToken);
+}
+
+/// <summary>
+/// Shared pause/resume signal a background writer polls at the top of each loop iteration and
+/// acknowledges once it has actually stopped starting new writes for that iteration.
+/// </summary>
+public interface IHostUpdateWriterActivityFlag
+{
+    Task RequestPauseAsync(CancellationToken cancellationToken);
+
+    /// <summary>Polled by the writer's own loop to decide whether to skip starting new work this iteration.</summary>
+    Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken);
+
+    Task<bool> IsPausedAsync(CancellationToken cancellationToken);
+
+    Task ResumeAsync(CancellationToken cancellationToken);
+
+    /// <summary>Called by the writer's own loop once it observes the pause request and stops.</summary>
+    Task AcknowledgePausedAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>Process-wide, thread-safe <see cref="IHostUpdateWriterActivityFlag"/>.</summary>
+public sealed class InMemoryHostUpdateWriterActivityFlag : IHostUpdateWriterActivityFlag
+{
+    private volatile bool _pauseRequested;
+    private volatile bool _acknowledged;
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken)
+    {
+        _pauseRequested = true;
+        _acknowledged = false;
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => Task.FromResult(_pauseRequested);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => Task.FromResult(_pauseRequested && _acknowledged);
+
+    public Task ResumeAsync(CancellationToken cancellationToken)
+    {
+        _pauseRequested = false;
+        _acknowledged = false;
+        return Task.CompletedTask;
+    }
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken)
+    {
+        if (_pauseRequested)
+        {
+            _acknowledged = true;
+        }
+
+        return Task.CompletedTask;
+    }
+}
