@@ -14,7 +14,8 @@ namespace Farm.Slicer.Module.Services;
 public class DbSlicerJobQueue(
     ISliceJobRepository repo,
     IOptions<JobDispatchRetrySettings>? retryOptions = null,
-    TimeProvider? timeProvider = null) : ISlicerJobQueue
+    TimeProvider? timeProvider = null,
+    Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null) : ISlicerJobQueue
 {
     private const int TimingHistoryDays = 30;
     private readonly ISliceJobRepository _repo = repo ?? throw new ArgumentNullException(nameof(repo));
@@ -24,12 +25,21 @@ public class DbSlicerJobQueue(
 
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
-    public Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
+    public async Task EnqueueAsync(DistributedSlicingJob job, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(job);
 
+        if (hostUpdateAdmissionGate is not null && await hostUpdateAdmissionGate.IsClosedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            // Kane/panel audit follow-up (issue #2663, "physical admission barrier is not real"):
+            // slicer submission is one of the named producers that must honor the drain gate --
+            // without this, the fence coordinator's proof of quiescence would be checking a gate
+            // no real submission path consults, exactly the "tautological" finding raised.
+            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException();
+        }
+
         SliceJob sj = ToSliceJob(job);
-        return _repo.AddAsync(sj, cancellationToken);
+        await _repo.AddAsync(sj, cancellationToken).ConfigureAwait(false);
     }
 
     public async Task<DistributedSlicingJob?> DequeueAsync(string workerId, SlicerEngineType? preferredEngine = null, CancellationToken cancellationToken = default)

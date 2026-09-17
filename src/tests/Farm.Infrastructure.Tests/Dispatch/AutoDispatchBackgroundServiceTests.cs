@@ -193,11 +193,12 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         return (printer, printerId);
     }
 
-    private AutoDispatchBackgroundService CreateService()
+    private AutoDispatchBackgroundService CreateService(
+        Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag? hostUpdateFence = null)
     {
         return new AutoDispatchBackgroundService(
             _trigger, _scopeFactory, _concurrencyCoordinator, _hubMock.Object,
-            NullLogger<AutoDispatchBackgroundService>.Instance);
+            NullLogger<AutoDispatchBackgroundService>.Instance, hostUpdateFence);
     }
 
     private PrintJob SeedQueuedJob(string name = "Test Job", int priority = 0, int queuePosition = 1) =>
@@ -305,6 +306,49 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         _clientProxyMock.Verify(
             c => c.SendCoreAsync("jobautodispatched", It.IsAny<object?[]>(), It.IsAny<CancellationToken>()),
             Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "Dispatch")]
+    [Trait("Phase", "2")]
+    public async Task ExecuteAsync_FencePauseRequested_SkipsStartingWorkerAndAcknowledgesPause()
+    {
+        // Kane/panel audit (issue #2663, "physical admission barrier is not real"): while a
+        // host update's fence step has paused auto-dispatch, the background loop must not start
+        // a new dispatch worker for an idle-printer notification -- and must acknowledge
+        // quiescence to the fence coordinator only once it genuinely has none in flight.
+        SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
+        (Printer printer, Guid printerId) = SeedPrinter();
+        SeedQueuedJob("benchy");
+
+        var fenceFlag = new Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag();
+        await fenceFlag.RequestPauseAsync(CancellationToken.None);
+
+        AutoDispatchBackgroundService svc = CreateService(fenceFlag);
+        using CancellationTokenSource cts = new(TimeSpan.FromSeconds(10));
+
+        await svc.StartAsync(cts.Token);
+        try
+        {
+            _trigger.NotifyPrinterIdle(printerId);
+
+            DateTime deadline = DateTime.UtcNow.AddSeconds(5);
+            while (!await fenceFlag.IsPausedAsync(CancellationToken.None) && DateTime.UtcNow < deadline)
+            {
+                await Task.Delay(25);
+            }
+
+            (await fenceFlag.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            svc.TrackedWorkerCount.Should().Be(0);
+            _dispatchServiceMock.Verify(
+                d => d.DispatchJobAsync(
+                    It.IsAny<Guid>(), It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<DispatchScore>(), It.IsAny<CancellationToken>()),
+                Times.Never);
+        }
+        finally
+        {
+            await svc.StopAsync(CancellationToken.None);
+        }
     }
 
     [Fact]

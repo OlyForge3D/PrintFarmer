@@ -48,7 +48,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 | Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
 | Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Wraps the existing `ProviderAwareMigrationRunner` under the executor's own single-writer lock; inspects the actual installed provider state and fails closed on an unsupported/mixed configuration rather than duplicating migration logic. |
 | Apply | `HostUpdateImageApplier` | Applies immutable `repository@sha256` images via the existing compose templates and `docker compose up -d`, using an explicit process argument list — never shell interpolation, never a mutable tag. |
-| Verify | `HostUpdateHealthVerifier` + `AggregateHostUpdateHealthCheck` | Confirms exact running digests (`docker inspect`) plus the aggregated `/health` endpoint's JSON body has a top-level `Status` of exactly `"Healthy"` (never merely an HTTP 200 — ASP.NET Core's default health middleware also returns 200 for `"Degraded"`) before reporting healthy and allowing writers to reopen. |
+| Verify | `HostUpdateHealthVerifier` + `AggregateHostUpdateHealthCheck` + `DigestHostUpdateHealthCheck` | Confirms exact running digests via a two-step `docker container inspect --format {{.Image}}` → `docker image inspect --format {{index .RepoDigests 0}}` probe (`.RepoDigests` exists only on image-inspect output, never on container-inspect output -- see "Known limitations" for the bug this replaced) plus the aggregated `/health` endpoint's JSON body has a top-level `Status` of exactly `"Healthy"` (never merely an HTTP 200 — ASP.NET Core's default health middleware also returns 200 for `"Degraded"`) before reporting healthy and allowing writers to reopen. |
 | Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` + `FileHostUpdateRecoveryOutcomeStore` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling (structured process args/env only — no shell string, no password on argv), and durably persists the `RolledBack`/`NeedsOperator` outcome itself (survives a crash immediately after cancellation) before reporting it. Resumable/idempotent via the same durable journal after a process restart. |
 
 ## Availability contract
@@ -92,6 +92,13 @@ against issue #2663.
 
 ## Known limitations
 
+- **Fixed (this pass) — `DigestHostUpdateHealthCheck` was probing a nonexistent field**: it
+  previously ran a single `docker inspect --format {{index .RepoDigests 0}} <container>`, but
+  `.RepoDigests` is exclusively a property of `docker image inspect` output; it never exists on
+  `docker container inspect` output, so this call could never succeed against a real container.
+  Fixed to the correct two-step probe (container inspect resolves `.Image`, then image inspect on
+  that reference resolves the real repo digest) with new regression tests in
+  `HostUpdateVerifyStepTests` (this type previously had zero test coverage at all).
 - Bishop/Hicks review of the base commit surfaced (and this slice fixed, with tests) five
   critical defects: `FileHostUpdateExecutionJournal.Append` silently truncated the entire
   hash-chained journal to its newest record on every append (a temp-file-then-move pattern that
@@ -152,10 +159,11 @@ against issue #2663.
   verifier's container-name resolution independently throws (`service_mapping_missing:<serviceId>`)
   rather than silently falling back to a guessed container name if it is ever reached without that
   earlier guard having run.
-- Only four writers are concretely fenced today (the admission gate, the queue outbox
-  publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService`); other background
-  schedulers/bridges/API replicas/workers still need `IFenceableWriter` implementations
-  registered as they are identified. Remaining known unfenced hosted services:
+- Five writers are concretely fenced today (the admission gate, the queue outbox
+  publisher, `PowerReadingPruneService`, `QueueRetentionPruneService`, and
+  `AutoDispatchBackgroundService`); other background schedulers/bridges/API replicas/workers
+  still need `IFenceableWriter` implementations registered as they are identified. Remaining
+  known unfenced hosted services:
   `MaintenanceAlertHostedService`, `CatalogUpdateDetectionService`,
   `VerifiedReleaseDiscoveryMonitorService`, `OrphanedJobSyncStartupService`,
   `HistorySeedingBackgroundService`, `ActiveExternalJobSyncBackgroundService`. The availability
@@ -163,17 +171,27 @@ against issue #2663.
   in `HostUpdateExecutionOptions.RequiredFencedWriterNames`; it cannot detect a writer that was
   never added to that list in the first place, so extending coverage still requires deliberate,
   audited work per writer rather than a generic scan. The admission gate itself
-  (`IHostUpdateAdmissionGate`) is wired into exactly one real submission chokepoint today:
+  (`IHostUpdateAdmissionGate`) is now wired into two real submission chokepoints:
   `JobQueueService.AddJobToQueueAsync` (which "OctoPrint upload+print", "Manual queue from UI",
-  and "Direct API calls" all funnel through) consults `IsClosedAsync` and throws
-  `HostUpdateAdmissionClosedException` rather than admitting a new print job while the drain step
-  has the gate closed. It is **not yet** wired into printer-command dispatch
-  (`JobQueueController`'s `/dispatch`/`/dispatch-to`, `AutoDispatchController`), slicer-job
-  submission, or any bridge/webhook ingress path — those remain open call sites that can still
-  admit new work during a drain. `AdmissionFenceableWriter.IsQuiescedAsync` reports only that the
-  gate itself has flipped closed, not that every producer honors it; do not read a quiesced
-  admission-gate report as proof that no new physical work can start until the remaining call
-  sites above are wired and audited the same way.
+  and "Direct API calls" all funnel through) and `DbSlicerJobQueue.EnqueueAsync` (the sole slicer
+  job submission path in monolith topology, where `Farm.Web.Api` hosts `Farm.Slicer.Module`
+  in-process; the split `Farm.Slicer.Host` process registers no `IHostUpdateAdmissionGate` at
+  all today, so slicer submissions in a split topology are **not** fenced -- see the topology
+  caveat below). Both consult `IsClosedAsync` and throw `HostUpdateAdmissionClosedException`
+  rather than admitting new work while the drain step has the gate closed.
+  `AutoDispatchBackgroundService` -- the loop that physically starts new printer-dispatch
+  workers -- now consults its own dedicated `AutoDispatchFenceFlag` at the top of each trigger
+  iteration: while paused it skips starting a new dispatch worker entirely (relying on the
+  existing 30s durable database scan to rediscover the same eligible printer once the fence
+  releases) and only acknowledges quiescence once `TrackedWorkerCount` is zero, so the fence
+  coordinator cannot observe "paused" while a printer command is still physically executing.
+  It is **still not** wired into printer-command dispatch's *manual* entry points
+  (`JobQueueController`'s `/dispatch`/`/dispatch-to`), or any bridge/webhook ingress path --
+  those remain open call sites that can still admit new work during a drain.
+  `AdmissionFenceableWriter.IsQuiescedAsync` reports only that the gate itself has flipped
+  closed, not that every producer honors it; do not read a quiesced admission-gate report as
+  proof that no new physical work can start until the remaining call sites above are wired and
+  audited the same way.
 - PostgreSQL/SQL Server backup and restore commands are invoked as a structured process argument
   list with the connection password passed only via an environment variable (`PGPASSWORD` /
   `SQLCMDPASSWORD`), never on the command line and never through a shell (`sh -c`) string — closing

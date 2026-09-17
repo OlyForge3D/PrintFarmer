@@ -25,7 +25,8 @@ public sealed class AutoDispatchBackgroundService(
     IServiceScopeFactory scopeFactory,
     DispatchConcurrencyCoordinator concurrencyCoordinator,
     IHubContext<PrinterHub> hub,
-    ILogger<AutoDispatchBackgroundService> logger) : BackgroundService
+    ILogger<AutoDispatchBackgroundService> logger,
+    Farm.Infrastructure.Services.HostUpdates.AutoDispatchFenceFlag? hostUpdateFence = null) : BackgroundService
 {
     private readonly SemaphoreSlim _selectionLock = new(1, 1);
     private readonly object _workerSync = new();
@@ -90,6 +91,27 @@ public sealed class AutoDispatchBackgroundService(
                 // Dispatch via a tracked worker so idle printers run concurrently under the
                 // configured capacity limit, with rerun coalescing and graceful drain on
                 // shutdown. The cross-process database claim prevents duplicates.
+                //
+                // Host-update fence (issue #2663 / Kane "physical admission barrier" finding):
+                // while fenced, stop *starting new dispatch workers* -- physically the same
+                // guarantee the drain step promises for active prints -- rather than merely
+                // ignoring the fence and letting new printer commands go out during a backup.
+                // Skipping this trigger event is safe: DurableScanInterval's periodic scan (see
+                // above) already re-discovers any eligible printer after a dropped event, so the
+                // same recovery path picks the printer back up once the fence is released.
+                // Acknowledge quiescence only once no dispatch worker is still in flight, so the
+                // fence coordinator cannot observe "paused" while a printer command is still
+                // physically executing.
+                if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
+                {
+                    if (TrackedWorkerCount == 0)
+                    {
+                        await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+                    }
+
+                    continue;
+                }
+
                 StartTrackedWorker(triggerEvent, stoppingToken);
             }
         }

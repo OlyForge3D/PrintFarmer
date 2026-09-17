@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 
@@ -167,6 +167,10 @@ public sealed class SignedUpdateInfrastructureTests
     [Fact]
     public void Parse_ProducerGoldenFixture_PreservesLfAndExpectedSequence()
     {
+        // This fixture is pinned to LF via .gitattributes (`text eol=lf`) so a genuine
+        // regression -- the repository copy actually gaining CRLF, e.g. a broken git config or
+        // an editor resave -- still fails this assertion, while a plain checkout can never
+        // reintroduce CR here regardless of a contributor's core.autocrlf setting.
         byte[] bytes = File.ReadAllBytes(Path.Combine(
             FindRepositoryRoot(),
             "scripts", "ci", "fixtures", "update-manifest.golden.json"));

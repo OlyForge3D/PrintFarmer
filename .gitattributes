@@ -25,6 +25,10 @@ install.sh text eol=lf
 
 # CI tooling manifest is read by bash/python via process substitution; keep LF
 scripts/ci/dotnet-test-manifest.json text eol=lf
+# Host-update golden manifest fixture (issue #2663): SignedUpdateInfrastructureTests asserts the
+# checked-in bytes contain no CR so the golden fixture stays byte-identical to what a Linux CI
+# runner and a Windows checkout both produce. Force LF regardless of a contributor's core.autocrlf.
+scripts/ci/fixtures/update-manifest.golden.json text eol=lf
 
 # Release metadata pins these source artifacts by SHA-256; keep checkout bytes LF-stable.
 /scripts/docker/configs/security-config.json text eol=lf

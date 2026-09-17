@@ -71,12 +71,14 @@ public static class HostUpdateExecutionStartup
         services.AddSingleton<IHostUpdateWriterActivityFlag, InMemoryHostUpdateWriterActivityFlag>();
         services.AddSingleton<PowerReadingPruneFenceFlag>();
         services.AddSingleton<QueueRetentionPruneFenceFlag>();
+        services.AddSingleton<AutoDispatchFenceFlag>();
         services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp =>
         [
             new AdmissionFenceableWriter(sp.GetRequiredService<IHostUpdateAdmissionGate>()),
             new BackgroundWriterFenceableWriter("queue-outbox-publisher", sp.GetRequiredService<IHostUpdateWriterActivityFlag>()),
             new BackgroundWriterFenceableWriter("power-reading-prune", sp.GetRequiredService<PowerReadingPruneFenceFlag>()),
             new BackgroundWriterFenceableWriter("queue-retention-prune", sp.GetRequiredService<QueueRetentionPruneFenceFlag>()),
+            new BackgroundWriterFenceableWriter("auto-dispatch", sp.GetRequiredService<AutoDispatchFenceFlag>()),
         ]);
         services.AddSingleton<IHostUpdateFenceCoordinator>(sp =>
         {

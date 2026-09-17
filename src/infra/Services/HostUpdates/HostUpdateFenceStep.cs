@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.HostUpdates;
+﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
 /// <summary>Thrown when one or more writers could not be proven fenced within the bounded timeout.</summary>
@@ -212,6 +212,31 @@ public sealed class PowerReadingPruneFenceFlag : IHostUpdateWriterActivityFlag
 /// for why a distinct concrete type is required instead of another bare-interface registration.
 /// </summary>
 public sealed class QueueRetentionPruneFenceFlag : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new();
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for
+/// <see cref="Queue.Dispatch.AutoDispatchBackgroundService"/> -- the auto-dispatch loop that
+/// physically starts new printer dispatch workers. Named separately from the generic
+/// <c>queue-outbox-publisher</c> flag (Kane/panel finding: "physical admission barrier is not
+/// real" -- auto-dispatch specifically must stop *starting new dispatch workers* while fenced,
+/// not merely stop publishing outbox events) so the fence coordinator can prove this producer,
+/// specifically, has quiesced. See <see cref="PowerReadingPruneFenceFlag"/> for why a distinct
+/// concrete type is required instead of another bare-interface registration.
+/// </summary>
+public sealed class AutoDispatchFenceFlag : IHostUpdateWriterActivityFlag
 {
     private readonly InMemoryHostUpdateWriterActivityFlag _inner = new();
 
