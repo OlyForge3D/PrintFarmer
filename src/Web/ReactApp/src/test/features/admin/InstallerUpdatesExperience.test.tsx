@@ -237,6 +237,8 @@ describe('InstallerUpdatesExperience', () => {
 
     expect(await screen.findByRole('dialog', { name: 'Acknowledge Insider channel risk' })).toBeVisible();
     expect(screen.getByRole('alert')).toHaveTextContent(/outcome is unknown/);
+    expect(screen.getByRole('checkbox', { name: /accept the prerelease risk/i })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Acknowledge and save' })).toBeDisabled();
     expect(document.querySelector('[aria-label="Update channel save status"]')).toHaveTextContent('');
   });
 

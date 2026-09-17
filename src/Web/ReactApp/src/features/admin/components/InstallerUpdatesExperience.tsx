@@ -372,8 +372,13 @@ export function InstallerUpdatesExperience({
         // state is known.
         pendingLocalReconciliationRef.current = error.authoritative;
         setChannel(error.authoritative.channel);
+        const acknowledgementMismatch =
+          error.authoritative.channel === settings.channel &&
+          error.authoritative.insiderAcknowledged !== settings.insiderAcknowledged;
         setChannelError(
-          `Update channel was not saved. The server still reports "${error.authoritative.channel}".`,
+          acknowledgementMismatch
+            ? "Update channel was not saved. The server did not record the Insider acknowledgement."
+            : `Update channel was not saved. The server still reports "${error.authoritative.channel}".`,
         );
         setSaveOutcomeUnknown(false);
         // The outcome is conclusively known (not pending): close the

@@ -117,7 +117,7 @@ describe("InstallerUpdatesPage structural-sharing reconciliation (real Installer
     await user.click(screen.getByRole("button", { name: "Acknowledge and save" }));
 
     await waitFor(() => expect(screen.getByRole("combobox", { name: "Release channel" })).toHaveValue("insider"));
-    expect(await screen.findByRole("alert")).toHaveTextContent(/was not saved/);
+    expect(await screen.findByRole("alert")).toHaveTextContent(/server did not record the Insider acknowledgement/);
     // The outcome is conclusively known (a confirmed rejection): controls
     // re-enable rather than staying locked as if the outcome were unknown.
     expect(screen.getByRole("combobox", { name: "Release channel" })).not.toBeDisabled();
