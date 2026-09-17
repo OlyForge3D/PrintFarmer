@@ -459,15 +459,7 @@ public sealed class HostUpdateExecutionRequestResolver(
             throw new InvalidOperationException("manifest_binding_conflict", ex);
         }
 
-        HostUpdateReplayDecision replay;
-        try
-        {
-            replay = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Reserve, ct).ConfigureAwait(false);
-        }
-        catch (InvalidDataException ex)
-        {
-            throw new InvalidOperationException("replay_unavailable", ex);
-        }
+        HostUpdateReplayDecision replay = await DecideReplayAsync(candidate, HostUpdateReplayIntent.Reserve, ct).ConfigureAwait(false);
 
         if (replay.Disposition != HostUpdateReplayDisposition.Accepted || replay.Reused)
         {
@@ -507,15 +499,10 @@ public sealed class HostUpdateExecutionRequestResolver(
         }
 
         bool hasAuthorizationId = !string.IsNullOrWhiteSpace(intent.AuthorizationId);
-        HostUpdateReplayDecision replay;
-        try
-        {
-            replay = await replayStore.DecideAsync(candidate, hasAuthorizationId ? HostUpdateReplayIntent.Reserve : HostUpdateReplayIntent.Admit, ct).ConfigureAwait(false);
-        }
-        catch (InvalidDataException)
-        {
-            return HostUpdateExecutionResolutionResult.Fail("replay_unavailable");
-        }
+        HostUpdateReplayDecision replay = await DecideReplayAsync(
+            candidate,
+            hasAuthorizationId ? HostUpdateReplayIntent.Reserve : HostUpdateReplayIntent.Admit,
+            ct).ConfigureAwait(false);
 
         if (replay.Disposition != HostUpdateReplayDisposition.Accepted || replay.Reused)
         {
@@ -525,11 +512,6 @@ public sealed class HostUpdateExecutionRequestResolver(
         HostUpdateAuthorizationConsumeResult consumed;
         if (!hasAuthorizationId)
         {
-            if (replay.Reused)
-            {
-                return HostUpdateExecutionResolutionResult.Fail("candidate_replay_rejected");
-            }
-
             try
             {
                 consumed = await authorizationStore.CreateConsumedAsync(candidate, policy, replay, clock.UtcNow, ct).ConfigureAwait(false);
@@ -555,14 +537,7 @@ public sealed class HostUpdateExecutionRequestResolver(
                 return HostUpdateExecutionResolutionResult.Fail(consumed.Error ?? "authorization_invalid");
             }
 
-            try
-            {
-                replay = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Admit, ct).ConfigureAwait(false);
-            }
-            catch (InvalidDataException)
-            {
-                return HostUpdateExecutionResolutionResult.Fail("replay_unavailable");
-            }
+            replay = await DecideReplayAsync(candidate, HostUpdateReplayIntent.Admit, ct).ConfigureAwait(false);
 
             if (replay.Disposition != HostUpdateReplayDisposition.Accepted || replay.Reused)
             {
@@ -614,6 +589,31 @@ public sealed class HostUpdateExecutionRequestResolver(
             : HostUpdateExecutionResolutionResult.Fail("resolved_request_invalid");
     }
 
+    /// <summary>
+    /// Single durable-availability boundary for protected anti-replay state. A store that is
+    /// registered but not provisioned, or whose state cannot be read or committed, is an
+    /// availability failure (503), never a replay conflict (409).
+    /// </summary>
+    private async Task<HostUpdateReplayDecision> DecideReplayAsync(
+        VerifiedHostUpdateCandidate candidate,
+        HostUpdateReplayIntent intent,
+        CancellationToken ct)
+    {
+        if (replayStore is IHostUpdateAvailability { IsAvailable: false } unavailable)
+        {
+            throw new HostUpdateSubsystemUnavailableException(unavailable.UnavailableReason, null);
+        }
+
+        try
+        {
+            return await replayStore.DecideAsync(candidate, intent, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or NotSupportedException or IOException or UnauthorizedAccessException)
+        {
+            throw new HostUpdateSubsystemUnavailableException(HostUpdateAvailabilityCodes.ReplayUnavailable, ex);
+        }
+    }
+
     private (HostUpdateSchedulerSettings Policy, VerifiedHostUpdateCandidate Candidate) ResolveCurrentCandidate(HostUpdateManualAuthorizationIntent intent)
     {
         HostUpdateSchedulerSettings policy;
@@ -622,7 +622,7 @@ public sealed class HostUpdateExecutionRequestResolver(
             HostUpdatePolicyReadResult result = policyBackedSettings.ReadPolicy();
             if (!result.Available)
             {
-                throw new InvalidOperationException("policy_unavailable");
+                throw new HostUpdateSubsystemUnavailableException(HostUpdateAvailabilityCodes.PolicyUnavailable, null);
             }
 
             policy = HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(result.Policy);

@@ -190,17 +190,22 @@ public static partial class SignedUpdateManifestValidator
         }
 
         long major = ParseBounded(match.Groups["major"].Value, SequenceMajorMaximum, "Major version");
-        if (major < 1)
+        Group insider = match.Groups["insider"];
+
+        // Mirrors the signer contract (scripts/ci/release-manifest.mjs): only a *stable* signed
+        // release must have a non-zero major version; a 0.x insider prerelease is legitimate and
+        // must stay derivable here, or the host would reject releases the signer can publish.
+        if (!insider.Success && major < 1)
         {
-            throw new FormatException("Major version must be greater than zero.");
+            throw new FormatException("Stable major version must be greater than zero.");
         }
 
         long minor = ParseBounded(match.Groups["minor"].Value, SequenceMinorMaximum, "Minor version");
         long patch = ParseBounded(match.Groups["patch"].Value, SequencePatchMaximum, "Patch version");
         long suffix = SequenceStableSuffix;
-        if (match.Groups["insider"].Success)
+        if (insider.Success)
         {
-            suffix = ParseBounded(match.Groups["insider"].Value, SequenceInsiderMaximum, "Prerelease sequence");
+            suffix = ParseBounded(insider.Value, SequenceInsiderMaximum, "Prerelease sequence");
             if (suffix < 1)
             {
                 throw new FormatException("Prerelease sequence must be between 1 and 99998.");

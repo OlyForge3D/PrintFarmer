@@ -220,6 +220,11 @@ public sealed class HostUpdateSchedulerTests
 
         Assert.Equal(activeRequestId, executor.CancelledRequestId);
         Assert.Equal(1, executor.CancellationCallCount);
+
+        // The signal is pinned to the exact execution generation, not just the request ID.
+        HostUpdateExecutorRequest executed = Assert.Single(executor.Requests);
+        Assert.False(string.IsNullOrWhiteSpace(executed.OperationToken));
+        Assert.Equal(executed.OperationToken, executor.CancelledSignal?.OperationToken);
     }
 
     [Fact]
@@ -741,10 +746,11 @@ public sealed class HostUpdateSchedulerTests
     {
         public List<HostUpdateExecutorRequest> Requests { get; } = [];
         public HostUpdateExecutorResponse Response { get; set; } = new(HostUpdateExecutorResult.Accepted);
-        public string? CancelledRequestId { get; private set; }
+        public string? CancelledRequestId => CancelledSignal?.RequestId;
+        public HostUpdateCancellationSignal? CancelledSignal { get; private set; }
         public int CancellationCallCount { get; private set; }
         public virtual Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct) { Requests.Add(request); return Task.FromResult(Response); }
-        public virtual Task SignalSafeCheckpointCancellationAsync(string requestId, CancellationToken ct) { CancelledRequestId = requestId; CancellationCallCount++; return Task.CompletedTask; }
+        public virtual Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct) { CancelledSignal = signal; CancellationCallCount++; return Task.CompletedTask; }
     }
 
     private sealed class BlockingExecutor : FakeExecutor

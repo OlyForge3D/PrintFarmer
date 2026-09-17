@@ -88,6 +88,10 @@ public sealed class FileHostUpdateReplayAnchor : IHostUpdateReplayAnchor, IHostU
     public async Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(epoch);
+
+        // An empty state hash would append an anchor entry that can never be reconciled against
+        // the replay state it is supposed to authenticate.
+        ArgumentException.ThrowIfNullOrWhiteSpace(stateHash);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {

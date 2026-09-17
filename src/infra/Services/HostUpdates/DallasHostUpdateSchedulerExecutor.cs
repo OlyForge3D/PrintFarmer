@@ -11,7 +11,7 @@ public sealed class DallasHostUpdateSchedulerExecutor(
     IHostUpdateExecutor executor,
     string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable
 {
-    private readonly ConcurrentDictionary<string, CancellationTokenSource> _activeRequests = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ActiveOperation> _activeRequests = new(StringComparer.Ordinal);
     private int _disposed;
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
@@ -21,13 +21,13 @@ public sealed class DallasHostUpdateSchedulerExecutor(
             return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
         }
 
-        if (Volatile.Read(ref _disposed) != 0)
-        {
-            return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
-        }
-
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
+
+        if (string.IsNullOrWhiteSpace(request.OperationToken))
+        {
+            return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "operation_token_missing");
+        }
 
         HostUpdateExecutionRequest executionRequest;
         try
@@ -48,8 +48,10 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         }
 
         CancellationTokenSource safeCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        if (!_activeRequests.TryAdd(request.RequestId, safeCancellation))
+        ActiveOperation operation = new(request.OperationToken, safeCancellation);
+        if (!_activeRequests.TryAdd(request.RequestId, operation))
         {
+            safeCancellation.Dispose();
             return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
         }
 
@@ -79,26 +81,38 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         }
         finally
         {
-            _activeRequests.TryRemove(new KeyValuePair<string, CancellationTokenSource>(request.RequestId, safeCancellation));
+            _activeRequests.TryRemove(new KeyValuePair<string, ActiveOperation>(request.RequestId, operation));
             safeCancellation.Dispose();
         }
     }
 
-    public async Task SignalSafeCheckpointCancellationAsync(string requestId, CancellationToken ct)
+    /// <summary>
+    /// Delivers cancellation only to the exact generation the signal was captured for. A signal
+    /// held across the end of one run must not cancel a later run that reuses the same request ID,
+    /// so the operation token is compared as well as the request ID.
+    /// </summary>
+    public async Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct)
     {
+        ArgumentNullException.ThrowIfNull(signal);
         ct.ThrowIfCancellationRequested();
-        if (!string.IsNullOrWhiteSpace(requestId) && _activeRequests.TryGetValue(requestId, out CancellationTokenSource? cancellation))
+        if (string.IsNullOrWhiteSpace(signal.RequestId) || string.IsNullOrWhiteSpace(signal.OperationToken) ||
+            !_activeRequests.TryGetValue(signal.RequestId, out ActiveOperation? operation) ||
+            !string.Equals(operation.OperationToken, signal.OperationToken, StringComparison.Ordinal))
         {
-            try
-            {
-                await cancellation.CancelAsync().ConfigureAwait(false);
-            }
-            catch (ObjectDisposedException)
-            {
-                // The request completed between lookup and cancellation delivery.
-            }
+            return;
+        }
+
+        try
+        {
+            await operation.Cancellation.CancelAsync().ConfigureAwait(false);
+        }
+        catch (ObjectDisposedException)
+        {
+            // The request completed between lookup and cancellation delivery.
         }
     }
 
     public void Dispose() => Interlocked.Exchange(ref _disposed, 1);
+
+    private sealed record ActiveOperation(string OperationToken, CancellationTokenSource Cancellation);
 }

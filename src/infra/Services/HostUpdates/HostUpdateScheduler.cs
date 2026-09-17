@@ -141,7 +141,7 @@ public sealed record VerifiedHostUpdateCandidate(
     string HostPlatform = "")
 {
     public bool IsEligible => CryptographicallyVerified && CompatibilityReady && InstallationAvailable && MaintenanceWindowOpen && SafetyPassed && IsNewer &&
-        !string.IsNullOrWhiteSpace(ReleaseId) && !string.IsNullOrWhiteSpace(SourceCommit) && Sequence >= 0 &&
+        !string.IsNullOrWhiteSpace(ReleaseId) && !string.IsNullOrWhiteSpace(SourceCommit) && Sequence >= 1 &&
         !string.IsNullOrWhiteSpace(ManifestDigest) && !string.IsNullOrWhiteSpace(Channel) && !string.IsNullOrWhiteSpace(TrustRoot) && PlatformDigests.IsComplete;
 
     public bool IsWithinFreshnessWindow(DateTimeOffset now) => EvidenceFresh && (ExpiresAt is null || now < ExpiresAt);
@@ -159,10 +159,11 @@ public sealed record HostUpdateExecutorRequest(
     string TrustRoot,
     long PolicyRevision,
     string PolicyFingerprint,
-    HostUpdatePlatformDigests PlatformDigests)
+    HostUpdatePlatformDigests PlatformDigests,
+    string OperationToken = "")
 {
     public bool IsValid => !string.IsNullOrWhiteSpace(RequestId) && !string.IsNullOrWhiteSpace(ReleaseId) &&
-        !string.IsNullOrWhiteSpace(SourceCommit) && Sequence >= 0 && !string.IsNullOrWhiteSpace(ManifestDigest) &&
+        !string.IsNullOrWhiteSpace(SourceCommit) && Sequence >= 1 && !string.IsNullOrWhiteSpace(ManifestDigest) &&
         (Channel == UpdateChannelSettings.StableChannel || Channel == UpdateChannelSettings.InsiderChannel) &&
         !string.IsNullOrWhiteSpace(TrustRoot) && PolicyRevision >= 0 && !string.IsNullOrWhiteSpace(PolicyFingerprint) && PlatformDigests.IsComplete;
 }
@@ -178,11 +179,25 @@ public enum HostUpdateExecutorResult
 
 public sealed record HostUpdateExecutorResponse(HostUpdateExecutorResult Result, string? Reason = null);
 
+/// <summary>
+/// Identifies exactly one <see cref="IHostUpdateSchedulerExecutor.ExecuteAsync"/> invocation.
+/// A request ID alone is not sufficient: the same ID can legitimately run again after the first
+/// run finished, and a delayed cancellation signal captured for the earlier run must never cancel
+/// the later one. The operation token is the immutable per-invocation generation that makes a
+/// stale signal detectable.
+/// </summary>
+public sealed record HostUpdateCancellationSignal(string RequestId, string OperationToken);
+
 public interface IHostUpdateSchedulerExecutor
 {
     Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct);
 
-    Task SignalSafeCheckpointCancellationAsync(string requestId, CancellationToken ct);
+    /// <summary>
+    /// Requests cancellation at the next safe checkpoint. Implementations must deliver the
+    /// cancellation only when both the request ID and the operation token match the currently
+    /// running generation.
+    /// </summary>
+    Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct);
 }
 
 public interface IHostUpdateSchedulerSettings
@@ -686,6 +701,7 @@ public sealed class HostUpdateScheduler(
     private HostUpdateSchedulerStatus _status = new(false, false, false, UpdateChannelSettings.StableChannel, 0, null, null, 0, HostUpdateSchedulerReason.Disabled);
     private readonly object _cancellationGate = new();
     private string? _activeRequestId;
+    private string? _activeOperationToken;
     private bool _activeRequestSignaled;
     private int _disposed;
     private int _tickGateDisposed;
@@ -869,6 +885,9 @@ public sealed class HostUpdateScheduler(
                 return Backoff(HostUpdateSchedulerReason.AdmissionFenceActive, admission.OperationId ?? candidate.Identity);
             }
 
+            // Allocated per invocation so a cancellation signal captured for an earlier run of
+            // the same request ID cannot be delivered to this one.
+            string operationToken = Guid.NewGuid().ToString("N");
             HostUpdateExecutorRequest request = new(
                 decision.CorrelationId,
                 candidate.ReleaseId,
@@ -879,11 +898,13 @@ public sealed class HostUpdateScheduler(
                 candidate.TrustRoot,
                 fresh.PolicyRevision,
                 fresh.Fingerprint,
-                candidate.PlatformDigests);
+                candidate.PlatformDigests,
+                operationToken);
 
             lock (_cancellationGate)
             {
                 _activeRequestId = request.RequestId;
+                _activeOperationToken = operationToken;
                 _activeRequestSignaled = false;
             }
             try
@@ -906,9 +927,10 @@ public sealed class HostUpdateScheduler(
             {
                 lock (_cancellationGate)
                 {
-                    if (string.Equals(_activeRequestId, request.RequestId, StringComparison.Ordinal))
+                    if (IsActiveGeneration(request.RequestId, operationToken))
                     {
                         _activeRequestId = null;
+                        _activeOperationToken = null;
                         _activeRequestSignaled = false;
                     }
                 }
@@ -925,29 +947,38 @@ public sealed class HostUpdateScheduler(
         }
     }
 
+    /// <summary>
+    /// Signals the currently running execution to stop at its next safe checkpoint. The captured
+    /// (request ID, operation token) pair pins the signal to exactly one execution generation, so
+    /// a delayed delivery cannot cancel a later run that reuses the same request ID, and a failed
+    /// delivery for a finished generation cannot clear the newer generation's signalled state.
+    /// </summary>
     public async Task SignalSafeCheckpointCancellationAsync(CancellationToken ct = default)
     {
-        string? requestId;
+        HostUpdateCancellationSignal signal;
         lock (_cancellationGate)
         {
-            if (Volatile.Read(ref _disposed) != 0 || _activeRequestId is null || _activeRequestSignaled)
+            if (Volatile.Read(ref _disposed) != 0 || _activeRequestId is null || _activeOperationToken is null || _activeRequestSignaled)
             {
                 return;
             }
 
-            requestId = _activeRequestId;
+            signal = new HostUpdateCancellationSignal(_activeRequestId, _activeOperationToken);
+
+            // Claimed up-front so concurrent callers cannot deliver twice; released again below
+            // only when delivery fails and this generation is still the active one.
             _activeRequestSignaled = true;
         }
 
         try
         {
-            await executor.SignalSafeCheckpointCancellationAsync(requestId, ct).ConfigureAwait(false);
+            await executor.SignalSafeCheckpointCancellationAsync(signal, ct).ConfigureAwait(false);
         }
         catch
         {
             lock (_cancellationGate)
             {
-                if (string.Equals(_activeRequestId, requestId, StringComparison.Ordinal))
+                if (IsActiveGeneration(signal.RequestId, signal.OperationToken))
                 {
                     _activeRequestSignaled = false;
                 }
@@ -955,6 +986,10 @@ public sealed class HostUpdateScheduler(
             throw;
         }
     }
+
+    private bool IsActiveGeneration(string requestId, string operationToken) =>
+        string.Equals(_activeRequestId, requestId, StringComparison.Ordinal) &&
+        string.Equals(_activeOperationToken, operationToken, StringComparison.Ordinal);
 
     public void Dispose()
     {

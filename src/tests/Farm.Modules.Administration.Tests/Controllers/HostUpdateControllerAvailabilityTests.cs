@@ -132,6 +132,185 @@ public sealed class HostUpdateControllerAvailabilityTests
         Assert.Equal(503, unavailable.StatusCode);
     }
 
+    [Fact]
+    public async Task AuthorizeAsync_returns_503_when_production_resolver_has_unprovisioned_replay_store()
+    {
+        using ProductionResolverHarness harness = new(new UnavailableHostUpdateReplayStore());
+        HostUpdateController controller = harness.CreateController();
+
+        ActionResult<HostUpdateManualAuthorizationResponse> result = await controller.AuthorizeAsync(null, default);
+
+        ObjectResult unavailable = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(503, unavailable.StatusCode);
+        Assert.Equal("host_update_replay_store_not_available", Detail(unavailable));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_returns_503_when_production_resolver_has_unprovisioned_replay_store()
+    {
+        using ProductionResolverHarness harness = new(new UnavailableHostUpdateReplayStore());
+        HostUpdateController controller = harness.CreateController();
+
+        ActionResult<HostUpdateStatusResponse> result = await controller.ExecuteAsync(null, default);
+
+        ObjectResult unavailable = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(503, unavailable.StatusCode);
+        Assert.Equal("host_update_replay_store_not_available", Detail(unavailable));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_returns_503_when_production_resolver_cannot_read_replay_state()
+    {
+        using ProductionResolverHarness harness = new(new UnreadableReplayStore());
+        HostUpdateController controller = harness.CreateController();
+
+        ActionResult<HostUpdateStatusResponse> result = await controller.ExecuteAsync(null, default);
+
+        ObjectResult unavailable = Assert.IsType<ObjectResult>(result.Result);
+        Assert.Equal(503, unavailable.StatusCode);
+        Assert.Equal(HostUpdateAvailabilityCodes.ReplayUnavailable, Detail(unavailable));
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_returns_409_for_an_actual_replay_conflict()
+    {
+        using ProductionResolverHarness harness = new(new MemoryReplayStore());
+        HostUpdateController controller = harness.CreateController();
+        ActionResult<HostUpdateStatusResponse> first = await controller.ExecuteAsync(null, default);
+        Assert.IsType<OkObjectResult>(first.Result);
+
+        ActionResult<HostUpdateStatusResponse> replay = await controller.ExecuteAsync(null, default);
+
+        ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(replay.Result);
+        Assert.Equal(409, conflict.StatusCode);
+        Assert.Contains("candidate_replay_rejected", conflict.Value?.ToString(), StringComparison.Ordinal);
+    }
+
+    private static string? Detail(ObjectResult result) =>
+        Assert.IsType<Microsoft.AspNetCore.Mvc.ProblemDetails>(result.Value, exactMatch: false).Detail;
+
+    /// <summary>
+    /// Wires the real <see cref="HostUpdateExecutionRequestResolver"/> so classification is proven
+    /// on the production code path, not on a hand-written resolver stub.
+    /// </summary>
+    private sealed class ProductionResolverHarness(IHostUpdateReplayStore replayStore) : IDisposable
+    {
+        private readonly string _root = Directory.CreateTempSubdirectory("printfarmer-hostupdate-availability-").FullName;
+
+        public HostUpdateController CreateController() => new(
+            new CompletingExecutor(),
+            new HostUpdateExecutionRequestResolver(
+                new FixedSettings(),
+                new FixedCandidateCache(Candidate),
+                replayStore,
+                new MemoryManifestBindingStore(),
+                new FileHostUpdateManualAuthorizationStore(_root),
+                new InactiveHostUpdateAdmissionFence(),
+                new FixedClock()),
+            new NoopJournal(),
+            new NoopRecovery());
+
+        public static VerifiedHostUpdateCandidate Candidate { get; } = new(
+            "release-1",
+            new string('a', 40),
+            42,
+            "sha256:" + new string('b', 64),
+            Farm.Infrastructure.Settings.UpdateChannelSettings.StableChannel,
+            true,
+            true,
+            true,
+            true,
+            true,
+            true,
+            new HostUpdatePlatformDigests(
+                "sha256:" + new string('c', 64),
+                "sha256:" + new string('d', 64),
+                "sha256:" + new string('e', 64),
+                "sha256:" + new string('f', 64),
+                "sha256:" + new string('1', 64),
+                "sha256:" + new string('2', 64)),
+            HostPlatform: "linux-amd64");
+
+        public void Dispose()
+        {
+            try
+            {
+                Directory.Delete(_root, recursive: true);
+            }
+            catch (IOException)
+            {
+                // Temp cleanup is best-effort.
+            }
+        }
+    }
+
+    private sealed class FixedSettings : IHostUpdateSchedulerSettings
+    {
+        public HostUpdateSchedulerSettings Current { get; } = new(
+            Channel: Farm.Infrastructure.Settings.UpdateChannelSettings.StableChannel,
+            PolicyRevision: 1);
+    }
+
+    private sealed class FixedCandidateCache(VerifiedHostUpdateCandidate candidate) : IHostUpdateSchedulerCandidateCache
+    {
+        public VerifiedHostUpdateCandidate? Current => candidate;
+
+        public string? LastError => null;
+    }
+
+    private sealed class FixedClock : IHostUpdateClock
+    {
+        public DateTimeOffset UtcNow => new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+    }
+
+    private sealed class MemoryManifestBindingStore : IVerifiedReleaseManifestBindingStore
+    {
+        private readonly Dictionary<string, string> _bindings = new(StringComparer.Ordinal);
+
+        public Task EnsureBoundAsync(string releaseId, string manifestDigest, CancellationToken cancellationToken)
+        {
+            if (_bindings.TryGetValue(releaseId, out string? existing) && !string.Equals(existing, manifestDigest, StringComparison.Ordinal))
+            {
+                throw new InvalidDataException("manifest_binding_conflict");
+            }
+
+            _bindings[releaseId] = manifestDigest;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class MemoryReplayStore : IHostUpdateReplayStore
+    {
+        private readonly HashSet<string> _admitted = new(StringComparer.Ordinal);
+
+        public Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct)
+        {
+            if (_admitted.Contains(candidate.Identity))
+            {
+                return Task.FromResult(new HostUpdateReplayDecision(HostUpdateReplayDisposition.Rejected, candidate.Identity, true));
+            }
+
+            if (intent == HostUpdateReplayIntent.Admit)
+            {
+                _admitted.Add(candidate.Identity);
+            }
+
+            return Task.FromResult(new HostUpdateReplayDecision(HostUpdateReplayDisposition.Accepted, candidate.Identity, false));
+        }
+    }
+
+    private sealed class UnreadableReplayStore : IHostUpdateReplayStore
+    {
+        public Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct) =>
+            throw new InvalidDataException("host_update_replay_state_corrupt");
+    }
+
+    private sealed class CompletingExecutor : IHostUpdateExecutor
+    {
+        public Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default) =>
+            Task.FromResult(new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []));
+    }
+
     private sealed class ThrowingResolver(Exception exception) : IHostUpdateExecutionRequestResolver
     {
         public Task<HostUpdateManualAuthorizationResponse> AuthorizeCurrentAsync(HostUpdateManualAuthorizationIntent intent, CancellationToken ct) =>

@@ -217,6 +217,102 @@ public sealed class HostUpdateManualAuthorizationTests
         Assert.Equal("host_update_operation_active", result.Error);
     }
 
+    [Fact]
+    public async Task AuthorizeCurrentAsync_ReplayStoreNotProvisioned_ThrowsSubsystemUnavailable()
+    {
+        ResolverHarness harness = new();
+        HostUpdateExecutionRequestResolver resolver = harness.CreateResolver(new UnavailableHostUpdateReplayStore());
+
+        HostUpdateSubsystemUnavailableException failure = await Assert.ThrowsAsync<HostUpdateSubsystemUnavailableException>(
+            () => resolver.AuthorizeCurrentAsync(new(), default));
+
+        Assert.Equal("host_update_replay_store_not_available", failure.Code);
+        Assert.True(HostUpdateAvailabilityCodes.IsDurableUnavailable(failure.Code));
+    }
+
+    [Fact]
+    public async Task ResolveManualAsync_ReplayStoreNotProvisioned_ThrowsSubsystemUnavailable()
+    {
+        ResolverHarness harness = new();
+        HostUpdateExecutionRequestResolver resolver = harness.CreateResolver(new UnavailableHostUpdateReplayStore());
+
+        HostUpdateSubsystemUnavailableException failure = await Assert.ThrowsAsync<HostUpdateSubsystemUnavailableException>(
+            () => resolver.ResolveManualAsync(new(), default));
+
+        Assert.Equal("host_update_replay_store_not_available", failure.Code);
+    }
+
+    [Fact]
+    public async Task ResolveManualAsync_ReplayStateUnreadable_ThrowsReplayUnavailableRatherThanConflict()
+    {
+        ResolverHarness harness = new();
+        HostUpdateExecutionRequestResolver resolver = harness.CreateResolver(
+            new ThrowingReplayStore(new InvalidDataException("host_update_replay_state_corrupt")));
+
+        HostUpdateSubsystemUnavailableException failure = await Assert.ThrowsAsync<HostUpdateSubsystemUnavailableException>(
+            () => resolver.ResolveManualAsync(new(), default));
+
+        Assert.Equal(HostUpdateAvailabilityCodes.ReplayUnavailable, failure.Code);
+    }
+
+    [Fact]
+    public async Task AuthorizeCurrentAsync_ReplayStateUnreadable_ThrowsReplayUnavailable()
+    {
+        ResolverHarness harness = new();
+        HostUpdateExecutionRequestResolver resolver = harness.CreateResolver(
+            new ThrowingReplayStore(new IOException("replay_state_io")));
+
+        HostUpdateSubsystemUnavailableException failure = await Assert.ThrowsAsync<HostUpdateSubsystemUnavailableException>(
+            () => resolver.AuthorizeCurrentAsync(new(), default));
+
+        Assert.Equal(HostUpdateAvailabilityCodes.ReplayUnavailable, failure.Code);
+    }
+
+    [Fact]
+    public async Task ResolveManualAsync_PolicyUnreadable_ThrowsSubsystemUnavailable()
+    {
+        ResolverHarness harness = new();
+        HostUpdateExecutionRequestResolver resolver = new(
+            new UnavailablePolicySettings(),
+            harness.Cache,
+            harness.Replay,
+            new MemoryManifestBindingStore(),
+            harness.AuthorizationStore,
+            harness.Fence,
+            harness.Clock);
+
+        HostUpdateSubsystemUnavailableException failure = await Assert.ThrowsAsync<HostUpdateSubsystemUnavailableException>(
+            () => resolver.ResolveManualAsync(new(), default));
+
+        Assert.Equal(HostUpdateAvailabilityCodes.PolicyUnavailable, failure.Code);
+    }
+
+    [Fact]
+    public async Task ResolveManualAsync_ReplayConflict_StaysAConflictNotAnAvailabilityFailure()
+    {
+        ResolverHarness harness = new();
+        Assert.True((await harness.Resolver.ResolveManualAsync(new(), default)).Succeeded);
+
+        HostUpdateExecutionResolutionResult replay = await harness.Resolver.ResolveManualAsync(new(), default);
+
+        Assert.False(replay.Succeeded);
+        Assert.Equal("candidate_replay_rejected", replay.Error);
+        Assert.False(HostUpdateAvailabilityCodes.IsDurableUnavailable(replay.Error));
+    }
+
+    private sealed class ThrowingReplayStore(Exception failure) : IHostUpdateReplayStore
+    {
+        public Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct) =>
+            throw failure;
+    }
+
+    private sealed class UnavailablePolicySettings : IHostUpdateSchedulerSettings, IHostUpdatePolicyBackedSchedulerSettings
+    {
+        public HostUpdateSchedulerSettings Current => new(Channel: UpdateChannelSettings.StableChannel, PolicyRevision: 1);
+
+        public HostUpdatePolicyReadResult ReadPolicy() => new(false, new HostUpdateAutomationPolicy(), "host_update_policy_store_unreadable");
+    }
+
     private sealed class ResolverHarness
     {
         public ResolverHarness(TimeSpan? ttl = null, IHostUpdateAdmissionFence? fence = null)
@@ -230,7 +326,10 @@ public sealed class HostUpdateManualAuthorizationTests
             Resolver = CreateResolver();
         }
 
-        public HostUpdateExecutionRequestResolver CreateResolver() => new(Settings, Cache, Replay, new MemoryManifestBindingStore(), AuthorizationStore, Fence, Clock);
+        public HostUpdateExecutionRequestResolver CreateResolver() => CreateResolver(Replay);
+
+        public HostUpdateExecutionRequestResolver CreateResolver(IHostUpdateReplayStore replayStore) =>
+            new(Settings, Cache, replayStore, new MemoryManifestBindingStore(), AuthorizationStore, Fence, Clock);
 
         public VerifiedHostUpdateCandidate Candidate { get; } = new(
             "release-1",

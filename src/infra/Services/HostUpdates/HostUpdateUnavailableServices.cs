@@ -31,6 +31,40 @@ public static class HostUpdateAvailabilityCodes
 {
     public const string StoreUnavailable = "host_update_durable_store_unavailable";
 
+    /// <summary>Protected anti-replay state could not be read or committed.</summary>
+    public const string ReplayUnavailable = "replay_unavailable";
+
+    /// <summary>Durable automation policy could not be read.</summary>
+    public const string PolicyUnavailable = "policy_unavailable";
+
+    /// <summary>Durable one-time authorization state could not be read or committed.</summary>
+    public const string AuthorizationStateUnavailable = "authorization_state_unavailable";
+
+    /// <summary>Generic settings storage backing the manifest binding is unreachable.</summary>
+    public const string ManifestBindingDatabaseUnavailable = "host_update_manifest_binding_database_unavailable";
+
+    private static readonly HashSet<string> ExplicitDurableCodes = new(StringComparer.Ordinal)
+    {
+        StoreUnavailable,
+        ReplayUnavailable,
+        PolicyUnavailable,
+        AuthorizationStateUnavailable,
+        ManifestBindingDatabaseUnavailable,
+    };
+
+    /// <summary>
+    /// Single classification for "the durable host-update subsystem could not answer". Callers
+    /// map these to 503 so an operator never sees a conflict/stale-authorization 409 for a
+    /// storage outage. Conflict codes (for example <c>candidate_replay_rejected</c>) are not
+    /// durable-unavailable and keep their 409 semantics.
+    /// </summary>
+    public static bool IsDurableUnavailable(string? code) =>
+        !string.IsNullOrWhiteSpace(code) &&
+        (ExplicitDurableCodes.Contains(code) ||
+         code.EndsWith("_unavailable", StringComparison.Ordinal) ||
+         code.EndsWith("_not_available", StringComparison.Ordinal) ||
+         code.EndsWith("_not_provisioned", StringComparison.Ordinal));
+
     public static string SafeCode(string? value) =>
         !string.IsNullOrWhiteSpace(value) && value.All(ch => char.IsLetterOrDigit(ch) || ch is '_' or '-')
             ? value

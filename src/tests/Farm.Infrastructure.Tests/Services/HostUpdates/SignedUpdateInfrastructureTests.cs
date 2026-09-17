@@ -69,16 +69,21 @@ public sealed class SignedUpdateInfrastructureTests
             .GetProperty("$defs")
             .GetProperty("parsedVersion")
             .GetProperty("properties");
-        Assert.Equal(1, parsedProperties.GetProperty("major").GetProperty("minimum").GetInt32());
+        // The signer contract allows a zero-major *prerelease*, so the schema's documented
+        // minimum is 0; only stable releases require a non-zero major version.
+        Assert.Equal(0, parsedProperties.GetProperty("major").GetProperty("minimum").GetInt32());
 
         SequenceGoldenFixture fixture = LoadSequenceFixture();
         foreach (SequenceValidCase testCase in fixture.ValidCases)
         {
-            Assert.True(testCase.Parsed.Major >= 1, testCase.Name);
+            Assert.True(testCase.Parsed.Major >= 1 || testCase.Parsed.Kind == "insider", testCase.Name);
             Assert.Equal(
                 SignedUpdateManifestValidator.DeriveSequence(testCase.Version),
                 long.Parse(testCase.ExpectedSequence, System.Globalization.CultureInfo.InvariantCulture));
         }
+
+        Assert.Contains(fixture.ValidCases, testCase => testCase.Version == "0.2.3-insider.1");
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "0.2.3");
     }
 
     [Fact]

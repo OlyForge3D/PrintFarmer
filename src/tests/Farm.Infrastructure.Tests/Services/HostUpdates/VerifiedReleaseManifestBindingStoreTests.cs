@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
@@ -65,6 +66,57 @@ public sealed class VerifiedReleaseManifestBindingStoreTests
         Assert.True(firstError is null ^ secondError is null);
         Assert.Contains("digest conflict", (firstError ?? secondError)!.Message);
         repository.SaveCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task EnsureBoundAsync_ProviderDbExceptionOnRead_ReportsSubsystemUnavailable()
+    {
+        FailingSettingsRepository repository = new(new SqliteException("database is locked", 5), failOnRead: true);
+        var store = new VerifiedReleaseManifestBindingStore(repository);
+
+        Func<Task> act = () => store.EnsureBoundAsync(ReleaseId, Digest, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<HostUpdateSubsystemUnavailableException>())
+            .Which.Code.Should().Be(HostUpdateAvailabilityCodes.ManifestBindingDatabaseUnavailable);
+    }
+
+    [Fact]
+    public async Task EnsureBoundAsync_ProviderDbExceptionOnCreate_ReportsSubsystemUnavailable()
+    {
+        FailingSettingsRepository repository = new(new SqliteException("disk I/O error", 10), failOnRead: false);
+        var store = new VerifiedReleaseManifestBindingStore(repository);
+
+        Func<Task> act = () => store.EnsureBoundAsync(ReleaseId, Digest, CancellationToken.None);
+
+        (await act.Should().ThrowAsync<HostUpdateSubsystemUnavailableException>())
+            .Which.Code.Should().Be(HostUpdateAvailabilityCodes.ManifestBindingDatabaseUnavailable);
+    }
+
+    [Fact]
+    public async Task EnsureBoundAsync_Cancellation_IsNotReclassifiedAsUnavailable()
+    {
+        FailingSettingsRepository repository = new(new OperationCanceledException(), failOnRead: true);
+        var store = new VerifiedReleaseManifestBindingStore(repository);
+
+        Func<Task> act = () => store.EnsureBoundAsync(ReleaseId, Digest, CancellationToken.None);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+    }
+
+    private sealed class FailingSettingsRepository(Exception failure, bool failOnRead) : IAppSettingsRepository
+    {
+        public Task<AppSettingsEntity?> GetAsync(string key, CancellationToken ct = default) => throw failure;
+
+        public Task<AppSettingsEntity?> GetReadOnlyAsync(string key, CancellationToken ct = default) =>
+            failOnRead ? throw failure : Task.FromResult<AppSettingsEntity?>(null);
+
+        public Task SetAsync(string key, string value, CancellationToken ct = default) => throw failure;
+
+        public Task<bool> TryCreateAsync(string key, string value, CancellationToken ct = default) => throw failure;
+
+        public Task<bool> DeleteAsync(string key, CancellationToken ct = default) => throw failure;
+
+        public Task SaveChangesAsync(CancellationToken ct = default) => throw failure;
     }
 
     private sealed class InMemorySettingsRepository : IAppSettingsRepository

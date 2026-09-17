@@ -6,7 +6,7 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 public sealed class DallasHostUpdateSchedulerExecutorTests
 {
-    private static HostUpdateExecutorRequest Request(string channel = "stable") => new(
+    private static HostUpdateExecutorRequest Request(string channel = "stable", string operationToken = "operation-1") => new(
         "request-1",
         "release-1",
         new string('a', 40),
@@ -22,7 +22,8 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
             "sha256:" + new string('e', 64),
             "sha256:" + new string('f', 64),
             "sha256:" + new string('1', 64),
-            "sha256:" + new string('2', 64)));
+            "sha256:" + new string('2', 64)),
+        operationToken);
 
     [Fact]
     public async Task ExecuteAsync_MapsImmutableSchedulerBindingToDallasRequest()
@@ -79,9 +80,9 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
         Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
         await executor.Started.Task;
 
-        await adapter.SignalSafeCheckpointCancellationAsync("other-request", default);
+        await adapter.SignalSafeCheckpointCancellationAsync(new HostUpdateCancellationSignal("other-request", "operation-1"), default);
         Assert.False(executor.CancellationRequested);
-        await adapter.SignalSafeCheckpointCancellationAsync("request-1", default);
+        await adapter.SignalSafeCheckpointCancellationAsync(new HostUpdateCancellationSignal("request-1", "operation-1"), default);
         HostUpdateExecutorResponse response = await execution;
 
         Assert.Equal(HostUpdateExecutorResult.Refused, response.Result);
@@ -113,56 +114,80 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
     }
 
     [Fact]
-    public async Task SignalSafeCheckpointCancellation_DelayedSignalForCompletedGenerationNeverCrossesIntoNextGeneration()
+    public async Task SignalSafeCheckpointCancellation_StaleGenerationSignalCannotCancelLaterRunWithSameRequestId()
     {
-        // Simulates: request A is active, a checkpoint signal for A's requestId is prepared but its
-        // delivery is paused, A completes on its own (without being cancelled) and is removed from the
-        // active-request table, request B starts and reuses the same requestId (the scheduler always
-        // signals against the *slot*, not a specific execution instance), and only then does the
-        // paused signal for A finally proceed. The delivered cancellation must land on the request
-        // that is actually live at delivery time (B) exactly once, must not throw
-        // ObjectDisposedException from the now-disposed CTS that belonged to A, and must not double
-        // deliver to B.
-        InstrumentedExecutor executorA = new(completeImmediately: true);
-        using DallasHostUpdateSchedulerExecutor adapterA = new(executorA, "linux-amd64");
-        HostUpdateExecutorResponse responseA = await adapterA.ExecuteAsync(Request(), default);
+        // A request ID alone is not a safe cancellation address: the scheduler may legitimately run
+        // the same request ID again after an earlier run finished. This pins the exact sequence:
+        // a signal is captured while generation A is live, A completes on its own, generation B
+        // starts under the SAME request ID, and only then is the captured signal delivered. B must
+        // survive that stale delivery and must still be cancellable by its own signal, exactly once.
+        GatedExecutor executor = new();
+        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+
+        Task<HostUpdateExecutorResponse> executionA = adapter.ExecuteAsync(Request(operationToken: "operation-a"), default);
+        await executor.Started;
+        HostUpdateCancellationSignal staleSignalForA = new("request-1", "operation-a");
+
+        executor.Release();
+        HostUpdateExecutorResponse responseA = await executionA;
         Assert.Equal(HostUpdateExecutorResult.Accepted, responseA.Result);
+        Assert.Equal(0, executor.CancellationObservedCount);
 
-        InstrumentedExecutor executorB = new(completeImmediately: false);
-        using DallasHostUpdateSchedulerExecutor adapterB = new(executorB, "linux-amd64");
-        Task<HostUpdateExecutorResponse> executionB = adapterB.ExecuteAsync(Request(), default);
-        await executorB.Started.Task;
+        executor.ResetForNextGeneration();
+        Task<HostUpdateExecutorResponse> executionB = adapter.ExecuteAsync(Request(operationToken: "operation-b"), default);
+        await executor.Started;
 
-        // The "delayed A signal" is delivered here, after A has already completed and B has already
-        // started under the same requestId. It targets adapterB because, in production, the scheduler
-        // always holds a single executor instance per standing update slot; this test uses two adapter
-        // instances only to give each generation its own instrumented executor.
-        await adapterB.SignalSafeCheckpointCancellationAsync("request-1", default);
+        await adapter.SignalSafeCheckpointCancellationAsync(staleSignalForA, default);
 
+        Assert.False(executionB.IsCompleted);
+        Assert.Equal(0, executor.CancellationObservedCount);
+
+        await adapter.SignalSafeCheckpointCancellationAsync(new HostUpdateCancellationSignal("request-1", "operation-b"), default);
         HostUpdateExecutorResponse responseB = await executionB;
 
         Assert.Equal(HostUpdateExecutorResult.Refused, responseB.Result);
         Assert.Equal("canceled_at_safe_checkpoint", responseB.Reason);
-        Assert.Equal(1, executorB.CancellationObservedCount);
-        Assert.Equal(0, executorA.CancellationObservedCount);
+        Assert.Equal(1, executor.CancellationObservedCount);
     }
 
-    private sealed class InstrumentedExecutor(bool completeImmediately) : IHostUpdateExecutor
+    [Fact]
+    public async Task ExecuteAsync_RefusesRequestWithoutOperationToken()
     {
-        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
+        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+
+        HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(operationToken: " "), default);
+
+        Assert.Equal(HostUpdateExecutorResult.Refused, response.Result);
+        Assert.Equal("operation_token_missing", response.Reason);
+        Assert.Empty(executor.Requests);
+    }
+
+    /// <summary>Executor with an explicit pause hook so one generation can be held open across another.</summary>
+    private sealed class GatedExecutor : IHostUpdateExecutor
+    {
+        private TaskCompletionSource _started = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private TaskCompletionSource _release = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task Started => _started.Task;
+
         public int CancellationObservedCount { get; private set; }
+
+        public void Release() => _release.TrySetResult();
+
+        public void ResetForNextGeneration()
+        {
+            _started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+            _release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        }
 
         public async Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default)
         {
-            Started.SetResult();
-            if (completeImmediately)
-            {
-                return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
-            }
-
+            Task release = _release.Task;
+            _started.TrySetResult();
             try
             {
-                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                await release.WaitAsync(cancellationToken);
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
             {

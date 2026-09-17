@@ -61,9 +61,9 @@ public sealed class HostUpdateController(
         {
             return AvailabilityProblem(ex);
         }
-        catch (InvalidOperationException ex) when (ex.Message == "policy_unavailable")
+        catch (InvalidOperationException ex) when (HostUpdateAvailabilityCodes.IsDurableUnavailable(ex.Message))
         {
-            return AvailabilityProblem("policy_unavailable");
+            return AvailabilityProblem(ex.Message);
         }
         catch (InvalidOperationException ex)
         {
@@ -115,7 +115,7 @@ public sealed class HostUpdateController(
         if (!resolution.Succeeded || resolution.Request is null)
         {
             string code = resolution.Error ?? "request_not_authorized";
-            if (code is "policy_unavailable" or "authorization_state_unavailable")
+            if (HostUpdateAvailabilityCodes.IsDurableUnavailable(code))
             {
                 return AvailabilityProblem(code);
             }
@@ -243,13 +243,9 @@ public sealed class HostUpdateController(
             return Conflict(new { code });
         }
 
+        // Every journal request already hashed to the single recorded binding above, so the
+        // first entry is the authoritative failed request; no second equality sweep is needed.
         HostUpdateExecutionRequest failedRequest = journalRequests[0];
-        string failedHash = HostUpdateRequestBinding.Compute(failedRequest);
-        if (journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), failedHash, StringComparison.Ordinal)))
-        {
-            return Conflict(new { code = "recovery_binding_mixed" });
-        }
-
         if (!string.IsNullOrWhiteSpace(body?.RequestId) && !string.Equals(body.RequestId, failedRequest.RequestId, StringComparison.Ordinal))
         {
             return Conflict(new { code = "recovery_request_mismatch" });
@@ -269,7 +265,7 @@ public sealed class HostUpdateController(
             return AvailabilityProblem(ex);
         }
 
-        if (result.Detail == "host_update_recovery_not_available")
+        if (HostUpdateAvailabilityCodes.IsDurableUnavailable(result.Detail))
         {
             return AvailabilityProblem(result.Detail);
         }

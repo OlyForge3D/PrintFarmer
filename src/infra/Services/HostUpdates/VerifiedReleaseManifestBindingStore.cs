@@ -1,4 +1,5 @@
-﻿using System.Security;
+﻿using System.Data.Common;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
@@ -114,7 +115,7 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
         {
             return await _repository.GetReadOnlyAsync(key, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is DbUpdateException or IOException or UnauthorizedAccessException or SecurityException)
+        catch (Exception exception) when (exception is DbUpdateException or DbException or IOException or UnauthorizedAccessException or SecurityException)
         {
             throw new HostUpdateSubsystemUnavailableException(
                 "host_update_manifest_binding_database_unavailable", exception);
@@ -127,7 +128,7 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
         {
             return await _repository.TryCreateDetailedAsync(key, json, cancellationToken).ConfigureAwait(false);
         }
-        catch (Exception exception) when (exception is DbUpdateException or IOException or UnauthorizedAccessException or SecurityException)
+        catch (Exception exception) when (exception is DbUpdateException or DbException or IOException or UnauthorizedAccessException or SecurityException)
         {
             throw new HostUpdateSubsystemUnavailableException(
                 "host_update_manifest_binding_database_unavailable", exception);
