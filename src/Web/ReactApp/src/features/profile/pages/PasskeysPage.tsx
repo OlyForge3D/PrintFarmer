@@ -65,13 +65,24 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
     }) => {
       const result = await registerPasskey();
       if (deviceName) {
-        await renamePasskey(result.newCredentialId, deviceName);
+        try {
+          await renamePasskey(result.newCredentialId, deviceName);
+        } catch (error) {
+          return { renameError: error instanceof Error ? error : new Error(String(error)) };
+        }
       }
+      return {};
     },
-    onSuccess: (_result, { toastId }) => {
+    onSuccess: ({ renameError }, { toastId }) => {
       queryClient.invalidateQueries({ queryKey: ['passkeys'] });
-      toast.success('Passkey registered successfully', { id: toastId });
       setPendingDeviceName('');
+      if (renameError) {
+        toast.error(`Passkey registered, but failed to save device name: ${renameError.message}`, {
+          id: toastId,
+        });
+        return;
+      }
+      toast.success('Passkey registered successfully', { id: toastId });
     },
     onError: (error: Error, { toastId }) => {
       toast.error(error.message || 'Failed to register passkey', { id: toastId });
@@ -126,6 +137,8 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
             variant="primary"
             onClick={() => setShowRegisterModal(true)}
             disabled={registerMutation.isPending}
+            explainedDisabled
+            title={registerMutation.isPending ? 'Passkey registration is in progress' : undefined}
           >
             <PlusIcon className="w-4 h-4" />
             <span>Add passkey</span>
