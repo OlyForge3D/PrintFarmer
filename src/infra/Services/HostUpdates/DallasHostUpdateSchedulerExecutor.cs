@@ -9,18 +9,15 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// </summary>
 public sealed class DallasHostUpdateSchedulerExecutor(
     IHostUpdateExecutor executor,
-    string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable
+    string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable, IAsyncDisposable
 {
     private readonly ConcurrentDictionary<string, ActiveOperation> _activeRequests = new(StringComparer.Ordinal);
+    private readonly object _lifecycleGate = new();
+    private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private int _disposed;
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
     {
-        if (Volatile.Read(ref _disposed) != 0)
-        {
-            return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
-        }
-
         ArgumentNullException.ThrowIfNull(request);
         ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
 
@@ -48,11 +45,20 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         }
 
         CancellationTokenSource safeCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        ActiveOperation operation = new(request.OperationToken, safeCancellation);
-        if (!_activeRequests.TryAdd(request.RequestId, operation))
+        ActiveOperation operation = new(request.OperationToken, safeCancellation, new(TaskCreationOptions.RunContinuationsAsynchronously));
+        lock (_lifecycleGate)
         {
-            safeCancellation.Dispose();
-            return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
+            if (Volatile.Read(ref _disposed) != 0)
+            {
+                safeCancellation.Dispose();
+                return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
+            }
+
+            if (!_activeRequests.TryAdd(request.RequestId, operation))
+            {
+                safeCancellation.Dispose();
+                return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
+            }
         }
 
         try
@@ -83,6 +89,7 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         {
             _activeRequests.TryRemove(new KeyValuePair<string, ActiveOperation>(request.RequestId, operation));
             safeCancellation.Dispose();
+            operation.Completion.TrySetResult();
         }
     }
 
@@ -112,7 +119,54 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         }
     }
 
-    public void Dispose() => Interlocked.Exchange(ref _disposed, 1);
+#pragma warning disable VSTHRD002
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
 
-    private sealed record ActiveOperation(string OperationToken, CancellationTokenSource Cancellation);
+    public async ValueTask DisposeAsync()
+    {
+        ActiveOperation[]? operations = null;
+        lock (_lifecycleGate)
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                operations = [.. _activeRequests.Values];
+            }
+        }
+
+        if (operations is null)
+        {
+#pragma warning disable VSTHRD003
+            await _disposeCompletion.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
+            return;
+        }
+
+        try
+        {
+            foreach (ActiveOperation operation in operations)
+            {
+                try
+                {
+                    await operation.Cancellation.CancelAsync().ConfigureAwait(false);
+                }
+                catch (ObjectDisposedException)
+                {
+                }
+            }
+
+#pragma warning disable VSTHRD003
+            await Task.WhenAll(operations.Select(operation => operation.Completion.Task)).ConfigureAwait(false);
+#pragma warning restore VSTHRD003
+        }
+        finally
+        {
+            _disposeCompletion.TrySetResult();
+        }
+    }
+
+    private sealed record ActiveOperation(
+        string OperationToken,
+        CancellationTokenSource Cancellation,
+        TaskCompletionSource Completion);
 }

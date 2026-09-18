@@ -163,6 +163,26 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
         Assert.Empty(executor.Requests);
     }
 
+    [Fact]
+    public async Task DisposeAsync_CancelsAndWaitsForActiveExecution()
+    {
+        CancellationResistantExecutor executor = new();
+        DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
+        await executor.Started.Task;
+
+        Task disposal = adapter.DisposeAsync().AsTask();
+        await executor.CancellationObserved.Task;
+
+        Assert.False(disposal.IsCompleted);
+        executor.Release.TrySetResult();
+        await execution;
+        await disposal;
+        Assert.Equal(
+            "executor_disposed",
+            (await adapter.ExecuteAsync(Request(operationToken: "operation-2"), default)).Reason);
+    }
+
     /// <summary>Executor with an explicit pause hook so one generation can be held open across another.</summary>
     private sealed class GatedExecutor : IHostUpdateExecutor
     {
@@ -195,6 +215,21 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
                 throw;
             }
 
+            return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
+        }
+    }
+
+    private sealed class CancellationResistantExecutor : IHostUpdateExecutor
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            using CancellationTokenRegistration registration = cancellationToken.Register(() => CancellationObserved.TrySetResult());
+            await Release.Task;
             return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
         }
     }

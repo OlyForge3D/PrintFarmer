@@ -246,6 +246,7 @@ public sealed class HostUpdateExecutor(
                 }
             }
 
+            Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:after");
             Append(activities, request, HostUpdateExecutionState.Completed, "completed");
             return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
         }

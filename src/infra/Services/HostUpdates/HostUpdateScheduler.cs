@@ -691,7 +691,7 @@ public sealed class HostUpdateScheduler(
     IHostUpdateClock clock,
     IHostUpdateJitter jitter,
     ILogger<HostUpdateScheduler>? logger = null,
-    IHostUpdateAdmissionFence? admissionFence = null) : IDisposable
+    IHostUpdateAdmissionFence? admissionFence = null) : IDisposable, IAsyncDisposable
 {
     private static readonly TimeSpan MaxJitter = TimeSpan.FromMinutes(5);
 
@@ -700,6 +700,7 @@ public sealed class HostUpdateScheduler(
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private HostUpdateSchedulerStatus _status = new(false, false, false, UpdateChannelSettings.StableChannel, 0, null, null, 0, HostUpdateSchedulerReason.Disabled);
     private readonly object _cancellationGate = new();
+    private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
     private string? _activeRequestId;
     private string? _activeOperationToken;
     private bool _activeRequestSignaled;
@@ -842,7 +843,7 @@ public sealed class HostUpdateScheduler(
                 return _status with { Reason = HostUpdateSchedulerReason.ReplayStoreUnavailable };
             }
 
-            if (decision.Disposition != HostUpdateReplayDisposition.Accepted)
+            if (decision.Disposition != HostUpdateReplayDisposition.Accepted || decision.Reused)
             {
                 HostUpdateSchedulerReason reason = decision.Disposition == HostUpdateReplayDisposition.Superseded
                     ? HostUpdateSchedulerReason.ReplaySuperseded
@@ -943,7 +944,6 @@ public sealed class HostUpdateScheduler(
         finally
         {
             _tickGate.Release();
-            TryDisposeTickGate();
         }
     }
 
@@ -991,27 +991,54 @@ public sealed class HostUpdateScheduler(
         string.Equals(_activeRequestId, requestId, StringComparison.Ordinal) &&
         string.Equals(_activeOperationToken, operationToken, StringComparison.Ordinal);
 
-    public void Dispose()
-    {
-        Interlocked.Exchange(ref _disposed, 1);
-        TryDisposeTickGate();
-    }
+#pragma warning disable VSTHRD002
+    public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
 
-    private void TryDisposeTickGate()
+    public async ValueTask DisposeAsync()
     {
-        if (Volatile.Read(ref _disposed) == 0 || Interlocked.CompareExchange(ref _tickGateDisposed, 1, 0) != 0)
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
         {
+#pragma warning disable VSTHRD003
+            await _disposeCompletion.Task.ConfigureAwait(false);
+#pragma warning restore VSTHRD003
             return;
         }
 
-        if (_tickGate.Wait(0))
+        HostUpdateCancellationSignal? signal = null;
+        lock (_cancellationGate)
         {
-            _tickGate.Release();
-            _tickGate.Dispose();
-            return;
+            if (_activeRequestId is not null && _activeOperationToken is not null && !_activeRequestSignaled)
+            {
+                signal = new HostUpdateCancellationSignal(_activeRequestId, _activeOperationToken);
+                _activeRequestSignaled = true;
+            }
         }
 
-        Volatile.Write(ref _tickGateDisposed, 0);
+        try
+        {
+            if (signal is not null)
+            {
+                try
+                {
+                    await executor.SignalSafeCheckpointCancellationAsync(signal, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "host_update_scheduler_shutdown_cancellation_failed");
+                }
+            }
+
+            await _tickGate.WaitAsync().ConfigureAwait(false);
+            if (Interlocked.Exchange(ref _tickGateDisposed, 1) == 0)
+            {
+                _tickGate.Dispose();
+            }
+        }
+        finally
+        {
+            _disposeCompletion.TrySetResult();
+        }
     }
 
     private static bool ShouldPersistTerminalRejection(VerifiedHostUpdateCandidate candidate, HostUpdateSchedulerReason reason) =>

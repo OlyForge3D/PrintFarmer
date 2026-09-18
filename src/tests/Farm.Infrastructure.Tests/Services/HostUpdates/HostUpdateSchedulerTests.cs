@@ -162,6 +162,22 @@ public sealed class HostUpdateSchedulerTests
     }
 
     [Fact]
+    public async Task TickAsync_AcceptedReusedReplayDecision_DoesNotExecute()
+    {
+        FakeExecutor executor = new();
+        HostUpdateScheduler scheduler = Create(
+            new HostUpdateSchedulerSettings(true),
+            Candidate(),
+            executor,
+            new FixedReplayStore(new HostUpdateReplayDecision(HostUpdateReplayDisposition.Accepted, "decision-reused", true)));
+
+        HostUpdateSchedulerStatus status = await scheduler.TickAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.ReplayRejected, status.Reason);
+        Assert.Empty(executor.Requests);
+    }
+
+    [Fact]
     public async Task TickAsync_ConcurrentCalls_DoNotOverlap()
     {
         BlockingExecutor executor = new();
@@ -174,6 +190,23 @@ public sealed class HostUpdateSchedulerTests
 
         Assert.Equal(HostUpdateSchedulerReason.UpdateAlreadyRunning, second.Reason);
         Assert.Single(executor.Requests);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_WaitsForActiveTick()
+    {
+        BlockingExecutor executor = new();
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor);
+        Task<HostUpdateSchedulerStatus> tick = scheduler.TickAsync();
+        await executor.Started.Task;
+
+        Task disposal = scheduler.DisposeAsync().AsTask();
+
+        Assert.False(disposal.IsCompleted);
+        executor.Release.TrySetResult();
+        await tick;
+        await disposal;
+        Assert.Equal(HostUpdateSchedulerReason.HostShutdown, (await scheduler.TickAsync()).Reason);
     }
 
     [Fact]
@@ -815,6 +848,12 @@ public sealed class HostUpdateSchedulerTests
     private sealed class MissingReplayStore : IHostUpdateReplayStore
     {
         public Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct) => throw new InvalidDataException("missing");
+    }
+
+    private sealed class FixedReplayStore(HostUpdateReplayDecision decision) : IHostUpdateReplayStore
+    {
+        public Task<HostUpdateReplayDecision> DecideAsync(VerifiedHostUpdateCandidate candidate, HostUpdateReplayIntent intent, CancellationToken ct) =>
+            Task.FromResult(decision);
     }
 
     private sealed class ThrowingReplayStore : IHostUpdateReplayStore

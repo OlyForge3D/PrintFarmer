@@ -165,8 +165,7 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             "host_update_policy_repository_not_available",
             "host_update_replay_anchor_not_available",
             "host_update_replay_store_not_available",
-            HostUpdateSchedulingAvailability.AdmissionFenceReason,
-            HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason);
+            HostUpdateSchedulingAvailability.AdmissionFenceReason);
         dto.UpdateScheduling.KillSwitch.Enabled.Should().BeFalse();
     }
 

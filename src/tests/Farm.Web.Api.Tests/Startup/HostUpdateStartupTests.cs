@@ -13,7 +13,8 @@ public sealed class HostUpdateStartupTests
     {
         await using CustomWebApplicationFactory factory = new(new Dictionary<string, string?>
         {
-            ["Slicer:Enabled"] = "false"
+            ["Slicer:Enabled"] = "false",
+            ["HostUpdateExecution:RootDirectory"] = string.Empty,
         });
         using HttpClient client = await factory.CreateAdminClientAsync();
 

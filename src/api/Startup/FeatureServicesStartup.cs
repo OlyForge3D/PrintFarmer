@@ -368,14 +368,6 @@ public static class FeatureServicesStartup
             services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateAutomationPolicyRepository>());
             services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyProvisioner>(sp => sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.FileHostUpdateAutomationPolicyRepository>());
             services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerSettings, Farm.Infrastructure.Services.HostUpdates.HostStateHostUpdateSchedulerSettings>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionJournal>(sp =>
-                new Farm.Infrastructure.Services.HostUpdates.FileHostUpdateExecutionJournal(
-                    sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Resolve("host-update-execution.journal")));
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionLock>(sp =>
-                new Farm.Infrastructure.Services.HostUpdates.FileHostUpdateExecutionLock(
-                    sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>().Resolve("host-update-execution.lock")));
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateRecoveryCoordinator,
-                Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateRecoveryCoordinator>();
         }
         else
         {
@@ -384,9 +376,6 @@ public static class FeatureServicesStartup
             services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdatePolicyFence, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdatePolicyFence>();
             services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateAutomationPolicyRepository>();
             services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerSettings>(_ => new Farm.Infrastructure.Services.HostUpdates.StaticHostUpdateSchedulerSettings(new Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerSettings()));
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionJournal, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateExecutionJournal>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionLock, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateExecutionLock>();
-            services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateRecoveryCoordinator, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateRecoveryCoordinator>();
         }
 
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionFence,
@@ -397,8 +386,6 @@ public static class FeatureServicesStartup
             hostStateEnabled
                 ? ActivatorUtilities.CreateInstance<Farm.Infrastructure.Services.HostUpdates.HostUpdateExecutionRequestResolver>(sp)
                 : new Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateExecutionRequestResolver());
-        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutor,
-            Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateExecutor>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness, Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateCandidateReadiness>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCandidateCache>(sp =>
             new Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCandidateCache(
