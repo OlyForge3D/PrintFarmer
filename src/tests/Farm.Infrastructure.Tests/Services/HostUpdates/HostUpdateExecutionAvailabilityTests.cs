@@ -186,11 +186,11 @@ public class HostUpdateExecutionAvailabilityTests
         }
     }
     [Fact]
-    public async Task CheckAsync_RootDirectoryNotConfigured_ReportsUnavailableWithReason()
+    public async Task CheckAsync_RootDirectoryNotConfiguredAndJournalUnavailable_ReportsUnavailableWithReasons()
     {
         var provider = new HostUpdateExecutionAvailabilityProvider(
             new HostUpdateExecutionOptions { RootDirectory = string.Empty, ComposeFiles = ["missing.yml"], RequiredFencedWriterNames = [] },
-            new FakeJournal(),
+            new UnavailableHostUpdateExecutionJournal(),
             [new FakeMigrationTarget()],
             [new FakeBackupTarget()],
             [],
@@ -201,6 +201,7 @@ public class HostUpdateExecutionAvailabilityTests
 
         result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
         result.Reasons.Should().Contain("root_directory_not_configured");
+        result.Reasons.Should().Contain("host_update_execution_journal_not_available");
     }
 
     [Fact]
