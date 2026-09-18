@@ -24,7 +24,7 @@ x-frontend-healthcheck: &frontend-healthcheck
   retries: 3
 
 x-nginx-healthcheck: &nginx-healthcheck
-  test: ["CMD", "nginx", "-t"]
+  test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/health"]
   interval: 30s
   timeout: 10s
   retries: 3

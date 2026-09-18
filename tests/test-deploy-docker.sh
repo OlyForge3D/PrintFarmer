@@ -1760,6 +1760,44 @@ EOF
     output=$(get_output)
     assert_contains "$output" "requires --profile full" "Worker topology should reject incomplete profile configuration"
 
+    local relative_install_dir="$TEST_TEMP_DIR/installer-full-worker-relative"
+    local mock_bin="$TEST_TEMP_DIR/installer-full-worker-bin"
+    create_installer_docker_stub "$mock_bin"
+    local previous_pwd="$PWD"
+    cd "$TEST_TEMP_DIR"
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --non-interactive --profile full --db postgres --with-orca-worker --image-set '$(basename "$image_set")' --dir '$relative_install_dir' --name isolated-lab --bind-address 127.0.0.1 --port 18080 --api-port 15245 --slicer-host-port 15246 --postgres-port 15432 --dry-run"
+    cd "$previous_pwd"
+    output=$(get_output)
+    assert_file_exists "$relative_install_dir/.env" "Full worker install should resolve a relative image-set before changing directory"
+    local generated_env
+    generated_env=$(cat "$relative_install_dir/.env")
+    assert_contains "$generated_env" "API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:" "Generated env should persist API digest"
+    assert_contains "$generated_env" "FRONTEND_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:" "Generated env should persist frontend digest"
+    assert_contains "$generated_env" "SLICER_HOST_IMAGE=ghcr.io/olyforge3d/printfarmer-slicer-host@sha256:" "Generated env should persist slicer-host digest"
+    assert_contains "$generated_env" "ORCASLICER_WORKER_IMAGE=ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:" "Generated env should persist Orca worker digest"
+    assert_contains "$generated_env" "PRINTER_DISCOVERY_IMAGE=ghcr.io/olyforge3d/printfarmer-printer-discovery@sha256:" "Generated env should persist discovery digest"
+    assert_contains "$(cat "$relative_install_dir/docker-compose.yml")" "name: isolated-lab" "Generated compose should isolate the project name"
+    assert_contains "$(cat "$relative_install_dir/docker-compose.yml")" "127.0.0.1:18080:80" "Generated compose should bind the requested loopback HTTP port"
+    assert_not_contains "$(cat "$relative_install_dir/docker-compose.yml")" ":443" "HTTP-only worker compose should not publish HTTPS"
+
+    pass_test
+}
+
+test_installer_rejects_invalid_image_sets() {
+    start_test "installer rejects wrong-repository and duplicate image-set entries"
+
+    local image_set="$TEST_TEMP_DIR/invalid-image-set.env"
+    cat > "$image_set" <<'EOF'
+API_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+FRONTEND_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+PRINTER_DISCOVERY_IMAGE=ghcr.io/olyforge3d/printfarmer-printer-discovery@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+EOF
+
+    capture_output "'$INSTALL_SCRIPT' --non-interactive --profile standard --db postgres --image-set '$image_set' --dir '$TEST_TEMP_DIR/invalid-image-install' --dry-run"
+    assert_not_equals "0" "$(get_exit_code)" "Installer should reject duplicate image-set variables"
+    assert_contains "$(get_output)" "must use ghcr.io/olyforge3d/printfarmer-api" "Installer should reject an image mapped to the wrong repository"
+
     pass_test
 }
 
@@ -2238,6 +2276,7 @@ run_all_tests() {
     test_pfarm_variables_sourcing
     test_installer_lite_slicer_worker_key
     test_installer_full_worker_inputs
+    test_installer_rejects_invalid_image_sets
     test_installer_standard_webauthn_configuration
     test_installer_upgrade_preserves_webauthn_configuration
     test_installer_rejects_invalid_webauthn_host
