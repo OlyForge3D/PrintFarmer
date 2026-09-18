@@ -1,8 +1,11 @@
+﻿using System.Data.Common;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -43,7 +46,7 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
         string releaseKey = Convert.ToHexString(
             SHA256.HashData(Encoding.UTF8.GetBytes(releaseId))).ToLowerInvariant();
         string key = KeyPrefix + releaseKey;
-        AppSettingsEntity? existing = await _repository.GetReadOnlyAsync(key, cancellationToken);
+        AppSettingsEntity? existing = await ReadAsync(key, cancellationToken);
         if (existing is not null)
         {
             ManifestBinding? binding;
@@ -76,8 +79,60 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
         }
 
         string json = JsonSerializer.Serialize(new ManifestBinding(releaseId, manifestDigest));
-        await _repository.SetAsync(key, json, cancellationToken);
-        await _repository.SaveChangesAsync(cancellationToken);
+        if (await CreateAsync(key, json, cancellationToken).ConfigureAwait(false) == AppSettingsCreateResult.Created)
+        {
+            return;
+        }
+
+        AppSettingsEntity? raced = await ReadAsync(key, cancellationToken).ConfigureAwait(false) ?? throw new InvalidDataException($"Manifest binding race for release '{releaseId}' could not be resolved.");
+
+        ManifestBinding? racedBinding;
+        try
+        {
+            racedBinding = JsonSerializer.Deserialize<ManifestBinding>(raced.SettingsJson);
+        }
+        catch (JsonException ex)
+        {
+            throw new InvalidDataException(
+                $"Persisted manifest binding for release '{releaseId}' is invalid.",
+                ex);
+        }
+
+        if (racedBinding is null || racedBinding.ReleaseId != releaseId || string.IsNullOrWhiteSpace(racedBinding.ManifestDigest))
+        {
+            throw new InvalidDataException($"Persisted manifest binding for release '{releaseId}' is invalid.");
+        }
+
+        if (racedBinding.ManifestDigest != manifestDigest)
+        {
+            throw new InvalidDataException($"Manifest digest conflict for immutable release '{releaseId}'.");
+        }
+    }
+
+    private async Task<AppSettingsEntity?> ReadAsync(string key, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _repository.GetReadOnlyAsync(key, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is DbUpdateException or DbException or IOException or UnauthorizedAccessException or SecurityException)
+        {
+            throw new HostUpdateSubsystemUnavailableException(
+                "host_update_manifest_binding_database_unavailable", exception);
+        }
+    }
+
+    private async Task<AppSettingsCreateResult> CreateAsync(string key, string json, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await _repository.TryCreateDetailedAsync(key, json, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is DbUpdateException or DbException or IOException or UnauthorizedAccessException or SecurityException)
+        {
+            throw new HostUpdateSubsystemUnavailableException(
+                "host_update_manifest_binding_database_unavailable", exception);
+        }
     }
 
     private sealed record ManifestBinding(string ReleaseId, string ManifestDigest);

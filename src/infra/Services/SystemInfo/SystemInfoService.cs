@@ -1,4 +1,4 @@
-using System.Data;
+﻿using System.Data;
 using System.Data.Common;
 using System.Diagnostics;
 using System.Globalization;
@@ -30,7 +30,8 @@ public class SystemInfoService(
     IEnumerable<IServiceInventorySource> inventorySources,
     Farm.Infrastructure.Settings.ISettingsService settingsService,
     Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache verifiedReleaseEvidenceCache,
-    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions) : ISystemInfoService
+    IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> verifiedReleaseDiscoveryOptions,
+    IHostUpdateSchedulingStatusProvider? updateSchedulingStatusProvider = null) : ISystemInfoService
 {
     private static readonly TimeSpan CpuSampleDuration = TimeSpan.FromMilliseconds(150);
     private const string CacheKey = "SystemInfo:Snapshot";
@@ -44,6 +45,8 @@ public class SystemInfoService(
     private readonly Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache _verifiedReleaseEvidenceCache = verifiedReleaseEvidenceCache;
     private readonly IOptionsMonitor<Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseDiscoveryOptions> _verifiedReleaseDiscoveryOptions =
         verifiedReleaseDiscoveryOptions;
+
+    private readonly IHostUpdateSchedulingStatusProvider? _updateSchedulingStatusProvider = updateSchedulingStatusProvider;
 
     /// <summary>
     /// Returns the current system information snapshot, served from a 10-second cache to avoid
@@ -198,6 +201,7 @@ public class SystemInfoService(
                 ArchiveBytes = archiveBytes,
                 DatabaseBytes = databaseBytes,
             },
+            UpdateScheduling = GetUpdateSchedulingStatus(),
             Services = GetServices(appVersion),
             Database = new SystemDatabaseInfoDto
             {
@@ -208,6 +212,31 @@ public class SystemInfoService(
                 ArchiveCount = archiveCount,
             },
         };
+    }
+
+    /// <summary>
+    /// Reports automatic host-update scheduling state. The provider is a read-only status source
+    /// and must never be able to fail the whole system-status endpoint: an unexpected provider
+    /// failure is logged and reported as "not wired" (null) rather than propagated.
+    /// </summary>
+    private HostUpdateSchedulingStatusDto? GetUpdateSchedulingStatus()
+    {
+        if (_updateSchedulingStatusProvider is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return _updateSchedulingStatusProvider.GetStatus();
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            _logger.LogWarning(
+                exception,
+                "Host update scheduling status provider failed; reporting automatic updates as not wired.");
+            return null;
+        }
     }
 
     private async Task<IReadOnlyList<string>> GetMigrationHeadsAsync(CancellationToken cancellationToken)

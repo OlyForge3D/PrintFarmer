@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -32,13 +32,14 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     public class Factory : CustomWebApplicationFactory
     {
         private readonly bool _throwDiscoveryOptions;
+        private readonly bool _throwSchedulingStatus;
 
         public Factory()
-            : this(discoveryEnabled: true, throwDiscoveryOptions: false)
+            : this(discoveryEnabled: true, throwDiscoveryOptions: false, throwSchedulingStatus: false)
         {
         }
 
-        private Factory(bool discoveryEnabled, bool throwDiscoveryOptions)
+        private Factory(bool discoveryEnabled, bool throwDiscoveryOptions, bool throwSchedulingStatus)
             : base(new Dictionary<string, string?>
             {
                 ["Security:DevModeBypassAuth"] = "false",
@@ -46,15 +47,30 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
             })
         {
             _throwDiscoveryOptions = throwDiscoveryOptions;
+            _throwSchedulingStatus = throwSchedulingStatus;
         }
 
-        public static Factory WithDiscoveryDisabled() => new(discoveryEnabled: false, throwDiscoveryOptions: false);
+        public static Factory WithDiscoveryDisabled() =>
+            new(discoveryEnabled: false, throwDiscoveryOptions: false, throwSchedulingStatus: false);
 
-        public static Factory WithInvalidDiscoveryOptions() => new(discoveryEnabled: true, throwDiscoveryOptions: true);
+        public static Factory WithInvalidDiscoveryOptions() =>
+            new(discoveryEnabled: true, throwDiscoveryOptions: true, throwSchedulingStatus: false);
+
+        public static Factory WithThrowingSchedulingStatusProvider() =>
+            new(discoveryEnabled: true, throwDiscoveryOptions: false, throwSchedulingStatus: true);
 
         protected override void ConfigureWebHost(IWebHostBuilder builder)
         {
             base.ConfigureWebHost(builder);
+            if (_throwSchedulingStatus)
+            {
+                builder.ConfigureTestServices(services =>
+                {
+                    services.RemoveAll<IHostUpdateSchedulingStatusProvider>();
+                    services.AddScoped<IHostUpdateSchedulingStatusProvider, ThrowingHostUpdateSchedulingStatusProvider>();
+                });
+            }
+
             if (!_throwDiscoveryOptions)
             {
                 return;
@@ -66,6 +82,12 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
                 services.AddSingleton<IOptionsMonitor<VerifiedReleaseDiscoveryOptions>>(
                     new ThrowingVerifiedReleaseDiscoveryOptionsMonitor());
             });
+        }
+
+        private sealed class ThrowingHostUpdateSchedulingStatusProvider : IHostUpdateSchedulingStatusProvider
+        {
+            public HostUpdateSchedulingStatusDto? GetStatus() =>
+                throw new InvalidOperationException("scheduling_status_provider_failed");
         }
     }
 
@@ -120,6 +142,46 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         (string? version, string? commit) = ApplicationBuildObservation.FromAssembly(typeof(Program).Assembly);
         api.ApplicationVersion.Should().Be(version);
         api.SourceCommit.Should().Be(commit);
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_ReportsAutomaticUpdateSchedulingFromTheRegisteredProvider()
+    {
+        HttpResponseMessage response = await _adminClient!.GetAsync("/api/system/info");
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
+
+        // The scheduling status provider is registered in production DI, so an unprovisioned
+        // host reports an explicit "registered but not running" status rather than null.
+        dto!.UpdateScheduling.Should().NotBeNull();
+        dto.UpdateScheduling!.ConfiguredEnabled.Should().BeFalse();
+        dto.UpdateScheduling.EffectiveEnabled.Should().BeFalse();
+        dto.UpdateScheduling.EffectiveChannel.Should().BeNull();
+        dto.UpdateScheduling.Executor.State.Should().Be(HostUpdateExecutorState.Unavailable);
+        dto.UpdateScheduling.Executor.Reason.Should().Be(HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason);
+        dto.UpdateScheduling.Backoff.State.Should().Be(HostUpdateBackoffState.Unknown);
+        dto.UpdateScheduling.Reasons.Should().Equal(
+            "host_update_policy_repository_not_available",
+            "host_update_replay_anchor_not_available",
+            "host_update_replay_store_not_available",
+            HostUpdateSchedulingAvailability.AdmissionFenceReason);
+        dto.UpdateScheduling.KillSwitch.Enabled.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task GetInfo_Admin_SurvivesAFailingSchedulingStatusProvider()
+    {
+        using Factory factory = Factory.WithThrowingSchedulingStatusProvider();
+        using HttpClient adminClient = await factory.CreateAdminClientAsync();
+        factory.Services.GetRequiredService<IMemoryCache>().Remove("SystemInfo:Snapshot");
+
+        HttpResponseMessage response = await adminClient.GetAsync("/api/system/info");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        SystemInfoDto? dto = await response.Content.ReadFromJsonAsync<SystemInfoDto>(JsonOptions);
+        dto!.UpdateScheduling.Should().BeNull();
+        dto.App.Version.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]

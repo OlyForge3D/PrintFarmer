@@ -98,7 +98,8 @@ GET /api/admin/catalog/version -> Farm.Modules.Printers::Farm.Modules.Printers.C
 GET /api/admin/data/export/catalog -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ExportCatalogAsync
 GET /api/admin/data/export/full -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ExportFullBackupAsync
 GET /api/admin/data/export/printers -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ExportPrintersAsync
-GET /api/admin/host-updates/{releaseId}/status -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.GetStatusAsync
+GET /api/admin/host-updates/automation-policy -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateAutomationPolicyController.Get
+GET /api/admin/host-updates/{releaseId}/status -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.GetStatus
 GET /api/admin/integrations/home-assistant/entities -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController.DiscoverEntitiesAsync
 GET /api/admin/integrations/home-assistant/settings -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController.GetSettings
 GET /api/admin/integrations/telegram/settings -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminTelegramController.GetSettings
@@ -517,6 +518,7 @@ POST /api/admin/catalog/updates/apply -> Farm.Modules.Printers::Farm.Modules.Pri
 POST /api/admin/data/import/catalog -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ImportCatalogAsync
 POST /api/admin/data/import/full -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ImportFullBackupAsync
 POST /api/admin/data/seed/reload -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ReloadSeedDataAsync
+POST /api/admin/host-updates/authorizations -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.AuthorizeAsync
 POST /api/admin/host-updates/execute -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.ExecuteAsync
 POST /api/admin/host-updates/{releaseId}/recover -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.RecoverAsync
 POST /api/admin/integrations/home-assistant/test -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController.TestConnectionAsync
@@ -803,6 +805,7 @@ POST /api/workers/{id}/disable -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api
 POST /api/workers/{id}/enable -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.WorkersController.EnableAsync
 POST /api/workers/{id}/reset -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.WorkersController.ResetAsync
 PUT /api/3d-models/{id:guid}/thumbnail -> Farm.Slicer.Module.Api::Farm.Slicer.Module.Api.Controllers.Model3DFilesController.ReplaceThumbnailAsync
+PUT /api/admin/host-updates/automation-policy -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateAutomationPolicyController.ReplaceAsync
 PUT /api/admin/integrations/home-assistant/settings -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController.UpdateSettings
 PUT /api/admin/integrations/telegram/settings -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminTelegramController.UpdateSettings
 PUT /api/admin/power-monitors/{id:int} -> Farm.Modules.SmartPlug::Farm.Modules.SmartPlug.Controllers.Admin.AdminPowerMonitorsController.UpdateAsync

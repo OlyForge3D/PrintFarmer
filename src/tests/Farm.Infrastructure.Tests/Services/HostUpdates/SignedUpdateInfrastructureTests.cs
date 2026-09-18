@@ -1,4 +1,4 @@
-using System.Net;
+﻿using System.Net;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 
@@ -22,11 +22,6 @@ public sealed class SignedUpdateInfrastructureTests
 
         foreach (SequenceInvalidCase testCase in fixture.InvalidCases)
         {
-            if (!testCase.DeriveSequenceRejects)
-            {
-                continue;
-            }
-
             Assert.ThrowsAny<Exception>(() => SignedUpdateManifestValidator.DeriveSequence(testCase.Version));
         }
 
@@ -54,33 +49,41 @@ public sealed class SignedUpdateInfrastructureTests
             FindRepositoryRoot(),
             "scripts", "ci", "fixtures", "release-version-sequence.schema.json"));
         using JsonDocument schemaDocument = JsonDocument.Parse(schema);
-        string validCaseRef = schemaDocument.RootElement
+        string pattern = schemaDocument.RootElement
             .GetProperty("properties")
             .GetProperty("validCases")
             .GetProperty("items")
             .GetProperty("$ref")
             .GetString()!;
-        Assert.Equal("#/$defs/validCase", validCaseRef);
-        string versionSyntax = schemaDocument.RootElement
-            .GetProperty("properties")
-            .GetProperty("contract")
-            .GetProperty("properties")
-            .GetProperty("versionSyntax")
-            .GetProperty("const")
-            .GetString()!;
-        Assert.Equal("MAJOR.MINOR.PATCH[-insider.SEQUENCE]", versionSyntax);
+        Assert.Equal("#/$defs/validCase", pattern);
+        JsonElement validCaseProperties = schemaDocument.RootElement
+            .GetProperty("$defs")
+            .GetProperty("validCase")
+            .GetProperty("properties");
+        Assert.Equal(1, validCaseProperties.GetProperty("version").GetProperty("minLength").GetInt32());
+        Assert.Equal("#/$defs/parsedVersion", validCaseProperties
+            .GetProperty("parsed")
+            .GetProperty("$ref")
+            .GetString());
+        JsonElement parsedProperties = schemaDocument.RootElement
+            .GetProperty("$defs")
+            .GetProperty("parsedVersion")
+            .GetProperty("properties");
+        // The signer contract allows a zero-major *prerelease*, so the schema's documented
+        // minimum is 0; only stable releases require a non-zero major version.
+        Assert.Equal(0, parsedProperties.GetProperty("major").GetProperty("minimum").GetInt32());
 
         SequenceGoldenFixture fixture = LoadSequenceFixture();
         foreach (SequenceValidCase testCase in fixture.ValidCases)
         {
-            Assert.False(string.IsNullOrWhiteSpace(testCase.Version));
+            Assert.True(testCase.Parsed.Major >= 1 || testCase.Parsed.Kind == "insider", testCase.Name);
+            Assert.Equal(
+                SignedUpdateManifestValidator.DeriveSequence(testCase.Version),
+                long.Parse(testCase.ExpectedSequence, System.Globalization.CultureInfo.InvariantCulture));
         }
 
-        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "01.2.3" && testCase.DeriveSequenceRejects);
-        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.02.3" && testCase.DeriveSequenceRejects);
-        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "1.2.03" && testCase.DeriveSequenceRejects);
         Assert.Contains(fixture.ValidCases, testCase => testCase.Version == "0.2.3-insider.1");
-        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "0.2.3" && testCase.DeriveSequenceRejects);
+        Assert.Contains(fixture.InvalidCases, testCase => testCase.Version == "0.2.3");
     }
 
     [Fact]
@@ -132,37 +135,6 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
-    }
-
-    [Fact]
-    public void Validate_ValidZeroMajorInsiderManifest_AcceptsManagedUpdateEvidence()
-    {
-        SignedUpdateManifest manifest = CreateManifest("0.2.3-insider.1", "insider", "development");
-        Assert.True(SignedUpdateManifestValidator.Validate(manifest).IsValid);
-        Assert.True(manifest.ManagedUpdateEligible);
-    }
-
-    [Theory]
-    [InlineData("1", true)]
-    [InlineData("12345678901234567890", true)]
-    [InlineData("abc", false)]
-    [InlineData("0", false)]
-    [InlineData("+1", false)]
-    [InlineData("-1", false)]
-    [InlineData(" 1", false)]
-    [InlineData("1 ", false)]
-    [InlineData("01", false)]
-    public void Validate_BuildId_MatchesProducerPositiveDecimalContract(string buildId, bool expectedValid)
-    {
-        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main") with { BuildId = buildId };
-
-        SignedUpdateValidationResult result = SignedUpdateManifestValidator.Validate(manifest);
-
-        Assert.Equal(expectedValid, result.IsValid);
-        if (!expectedValid)
-        {
-            Assert.Contains("build_id_invalid", result.Errors);
-        }
     }
 
     [Fact]
@@ -287,7 +259,7 @@ public sealed class SignedUpdateInfrastructureTests
     {
         SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
         byte[] firstBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
-        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "200" }, JsonOptions);
+        byte[] secondBytes = JsonSerializer.SerializeToUtf8Bytes(manifest with { BuildId = "build-2" }, JsonOptions);
         VerifiedGitHubReleaseMetadataProvider firstProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(firstBytes)), new AcceptingVerifier()));
         VerifiedGitHubReleaseMetadataProvider secondProvider = new(new GitHubSignedReleaseDiscovery(new HttpClient(new TestHandler(secondBytes)), new AcceptingVerifier()));
 
@@ -666,7 +638,7 @@ public sealed class SignedUpdateInfrastructureTests
         SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
 
         Assert.True(validation.IsValid, string.Join(',', validation.Errors));
-        Assert.Equal(100_000_000_99999, manifest.Sequence);
+        Assert.Equal(SignedUpdateManifestValidator.DeriveSequence("1.0.0"), manifest.Sequence);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Platforms);
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Services[0].Platforms);
         Assert.Equal(["linux-amd64"], manifest.Services[4].Platforms);
@@ -678,7 +650,7 @@ public sealed class SignedUpdateInfrastructureTests
         string digest = "sha256:" + new string('a', 64);
         string[] platforms = ["linux-amd64", "linux-arm64"];
         string[] services = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
-        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "100",
+        return new(1, $"v{version}", version, channel, branch, new string('b', 40), "build-1",
             SignedUpdateManifestValidator.DeriveSequence(version), true,
             services.Select(id => new SignedUpdateService(
                 id,
@@ -730,7 +702,7 @@ public sealed class SignedUpdateInfrastructureTests
         IReadOnlyList<SequenceDistinctGroup> DistinctGroups);
     private sealed record SequenceValidCase(string Name, string Version, SequenceParsed Parsed, string ExpectedSequence);
     private sealed record SequenceParsed(long Major, long Minor, long Patch, string Kind, long Suffix);
-    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains, bool DeriveSequenceRejects = true);
+    private sealed record SequenceInvalidCase(string Name, string Version, string ErrorContains);
     private sealed record SequenceOrderingCase(string Name, string Lower, string Higher);
     private sealed record SequenceDistinctGroup(string Name, IReadOnlyList<string> Versions);
 

@@ -50,14 +50,14 @@ public static class HostUpdateExecutionStartup
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return string.IsNullOrWhiteSpace(options.RootDirectory)
-                ? new UnconfiguredHostUpdateExecutionJournal()
+                ? new UnavailableHostUpdateExecutionJournal()
                 : new FileHostUpdateExecutionJournal(Path.Combine(options.StateDirectory, "journal.ndjson"));
         });
         services.AddSingleton<IHostUpdateExecutionLock>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return string.IsNullOrWhiteSpace(options.RootDirectory)
-                ? new UnconfiguredHostUpdateExecutionLock()
+                ? new UnavailableHostUpdateExecutionLock()
                 : new FileHostUpdateExecutionLock(Path.Combine(options.StateDirectory, "execution.lock"));
         });
         services.AddSingleton<IHostUpdateJournal>(sp =>
@@ -133,8 +133,13 @@ public static class HostUpdateExecutionStartup
                 options.ActiveServiceIds.ToHashSet(StringComparer.Ordinal));
         });
         services.AddScoped<IHostUpdateExecutionSteps, HostUpdateExecutionStepsAdapter>();
-        services.AddScoped<IHostUpdateExecutor, HostUpdateExecutor>();
-        services.AddScoped<IHostUpdateExecutionRequestResolver, HostUpdateExecutionRequestResolver>();
+        services.AddScoped<IHostUpdateExecutor>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnavailableHostUpdateExecutor()
+                : ActivatorUtilities.CreateInstance<HostUpdateExecutor>(sp);
+        });
 
         // Availability: proves (not assumes) the executor is actually usable -- root writable,
         // journal intact, adapters configured, compose files present, docker runtime reachable --
@@ -324,7 +329,13 @@ public static class HostUpdateExecutionStartup
                 ? new UnconfiguredHostUpdateRecoveryOutcomeStore()
                 : new FileHostUpdateRecoveryOutcomeStore(Path.Combine(options.StateDirectory, "recovery-outcomes"));
         });
-        services.AddScoped<IHostUpdateRecoveryCoordinator, HostUpdateRecoveryCoordinator>();
+        services.AddScoped<IHostUpdateRecoveryCoordinator>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnavailableHostUpdateRecoveryCoordinator()
+                : ActivatorUtilities.CreateInstance<HostUpdateRecoveryCoordinator>(sp);
+        });
     }
 }
 

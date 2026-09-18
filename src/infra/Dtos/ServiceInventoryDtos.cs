@@ -1,5 +1,7 @@
 ﻿using System.Text.Json.Serialization;
 
+#pragma warning disable SA1507, SA1516, SA1137
+
 namespace Farm.Infrastructure.Dtos;
 
 /// <summary>Read-only inventory ObservationState values.</summary>
@@ -372,7 +374,19 @@ public sealed record VerifiedReleaseEvidenceDto
 
     /// <summary>Per-service target requirements from the signed release manifest.</summary>
     public IReadOnlyList<ReleaseServiceRequirementDto> Services { get; init; } = [];
+
+    /// <summary>Canonical execution targets retained separately from inventory-facing service identifiers.</summary>
+    public IReadOnlyList<VerifiedReleaseExecutionTargetDto> ExecutionTargets { get; init; } = [];
 }
+
+/// <summary>Authenticated canonical target handed to the host executor.</summary>
+public sealed record VerifiedReleaseExecutionTargetDto
+{
+    public string ServiceId { get; init; } = string.Empty;
+    public string Platform { get; init; } = string.Empty;
+    public string PlatformDigest { get; init; } = string.Empty;
+}
+
 
 /// <summary>One immutable target requirement from a signed coordinated release.</summary>
 public sealed record ReleaseServiceRequirementDto

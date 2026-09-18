@@ -116,6 +116,7 @@ export function InstallerUpdatesPage() {
   return (
     <InstallerUpdatesExperience
       inventory={data?.inventory}
+      updateScheduling={data?.updateScheduling}
       observation={effectiveObservation}
       updateChannelSettings={updateChannelSettings}
       updateChannelIsLoading={updateChannelIsLoading}

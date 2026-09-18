@@ -75,22 +75,29 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             reasons.Add($"root_directory_unwritable:{writeError}");
         }
 
-        try
+        if (journal is IHostUpdateAvailability { IsAvailable: false } journalAvailability)
         {
-            // Harmless probe read: no release will ever legitimately use this id. A successful
-            // (possibly empty) read proves the journal file, if any, is not corrupt.
-            _ = journal.Read(ProbeReleaseId);
+            reasons.Add(journalAvailability.UnavailableReason);
         }
-        catch (InvalidDataException exception)
+        else
         {
-            reasons.Add($"journal_corrupt:{exception.Message}");
-        }
-        catch (IOException exception)
-        {
-            reasons.Add($"journal_unreadable:{exception.Message}");
-        }
+            try
+            {
+                // Harmless probe read: no release will ever legitimately use this id. A successful
+                // (possibly empty) read proves the journal file, if any, is not corrupt.
+                _ = journal.Read(ProbeReleaseId);
+            }
+            catch (InvalidDataException exception)
+            {
+                reasons.Add($"journal_corrupt:{exception.Message}");
+            }
+            catch (IOException exception)
+            {
+                reasons.Add($"journal_unreadable:{exception.Message}");
+            }
 
-        await ReconcileNonterminalReleasesAsync(reasons, cancellationToken).ConfigureAwait(false);
+            await ReconcileNonterminalReleasesAsync(reasons, cancellationToken).ConfigureAwait(false);
+        }
 
         if (migrationTargets.Count == 0)
         {

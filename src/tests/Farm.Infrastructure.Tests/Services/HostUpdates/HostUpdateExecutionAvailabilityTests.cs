@@ -186,11 +186,11 @@ public class HostUpdateExecutionAvailabilityTests
         }
     }
     [Fact]
-    public async Task CheckAsync_RootDirectoryNotConfigured_ReportsUnavailableWithReason()
+    public async Task CheckAsync_RootDirectoryNotConfiguredAndJournalUnavailable_ReportsUnavailableWithReasons()
     {
         var provider = new HostUpdateExecutionAvailabilityProvider(
             new HostUpdateExecutionOptions { RootDirectory = string.Empty, ComposeFiles = ["missing.yml"], RequiredFencedWriterNames = [] },
-            new FakeJournal(),
+            new UnavailableHostUpdateExecutionJournal(),
             [new FakeMigrationTarget()],
             [new FakeBackupTarget()],
             [],
@@ -201,6 +201,7 @@ public class HostUpdateExecutionAvailabilityTests
 
         result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
         result.Reasons.Should().Contain("root_directory_not_configured");
+        result.Reasons.Should().Contain("host_update_execution_journal_not_available");
     }
 
     [Fact]
@@ -559,16 +560,21 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
-    public async Task CheckAsync_ReleaseAlreadyCompleted_DoesNotReFenceOrReportPending()
+    public async Task CheckAsync_ReleaseCompletedByRealExecutor_DoesNotReFenceOrReportPending()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
+        string journalPath = Path.Combine(root, "state", "journal.ndjson");
         await File.WriteAllTextAsync(composeFile, "services: {}");
         try
         {
-            var journal = new FakeJournal();
-            journal.Append(new HostUpdateExecutionActivity("a1", "release-5", HostUpdateExecutionState.Completed, "completed", DateTimeOffset.UtcNow));
-            journal.Append(new HostUpdateExecutionActivity("a2", "release-5", HostUpdateExecutionState.Completed, "fence-release:after", DateTimeOffset.UtcNow));
+            var journal = new FileHostUpdateExecutionJournal(journalPath);
+            HostUpdateExecutionRequest request = ExecutionRequest();
+            HostUpdateExecutionResult execution = await new HostUpdateExecutor(
+                new NoopExecutionSteps(),
+                journal,
+                NoopHostUpdateExecutionLock.Instance).ExecuteAsync(request);
+            execution.State.Should().Be(HostUpdateExecutionState.Completed);
             var admission = new FakeFenceableWriter("api-admission");
 
             var provider = new HostUpdateExecutionAvailabilityProvider(
@@ -590,6 +596,39 @@ public class HostUpdateExecutionAvailabilityTests
         {
             Directory.Delete(root, recursive: true);
         }
+    }
+
+    private static HostUpdateExecutionRequest ExecutionRequest() => new(
+        "release-5",
+        1,
+        "sha256:" + new string('a', 64),
+        new string('b', 40),
+        HostUpdateExecutionChannel.Stable,
+        [
+            new("api", "linux-amd64", "sha256:" + new string('a', 64)),
+            new("frontend", "linux-amd64", "sha256:" + new string('b', 64)),
+            new("slicer-host", "linux-amd64", "sha256:" + new string('c', 64)),
+            new("printer-discovery", "linux-amd64", "sha256:" + new string('d', 64)),
+            new("orcaslicer-worker", "linux-amd64", "sha256:" + new string('e', 64)),
+            new("monolith", "linux-amd64", "sha256:" + new string('f', 64)),
+        ])
+    {
+        RequestId = "request-5",
+        TrustRoot = "root-1",
+        PolicyRevision = 1,
+        PolicyFingerprint = "policy-1",
+        HostPlatform = "linux-amd64",
+    };
+
+    private sealed class NoopExecutionSteps : IHostUpdateExecutionSteps
+    {
+        public Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+        public Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+        public Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+        public Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+        public Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+        public Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+        public Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
     }
 
     private sealed class DelegateAvailabilityProvider(Func<HostUpdateExecutionAvailability> compute) : IHostUpdateExecutionAvailabilityProvider

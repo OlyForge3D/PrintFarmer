@@ -1,20 +1,9 @@
-﻿#pragma warning disable SA1502
-#pragma warning disable SA1516
-#pragma warning disable SA1136
-#pragma warning disable SA1408
-#pragma warning disable SA1501
-#pragma warning disable SA1513
-#pragma warning disable SA1514
-#pragma warning disable SA1519
-#pragma warning disable SA1107
-#pragma warning disable SA1503
-#pragma warning disable S2681
+﻿#pragma warning disable S2681
 #pragma warning disable IDISP007
-#pragma warning disable SA1008
-#pragma warning disable SA1009
-#pragma warning disable SA1010
-#pragma warning disable SA1011
+#pragma warning disable SA1516
+#pragma warning disable SA1513
 #pragma warning disable SA1518
+#pragma warning disable SA1507, SA1515
 using System.Diagnostics;
 using System.Security.Cryptography;
 using System.Text;
@@ -22,100 +11,144 @@ using System.Text.Json;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
-public enum HostUpdateExecutionState { Accepted, Preflight, Draining, Fenced, BackedUp, Migrating, Applying, Verifying, Completed, RecoveryRequired }
-public enum HostUpdateExecutionChannel { Stable, Insider }
+public enum HostUpdateExecutionState
+{
+    Accepted,
+    Preflight,
+    Draining,
+    Fenced,
+    BackedUp,
+    Migrating,
+    Applying,
+    Verifying,
+    Completed,
+    RecoveryRequired,
+}
+
+public enum HostUpdateExecutionChannel
+{
+    Stable,
+    Insider,
+}
+
 public sealed record HostUpdateExecutionTarget(string ServiceId, string Platform, string ChildDigest);
+
 public sealed record HostUpdateExecutionRequest(string ReleaseId, long AuthenticatedSequence, string ManifestDigest, string SourceCommit, HostUpdateExecutionChannel Channel, IReadOnlyList<HostUpdateExecutionTarget> Targets)
 {
-    public const int MinimumTargetCount = 1;
+    public const int RequiredTargetCount = 6;
+
+    public static IReadOnlySet<string> RequiredServiceIds { get; } = new HashSet<string>(StringComparer.Ordinal)
+    {
+        "api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"
+    };
+
+    public string RequestId { get; init; } = string.Empty;
+
+    public string TrustRoot { get; init; } = string.Empty;
+
+    public long PolicyRevision { get; init; } = -1;
+
+    public string PolicyFingerprint { get; init; } = string.Empty;
+
+    public string HostPlatform { get; init; } = string.Empty;
+
+    public HostUpdateAuthorizationKind AuthorizationKind { get; init; } = HostUpdateAuthorizationKind.StandingPolicy;
+
     public bool IsValid(out string error)
     {
         error = string.Empty;
-        if (string.IsNullOrWhiteSpace(ReleaseId) || AuthenticatedSequence < 1 || !Digest(ManifestDigest) || !Commit(SourceCommit) || Targets is null || Targets.Count < MinimumTargetCount)
-        { error = "release_identity_invalid"; return false; }
-        if (Targets.Any(t => t is null || string.IsNullOrWhiteSpace(t.ServiceId) || string.IsNullOrWhiteSpace(t.Platform) || !Digest(t.ChildDigest)))
-        { error = "target_invalid"; return false; }
-        if (Targets.Select(t => t.ServiceId).Distinct(StringComparer.Ordinal).Count() != Targets.Count)
-        { error = "target_set_invalid"; return false; }
+        if (string.IsNullOrWhiteSpace(RequestId) || string.IsNullOrWhiteSpace(ReleaseId) || AuthenticatedSequence < 1 || !Digest(ManifestDigest) || !Commit(SourceCommit) ||
+            string.IsNullOrWhiteSpace(TrustRoot) || PolicyRevision < 0 || string.IsNullOrWhiteSpace(PolicyFingerprint) ||
+            !SignedUpdateManifestValidator.IsPlatform(HostPlatform))
+        {
+            error = "release_binding_invalid";
+            return false;
+        }
+
+        if (Targets is null || Targets.Count != RequiredTargetCount)
+        {
+            error = "target_invalid";
+            return false;
+        }
+
+        if (Targets.Any(t => t is null || string.IsNullOrWhiteSpace(t.ServiceId) ||
+            !SignedUpdateManifestValidator.IsPlatform(t.Platform) ||
+            !string.Equals(t.Platform, HostPlatform, StringComparison.Ordinal) || !Digest(t.ChildDigest)))
+        {
+            error = "target_invalid";
+            return false;
+        }
+
+        if (Targets.Select(t => t.ServiceId).ToHashSet(StringComparer.Ordinal).SetEquals(RequiredServiceIds) is false)
+        {
+            error = "target_set_invalid";
+            return false;
+        }
+
         return true;
     }
+
     private static bool Digest(string value) => !string.IsNullOrWhiteSpace(value) && value.StartsWith("sha256:", StringComparison.Ordinal) && value.Length == 71 && value[7..].All(Uri.IsHexDigit);
+
     private static bool Commit(string value) => !string.IsNullOrWhiteSpace(value) && value.Length is >= 40 and <= 64 && value.All(Uri.IsHexDigit);
 }
-public sealed record HostUpdateExecutionActivity(string ActivityId, string ReleaseId, HostUpdateExecutionState State, string Phase, DateTimeOffset RecordedAt, string? RequestFingerprint = null);
-public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecutionState State, string? FailureCode, IReadOnlyList<HostUpdateExecutionActivity> Activities) { public bool Succeeded => State == HostUpdateExecutionState.Completed; }
-public interface IHostUpdateExecutor { Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default); }
+
+public sealed record HostUpdateExecutionActivity(
+    string ActivityId,
+    string ReleaseId,
+    HostUpdateExecutionState State,
+    string Phase,
+    DateTimeOffset RecordedAt,
+    string? RequestFingerprint = null)
+{
+    public string? RequestBindingHash { get; init; }
+
+    public HostUpdateExecutionRequest? RequestBinding { get; init; }
+}
+
+public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecutionState State, string? FailureCode, IReadOnlyList<HostUpdateExecutionActivity> Activities)
+{
+    public bool Succeeded => State == HostUpdateExecutionState.Completed;
+}
+
+public interface IHostUpdateExecutor
+{
+    Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default);
+}
+
 public interface IHostUpdateExecutionSteps
 {
-    Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task PersistInstalledStateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ReleaseFenceAsync(CancellationToken cancellationToken);
+    Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct);
+
+    Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct);
+
+    Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct);
+
+    Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct);
+
+    Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct);
+
+    Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct);
+
+    Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct);
 }
-public interface IHostUpdateExecutionJournal { IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId); void Append(HostUpdateExecutionActivity activity); IReadOnlyList<string> ListReleaseIds(); }
-public interface IHostUpdateExecutionLease : IDisposable { }
-public interface IHostUpdateExecutionLock { IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken); }
 
-/// <summary>
-/// Canonical immutable request binding for one release journal. It covers every field that makes
-/// a host-update request authoritative: release id, authenticated sequence, manifest digest,
-/// source commit, channel, and the exact service/platform child digests. Resuming or recovering a
-/// release with the same <c>ReleaseId</c> but any different identity bit is unsafe and fails closed.
-/// </summary>
-public static class HostUpdateRequestFingerprint
+public interface IHostUpdateExecutionJournal
 {
-    private sealed record CanonicalTarget(string ServiceId, string Platform, string ChildDigest);
-    private sealed record CanonicalRequest(string ReleaseId, long AuthenticatedSequence, string ManifestDigest, string SourceCommit, string Channel, IReadOnlyList<CanonicalTarget> Targets);
+    IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId);
 
-    public static string Compute(HostUpdateExecutionRequest request)
-    {
-        ArgumentNullException.ThrowIfNull(request);
-        var canonical = new CanonicalRequest(
-            request.ReleaseId,
-            request.AuthenticatedSequence,
-            request.ManifestDigest,
-            request.SourceCommit,
-            request.Channel.ToString(),
-            [.. request.Targets
-                .OrderBy(t => t.ServiceId, StringComparer.Ordinal)
-                .ThenBy(t => t.Platform, StringComparer.Ordinal)
-                .Select(t => new CanonicalTarget(t.ServiceId, t.Platform, t.ChildDigest))]);
-        string json = JsonSerializer.Serialize(canonical);
-        return "sha256:" + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json))).ToLowerInvariant();
-    }
+    IReadOnlyList<string> ListReleaseIds();
 
-    public static bool Matches(IReadOnlyList<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, out string error)
-    {
-        ArgumentNullException.ThrowIfNull(activities);
-        ArgumentNullException.ThrowIfNull(request);
-        error = string.Empty;
-        if (activities.Count == 0)
-        {
-            return true;
-        }
+    void Append(HostUpdateExecutionActivity activity);
+}
 
-        string expected = Compute(request);
-        foreach (HostUpdateExecutionActivity activity in activities)
-        {
-            if (string.IsNullOrWhiteSpace(activity.RequestFingerprint))
-            {
-                error = "request_fingerprint_missing";
-                return false;
-            }
+public interface IHostUpdateExecutionLease : IDisposable
+{
+}
 
-            if (!FixedTimeEquals(activity.RequestFingerprint, expected))
-            {
-                error = "request_fingerprint_mismatch";
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private static bool FixedTimeEquals(string left, string right)
-    {
-        byte[] leftBytes = Encoding.UTF8.GetBytes(left);
-        byte[] rightBytes = Encoding.UTF8.GetBytes(right);
-        return leftBytes.Length == rightBytes.Length && CryptographicOperations.FixedTimeEquals(leftBytes, rightBytes);
-    }
+public interface IHostUpdateExecutionLock
+{
+    IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken);
 }
 
 public sealed class HostUpdateExecutor(
@@ -124,8 +157,17 @@ public sealed class HostUpdateExecutor(
     IHostUpdateExecutionLock updateLock,
     IHostUpdateSideEffectReconciler? sideEffectReconciler = null) : IHostUpdateExecutor
 {
-    private static readonly (HostUpdateExecutionState State, string Phase, bool SafeToCancelAndReplay)[] Plan =
-    [(HostUpdateExecutionState.Preflight, "preflight", true), (HostUpdateExecutionState.Draining, "drain", true), (HostUpdateExecutionState.Fenced, "fence", true), (HostUpdateExecutionState.BackedUp, "backup", true), (HostUpdateExecutionState.Migrating, "migration", false), (HostUpdateExecutionState.Applying, "apply", false), (HostUpdateExecutionState.Verifying, "verify", true)];
+    private static readonly (HostUpdateExecutionState State, string Phase, bool Safe)[] Plan =
+    [
+        (HostUpdateExecutionState.Preflight, "preflight", true),
+        (HostUpdateExecutionState.Draining, "drain", true),
+        (HostUpdateExecutionState.Fenced, "fence", true),
+        (HostUpdateExecutionState.BackedUp, "backup", true),
+        (HostUpdateExecutionState.Migrating, "migration", false),
+        (HostUpdateExecutionState.Applying, "apply", false),
+        (HostUpdateExecutionState.Verifying, "verify", true),
+    ];
+
     public async Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(request);
@@ -134,19 +176,18 @@ public sealed class HostUpdateExecutor(
             return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, error, []);
         }
 
+        string bindingHash = HostUpdateRequestBinding.Compute(request);
         using IHostUpdateExecutionLease lease = updateLock.Acquire(TimeSpan.FromSeconds(30), cancellationToken);
         List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList();
         HostUpdateExecutionState current = activities.LastOrDefault()?.State ?? HostUpdateExecutionState.Accepted;
-        if (!HostUpdateRequestFingerprint.Matches(activities, request, out string fingerprintError))
-        { Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + fingerprintError); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, fingerprintError, activities); }
-        if (current == HostUpdateExecutionState.Completed)
+        if (activities.Any(activity => activity.RequestBindingHash is not null && activity.RequestBindingHash != bindingHash))
         {
-            return await EnsureCompletedFenceReleasedAsync(request, activities, cancellationToken).ConfigureAwait(false);
+            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "request_binding_conflict", activities);
         }
 
-        if (current == HostUpdateExecutionState.RecoveryRequired)
+        if (current == HostUpdateExecutionState.Completed || current == HostUpdateExecutionState.RecoveryRequired)
         {
-            return new(request.ReleaseId, current, "recovery_required", activities);
+            return new(request.ReleaseId, current, current == HostUpdateExecutionState.Completed ? null : "recovery_required", activities);
         }
 
         if (current == HostUpdateExecutionState.Accepted)
@@ -156,162 +197,261 @@ public sealed class HostUpdateExecutor(
 
         try
         {
-            foreach ((HostUpdateExecutionState state, string phase, bool safeToCancelAndReplay) in Plan)
+            foreach ((HostUpdateExecutionState state, string phase, bool safe) in Plan)
             {
                 if (activities.Any(a => a.State == state && a.Phase.EndsWith(":after", StringComparison.Ordinal)))
                 {
                     continue;
                 }
 
-                if (!safeToCancelAndReplay && activities.Any(a => a.State == state && string.Equals(a.Phase, phase + ":before", StringComparison.Ordinal)))
+                if (!safe && activities.Any(a => a.State == state && string.Equals(a.Phase, phase + ":before", StringComparison.Ordinal)))
                 {
                     HostUpdateSideEffectReconciliation reconciliation = sideEffectReconciler is null
                         ? HostUpdateSideEffectReconciliation.Uncertain("reconciler_unavailable")
                         : await sideEffectReconciler.ReconcileAsync(phase, request, cancellationToken).ConfigureAwait(false);
-                    if (reconciliation.Reconciled)
+                    if (!reconciliation.Reconciled)
                     {
-                        Append(activities, request, state, phase + ":after");
-                        current = state;
-                        continue;
+                        string failure = "uncertain_side_effect:" + phase + ":" + reconciliation.Detail;
+                        Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure);
+                        return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities);
                     }
 
-                    string failure = "uncertain_side_effect:" + phase + ":" + reconciliation.Detail;
-                    Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure);
-                    return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities);
+                    Append(activities, request, state, phase + ":after");
+                    current = state;
+                    continue;
                 }
-                if (safeToCancelAndReplay && cancellationToken.IsCancellationRequested)
+
+                if (safe && cancellationToken.IsCancellationRequested)
                 {
                     return new(request.ReleaseId, current, "canceled", activities);
                 }
 
                 Append(activities, request, state, phase + ":before");
                 try
-                { await InvokeAsync(state, request, cancellationToken).ConfigureAwait(false); }
-                catch (OperationCanceledException) when (!safeToCancelAndReplay) { string failure = "uncertain_side_effect:" + phase + ":canceled"; Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities); }
-                catch (OperationCanceledException) when (safeToCancelAndReplay) { return new(request.ReleaseId, current, "canceled", activities); }
+                {
+                    await InvokeAsync(state, request, safe ? cancellationToken : CancellationToken.None);
+                }
+                catch (OperationCanceledException) when (!safe)
+                {
+                    string failure = "uncertain_side_effect:" + phase + ":canceled";
+                    Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure);
+                    return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities);
+                }
+
                 Append(activities, request, state, phase + ":after");
                 current = state;
-                if (safeToCancelAndReplay && cancellationToken.IsCancellationRequested)
+                if (safe && cancellationToken.IsCancellationRequested)
                 {
                     return new(request.ReleaseId, current, "canceled", activities);
                 }
             }
-            Append(activities, request, HostUpdateExecutionState.Completed, "completed");
-            return await EnsureCompletedFenceReleasedAsync(request, activities, cancellationToken).ConfigureAwait(false);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException) { Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + ex.GetType().Name); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities); }
-    }
 
-    private async Task<HostUpdateExecutionResult> EnsureCompletedFenceReleasedAsync(
-        HostUpdateExecutionRequest request,
-        List<HostUpdateExecutionActivity> activities,
-        CancellationToken cancellationToken)
-    {
-        if (!activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "installed-state:after", StringComparison.Ordinal)))
-        {
-            if (!activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "installed-state:before", StringComparison.Ordinal)))
-            {
-                Append(activities, request, HostUpdateExecutionState.Completed, "installed-state:before");
-            }
-
-            await steps.PersistInstalledStateAsync(request, cancellationToken).ConfigureAwait(false);
-            Append(activities, request, HostUpdateExecutionState.Completed, "installed-state:after");
-        }
-
-        if (activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "fence-release:after", StringComparison.Ordinal)))
-        {
-            return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
-        }
-
-        if (!activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "fence-release:before", StringComparison.Ordinal)))
-        {
-            Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:before");
-        }
-
-        try
-        {
-            await steps.ReleaseFenceAsync(cancellationToken).ConfigureAwait(false);
             Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:after");
+            Append(activities, request, HostUpdateExecutionState.Completed, "completed");
             return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
         }
-        catch (Exception exception) when (exception is not OperationCanceledException)
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
-            string failure = "fence_release_failed:" + exception.GetType().Name;
-            Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:failed:" + failure);
-            return new(request.ReleaseId, HostUpdateExecutionState.Completed, failure, activities);
+            return new(request.ReleaseId, current, "canceled", activities);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + ex.GetType().Name);
+            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities);
         }
     }
 
-    private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => state switch { HostUpdateExecutionState.Preflight => steps.PreflightAsync(request, cancellationToken), HostUpdateExecutionState.Draining => steps.DrainAsync(request, cancellationToken), HostUpdateExecutionState.Fenced => steps.FenceAsync(request, cancellationToken), HostUpdateExecutionState.BackedUp => steps.BackupAsync(request, cancellationToken), HostUpdateExecutionState.Migrating => steps.MigrateAsync(request, cancellationToken), HostUpdateExecutionState.Applying => steps.ApplyAsync(request, cancellationToken), HostUpdateExecutionState.Verifying => steps.VerifyAsync(request, cancellationToken), _ => Task.CompletedTask };
-    private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase) { var activity = new HostUpdateExecutionActivity(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(request)); journal.Append(activity); activities.Add(activity); }
+    private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => state switch
+    {
+        HostUpdateExecutionState.Preflight => steps.PreflightAsync(request, cancellationToken),
+        HostUpdateExecutionState.Draining => steps.DrainAsync(request, cancellationToken),
+        HostUpdateExecutionState.Fenced => steps.FenceAsync(request, cancellationToken),
+        HostUpdateExecutionState.BackedUp => steps.BackupAsync(request, cancellationToken),
+        HostUpdateExecutionState.Migrating => steps.MigrateAsync(request, cancellationToken),
+        HostUpdateExecutionState.Applying => steps.ApplyAsync(request, cancellationToken),
+        HostUpdateExecutionState.Verifying => steps.VerifyAsync(request, cancellationToken),
+        _ => Task.CompletedTask,
+    };
+
+
+    private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase)
+    {
+        HostUpdateExecutionActivity activity = new(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow)
+        {
+            RequestBindingHash = HostUpdateRequestBinding.Compute(request),
+            RequestBinding = request,
+        };
+        journal.Append(activity);
+        activities.Add(activity);
+    }
 }
 
-/// <summary>Loads the authoritative execution request from the already verified/staged host-update journal.</summary>
-public interface IHostUpdateExecutionRequestResolver
+/// <summary>Outcome of proving whether a prior unsafe side effect already reached its target state.</summary>
+public sealed record HostUpdateSideEffectReconciliation(bool Reconciled, string Detail)
 {
-    Task<HostUpdateExecutionRequest?> ResolveAsync(string releaseId, CancellationToken cancellationToken);
+    public static HostUpdateSideEffectReconciliation Complete(string detail) => new(true, detail);
+
+    public static HostUpdateSideEffectReconciliation Uncertain(string detail) => new(false, detail);
+}
+
+/// <summary>Proves migration or apply completion after a crash before its completion marker was durable.</summary>
+public interface IHostUpdateSideEffectReconciler
+{
+    Task<HostUpdateSideEffectReconciliation> ReconcileAsync(
+        string phase,
+        HostUpdateExecutionRequest request,
+        CancellationToken cancellationToken);
+}
+
+/// <summary>Reconciles migration and apply state only through their authoritative state probes.</summary>
+public sealed class HostUpdateSideEffectReconciler(
+    IHostUpdateMigrationReconciler migrationReconciler,
+    IHostUpdateDigestVerifier digestVerifier) : IHostUpdateSideEffectReconciler
+{
+    public async Task<HostUpdateSideEffectReconciliation> ReconcileAsync(
+        string phase,
+        HostUpdateExecutionRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (string.Equals(phase, "migration", StringComparison.Ordinal))
+        {
+            return await migrationReconciler.IsReconciledAsync(request, cancellationToken).ConfigureAwait(false)
+                ? HostUpdateSideEffectReconciliation.Complete("migration_state_matches")
+                : HostUpdateSideEffectReconciliation.Uncertain("migration_state_incomplete");
+        }
+
+        if (string.Equals(phase, "apply", StringComparison.Ordinal))
+        {
+            try
+            {
+                IReadOnlyDictionary<string, string> digests = request.Targets.ToDictionary(
+                    target => target.ServiceId,
+                    target => target.ChildDigest,
+                    StringComparer.Ordinal);
+                await digestVerifier.VerifyDigestsAsync(digests, cancellationToken).ConfigureAwait(false);
+                return HostUpdateSideEffectReconciliation.Complete("running_digests_match");
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                return HostUpdateSideEffectReconciliation.Uncertain(
+                    "running_digests_unverified:" + exception.GetType().Name);
+            }
+        }
+
+        return HostUpdateSideEffectReconciliation.Uncertain("unsupported_phase");
+    }
+}
+
+
+public static class HostUpdateExecutionRequestBuilder
+{
+    private static readonly string[] ServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
+
+    public static HostUpdateExecutionRequest FromExecutorRequest(
+        HostUpdateExecutorRequest request,
+        string hostPlatform,
+        HostUpdateAuthorizationKind authorizationKind)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostPlatform);
+
+        HostUpdateExecutionChannel channel = request.Channel switch
+        {
+            "stable" => HostUpdateExecutionChannel.Stable,
+            "insider" => HostUpdateExecutionChannel.Insider,
+            _ => throw new ArgumentException("channel_invalid", nameof(request)),
+        };
+
+        return new HostUpdateExecutionRequest(
+            request.ReleaseId,
+            request.Sequence,
+            request.ManifestDigest,
+            request.SourceCommit,
+            channel,
+            CreateTargets(request.PlatformDigests, hostPlatform))
+        {
+            RequestId = request.RequestId,
+            TrustRoot = request.TrustRoot,
+            PolicyRevision = request.PolicyRevision,
+            PolicyFingerprint = request.PolicyFingerprint,
+            HostPlatform = hostPlatform,
+            AuthorizationKind = authorizationKind,
+        };
+    }
+
+    private static List<HostUpdateExecutionTarget> CreateTargets(HostUpdatePlatformDigests digests, string hostPlatform) =>
+    [
+        new(ServiceIds[0], hostPlatform, digests.Api),
+        new(ServiceIds[1], hostPlatform, digests.Frontend),
+        new(ServiceIds[2], hostPlatform, digests.SlicerHost),
+        new(ServiceIds[3], hostPlatform, digests.PrinterDiscovery),
+        new(ServiceIds[4], hostPlatform, digests.OrcaslicerWorker),
+        new(ServiceIds[5], hostPlatform, digests.Monolith),
+    ];
+}
+
+public static class HostUpdateRequestBinding
+{
+    public static string Compute(HostUpdateExecutionRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        return HostUpdateCanonical.Hash(new
+        {
+            request.TrustRoot,
+            request.PolicyRevision,
+            request.PolicyFingerprint,
+            request.ReleaseId,
+            request.Channel,
+            request.RequestId,
+            request.AuthenticatedSequence,
+            request.ManifestDigest,
+            request.SourceCommit,
+            request.HostPlatform,
+            request.AuthorizationKind,
+            Targets = request.Targets.OrderBy(target => target.ServiceId, StringComparer.Ordinal),
+        });
+    }
 }
 
 /// <summary>
-/// Converts a completed #2662 staging receipt into the #2663 executor request. The admin API
-/// supplies only the release id; sequence, source commit, channel, manifest digest, active
-/// service set, platform and digests all come from durable server-side verified evidence.
+/// Compatibility facade for recovery components. Scheduler-bound requests use the stronger
+/// immutable binding hash, including authorization and policy identity, for every comparison.
 /// </summary>
-public sealed class HostUpdateExecutionRequestResolver(IHostUpdateJournal foundationJournal) : IHostUpdateExecutionRequestResolver
+public static class HostUpdateRequestFingerprint
 {
-    public async Task<HostUpdateExecutionRequest?> ResolveAsync(string releaseId, CancellationToken cancellationToken)
+    public static string Compute(HostUpdateExecutionRequest request) => HostUpdateRequestBinding.Compute(request);
+
+    public static bool Matches(
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        HostUpdateExecutionRequest request,
+        out string error)
     {
-        if (string.IsNullOrWhiteSpace(releaseId))
-        {
-            return null;
-        }
+        ArgumentNullException.ThrowIfNull(activities);
+        ArgumentNullException.ThrowIfNull(request);
 
-        IReadOnlyList<HostUpdateJournalEntry> entries = await foundationJournal.ReadAsync(cancellationToken).ConfigureAwait(false);
-        HostUpdateJournalEntry? staged = entries.LastOrDefault(entry =>
-            entry.State == HostUpdateLifecycle.Staged &&
-            string.Equals(entry.Code, "staged", StringComparison.Ordinal) &&
-            string.Equals(entry.Snapshot.Identity?.ReleaseId, releaseId, StringComparison.Ordinal) &&
-            entry.Snapshot.Receipt is { IsComplete: true, Code: "staged" });
-        if (staged?.Snapshot.Identity is not { } identity)
+        string expected = Compute(request);
+        foreach (HostUpdateExecutionActivity activity in activities)
         {
-            return null;
-        }
-
-        if (!Enum.TryParse(identity.Channel, ignoreCase: true, out HostUpdateExecutionChannel channel))
-        {
-            return null;
-        }
-
-        long sequence;
-        try
-        {
-            sequence = SignedUpdateManifestValidator.DeriveSequence(identity.Version);
-        }
-        catch (Exception exception) when (exception is FormatException or OverflowException)
-        {
-            return null;
-        }
-
-        string platform = staged.Snapshot.Platform;
-        HostUpdateExecutionTarget[] targets = [.. staged.Snapshot.RequiredComponents
-            .OrderBy(component => component, StringComparer.Ordinal)
-            .Select(component =>
+            string? actual = activity.RequestBindingHash ?? activity.RequestFingerprint;
+            if (string.IsNullOrWhiteSpace(actual))
             {
-                string key = SignedUpdateManifestValidator.PlatformKey(component, platform);
-                return staged.Snapshot.ComponentPlatformDigests.TryGetValue(key, out string? digest)
-                    ? new HostUpdateExecutionTarget(component, platform, digest)
-                    : null;
-            })
-            .OfType<HostUpdateExecutionTarget>()];
+                error = "request_fingerprint_missing";
+                return false;
+            }
 
-        var request = new HostUpdateExecutionRequest(
-            identity.ReleaseId,
-            sequence,
-            identity.ManifestDigest,
-            identity.SourceCommit,
-            channel,
-            targets);
-        return request.IsValid(out _) ? request : null;
+            if (!CryptographicOperations.FixedTimeEquals(
+                    Encoding.UTF8.GetBytes(actual),
+                    Encoding.UTF8.GetBytes(expected)))
+            {
+                error = "request_fingerprint_mismatch";
+                return false;
+            }
+        }
+
+        error = string.Empty;
+        return true;
     }
 }
 public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecutionLock
@@ -324,198 +464,159 @@ public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecut
         {
             cancellationToken.ThrowIfCancellationRequested();
             try
-            { FileStream stream = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None); stream.SetLength(0); using (StreamWriter writer = new(stream, leaveOpen: true)) { writer.Write($"pid={Environment.ProcessId};started={DateTimeOffset.UtcNow:O}"); writer.Flush(); } stream.Flush(true); return new Lease(stream); }
-            catch (IOException) when (Stopwatch.GetElapsedTime(start) < timeout) { Thread.Sleep(25); }
-            catch (IOException) { throw new TimeoutException("host_update_lock_timeout"); }
+            {
+                HostStateFileSecurity.RejectReparseTarget(path);
+                FileStream stream = new(path, FileMode.OpenOrCreate, FileAccess.ReadWrite, FileShare.None);
+                stream.SetLength(0);
+                using (StreamWriter writer = new(stream, leaveOpen: true))
+                {
+                    writer.Write($"pid={Environment.ProcessId};started={DateTimeOffset.UtcNow:O}");
+                    writer.Flush();
+                }
+
+                stream.Flush(true);
+                return new Lease(stream);
+            }
+            catch (IOException) when (Stopwatch.GetElapsedTime(start) < timeout)
+            {
+                Thread.Sleep(25);
+            }
+            catch (IOException)
+            {
+                throw new TimeoutException("host_update_lock_timeout");
+            }
         }
     }
-    private sealed class Lease(FileStream stream) : IHostUpdateExecutionLease { public void Dispose() => stream.Dispose(); }
-}
 
-/// <summary>Outcome of proving whether a prior side effect already reached its target state.</summary>
-public sealed record HostUpdateSideEffectReconciliation(bool Reconciled, string Detail)
-{
-    public static HostUpdateSideEffectReconciliation Complete(string detail) => new(true, detail);
-
-    public static HostUpdateSideEffectReconciliation Uncertain(string detail) => new(false, detail);
-}
-
-/// <summary>Proves migration/apply side-effect completion after a crash before the after-marker was journaled.</summary>
-public interface IHostUpdateSideEffectReconciler
-{
-    Task<HostUpdateSideEffectReconciliation> ReconcileAsync(string phase, HostUpdateExecutionRequest request, CancellationToken cancellationToken);
-}
-
-/// <summary>
-/// Reconciles unsafe side effects with operation-specific evidence: migrations are complete only
-/// when every context reports no pending migrations; apply is complete only when exact running
-/// digests match the immutable request. Anything else remains NeedsOperator.
-/// </summary>
-public sealed class HostUpdateSideEffectReconciler(
-    IHostUpdateMigrationReconciler migrationReconciler,
-    IHostUpdateDigestVerifier digestVerifier) : IHostUpdateSideEffectReconciler
-{
-    public async Task<HostUpdateSideEffectReconciliation> ReconcileAsync(string phase, HostUpdateExecutionRequest request, CancellationToken cancellationToken)
+    private sealed class Lease(FileStream stream) : IHostUpdateExecutionLease
     {
-        ArgumentNullException.ThrowIfNull(request);
-        if (string.Equals(phase, "migration", StringComparison.Ordinal))
-        {
-            return await migrationReconciler.IsReconciledAsync(request, cancellationToken).ConfigureAwait(false)
-                ? HostUpdateSideEffectReconciliation.Complete("migration_state_matches")
-                : HostUpdateSideEffectReconciliation.Uncertain("migration_state_incomplete");
-        }
-
-        if (string.Equals(phase, "apply", StringComparison.Ordinal))
-        {
-            try
-            {
-                IReadOnlyDictionary<string, string> digests = request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal);
-                await digestVerifier.VerifyDigestsAsync(digests, cancellationToken).ConfigureAwait(false);
-                return HostUpdateSideEffectReconciliation.Complete("running_digests_match");
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                return HostUpdateSideEffectReconciliation.Uncertain("running_digests_unverified:" + exception.GetType().Name);
-            }
-        }
-
-        return HostUpdateSideEffectReconciliation.Uncertain("unsupported_phase");
+        public void Dispose() => stream.Dispose();
     }
 }
+
 public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExecutionJournal
 {
+    private readonly string stagedPath = path + ".staged";
+
     private sealed record JournalRecord(string PreviousHash, string Payload, string Hash, HostUpdateExecutionActivity Activity);
-    public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId)
-    {
-        if (!File.Exists(path))
-        {
-            return [];
-        }
 
-        List<HostUpdateExecutionActivity> result = [];
-        string previous = string.Empty;
-        foreach (string line in File.ReadLines(path))
-        {
-            JournalRecord? record;
-            try
-            { record = JsonSerializer.Deserialize<JournalRecord>(line); }
-            catch (JsonException ex) { throw new InvalidDataException("journal_corrupt", ex); }
-            if (record is null || record.Activity is null || !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) || !CryptographicOperations.FixedTimeEquals(Convert.FromHexString(record.Hash), SHA256.HashData(Encoding.UTF8.GetBytes(record.PreviousHash + record.Payload))))
-            {
-                throw new InvalidDataException("journal_integrity_failure");
-            }
+    public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) =>
+        ReadValidatedRecords().Where(record => record.Activity.ReleaseId == releaseId).Select(record => record.Activity).ToArray();
 
-            previous = record.Hash;
-            if (record.Activity.ReleaseId == releaseId)
-            {
-                result.Add(record.Activity);
-            }
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Enumerates every distinct release id ever recorded in this journal, in first-seen order.
-    /// Used at startup by restart reconciliation (Bishop/Hicks #2663 finding: the in-memory
-    /// admission gate resets open on process restart even when a release was left mid-flight or
-    /// in <see cref="HostUpdateExecutionState.RecoveryRequired"/>) to discover which releases, if
-    /// any, still require the perimeter to stay fenced before any new writer is admitted.
-    /// </summary>
-    public IReadOnlyList<string> ListReleaseIds()
-    {
-        if (!File.Exists(path))
-        {
-            return [];
-        }
-
-        List<string> ids = [];
-        HashSet<string> seen = new(StringComparer.Ordinal);
-        string previous = string.Empty;
-        foreach (string line in File.ReadLines(path))
-        {
-            JournalRecord? record;
-            try
-            { record = JsonSerializer.Deserialize<JournalRecord>(line); }
-            catch (JsonException ex) { throw new InvalidDataException("journal_corrupt", ex); }
-            if (record is null || record.Activity is null || !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) || !CryptographicOperations.FixedTimeEquals(Convert.FromHexString(record.Hash), SHA256.HashData(Encoding.UTF8.GetBytes(record.PreviousHash + record.Payload))))
-            {
-                throw new InvalidDataException("journal_integrity_failure");
-            }
-
-            previous = record.Hash;
-            if (seen.Add(record.Activity.ReleaseId))
-            {
-                ids.Add(record.Activity.ReleaseId);
-            }
-        }
-
-        return ids;
-    }
+    public IReadOnlyList<string> ListReleaseIds() =>
+        ReadValidatedRecords()
+            .Select(record => record.Activity.ReleaseId)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
 
     public void Append(HostUpdateExecutionActivity activity)
     {
+        ArgumentNullException.ThrowIfNull(activity);
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");
-
-        // Kane/Bishop/Hicks review (issue #2663): the atomic temp-file-then-move pattern used here
-        // for crash safety must still preserve every prior record. An earlier version wrote only
-        // the newest line to the temp file before moving it over `path`, which silently truncated
-        // the entire hash-chained journal down to its last entry on every append. Read the full
-        // existing chain first and re-write it in full (existing lines + the new one) so a crash
-        // between the write and the move can never observe a shorter-than-before journal, and a
-        // successful move preserves the full chain rather than replacing it.
-        string[] existingLines = File.Exists(path) ? File.ReadAllLines(path) : [];
-        string previous = string.Empty;
-        if (File.Exists(path))
-        {
-            if (existingLines.Length == 0)
-            {
-                throw new InvalidDataException("journal_corrupt");
-            }
-
-            previous = ValidateLines(existingLines);
-        }
-
+        RecoverStagedFile();
+        List<JournalRecord> records = ReadValidatedRecords();
+        string previous = records.LastOrDefault()?.Hash ?? string.Empty;
         string payload = JsonSerializer.Serialize(activity);
-        string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(previous + payload))).ToLowerInvariant();
-        string line = JsonSerializer.Serialize(new JournalRecord(previous, payload, hash, activity));
-        var builder = new StringBuilder();
-        foreach (string existingLine in existingLines)
-        {
-            builder.Append(existingLine).Append(Environment.NewLine);
-        }
-
-        builder.Append(line).Append(Environment.NewLine);
-        HostUpdateDurableFile.WriteAllTextAtomic(path, builder.ToString());
+        string hash = Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(previous + payload)));
+        records.Add(new JournalRecord(previous, payload, hash, activity));
+        string contents = string.Join('\n', records.Select(record => JsonSerializer.Serialize(record))) + "\n";
+        _ = Parse(contents);
+        AtomicRewrite(contents);
     }
 
-    private static string ValidateLines(IEnumerable<string> lines)
+    private List<JournalRecord> ReadValidatedRecords()
     {
+        RecoverStagedFile();
+        if (!File.Exists(path))
+        {
+            return [];
+        }
+
+        HostStateFileSecurity.RejectReparseTarget(path);
+        return Parse(File.ReadAllText(path));
+    }
+
+    private static List<JournalRecord> Parse(string contents)
+    {
+        if (contents.Length != 0 && !contents.EndsWith('\n'))
+        {
+            throw new InvalidDataException("journal_corrupt");
+        }
+
+        List<JournalRecord> records = [];
         string previous = string.Empty;
-        foreach (string line in lines)
+        foreach (string line in contents.Split('\n', StringSplitOptions.RemoveEmptyEntries))
         {
             JournalRecord? record;
             try
             {
                 record = JsonSerializer.Deserialize<JournalRecord>(line);
             }
-            catch (JsonException exception)
+            catch (JsonException ex)
             {
-                throw new InvalidDataException("journal_corrupt", exception);
+                throw new InvalidDataException("journal_corrupt", ex);
             }
 
-            if (record is null ||
-                record.Activity is null ||
-                !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) ||
-                !CryptographicOperations.FixedTimeEquals(
-                    Convert.FromHexString(record.Hash),
-                    SHA256.HashData(Encoding.UTF8.GetBytes(record.PreviousHash + record.Payload))))
+            byte[] expected = SHA256.HashData(Encoding.UTF8.GetBytes((record?.PreviousHash ?? string.Empty) + (record?.Payload ?? string.Empty)));
+            byte[] actual;
+            try
+            {
+                actual = Convert.FromHexString(record?.Hash ?? string.Empty);
+            }
+            catch (FormatException ex)
+            {
+                throw new InvalidDataException("journal_integrity_failure", ex);
+            }
+
+            if (record?.Activity is null || !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) ||
+                !CryptographicOperations.FixedTimeEquals(actual, expected))
             {
                 throw new InvalidDataException("journal_integrity_failure");
             }
 
+            records.Add(record);
             previous = record.Hash;
         }
 
-        return previous;
+        return records;
+    }
+
+    private void AtomicRewrite(string contents)
+    {
+        HostStateFileSecurity.RejectReparseTarget(stagedPath);
+        try
+        {
+            using (FileStream stream = new(stagedPath, FileMode.Create, FileAccess.Write, FileShare.None, 4096, FileOptions.WriteThrough))
+            using (StreamWriter writer = new(stream, new UTF8Encoding(false), leaveOpen: true))
+            {
+                writer.Write(contents);
+                writer.Flush();
+                stream.Flush(true);
+            }
+
+            _ = Parse(File.ReadAllText(stagedPath));
+            HostStateFileSecurity.RejectReparseTarget(path);
+            File.Move(stagedPath, path, true);
+        }
+        finally
+        {
+            if (File.Exists(stagedPath) && !HostStateFileSecurity.IsReparsePoint(stagedPath))
+            {
+                File.Delete(stagedPath);
+            }
+        }
+    }
+
+    private void RecoverStagedFile()
+    {
+        if (!File.Exists(stagedPath))
+        {
+            return;
+        }
+
+        HostStateFileSecurity.RejectReparseTarget(stagedPath);
+        // Rename is the commit point. A surviving stage was never committed, so the validated
+        // authoritative chain wins even when the staged rewrite is complete.
+        File.Delete(stagedPath);
     }
 }
