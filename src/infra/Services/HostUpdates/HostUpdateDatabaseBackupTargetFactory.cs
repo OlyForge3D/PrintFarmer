@@ -87,6 +87,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 dest =>
                 [
                     "-S", builder.DataSource,
+                    "-b",
                     .. authArgs,
                     "-Q", $"BACKUP DATABASE [{EscapeBracketedIdentifier(database)}] TO DISK = N'{EscapeQuotedLiteral(Path.Combine(dest, SqlServerFileName))}' WITH INIT",
                 ],
@@ -146,6 +147,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 "sqlcmd",
                 [
                     "-S", builder.DataSource,
+                    "-b",
                     .. authArgs,
                     "-Q", $"BEGIN TRY ALTER DATABASE [{EscapeBracketedIdentifier(database)}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; RESTORE DATABASE [{EscapeBracketedIdentifier(database)}] FROM DISK = N'{EscapeQuotedLiteral(Path.Combine(targetDirectory, SqlServerFileName))}' WITH REPLACE; ALTER DATABASE [{EscapeBracketedIdentifier(database)}] SET MULTI_USER; END TRY BEGIN CATCH IF DB_ID(N'{EscapeQuotedLiteral(database)}') IS NOT NULL ALTER DATABASE [{EscapeBracketedIdentifier(database)}] SET MULTI_USER; THROW; END CATCH",
                 ],

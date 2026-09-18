@@ -102,9 +102,8 @@ public sealed class HostUpdateBackupCoordinator(
             [.. files.OrderBy(f => f.RelativePath, StringComparer.Ordinal)]);
         string manifestPath = Path.Combine(runDirectory, "manifest.json");
         string manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
-        string tempManifestPath = manifestPath + ".tmp-" + Guid.NewGuid().ToString("N");
-        await File.WriteAllTextAsync(tempManifestPath, manifestJson, cancellationToken).ConfigureAwait(false);
-        File.Move(tempManifestPath, manifestPath, overwrite: true);
+        HostUpdateDurableFile.WriteAllTextAtomic(manifestPath, manifestJson);
+        HostUpdateDurableFile.FlushDirectory(runDirectory);
     }
 
     private static string SanitizeForPath(string value)
@@ -179,8 +178,7 @@ public sealed class DirectoryCopyBackupTarget(string name, string sourceDirector
             // configured in this deployment) may legitimately be absent. The coordinator's
             // non-empty-file check still applies to catch a target that produces nothing when it
             // was expected to.
-            await File.WriteAllTextAsync(Path.Combine(destinationDirectory, ".empty"), "source_not_present", cancellationToken)
-                .ConfigureAwait(false);
+            HostUpdateDurableFile.WriteAllTextAtomic(Path.Combine(destinationDirectory, ".empty"), "source_not_present");
             return;
         }
 
@@ -195,10 +193,9 @@ public sealed class DirectoryCopyBackupTarget(string name, string sourceDirector
         if (relativeDirectories.Length > 1 || sourceFiles.Length == 0)
         {
             string directoryManifest = JsonSerializer.Serialize(relativeDirectories, new JsonSerializerOptions { WriteIndented = true });
-            await File.WriteAllTextAsync(
+            HostUpdateDurableFile.WriteAllTextAtomic(
                 Path.Combine(destinationDirectory, ".printfarmer-directories.json"),
-                directoryManifest,
-                cancellationToken).ConfigureAwait(false);
+                directoryManifest);
         }
 
         foreach (string sourcePath in sourceFiles)
@@ -207,7 +204,7 @@ public sealed class DirectoryCopyBackupTarget(string name, string sourceDirector
             string relative = Path.GetRelativePath(sourceDirectory, sourcePath);
             string destinationPath = Path.Combine(destinationDirectory, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? destinationDirectory);
-            File.Copy(sourcePath, destinationPath, overwrite: true);
+            await HostUpdateDurableFile.CopyFileDurablyAsync(sourcePath, destinationPath, cancellationToken).ConfigureAwait(false);
         }
     }
 }

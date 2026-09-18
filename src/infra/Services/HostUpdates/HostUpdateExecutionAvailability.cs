@@ -54,6 +54,14 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
+    private static readonly string[] CodeOwnedUnavailableFacilities =
+    [
+        "target_image_migration_runner_unavailable",
+        "slicer_claim_progress_completion_fence_incomplete",
+        "queue_reconciliation_writer_fence_unavailable",
+        "sql_server_visible_backup_path_mapping_unverified",
+    ];
+
     public async Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken)
     {
         var reasons = new List<string>();
@@ -95,7 +103,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             reasons.Add("no_backup_targets_configured");
         }
 
-        foreach (string unavailableFacility in options.RequiredUnavailableFacilities.Where(name => !string.IsNullOrWhiteSpace(name)))
+        foreach (string unavailableFacility in CodeOwnedUnavailableFacilities.Concat(options.RequiredUnavailableFacilities).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal))
         {
             reasons.Add($"facility_unavailable:{unavailableFacility}");
         }

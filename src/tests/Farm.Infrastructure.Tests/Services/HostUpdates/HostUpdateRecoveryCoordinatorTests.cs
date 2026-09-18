@@ -172,6 +172,62 @@ public sealed class HostUpdateRecoveryCoordinatorTests
         lockProbe.AcquireCount.Should().Be(1);
         lockProbe.Disposed.Should().BeTrue();
     }
+
+
+    [Fact]
+    public async Task RecoverAsync_ExistingRolledBackOutcome_DoesNotReplayRestoreOrApply()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        await outcomeStore.WriteAsync(
+            new HostUpdateRecoveryOutcomeRecord(Request.ReleaseId, HostUpdateRecoveryOutcome.RolledBack, "coordinated_restore", DateTimeOffset.UtcNow),
+            CancellationToken.None);
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            new ThrowingDigestApplier(),
+            new ThrowingRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            executionLock: new RecordingExecutionLock(() => { }));
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        result.Detail.Should().Be("coordinated_restore");
+    }
+
+    [Fact]
+    public async Task RecoverAsync_ApplyMayHaveStartedWithoutPriorImageState_PersistsNeedsOperator()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        IReadOnlyList<HostUpdateExecutionActivity> activities =
+        [
+            new HostUpdateExecutionActivity("accepted", Request.ReleaseId, HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(Request)),
+            new HostUpdateExecutionActivity("apply-before", Request.ReleaseId, HostUpdateExecutionState.Applying, "apply:before", DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(Request)),
+        ];
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(installedState: null),
+            new AlwaysCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            new ThrowingRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore);
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, activities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be("prior_image_state_missing_after_apply_started");
+        HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
+        persisted.Should().NotBeNull();
+        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        persisted.Detail.Should().Be("prior_image_state_missing_after_apply_started");
+    }
+
     [Fact]
     public async Task OutcomeStore_SurvivesFreshInstanceAfterRestart()
     {
@@ -325,6 +381,12 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     {
         public Task RestoreAsync(HostUpdateBackupManifest manifest, string backupRunDirectory, CancellationToken cancellationToken) =>
             throw new InvalidOperationException("should not be invoked when image-only rollback is compatible");
+    }
+
+    private sealed class ThrowingRestoreExecutor : IHostUpdateRestoreExecutor
+    {
+        public Task RestoreAsync(HostUpdateBackupManifest manifest, string backupRunDirectory, CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("restore_replayed");
     }
 
     private sealed class NeverFindsManifestLocator : IHostUpdateBackupManifestLocator

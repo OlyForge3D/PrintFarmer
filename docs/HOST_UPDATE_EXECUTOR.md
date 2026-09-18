@@ -62,7 +62,7 @@ previous run's state) and then periodically rechecks, publishing every result in
 `HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
-`compose_file_missing:...`, `docker_runtime_unavailable`, `missing_fenced_writer:webhook-delivery`) so an operator is never left guessing.
+`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, or a code-owned `facility_unavailable:...`) so an operator is never left guessing. Known #2663 physical gaps are now code-owned fail-closed availability reasons, not operator-omittable configuration: target-image migration runner, complete slicer claim/progress/completion fencing, queue reconciliation writer fencing, and SQL Server host/server backup-path mapping must be implemented before this executor can report production `Available`.
 
 ## DI wiring
 
@@ -169,4 +169,6 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   part of `RecoverAsync` itself — including when recovery is cancelled mid-flight — so the outcome
   survives a process crash immediately afterward even if whatever invoked recovery never gets a
   chance to persist it. A successful rollback releases the writer fence only after the durable `RolledBack` outcome is written; if fence release fails, recovery overwrites the outcome with `NeedsOperator` and keeps the system closed. The manual admin status endpoint now includes the latest durable recovery outcome for the requested release, so operators can see `RolledBack`/`NeedsOperator` details after the original recovery call has returned or the process has restarted.
+- Backup manifests, copied payload files, and recovery outcome records now use the same durable write-through, flush-to-disk, atomic replace, and parent-directory sync primitive as the execution journal before the executor records `backup:after` or a terminal recovery result.
+- Duplicate/delayed recovery is idempotent under the durable execution lock: if a previous attempt already persisted `RolledBack`, a later matching recovery call returns that terminal result without replaying restore or compose side effects. If apply may have started and prior installed image evidence is absent, recovery records `NeedsOperator` instead of reporting a successful coordinated restore that could not restore images.
 - Power-loss reconciliation is now operation-specific for the unsafe side-effect checkpoints. A restart after `migration:before` without `migration:after` continues only when all migration targets report no pending migrations; a restart after `apply:before` without `apply:after` continues only when exact running digest verification succeeds. Otherwise the journal records durable `RecoveryRequired`/operator action and does not replay migrations or compose automatically.

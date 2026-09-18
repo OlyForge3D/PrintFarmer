@@ -97,6 +97,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastFileName.Should().Be("sqlcmd");
+        runner.LastArguments.Should().Contain("-b");
         runner.LastArguments.Should().Contain(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
     }
 
@@ -140,6 +141,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
 
         command.FileName.Should().Be("sqlcmd");
+        command.Arguments.Should().Contain("-b");
         command.Arguments.Should().Contain(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         command.Arguments.Should().NotContain(a => a.Contains("test-only-pw-2", StringComparison.Ordinal));
         command.Environment.Should().ContainKey("SQLCMDPASSWORD").WhoseValue.Should().Be("test-only-pw-2");

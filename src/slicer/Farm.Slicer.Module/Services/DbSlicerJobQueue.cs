@@ -29,14 +29,7 @@ public class DbSlicerJobQueue(
     {
         ArgumentNullException.ThrowIfNull(job);
 
-        if (hostUpdateAdmissionGate is not null && await hostUpdateAdmissionGate.IsClosedAsync(cancellationToken).ConfigureAwait(false))
-        {
-            // Kane/panel audit follow-up (issue #2663, "physical admission barrier is not real"):
-            // slicer submission is one of the named producers that must honor the drain gate --
-            // without this, the fence coordinator's proof of quiescence would be checking a gate
-            // no real submission path consults, exactly the "tautological" finding raised.
-            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException();
-        }
+        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
 
         SliceJob sj = ToSliceJob(job);
         await _repo.AddAsync(sj, cancellationToken).ConfigureAwait(false);
@@ -44,6 +37,8 @@ public class DbSlicerJobQueue(
 
     public async Task<DistributedSlicingJob?> DequeueAsync(string workerId, SlicerEngineType? preferredEngine = null, CancellationToken cancellationToken = default)
     {
+        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
+
         if (!Guid.TryParse(workerId, out Guid wid))
         {
             throw new ArgumentException("Worker ID must be a valid GUID.", nameof(workerId));
@@ -64,6 +59,7 @@ public class DbSlicerJobQueue(
         ArgumentNullException.ThrowIfNull(job);
 
         ArgumentNullException.ThrowIfNull(result);
+        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
 
         // Persist completion summary (no artifact IDs available in SlicingResult here)
         string resultUrl = result.ResultFileUrl?.ToString() ?? string.Empty;
@@ -89,6 +85,7 @@ public class DbSlicerJobQueue(
 
     public async Task FailJobAsync(DistributedSlicingJob job, string errorMessage, CancellationToken cancellationToken = default)
     {
+        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
         (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
         bool failed = await _repo.TryFailForActiveLeaseAsync(
             job.Id,
@@ -101,6 +98,7 @@ public class DbSlicerJobQueue(
 
     public async Task UpdateProgressAsync(DistributedSlicingJob job, int progress, string? currentStep = null, CancellationToken cancellationToken = default)
     {
+        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
         (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
         bool updated = await _repo.TryUpdateProgressForActiveLeaseAsync(
             job.Id,
@@ -118,8 +116,11 @@ public class DbSlicerJobQueue(
         return job == null ? null : ToDistributedJob(job);
     }
 
-    public Task CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default)
-        => _repo.MarkFailedAsync(jobId, "Cancelled by operator", cancellationToken);
+    public async Task CancelJobAsync(Guid jobId, CancellationToken cancellationToken = default)
+    {
+        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
+        await _repo.MarkFailedAsync(jobId, "Cancelled by operator", cancellationToken).ConfigureAwait(false);
+    }
 
     public async Task<SlicerQueueStats> GetQueueStatsAsync(SlicerEngineType? engine = null, CancellationToken cancellationToken = default)
     {
@@ -230,6 +231,7 @@ public class DbSlicerJobQueue(
 
     public async Task RequeueJobAsync(DistributedSlicingJob job, TimeSpan? delay = null, double jitterPercent = 0.0, CancellationToken cancellationToken = default)
     {
+        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
         (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
         bool requeued = await _repo.TryRequeueForActiveLeaseAsync(
             job.Id,
@@ -293,6 +295,14 @@ public class DbSlicerJobQueue(
         };
 
         return dsj;
+    }
+
+    private async Task ThrowIfHostUpdateAdmissionClosedAsync(CancellationToken cancellationToken)
+    {
+        if (hostUpdateAdmissionGate is not null && await hostUpdateAdmissionGate.IsClosedAsync(cancellationToken).ConfigureAwait(false))
+        {
+            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException();
+        }
     }
 
     private static (Guid WorkerId, Guid ClaimToken) GetClaimIdentity(DistributedSlicingJob job)

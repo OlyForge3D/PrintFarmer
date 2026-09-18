@@ -54,9 +54,7 @@ public sealed class FileHostUpdateRecoveryOutcomeStore(string rootDirectory) : I
         Directory.CreateDirectory(rootDirectory);
         string path = PathFor(record.ReleaseId);
         string json = System.Text.Json.JsonSerializer.Serialize(record);
-        string temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        await File.WriteAllTextAsync(temp, json, cancellationToken).ConfigureAwait(false);
-        File.Move(temp, path, overwrite: true);
+        await Task.Run(() => HostUpdateDurableFile.WriteAllTextAtomic(path, json), cancellationToken).ConfigureAwait(false);
     }
 
     private string PathFor(string releaseId)
@@ -147,6 +145,12 @@ public sealed class HostUpdateRecoveryCoordinator(
 
         using IHostUpdateExecutionLease lease = (executionLock ?? NoopHostUpdateExecutionLock.Instance).Acquire(TimeSpan.FromSeconds(30), cancellationToken);
 
+        HostUpdateRecoveryOutcomeRecord? existingOutcome = await outcomeStore.ReadAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
+        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
+        {
+            return new HostUpdateRecoveryResult(existingOutcome.Outcome, existingOutcome.Detail);
+        }
+
         HostUpdateRecoveryResult result;
         try
         {
@@ -198,6 +202,11 @@ public sealed class HostUpdateRecoveryCoordinator(
         InstalledHostState? priorState = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            if (priorState is null && ApplyMayHaveStarted(activities))
+            {
+                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "prior_image_state_missing_after_apply_started");
+            }
+
             if (priorState is not null && compatibilityEvaluator.SupportsImageOnlyRollback(priorState, activities))
             {
                 await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
@@ -231,6 +240,9 @@ public sealed class HostUpdateRecoveryCoordinator(
             return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, exception.GetType().Name);
         }
     }
+
+    private static bool ApplyMayHaveStarted(IReadOnlyList<HostUpdateExecutionActivity> activities) =>
+        activities.Any(a => a.State == HostUpdateExecutionState.Applying && a.Phase.StartsWith("apply:before", StringComparison.Ordinal));
 }
 
 /// <summary>Attempts recovery for a release left in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.</summary>

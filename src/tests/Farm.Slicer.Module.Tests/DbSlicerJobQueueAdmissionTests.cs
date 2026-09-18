@@ -55,4 +55,55 @@ public sealed class DbSlicerJobQueueAdmissionTests
 
         repo.Verify(r => r.AddAsync(It.IsAny<SliceJob>(), It.IsAny<CancellationToken>()), Times.Once);
     }
+
+    [Fact]
+    public async Task DequeueAsync_GateClosed_ThrowsAndNeverClaimsRepositoryLease()
+    {
+        var repo = new Mock<ISliceJobRepository>(MockBehavior.Strict);
+        var gate = new Mock<IHostUpdateAdmissionGate>(MockBehavior.Strict);
+        gate.Setup(g => g.IsClosedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var queue = new DbSlicerJobQueue(repo.Object, hostUpdateAdmissionGate: gate.Object);
+
+        Func<Task> act = () => queue.DequeueAsync(Guid.NewGuid().ToString(), cancellationToken: CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateAdmissionClosedException>();
+        repo.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task CompleteJobAsync_GateClosed_ThrowsAndNeverWritesCompletion()
+    {
+        var repo = new Mock<ISliceJobRepository>(MockBehavior.Strict);
+        var gate = new Mock<IHostUpdateAdmissionGate>(MockBehavior.Strict);
+        gate.Setup(g => g.IsClosedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var queue = new DbSlicerJobQueue(repo.Object, hostUpdateAdmissionGate: gate.Object);
+        DistributedSlicingJob job = ClaimedJob();
+
+        Func<Task> act = () => queue.CompleteJobAsync(job, new SlicingResult(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateAdmissionClosedException>();
+        repo.VerifyNoOtherCalls();
+    }
+
+    [Fact]
+    public async Task UpdateProgressAsync_GateClosed_ThrowsAndNeverWritesProgress()
+    {
+        var repo = new Mock<ISliceJobRepository>(MockBehavior.Strict);
+        var gate = new Mock<IHostUpdateAdmissionGate>(MockBehavior.Strict);
+        gate.Setup(g => g.IsClosedAsync(It.IsAny<CancellationToken>())).ReturnsAsync(true);
+        var queue = new DbSlicerJobQueue(repo.Object, hostUpdateAdmissionGate: gate.Object);
+
+        Func<Task> act = () => queue.UpdateProgressAsync(ClaimedJob(), 50, cancellationToken: CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateAdmissionClosedException>();
+        repo.VerifyNoOtherCalls();
+    }
+
+    private static DistributedSlicingJob ClaimedJob() => new()
+    {
+        Id = Guid.NewGuid(),
+        WorkerId = Guid.NewGuid().ToString(),
+        ClaimToken = Guid.NewGuid(),
+    };
+
 }

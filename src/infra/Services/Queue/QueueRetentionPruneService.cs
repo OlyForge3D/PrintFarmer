@@ -52,6 +52,7 @@ public sealed class QueueRetentionPruneService(
             if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
             {
                 await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
             }
             else
             {

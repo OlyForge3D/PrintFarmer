@@ -122,7 +122,7 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
-    public async Task CheckAsync_EveryDependencyHealthy_ReportsAvailable()
+    public async Task CheckAsync_KnownPhysicalGapsRemain_ReportsCodeOwnedUnavailableFacilities()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -140,8 +140,11 @@ public class HostUpdateExecutionAvailabilityTests
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
-            result.Reasons.Should().BeEmpty();
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
+            result.Reasons.Should().Contain("facility_unavailable:slicer_claim_progress_completion_fence_incomplete");
+            result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
+            result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
         }
         finally
         {
@@ -174,7 +177,7 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().NotContain(r => r.StartsWith("facility_unavailable:", StringComparison.Ordinal));
+            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().Contain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
             result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal)).Should().Contain("webhook-delivery");
         }
@@ -334,8 +337,8 @@ public class HostUpdateExecutionAvailabilityTests
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
-            result.Reasons.Should().BeEmpty();
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
         }
         finally
         {
@@ -546,7 +549,8 @@ public class HostUpdateExecutionAvailabilityTests
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().NotContain(r => r.StartsWith("restart_reconciliation_pending", StringComparison.Ordinal));
         }
         finally
@@ -579,7 +583,8 @@ public class HostUpdateExecutionAvailabilityTests
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             admission.QuiesceCallCount.Should().Be(0);
         }
         finally
