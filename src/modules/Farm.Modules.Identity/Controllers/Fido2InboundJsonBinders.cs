@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Fido2NetLib;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.ModelBinding;
 
 namespace Farm.Modules.Identity.Controllers;
@@ -25,6 +26,24 @@ namespace Farm.Modules.Identity.Controllers;
 internal static class Fido2InboundJsonOptions
 {
     public static readonly JsonSerializerOptions Options = new(JsonSerializerDefaults.Web);
+}
+
+/// <summary>
+/// <see cref="ModelBinderAttribute"/> variant that keeps <see cref="ModelMetadata.BindingSource"/> reported
+/// as <see cref="BindingSource.Body"/> (matching the <c>[FromBody]</c> parameter this replaces) instead of
+/// falling back to <see cref="BindingSource.Custom"/>. <see cref="ModelBinderAttribute.BindingSource"/> only
+/// has a protected setter, so it cannot be set as a named argument on the base attribute directly; this
+/// keeps OpenAPI/Swagger generation and any other tooling that inspects binding source reporting the
+/// parameter as a JSON request body, exactly as it did with <c>[FromBody]</c>.
+/// </summary>
+[AttributeUsage(AttributeTargets.Parameter | AttributeTargets.Property)]
+internal sealed class Fido2InboundBodyModelBinderAttribute : ModelBinderAttribute
+{
+    public Fido2InboundBodyModelBinderAttribute(Type binderType)
+    {
+        BinderType = binderType;
+        BindingSource = BindingSource.Body;
+    }
 }
 
 /// <summary>
@@ -64,12 +83,23 @@ internal sealed class AuthenticatorAttestationRawResponseModelBinder : IModelBin
 }
 
 /// <summary>
+/// Wire envelope for the passkey login completion body, deserialized with
+/// <see cref="Fido2InboundJsonOptions"/> so the nested <see cref="AuthenticatorAssertionRawResponse"/>.Type
+/// resolves via Fido2NetLib's own attributes instead of PrintFarmer's global enum converter (issue #2763).
+/// Deserializing the whole envelope in one pass (rather than hand-walking a <see cref="JsonDocument"/>)
+/// keeps the case-insensitive property matching that <see cref="JsonSerializerDefaults.Web"/> provides, and
+/// lets <see cref="JsonSerializer.DeserializeAsync{TValue}(System.IO.Stream, JsonSerializerOptions?, System.Threading.CancellationToken)"/>
+/// reject a non-object JSON root (e.g. <c>[]</c>, a bare string/number, or <c>null</c>) as a <see cref="JsonException"/>
+/// - rather than a <c>JsonElement.TryGetProperty</c> call throwing <see cref="InvalidOperationException"/>
+/// on a non-object root and escaping as an unhandled 500.
+/// </summary>
+internal sealed record PasskeyLoginCompleteEnvelope(string? Username, AuthenticatorAssertionRawResponse? AssertionResponse);
+
+/// <summary>
 /// Deserializes the passkey login completion body directly with <see cref="Fido2InboundJsonOptions"/>,
 /// bypassing the MVC input formatter (and its global enum converter) that <c>[FromBody]</c> would otherwise use.
-/// The request's nested <c>assertionResponse</c> object is parsed manually because a top-level
-/// <c>[FromBody]</c>/<c>[ModelBinder]</c> replacement is the only way to isolate the whole object graph in one
-/// pass - property-level binders on a <c>[FromBody]</c>-bound complex type are never invoked. See
-/// <see cref="Fido2InboundJsonOptions"/> for the full rationale (issue #2763).
+/// See <see cref="Fido2InboundJsonOptions"/> and <see cref="PasskeyLoginCompleteEnvelope"/> for the full
+/// rationale (issue #2763).
 /// </summary>
 internal sealed class PasskeyLoginCompleteRequestModelBinder : IModelBinder
 {
@@ -80,23 +110,20 @@ internal sealed class PasskeyLoginCompleteRequestModelBinder : IModelBinder
         HttpRequest request = bindingContext.HttpContext.Request;
         try
         {
-            using JsonDocument document = await JsonDocument.ParseAsync(
+            PasskeyLoginCompleteEnvelope? envelope = await JsonSerializer.DeserializeAsync<PasskeyLoginCompleteEnvelope>(
                 request.Body,
-                options: default,
-                cancellationToken: bindingContext.HttpContext.RequestAborted);
+                Fido2InboundJsonOptions.Options,
+                bindingContext.HttpContext.RequestAborted);
 
-            JsonElement root = document.RootElement;
+            if (envelope is null)
+            {
+                bindingContext.ModelState.TryAddModelError(bindingContext.ModelName, "The passkey login request body is required.");
+                bindingContext.Result = ModelBindingResult.Failed();
+                return;
+            }
 
-            string username = root.TryGetProperty("username", out JsonElement usernameElement) && usernameElement.ValueKind == JsonValueKind.String
-                ? usernameElement.GetString() ?? string.Empty
-                : string.Empty;
-
-            AuthenticatorAssertionRawResponse? assertionResponse = root.TryGetProperty("assertionResponse", out JsonElement assertionElement)
-                && assertionElement.ValueKind == JsonValueKind.Object
-                    ? assertionElement.Deserialize<AuthenticatorAssertionRawResponse>(Fido2InboundJsonOptions.Options)
-                    : null;
-
-            bindingContext.Result = ModelBindingResult.Success(new PasskeyLoginCompleteRequest(username, assertionResponse));
+            bindingContext.Result = ModelBindingResult.Success(
+                new PasskeyLoginCompleteRequest(envelope.Username ?? string.Empty, envelope.AssertionResponse));
         }
         catch (JsonException ex)
         {

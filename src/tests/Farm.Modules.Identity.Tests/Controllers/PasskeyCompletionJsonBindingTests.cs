@@ -173,4 +173,39 @@ public class PasskeyCompletionJsonBindingTests : IClassFixture<PasskeyCompletion
             s => s.CompleteRegistrationAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAttestationRawResponse>(), It.IsAny<CancellationToken>()),
             Times.Never);
     }
+
+    [Fact]
+    public async Task LoginComplete_MalformedJson_Returns400ViaModelState()
+    {
+        using HttpClient client = _factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/auth/passkey/login/complete",
+            JsonContent("{ not valid json"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _factory.PasskeyServiceMock.Verify(
+            s => s.CompleteLoginAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAssertionRawResponse>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    [Fact]
+    public async Task LoginComplete_NonObjectRootJson_Returns400ViaModelState()
+    {
+        // Regression guard: a JSON root that parses successfully but isn't an object (e.g. an
+        // array) must fail model binding with a clean 400, not an unhandled 500 - see
+        // PasskeyLoginCompleteEnvelope for why deserializing straight into the envelope type
+        // (rather than hand-walking a JsonDocument) makes this a JsonException, not an
+        // InvalidOperationException from JsonElement.TryGetProperty on a non-object root.
+        using HttpClient client = _factory.CreateClient();
+
+        using HttpResponseMessage response = await client.PostAsync(
+            "/api/auth/passkey/login/complete",
+            JsonContent("[]"));
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        _factory.PasskeyServiceMock.Verify(
+            s => s.CompleteLoginAsync(It.IsAny<string>(), It.IsAny<AuthenticatorAssertionRawResponse>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
 }

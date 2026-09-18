@@ -459,7 +459,7 @@ public class AuthController(
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> PasskeyRegisterCompleteAsync(
-        [ModelBinder(BinderType = typeof(AuthenticatorAttestationRawResponseModelBinder))] AuthenticatorAttestationRawResponse attestationResponse,
+        [Fido2InboundBodyModelBinder(typeof(AuthenticatorAttestationRawResponseModelBinder))] AuthenticatorAttestationRawResponse attestationResponse,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(attestationResponse);
@@ -535,7 +535,7 @@ public class AuthController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> PasskeyLoginCompleteAsync(
-        [ModelBinder(BinderType = typeof(PasskeyLoginCompleteRequestModelBinder))] PasskeyLoginCompleteRequest request,
+        [Fido2InboundBodyModelBinder(typeof(PasskeyLoginCompleteRequestModelBinder))] PasskeyLoginCompleteRequest request,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
