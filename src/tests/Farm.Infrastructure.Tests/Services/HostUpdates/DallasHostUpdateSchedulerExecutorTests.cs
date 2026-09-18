@@ -183,6 +183,25 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
             (await adapter.ExecuteAsync(Request(operationToken: "operation-2"), default)).Reason);
     }
 
+    [Fact]
+    public async Task DisposeAsync_ThrowingCancellationCallbackStillWaitsForActiveExecution()
+    {
+        ThrowingCancellationExecutor executor = new();
+        DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
+        await executor.Started.Task;
+
+        Task disposal = adapter.DisposeAsync().AsTask();
+        await executor.CancellationObserved.Task;
+
+        Assert.False(disposal.IsCompleted);
+        executor.Release.TrySetResult();
+        await execution;
+        AggregateException exception = await Assert.ThrowsAsync<AggregateException>(() => disposal);
+        Assert.StartsWith("host_update_shutdown_cancellation_failed", exception.Message, StringComparison.Ordinal);
+        Assert.Contains(exception.Flatten().InnerExceptions, error => error is InvalidOperationException { Message: "cancellation_callback_failed" });
+    }
+
     /// <summary>Executor with an explicit pause hook so one generation can be held open across another.</summary>
     private sealed class GatedExecutor : IHostUpdateExecutor
     {
@@ -229,6 +248,25 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
         {
             Started.TrySetResult();
             using CancellationTokenRegistration registration = cancellationToken.Register(() => CancellationObserved.TrySetResult());
+            await Release.Task;
+            return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
+        }
+    }
+
+    private sealed class ThrowingCancellationExecutor : IHostUpdateExecutor
+    {
+        public TaskCompletionSource Started { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource CancellationObserved { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public TaskCompletionSource Release { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public async Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default)
+        {
+            Started.TrySetResult();
+            using CancellationTokenRegistration registration = cancellationToken.Register(() =>
+            {
+                CancellationObserved.TrySetResult();
+                throw new InvalidOperationException("cancellation_callback_failed");
+            });
             await Release.Task;
             return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
         }

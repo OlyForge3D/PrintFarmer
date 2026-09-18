@@ -142,22 +142,37 @@ public sealed class DallasHostUpdateSchedulerExecutor(
             return;
         }
 
+        List<Exception> cancellationErrors = [];
+        foreach (ActiveOperation operation in operations)
+        {
+            try
+            {
+                await operation.Cancellation.CancelAsync().ConfigureAwait(false);
+            }
+            catch (ObjectDisposedException)
+            {
+            }
+            catch (Exception exception)
+            {
+                cancellationErrors.Add(exception);
+            }
+        }
+
         try
         {
-            foreach (ActiveOperation operation in operations)
-            {
-                try
-                {
-                    await operation.Cancellation.CancelAsync().ConfigureAwait(false);
-                }
-                catch (ObjectDisposedException)
-                {
-                }
-            }
-
 #pragma warning disable VSTHRD003
             await Task.WhenAll(operations.Select(operation => operation.Completion.Task)).ConfigureAwait(false);
 #pragma warning restore VSTHRD003
+
+            if (cancellationErrors.Count > 0)
+            {
+                throw new AggregateException("host_update_shutdown_cancellation_failed", cancellationErrors);
+            }
+        }
+        catch (Exception exception)
+        {
+            _disposeCompletion.TrySetException(exception);
+            throw;
         }
         finally
         {
