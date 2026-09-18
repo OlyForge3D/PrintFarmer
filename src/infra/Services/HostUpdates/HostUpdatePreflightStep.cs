@@ -69,12 +69,12 @@ public sealed class FileInstalledHostStateStore(string path) : IInstalledHostSta
             throw new HostUpdateInstalledStateCorruptException("record_null");
         }
 
-        if (!HostUpdateValidation.IsIdentifier(state.ReleaseId))
+        if (!HostUpdateValidation.IsReleaseId(state.ReleaseId))
         {
             throw new HostUpdateInstalledStateCorruptException("release_id_invalid");
         }
 
-        if (!HostUpdateValidation.IsDigest(state.ManifestDigest))
+        if (!HostUpdateValidation.IsCanonicalDigest(state.ManifestDigest))
         {
             throw new HostUpdateInstalledStateCorruptException("manifest_digest_invalid");
         }
@@ -91,7 +91,7 @@ public sealed class FileInstalledHostStateStore(string path) : IInstalledHostSta
                 throw new HostUpdateInstalledStateCorruptException("service_id_invalid");
             }
 
-            if (!HostUpdateValidation.IsDigest(digest.Value))
+            if (!HostUpdateValidation.IsCanonicalDigest(digest.Value))
             {
                 throw new HostUpdateInstalledStateCorruptException("service_digest_invalid");
             }
