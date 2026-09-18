@@ -4251,6 +4251,7 @@ export interface SystemDatabaseInfo {
 
 export interface SystemInfo {
   inventory?: ServiceInventory | null;
+  updateScheduling?: UpdateSchedulingStatus | null;
   app: SystemAppInfo;
   cpu: SystemCpuInfo;
   memory: SystemMemoryInfo;

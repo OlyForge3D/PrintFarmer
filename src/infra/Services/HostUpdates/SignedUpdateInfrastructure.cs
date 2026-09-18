@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
@@ -89,33 +89,45 @@ public static partial class SignedUpdateManifestValidator
     public static SignedUpdateValidationResult Validate(SignedUpdateManifest? manifest)
     {
         List<string> errors = [];
-        if (manifest is null) return new(false, ["manifest_missing"]);
-        if (manifest.Schema != 1) errors.Add("schema_invalid");
-        if (!CanonicalVersion().IsMatch(manifest.Version) || !IsVersionForChannel(manifest.Version, manifest.Channel)) errors.Add("version_invalid");
-        if (manifest.Channel is not ("stable" or "insider")) errors.Add("channel_invalid");
+        if (manifest is null)
+            return new(false, ["manifest_missing"]);
+        if (manifest.Schema != 1)
+            errors.Add("schema_invalid");
+        if (!CanonicalVersion().IsMatch(manifest.Version) || !IsVersionForChannel(manifest.Version, manifest.Channel))
+            errors.Add("version_invalid");
+        if (manifest.Channel is not ("stable" or "insider"))
+            errors.Add("channel_invalid");
         string expectedTag = $"v{manifest.Version}";
-        if (manifest.Tag != expectedTag) errors.Add("tag_version_mismatch");
+        if (manifest.Tag != expectedTag)
+            errors.Add("tag_version_mismatch");
         string expectedBranch = manifest.Channel == "stable" ? "main" : "development";
-        if (manifest.SourceBranch != expectedBranch) errors.Add("source_branch_invalid");
-        if (!LowerHex40().IsMatch(manifest.SourceCommit)) errors.Add("source_commit_invalid");
-        if (!PositiveDecimal().IsMatch(manifest.BuildId ?? string.Empty)) errors.Add("build_id_invalid");
+        if (manifest.SourceBranch != expectedBranch)
+            errors.Add("source_branch_invalid");
+        if (!LowerHex40().IsMatch(manifest.SourceCommit))
+            errors.Add("source_commit_invalid");
+        if (string.IsNullOrWhiteSpace(manifest.BuildId) || manifest.BuildId.Length > 128)
+            errors.Add("build_id_invalid");
         try
         {
-            if (manifest.Sequence != DeriveSequence(manifest.Version)) errors.Add("sequence_mismatch");
+            if (manifest.Sequence != DeriveSequence(manifest.Version))
+                errors.Add("sequence_mismatch");
         }
         catch (Exception exception) when (exception is FormatException or OverflowException)
         {
             errors.Add("sequence_invalid");
         }
-        if (!manifest.ManagedUpdateEligible) errors.Add("managed_update_ineligible");
+        if (!manifest.ManagedUpdateEligible)
+            errors.Add("managed_update_ineligible");
         IReadOnlyList<string> manifestPlatforms = manifest.Platforms ?? [];
         string[] expectedTopLevelPlatforms = ["linux-amd64", "linux-arm64"];
         HashSet<string> expectedPlatformDigestKeys = new(StringComparer.Ordinal);
-        if (manifest.Services is null || manifest.Services.Count != OrderedServiceIds.Length) errors.Add("service_set_invalid");
+        if (manifest.Services is null || manifest.Services.Count != OrderedServiceIds.Length)
+            errors.Add("service_set_invalid");
         else
         {
             string[] ids = manifest.Services.Select(service => service?.Id ?? string.Empty).ToArray();
-            if (!ids.SequenceEqual(OrderedServiceIds, StringComparer.Ordinal)) errors.Add("service_set_invalid");
+            if (!ids.SequenceEqual(OrderedServiceIds, StringComparer.Ordinal))
+                errors.Add("service_set_invalid");
             foreach (SignedUpdateService service in manifest.Services)
             {
                 if (service is null)
@@ -124,7 +136,8 @@ public static partial class SignedUpdateManifestValidator
                     continue;
                 }
 
-                if (!IsApprovedImage(service.Id, service.Image)) errors.Add("image_reference_invalid");
+                if (!IsApprovedImage(service.Id, service.Image))
+                    errors.Add("image_reference_invalid");
                 IReadOnlyList<string> servicePlatforms = service.Platforms ?? [];
                 if (servicePlatforms.Count == 0
                     || servicePlatforms.Distinct(StringComparer.Ordinal).Count() != servicePlatforms.Count
@@ -153,7 +166,8 @@ public static partial class SignedUpdateManifestValidator
 
         if (manifest.Platforms is null || manifest.Platforms.Count == 0 || manifest.Platforms.Distinct(StringComparer.Ordinal).Count() != manifest.Platforms.Count ||
             manifest.Platforms.Any(platform => !IsPlatform(platform))
-            || !manifest.Platforms.SequenceEqual(expectedTopLevelPlatforms, StringComparer.Ordinal)) errors.Add("platform_invalid");
+            || !manifest.Platforms.SequenceEqual(expectedTopLevelPlatforms, StringComparer.Ordinal))
+            errors.Add("platform_invalid");
         if (manifest.PlatformDigests is null
             || manifest.PlatformDigests.Count != expectedPlatformDigestKeys.Count
             || manifest.PlatformDigests.Keys.Any(key => !expectedPlatformDigestKeys.Contains(key))
@@ -161,7 +175,8 @@ public static partial class SignedUpdateManifestValidator
         {
             errors.Add("platform_digest_invalid");
         }
-        if (manifest.MinimumUpdaterVersion is null || !HostUpdateValidation.IsSemanticVersion(manifest.MinimumUpdaterVersion)) errors.Add("compatibility_invalid");
+        if (manifest.MinimumUpdaterVersion is null || !HostUpdateValidation.IsSemanticVersion(manifest.MinimumUpdaterVersion))
+            errors.Add("compatibility_invalid");
         return errors.Count == 0 ? SignedUpdateValidationResult.Valid : new(false, errors.Distinct(StringComparer.Ordinal).Order(StringComparer.Ordinal).ToArray());
     }
 
@@ -174,8 +189,12 @@ public static partial class SignedUpdateManifestValidator
             throw new FormatException("Sequence version must use unsigned decimal components without leading zeros.");
         }
 
-        Group insider = match.Groups["insider"];
         long major = ParseBounded(match.Groups["major"].Value, SequenceMajorMaximum, "Major version");
+        Group insider = match.Groups["insider"];
+
+        // Mirrors the signer contract (scripts/ci/release-manifest.mjs): only a *stable* signed
+        // release must have a non-zero major version; a 0.x insider prerelease is legitimate and
+        // must stay derivable here, or the host would reject releases the signer can publish.
         if (!insider.Success && major < 1)
         {
             throw new FormatException("Stable major version must be greater than zero.");
@@ -259,7 +278,8 @@ public static partial class SignedUpdateManifestValidator
     private static JsonElement RequireKind(JsonElement element, string name, params JsonValueKind[] kinds)
     {
         JsonElement value = element.GetProperty(name);
-        if (!kinds.Contains(value.ValueKind)) throw new JsonException($"{name} has an invalid JSON type.");
+        if (!kinds.Contains(value.ValueKind))
+            throw new JsonException($"{name} has an invalid JSON type.");
         return value;
     }
 
@@ -331,8 +351,6 @@ public static partial class SignedUpdateManifestValidator
     private static partial Regex StableTag();
     [GeneratedRegex(@"^v(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)\.(?:0|[1-9]\d*)-insider\.[1-9]\d*$", RegexOptions.CultureInvariant)]
     private static partial Regex InsiderTag();
-    [GeneratedRegex("^[1-9][0-9]*$", RegexOptions.CultureInvariant)]
-    private static partial Regex PositiveDecimal();
     [GeneratedRegex("^[0-9a-f]{40}$", RegexOptions.CultureInvariant)]
     private static partial Regex LowerHex40();
     [GeneratedRegex("^sha256:[0-9a-f]{64}$", RegexOptions.CultureInvariant)]
@@ -362,7 +380,8 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
 
     public async Task<VerifiedSignedUpdateRelease?> DiscoverAsync(string channel, CancellationToken cancellationToken)
     {
-        if (channel is not ("stable" or "insider")) throw new ArgumentException("Unsupported channel.", nameof(channel));
+        if (channel is not ("stable" or "insider"))
+            throw new ArgumentException("Unsupported channel.", nameof(channel));
         List<GitHubRelease> releases = [];
         for (int page = 1; page <= 10; page++)
         {
@@ -381,9 +400,11 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
             IReadOnlyList<GitHubRelease>? pageReleases = JsonSerializer.Deserialize<IReadOnlyList<GitHubRelease>>(
                 releaseBytes,
                 new JsonSerializerOptions(JsonSerializerDefaults.Web));
-            if (pageReleases is null || pageReleases.Count == 0) break;
+            if (pageReleases is null || pageReleases.Count == 0)
+                break;
             releases.AddRange(pageReleases);
-            if (pageReleases.Count < 100) break;
+            if (pageReleases.Count < 100)
+                break;
         }
 
         string identity = channel == "stable"
@@ -395,7 +416,8 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
                 && SignedUpdateManifestValidator.IsTagForChannel(candidate.TagName, channel))
             .Take(MaximumCandidates))
         {
-            if (release.Assets is null) continue;
+            if (release.Assets is null)
+                continue;
             GitHubReleaseAsset[] manifestAssets = release.Assets.Where(asset => asset.Name == "update-manifest.json").ToArray();
             GitHubReleaseAsset[] bundleAssets = release.Assets.Where(asset => asset.Name == "update-manifest.sigstore.json").ToArray();
             if (manifestAssets.Length != 1
@@ -577,8 +599,10 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
                 CreateNoWindow = true,
             },
         };
-        foreach (string argument in command.Arguments) process.StartInfo.ArgumentList.Add(argument);
-        if (!process.Start()) return new(-1, string.Empty);
+        foreach (string argument in command.Arguments)
+            process.StartInfo.ArgumentList.Add(argument);
+        if (!process.Start())
+            return new(-1, string.Empty);
 
         Stopwatch stopwatch = Stopwatch.StartNew();
         using CancellationTokenSource deadline = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
@@ -661,7 +685,8 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
         while ((read = await reader.ReadAsync(buffer.AsMemory(), cancellationToken)) > 0)
         {
             int remaining = maximum - captured.Length;
-            if (remaining > 0) captured.Append(buffer, 0, Math.Min(remaining, read));
+            if (remaining > 0)
+                captured.Append(buffer, 0, Math.Min(remaining, read));
         }
 
         return captured.ToString();
@@ -689,7 +714,8 @@ public sealed class ProcessCosignVerifier : ISignedReleaseVerifier
 
     public async Task<bool> VerifyAsync(ReadOnlyMemory<byte> manifest, ReadOnlyMemory<byte> bundle, string certificateIdentity, CancellationToken cancellationToken)
     {
-        if (options.Timeout <= TimeSpan.Zero || options.MaxDiagnostics < 0) throw new InvalidOperationException("Cosign verifier options are invalid.");
+        if (options.Timeout <= TimeSpan.Zero || options.MaxDiagnostics < 0)
+            throw new InvalidOperationException("Cosign verifier options are invalid.");
         string directory = directoryFactory();
         string manifestPath = Path.Combine(directory, "manifest.json");
         string bundlePath = Path.Combine(directory, "bundle.json");
@@ -707,7 +733,8 @@ public sealed class ProcessCosignVerifier : ISignedReleaseVerifier
         catch (System.ComponentModel.Win32Exception) { return false; }
         finally
         {
-            try { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
+            try
+            { if (Directory.Exists(directory)) Directory.Delete(directory, true); }
             catch (IOException) { }
             catch (UnauthorizedAccessException) { }
         }
@@ -733,7 +760,8 @@ public sealed class VerifiedGitHubReleaseMetadataProvider(GitHubSignedReleaseDis
         VerifiedSignedUpdateRelease verifiedRelease = await discovery.DiscoverAsync(channel, ct) ?? throw new InvalidDataException("No verified release is available.");
         SignedUpdateManifest manifest = verifiedRelease.Manifest;
         SignedUpdateValidationResult validation = SignedUpdateManifestValidator.Validate(manifest);
-        if (!validation.IsValid) throw new InvalidDataException(string.Join(',', validation.Errors));
+        if (!validation.IsValid)
+            throw new InvalidDataException(string.Join(',', validation.Errors));
         string version = manifest.Version;
         string releaseId = $"{manifest.Channel}:{version}";
         string manifestDigest = $"sha256:{Convert.ToHexString(SHA256.HashData(verifiedRelease.ManifestBytes)).ToLowerInvariant()}";

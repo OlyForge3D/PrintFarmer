@@ -810,3 +810,14 @@ Docker Network
 ```
 
 See **[Deployment Guide](./DEPLOYMENT.md)** for detailed deployment options.
+
+### Automatic host update status
+
+`SystemInfoDto.UpdateScheduling` is additive. It is non-null when the scheduler subsystem is registered, including the current fail-closed unavailable state; `null` is reserved for a subsystem that is not wired. The status reports persisted policy/channel state, due/backoff timestamps, kill-switch state, executor availability, and safe reason codes. `configuredEnabled` means an administrator saved durable policy intent; it is not automatic execution authority. `effectiveEnabled` remains false until every required concrete adapter is available.
+
+The scheduler core (`HostUpdateScheduler` in `src/infra/Services/HostUpdates/HostUpdateScheduler.cs`) implements cadence enforcement, kill-switch checks (at entry and freshly re-read immediately before executor admission), an atomic replay decision (`IHostUpdateReplayStore.DecideAsync`) keyed by enrolled trust root and channel with high-water/sequence/identity/disposition semantics, and a persisted policy fence (`IHostUpdatePolicyFence`) that rejects policy-revision rollback or equal-revision content drift. When `HostUpdates:HostState:Enabled=true` is explicitly configured against a validated secure root, DI registers concrete file-backed replay anchor, replay store, policy fence, manual-authorization store, policy repository/CAS endpoint, and execution journal/lock. Ordinary default startup leaves those ports registered as unavailable so admin routes return explicit 503 `ProblemDetails` instead of activation failures.
+
+Host-update standing authorization is not exposed through the generic `IAppSetting` settings surface. The canonical mutation path is the farm-admin-protected host-state policy repository and `/api/admin/host-updates/automation-policy` compare-and-swap endpoint. The older generic `UpdateAutomation` shape is only a legacy DTO/validation shape and must not be used as a policy mutation authority.
+
+The active production boundary is still inert because the constrained production executor, hosted scheduler loop, physical admission consumers, and concrete installation/readiness/recovery adapters are absent. `IHostUpdateAdmissionFence` is only a logical contract today: scheduler/admin paths can obey it, but print, slice, queue, printer-command, and recovery subsystems do not yet publish physical admission state, so it must not be represented as an enforced fleet-wide gate. The registered recovery coordinator remains unavailable until a separately audited concrete recovery port is supplied; current recovery state is journal-only and never performs physical restore side effects.
+

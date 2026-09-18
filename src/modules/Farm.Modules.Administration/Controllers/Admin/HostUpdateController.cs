@@ -1,55 +1,25 @@
-﻿using Farm.Infrastructure.Authorization;
+﻿using System.Security;
+using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Modules.Administration.Controllers.Admin;
-
-/// <summary>
-/// One immutable, fully specified execution request. The request body is bound once and never
-/// partially updated afterward; resubmitting the same <see cref="ReleaseId"/> resumes the same
-/// journal-tracked operation (idempotent-by-release, see <c>HostUpdateExecutor</c>).
-/// </summary>
-public sealed record HostUpdateExecuteRequestBody(
-    string ReleaseId,
-    long AuthenticatedSequence,
-    string ManifestDigest,
-    string SourceCommit,
-    string Channel,
-    IReadOnlyList<HostUpdateExecutionTarget> Targets)
-{
-    public bool TryToExecutionRequest(out HostUpdateExecutionRequest? request, out string error)
-    {
-        request = null;
-        if (!Enum.TryParse(Channel, ignoreCase: true, out HostUpdateExecutionChannel channel))
-        {
-            error = "channel_invalid";
-            return false;
-        }
-
-        var candidate = new HostUpdateExecutionRequest(ReleaseId, AuthenticatedSequence, ManifestDigest, SourceCommit, channel, Targets);
-        if (!candidate.IsValid(out error))
-        {
-            return false;
-        }
-
-        request = candidate;
-        return true;
-    }
-}
 
 /// <summary>Operator-visible status for one release's execution/recovery history.</summary>
 public sealed record HostUpdateStatusResponse(
     string ReleaseId,
     HostUpdateExecutionState CurrentState,
-    IReadOnlyList<HostUpdateExecutionActivity> Activities,
-    HostUpdateRecoveryOutcomeRecord? RecoveryOutcome = null);
+    IReadOnlyList<HostUpdateExecutionActivity> Activities);
+
+public sealed record HostUpdateRecoveryRequestBody(string? RequestId = null);
 
 /// <summary>
-/// Manual-first admin API for the host update executor (#2663). This is the operator-initiated
-/// path only: it grants no standing automatic-scheduler permission, and every call is
-/// authorized as a fresh administrative action. Automatic scheduling on this same engine is
-/// #2666's later, separately authorized milestone.
+/// Manual-first admin API for the host update executor (#2663/#2666). The API accepts only
+/// operator intent/authorization references; immutable release identity, sequence, manifest,
+/// channel, trust root, platform, and execution target digests are resolved server-side from
+/// signed verified evidence and protected authorization state immediately before execution.
 /// </summary>
 [ApiController]
 [Route("api/admin/host-updates")]
@@ -57,16 +27,54 @@ public sealed record HostUpdateStatusResponse(
 [Tags("Admin - Host Updates")]
 public sealed class HostUpdateController(
     IHostUpdateExecutor executor,
-    IHostUpdateExecutionJournal journal,
-    IHostUpdateRecoveryCoordinator recoveryCoordinator,
     IHostUpdateExecutionRequestResolver requestResolver,
-    HostUpdateExecutionAvailabilityHolder availabilityHolder,
-    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore) : ControllerBase
+    IHostUpdateExecutionJournal journal,
+    IHostUpdateRecoveryCoordinator recoveryCoordinator) : ControllerBase
 {
+    [HttpPost("authorizations")]
+    [ProducesResponseType(typeof(HostUpdateManualAuthorizationResponse), StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<HostUpdateManualAuthorizationResponse>> AuthorizeAsync(
+        [FromBody] HostUpdateManualAuthorizationIntent? intent,
+        CancellationToken cancellationToken)
+    {
+        if (Unavailable(requestResolver, out ObjectResult? unavailable))
+        {
+            return unavailable;
+        }
+
+        try
+        {
+            HostUpdateManualAuthorizationResponse response = await requestResolver.AuthorizeCurrentAsync(
+                intent ?? new HostUpdateManualAuthorizationIntent(),
+                cancellationToken).ConfigureAwait(false);
+            return Ok(response);
+        }
+        catch (HostUpdateSubsystemUnavailableException ex)
+        {
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
+        }
+        catch (InvalidOperationException ex) when (HostUpdateAvailabilityCodes.IsDurableUnavailable(ex.Message))
+        {
+            return AvailabilityProblem(ex.Message);
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Conflict(new { code = ex.Message });
+        }
+    }
+
     /// <summary>
-    /// Executes (or resumes) one manually approved host update to completion or
-    /// <see cref="HostUpdateExecutionState.RecoveryRequired"/>. Never enables unattended
-    /// automatic scheduling; this call must be made explicitly by an authorized operator.
+    /// Executes one manually approved host update. The body may reference an existing one-time
+    /// authorization ID or be empty to atomically authorize the current verified candidate once;
+    /// it never carries target release material supplied by the client.
     /// </summary>
     [HttpPost("execute")]
     [ProducesResponseType(typeof(HostUpdateStatusResponse), StatusCodes.Status200OK)]
@@ -74,30 +82,62 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<HostUpdateStatusResponse>> ExecuteAsync(
-        [FromBody] HostUpdateExecuteRequestBody body,
+        [FromBody] HostUpdateManualAuthorizationIntent? intent,
         CancellationToken cancellationToken)
     {
-        if (TryRejectWhenUnavailable(body?.ReleaseId, out ActionResult? unavailable))
+        if (Unavailable(requestResolver, out ObjectResult? resolverUnavailable))
         {
-            return unavailable!;
+            return resolverUnavailable;
         }
 
-        if (body is null || string.IsNullOrWhiteSpace(body.ReleaseId))
+        if (Unavailable(executor, out ObjectResult? executorUnavailable))
         {
-            return BadRequest(new { code = "release_id_required" });
+            return executorUnavailable;
         }
 
-        HostUpdateExecutionRequest? request = await requestResolver.ResolveAsync(body.ReleaseId, cancellationToken).ConfigureAwait(false);
-        if (request is null)
+        HostUpdateExecutionResolutionResult resolution;
+        try
         {
-            return Conflict(new { code = "staged_authorization_required" });
+            resolution = await requestResolver.ResolveManualAsync(
+                intent ?? new HostUpdateManualAuthorizationIntent(),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (HostUpdateSubsystemUnavailableException ex)
+        {
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
         }
 
-        HostUpdateExecutionResult result = await executor.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
-        HostUpdateRecoveryOutcomeRecord? recoveryOutcome = await recoveryOutcomeStore.ReadAsync(result.ReleaseId, cancellationToken).ConfigureAwait(false);
-        var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities, recoveryOutcome);
+        if (!resolution.Succeeded || resolution.Request is null)
+        {
+            string code = resolution.Error ?? "request_not_authorized";
+            if (HostUpdateAvailabilityCodes.IsDurableUnavailable(code))
+            {
+                return AvailabilityProblem(code);
+            }
+
+            return Conflict(new { code });
+        }
+
+        HostUpdateExecutionResult result;
+        try
+        {
+            result = await executor.ExecuteAsync(resolution.Request, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HostUpdateSubsystemUnavailableException ex)
+        {
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
+        }
+
+        var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities);
         return result.State == HostUpdateExecutionState.RecoveryRequired ? Conflict(response) : Ok(response);
     }
 
@@ -107,22 +147,40 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<HostUpdateStatusResponse>> GetStatusAsync(string releaseId, CancellationToken cancellationToken)
+    public ActionResult<HostUpdateStatusResponse> GetStatus(string releaseId)
     {
-        IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
+        if (Unavailable(journal, out ObjectResult? unavailable))
+        {
+            return unavailable;
+        }
+
+        IReadOnlyList<HostUpdateExecutionActivity> activities;
+        try
+        {
+            activities = journal.Read(releaseId);
+        }
+        catch (HostUpdateSubsystemUnavailableException ex)
+        {
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
+        }
+
         if (activities.Count == 0)
         {
             return NotFound();
         }
 
         HostUpdateExecutionState current = activities[^1].State;
-        HostUpdateRecoveryOutcomeRecord? recoveryOutcome = await recoveryOutcomeStore.ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
-        return Ok(new HostUpdateStatusResponse(releaseId, current, activities, recoveryOutcome));
+        return Ok(new HostUpdateStatusResponse(releaseId, current, activities));
     }
 
     /// <summary>
-    /// Attempts recovery for a release currently left in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.
-    /// Only ever performed explicitly by an authorized operator; never triggered automatically.
+    /// Attempts recovery for a release currently left in recovery. Recovery accepts only the
+    /// route release identity and optional request ID, then reconstructs the exact immutable
+    /// request from the durable execution journal before invoking coordinator side effects.
     /// </summary>
     [HttpPost("{releaseId}/recover")]
     [ProducesResponseType(typeof(HostUpdateRecoveryResult), StatusCodes.Status200OK)]
@@ -130,18 +188,35 @@ public sealed class HostUpdateController(
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
-    [ProducesResponseType(StatusCodes.Status503ServiceUnavailable)]
     public async Task<ActionResult<HostUpdateRecoveryResult>> RecoverAsync(
         string releaseId,
-        [FromBody] HostUpdateExecuteRequestBody body,
+        [FromBody] HostUpdateRecoveryRequestBody? body,
         CancellationToken cancellationToken)
     {
-        if (TryRejectWhenUnavailable(releaseId, out ActionResult? unavailable))
+        if (Unavailable(journal, out ObjectResult? journalUnavailable))
         {
-            return unavailable!;
+            return journalUnavailable;
         }
 
-        IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
+        if (Unavailable(recoveryCoordinator, out ObjectResult? recoveryUnavailable))
+        {
+            return recoveryUnavailable;
+        }
+
+        IReadOnlyList<HostUpdateExecutionActivity> activities;
+        try
+        {
+            activities = journal.Read(releaseId);
+        }
+        catch (HostUpdateSubsystemUnavailableException ex)
+        {
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is NotSupportedException or InvalidDataException or IOException or UnauthorizedAccessException or SecurityException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
+        }
+
         if (activities.Count == 0)
         {
             return NotFound();
@@ -152,42 +227,73 @@ public sealed class HostUpdateController(
             return Conflict(new { code = "not_in_recovery" });
         }
 
-        HostUpdateExecutionRequest? request = await requestResolver.ResolveAsync(releaseId, cancellationToken).ConfigureAwait(false);
-        if (request is null)
+        HostUpdateExecutionRequest[] journalRequests = activities.Select(activity => activity.RequestBinding)
+            .Where(binding => binding is not null)
+            .Select(binding => binding!)
+            .ToArray();
+        string[] journalBindings = activities.Select(activity => activity.RequestBindingHash)
+            .Where(binding => !string.IsNullOrWhiteSpace(binding))
+            .Select(binding => binding!)
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+        if (journalRequests.Length != activities.Count || journalBindings.Length != 1 ||
+            journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), journalBindings[0], StringComparison.Ordinal)))
         {
-            return Conflict(new { code = "staged_authorization_required" });
+            string code = journalRequests.Length == 0 || journalBindings.Length == 0 ? "recovery_binding_missing" : "recovery_binding_mismatch";
+            return Conflict(new { code });
         }
 
-        HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(request, activities, cancellationToken).ConfigureAwait(false);
+        // Every journal request already hashed to the single recorded binding above, so the
+        // first entry is the authoritative failed request; no second equality sweep is needed.
+        HostUpdateExecutionRequest failedRequest = journalRequests[0];
+        if (!string.IsNullOrWhiteSpace(body?.RequestId) && !string.Equals(body.RequestId, failedRequest.RequestId, StringComparison.Ordinal))
+        {
+            return Conflict(new { code = "recovery_request_mismatch" });
+        }
+
+        HostUpdateRecoveryResult result;
+        try
+        {
+            result = await recoveryCoordinator.RecoverAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
+        }
+        catch (HostUpdateSubsystemUnavailableException ex)
+        {
+            return AvailabilityProblem(ex);
+        }
+        catch (Exception ex) when (ex is InvalidDataException or SecurityException or IOException or UnauthorizedAccessException or DbUpdateException)
+        {
+            return AvailabilityProblem(ex);
+        }
+
+        if (HostUpdateAvailabilityCodes.IsDurableUnavailable(result.Detail))
+        {
+            return AvailabilityProblem(result.Detail);
+        }
+
         return Ok(result);
     }
 
-    /// <summary>
-    /// Bishop/Hicks review (issue #2663): the executor's positively-proven availability (root
-    /// writable, journal intact, every required adapter/writer wired, restart reconciliation
-    /// clean -- see <see cref="HostUpdateExecutionAvailabilityProvider"/>) must gate every
-    /// mutating admin call, not just be exposed as an informational status a caller could choose
-    /// to ignore. A request that arrives while the executor is <c>Unavailable</c> (including,
-    /// critically, while restart reconciliation still reports an unresolved prior release) is
-    /// rejected before it ever touches <see cref="IHostUpdateExecutor"/> or
-    /// <see cref="IHostUpdateRecoveryCoordinator"/>, with the exact unavailability reasons
-    /// surfaced to the operator rather than an opaque failure deeper in the pipeline.
-    /// </summary>
-    private bool TryRejectWhenUnavailable(string? releaseId, out ActionResult? result)
+    private bool Unavailable(object service, out ObjectResult result)
     {
-        HostUpdateExecutionAvailability availability = availabilityHolder.Current;
-        if (availability.State == HostUpdateExecutionAvailabilityState.Available || IsOnlyMatchingRestartReconciliation(availability, releaseId))
+        if (service is IHostUpdateAvailability { IsAvailable: false } availability)
         {
-            result = null;
-            return false;
+            result = AvailabilityProblem(availability.UnavailableReason);
+            return true;
         }
 
-        result = StatusCode(StatusCodes.Status503ServiceUnavailable, new { code = "host_update_executor_unavailable", reasons = availability.Reasons });
-        return true;
+        result = null!;
+        return false;
     }
 
-    private static bool IsOnlyMatchingRestartReconciliation(HostUpdateExecutionAvailability availability, string? releaseId) =>
-        !string.IsNullOrWhiteSpace(releaseId) &&
-        availability.Reasons.Count > 0 &&
-        availability.Reasons.All(reason => reason.StartsWith($"restart_reconciliation_pending:{releaseId}:", StringComparison.Ordinal));
+    private ObjectResult AvailabilityProblem(Exception exception) => Problem(
+        detail: exception is HostUpdateSubsystemUnavailableException typed
+            ? HostUpdateAvailabilityCodes.SafeCode(typed.Code)
+            : HostUpdateAvailabilityCodes.StoreUnavailable,
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Host update subsystem unavailable");
+
+    private ObjectResult AvailabilityProblem(string reason) => Problem(
+        detail: HostUpdateAvailabilityCodes.SafeCode(reason),
+        statusCode: StatusCodes.Status503ServiceUnavailable,
+        title: "Host update subsystem unavailable");
 }
