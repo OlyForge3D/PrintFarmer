@@ -1,4 +1,4 @@
-namespace Farm.Infrastructure.Services.HostUpdates;
+﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
 /// <summary>Thrown when one or more writers could not be proven fenced within the bounded timeout.</summary>
@@ -93,9 +93,15 @@ public interface IHostUpdateFenceCoordinator
 }
 
 /// <summary>
-/// Fences the HTTP admission perimeter: once quiesced, the perimeter reports quiesced
-/// immediately because <see cref="IHostUpdateAdmissionGate"/> is consulted synchronously by
-/// every new request (there is no window for a new write to start after closing).
+/// Fences the HTTP admission perimeter. <see cref="IsQuiescedAsync"/> reports the gate's own
+/// closed/open state; the gate genuinely blocks a submission only where a real call site
+/// explicitly consults <see cref="IHostUpdateAdmissionGate.IsClosedAsync"/> before admitting new
+/// work. Current consumers cover queue submission, manual dispatch, batch dispatch,
+/// auto-dispatch ready acknowledgement, the auto-dispatch background loop, slicer job enqueue/claim,
+/// and webhook delivery. Remaining producer gaps are explicit code-owned unavailable facilities in
+/// <c>docs/HOST_UPDATE_EXECUTOR.md</c>. Closing the gate without every real call site wired does
+/// not, by itself, guarantee no new write starts; this class only proves the gate itself flipped,
+/// not that every producer honors it.
 /// </summary>
 public sealed class AdmissionFenceableWriter(IHostUpdateAdmissionGate admissionGate) : IFenceableWriter
 {
@@ -144,7 +150,7 @@ public interface IHostUpdateWriterActivityFlag
 }
 
 /// <summary>Process-wide, thread-safe <see cref="IHostUpdateWriterActivityFlag"/>.</summary>
-public sealed class InMemoryHostUpdateWriterActivityFlag : IHostUpdateWriterActivityFlag
+public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
 {
     private volatile bool _pauseRequested;
     private volatile bool _acknowledged;
@@ -156,24 +162,114 @@ public sealed class InMemoryHostUpdateWriterActivityFlag : IHostUpdateWriterActi
         return Task.CompletedTask;
     }
 
-    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => Task.FromResult(_pauseRequested);
+    public async Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) =>
+        _pauseRequested || (durableFence is not null && await durableFence.IsClosedAsync(cancellationToken).ConfigureAwait(false));
 
-    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => Task.FromResult(_pauseRequested && _acknowledged);
+    public async Task<bool> IsPausedAsync(CancellationToken cancellationToken) =>
+        await IsPauseRequestedAsync(cancellationToken).ConfigureAwait(false) && _acknowledged;
 
-    public Task ResumeAsync(CancellationToken cancellationToken)
+    public async Task ResumeAsync(CancellationToken cancellationToken)
     {
         _pauseRequested = false;
         _acknowledged = false;
-        return Task.CompletedTask;
+        if (durableFence is not null)
+        {
+            await durableFence.OpenAsync(cancellationToken).ConfigureAwait(false);
+        }
     }
 
-    public Task AcknowledgePausedAsync(CancellationToken cancellationToken)
+    public async Task AcknowledgePausedAsync(CancellationToken cancellationToken)
     {
-        if (_pauseRequested)
+        if (await IsPauseRequestedAsync(cancellationToken).ConfigureAwait(false))
         {
             _acknowledged = true;
         }
-
-        return Task.CompletedTask;
     }
+}
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for
+/// <see cref="Electricity.PowerReadingPruneService"/>. A distinct concrete type (rather than
+/// another registration of the bare interface) lets dependency injection route this specific
+/// writer's optional constructor parameter to its own independent pause/acknowledge state,
+/// separate from every other fenced background writer.
+/// </summary>
+public sealed class PowerReadingPruneFenceFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for
+/// <see cref="Queue.QueueRetentionPruneService"/>. See <see cref="PowerReadingPruneFenceFlag"/>
+/// for why a distinct concrete type is required instead of another bare-interface registration.
+/// </summary>
+public sealed class QueueRetentionPruneFenceFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for
+/// <see cref="Queue.Dispatch.AutoDispatchBackgroundService"/> -- the auto-dispatch loop that
+/// physically starts new printer dispatch workers. Named separately from the generic
+/// <c>queue-outbox-publisher</c> flag (Kane/panel finding: "physical admission barrier is not
+/// real" -- auto-dispatch specifically must stop *starting new dispatch workers* while fenced,
+/// not merely stop publishing outbox events) so the fence coordinator can prove this producer,
+/// specifically, has quiesced. See <see cref="PowerReadingPruneFenceFlag"/> for why a distinct
+/// concrete type is required instead of another bare-interface registration.
+/// </summary>
+public sealed class AutoDispatchFenceFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}
+
+/// <summary>
+/// Dedicated <see cref="IHostUpdateWriterActivityFlag"/> instance for outbound webhook delivery.
+/// This fences the webhook bridge so no external HTTP delivery or webhook delivery-log write can
+/// start while the host-update executor is in its pre-backup/migration/apply critical section.
+/// </summary>
+public sealed class WebhookDeliveryFenceFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
 }

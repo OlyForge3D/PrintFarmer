@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.PrinterCalibration;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Slicer.Module.Data;
 using Farm.Slicer.Module.Data.Repositories;
 using Farm.Slicer.Module.HostedServices;
@@ -320,6 +321,7 @@ public static class SlicerModuleExtensions
         _ = services.AddScoped<ICalibrationProfileResolver, CalibrationProfileResolver>();
         _ = services.AddScoped<IModelStorageResolver, Model3DStorageResolver>();
         _ = services.AddScoped<IUnifiedFilesQueryService, UnifiedFilesQueryService>();
+        _ = services.AddScoped<IActiveWorkObservationPort, SlicerActiveWorkObservationPort>();
         _ = services.AddScoped<ISlicerJobQueue, DbSlicerJobQueue>();
         _ = services.AddScoped<ISlicerOrchestrator, SlicerOrchestrator>();
         _ = services.AddScoped<IOrcaBundleParsingService, OrcaBundleParsingService>();

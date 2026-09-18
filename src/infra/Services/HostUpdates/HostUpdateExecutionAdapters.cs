@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -103,4 +103,64 @@ public sealed class DefaultHostUpdateProcessRunner : IHostUpdateProcessRunner
             // Process already exited between the check and the kill attempt.
         }
     }
+}
+
+/// <summary>Default-off installed-state store: reads empty and rejects mutations until a host-controlled root is configured.</summary>
+public sealed class UnconfiguredInstalledHostStateStore : IInstalledHostStateStore
+{
+    public Task<InstalledHostState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult<InstalledHostState?>(null);
+
+    public Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("root_directory_not_configured");
+}
+
+/// <summary>Default-off execution journal: read-only empty surface so startup/status remain inert while execution is unavailable.</summary>
+public sealed class UnconfiguredHostUpdateExecutionJournal : IHostUpdateExecutionJournal
+{
+    public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => [];
+
+    public IReadOnlyList<string> ListReleaseIds() => [];
+
+    public void Append(HostUpdateExecutionActivity activity) => throw new InvalidOperationException("root_directory_not_configured");
+}
+
+/// <summary>Default-off execution lock: any attempted mutation fails closed until a host-controlled root is configured.</summary>
+public sealed class UnconfiguredHostUpdateExecutionLock : IHostUpdateExecutionLock
+{
+    public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("root_directory_not_configured");
+}
+
+/// <summary>Default-off backup locator: no backup history exists when the executor root is unconfigured.</summary>
+public sealed class UnconfiguredHostUpdateBackupManifestLocator : IHostUpdateBackupManifestLocator
+{
+    public Task<(HostUpdateBackupManifest Manifest, string RunDirectory)?> FindLatestAsync(string releaseId, CancellationToken cancellationToken) =>
+        Task.FromResult<(HostUpdateBackupManifest Manifest, string RunDirectory)?>(null);
+}
+
+/// <summary>Default-off recovery outcome store: reads empty and rejects mutation until durable state is configured.</summary>
+public sealed class UnconfiguredHostUpdateRecoveryOutcomeStore : IHostUpdateRecoveryOutcomeStore
+{
+    public Task<HostUpdateRecoveryOutcomeRecord?> ReadAsync(string releaseId, CancellationToken cancellationToken) =>
+        Task.FromResult<HostUpdateRecoveryOutcomeRecord?>(null);
+
+    public Task WriteAsync(HostUpdateRecoveryOutcomeRecord record, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("root_directory_not_configured");
+}
+
+/// <summary>Default-off foundation journal: no trusted staged request exists until durable host state is configured.</summary>
+public sealed class UnconfiguredHostUpdateJournal : IHostUpdateJournal
+{
+    public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) =>
+        throw new InvalidOperationException("root_directory_not_configured");
+
+    public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<HostUpdateJournalEntry>>([]);
+}
+
+/// <summary>Default-off backup coordinator: any direct execution attempt fails closed before mutation.</summary>
+public sealed class UnconfiguredHostUpdateBackupCoordinator : IHostUpdateBackupCoordinator
+{
+    public Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+        throw new InvalidOperationException("root_directory_not_configured");
 }

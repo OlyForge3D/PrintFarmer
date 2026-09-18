@@ -1,4 +1,4 @@
-﻿using System.Runtime.InteropServices;
+using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -122,7 +122,7 @@ public static class VerifiedReleaseEvidenceMapper
         CanonicalReleaseIdentityDto identity = new()
         {
             CanonicalVersion = metadata.Identity.Version,
-            BaseVersion = metadata.Identity.Version,
+            BaseVersion = GetBaseVersion(metadata.Identity.Version, metadata.Identity.Channel),
             Channel = metadata.Identity.Channel,
             ReleaseId = metadata.Identity.ReleaseId,
             SourceTag = metadata.Identity.SourceTag,
@@ -131,23 +131,6 @@ public static class VerifiedReleaseEvidenceMapper
             AuthorizedBranchHead = metadata.Identity.AuthorizedBranchHead,
             BuildId = metadata.Identity.BuildMetadata,
         };
-
-        string[] executionServiceIds = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"];
-        List<VerifiedReleaseExecutionTargetDto> executionTargets = [];
-        bool hasCompleteTopology = metadata.ComponentPlatforms is not null && executionServiceIds.All(metadata.ComponentPlatforms.ContainsKey);
-        if (hasCompleteTopology)
-        {
-            foreach (string serviceId in executionServiceIds)
-            {
-                string manifestId = serviceId;
-                if (!metadata.ComponentPlatforms!.TryGetValue(manifestId, out IReadOnlyList<string>? targetPlatforms) || !targetPlatforms.Contains(hostPlatform, StringComparer.Ordinal) || !metadata.ComponentPlatformDigests!.TryGetValue(SignedUpdateManifestValidator.PlatformKey(manifestId, hostPlatform), out string? targetDigest) || !HostUpdateValidation.IsDigest(targetDigest))
-                {
-                    throw new InvalidDataException($"Verified release is missing canonical execution target '{serviceId}' for '{hostPlatform}'.");
-                }
-
-                executionTargets.Add(new VerifiedReleaseExecutionTargetDto { ServiceId = serviceId, Platform = hostPlatform, PlatformDigest = targetDigest });
-            }
-        }
 
         return new VerifiedReleaseEvidenceDto
         {
@@ -162,8 +145,21 @@ public static class VerifiedReleaseEvidenceMapper
             Identity = identity,
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,
-            ExecutionTargets = executionTargets,
         };
+    }
+
+    private static string GetBaseVersion(string version, string channel)
+    {
+        if (channel == "insider")
+        {
+            int delimiter = version.IndexOf("-insider.", StringComparison.Ordinal);
+            if (delimiter > 0)
+            {
+                return version[..delimiter];
+            }
+        }
+
+        return version;
     }
 
     private static string GetHostPlatform()

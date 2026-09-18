@@ -35,7 +35,8 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class QueueRetentionPruneService(
     IServiceScopeFactory scopeFactory,
     IOptions<QueueRetentionSettings> options,
-    ILogger<QueueRetentionPruneService> logger) : BackgroundService
+    ILogger<QueueRetentionPruneService> logger,
+    Farm.Infrastructure.Services.HostUpdates.QueueRetentionPruneFenceFlag? hostUpdateFence = null) : BackgroundService
 {
     private readonly QueueRetentionSettings _settings = options.Value;
 
@@ -44,17 +45,48 @@ public sealed class QueueRetentionPruneService(
     {
         while (!stoppingToken.IsCancellationRequested)
         {
-            await RunOnceAsync(stoppingToken);
+            // Host-update fence (issue #2663): skip this pass's deletes while a coordinated
+            // backup/migration is in progress, and acknowledge quiescence to the fence
+            // coordinator. RunOnceAsync itself is left untouched (and unfenced) because tests
+            // call it directly to avoid waiting on the timer.
+            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
+            {
+                await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+            }
+            else
+            {
+                await RunOnceAsync(stoppingToken);
+            }
 
             try
             {
-                await Task.Delay(_settings.PruneInterval, stoppingToken);
+                if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+                {
+                    await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
                 return;
             }
         }
+    }
+
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + _settings.PruneInterval;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     /// <summary>

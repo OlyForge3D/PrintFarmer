@@ -119,6 +119,8 @@ public sealed class UnavailableHostUpdateExecutionJournal : IHostUpdateExecution
 
     public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => throw new NotSupportedException(UnavailableReason);
 
+    public IReadOnlyList<string> ListReleaseIds() => throw new NotSupportedException(UnavailableReason);
+
     public void Append(HostUpdateExecutionActivity activity) => throw new NotSupportedException(UnavailableReason);
 }
 

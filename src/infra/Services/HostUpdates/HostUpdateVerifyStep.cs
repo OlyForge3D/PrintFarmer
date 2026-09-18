@@ -1,6 +1,12 @@
+﻿using System.Text.Json;
+
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
+/// <summary>Thrown when the digest map does not match the configured canonical service set.</summary>
+public sealed class HostUpdateVerificationTargetSetException(string expected, string actual)
+    : InvalidOperationException($"host_update_verification_target_set_mismatch:expected={expected}:actual={actual}");
+
 /// <summary>Thrown when one or more health checks failed to report healthy within the bounded timeout.</summary>
 public sealed class HostUpdateVerificationTimeoutException(IReadOnlyList<string> failedCheckNames)
     : TimeoutException($"health_verification_timeout:{string.Join(',', failedCheckNames)}")
@@ -36,7 +42,87 @@ public sealed class HttpHostUpdateHealthCheck(string name, HttpClient client, st
     }
 }
 
-/// <summary>Verifies the exact running image digest of one container against an expected pinned digest.</summary>
+/// <summary>
+/// Hits the API's aggregated <c>/health</c> endpoint (which runs <c>ComprehensiveHealthCheck</c>,
+/// <c>SignalRHealthCheck</c>, and <c>SpoolmanHealthCheck</c> -- see
+/// <c>Farm.Web.Api.Startup.HealthCheckStartup</c>) and requires the top-level report status to
+/// be exactly <c>"Healthy"</c>, never merely a 200 response: ASP.NET Core's default health check
+/// middleware also returns 200 for <c>"Degraded"</c>. This closes Kane audit P0.5's core gap --
+/// the previously wired <c>/healthz</c> liveness probe is a hardcoded <c>{ status = "ok" }</c>
+/// response that always returns 200 unconditionally and can never detect a broken
+/// database/queue/storage/worker subsystem.
+/// </summary>
+public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient client, string relativeUrl, IReadOnlySet<string>? requiredResultNames = null) : IHostUpdateHealthCheck
+{
+    public string Name { get; } = name;
+
+    public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
+    {
+        try
+        {
+            using HttpResponseMessage response = await client.GetAsync(relativeUrl, cancellationToken).ConfigureAwait(false);
+            string body = await response.Content.ReadAsStringAsync(cancellationToken).ConfigureAwait(false);
+            using JsonDocument document = JsonDocument.Parse(body);
+
+            // Bishop/Hicks review (issue #2663): the real /health response is serialized with
+            // Program.HealthJsonOptions (PropertyNamingPolicy = JsonNamingPolicy.CamelCase), so
+            // the wire property is "status", never "Status". JsonElement.TryGetProperty is
+            // ordinal/case-sensitive, so looking up the PascalCase name here always missed --
+            // this health check silently reported unhealthy for every real response, which was
+            // caught only by feeding it an actual serialized fixture instead of a hand-built one.
+            return TryGetStatusProperty(document.RootElement, out JsonElement statusElement) &&
+                string.Equals(statusElement.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase) &&
+                RequiredResultsAreHealthy(document.RootElement);
+        }
+        catch (Exception exception) when (exception is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            return false;
+        }
+    }
+
+    private bool RequiredResultsAreHealthy(JsonElement root)
+    {
+        if (requiredResultNames is null || requiredResultNames.Count == 0)
+        {
+            return true;
+        }
+
+        if (!root.TryGetProperty("results", out JsonElement results) && !root.TryGetProperty("Results", out results))
+        {
+            return false;
+        }
+
+        foreach (string resultName in requiredResultNames)
+        {
+            if (!results.TryGetProperty(resultName, out JsonElement result) ||
+                !TryGetStatusProperty(result, out JsonElement resultStatus) ||
+                !string.Equals(resultStatus.GetString(), "Healthy", StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryGetStatusProperty(JsonElement root, out JsonElement statusElement) =>
+        root.TryGetProperty("status", out statusElement) || root.TryGetProperty("Status", out statusElement);
+}
+
+/// <summary>
+/// Verifies one service's exact running image digest by inspecting the live container, never
+/// trusting a mutable tag. Bishop/Hicks review (issue #2663): <c>docker container inspect</c>
+/// has no <c>.RepoDigests</c> field at all -- that property only exists on <c>docker image
+/// inspect</c> output -- so the original single-step <c>docker inspect --format
+/// {{index .RepoDigests 0}} &lt;container&gt;</c> could never succeed against a real container;
+/// it either errored or (worse, if a stale/mocked runner ever returned a plausible-looking
+/// string) silently matched by coincidence. The correct two-step probe is: (1)
+/// <c>docker container inspect --format {{.Image}} &lt;container&gt;</c> to get the exact image
+/// reference (by ID or digest) the running container was created from, then (2) <c>docker image
+/// inspect --format {{index .RepoDigests 0}} &lt;imageRef&gt;</c> to resolve that image's
+/// registry-assigned repo digest, which is then compared (suffix match against the expected
+/// <c>sha256:...</c> manifest digest) exactly as before.
+/// </summary>
 public sealed class DigestHostUpdateHealthCheck(
     string name,
     IHostUpdateProcessRunner processRunner,
@@ -47,12 +133,28 @@ public sealed class DigestHostUpdateHealthCheck(
 
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
     {
-        HostUpdateProcessResult result = await processRunner.RunAsync(
+        HostUpdateProcessResult containerInspect = await processRunner.RunAsync(
             "docker",
-            ["inspect", "--format", "{{index .RepoDigests 0}}", containerName],
+            ["container", "inspect", "--format", "{{.Image}}", containerName],
             TimeSpan.FromSeconds(15),
             cancellationToken).ConfigureAwait(false);
-        return result.Succeeded && result.StandardOutput.Trim().EndsWith(expectedDigest, StringComparison.Ordinal);
+        if (!containerInspect.Succeeded)
+        {
+            return false;
+        }
+
+        string imageRef = containerInspect.StandardOutput.Trim();
+        if (string.IsNullOrEmpty(imageRef))
+        {
+            return false;
+        }
+
+        HostUpdateProcessResult imageInspect = await processRunner.RunAsync(
+            "docker",
+            ["image", "inspect", "--format", "{{index .RepoDigests 0}}", imageRef],
+            TimeSpan.FromSeconds(15),
+            cancellationToken).ConfigureAwait(false);
+        return imageInspect.Succeeded && imageInspect.StandardOutput.Trim().EndsWith(expectedDigest, StringComparison.Ordinal);
     }
 }
 
@@ -66,6 +168,7 @@ public sealed class HostUpdateHealthVerifier(
     Func<string, string, IHostUpdateHealthCheck> digestCheckFactory,
     TimeSpan timeout,
     TimeSpan pollInterval,
+    IReadOnlySet<string>? requiredServiceIds = null,
     TimeProvider? timeProvider = null) : IHostUpdateHealthVerifier, IHostUpdateDigestVerifier
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
@@ -84,6 +187,13 @@ public sealed class HostUpdateHealthVerifier(
     /// </summary>
     public async Task VerifyDigestsAsync(IReadOnlyDictionary<string, string> digestsByService, CancellationToken cancellationToken)
     {
+        if (requiredServiceIds is { Count: > 0 } && !digestsByService.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(requiredServiceIds))
+        {
+            string actual = string.Join(',', digestsByService.Keys.OrderBy(id => id, StringComparer.Ordinal));
+            string expected = string.Join(',', requiredServiceIds.OrderBy(id => id, StringComparer.Ordinal));
+            throw new HostUpdateVerificationTargetSetException(expected, actual);
+        }
+
         List<IHostUpdateHealthCheck> checks =
         [
             .. staticChecks,

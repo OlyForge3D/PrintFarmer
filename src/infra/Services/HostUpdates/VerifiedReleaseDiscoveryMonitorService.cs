@@ -51,10 +51,12 @@ public class VerifiedReleaseDiscoveryMonitorService(
     private readonly IBackgroundServiceMonitor _serviceMonitor = serviceMonitor ?? throw new ArgumentNullException(nameof(serviceMonitor));
     private readonly IVerifiedReleaseEvidenceCache _cache = cache ?? throw new ArgumentNullException(nameof(cache));
 
+    internal Func<TimeSpan, CancellationToken, Task> DelayAsync { get; set; } = Task.Delay;
+
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        VerifiedReleaseDiscoveryOptions options = _optionsMonitor.CurrentValue;
+        VerifiedReleaseDiscoveryOptions options = new();
 
         _serviceMonitor.Register(
             ServiceId,
@@ -67,9 +69,11 @@ public class VerifiedReleaseDiscoveryMonitorService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            int intervalSeconds = options.IntervalSeconds;
             try
             {
                 options = _optionsMonitor.CurrentValue;
+                intervalSeconds = options.IntervalSeconds;
                 if (options.Enabled)
                 {
                     _serviceMonitor.ReportEnabled(ServiceId, true);
@@ -83,8 +87,6 @@ public class VerifiedReleaseDiscoveryMonitorService(
                     _logger.LogInformation("[VerifiedReleaseDiscovery] Disabled, pausing");
                     _serviceMonitor.ReportEnabled(ServiceId, false);
                 }
-
-                await Task.Delay(TimeSpan.FromSeconds(options.IntervalSeconds), stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -98,6 +100,16 @@ public class VerifiedReleaseDiscoveryMonitorService(
                 // transient outage does not regress readiness evaluation to "no evidence".
                 _logger.LogError(ex, "[VerifiedReleaseDiscovery] Unhandled error during discovery");
                 RecordFailure(ex);
+            }
+
+            try
+            {
+                await DelayAsync(TimeSpan.FromSeconds(intervalSeconds), stoppingToken);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                _logger.LogInformation("[VerifiedReleaseDiscovery] Stopping");
+                break;
             }
         }
 

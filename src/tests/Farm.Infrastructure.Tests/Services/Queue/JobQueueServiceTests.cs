@@ -566,6 +566,57 @@ public class JobQueueServiceTests
         await act.Should().ThrowAsync<ArgumentNullException>();
     }
 
+    // Kane audit follow-up (issue #2663): AddJobToQueueAsync is the single chokepoint new print
+    // job submissions funnel through (OctoPrint upload+print, manual UI queue-add, direct API
+    // calls); it must reject a new submission while a host update's drain step has closed the
+    // admission gate, rather than silently admitting work the drain believes has stopped.
+    [Fact]
+    public async Task AddJobToQueueAsync_WithClosedHostUpdateAdmissionGate_ThrowsAndNeverTouchesRepository()
+    {
+        var closedGate = new FakeHostUpdateAdmissionGate(isClosed: true);
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            hostUpdateAdmissionGate: closedGate);
+        var request = new QueuePrintJobDto { GcodeFileId = Guid.NewGuid(), Priority = 0 };
+
+        Func<Task> act = async () => await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        await act.Should().ThrowAsync<Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException>();
+        _mockDataService.Verify(x => x.GetGcodeFileAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()), Times.Never);
+        _mockRepo.Verify(x => x.AddAsync(It.IsAny<PrintJob>(), It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Fact]
+    public async Task AddJobToQueueAsync_WithOpenHostUpdateAdmissionGate_AdmitsSubmissionNormally()
+    {
+        var openGate = new FakeHostUpdateAdmissionGate(isClosed: false);
+        var sut = new JobQueueService(
+            _mockRepo.Object,
+            _mockDataService.Object,
+            _mockLogger.Object,
+            hostUpdateAdmissionGate: openGate);
+        var request = new QueuePrintJobDto { GcodeFileId = Guid.NewGuid(), Priority = 0 };
+
+        _mockDataService.Setup(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync((GcodeFile?)null);
+
+        JobQueuePrintJobDto? result = await sut.AddJobToQueueAsync(request, null, CancellationToken.None);
+
+        result.Should().BeNull(); // reaches the normal "no such gcode file" path, proving the gate did not block it
+        _mockDataService.Verify(x => x.GetGcodeFileAsync(request.GcodeFileId, It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    private sealed class FakeHostUpdateAdmissionGate(bool isClosed) : Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate
+    {
+        public Task CloseAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task OpenAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<bool> IsClosedAsync(CancellationToken cancellationToken) => Task.FromResult(isClosed);
+    }
+
     [Fact]
     public async Task AddJobToQueueAsync_WithNonexistentGcodeFile_ReturnsNull()
     {

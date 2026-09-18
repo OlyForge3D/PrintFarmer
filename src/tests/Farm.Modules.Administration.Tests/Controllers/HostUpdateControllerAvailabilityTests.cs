@@ -396,12 +396,16 @@ public sealed class HostUpdateControllerAvailabilityTests
     {
         public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => throw exception;
 
+        public IReadOnlyList<string> ListReleaseIds() => throw exception;
+
         public void Append(HostUpdateExecutionActivity activity) => throw new NotSupportedException();
     }
 
     private sealed class NoopJournal : IHostUpdateExecutionJournal
     {
         public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => Array.Empty<HostUpdateExecutionActivity>();
+
+        public IReadOnlyList<string> ListReleaseIds() => Array.Empty<string>();
 
         public void Append(HostUpdateExecutionActivity activity) => throw new NotSupportedException();
     }

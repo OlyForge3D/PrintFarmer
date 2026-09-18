@@ -237,6 +237,7 @@ public sealed class HostUpdateControllerRecoveryTests
     private sealed class MemoryJournal(params HostUpdateExecutionActivity[] activities) : IHostUpdateExecutionJournal
     {
         public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => activities.Where(activity => activity.ReleaseId == releaseId).ToArray();
+        public IReadOnlyList<string> ListReleaseIds() => activities.Select(activity => activity.ReleaseId).Distinct(StringComparer.Ordinal).ToArray();
         public void Append(HostUpdateExecutionActivity activity) => throw new NotSupportedException();
     }
 
@@ -264,6 +265,8 @@ public sealed class HostUpdateControllerRecoveryTests
         }]);
 
         public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => activities.Where(activity => activity.ReleaseId == releaseId).ToArray();
+
+        public IReadOnlyList<string> ListReleaseIds() => activities.Select(activity => activity.ReleaseId).Distinct(StringComparer.Ordinal).ToArray();
 
         public void Append(HostUpdateExecutionActivity activity) => activities.Add(activity);
     }

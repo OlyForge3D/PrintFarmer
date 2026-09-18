@@ -1,4 +1,4 @@
-using System.Security.Cryptography;
+﻿using System.Security.Cryptography;
 using System.Text.Json;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -11,7 +11,7 @@ public sealed class HostUpdateBackupUnsupportedOwnerException(IReadOnlyList<stri
     public IReadOnlyList<string> ExternallyOwnedTargetNames { get; } = externallyOwnedTargetNames;
 }
 
-/// <summary>Thrown when a backup target fails to produce any files, or produces zero-byte output.</summary>
+/// <summary>Thrown when a backup target fails to produce any files or explicit directory coverage.</summary>
 public sealed class HostUpdateBackupIncompleteException(string targetName) : InvalidOperationException($"backup_incomplete:{targetName}");
 #pragma warning restore CA1032
 
@@ -69,7 +69,11 @@ public sealed class HostUpdateBackupCoordinator(
             backupRootDirectory,
             SanitizeForPath(request.ReleaseId),
             DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff"));
+        string releaseDirectory = Path.GetDirectoryName(runDirectory)!;
         Directory.CreateDirectory(runDirectory);
+        HostUpdateDurableFile.FlushDirectory(backupRootDirectory);
+        HostUpdateDurableFile.FlushDirectory(releaseDirectory);
+        HostUpdateDurableFile.FlushDirectory(runDirectory);
 
         foreach (IHostUpdateBackupTarget target in targets)
         {
@@ -90,7 +94,7 @@ public sealed class HostUpdateBackupCoordinator(
             files.Add(new HostUpdateBackupManifestFile(Path.GetRelativePath(runDirectory, filePath), hash, bytes.LongLength));
         }
 
-        if (files.Count == 0 || files.Any(f => f.Length == 0))
+        if (files.Count == 0)
         {
             throw new HostUpdateBackupIncompleteException("manifest");
         }
@@ -102,9 +106,10 @@ public sealed class HostUpdateBackupCoordinator(
             [.. files.OrderBy(f => f.RelativePath, StringComparer.Ordinal)]);
         string manifestPath = Path.Combine(runDirectory, "manifest.json");
         string manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
-        string tempManifestPath = manifestPath + ".tmp-" + Guid.NewGuid().ToString("N");
-        await File.WriteAllTextAsync(tempManifestPath, manifestJson, cancellationToken).ConfigureAwait(false);
-        File.Move(tempManifestPath, manifestPath, overwrite: true);
+        HostUpdateDurableFile.WriteAllTextAtomic(manifestPath, manifestJson);
+        HostUpdateDurableFile.FlushDirectory(runDirectory);
+        HostUpdateDurableFile.FlushDirectory(releaseDirectory);
+        HostUpdateDurableFile.FlushDirectory(backupRootDirectory);
     }
 
     private static string SanitizeForPath(string value)
@@ -154,7 +159,7 @@ public sealed class ProcessDatabaseBackupTarget(
 }
 
 /// <summary>Backs up an application-owned directory (blobs/profiles/calibration/config/keyrings) via a recursive copy.</summary>
-public sealed class DirectoryCopyBackupTarget(string name, string sourceDirectory) : IHostUpdateBackupTarget
+public sealed class DirectoryCopyBackupTarget(string name, string sourceDirectory, bool isRequired = true) : IHostUpdateBackupTarget
 {
     public string Name { get; } = name;
 
@@ -164,21 +169,48 @@ public sealed class DirectoryCopyBackupTarget(string name, string sourceDirector
     {
         if (!Directory.Exists(sourceDirectory))
         {
-            // Nothing to back up (e.g. certificates not configured in this deployment) is not
-            // an incomplete backup; the coordinator's non-empty-file check still applies to
-            // catch a target that produces nothing when it was expected to.
-            await File.WriteAllTextAsync(Path.Combine(destinationDirectory, ".empty"), "source_not_present", cancellationToken)
-                .ConfigureAwait(false);
+            if (isRequired)
+            {
+                // Every currently-configured owned directory is a real, always-mounted container
+                // path (see the doc comment on HostUpdateExecutionOptions.OwnedDirectories); a
+                // missing mount here means the deployment is misconfigured, not that there is
+                // legitimately nothing to back up. Writing a ".empty" sentinel and reporting
+                // success would silently drop this directory's data from every future restore, so
+                // a required target fails the backup closed instead.
+                throw new HostUpdateBackupIncompleteException(Name);
+            }
+
+            // Only a directory explicitly declared optional (e.g. certificates/keyrings not
+            // configured in this deployment) may legitimately be absent. The coordinator's
+            // non-empty-file check still applies to catch a target that produces nothing when it
+            // was expected to.
+            HostUpdateDurableFile.WriteAllTextAtomic(Path.Combine(destinationDirectory, ".empty"), "source_not_present");
             return;
         }
 
-        foreach (string sourcePath in Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories))
+        string[] relativeDirectories =
+        [
+            ".",
+            .. Directory.EnumerateDirectories(sourceDirectory, "*", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(sourceDirectory, path))
+                .OrderBy(path => path, StringComparer.Ordinal),
+        ];
+        string[] sourceFiles = [.. Directory.EnumerateFiles(sourceDirectory, "*", SearchOption.AllDirectories)];
+        if (relativeDirectories.Length > 1 || sourceFiles.Length == 0)
+        {
+            string directoryManifest = JsonSerializer.Serialize(relativeDirectories, new JsonSerializerOptions { WriteIndented = true });
+            HostUpdateDurableFile.WriteAllTextAtomic(
+                Path.Combine(destinationDirectory, ".printfarmer-directories.json"),
+                directoryManifest);
+        }
+
+        foreach (string sourcePath in sourceFiles)
         {
             cancellationToken.ThrowIfCancellationRequested();
             string relative = Path.GetRelativePath(sourceDirectory, sourcePath);
             string destinationPath = Path.Combine(destinationDirectory, relative);
             Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? destinationDirectory);
-            File.Copy(sourcePath, destinationPath, overwrite: true);
+            await HostUpdateDurableFile.CopyFileDurablyAsync(sourcePath, destinationPath, cancellationToken).ConfigureAwait(false);
         }
     }
 }

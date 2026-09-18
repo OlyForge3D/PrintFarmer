@@ -55,6 +55,7 @@ public class JobQueueService : IJobQueueService
     private readonly IQueuePositionAllocator? _positionAllocator;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization;
     private readonly IQueueSubscriptionMembershipNotifier? _membershipNotifier;
+    private readonly Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? _hostUpdateAdmissionGate;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -79,6 +80,11 @@ public class JobQueueService : IJobQueueService
     /// membership-changing job transition that needs a direct call here rather than relying
     /// on <see cref="QueueOutboxPublisherService"/>'s narrowed outbox-event handling.
     /// </param>
+    /// <param name="hostUpdateAdmissionGate">
+    /// Optional host-update admission gate (Kane audit follow-up, issue #2663): when closed by
+    /// a draining host update, <see cref="AddJobToQueueAsync"/> rejects new submissions rather
+    /// than admitting work the update's drain step believes has already stopped.
+    /// </param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -95,7 +101,8 @@ public class JobQueueService : IJobQueueService
         IDbOutboxSequenceAllocator? sequenceAllocator = null,
         IQueuePositionAllocator? positionAllocator = null,
         IQueueResourceAuthorizationService? resourceAuthorization = null,
-        IQueueSubscriptionMembershipNotifier? membershipNotifier = null)
+        IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
+        Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null)
     {
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
@@ -115,6 +122,7 @@ public class JobQueueService : IJobQueueService
         _positionAllocator = positionAllocator;
         _resourceAuthorization = resourceAuthorization;
         _membershipNotifier = membershipNotifier;
+        _hostUpdateAdmissionGate = hostUpdateAdmissionGate;
     }
 
     /// <summary>
@@ -265,6 +273,15 @@ public class JobQueueService : IJobQueueService
     public async Task<JobQueuePrintJobDto?> AddJobToQueueAsync(QueuePrintJobDto request, Guid? userId, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
+
+        if (_hostUpdateAdmissionGate is not null && await _hostUpdateAdmissionGate.IsClosedAsync(ct).ConfigureAwait(false))
+        {
+            // Kane audit follow-up (issue #2663): a host update's drain step closes this gate
+            // and then waits for active work to finish naturally -- if new submissions kept
+            // being admitted here, the drain would never observe true quiescence. Fail closed
+            // rather than silently admitting a new job while the host is being updated.
+            throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException();
+        }
 
         GcodeFile? gcode = await _dataService.GetGcodeFileAsync(request.GcodeFileId, ct);
         if (gcode == null)

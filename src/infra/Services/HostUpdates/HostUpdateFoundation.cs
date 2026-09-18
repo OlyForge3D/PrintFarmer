@@ -950,6 +950,40 @@ internal static class HostUpdateValidation
     public static bool IsChannel(string? value) => value is not null && Channels.Contains(value);
     public static bool IsProvider(string? value) => value is not null && Providers.Contains(value);
     public static bool IsDigest(string? value) => value is { Length: 71 } && value.StartsWith("sha256:", StringComparison.Ordinal) && value[7..].All(Uri.IsHexDigit);
+
+    /// <summary>
+    /// The canonical signed-manifest digest grammar: <c>sha256:</c> followed by exactly 64 lowercase
+    /// hex characters. Stricter than <see cref="IsDigest"/>, which accepts uppercase hex via
+    /// <see cref="Uri.IsHexDigit"/>. Publication lowercases every digest it emits, so evidence that
+    /// carries uppercase hex did not come from a signed manifest and must not be treated as
+    /// canonical.
+    /// </summary>
+    public static bool IsCanonicalDigest(string? value) => value is { Length: 71 } &&
+        value.StartsWith("sha256:", StringComparison.Ordinal) &&
+        value[7..].All(character => character is >= '0' and <= '9' or >= 'a' and <= 'f');
+
+    /// <summary>
+    /// The canonical release-id grammar used by immutable publication identities: a known channel,
+    /// a colon, then the canonical release version for that channel (for example
+    /// <c>stable:1.2.3</c> or <c>insider:1.2.3-insider.4</c>). This is the same composition
+    /// <see cref="IsReleaseIdentity"/> asserts, exposed for callers that hold only the id.
+    /// </summary>
+    public static bool IsReleaseId(string? value)
+    {
+        if (value is null)
+        {
+            return false;
+        }
+
+        int delimiter = value.IndexOf(':', StringComparison.Ordinal);
+        if (delimiter <= 0)
+        {
+            return false;
+        }
+
+        string channel = value[..delimiter];
+        return IsChannel(channel) && IsCanonicalReleaseVersion(value[(delimiter + 1)..], channel);
+    }
     public static bool IsHexHash(string? value) => value is { Length: 64 } && value.All(Uri.IsHexDigit);
     public static bool IsRejectionCode(string? value) => value is { Length: > 0 and <= 80 } &&
         value.All(character => character is >= 'a' and <= 'z' or >= '0' and <= '9' or '_');

@@ -1,4 +1,4 @@
-using Farm.Infrastructure.Data;
+﻿using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,6 +7,15 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
 /// <summary>Thrown when active work has not safely finished within the bounded drain timeout.</summary>
 public sealed class HostUpdateDrainTimeoutException(string detail) : TimeoutException(detail);
+
+/// <summary>
+/// Thrown by a real submission/scheduling call site (Kane audit follow-up, issue #2663) when it
+/// consults <see cref="IHostUpdateAdmissionGate.IsClosedAsync"/> and finds the gate closed by an
+/// in-progress host update's drain step. Not thrown by the gate itself -- each protected call
+/// site owns checking the gate and throwing this so the failure is attributable to exactly the
+/// submission path that was rejected.
+/// </summary>
+public sealed class HostUpdateAdmissionClosedException() : InvalidOperationException("host_update_admission_closed");
 #pragma warning restore CA1032
 
 /// <summary>
@@ -20,6 +29,63 @@ public interface IHostUpdateAdmissionGate
     Task OpenAsync(CancellationToken cancellationToken);
 
     Task<bool> IsClosedAsync(CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Host-root-backed admission gate shared by API replicas and the standalone slicer-host. A
+/// missing or invalid root is treated as closed so producers fail safe instead of admitting work
+/// while executor availability is unavailable.
+/// </summary>
+public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions options) : IHostUpdateAdmissionGate
+{
+    private bool IsConfigured => !string.IsNullOrWhiteSpace(options.RootDirectory);
+
+    private string GatePath => Path.Combine(options.StateDirectory, "admission.closed");
+
+    public async Task CloseAsync(CancellationToken cancellationToken)
+    {
+        if (!IsConfigured)
+        {
+            return;
+        }
+
+        await Task.Run(() => HostUpdateDurableFile.WriteAllTextAtomic(GatePath, DateTimeOffset.UtcNow.ToString("O")), cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public Task OpenAsync(CancellationToken cancellationToken)
+    {
+        if (!IsConfigured)
+        {
+            return Task.CompletedTask;
+        }
+
+        string path = GatePath;
+        if (File.Exists(path))
+        {
+            File.Delete(path);
+            HostUpdateDurableFile.FlushDirectory(Path.GetDirectoryName(path)!);
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task<bool> IsClosedAsync(CancellationToken cancellationToken)
+    {
+        if (!IsConfigured)
+        {
+            return Task.FromResult(false);
+        }
+
+        try
+        {
+            return Task.FromResult(File.Exists(GatePath));
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
+        {
+            return Task.FromResult(true);
+        }
+    }
 }
 
 /// <summary>Process-wide, thread-safe <see cref="IHostUpdateAdmissionGate"/>.</summary>
@@ -88,7 +154,7 @@ public sealed class DbActiveWorkObservationPort(AppDbContext db) : IActiveWorkOb
 /// </summary>
 public sealed class HostUpdateDrainCoordinator(
     IHostUpdateAdmissionGate admissionGate,
-    IActiveWorkObservationPort activeWork,
+    IReadOnlyList<IActiveWorkObservationPort> activeWorkPorts,
     TimeSpan drainTimeout,
     TimeSpan pollInterval,
     TimeProvider? timeProvider = null) : IHostUpdateDrainCoordinator
@@ -103,7 +169,12 @@ public sealed class HostUpdateDrainCoordinator(
         DateTimeOffset deadline = _timeProvider.GetUtcNow() + drainTimeout;
         while (true)
         {
-            int active = await activeWork.CountActiveAsync(cancellationToken).ConfigureAwait(false);
+            int active = 0;
+            foreach (IActiveWorkObservationPort activeWork in activeWorkPorts)
+            {
+                active += await activeWork.CountActiveAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             if (active == 0)
             {
                 return;
