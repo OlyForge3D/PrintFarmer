@@ -69,7 +69,11 @@ public sealed class HostUpdateBackupCoordinator(
             backupRootDirectory,
             SanitizeForPath(request.ReleaseId),
             DateTimeOffset.UtcNow.ToString("yyyyMMddHHmmssfff"));
+        string releaseDirectory = Path.GetDirectoryName(runDirectory)!;
         Directory.CreateDirectory(runDirectory);
+        HostUpdateDurableFile.FlushDirectory(backupRootDirectory);
+        HostUpdateDurableFile.FlushDirectory(releaseDirectory);
+        HostUpdateDurableFile.FlushDirectory(runDirectory);
 
         foreach (IHostUpdateBackupTarget target in targets)
         {
@@ -104,6 +108,8 @@ public sealed class HostUpdateBackupCoordinator(
         string manifestJson = JsonSerializer.Serialize(manifest, new JsonSerializerOptions { WriteIndented = true });
         HostUpdateDurableFile.WriteAllTextAtomic(manifestPath, manifestJson);
         HostUpdateDurableFile.FlushDirectory(runDirectory);
+        HostUpdateDurableFile.FlushDirectory(releaseDirectory);
+        HostUpdateDurableFile.FlushDirectory(backupRootDirectory);
     }
 
     private static string SanitizeForPath(string value)

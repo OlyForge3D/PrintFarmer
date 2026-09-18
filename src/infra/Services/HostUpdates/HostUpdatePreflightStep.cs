@@ -25,7 +25,7 @@ public interface IInstalledHostStateStore
     Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken);
 }
 
-/// <summary>File-backed <see cref="IInstalledHostStateStore"/> using an atomic write-then-rename.</summary>
+/// <summary>File-backed <see cref="IInstalledHostStateStore"/> using a durable atomic write.</summary>
 public sealed class FileInstalledHostStateStore(string path) : IInstalledHostStateStore
 {
     public async Task<InstalledHostState?> ReadAsync(CancellationToken cancellationToken)
@@ -44,9 +44,7 @@ public sealed class FileInstalledHostStateStore(string path) : IInstalledHostSta
         ArgumentNullException.ThrowIfNull(state);
         Directory.CreateDirectory(Path.GetDirectoryName(path) is { Length: > 0 } dir ? dir : ".");
         string json = JsonSerializer.Serialize(state);
-        string temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
-        await File.WriteAllTextAsync(temp, json, cancellationToken).ConfigureAwait(false);
-        File.Move(temp, path, overwrite: true);
+        await Task.Run(() => HostUpdateDurableFile.WriteAllTextAtomic(path, json), cancellationToken).ConfigureAwait(false);
     }
 }
 

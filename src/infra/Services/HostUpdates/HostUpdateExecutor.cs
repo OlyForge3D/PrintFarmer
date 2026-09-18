@@ -237,8 +237,8 @@ public sealed class HostUpdateExecutor(
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
             string failure = "fence_release_failed:" + exception.GetType().Name;
-            Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure);
-            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities);
+            Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:failed:" + failure);
+            return new(request.ReleaseId, HostUpdateExecutionState.Completed, failure, activities);
         }
     }
 
@@ -472,14 +472,12 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
                 throw new InvalidDataException("journal_corrupt");
             }
 
-            string last = existingLines[^1];
-            previous = JsonSerializer.Deserialize<JournalRecord>(last)?.Hash ?? throw new InvalidDataException("journal_corrupt");
+            previous = ValidateLines(existingLines);
         }
 
         string payload = JsonSerializer.Serialize(activity);
         string hash = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(previous + payload))).ToLowerInvariant();
         string line = JsonSerializer.Serialize(new JournalRecord(previous, payload, hash, activity));
-        string temp = path + ".tmp-" + Guid.NewGuid().ToString("N");
         var builder = new StringBuilder();
         foreach (string existingLine in existingLines)
         {
@@ -487,36 +485,37 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
         }
 
         builder.Append(line).Append(Environment.NewLine);
-        using (FileStream stream = new(temp, new FileStreamOptions
-        {
-            Mode = FileMode.CreateNew,
-            Access = FileAccess.Write,
-            Share = FileShare.None,
-            Options = FileOptions.WriteThrough,
-        }))
-        {
-            byte[] bytes = new UTF8Encoding(false).GetBytes(builder.ToString());
-            stream.Write(bytes, 0, bytes.Length);
-            stream.Flush(flushToDisk: true);
-        }
-
-        File.Move(temp, path, true);
-        FlushDirectory(Path.GetDirectoryName(path) ?? ".");
+        HostUpdateDurableFile.WriteAllTextAtomic(path, builder.ToString());
     }
-    private static void FlushDirectory(string directory)
+
+    private static string ValidateLines(IEnumerable<string> lines)
     {
-        if (OperatingSystem.IsWindows())
+        string previous = string.Empty;
+        foreach (string line in lines)
         {
-            return;
+            JournalRecord? record;
+            try
+            {
+                record = JsonSerializer.Deserialize<JournalRecord>(line);
+            }
+            catch (JsonException exception)
+            {
+                throw new InvalidDataException("journal_corrupt", exception);
+            }
+
+            if (record is null ||
+                record.Activity is null ||
+                !string.Equals(record.PreviousHash, previous, StringComparison.Ordinal) ||
+                !CryptographicOperations.FixedTimeEquals(
+                    Convert.FromHexString(record.Hash),
+                    SHA256.HashData(Encoding.UTF8.GetBytes(record.PreviousHash + record.Payload))))
+            {
+                throw new InvalidDataException("journal_integrity_failure");
+            }
+
+            previous = record.Hash;
         }
 
-        try
-        {
-            using FileStream stream = new(directory, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
-            stream.Flush(flushToDisk: true);
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-        {
-        }
+        return previous;
     }
 }

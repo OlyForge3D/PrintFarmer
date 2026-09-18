@@ -190,7 +190,8 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             if (last == HostUpdateExecutionState.RecoveryRequired)
             {
                 HostUpdateRecoveryOutcomeRecord? outcome = await recoveryOutcomeStore.ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
-                if (outcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
+                if (outcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack } &&
+                    !outcome.Detail.EndsWith("|fence_release_pending", StringComparison.Ordinal))
                 {
                     // Already durably resolved by a prior, confirmed recovery attempt -- nothing
                     // to re-fence for this specific release.

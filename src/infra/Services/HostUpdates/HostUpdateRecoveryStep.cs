@@ -6,6 +6,9 @@ public enum HostUpdateRecoveryOutcome
     /// <summary>The host was restored to a verified prior working state.</summary>
     RolledBack,
 
+    /// <summary>Rollback completed but the admission fence still needs an idempotent release.</summary>
+    FenceReleasePending,
+
     /// <summary>No safe rollback/restore path exists; an operator must resolve this manually.</summary>
     NeedsOperator,
 }
@@ -126,6 +129,8 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateFenceCoordinator? fenceCoordinator = null,
     IHostUpdateExecutionLock? executionLock = null) : IHostUpdateRecoveryCoordinator
 {
+    private const string FenceReleasePendingMarker = "|fence_release_pending";
+
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
         IReadOnlyList<HostUpdateExecutionActivity> activities,
@@ -146,9 +151,24 @@ public sealed class HostUpdateRecoveryCoordinator(
         using IHostUpdateExecutionLease lease = (executionLock ?? NoopHostUpdateExecutionLock.Instance).Acquire(TimeSpan.FromSeconds(30), cancellationToken);
 
         HostUpdateRecoveryOutcomeRecord? existingOutcome = await outcomeStore.ReadAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
-        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
+        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack } &&
+            !existingOutcome.Detail.EndsWith(FenceReleasePendingMarker, StringComparison.Ordinal))
         {
-            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, new HostUpdateRecoveryResult(existingOutcome.Outcome, existingOutcome.Detail)).ConfigureAwait(false);
+            return new HostUpdateRecoveryResult(existingOutcome.Outcome, existingOutcome.Detail);
+        }
+
+        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack } &&
+            existingOutcome.Detail.EndsWith(FenceReleasePendingMarker, StringComparison.Ordinal))
+        {
+            return await ReleaseFenceAfterRolledBackAsync(
+                failedRequest.ReleaseId,
+                new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, existingOutcome.Detail[..^FenceReleasePendingMarker.Length]))
+                .ConfigureAwait(false);
+        }
+
+        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.FenceReleasePending })
+        {
+            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, existingOutcome.Detail)).ConfigureAwait(false);
         }
 
         HostUpdateRecoveryResult result;
@@ -178,6 +198,12 @@ public sealed class HostUpdateRecoveryCoordinator(
 
         if (result.Outcome == HostUpdateRecoveryOutcome.RolledBack)
         {
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, HostUpdateRecoveryOutcome.FenceReleasePending, result.Detail, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, HostUpdateRecoveryOutcome.RolledBack, result.Detail + FenceReleasePendingMarker, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
             result = await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, result).ConfigureAwait(false);
         }
 
@@ -188,12 +214,18 @@ public sealed class HostUpdateRecoveryCoordinator(
     {
         if (fenceCoordinator is null)
         {
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(releaseId, HostUpdateRecoveryOutcome.RolledBack, result.Detail, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
             return result;
         }
 
         try
         {
             await fenceCoordinator.ReleaseAsync(CancellationToken.None).ConfigureAwait(false);
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(releaseId, HostUpdateRecoveryOutcome.RolledBack, result.Detail, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
             return result;
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
@@ -211,9 +243,17 @@ public sealed class HostUpdateRecoveryCoordinator(
         IReadOnlyList<HostUpdateExecutionActivity> activities,
         CancellationToken cancellationToken)
     {
-        InstalledHostState? priorState = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
         try
         {
+            InstalledHostState? priorState = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+            bool completedInstallation = activities.Any(a =>
+                a.State == HostUpdateExecutionState.Completed &&
+                string.Equals(a.Phase, "installed-state:after", StringComparison.Ordinal));
+            if (completedInstallation)
+            {
+                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "completed_installation_requires_fence_release");
+            }
+
             if (priorState is null && ApplyMayHaveStarted(activities))
             {
                 return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "prior_image_state_missing_after_apply_started");
@@ -282,6 +322,7 @@ public sealed class ProcessHostUpdateRestoreExecutor(
     public async Task RestoreAsync(HostUpdateBackupManifest manifest, string backupRunDirectory, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(manifest);
+        Dictionary<string, string> targets = ValidateTargetMappings(manifest);
         await VerifyChecksumsAsync(manifest, backupRunDirectory, cancellationToken).ConfigureAwait(false);
 
         foreach (string targetName in manifest.TargetNames)
@@ -304,7 +345,7 @@ public sealed class ProcessHostUpdateRestoreExecutor(
                 continue;
             }
 
-            if (directoryRestoreTargetsByName.TryGetValue(targetName, out string? destinationDirectory))
+            if (targets.TryGetValue(targetName, out string? destinationDirectory))
             {
                 if (File.Exists(Path.Combine(targetDirectory, ".empty")))
                 {
@@ -343,6 +384,37 @@ public sealed class ProcessHostUpdateRestoreExecutor(
 
             throw new InvalidOperationException($"restore_target_unmapped:{targetName}");
         }
+    }
+
+    private Dictionary<string, string> ValidateTargetMappings(HostUpdateBackupManifest manifest)
+    {
+        if (manifest.TargetNames.Count != manifest.TargetNames.Distinct(StringComparer.Ordinal).Count())
+        {
+            throw new InvalidOperationException("restore_target_duplicate");
+        }
+
+        Dictionary<string, string> directoryTargets = new(StringComparer.Ordinal);
+        foreach (string targetName in manifest.TargetNames)
+        {
+            bool hasCommand = restoreCommandsByTarget.ContainsKey(targetName);
+            bool hasDirectory = directoryRestoreTargetsByName.TryGetValue(targetName, out string? destinationDirectory);
+            if (!hasCommand && !hasDirectory)
+            {
+                throw new InvalidOperationException($"restore_target_unmapped:{targetName}");
+            }
+
+            if (hasCommand == hasDirectory)
+            {
+                throw new InvalidOperationException($"restore_target_mapping_invalid:{targetName}");
+            }
+
+            if (hasDirectory)
+            {
+                directoryTargets.Add(targetName, destinationDirectory!);
+            }
+        }
+
+        return directoryTargets;
     }
 
     private static void RestoreRecordedDirectories(string targetDirectory, string destinationDirectory)

@@ -301,6 +301,33 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     }
 
     [Fact]
+    public async Task RecoverAsync_CompletedInstallationRefusesDestructiveRestore()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        var restore = new TrackingRestoreExecutor();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow)),
+            new NeverCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            restore,
+            new FindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore);
+        IReadOnlyList<HostUpdateExecutionActivity> activities =
+        [
+            new("activity", Request.ReleaseId, HostUpdateExecutionState.Completed, "installed-state:after", DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(Request)),
+        ];
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, activities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        result.Detail.Should().Be("completed_installation_requires_fence_release");
+        restore.Called.Should().BeFalse();
+    }
+
+    [Fact]
     public async Task RestoreAsync_UnmappedManifestTarget_ThrowsFailClosed()
     {
         var runner = new RecordingProcessRunner();
@@ -321,6 +348,30 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     {
         public Task<HostUpdateProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? environment = null) =>
             Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+    }
+
+    private sealed class TrackingRestoreExecutor : IHostUpdateRestoreExecutor
+    {
+        public bool Called { get; private set; }
+
+        public Task RestoreAsync(HostUpdateBackupManifest manifest, string backupRunDirectory, CancellationToken cancellationToken)
+        {
+            Called = true;
+            return Task.CompletedTask;
+        }
+    }
+
+    private sealed class NeverCompatibleEvaluator : IHostUpdateRecoveryCompatibilityEvaluator
+    {
+        public bool SupportsImageOnlyRollback(InstalledHostState priorState, IReadOnlyList<HostUpdateExecutionActivity> activities) => false;
+    }
+
+    private sealed class FindsManifestLocator : IHostUpdateBackupManifestLocator
+    {
+        public Task<(HostUpdateBackupManifest Manifest, string RunDirectory)?> FindLatestAsync(string releaseId, CancellationToken cancellationToken) =>
+            Task.FromResult<(HostUpdateBackupManifest Manifest, string RunDirectory)?>((
+                new HostUpdateBackupManifest(releaseId, DateTimeOffset.UtcNow, ["api"], []),
+                Path.GetTempPath()));
     }
 
     private static string Sha256(string text) =>

@@ -62,6 +62,27 @@ public sealed class HostUpdateExecutorTests
     }
 
     [Fact]
+    public async Task Executor_fence_release_failure_keeps_completed_terminal_and_retries_release()
+    {
+        var steps = new FakeSteps { ReleaseException = new InvalidOperationException("release") };
+        var journal = new MemoryJournal();
+        var executor = new HostUpdateExecutor(steps, journal, new NoopLock());
+
+        HostUpdateExecutionResult failed = await executor.ExecuteAsync(Request());
+
+        failed.State.Should().Be(HostUpdateExecutionState.Completed);
+        failed.FailureCode.Should().Be("fence_release_failed:InvalidOperationException");
+        journal.Read("rel-1").Should().Contain(a => a.State == HostUpdateExecutionState.Completed && a.Phase.StartsWith("fence-release:failed:", StringComparison.Ordinal));
+
+        steps.ReleaseException = null;
+        HostUpdateExecutionResult retried = await executor.ExecuteAsync(Request());
+
+        retried.State.Should().Be(HostUpdateExecutionState.Completed);
+        retried.FailureCode.Should().BeNull();
+        steps.Calls.Count(call => call == "release-fence").Should().Be(2);
+    }
+
+    [Fact]
     public async Task Executor_refuses_same_release_resume_with_changed_immutable_request_fingerprint()
     {
         HostUpdateExecutionRequest original = Request();
@@ -292,5 +313,5 @@ public sealed class HostUpdateExecutorTests
     }
 
     private sealed class FakeSideEffectReconciler(string? reconciledPhase) : IHostUpdateSideEffectReconciler { public Task<HostUpdateSideEffectReconciliation> ReconcileAsync(string phase, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(string.Equals(phase, reconciledPhase, StringComparison.Ordinal) ? HostUpdateSideEffectReconciliation.Complete("proven") : HostUpdateSideEffectReconciliation.Uncertain("not_proven")); }
-    private sealed class FakeSteps : IHostUpdateExecutionSteps { public List<string> Calls { get; } = []; public List<CancellationToken> StepTokens { get; } = []; public Exception? MigrationException { get; set; } public Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("preflight", c); public Task DrainAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("drain", c); public Task FenceAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("fence", c); public Task BackupAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("backup", c); public async Task MigrateAsync(HostUpdateExecutionRequest r, CancellationToken c) { await AddAsync("migration", c); if (MigrationException is not null) { throw MigrationException; } } public Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("apply", c); public Task VerifyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("verify", c); public Task PersistInstalledStateAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("persist-installed", c); public Task ReleaseFenceAsync(CancellationToken c) => AddAsync("release-fence", c); private Task AddAsync(string value, CancellationToken cancellationToken) { Calls.Add(value); StepTokens.Add(cancellationToken); return Task.CompletedTask; } }
+    private sealed class FakeSteps : IHostUpdateExecutionSteps { public List<string> Calls { get; } = []; public List<CancellationToken> StepTokens { get; } = []; public Exception? MigrationException { get; set; } public Exception? ReleaseException { get; set; } public Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("preflight", c); public Task DrainAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("drain", c); public Task FenceAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("fence", c); public Task BackupAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("backup", c); public async Task MigrateAsync(HostUpdateExecutionRequest r, CancellationToken c) { await AddAsync("migration", c); if (MigrationException is not null) { throw MigrationException; } } public Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("apply", c); public Task VerifyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("verify", c); public Task PersistInstalledStateAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("persist-installed", c); public async Task ReleaseFenceAsync(CancellationToken c) { await AddAsync("release-fence", c); if (ReleaseException is not null) { throw ReleaseException; } } private Task AddAsync(string value, CancellationToken cancellationToken) { Calls.Add(value); StepTokens.Add(cancellationToken); return Task.CompletedTask; } }
 }
