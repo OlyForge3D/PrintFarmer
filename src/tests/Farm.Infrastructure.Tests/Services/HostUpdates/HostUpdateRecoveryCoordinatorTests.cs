@@ -148,6 +148,30 @@ public sealed class HostUpdateRecoveryCoordinatorTests
         persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
         persisted.Detail.Should().Be("request_fingerprint_mismatch");
     }
+
+    [Fact]
+    public async Task RecoverAsync_AcquiresExecutionLockAcrossValidationApplyAndOutcome()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        var lockProbe = new RecordingExecutionLock(() => outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None).Result.Should().BeNull());
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(new InstalledHostState(
+                "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow)),
+            new AlwaysCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            executionLock: lockProbe);
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        lockProbe.AcquireCount.Should().Be(1);
+        lockProbe.Disposed.Should().BeTrue();
+    }
     [Fact]
     public async Task OutcomeStore_SurvivesFreshInstanceAfterRestart()
     {
@@ -226,6 +250,25 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     }
 
 
+
+    private sealed class RecordingExecutionLock(Action onAcquire) : IHostUpdateExecutionLock
+    {
+        public int AcquireCount { get; private set; }
+
+        public bool Disposed { get; private set; }
+
+        public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken)
+        {
+            AcquireCount++;
+            onAcquire();
+            return new Lease(this);
+        }
+
+        private sealed class Lease(RecordingExecutionLock owner) : IHostUpdateExecutionLease
+        {
+            public void Dispose() => owner.Disposed = true;
+        }
+    }
     private sealed class RecordingFenceCoordinator(Func<Task> onRelease) : IHostUpdateFenceCoordinator
     {
         public int ReleaseCount { get; private set; }

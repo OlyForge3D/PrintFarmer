@@ -169,7 +169,13 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         {
             IReadOnlyList<HostUpdateExecutionActivity> activities = journal.Read(releaseId);
             HostUpdateExecutionState? last = activities.Count == 0 ? null : activities[^1].State;
-            if (last is null or HostUpdateExecutionState.Completed)
+            if (last is null)
+            {
+                continue;
+            }
+
+            if (last == HostUpdateExecutionState.Completed &&
+                activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "fence-release:after", StringComparison.Ordinal)))
             {
                 continue;
             }

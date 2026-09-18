@@ -163,6 +163,24 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         runner.LastEnvironment.Should().ContainKey("SQLCMDPASSWORD").WhoseValue.Should().Be("test-only-pw-3");
     }
 
+
+    [Fact]
+    public void CreateRestoreCommand_SqlServer_UsesExclusiveRestoreBatchWithFailureSafety()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-6;TrustServerCertificate=True",
+        };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
+        query.Should().Contain("SET SINGLE_USER WITH ROLLBACK IMMEDIATE");
+        query.Should().Contain("WITH REPLACE");
+        query.Should().Contain("SET MULTI_USER");
+        query.Should().Contain("BEGIN CATCH");
+    }
     [Fact]
     public void CreateRestoreCommand_UnsupportedProvider_Throws()
     {

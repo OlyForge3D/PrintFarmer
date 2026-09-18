@@ -7,7 +7,7 @@ public sealed class HostUpdateExecutorTests
 {
     private static HostUpdateExecutionRequest Request() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, Enumerable.Range(1, 6).Select(i => new HostUpdateExecutionTarget("svc-" + i, "linux-amd64", "sha256:" + new string("abcdef"[i - 1], 64))).ToArray());
 
-    [Fact] public void Request_requires_exact_unique_six_targets() { var request = Request() with { Targets = Request().Targets.Take(5).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("release_identity_invalid", error); }
+    [Fact] public void Request_requires_at_least_one_target() { var request = Request() with { Targets = [] }; Assert.False(request.IsValid(out var error)); Assert.Equal("release_identity_invalid", error); }
     [Fact] public void Request_rejects_duplicate_service_ids() { var request = Request() with { Targets = Request().Targets.Select((t, i) => i == 5 ? t with { ServiceId = "svc-1" } : t).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_set_invalid", error); }
     [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(Activity(Request(), HostUpdateExecutionState.Accepted, "accepted")); Assert.Single(journal.Read("rel-1")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("rel-1")); } finally { if (File.Exists(path)) { File.Delete(path); } } }
 
@@ -55,7 +55,7 @@ public sealed class HostUpdateExecutorTests
         using var cts = new CancellationTokenSource();
         var result = await executor.ExecuteAsync(Request(), cts.Token);
         Assert.True(result.Succeeded);
-        Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls);
+        Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify", "release-fence" }, steps.Calls);
         Assert.All(steps.StepTokens, token => Assert.True(token.CanBeCanceled));
         Assert.All(result.Activities, activity => Assert.False(string.IsNullOrWhiteSpace(activity.RequestFingerprint)));
     }
@@ -155,7 +155,7 @@ public sealed class HostUpdateExecutorTests
         HostUpdateExecutionResult result = await executor.ExecuteAsync(request);
 
         Assert.True(result.Succeeded);
-        Assert.Equal(new[] { "apply", "verify" }, steps.Calls);
+        Assert.Equal(new[] { "apply", "verify", "release-fence" }, steps.Calls);
         Assert.Contains(journal.Read(request.ReleaseId), a => a.State == HostUpdateExecutionState.Migrating && a.Phase == "migration:after");
     }
 
@@ -177,7 +177,7 @@ public sealed class HostUpdateExecutorTests
         HostUpdateExecutionResult result = await executor.ExecuteAsync(request);
 
         Assert.True(result.Succeeded);
-        Assert.Equal(new[] { "verify" }, steps.Calls);
+        Assert.Equal(new[] { "verify", "release-fence" }, steps.Calls);
         Assert.DoesNotContain("apply", steps.Calls);
         Assert.Contains(journal.Read(request.ReleaseId), a => a.State == HostUpdateExecutionState.Applying && a.Phase == "apply:after");
     }
@@ -204,11 +204,75 @@ public sealed class HostUpdateExecutorTests
         Assert.Empty(steps.Calls);
         Assert.Equal("failure:uncertain_side_effect:apply:not_proven", journal.Read(request.ReleaseId)[^1].Phase);
     }
+
+    [Fact]
+    public async Task RequestResolver_LoadsOnlyCompletedStagedServerSideReceipt()
+    {
+        var identity = new CanonicalReleaseIdentity(
+            "stable:1.0.0", "1.0.0", "stable", "v1.0.0", "main", new string('b', 40), new string('b', 40),
+            "build-1", "stable:1.0.0", "1.0.0", "sha256:" + new string('a', 64));
+        var prior = identity with { ReleaseId = "stable:0.9.0", Version = "0.9.0" };
+        var receipt = new HostUpdateStagingReceipt(
+            true,
+            "staged",
+            identity,
+            identity.ManifestDigest,
+            new Dictionary<string, string> { ["api/linux-amd64"] = "sha256:" + new string('c', 64), ["frontend/linux-amd64"] = "sha256:" + new string('d', 64) },
+            prior,
+            "sha256:" + new string('e', 64),
+            "sha256:" + new string('f', 64));
+        var journal = new MemoryFoundationJournal(new[] {
+            new HostUpdateJournalEntry(
+                1,
+                DateTimeOffset.UtcNow,
+                "op-1",
+                "idem-1",
+                HostUpdateLifecycle.Staged,
+                "staged",
+                new HostUpdateJournalSnapshot(
+                    "installation-1",
+                    "operator",
+                    "nonce",
+                    "reason",
+                    "stable",
+                    "stable",
+                    "rev-1",
+                    "plan-hash",
+                    identity,
+                    receipt,
+                    "topology",
+                    new HashSet<string> { "api" },
+                    "linux-amd64",
+                    receipt.ComponentPlatformDigests)),
+        });
+        var resolver = new HostUpdateExecutionRequestResolver(journal);
+
+        HostUpdateExecutionRequest? request = await resolver.ResolveAsync(identity.ReleaseId, CancellationToken.None);
+
+        request.Should().NotBeNull();
+        request!.ReleaseId.Should().Be(identity.ReleaseId);
+        request.ManifestDigest.Should().Be(identity.ManifestDigest);
+        request.SourceCommit.Should().Be(identity.SourceCommit);
+        request.Channel.Should().Be(HostUpdateExecutionChannel.Stable);
+        request.Targets.Should().ContainSingle();
+        request.Targets[0].ServiceId.Should().Be("api");
+    }
+
+    [Fact]
+    public async Task RequestResolver_RejectsMissingCompletedStagingReceipt()
+    {
+        var resolver = new HostUpdateExecutionRequestResolver(new MemoryFoundationJournal([]));
+
+        HostUpdateExecutionRequest? request = await resolver.ResolveAsync("stable:1.0.0", CancellationToken.None);
+
+        request.Should().BeNull();
+    }
     private static HostUpdateExecutionActivity Activity(HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase) =>
         new(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(request));
 
+    private sealed class MemoryFoundationJournal(IReadOnlyList<HostUpdateJournalEntry> entries) : IHostUpdateJournal { public Task AppendAsync(HostUpdateJournalEntry entry, CancellationToken ct) => throw new NotSupportedException(); public Task<IReadOnlyList<HostUpdateJournalEntry>> ReadAsync(CancellationToken ct) => Task.FromResult(entries); }
     private sealed class NoopLock : IHostUpdateExecutionLock { public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken) => new Lease(); private sealed class Lease : IHostUpdateExecutionLease { public void Dispose() { } } }
     private sealed class MemoryJournal(params HostUpdateExecutionActivity[] seed) : IHostUpdateExecutionJournal { private readonly List<HostUpdateExecutionActivity> entries = [.. seed]; public IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId) => entries.Where(e => e.ReleaseId == releaseId).ToArray(); public void Append(HostUpdateExecutionActivity activity) => entries.Add(activity); public IReadOnlyList<string> ListReleaseIds() => entries.Select(e => e.ReleaseId).Distinct().ToArray(); }
     private sealed class FakeSideEffectReconciler(string? reconciledPhase) : IHostUpdateSideEffectReconciler { public Task<HostUpdateSideEffectReconciliation> ReconcileAsync(string phase, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(string.Equals(phase, reconciledPhase, StringComparison.Ordinal) ? HostUpdateSideEffectReconciliation.Complete("proven") : HostUpdateSideEffectReconciliation.Uncertain("not_proven")); }
-    private sealed class FakeSteps : IHostUpdateExecutionSteps { public List<string> Calls { get; } = []; public List<CancellationToken> StepTokens { get; } = []; public Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("preflight", c); public Task DrainAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("drain", c); public Task FenceAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("fence", c); public Task BackupAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("backup", c); public Task MigrateAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("migration", c); public Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("apply", c); public Task VerifyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("verify", c); private Task AddAsync(string value, CancellationToken cancellationToken) { Calls.Add(value); StepTokens.Add(cancellationToken); return Task.CompletedTask; } }
+    private sealed class FakeSteps : IHostUpdateExecutionSteps { public List<string> Calls { get; } = []; public List<CancellationToken> StepTokens { get; } = []; public Task PreflightAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("preflight", c); public Task DrainAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("drain", c); public Task FenceAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("fence", c); public Task BackupAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("backup", c); public Task MigrateAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("migration", c); public Task ApplyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("apply", c); public Task VerifyAsync(HostUpdateExecutionRequest r, CancellationToken c) => AddAsync("verify", c); public Task ReleaseFenceAsync(CancellationToken c) => AddAsync("release-fence", c); private Task AddAsync(string value, CancellationToken cancellationToken) { Calls.Add(value); StepTokens.Add(cancellationToken); return Task.CompletedTask; } }
 }

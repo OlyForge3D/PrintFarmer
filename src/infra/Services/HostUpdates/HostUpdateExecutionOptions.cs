@@ -93,6 +93,19 @@ public sealed class HostUpdateExecutionOptions
     public string[] RequiredUnavailableFacilities { get; set; } = [];
 
     /// <summary>
+    /// Active compose services for this host topology. The resolver authenticates the full staged
+    /// artifact set, but apply/verify only target services actually running in this topology.
+    /// </summary>
+    public string[] ActiveServiceIds { get; set; } =
+    [
+        "api",
+        "frontend",
+        "slicer-host",
+        "printer-discovery",
+        "orcaslicer-worker",
+    ];
+
+    /// <summary>
     /// Writer names (matching <see cref="IFenceableWriter.Name"/>) that must all be present in
     /// the registered fence coordinator before the executor is considered available. Backfills
     /// coverage over time as more background writers are fenced (issue #2663); an entry here

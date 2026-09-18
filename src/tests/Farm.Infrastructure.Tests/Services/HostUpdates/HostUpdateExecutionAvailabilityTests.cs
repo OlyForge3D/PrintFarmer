@@ -565,6 +565,7 @@ public class HostUpdateExecutionAvailabilityTests
         {
             var journal = new FakeJournal();
             journal.Append(new HostUpdateExecutionActivity("a1", "release-5", HostUpdateExecutionState.Completed, "completed", DateTimeOffset.UtcNow));
+            journal.Append(new HostUpdateExecutionActivity("a2", "release-5", HostUpdateExecutionState.Completed, "fence-release:after", DateTimeOffset.UtcNow));
             var admission = new FakeFenceableWriter("api-admission");
 
             var provider = new HostUpdateExecutionAvailabilityProvider(

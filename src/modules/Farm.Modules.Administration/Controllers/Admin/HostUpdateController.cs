@@ -59,6 +59,7 @@ public sealed class HostUpdateController(
     IHostUpdateExecutor executor,
     IHostUpdateExecutionJournal journal,
     IHostUpdateRecoveryCoordinator recoveryCoordinator,
+    IHostUpdateExecutionRequestResolver requestResolver,
     HostUpdateExecutionAvailabilityHolder availabilityHolder,
     IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore) : ControllerBase
 {
@@ -78,18 +79,23 @@ public sealed class HostUpdateController(
         [FromBody] HostUpdateExecuteRequestBody body,
         CancellationToken cancellationToken)
     {
-        if (TryRejectWhenUnavailable(out ActionResult? unavailable))
+        if (TryRejectWhenUnavailable(body?.ReleaseId, out ActionResult? unavailable))
         {
             return unavailable!;
         }
 
-        string error = "request_invalid";
-        if (body is null || !body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out error))
+        if (body is null || string.IsNullOrWhiteSpace(body.ReleaseId))
         {
-            return BadRequest(new { code = string.IsNullOrEmpty(error) ? "request_invalid" : error });
+            return BadRequest(new { code = "release_id_required" });
         }
 
-        HostUpdateExecutionResult result = await executor.ExecuteAsync(request!, cancellationToken).ConfigureAwait(false);
+        HostUpdateExecutionRequest? request = await requestResolver.ResolveAsync(body.ReleaseId, cancellationToken).ConfigureAwait(false);
+        if (request is null)
+        {
+            return Conflict(new { code = "staged_authorization_required" });
+        }
+
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(request, cancellationToken).ConfigureAwait(false);
         HostUpdateRecoveryOutcomeRecord? recoveryOutcome = await recoveryOutcomeStore.ReadAsync(result.ReleaseId, cancellationToken).ConfigureAwait(false);
         var response = new HostUpdateStatusResponse(result.ReleaseId, result.State, result.Activities, recoveryOutcome);
         return result.State == HostUpdateExecutionState.RecoveryRequired ? Conflict(response) : Ok(response);
@@ -130,7 +136,7 @@ public sealed class HostUpdateController(
         [FromBody] HostUpdateExecuteRequestBody body,
         CancellationToken cancellationToken)
     {
-        if (TryRejectWhenUnavailable(out ActionResult? unavailable))
+        if (TryRejectWhenUnavailable(releaseId, out ActionResult? unavailable))
         {
             return unavailable!;
         }
@@ -146,13 +152,13 @@ public sealed class HostUpdateController(
             return Conflict(new { code = "not_in_recovery" });
         }
 
-        string error = "request_invalid";
-        if (body is null || !body.TryToExecutionRequest(out HostUpdateExecutionRequest? request, out error))
+        HostUpdateExecutionRequest? request = await requestResolver.ResolveAsync(releaseId, cancellationToken).ConfigureAwait(false);
+        if (request is null)
         {
-            return BadRequest(new { code = string.IsNullOrEmpty(error) ? "request_invalid" : error });
+            return Conflict(new { code = "staged_authorization_required" });
         }
 
-        HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(request!, activities, cancellationToken).ConfigureAwait(false);
+        HostUpdateRecoveryResult result = await recoveryCoordinator.RecoverAsync(request, activities, cancellationToken).ConfigureAwait(false);
         return Ok(result);
     }
 
@@ -167,10 +173,10 @@ public sealed class HostUpdateController(
     /// <see cref="IHostUpdateRecoveryCoordinator"/>, with the exact unavailability reasons
     /// surfaced to the operator rather than an opaque failure deeper in the pipeline.
     /// </summary>
-    private bool TryRejectWhenUnavailable(out ActionResult? result)
+    private bool TryRejectWhenUnavailable(string? releaseId, out ActionResult? result)
     {
         HostUpdateExecutionAvailability availability = availabilityHolder.Current;
-        if (availability.State == HostUpdateExecutionAvailabilityState.Available)
+        if (availability.State == HostUpdateExecutionAvailabilityState.Available || IsOnlyMatchingRestartReconciliation(availability, releaseId))
         {
             result = null;
             return false;
@@ -179,4 +185,9 @@ public sealed class HostUpdateController(
         result = StatusCode(StatusCodes.Status503ServiceUnavailable, new { code = "host_update_executor_unavailable", reasons = availability.Reasons });
         return true;
     }
+
+    private static bool IsOnlyMatchingRestartReconciliation(HostUpdateExecutionAvailability availability, string? releaseId) =>
+        !string.IsNullOrWhiteSpace(releaseId) &&
+        availability.Reasons.Count > 0 &&
+        availability.Reasons.All(reason => reason.StartsWith($"restart_reconciliation_pending:{releaseId}:", StringComparison.Ordinal));
 }

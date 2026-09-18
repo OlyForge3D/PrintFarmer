@@ -40,11 +40,33 @@ public static class HostUpdateExecutionStartup
         // RootDirectory (never the app DB, never a temp/cache path -- see
         // HostUpdateExecutionOptionsValidator).
         services.AddSingleton<IInstalledHostStateStore>(sp =>
-            new FileInstalledHostStateStore(Path.Combine(sp.GetRequiredService<HostUpdateExecutionOptions>().StateDirectory, "installed-state.json")));
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredInstalledHostStateStore()
+                : new FileInstalledHostStateStore(Path.Combine(options.StateDirectory, "installed-state.json"));
+        });
         services.AddSingleton<IHostUpdateExecutionJournal>(sp =>
-            new FileHostUpdateExecutionJournal(Path.Combine(sp.GetRequiredService<HostUpdateExecutionOptions>().StateDirectory, "journal.ndjson")));
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateExecutionJournal()
+                : new FileHostUpdateExecutionJournal(Path.Combine(options.StateDirectory, "journal.ndjson"));
+        });
         services.AddSingleton<IHostUpdateExecutionLock>(sp =>
-            new FileHostUpdateExecutionLock(Path.Combine(sp.GetRequiredService<HostUpdateExecutionOptions>().StateDirectory, "execution.lock")));
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateExecutionLock()
+                : new FileHostUpdateExecutionLock(Path.Combine(options.StateDirectory, "execution.lock"));
+        });
+        services.AddSingleton<IHostUpdateJournal>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateJournal()
+                : new FileHostUpdateJournal(options.StateDirectory);
+        });
 
         // Drain: perimeter admission gate + observed active print/outbox work.
         services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();
@@ -107,10 +129,11 @@ public static class HostUpdateExecutionStartup
                 options.DiskWatchPath,
                 options.MinimumFreeBytes,
                 options.SupportedProviderNames.ToHashSet(StringComparer.Ordinal),
-                options.ServiceMappings.Select(m => m.ServiceId).ToHashSet(StringComparer.Ordinal));
+                options.ActiveServiceIds.ToHashSet(StringComparer.Ordinal));
         });
         services.AddScoped<IHostUpdateExecutionSteps, HostUpdateExecutionStepsAdapter>();
         services.AddScoped<IHostUpdateExecutor, HostUpdateExecutor>();
+        services.AddScoped<IHostUpdateExecutionRequestResolver, HostUpdateExecutionRequestResolver>();
 
         // Availability: proves (not assumes) the executor is actually usable -- root writable,
         // journal intact, adapters configured, compose files present, docker runtime reachable --
@@ -189,9 +212,13 @@ public static class HostUpdateExecutionStartup
                 new DirectoryCopyBackupTarget(pair.Key, pair.Value, isRequired: !optionalDirectoryNames.Contains(pair.Key))));
             return targets;
         });
-        services.AddScoped<IHostUpdateBackupCoordinator>(sp => new HostUpdateBackupCoordinator(
-            sp.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>(),
-            sp.GetRequiredService<HostUpdateExecutionOptions>().BackupRootDirectory));
+        services.AddScoped<IHostUpdateBackupCoordinator>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateBackupCoordinator()
+                : new HostUpdateBackupCoordinator(sp.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>(), options.BackupRootDirectory);
+        });
     }
 
     private static void AddApplyAndVerify(IServiceCollection services)
@@ -246,7 +273,7 @@ public static class HostUpdateExecutionStartup
                 digest),
             TimeSpan.FromSeconds(options.VerifyTimeoutSeconds),
             TimeSpan.FromSeconds(options.VerifyPollIntervalSeconds),
-            options.ServiceMappings.Select(m => m.ServiceId).ToHashSet(StringComparer.Ordinal));
+            options.ActiveServiceIds.ToHashSet(StringComparer.Ordinal));
     }
 
     private static string ContainerNameFor(HostUpdateExecutionOptions options, string serviceId)
@@ -268,7 +295,12 @@ public static class HostUpdateExecutionStartup
     {
         services.AddSingleton<IHostUpdateRecoveryCompatibilityEvaluator, DefaultHostUpdateRecoveryCompatibilityEvaluator>();
         services.AddScoped<IHostUpdateBackupManifestLocator>(sp =>
-            new FileHostUpdateBackupManifestLocator(sp.GetRequiredService<HostUpdateExecutionOptions>().BackupRootDirectory));
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateBackupManifestLocator()
+                : new FileHostUpdateBackupManifestLocator(options.BackupRootDirectory);
+        });
         services.AddScoped<IHostUpdateRestoreExecutor>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
@@ -285,8 +317,12 @@ public static class HostUpdateExecutionStartup
                 TimeSpan.FromSeconds(options.BackupTimeoutSeconds));
         });
         services.AddSingleton<IHostUpdateRecoveryOutcomeStore>(sp =>
-            new FileHostUpdateRecoveryOutcomeStore(
-                Path.Combine(sp.GetRequiredService<HostUpdateExecutionOptions>().StateDirectory, "recovery-outcomes")));
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdateRecoveryOutcomeStore()
+                : new FileHostUpdateRecoveryOutcomeStore(Path.Combine(options.StateDirectory, "recovery-outcomes"));
+        });
         services.AddScoped<IHostUpdateRecoveryCoordinator, HostUpdateRecoveryCoordinator>();
     }
 }

@@ -42,7 +42,8 @@ public class HostUpdateControllerAvailabilityTests
         Mock<IHostUpdateRecoveryCoordinator> recovery = new(MockBehavior.Strict);
         var holder = new HostUpdateExecutionAvailabilityHolder();
         holder.Update(HostUpdateExecutionAvailability.Unavailable(DateTimeOffset.UtcNow, ["root_directory_not_configured"]));
-        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder, new InMemoryRecoveryOutcomeStore());
+        Mock<IHostUpdateExecutionRequestResolver> resolver = new(MockBehavior.Strict);
+        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, resolver.Object, holder, new InMemoryRecoveryOutcomeStore());
 
         ActionResult<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse> result =
             await controller.ExecuteAsync(ValidBody(), CancellationToken.None);
@@ -53,22 +54,28 @@ public class HostUpdateControllerAvailabilityTests
     }
 
     [Fact]
-    public async Task RecoverAsync_WhenUnavailable_Returns503AndNeverDelegates()
+    public async Task RecoverAsync_WhenOnlyMatchingRestartReconciliationPending_DelegatesForExactRecovery()
     {
         Mock<IHostUpdateExecutor> executor = new(MockBehavior.Strict);
         Mock<IHostUpdateExecutionJournal> journal = new(MockBehavior.Strict);
         Mock<IHostUpdateRecoveryCoordinator> recovery = new(MockBehavior.Strict);
         var holder = new HostUpdateExecutionAvailabilityHolder();
         holder.Update(HostUpdateExecutionAvailability.Unavailable(DateTimeOffset.UtcNow, ["restart_reconciliation_pending:release-1:Fenced"]));
-        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder, new InMemoryRecoveryOutcomeStore());
+        Mock<IHostUpdateExecutionRequestResolver> resolver = new(MockBehavior.Strict);
+        resolver.Setup(r => r.ResolveAsync("release-1", It.IsAny<CancellationToken>())).ReturnsAsync(ToRequest());
+        journal.Setup(j => j.Read("release-1")).Returns([
+            new HostUpdateExecutionActivity("a1", "release-1", HostUpdateExecutionState.RecoveryRequired, "failure:restart", DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(ToRequest())),
+        ]);
+        recovery.Setup(r => r.RecoverAsync(It.IsAny<HostUpdateExecutionRequest>(), It.IsAny<IReadOnlyList<HostUpdateExecutionActivity>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, string.Empty));
+        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, resolver.Object, holder, new InMemoryRecoveryOutcomeStore());
 
         ActionResult<HostUpdateRecoveryResult> result =
             await controller.RecoverAsync("release-1", ValidBody(), CancellationToken.None);
 
-        ObjectResult objectResult = result.Result.Should().BeOfType<ObjectResult>().Which;
-        objectResult.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
-        journal.VerifyNoOtherCalls();
-        recovery.VerifyNoOtherCalls();
+        OkObjectResult ok = result.Result.Should().BeOfType<OkObjectResult>().Which;
+        ok.Value.Should().BeOfType<HostUpdateRecoveryResult>();
+        recovery.Verify(r => r.RecoverAsync(It.IsAny<HostUpdateExecutionRequest>(), It.IsAny<IReadOnlyList<HostUpdateExecutionActivity>>(), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -80,16 +87,18 @@ public class HostUpdateControllerAvailabilityTests
         var holder = new HostUpdateExecutionAvailabilityHolder();
         holder.Update(HostUpdateExecutionAvailability.Available(DateTimeOffset.UtcNow));
         var expected = new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []);
+        Mock<IHostUpdateExecutionRequestResolver> resolver = new(MockBehavior.Strict);
+        resolver.Setup(r => r.ResolveAsync("release-1", It.IsAny<CancellationToken>())).ReturnsAsync(ToRequest());
         executor.Setup(e => e.ExecuteAsync(It.IsAny<HostUpdateExecutionRequest>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(expected);
-        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, holder, new InMemoryRecoveryOutcomeStore());
+        var controller = new Farm.Modules.Administration.Controllers.Admin.HostUpdateController(executor.Object, journal.Object, recovery.Object, resolver.Object, holder, new InMemoryRecoveryOutcomeStore());
 
         ActionResult<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse> result =
             await controller.ExecuteAsync(ValidBody(), CancellationToken.None);
 
         OkObjectResult ok = result.Result.Should().BeOfType<OkObjectResult>().Which;
         ok.Value.Should().BeOfType<Farm.Modules.Administration.Controllers.Admin.HostUpdateStatusResponse>();
-        executor.Verify(e => e.ExecuteAsync(It.IsAny<HostUpdateExecutionRequest>(), It.IsAny<CancellationToken>()), Times.Once);
+        executor.Verify(e => e.ExecuteAsync(It.Is<HostUpdateExecutionRequest>(r => r.ManifestDigest == ToRequest().ManifestDigest), It.IsAny<CancellationToken>()), Times.Once);
     }
 
     [Fact]
@@ -119,6 +128,7 @@ public class HostUpdateControllerAvailabilityTests
             executor.Object,
             journal.Object,
             recovery.Object,
+            Mock.Of<IHostUpdateExecutionRequestResolver>(),
             holder,
             outcomeStore);
 
@@ -131,6 +141,14 @@ public class HostUpdateControllerAvailabilityTests
         response.RecoveryOutcome.Should().Be(outcome);
     }
 
+
+    private static HostUpdateExecutionRequest ToRequest() => new(
+        "release-1",
+        1,
+        "sha256:" + new string('a', 64),
+        new string('b', 40),
+        HostUpdateExecutionChannel.Stable,
+        [new HostUpdateExecutionTarget("api", "linux/amd64", "sha256:" + new string('c', 64))]);
     private sealed class InMemoryRecoveryOutcomeStore : IHostUpdateRecoveryOutcomeStore
     {
         private readonly Dictionary<string, HostUpdateRecoveryOutcomeRecord> outcomes = new(StringComparer.Ordinal);

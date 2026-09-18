@@ -60,13 +60,32 @@ public sealed class QueueRetentionPruneService(
 
             try
             {
-                await Task.Delay(_settings.PruneInterval, stoppingToken);
+                if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+                {
+                    await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                }
             }
             catch (OperationCanceledException)
             {
                 return;
             }
         }
+    }
+
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + _settings.PruneInterval;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     /// <summary>

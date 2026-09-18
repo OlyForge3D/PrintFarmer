@@ -90,9 +90,11 @@ public sealed class DefaultHostUpdateRecoveryCompatibilityEvaluator : IHostUpdat
     {
         ArgumentNullException.ThrowIfNull(priorState);
         ArgumentNullException.ThrowIfNull(activities);
+        bool migrationStarted = activities.Any(a =>
+            a.State == HostUpdateExecutionState.Migrating && a.Phase.StartsWith("migration:before", StringComparison.Ordinal));
         bool migrationCommitted = activities.Any(a =>
             a.State == HostUpdateExecutionState.Migrating && a.Phase.EndsWith(":after", StringComparison.Ordinal));
-        return !migrationCommitted;
+        return !migrationStarted && !migrationCommitted;
     }
 }
 
@@ -123,7 +125,8 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateBackupManifestLocator manifestLocator,
     IHostUpdateDigestVerifier digestVerifier,
     IHostUpdateRecoveryOutcomeStore outcomeStore,
-    IHostUpdateFenceCoordinator? fenceCoordinator = null) : IHostUpdateRecoveryCoordinator
+    IHostUpdateFenceCoordinator? fenceCoordinator = null,
+    IHostUpdateExecutionLock? executionLock = null) : IHostUpdateRecoveryCoordinator
 {
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
@@ -141,6 +144,8 @@ public sealed class HostUpdateRecoveryCoordinator(
                 CancellationToken.None).ConfigureAwait(false);
             return fingerprintResult;
         }
+
+        using IHostUpdateExecutionLease lease = (executionLock ?? NoopHostUpdateExecutionLock.Instance).Acquire(TimeSpan.FromSeconds(30), cancellationToken);
 
         HostUpdateRecoveryResult result;
         try
@@ -277,16 +282,52 @@ public sealed class ProcessHostUpdateRestoreExecutor(
 
             if (directoryRestoreTargetsByName.TryGetValue(targetName, out string? destinationDirectory))
             {
+                if (File.Exists(Path.Combine(targetDirectory, ".empty")))
+                {
+                    if (Directory.Exists(destinationDirectory))
+                    {
+                        Directory.Delete(destinationDirectory, recursive: true);
+                    }
+
+                    continue;
+                }
+
+                if (Directory.Exists(destinationDirectory))
+                {
+                    Directory.Delete(destinationDirectory, recursive: true);
+                }
+
                 Directory.CreateDirectory(destinationDirectory);
+                RestoreRecordedDirectories(targetDirectory, destinationDirectory);
                 foreach (string sourcePath in Directory.EnumerateFiles(targetDirectory, "*", SearchOption.AllDirectories))
                 {
                     cancellationToken.ThrowIfCancellationRequested();
                     string relative = Path.GetRelativePath(targetDirectory, sourcePath);
+                    if (string.Equals(relative, ".printfarmer-directories.json", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
                     string destinationPath = Path.Combine(destinationDirectory, relative);
                     Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? destinationDirectory);
                     File.Copy(sourcePath, destinationPath, overwrite: true);
                 }
             }
+        }
+    }
+
+    private static void RestoreRecordedDirectories(string targetDirectory, string destinationDirectory)
+    {
+        string manifestPath = Path.Combine(targetDirectory, ".printfarmer-directories.json");
+        if (!File.Exists(manifestPath))
+        {
+            return;
+        }
+
+        string[]? directories = System.Text.Json.JsonSerializer.Deserialize<string[]>(File.ReadAllText(manifestPath));
+        foreach (string relative in directories ?? [])
+        {
+            Directory.CreateDirectory(Path.Combine(destinationDirectory, relative));
         }
     }
 
@@ -344,5 +385,29 @@ public sealed class FileHostUpdateBackupManifestLocator(string backupRootDirecto
     {
         char[] invalid = Path.GetInvalidFileNameChars();
         return new string([.. value.Select(c => invalid.Contains(c) ? '_' : c)]);
+    }
+}
+
+internal sealed class NoopHostUpdateExecutionLock : IHostUpdateExecutionLock
+{
+    public static readonly NoopHostUpdateExecutionLock Instance = new();
+
+    private NoopHostUpdateExecutionLock()
+    {
+    }
+
+    public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken) => NoopHostUpdateExecutionLease.LeaseInstance;
+
+    private sealed class NoopHostUpdateExecutionLease : IHostUpdateExecutionLease
+    {
+        public static readonly NoopHostUpdateExecutionLease LeaseInstance = new();
+
+        private NoopHostUpdateExecutionLease()
+        {
+        }
+
+        public void Dispose()
+        {
+        }
     }
 }

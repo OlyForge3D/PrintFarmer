@@ -45,8 +45,9 @@ public sealed class HostUpdateExecutionStepsAdapter(
         await installedStateStore.WriteAsync(
             new InstalledHostState(request.ReleaseId, request.ManifestDigest, serviceDigests, Topology(request), DateTimeOffset.UtcNow, servicePlatforms),
             ct).ConfigureAwait(false);
-        await fence.ReleaseAsync(ct).ConfigureAwait(false);
     }
+
+    public Task ReleaseFenceAsync(CancellationToken cancellationToken) => fence.ReleaseAsync(cancellationToken);
 
     private static string Topology(HostUpdateExecutionRequest request) =>
         string.Join('+', request.Targets.Select(t => t.ServiceId).OrderBy(id => id, StringComparer.Ordinal));

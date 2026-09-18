@@ -1,12 +1,11 @@
 ﻿# Host update executor
 
 The safe-executor core (`HostUpdateExecutor`) supplies
-immutable release identity contracts, durable canonical request fingerprint binding, exact six-target validation, a bounded process/installation
+immutable release identity contracts, durable canonical request fingerprint binding, active-topology target validation, a bounded process/installation
 lock, a durable hash-chained journal, and a checkpoint-aware state machine. On top of that
 foundation, issue #2663 adds concrete, repository-appropriate step adapters that turn the
 foundation into a functional **manual-first** update path: an operator (or, later, #2666's
-scheduler once it is granted standing permission — not yet the case here) submits one immutable
-`HostUpdateExecutionRequest` through the admin API, and the executor drives it through
+scheduler once it is granted standing permission — not yet the case here) submits a staged release id through the admin API; execution resolves the immutable request only from server-side verified staging journal evidence, then drives it through
 preflight → drain → fence → backup → migration → apply → verify, or into `RecoveryRequired` on any
 failure. There is still no automatic/unattended execution path.
 
@@ -98,10 +97,7 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   `sp.GetServices<IHostUpdateBackupTarget>()`, which the .NET container resolves as
   `IEnumerable<IHostUpdateBackupTarget>` again -- an unbounded self-recursive registration that
   would `StackOverflowException` the process the first time anything resolved the backup target
-  list; `HostUpdateExecutionOptionsValidator`'s `.ValidateOnStart()` required `RootDirectory` (and
-  every other host-update-execution option) unconditionally, but no supported deployment shape
-  configures it, so the entire API crashed at startup the moment `AddHostUpdateExecution` was
-  registered; and `AggregateHostUpdateHealthCheck` looked up the real `/health` payload's status
+  list; the executor initially treated an unconfigured `RootDirectory` as a closed admission gate rather than an inert/manual-updater-unavailable state, risking ordinary production submissions when the updater was intentionally default-off; and `AggregateHostUpdateHealthCheck` looked up the real `/health` payload's status
   under the PascalCase key `Status`, but `ProgramHelpers.WriteHealthResponseAsync` serializes with
   `Program.HealthJsonOptions` (`PropertyNamingPolicy = JsonNamingPolicy.CamelCase`), so the wire
   property is `status` -- the lookup silently always missed, meaning verify always reported
@@ -165,8 +161,7 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   list with the connection password passed only via an environment variable (`PGPASSWORD` /
   `SQLCMDPASSWORD`), never on the command line and never through a shell (`sh -c`) string — closing
   the earlier shell-quoting/argv-exposure risk for both directions. The interpolated T-SQL
-  identifier/literal (`[database]` / `N'path'`) and the interpolated sqlite3 `.backup`/`.restore`
-  literal path are also escaped (doubled `]`/`'` respectively, the standard T-SQL/sqlite3
+  restore enters `SINGLE_USER WITH ROLLBACK IMMEDIATE` and uses a TRY/CATCH path that attempts `MULTI_USER` before rethrowing. The interpolated T-SQL identifier/literal (`[database]` / `N'path'`) and the interpolated sqlite3 `.backup`/`.restore` literal path are also escaped (doubled `]`/`'` respectively, the standard T-SQL/sqlite3
   convention) so a database name or backup-root path containing one of those characters cannot
   terminate the literal early and inject additional dot-command/T-SQL text into the same batch.
 - Recovery's `NeedsOperator`/`RolledBack` outcome is now durably persisted by

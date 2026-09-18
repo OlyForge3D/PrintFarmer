@@ -34,12 +34,12 @@ public sealed class FileHostUpdateAdmissionGateTests
     }
 
     [Fact]
-    public async Task IsClosedAsync_WhenRootMissing_ReturnsClosedFailSafe()
+    public async Task IsClosedAsync_WhenRootUnconfigured_ReturnsOpenForDefaultOffProduction()
     {
         var gate = new FileHostUpdateAdmissionGate(new HostUpdateExecutionOptions());
 
         bool closed = await gate.IsClosedAsync(CancellationToken.None);
 
-        closed.Should().BeTrue();
+        closed.Should().BeFalse();
     }
 }

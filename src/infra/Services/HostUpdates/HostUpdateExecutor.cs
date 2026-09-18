@@ -27,15 +27,15 @@ public enum HostUpdateExecutionChannel { Stable, Insider }
 public sealed record HostUpdateExecutionTarget(string ServiceId, string Platform, string ChildDigest);
 public sealed record HostUpdateExecutionRequest(string ReleaseId, long AuthenticatedSequence, string ManifestDigest, string SourceCommit, HostUpdateExecutionChannel Channel, IReadOnlyList<HostUpdateExecutionTarget> Targets)
 {
-    public const int RequiredTargetCount = 6;
+    public const int MinimumTargetCount = 1;
     public bool IsValid(out string error)
     {
         error = string.Empty;
-        if (string.IsNullOrWhiteSpace(ReleaseId) || AuthenticatedSequence < 1 || !Digest(ManifestDigest) || !Commit(SourceCommit) || Targets is null || Targets.Count != RequiredTargetCount)
+        if (string.IsNullOrWhiteSpace(ReleaseId) || AuthenticatedSequence < 1 || !Digest(ManifestDigest) || !Commit(SourceCommit) || Targets is null || Targets.Count < MinimumTargetCount)
         { error = "release_identity_invalid"; return false; }
         if (Targets.Any(t => t is null || string.IsNullOrWhiteSpace(t.ServiceId) || string.IsNullOrWhiteSpace(t.Platform) || !Digest(t.ChildDigest)))
         { error = "target_invalid"; return false; }
-        if (Targets.Select(t => t.ServiceId).Distinct(StringComparer.Ordinal).Count() != RequiredTargetCount)
+        if (Targets.Select(t => t.ServiceId).Distinct(StringComparer.Ordinal).Count() != Targets.Count)
         { error = "target_set_invalid"; return false; }
         return true;
     }
@@ -47,7 +47,7 @@ public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecu
 public interface IHostUpdateExecutor { Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default); }
 public interface IHostUpdateExecutionSteps
 {
-    Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct);
+    Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ReleaseFenceAsync(CancellationToken cancellationToken);
 }
 public interface IHostUpdateExecutionJournal { IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId); void Append(HostUpdateExecutionActivity activity); IReadOnlyList<string> ListReleaseIds(); }
 public interface IHostUpdateExecutionLease : IDisposable { }
@@ -139,9 +139,14 @@ public sealed class HostUpdateExecutor(
         HostUpdateExecutionState current = activities.LastOrDefault()?.State ?? HostUpdateExecutionState.Accepted;
         if (!HostUpdateRequestFingerprint.Matches(activities, request, out string fingerprintError))
         { Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + fingerprintError); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, fingerprintError, activities); }
-        if (current == HostUpdateExecutionState.Completed || current == HostUpdateExecutionState.RecoveryRequired)
+        if (current == HostUpdateExecutionState.Completed)
         {
-            return new(request.ReleaseId, current, current == HostUpdateExecutionState.Completed ? null : "recovery_required", activities);
+            return await EnsureCompletedFenceReleasedAsync(request, activities, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (current == HostUpdateExecutionState.RecoveryRequired)
+        {
+            return new(request.ReleaseId, current, "recovery_required", activities);
         }
 
         if (current == HostUpdateExecutionState.Accepted)
@@ -192,14 +197,112 @@ public sealed class HostUpdateExecutor(
                 }
             }
             Append(activities, request, HostUpdateExecutionState.Completed, "completed");
-            return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
+            return await EnsureCompletedFenceReleasedAsync(request, activities, cancellationToken).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException) { Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + ex.GetType().Name); return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, ex.GetType().Name, activities); }
     }
+
+    private async Task<HostUpdateExecutionResult> EnsureCompletedFenceReleasedAsync(
+        HostUpdateExecutionRequest request,
+        List<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken)
+    {
+        if (activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "fence-release:after", StringComparison.Ordinal)))
+        {
+            return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
+        }
+
+        if (!activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "fence-release:before", StringComparison.Ordinal)))
+        {
+            Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:before");
+        }
+
+        try
+        {
+            await steps.ReleaseFenceAsync(cancellationToken).ConfigureAwait(false);
+            Append(activities, request, HostUpdateExecutionState.Completed, "fence-release:after");
+            return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            string failure = "fence_release_failed:" + exception.GetType().Name;
+            Append(activities, request, HostUpdateExecutionState.RecoveryRequired, "failure:" + failure);
+            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, failure, activities);
+        }
+    }
+
     private Task InvokeAsync(HostUpdateExecutionState state, HostUpdateExecutionRequest request, CancellationToken cancellationToken) => state switch { HostUpdateExecutionState.Preflight => steps.PreflightAsync(request, cancellationToken), HostUpdateExecutionState.Draining => steps.DrainAsync(request, cancellationToken), HostUpdateExecutionState.Fenced => steps.FenceAsync(request, cancellationToken), HostUpdateExecutionState.BackedUp => steps.BackupAsync(request, cancellationToken), HostUpdateExecutionState.Migrating => steps.MigrateAsync(request, cancellationToken), HostUpdateExecutionState.Applying => steps.ApplyAsync(request, cancellationToken), HostUpdateExecutionState.Verifying => steps.VerifyAsync(request, cancellationToken), _ => Task.CompletedTask };
     private void Append(List<HostUpdateExecutionActivity> activities, HostUpdateExecutionRequest request, HostUpdateExecutionState state, string phase) { var activity = new HostUpdateExecutionActivity(Guid.NewGuid().ToString("N"), request.ReleaseId, state, phase, DateTimeOffset.UtcNow, HostUpdateRequestFingerprint.Compute(request)); journal.Append(activity); activities.Add(activity); }
 }
 
+/// <summary>Loads the authoritative execution request from the already verified/staged host-update journal.</summary>
+public interface IHostUpdateExecutionRequestResolver
+{
+    Task<HostUpdateExecutionRequest?> ResolveAsync(string releaseId, CancellationToken cancellationToken);
+}
+
+/// <summary>
+/// Converts a completed #2662 staging receipt into the #2663 executor request. The admin API
+/// supplies only the release id; sequence, source commit, channel, manifest digest, active
+/// service set, platform and digests all come from durable server-side verified evidence.
+/// </summary>
+public sealed class HostUpdateExecutionRequestResolver(IHostUpdateJournal foundationJournal) : IHostUpdateExecutionRequestResolver
+{
+    public async Task<HostUpdateExecutionRequest?> ResolveAsync(string releaseId, CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(releaseId))
+        {
+            return null;
+        }
+
+        IReadOnlyList<HostUpdateJournalEntry> entries = await foundationJournal.ReadAsync(cancellationToken).ConfigureAwait(false);
+        HostUpdateJournalEntry? staged = entries.LastOrDefault(entry =>
+            entry.State == HostUpdateLifecycle.Staged &&
+            string.Equals(entry.Code, "staged", StringComparison.Ordinal) &&
+            string.Equals(entry.Snapshot.Identity?.ReleaseId, releaseId, StringComparison.Ordinal) &&
+            entry.Snapshot.Receipt is { IsComplete: true, Code: "staged" });
+        if (staged?.Snapshot.Identity is not { } identity)
+        {
+            return null;
+        }
+
+        if (!Enum.TryParse(identity.Channel, ignoreCase: true, out HostUpdateExecutionChannel channel))
+        {
+            return null;
+        }
+
+        long sequence;
+        try
+        {
+            sequence = SignedUpdateManifestValidator.DeriveSequence(identity.Version);
+        }
+        catch (Exception exception) when (exception is FormatException or OverflowException)
+        {
+            return null;
+        }
+
+        string platform = staged.Snapshot.Platform;
+        HostUpdateExecutionTarget[] targets = [.. staged.Snapshot.RequiredComponents
+            .OrderBy(component => component, StringComparer.Ordinal)
+            .Select(component =>
+            {
+                string key = SignedUpdateManifestValidator.PlatformKey(component, platform);
+                return staged.Snapshot.ComponentPlatformDigests.TryGetValue(key, out string? digest)
+                    ? new HostUpdateExecutionTarget(component, platform, digest)
+                    : null;
+            })
+            .OfType<HostUpdateExecutionTarget>()];
+
+        var request = new HostUpdateExecutionRequest(
+            identity.ReleaseId,
+            sequence,
+            identity.ManifestDigest,
+            identity.SourceCommit,
+            channel,
+            targets);
+        return request.IsValid(out _) ? request : null;
+    }
+}
 public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecutionLock
 {
     public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken)
@@ -373,12 +476,36 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
         }
 
         builder.Append(line).Append(Environment.NewLine);
-        File.WriteAllText(temp, builder.ToString(), new UTF8Encoding(false));
-        using (FileStream stream = new(temp, FileMode.Open, FileAccess.Read, FileShare.Read))
+        using (FileStream stream = new(temp, new FileStreamOptions
         {
-            stream.Flush(true);
+            Mode = FileMode.CreateNew,
+            Access = FileAccess.Write,
+            Share = FileShare.None,
+            Options = FileOptions.WriteThrough,
+        }))
+        {
+            byte[] bytes = new UTF8Encoding(false).GetBytes(builder.ToString());
+            stream.Write(bytes, 0, bytes.Length);
+            stream.Flush(flushToDisk: true);
         }
 
         File.Move(temp, path, true);
+        FlushDirectory(Path.GetDirectoryName(path) ?? ".");
+    }
+    private static void FlushDirectory(string directory)
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            return;
+        }
+
+        try
+        {
+            using FileStream stream = new(directory, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+            stream.Flush(flushToDisk: true);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+        {
+        }
     }
 }

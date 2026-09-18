@@ -38,10 +38,17 @@ public interface IHostUpdateAdmissionGate
 /// </summary>
 public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions options) : IHostUpdateAdmissionGate
 {
+    private bool IsConfigured => !string.IsNullOrWhiteSpace(options.RootDirectory);
+
     private string GatePath => Path.Combine(options.StateDirectory, "admission.closed");
 
     public async Task CloseAsync(CancellationToken cancellationToken)
     {
+        if (!IsConfigured)
+        {
+            return;
+        }
+
         string path = GatePath;
         Directory.CreateDirectory(Path.GetDirectoryName(path)!);
         await File.WriteAllTextAsync(path, DateTimeOffset.UtcNow.ToString("O"), cancellationToken).ConfigureAwait(false);
@@ -54,6 +61,11 @@ public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions optio
 
     public Task OpenAsync(CancellationToken cancellationToken)
     {
+        if (!IsConfigured)
+        {
+            return Task.CompletedTask;
+        }
+
         string path = GatePath;
         if (File.Exists(path))
         {
@@ -65,6 +77,11 @@ public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions optio
 
     public Task<bool> IsClosedAsync(CancellationToken cancellationToken)
     {
+        if (!IsConfigured)
+        {
+            return Task.FromResult(false);
+        }
+
         try
         {
             return Task.FromResult(File.Exists(GatePath));
