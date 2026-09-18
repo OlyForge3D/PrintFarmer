@@ -186,7 +186,10 @@ public static class HostUpdateDatabaseBackupTargetFactory
     /// </summary>
     private static SqlConnectionStringBuilder EncryptedSqlServerBuilder(string connectionString)
     {
-        var builder = new SqlConnectionStringBuilder(connectionString);
+        // Keep the security invariant visible to both the parser and static analysis. The
+        // explicit property assignment below remains authoritative when the application string
+        // contains Encrypt=False.
+        var builder = new SqlConnectionStringBuilder($"Encrypt=True;{connectionString}");
 
         if (builder.Encrypt != SqlConnectionEncryptOption.Strict)
         {
