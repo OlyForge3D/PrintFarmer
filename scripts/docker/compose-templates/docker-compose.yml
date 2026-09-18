@@ -20,7 +20,7 @@ services:
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_PID: ${MSSQL_PID:-Developer}
     ports:
-      - "${BIND_ADDRESS:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     networks:
       printfarmer-network:
         aliases:
@@ -59,7 +59,7 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-api
     restart: unless-stopped
     ports:
-      - "${BIND_ADDRESS:-0.0.0.0}:${API_PORT:-5245}:5245"
+      - "127.0.0.1:${API_PORT:-5245}:5245"
     depends_on:
       database:
         condition: service_healthy

@@ -9,7 +9,7 @@ environment:
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 ports:
-  - "${BIND_ADDRESS:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
+  - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
 networks:
   printfarmer-network:
     aliases:

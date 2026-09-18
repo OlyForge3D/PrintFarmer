@@ -1776,8 +1776,9 @@ EOF
     assert_contains "$generated_env" "SLICER_HOST_IMAGE=ghcr.io/olyforge3d/printfarmer-slicer-host@sha256:" "Generated env should persist slicer-host digest"
     assert_contains "$generated_env" "ORCASLICER_WORKER_IMAGE=ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:" "Generated env should persist Orca worker digest"
     assert_contains "$generated_env" "PRINTER_DISCOVERY_IMAGE=ghcr.io/olyforge3d/printfarmer-printer-discovery@sha256:" "Generated env should persist discovery digest"
-    assert_contains "$(cat "$relative_install_dir/docker-compose.yml")" "name: isolated-lab" "Generated compose should isolate the project name"
-    assert_contains "$(cat "$relative_install_dir/docker-compose.yml")" "127.0.0.1:18080:80" "Generated compose should bind the requested loopback HTTP port"
+    assert_contains "$(cat "$relative_install_dir/.env")" "COMPOSE_PROJECT_NAME=isolated-lab" "Generated env should isolate the Compose project name"
+    assert_contains "$(cat "$relative_install_dir/.env")" "BIND_ADDRESS=127.0.0.1" "Generated env should retain the requested loopback bind address"
+    assert_contains "$(cat "$relative_install_dir/.env")" "HTTP_PORT=18080" "Generated env should retain the requested HTTP port"
     assert_not_contains "$(cat "$relative_install_dir/docker-compose.yml")" ":443" "HTTP-only worker compose should not publish HTTPS"
 
     pass_test

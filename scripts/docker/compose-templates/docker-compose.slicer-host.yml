@@ -32,7 +32,7 @@ services:
     container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-slicer-host
     restart: unless-stopped
     ports:
-      - "${BIND_ADDRESS:-0.0.0.0}:${SLICER_HOST_PORT:-5246}:5246"
+      - "127.0.0.1:${SLICER_HOST_PORT:-5246}:5246"
     depends_on:
       api:
         condition: service_healthy

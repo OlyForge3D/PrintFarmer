@@ -22,7 +22,7 @@
 #   --with-orca-worker    Add slicer-host and one OrcaSlicer worker (full profile only)
 #   --image-set FILE      Immutable per-service image references
 #   --name NAME           Compose project and resource prefix (default: printfarmer)
-#   --bind-address ADDR   Address for published service ports (default: 0.0.0.0)
+#   --bind-address ADDR   Address for the public HTTP proxy (default: 0.0.0.0; API/DB remain loopback-only)
 #   --with-spoolman URL   Enable Spoolman filament tracking
 #   --dry-run             Generate files only, don't start containers
 #   --reuse-config        Reuse existing .env if found (preserves secrets)
@@ -73,6 +73,7 @@ WITH_ORCA_WORKER=false
 IMAGE_SET_FILE=""
 DEPLOYMENT_NAME="printfarmer"
 BIND_ADDRESS="0.0.0.0"
+HTTP_ONLY_MODE=false
 IMAGE_TAG_EXPLICIT=false
 HTTP_PORT_EXPLICIT=false
 API_PORT_EXPLICIT=false
@@ -336,6 +337,7 @@ validate_webauthn_host() {
 
 validate_bind_address() {
     local address="$1" octet
+    local -a _bind_octets
     [[ "$address" != *:* ]] || die "--bind-address does not support IPv6; use an IPv4 address or localhost."
     [[ "$address" == "localhost" || "$address" == "127.0.0.1" ]] && return 0
     [[ "$address" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] ||
@@ -348,10 +350,6 @@ validate_bind_address() {
 
 if [[ "$SERVER_HOST_EXPLICIT" == "true" ]]; then
     validate_webauthn_host "$SERVER_HOST"
-    HTTP_ONLY_MODE=false
-    if [[ "$SERVER_HOST" == "localhost" || "$SERVER_HOST" == "127.0.0.1" ]]; then
-        HTTP_ONLY_MODE=true
-    fi
 fi
 
 # ─── Help ───────────────────────────────────────────────────────────────────
@@ -379,7 +377,7 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     --with-orca-worker    Add slicer-host and one OrcaSlicer worker (requires --profile full --db postgres)
     --image-set FILE      Read immutable per-service image references from FILE
     --name NAME           Compose project and resource prefix (default: printfarmer)
-    --bind-address ADDR   Address for published service ports (default: 0.0.0.0)
+    --bind-address ADDR   Address for the public HTTP proxy (default: 0.0.0.0; API/DB remain loopback-only)
     --with-spoolman URL   Connect to Spoolman for filament tracking
     --dry-run             Generate config files without starting containers
     --reuse-config        Reuse existing .env if found (preserves secrets/DB config)
@@ -595,13 +593,6 @@ case "$DEPLOY_PROFILE" in
         ;;
 esac
 
-if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
-    [[ "$DEPLOY_PROFILE" == "full" ]] ||
-        die "--with-orca-worker requires --profile full so discovery and the split proxy are configured together."
-    [[ "$DB_ENGINE" == "postgres" ]] ||
-        die "--with-orca-worker requires --db postgres."
-fi
-
 [[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
     die "--name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens."
 validate_bind_address "$BIND_ADDRESS"
@@ -727,6 +718,22 @@ if [[ "$DO_UPGRADE" == "true" ]]; then
         info "Image tag → ${IMAGE_TAG}"
     fi
     apply_image_set_to_env ".env"
+    if [[ -n "$IMAGE_SET_FILE" ]]; then
+        upgrade_worker_enabled=false
+        if grep -Eq '^WITH_ORCA_WORKER=(true|yes|1)$' .env; then
+            upgrade_worker_enabled=true
+        fi
+        for image_variable in API_IMAGE FRONTEND_IMAGE PRINTER_DISCOVERY_IMAGE; do
+            grep -Eq "\$\{${image_variable}:-" docker-compose.yml ||
+                die "Pinned upgrade cannot update legacy docker-compose.yml: ${image_variable} is not parameterized. Reinstall or regenerate the compose file before retrying --image-set."
+        done
+        if [[ "$upgrade_worker_enabled" == "true" ]]; then
+            for image_variable in SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE; do
+                grep -Eq "\$\{${image_variable}:-" docker-compose.yml ||
+                    die "Pinned upgrade cannot update legacy docker-compose.yml: ${image_variable} is not parameterized. Reinstall or regenerate the compose file before retrying --image-set."
+            done
+        fi
+    fi
     ensure_upgrade_slicer_worker_key ".env" "docker-compose.yml"
     run_with_spinner "Pulling latest images" $COMPOSE_CMD pull || die "Pull failed"
     info "Restarting containers..."
@@ -1053,12 +1060,12 @@ if [[ -n "$EXISTING_ENV" ]]; then
     if [[ -n "$_existing_worker" && "$WORKER_EXPLICIT" != "true" ]]; then
         [[ "$_existing_worker" == "true" || "$_existing_worker" == "yes" || "$_existing_worker" == "1" ]] && WITH_ORCA_WORKER=true
     fi
-    if [[ "$IMAGE_SET_EXPLICIT" != "true" ]]; then
-        [[ -n "$_existing_api_image" ]] && API_IMAGE_PRESERVED="$_existing_api_image"
-        [[ -n "$_existing_frontend_image" ]] && FRONTEND_IMAGE_PRESERVED="$_existing_frontend_image"
-        [[ -n "$_existing_slicer_image" ]] && SLICER_HOST_IMAGE_PRESERVED="$_existing_slicer_image"
-        [[ -n "$_existing_orca_image" ]] && ORCASLICER_WORKER_IMAGE_PRESERVED="$_existing_orca_image"
-        [[ -n "$_existing_discovery_image" ]] && PRINTER_DISCOVERY_IMAGE_PRESERVED="$_existing_discovery_image"
+    if [[ "$IMAGE_SET_EXPLICIT" != "true" && "$IMAGE_TAG_EXPLICIT" != "true" ]]; then
+        [[ "$_existing_api_image" == *@sha256:* ]] && API_IMAGE_PRESERVED="$_existing_api_image"
+        [[ "$_existing_frontend_image" == *@sha256:* ]] && FRONTEND_IMAGE_PRESERVED="$_existing_frontend_image"
+        [[ "$_existing_slicer_image" == *@sha256:* ]] && SLICER_HOST_IMAGE_PRESERVED="$_existing_slicer_image"
+        [[ "$_existing_orca_image" == *@sha256:* ]] && ORCASLICER_WORKER_IMAGE_PRESERVED="$_existing_orca_image"
+        [[ "$_existing_discovery_image" == *@sha256:* ]] && PRINTER_DISCOVERY_IMAGE_PRESERVED="$_existing_discovery_image"
     fi
     if [[ -n "$_existing_grafana_pw" ]]; then
         GRAFANA_ADMIN_PASSWORD_PRESERVED="$_existing_grafana_pw"
@@ -1071,6 +1078,42 @@ if [[ -n "$EXISTING_ENV" ]]; then
 fi
 
 validate_webauthn_host "$SERVER_HOST"
+HTTP_ONLY_MODE=false
+if [[ "$SERVER_HOST" == "localhost" || "$SERVER_HOST" == "127.0.0.1" ]]; then
+    HTTP_ONLY_MODE=true
+fi
+
+# Revalidate the effective values after loading an existing installation. CLI
+# flags override preserved topology, and compatibility is checked only after
+# both have been combined.
+case "$DEPLOY_PROFILE" in
+    lite)
+        [[ "$DB_ENGINE" == "sqlite" ]] || die "Lite profile requires SQLite."
+        ;;
+    full)
+        [[ "$DB_ENGINE" == "sqlite" || "$DB_ENGINE" == "postgres" ]] ||
+            die "Full profile supports only SQLite or PostgreSQL."
+        ;;
+    standard)
+        ;;
+    *)
+        die "Invalid effective profile '$DEPLOY_PROFILE'. Choose: lite, standard, full."
+        ;;
+esac
+if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
+    [[ "$DEPLOY_PROFILE" == "full" ]] ||
+        die "--with-orca-worker requires --profile full."
+    [[ "$DB_ENGINE" == "postgres" ]] ||
+        die "--with-orca-worker requires --db postgres."
+fi
+[[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
+    die "--name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens."
+validate_bind_address "$BIND_ADDRESS"
+for port_name in HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT; do
+    port_value="${!port_name}"
+    [[ "$port_value" =~ ^[1-9][0-9]{0,4}$ ]] && (( port_value <= 65535 )) ||
+        die "$port_name must be a port between 1 and 65535."
+done
 
 # ─── Generate secrets ───────────────────────────────────────────────────────
 JWT_KEY="${JWT_KEY_PRESERVED:-$(generate_secret 64)}"
@@ -1227,18 +1270,20 @@ printf '\n# Installer topology and service images\n' >> "$ENV_TEMP_FILE"
 cat >> "$ENV_TEMP_FILE" <<TOPOLOGYE
 WITH_ORCA_WORKER=${WITH_ORCA_WORKER}
 INSTALLER_LAB=true
-API_IMAGE=${API_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}
-FRONTEND_IMAGE=${FRONTEND_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}
-SLICER_HOST_IMAGE=${SLICER_HOST_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-slicer-host:${IMAGE_TAG}}
-ORCASLICER_WORKER_IMAGE=${ORCASLICER_WORKER_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-orcaslicer-worker:${IMAGE_TAG}}
-PRINTER_DISCOVERY_IMAGE=${PRINTER_DISCOVERY_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}
 TOPOLOGYE
+if [[ -n "$IMAGE_SET_FILE" || -n "${API_IMAGE_PRESERVED:-}" || -n "${FRONTEND_IMAGE_PRESERVED:-}" ]]; then
+    printf 'API_IMAGE=%s\n' "${API_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'FRONTEND_IMAGE=%s\n' "${FRONTEND_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'SLICER_HOST_IMAGE=%s\n' "${SLICER_HOST_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-slicer-host:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'ORCASLICER_WORKER_IMAGE=%s\n' "${ORCASLICER_WORKER_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-orcaslicer-worker:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'PRINTER_DISCOVERY_IMAGE=%s\n' "${PRINTER_DISCOVERY_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+fi
 if [[ -n "$IMAGE_SET_FILE" ]]; then
     printf '# Immutable release image set: %s\n' "$IMAGE_SET_FILE" >> "$ENV_TEMP_FILE"
 fi
 
 # Append monitoring credentials when the "full" profile enables Grafana
-if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+if [[ "$DEPLOY_PROFILE" == "full" && "$WITH_ORCA_WORKER" != "true" ]]; then
     cat >> "$ENV_TEMP_FILE" <<MONITORINGEOF
 
 # Monitoring (Grafana admin credentials — no default; see issue #1295)
@@ -1351,6 +1396,7 @@ http {
         server_name _;
 
         # Health endpoints
+        location = /nginx-health { default_type text/plain; return 200 "ok\n"; }
         location = /healthz { proxy_pass http://api_backend/healthz; proxy_http_version 1.1; proxy_set_header Host $host; }
         location = /health  { proxy_pass http://api_backend/health;  proxy_http_version 1.1; proxy_set_header Host $host; }
         location = /ca.cer {
@@ -1513,14 +1559,14 @@ else
   # PostgreSQL database
   database:
     image: postgres:16-alpine
-    container_name: ${DEPLOYMENT_NAME}-database
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-database
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
       POSTGRES_USER: ${POSTGRES_USER:-printfarmer}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "${BIND_ADDRESS}:${POSTGRES_PORT}:5432"
+      - "127.0.0.1:${POSTGRES_PORT}:5432"
     volumes:
       - printfarmer-database:/var/lib/postgresql/data
     healthcheck:
@@ -1542,7 +1588,7 @@ else
   # Printer Discovery Service
   printer-discovery:
     image: ${PRINTER_DISCOVERY_IMAGE:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}
-    container_name: ${DEPLOYMENT_NAME}-printer-discovery
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-printer-discovery
     restart: unless-stopped
     entrypoint: ["dotnet", "Farm.PrinterDiscovery.dll"]
     environment:
@@ -1576,10 +1622,8 @@ else
   # Prometheus — metrics collection
   prometheus:
     image: prom/prometheus:latest
-    container_name: printfarmer-prometheus
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-prometheus
     restart: unless-stopped
-    ports:
-      - "${BIND_ADDRESS}:${API_PORT}:5245"
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
       - "--storage.tsdb.path=/prometheus"
@@ -1601,7 +1645,7 @@ else
   # Grafana — dashboards
   grafana:
     image: grafana/grafana:latest
-    container_name: printfarmer-grafana
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set to enable the monitoring stack}
@@ -1638,7 +1682,7 @@ ${compose_database_service}
     container_name: ${DEPLOYMENT_NAME}-api
     restart: unless-stopped
     ports:
-      - "\${BIND_ADDRESS:-0.0.0.0}:\${API_PORT:-5245}:5245"
+      - "127.0.0.1:\${API_PORT:-5245}:5245"
 ${compose_api_depends}
     environment:
       - ASPNETCORE_ENVIRONMENT=\${ASPNETCORE_ENVIRONMENT:-Production}
@@ -1712,7 +1756,7 @@ ${compose_api_depends}
       - frontend
       - api
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/health"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/nginx-health"]
       interval: 30s
       timeout: 10s
       retries: 3
