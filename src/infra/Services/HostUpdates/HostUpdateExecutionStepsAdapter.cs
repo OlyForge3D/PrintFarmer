@@ -49,5 +49,5 @@ public sealed class HostUpdateExecutionStepsAdapter(
     public Task ReleaseFenceAsync(CancellationToken cancellationToken) => fence.ReleaseAsync(cancellationToken);
 
     private static string Topology(HostUpdateExecutionRequest request) =>
-        string.Join('+', request.Targets.Select(t => t.ServiceId).OrderBy(id => id, StringComparer.Ordinal));
+        FileInstalledHostStateStore.CanonicalTopology(request.Targets.Select(t => t.ServiceId));
 }

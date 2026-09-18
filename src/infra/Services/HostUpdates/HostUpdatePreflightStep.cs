@@ -55,26 +55,28 @@ public sealed class FileInstalledHostStateStore(string path) : IInstalledHostSta
         return Validate(state);
     }
 
-    private static InstalledHostState Validate(InstalledHostState? state)
+    /// <summary>
+    /// Validates that a deserialized record is semantically canonical, not merely non-blank. This
+    /// state is the sole evidence recovery uses to decide what the host is allowed to be rolled
+    /// back to, so a syntactically-parseable but semantically wrong record (a truncated digest, a
+    /// bogus platform, a service set that disagrees with the recorded topology) must fail closed
+    /// rather than drive a restore toward a state that was never actually installed.
+    /// </summary>
+    internal static InstalledHostState Validate(InstalledHostState? state)
     {
         if (state is null)
         {
             throw new HostUpdateInstalledStateCorruptException("record_null");
         }
 
-        if (string.IsNullOrWhiteSpace(state.ReleaseId))
+        if (!HostUpdateValidation.IsIdentifier(state.ReleaseId))
         {
-            throw new HostUpdateInstalledStateCorruptException("release_id_missing");
+            throw new HostUpdateInstalledStateCorruptException("release_id_invalid");
         }
 
-        if (string.IsNullOrWhiteSpace(state.ManifestDigest))
+        if (!HostUpdateValidation.IsDigest(state.ManifestDigest))
         {
-            throw new HostUpdateInstalledStateCorruptException("manifest_digest_missing");
-        }
-
-        if (string.IsNullOrWhiteSpace(state.Topology))
-        {
-            throw new HostUpdateInstalledStateCorruptException("topology_missing");
+            throw new HostUpdateInstalledStateCorruptException("manifest_digest_invalid");
         }
 
         if (state.ServiceDigests is null || state.ServiceDigests.Count == 0)
@@ -84,34 +86,66 @@ public sealed class FileInstalledHostStateStore(string path) : IInstalledHostSta
 
         foreach (KeyValuePair<string, string> digest in state.ServiceDigests)
         {
-            if (string.IsNullOrWhiteSpace(digest.Key) || string.IsNullOrWhiteSpace(digest.Value))
+            if (!HostUpdateValidation.IsIdentifier(digest.Key))
+            {
+                throw new HostUpdateInstalledStateCorruptException("service_id_invalid");
+            }
+
+            if (!HostUpdateValidation.IsDigest(digest.Value))
             {
                 throw new HostUpdateInstalledStateCorruptException("service_digest_invalid");
             }
         }
 
-        if (state.ServicePlatforms is not null)
+        // The platform map is what recovery replays digests with, so a missing, partial, or
+        // over-broad map is unusable evidence rather than an optional extra: it must describe
+        // exactly the same service set as the digests it accompanies.
+        if (state.ServicePlatforms is null)
         {
-            foreach (KeyValuePair<string, string> platform in state.ServicePlatforms)
-            {
-                if (string.IsNullOrWhiteSpace(platform.Key) || string.IsNullOrWhiteSpace(platform.Value))
-                {
-                    throw new HostUpdateInstalledStateCorruptException("service_platform_invalid");
-                }
+            throw new HostUpdateInstalledStateCorruptException("service_platforms_missing");
+        }
 
-                if (!state.ServiceDigests.ContainsKey(platform.Key))
-                {
-                    throw new HostUpdateInstalledStateCorruptException("service_platform_unmapped");
-                }
+        if (state.ServicePlatforms.Count != state.ServiceDigests.Count ||
+            !state.ServicePlatforms.Keys.All(state.ServiceDigests.ContainsKey))
+        {
+            throw new HostUpdateInstalledStateCorruptException("service_platforms_mismatch");
+        }
+
+        foreach (KeyValuePair<string, string> platform in state.ServicePlatforms)
+        {
+            if (!SignedUpdateManifestValidator.IsPlatform(platform.Value))
+            {
+                throw new HostUpdateInstalledStateCorruptException("service_platform_invalid");
             }
+        }
+
+        // Topology is derived data, so it is only trustworthy when it still agrees with the service
+        // set it was derived from. Comparing against the canonical projection rejects duplicated,
+        // unknown, missing, and mis-ordered entries in one check.
+        if (!string.Equals(state.Topology, CanonicalTopology(state.ServiceDigests.Keys), StringComparison.Ordinal))
+        {
+            throw new HostUpdateInstalledStateCorruptException("topology_invalid");
         }
 
         return state;
     }
 
+    /// <summary>
+    /// The canonical topology projection. Must stay identical to the one the executor records in
+    /// <c>HostUpdateExecutionStepsAdapter</c>; any divergence would make every written record fail
+    /// its own validation on read back.
+    /// </summary>
+    internal static string CanonicalTopology(IEnumerable<string> serviceIds) =>
+        string.Join('+', serviceIds.OrderBy(id => id, StringComparer.Ordinal));
+
     public async Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(state);
+
+        // Validated on the way out as well as the way in: persisting non-canonical evidence would
+        // only surface as an unreadable state file at the next preflight/recovery, long after the
+        // context that produced it is gone.
+        Validate(state);
         Directory.CreateDirectory(Path.GetDirectoryName(path) is { Length: > 0 } dir ? dir : ".");
         string json = JsonSerializer.Serialize(state);
         await Task.Run(() => HostUpdateDurableFile.WriteAllTextAtomic(path, json), cancellationToken).ConfigureAwait(false);
