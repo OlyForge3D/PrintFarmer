@@ -49,14 +49,8 @@ public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions optio
             return;
         }
 
-        string path = GatePath;
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        await File.WriteAllTextAsync(path, DateTimeOffset.UtcNow.ToString("O"), cancellationToken).ConfigureAwait(false);
-        await using FileStream stream = new(path, FileMode.Open, FileAccess.ReadWrite, FileShare.Read);
-        await stream.FlushAsync(cancellationToken).ConfigureAwait(false);
-#pragma warning disable CA1849 // Durable gate close must flush the file-system write-through marker before admitting backup/migration.
-        stream.Flush(flushToDisk: true);
-#pragma warning restore CA1849
+        await Task.Run(() => HostUpdateDurableFile.WriteAllTextAtomic(GatePath, DateTimeOffset.UtcNow.ToString("O")), cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public Task OpenAsync(CancellationToken cancellationToken)
@@ -70,6 +64,7 @@ public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions optio
         if (File.Exists(path))
         {
             File.Delete(path);
+            HostUpdateDurableFile.FlushDirectory(Path.GetDirectoryName(path)!);
         }
 
         return Task.CompletedTask;
@@ -159,7 +154,7 @@ public sealed class DbActiveWorkObservationPort(AppDbContext db) : IActiveWorkOb
 /// </summary>
 public sealed class HostUpdateDrainCoordinator(
     IHostUpdateAdmissionGate admissionGate,
-    IActiveWorkObservationPort activeWork,
+    IReadOnlyList<IActiveWorkObservationPort> activeWorkPorts,
     TimeSpan drainTimeout,
     TimeSpan pollInterval,
     TimeProvider? timeProvider = null) : IHostUpdateDrainCoordinator
@@ -174,7 +169,12 @@ public sealed class HostUpdateDrainCoordinator(
         DateTimeOffset deadline = _timeProvider.GetUtcNow() + drainTimeout;
         while (true)
         {
-            int active = await activeWork.CountActiveAsync(cancellationToken).ConfigureAwait(false);
+            int active = 0;
+            foreach (IActiveWorkObservationPort activeWork in activeWorkPorts)
+            {
+                active += await activeWork.CountActiveAsync(cancellationToken).ConfigureAwait(false);
+            }
+
             if (active == 0)
             {
                 return;

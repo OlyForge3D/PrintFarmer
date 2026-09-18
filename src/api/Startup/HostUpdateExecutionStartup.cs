@@ -70,13 +70,14 @@ public static class HostUpdateExecutionStartup
 
         // Drain: perimeter admission gate + observed active print/outbox work.
         services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();
-        services.AddScoped<IActiveWorkObservationPort, DbActiveWorkObservationPort>();
+        services.AddScoped<DbActiveWorkObservationPort>();
+        services.AddScoped<IActiveWorkObservationPort>(sp => sp.GetRequiredService<DbActiveWorkObservationPort>());
         services.AddScoped<IHostUpdateDrainCoordinator>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return new HostUpdateDrainCoordinator(
                 sp.GetRequiredService<IHostUpdateAdmissionGate>(),
-                sp.GetRequiredService<IActiveWorkObservationPort>(),
+                [.. sp.GetServices<IActiveWorkObservationPort>()],
                 TimeSpan.FromSeconds(options.DrainTimeoutSeconds),
                 TimeSpan.FromSeconds(options.DrainPollIntervalSeconds));
         });

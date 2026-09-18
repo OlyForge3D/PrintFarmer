@@ -148,7 +148,7 @@ public sealed class HostUpdateRecoveryCoordinator(
         HostUpdateRecoveryOutcomeRecord? existingOutcome = await outcomeStore.ReadAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
         if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
         {
-            return new HostUpdateRecoveryResult(existingOutcome.Outcome, existingOutcome.Detail);
+            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, new HostUpdateRecoveryResult(existingOutcome.Outcome, existingOutcome.Detail)).ConfigureAwait(false);
         }
 
         HostUpdateRecoveryResult result;
@@ -176,22 +176,34 @@ public sealed class HostUpdateRecoveryCoordinator(
             new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, result.Outcome, result.Detail, DateTimeOffset.UtcNow),
             CancellationToken.None).ConfigureAwait(false);
 
-        if (result.Outcome == HostUpdateRecoveryOutcome.RolledBack && fenceCoordinator is not null)
+        if (result.Outcome == HostUpdateRecoveryOutcome.RolledBack)
         {
-            try
-            {
-                await fenceCoordinator.ReleaseAsync(CancellationToken.None).ConfigureAwait(false);
-            }
-            catch (Exception exception) when (exception is not OperationCanceledException)
-            {
-                result = new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "fence_release_failed:" + exception.GetType().Name);
-                await outcomeStore.WriteAsync(
-                    new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, result.Outcome, result.Detail, DateTimeOffset.UtcNow),
-                    CancellationToken.None).ConfigureAwait(false);
-            }
+            result = await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, result).ConfigureAwait(false);
         }
 
         return result;
+    }
+
+    private async Task<HostUpdateRecoveryResult> ReleaseFenceAfterRolledBackAsync(string releaseId, HostUpdateRecoveryResult result)
+    {
+        if (fenceCoordinator is null)
+        {
+            return result;
+        }
+
+        try
+        {
+            await fenceCoordinator.ReleaseAsync(CancellationToken.None).ConfigureAwait(false);
+            return result;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            HostUpdateRecoveryResult failed = new(HostUpdateRecoveryOutcome.NeedsOperator, "fence_release_failed:" + exception.GetType().Name);
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(releaseId, failed.Outcome, failed.Detail, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
+            return failed;
+        }
     }
 
     private async Task<HostUpdateRecoveryResult> RecoverCoreAsync(
@@ -322,9 +334,14 @@ public sealed class ProcessHostUpdateRestoreExecutor(
 
                     string destinationPath = Path.Combine(destinationDirectory, relative);
                     Directory.CreateDirectory(Path.GetDirectoryName(destinationPath) ?? destinationDirectory);
-                    File.Copy(sourcePath, destinationPath, overwrite: true);
+                    await HostUpdateDurableFile.CopyFileDurablyAsync(sourcePath, destinationPath, cancellationToken).ConfigureAwait(false);
                 }
+
+                HostUpdateDurableFile.FlushDirectory(destinationDirectory);
+                continue;
             }
+
+            throw new InvalidOperationException($"restore_target_unmapped:{targetName}");
         }
     }
 

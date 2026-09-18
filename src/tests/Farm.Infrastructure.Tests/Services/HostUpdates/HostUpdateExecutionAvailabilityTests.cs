@@ -142,7 +142,6 @@ public class HostUpdateExecutionAvailabilityTests
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
-            result.Reasons.Should().Contain("facility_unavailable:slicer_claim_progress_completion_fence_incomplete");
             result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
         }

@@ -47,7 +47,7 @@ public sealed record HostUpdateExecutionResult(string ReleaseId, HostUpdateExecu
 public interface IHostUpdateExecutor { Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default); }
 public interface IHostUpdateExecutionSteps
 {
-    Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ReleaseFenceAsync(CancellationToken cancellationToken);
+    Task PreflightAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task DrainAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task FenceAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task BackupAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task PersistInstalledStateAsync(HostUpdateExecutionRequest request, CancellationToken ct); Task ReleaseFenceAsync(CancellationToken cancellationToken);
 }
 public interface IHostUpdateExecutionJournal { IReadOnlyList<HostUpdateExecutionActivity> Read(string releaseId); void Append(HostUpdateExecutionActivity activity); IReadOnlyList<string> ListReleaseIds(); }
 public interface IHostUpdateExecutionLease : IDisposable { }
@@ -207,6 +207,17 @@ public sealed class HostUpdateExecutor(
         List<HostUpdateExecutionActivity> activities,
         CancellationToken cancellationToken)
     {
+        if (!activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "installed-state:after", StringComparison.Ordinal)))
+        {
+            if (!activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "installed-state:before", StringComparison.Ordinal)))
+            {
+                Append(activities, request, HostUpdateExecutionState.Completed, "installed-state:before");
+            }
+
+            await steps.PersistInstalledStateAsync(request, cancellationToken).ConfigureAwait(false);
+            Append(activities, request, HostUpdateExecutionState.Completed, "installed-state:after");
+        }
+
         if (activities.Any(a => a.State == HostUpdateExecutionState.Completed && string.Equals(a.Phase, "fence-release:after", StringComparison.Ordinal)))
         {
             return new(request.ReleaseId, HostUpdateExecutionState.Completed, null, activities);

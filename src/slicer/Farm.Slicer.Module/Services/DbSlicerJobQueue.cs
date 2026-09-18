@@ -59,7 +59,6 @@ public class DbSlicerJobQueue(
         ArgumentNullException.ThrowIfNull(job);
 
         ArgumentNullException.ThrowIfNull(result);
-        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
 
         // Persist completion summary (no artifact IDs available in SlicingResult here)
         string resultUrl = result.ResultFileUrl?.ToString() ?? string.Empty;
@@ -85,7 +84,6 @@ public class DbSlicerJobQueue(
 
     public async Task FailJobAsync(DistributedSlicingJob job, string errorMessage, CancellationToken cancellationToken = default)
     {
-        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
         (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
         bool failed = await _repo.TryFailForActiveLeaseAsync(
             job.Id,
@@ -98,7 +96,6 @@ public class DbSlicerJobQueue(
 
     public async Task UpdateProgressAsync(DistributedSlicingJob job, int progress, string? currentStep = null, CancellationToken cancellationToken = default)
     {
-        await ThrowIfHostUpdateAdmissionClosedAsync(cancellationToken).ConfigureAwait(false);
         (Guid workerId, Guid claimToken) = GetClaimIdentity(job);
         bool updated = await _repo.TryUpdateProgressForActiveLeaseAsync(
             job.Id,

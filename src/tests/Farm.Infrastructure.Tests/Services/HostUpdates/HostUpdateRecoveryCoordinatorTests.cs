@@ -191,6 +191,7 @@ public sealed class HostUpdateRecoveryCoordinatorTests
             new NeverFindsManifestLocator(),
             new FakeDigestVerifier(),
             outcomeStore,
+            new RecordingFenceCoordinator(() => { }),
             executionLock: new RecordingExecutionLock(() => { }));
 
         HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
@@ -298,6 +299,33 @@ public sealed class HostUpdateRecoveryCoordinatorTests
         persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
         persisted.Detail.Should().Be("fence_release_failed:InvalidOperationException");
     }
+
+    [Fact]
+    public async Task RestoreAsync_UnmappedManifestTarget_ThrowsFailClosed()
+    {
+        var runner = new RecordingProcessRunner();
+        var restore = new ProcessHostUpdateRestoreExecutor(runner, new Dictionary<string, Func<string, HostUpdateRestoreCommand>>(), new Dictionary<string, string>(), TimeSpan.FromSeconds(30));
+        string root = CreateTempDir();
+        string target = Path.Combine(root, "unknown");
+        Directory.CreateDirectory(target);
+        string file = Path.Combine(target, "payload.txt");
+        await File.WriteAllTextAsync(file, "data");
+        var manifest = new HostUpdateBackupManifest("release-1", DateTimeOffset.UtcNow, ["unknown"], [new HostUpdateBackupManifestFile(Path.Combine("unknown", "payload.txt"), Sha256("data"), 4)]);
+
+        Func<Task> act = () => restore.RestoreAsync(manifest, root, CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*restore_target_unmapped:unknown*");
+    }
+
+    private sealed class RecordingProcessRunner : IHostUpdateProcessRunner
+    {
+        public Task<HostUpdateProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? environment = null) =>
+            Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+    }
+
+    private static string Sha256(string text) =>
+        "sha256".Replace("sha256", string.Empty) + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(text))).ToLowerInvariant();
+
     private static string CreateTempDir()
     {
         string path = Path.Combine(Path.GetTempPath(), "pf-recovery-outcome-tests-" + Guid.NewGuid().ToString("N"));

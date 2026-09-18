@@ -1042,7 +1042,9 @@ resuming. Never infer success solely from process exit or replay uncertain work.
    Follow [migration-safe procedures](DEPLOYMENT.md#migration-safe-upgrades);
    do not rely on the current backup helper as proof of completeness.
 5. **Migrate:** A single selected owner applies and validates each context in
-   manifest order. Existing API/slicer startup migration behavior must be
+   manifest order from the authenticated target image or a dedicated target
+   migration runner. The current/old API assembly must not execute forward
+   target migrations. Existing API/slicer startup migration behavior must be
    explicitly coordinated before automation ships; do not start competing hosts
    and hope migration locks suffice. Use bounded, observable execution; on a
    timeout inspect provider state instead of assuming termination or retry safety.
@@ -1051,7 +1053,8 @@ resuming. Never infer success solely from process exit or replay uncertain work.
    routes/TLS, frontend assets, auth/key continuity, worker compatibility,
    artifact read/write probes, and queue consumers/reconciler/publisher health.
    Do not send real printer start commands as smoke tests. Readiness timeout
-   fails the operation. Reopen writes only after the whole set passes.
+   fails the operation. Reopen writes only after the whole set passes and the
+   durable terminal outcome plus installed-state transition have been recorded.
 7. **Complete:** Reconcile inventory, record approvals/actor, manifest/signature
    identity, prior/target/observed digests, schema transitions, backup references,
    timestamps and outcome. Retain host audit history independently of restored
@@ -1227,8 +1230,8 @@ production validation runs are implied by this design document.
 - **Dependencies:** I1 + I2 + I3's proven host-evidence eligibility gate;
   CLI must still work without the UI. **Acceptance:** Durable journal/lock,
   whole-set staging, drain,
-  coordinated backup, serialized migrations, strict verification, safe recovery,
-  complete offline bundle, and fixed-command plan export.
+  coordinated backup, target-image/dedicated serialized migrations, strict verification,
+  safe recovery, complete offline bundle, and fixed-command plan export.
   Bind channel/policy revision in evidence, plans, commands and journals;
   preflight/confirm/audit switches and execute only whole single-channel sets.
   Channel-aware rollback must not silently downgrade or reset enrollment.

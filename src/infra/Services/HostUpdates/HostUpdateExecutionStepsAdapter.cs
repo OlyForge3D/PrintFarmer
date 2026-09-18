@@ -34,12 +34,11 @@ public sealed class HostUpdateExecutionStepsAdapter(
     public Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct) =>
         apply.RunAsync(request, ct);
 
-    public async Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct)
-    {
-        await verify.RunAsync(request, ct).ConfigureAwait(false);
+    public Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct) =>
+        verify.RunAsync(request, ct);
 
-        // Only after every readiness signal (including exact running digests) has verified
-        // healthy do we persist this as the new installed state and reopen writers.
+    public async Task PersistInstalledStateAsync(HostUpdateExecutionRequest request, CancellationToken ct)
+    {
         var serviceDigests = request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal);
         var servicePlatforms = request.Targets.ToDictionary(t => t.ServiceId, t => t.Platform, StringComparer.Ordinal);
         await installedStateStore.WriteAsync(
