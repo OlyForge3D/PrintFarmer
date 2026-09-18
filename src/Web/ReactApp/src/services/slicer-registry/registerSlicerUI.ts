@@ -47,38 +47,10 @@ export function registerOrcaSlicerUI(registry: ISlicerUIRegistry): void {
 }
 
 /**
- * Register PrusaSlicer UI
- * 
- * Dynamically imports PrusaSlicer UI from the workspace package.
- * This is a placeholder for future PrusaSlicer support.
- */
-// export function registerPrusaSlicerUI(registry: ISlicerUIRegistry): void {
-//   import("@farm/slicers-prasalicer-v2_9_x")
-//     .then((module) => {
-//       const prusaExports: SlicerUIExports = {
-//         slicerName: "PrusaSlicer",
-//         slicerVersion: "2.9.x",
-//         ImportComponent: module.PrusaImportWizard,
-//         profilesService: module.prusaProfilesService,
-//         types: {},
-//       };
-//
-//       registry.registerUI("PrusaSlicer", "2.9.x", prusaExports);
-//       console.info("[registerSlicerUI] Registered PrusaSlicer v2.9.x");
-//     })
-//     .catch((err) => {
-//       console.error("[registerSlicerUI] Failed to register PrusaSlicer:", err);
-//     });
-// }
-
-/**
  * Register all slicer UI libraries
  *
- * Called once during app initialization to set up all available slicers.
- * Registers OrcaSlicer first; PrusaSlicer support will be added when ready.
+ * Called once during app initialization to register the available slicer.
  */
 export function registerAllSlicerUI(registry: ISlicerUIRegistry): void {
   registerOrcaSlicerUI(registry);
-  // registerPrusaSlicerUI(registry);
-  // Future: registerCrealitySlicerUI(registry);
 }
