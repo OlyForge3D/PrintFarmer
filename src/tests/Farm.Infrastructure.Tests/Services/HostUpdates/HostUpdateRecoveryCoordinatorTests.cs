@@ -246,15 +246,18 @@ public sealed class HostUpdateRecoveryCoordinatorTests
     }
 
     [Fact]
-    public async Task RecoverAsync_RolledBackOutcomeIsPersistedBeforeFenceRelease()
+    public async Task RecoverAsync_FenceReleasePendingIsPersistedBeforeFenceRelease()
     {
         string root = CreateTempDir();
         var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
         var fence = new RecordingFenceCoordinator(async () =>
         {
+            // The durable state observed during the release window must be fence-release-pending,
+            // never a plain terminal RolledBack: a crash here would otherwise be read as fully
+            // resolved and strand admission closed forever.
             HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
             persisted.Should().NotBeNull();
-            persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+            persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.FenceReleasePending);
         });
         var coordinator = new HostUpdateRecoveryCoordinator(
             new FakeInstalledHostStateStore(new InstalledHostState(
@@ -271,10 +274,57 @@ public sealed class HostUpdateRecoveryCoordinatorTests
 
         result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
         fence.ReleaseCount.Should().Be(1);
+        HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
+        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        persisted.Detail.Should().NotContain("fence_release");
     }
 
     [Fact]
-    public async Task RecoverAsync_FenceReleaseFails_PersistsNeedsOperatorAndReturnsClosedOutcome()
+    public async Task RecoverAsync_CrashAfterFirstPostRollbackWrite_ReDrivesReleaseOnly()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        var crashingFence = new RecordingFenceCoordinator(() => throw new InvalidOperationException("killed"));
+        var installedState = new FakeInstalledHostStateStore(new InstalledHostState(
+            "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow));
+
+        // First attempt: rollback succeeds, then the process dies during fence release.
+        HostUpdateRecoveryResult first = await new HostUpdateRecoveryCoordinator(
+            installedState,
+            new AlwaysCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            crashingFence).RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        first.Outcome.Should().Be(HostUpdateRecoveryOutcome.FenceReleasePending);
+
+        // Restart: the surviving checkpoint must re-drive the idempotent release alone -- never
+        // restore, never digest apply.
+        var restore = new TrackingRestoreExecutor();
+        var applier = new ThrowingDigestApplier();
+        var retryFence = new RecordingFenceCoordinator(() => { });
+        HostUpdateRecoveryResult second = await new HostUpdateRecoveryCoordinator(
+            installedState,
+            new AlwaysCompatibleEvaluator(),
+            applier,
+            restore,
+            new FindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            retryFence).RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        second.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        retryFence.ReleaseCount.Should().Be(1);
+        restore.Called.Should().BeFalse();
+        HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
+        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+    }
+
+    [Fact]
+    public async Task RecoverAsync_FenceReleaseFails_PreservesFenceReleasePendingWithDiagnostic()
     {
         string root = CreateTempDir();
         var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
@@ -292,12 +342,71 @@ public sealed class HostUpdateRecoveryCoordinatorTests
 
         HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
 
-        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
-        result.Detail.Should().Be("fence_release_failed:InvalidOperationException");
+        // The rollback is complete and the fence is still closed, so release-only restart semantics
+        // must be preserved instead of being flattened into a generic NeedsOperator.
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.FenceReleasePending);
+        result.Detail.Should().EndWith("|fence_release_failed:InvalidOperationException");
         HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
         persisted.Should().NotBeNull();
-        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
-        persisted.Detail.Should().Be("fence_release_failed:InvalidOperationException");
+        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.FenceReleasePending);
+        persisted.Detail.Should().EndWith("|fence_release_failed:InvalidOperationException");
+    }
+
+    [Fact]
+    public async Task RecoverAsync_RepeatedFenceReleaseFailures_DoNotAccumulateDiagnosticSuffixes()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        var installedState = new FakeInstalledHostStateStore(new InstalledHostState(
+            "release-0", "sha256:prior", new Dictionary<string, string> { ["api"] = "sha256:prior-api" }, "monolith", DateTimeOffset.UtcNow));
+        HostUpdateRecoveryCoordinator Failing() => new(
+            installedState,
+            new AlwaysCompatibleEvaluator(),
+            new ThrowingDigestApplier(),
+            new TrackingRestoreExecutor(),
+            new FindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            new RecordingFenceCoordinator(() => throw new InvalidOperationException("release_failed")));
+
+        await new HostUpdateRecoveryCoordinator(
+            installedState,
+            new AlwaysCompatibleEvaluator(),
+            new FakeDigestApplier(),
+            new NeverInvokedRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            new RecordingFenceCoordinator(() => throw new InvalidOperationException("release_failed"))).RecoverAsync(Request, NoActivities, CancellationToken.None);
+        HostUpdateRecoveryResult second = await Failing().RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        second.Detail.Split('|').Should().HaveCount(2);
+    }
+
+    [Fact]
+    public async Task RecoverAsync_FenceReleasePendingOutcome_NeverReplaysRestoreOrApply()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        await outcomeStore.WriteAsync(
+            new HostUpdateRecoveryOutcomeRecord(Request.ReleaseId, HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore|fence_release_failed:IOException", DateTimeOffset.UtcNow),
+            CancellationToken.None);
+        var fence = new RecordingFenceCoordinator(() => { });
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FakeInstalledHostStateStore(installedState: null),
+            new AlwaysCompatibleEvaluator(),
+            new ThrowingDigestApplier(),
+            new ThrowingRestoreExecutor(),
+            new NeverFindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore,
+            fence);
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        result.Detail.Should().Be("coordinated_restore");
+        fence.ReleaseCount.Should().Be(1);
     }
 
     [Fact]
@@ -342,6 +451,31 @@ public sealed class HostUpdateRecoveryCoordinatorTests
         Func<Task> act = () => restore.RestoreAsync(manifest, root, CancellationToken.None);
 
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*restore_target_unmapped:unknown*");
+    }
+
+    [Fact]
+    public async Task RecoverAsync_CorruptInstalledState_FailsClosedToNeedsOperator()
+    {
+        string root = CreateTempDir();
+        var outcomeStore = new FileHostUpdateRecoveryOutcomeStore(root);
+        string statePath = Path.Combine(root, "installed-state.json");
+        await File.WriteAllTextAsync(statePath, "{}", CancellationToken.None);
+        var restore = new TrackingRestoreExecutor();
+        var coordinator = new HostUpdateRecoveryCoordinator(
+            new FileInstalledHostStateStore(statePath),
+            new AlwaysCompatibleEvaluator(),
+            new ThrowingDigestApplier(),
+            restore,
+            new FindsManifestLocator(),
+            new FakeDigestVerifier(),
+            outcomeStore);
+
+        HostUpdateRecoveryResult result = await coordinator.RecoverAsync(Request, NoActivities, CancellationToken.None);
+
+        result.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
+        restore.Called.Should().BeFalse();
+        HostUpdateRecoveryOutcomeRecord? persisted = await outcomeStore.ReadAsync(Request.ReleaseId, CancellationToken.None);
+        persisted!.Outcome.Should().Be(HostUpdateRecoveryOutcome.NeedsOperator);
     }
 
     private sealed class RecordingProcessRunner : IHostUpdateProcessRunner

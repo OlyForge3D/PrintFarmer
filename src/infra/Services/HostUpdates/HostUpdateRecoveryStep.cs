@@ -1,16 +1,24 @@
 ﻿namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>Outcome of an attempted recovery after the executor left the release in <see cref="HostUpdateExecutionState.RecoveryRequired"/>.</summary>
+/// <remarks>
+/// Values are pinned because they are persisted as numbers in the durable outcome store; inserting
+/// a member in the middle would silently reinterpret already-written records.
+/// </remarks>
 public enum HostUpdateRecoveryOutcome
 {
-    /// <summary>The host was restored to a verified prior working state.</summary>
-    RolledBack,
-
-    /// <summary>Rollback completed but the admission fence still needs an idempotent release.</summary>
-    FenceReleasePending,
+    /// <summary>The host was restored to a verified prior working state and admission was reopened.</summary>
+    RolledBack = 0,
 
     /// <summary>No safe rollback/restore path exists; an operator must resolve this manually.</summary>
-    NeedsOperator,
+    NeedsOperator = 1,
+
+    /// <summary>
+    /// The rollback itself completed durably, but the admission fence still needs its idempotent
+    /// release. This is deliberately not terminal: restart reconciliation keeps writers fenced and
+    /// a retry re-drives the release alone, never restore/apply.
+    /// </summary>
+    FenceReleasePending = 2,
 }
 
 /// <summary>Durable, immutable record of one recovery attempt.</summary>
@@ -129,7 +137,7 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateFenceCoordinator? fenceCoordinator = null,
     IHostUpdateExecutionLock? executionLock = null) : IHostUpdateRecoveryCoordinator
 {
-    private const string FenceReleasePendingMarker = "|fence_release_pending";
+    private const string FenceReleaseFailureSeparator = "|";
 
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
@@ -151,24 +159,21 @@ public sealed class HostUpdateRecoveryCoordinator(
         using IHostUpdateExecutionLease lease = (executionLock ?? NoopHostUpdateExecutionLock.Instance).Acquire(TimeSpan.FromSeconds(30), cancellationToken);
 
         HostUpdateRecoveryOutcomeRecord? existingOutcome = await outcomeStore.ReadAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
-        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack } &&
-            !existingOutcome.Detail.EndsWith(FenceReleasePendingMarker, StringComparison.Ordinal))
+
+        // Only a plain RolledBack record is fully terminal: it is written exclusively after the
+        // admission fence has actually been released, so there is nothing left to re-drive.
+        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
         {
             return new HostUpdateRecoveryResult(existingOutcome.Outcome, existingOutcome.Detail);
         }
 
-        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack } &&
-            existingOutcome.Detail.EndsWith(FenceReleasePendingMarker, StringComparison.Ordinal))
-        {
-            return await ReleaseFenceAfterRolledBackAsync(
-                failedRequest.ReleaseId,
-                new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, existingOutcome.Detail[..^FenceReleasePendingMarker.Length]))
-                .ConfigureAwait(false);
-        }
-
+        // The rollback itself already completed durably on an earlier attempt and only the
+        // idempotent fence release remains. Re-entering RecoverCoreAsync here would re-run
+        // restore/digest-apply against an already-restored host, so the retry is narrowed to the
+        // release alone.
         if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.FenceReleasePending })
         {
-            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, existingOutcome.Detail)).ConfigureAwait(false);
+            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, existingOutcome.Detail).ConfigureAwait(false);
         }
 
         HostUpdateRecoveryResult result;
@@ -187,7 +192,21 @@ public sealed class HostUpdateRecoveryCoordinator(
             throw;
         }
 
-        // Persisted unconditionally on every completed outcome -- including NeedsOperator --
+        if (result.Outcome == HostUpdateRecoveryOutcome.RolledBack)
+        {
+            // Bishop/Hicks review (issue #2663): the FIRST durable write after a successful rollback
+            // must record rollback-complete AND fence-release-pending together. Writing a plain
+            // terminal RolledBack first would permanently strand admission.closed if the process
+            // died in the window before ReleaseAsync ran, because both the re-entry branch above and
+            // the restart availability reconciliation treat a plain RolledBack record as fully
+            // resolved and would therefore never re-drive the release.
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, HostUpdateRecoveryOutcome.FenceReleasePending, result.Detail, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
+            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, result.Detail).ConfigureAwait(false);
+        }
+
+        // Persisted unconditionally on every other completed outcome -- including NeedsOperator --
         // so it survives a process crash/kill even if whatever invoked RecoverAsync never gets a
         // chance to persist it itself (Kane audit P1.7). Uses CancellationToken.None for the
         // persistence write itself: recording the outcome must not be skipped just because the
@@ -196,46 +215,48 @@ public sealed class HostUpdateRecoveryCoordinator(
             new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, result.Outcome, result.Detail, DateTimeOffset.UtcNow),
             CancellationToken.None).ConfigureAwait(false);
 
-        if (result.Outcome == HostUpdateRecoveryOutcome.RolledBack)
-        {
-            await outcomeStore.WriteAsync(
-                new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, HostUpdateRecoveryOutcome.FenceReleasePending, result.Detail, DateTimeOffset.UtcNow),
-                CancellationToken.None).ConfigureAwait(false);
-            await outcomeStore.WriteAsync(
-                new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, HostUpdateRecoveryOutcome.RolledBack, result.Detail + FenceReleasePendingMarker, DateTimeOffset.UtcNow),
-                CancellationToken.None).ConfigureAwait(false);
-            result = await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, result).ConfigureAwait(false);
-        }
-
         return result;
     }
 
-    private async Task<HostUpdateRecoveryResult> ReleaseFenceAfterRolledBackAsync(string releaseId, HostUpdateRecoveryResult result)
+    /// <summary>
+    /// Drives the idempotent admission-fence release that must follow a completed rollback. Never
+    /// performs (or re-performs) restore/apply work: by the time this runs the host payload is
+    /// already durably restored, and the only remaining obligation is reopening admission.
+    /// </summary>
+    private async Task<HostUpdateRecoveryResult> ReleaseFenceAfterRolledBackAsync(string releaseId, string pendingDetail)
     {
-        if (fenceCoordinator is null)
+        // Retries carry any previous failure diagnostic in the detail suffix; the rollback detail
+        // itself is everything before it, so repeated failures cannot accumulate suffixes.
+        int separator = pendingDetail.IndexOf(FenceReleaseFailureSeparator, StringComparison.Ordinal);
+        string rollbackDetail = separator < 0 ? pendingDetail : pendingDetail[..separator];
+
+        if (fenceCoordinator is not null)
         {
-            await outcomeStore.WriteAsync(
-                new HostUpdateRecoveryOutcomeRecord(releaseId, HostUpdateRecoveryOutcome.RolledBack, result.Detail, DateTimeOffset.UtcNow),
-                CancellationToken.None).ConfigureAwait(false);
-            return result;
+            try
+            {
+                await fenceCoordinator.ReleaseAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                // The rollback is still complete and the fence is still closed, so the durable state
+                // stays fence-release-pending (never a generic NeedsOperator): a restart must retry
+                // the idempotent release only, not RecoverCoreAsync/restore/apply. The failure is
+                // carried as a diagnostic suffix for the operator.
+                string failedDetail = rollbackDetail + FenceReleaseFailureSeparator + "fence_release_failed:" + exception.GetType().Name;
+                await outcomeStore.WriteAsync(
+                    new HostUpdateRecoveryOutcomeRecord(releaseId, HostUpdateRecoveryOutcome.FenceReleasePending, failedDetail, DateTimeOffset.UtcNow),
+                    CancellationToken.None).ConfigureAwait(false);
+                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.FenceReleasePending, failedDetail);
+            }
         }
 
-        try
-        {
-            await fenceCoordinator.ReleaseAsync(CancellationToken.None).ConfigureAwait(false);
-            await outcomeStore.WriteAsync(
-                new HostUpdateRecoveryOutcomeRecord(releaseId, HostUpdateRecoveryOutcome.RolledBack, result.Detail, DateTimeOffset.UtcNow),
-                CancellationToken.None).ConfigureAwait(false);
-            return result;
-        }
-        catch (Exception exception) when (exception is not OperationCanceledException)
-        {
-            HostUpdateRecoveryResult failed = new(HostUpdateRecoveryOutcome.NeedsOperator, "fence_release_failed:" + exception.GetType().Name);
-            await outcomeStore.WriteAsync(
-                new HostUpdateRecoveryOutcomeRecord(releaseId, failed.Outcome, failed.Detail, DateTimeOffset.UtcNow),
-                CancellationToken.None).ConfigureAwait(false);
-            return failed;
-        }
+        // Admission is open again (or was never fenced by this coordinator), so the release is now
+        // genuinely terminal and the plain RolledBack record may finally be written.
+        var released = new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, rollbackDetail);
+        await outcomeStore.WriteAsync(
+            new HostUpdateRecoveryOutcomeRecord(releaseId, released.Outcome, released.Detail, DateTimeOffset.UtcNow),
+            CancellationToken.None).ConfigureAwait(false);
+        return released;
     }
 
     private async Task<HostUpdateRecoveryResult> RecoverCoreAsync(

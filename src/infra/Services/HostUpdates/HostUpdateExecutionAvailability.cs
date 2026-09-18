@@ -190,11 +190,13 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             if (last == HostUpdateExecutionState.RecoveryRequired)
             {
                 HostUpdateRecoveryOutcomeRecord? outcome = await recoveryOutcomeStore.ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
-                if (outcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack } &&
-                    !outcome.Detail.EndsWith("|fence_release_pending", StringComparison.Ordinal))
+                if (outcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
                 {
-                    // Already durably resolved by a prior, confirmed recovery attempt -- nothing
-                    // to re-fence for this specific release.
+                    // Already durably resolved by a prior, confirmed recovery attempt -- a plain
+                    // RolledBack record is only ever written after the admission fence was actually
+                    // released, so there is nothing to re-fence for this specific release. A
+                    // FenceReleasePending record deliberately does not match: that rollback's
+                    // release never completed, so writers must stay fenced until it does.
                     continue;
                 }
             }

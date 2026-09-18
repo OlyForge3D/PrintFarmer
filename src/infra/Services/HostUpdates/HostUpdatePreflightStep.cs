@@ -36,7 +36,77 @@ public sealed class FileInstalledHostStateStore(string path) : IInstalledHostSta
         }
 
         string json = await File.ReadAllTextAsync(path, cancellationToken).ConfigureAwait(false);
-        return JsonSerializer.Deserialize<InstalledHostState>(json);
+        InstalledHostState? state;
+        try
+        {
+            state = JsonSerializer.Deserialize<InstalledHostState>(json);
+        }
+        catch (JsonException exception)
+        {
+            throw new HostUpdateInstalledStateCorruptException("json_invalid", exception);
+        }
+
+        // Bishop/Hicks review (issue #2663): a present-but-unusable file must never be reported as
+        // "no installed state" (which preflight reads as a first install) and must never surface
+        // later as an incidental NullReferenceException. JSON `null`, `{}`, and records missing any
+        // required member all deserialize without throwing, so the record is validated here and a
+        // specific corruption exception is raised, letting execute/recovery fail closed
+        // deterministically to NeedsOperator.
+        return Validate(state);
+    }
+
+    private static InstalledHostState Validate(InstalledHostState? state)
+    {
+        if (state is null)
+        {
+            throw new HostUpdateInstalledStateCorruptException("record_null");
+        }
+
+        if (string.IsNullOrWhiteSpace(state.ReleaseId))
+        {
+            throw new HostUpdateInstalledStateCorruptException("release_id_missing");
+        }
+
+        if (string.IsNullOrWhiteSpace(state.ManifestDigest))
+        {
+            throw new HostUpdateInstalledStateCorruptException("manifest_digest_missing");
+        }
+
+        if (string.IsNullOrWhiteSpace(state.Topology))
+        {
+            throw new HostUpdateInstalledStateCorruptException("topology_missing");
+        }
+
+        if (state.ServiceDigests is null || state.ServiceDigests.Count == 0)
+        {
+            throw new HostUpdateInstalledStateCorruptException("service_digests_missing");
+        }
+
+        foreach (KeyValuePair<string, string> digest in state.ServiceDigests)
+        {
+            if (string.IsNullOrWhiteSpace(digest.Key) || string.IsNullOrWhiteSpace(digest.Value))
+            {
+                throw new HostUpdateInstalledStateCorruptException("service_digest_invalid");
+            }
+        }
+
+        if (state.ServicePlatforms is not null)
+        {
+            foreach (KeyValuePair<string, string> platform in state.ServicePlatforms)
+            {
+                if (string.IsNullOrWhiteSpace(platform.Key) || string.IsNullOrWhiteSpace(platform.Value))
+                {
+                    throw new HostUpdateInstalledStateCorruptException("service_platform_invalid");
+                }
+
+                if (!state.ServiceDigests.ContainsKey(platform.Key))
+                {
+                    throw new HostUpdateInstalledStateCorruptException("service_platform_unmapped");
+                }
+            }
+        }
+
+        return state;
     }
 
     public async Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken)
@@ -47,6 +117,24 @@ public sealed class FileInstalledHostStateStore(string path) : IInstalledHostSta
         await Task.Run(() => HostUpdateDurableFile.WriteAllTextAtomic(path, json), cancellationToken).ConfigureAwait(false);
     }
 }
+
+/// <summary>
+/// Thrown when the durable installed-state file exists but does not contain a usable record.
+/// Distinct from "no installed state": a corrupt or truncated file must fail closed rather than be
+/// mistaken for a first install.
+/// </summary>
+#pragma warning disable CA1032 // Only ever constructed with a code; standard constructors are not used.
+public sealed class HostUpdateInstalledStateCorruptException : InvalidOperationException
+{
+    public HostUpdateInstalledStateCorruptException(string code)
+        : base("installed_state_corrupt:" + code) => Code = code;
+
+    public HostUpdateInstalledStateCorruptException(string code, Exception innerException)
+        : base("installed_state_corrupt:" + code, innerException) => Code = code;
+
+    public string Code { get; }
+}
+#pragma warning restore CA1032
 
 /// <summary>Thrown when preflight determines the host is not safe to update.</summary>
 #pragma warning disable CA1032 // Only ever constructed with a code; standard constructors are not used.
