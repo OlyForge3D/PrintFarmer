@@ -10,6 +10,7 @@ using Fido2NetLib.Objects;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.AspNetCore.Mvc.ModelBinding;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Primitives;
 using ChangePasswordRequest = Farm.Infrastructure.Contracts.Auth.ChangePasswordRequest;
@@ -446,13 +447,19 @@ public class AuthController(
     /// <summary>
     /// Completes the passkey registration ceremony by verifying and storing the authenticator credential.
     /// </summary>
+    /// <remarks>
+    /// Fido2NetLib owns the browser wire contract for the attestation payload, same as register/begin
+    /// above: <c>[FromBody]</c> would deserialize with PrintFarmer's global <c>JsonStringEnumConverter</c>,
+    /// which rejects the WebAuthn <c>"public-key"</c> wire value (issue #2763). See
+    /// <see cref="Fido2InboundJsonOptions"/> for details.
+    /// </remarks>
     [HttpPost("passkey/register/complete")]
     [Authorize(Policy = InteractiveSessionRequirement.PolicyName)]
     [ProducesResponseType(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> PasskeyRegisterCompleteAsync(
-        [FromBody] AuthenticatorAttestationRawResponse attestationResponse,
+        [ModelBinder(BinderType = typeof(AuthenticatorAttestationRawResponseModelBinder))] AuthenticatorAttestationRawResponse attestationResponse,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(attestationResponse);
@@ -516,6 +523,11 @@ public class AuthController(
     /// <summary>
     /// Completes the passkey login ceremony by verifying the stored credential assertion and returning a JWT.
     /// </summary>
+    /// <remarks>
+    /// Same isolation as register/complete: bypasses the global <c>JsonStringEnumConverter</c> so
+    /// Fido2NetLib's nested <see cref="AuthenticatorAssertionRawResponse"/>.Type binds <c>"public-key"</c>
+    /// correctly (issue #2763). See <see cref="Fido2InboundJsonOptions"/> for details.
+    /// </remarks>
     [HttpPost("passkey/login/complete")]
     [AllowAnonymous] // Public because the signed passkey assertion is the credential being verified.
     [ProducesResponseType(typeof(AuthenticationResult), StatusCodes.Status200OK)]
@@ -523,7 +535,7 @@ public class AuthController(
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status422UnprocessableEntity)]
     public async Task<IActionResult> PasskeyLoginCompleteAsync(
-        [FromBody] PasskeyLoginCompleteRequest request,
+        [ModelBinder(BinderType = typeof(PasskeyLoginCompleteRequestModelBinder))] PasskeyLoginCompleteRequest request,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(request);
