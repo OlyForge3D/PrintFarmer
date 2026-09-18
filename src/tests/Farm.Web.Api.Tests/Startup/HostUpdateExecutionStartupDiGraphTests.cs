@@ -31,9 +31,18 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
     // Must satisfy HostUpdateExecutionOptionsValidator (absolute; not under the OS temp
     // directory; not the current/working directory or a subdirectory of it) because resolving
     // IOptions<HostUpdateExecutionOptions>.Value always runs IValidateOptions, independent of
-    // ValidateOnStart's eager host-startup hook.
-    private static string CreateValidRoot() =>
-        Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "pf-hostupdate-di-graph-" + Guid.NewGuid().ToString("N"));
+    // ValidateOnStart's eager host-startup hook. Local application data is user-writable on
+    // both Windows and Linux without requiring filesystem-root permissions.
+    private static string CreateValidRoot()
+    {
+        string localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        if (string.IsNullOrWhiteSpace(localData))
+        {
+            throw new InvalidOperationException("A user-local application data directory is required for this test.");
+        }
+
+        return Path.Combine(localData, "pf-hostupdate-di-graph-" + Guid.NewGuid().ToString("N"));
+    }
 
     [Fact]
     public void AddHostUpdateExecution_ResolvingBackupTargetList_DoesNotRecurseAndReturnsRealTargets()
