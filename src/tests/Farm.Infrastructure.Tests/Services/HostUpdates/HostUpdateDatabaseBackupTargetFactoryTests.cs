@@ -14,6 +14,12 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateDatabaseBackupTargetFactoryTests
 {
+    /// <summary>
+    /// A deliberately non-secret placeholder used only to prove the credential never reaches the
+    /// argument list; it authenticates nothing.
+    /// </summary>
+    private const string FixtureSqlPassword = "fixture-not-a-real-credential";
+
     private sealed class RecordingProcessRunner : IHostUpdateProcessRunner
     {
         public string? LastFileName { get; private set; }
@@ -270,5 +276,164 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         query.Should().Contain("it''s-a-trap");
         query.Should().NotContain("N'" + hostileTargetDirectory);
+    }
+
+    /// <summary>
+    /// A backup or restore streams the whole database over the sqlcmd connection, and sqlcmd
+    /// applies its own build-specific encryption default instead of reading the application's
+    /// connection string. Host-update backup/restore therefore *requires* encryption rather than
+    /// honouring the ambient configuration: even an explicit <c>Encrypt=False</c> must still be
+    /// forced on, so that channel can never carry a full database dump in cleartext.
+    /// </summary>
+    [Theory]
+    [InlineData("")]
+    [InlineData(";Encrypt=False")]
+    [InlineData(";Encrypt=True")]
+    [InlineData(";Encrypt=Strict")]
+    public async Task CreateBackupTarget_SqlServer_AlwaysRequiresEncryptedTransport(string encryptSetting)
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{encryptSetting}",
+        };
+        var runner = new RecordingProcessRunner();
+
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+        await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        runner.LastArguments.Should().Contain("-N");
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData(";Encrypt=False")]
+    [InlineData(";Encrypt=True")]
+    [InlineData(";Encrypt=Strict")]
+    public void CreateRestoreCommand_SqlServer_AlwaysRequiresEncryptedTransport(string encryptSetting)
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{encryptSetting}",
+        };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        command.Arguments.Should().Contain("-N");
+    }
+
+    /// <summary>
+    /// <c>-C</c> waives only the certificate-chain check, never encryption itself, so it is an
+    /// explicit deployment trust policy (a self-signed certificate on a host-local or
+    /// private-network SQL Server) rather than a downgrade to unencrypted transport. It is
+    /// emitted only when the deployment configured <c>TrustServerCertificate=True</c>, so the
+    /// default posture stays encrypt *and* validate.
+    /// </summary>
+    [Theory]
+    [InlineData("", false)]
+    [InlineData(";TrustServerCertificate=False", false)]
+    [InlineData(";TrustServerCertificate=True", true)]
+    public async Task CreateBackupTarget_SqlServer_TrustsServerCertificateOnlyWhenExplicitlyConfigured(
+        string trustSetting,
+        bool expectTrustCertificate)
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{trustSetting}",
+        };
+        var runner = new RecordingProcessRunner();
+
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+        await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        runner.LastArguments!.Contains("-C").Should().Be(expectTrustCertificate);
+        runner.LastArguments.Should().Contain("-N");
+    }
+
+    [Theory]
+    [InlineData("", false)]
+    [InlineData(";TrustServerCertificate=False", false)]
+    [InlineData(";TrustServerCertificate=True", true)]
+    public void CreateRestoreCommand_SqlServer_TrustsServerCertificateOnlyWhenExplicitlyConfigured(
+        string trustSetting,
+        bool expectTrustCertificate)
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{trustSetting}",
+        };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        command.Arguments.Contains("-C").Should().Be(expectTrustCertificate);
+        command.Arguments.Should().Contain("-N");
+    }
+
+    /// <summary>
+    /// Hardening transport must not regress sqlcmd's credential convention: the password travels
+    /// only through <c>SQLCMDPASSWORD</c> and never appears in the argument list, and <c>-b</c>
+    /// (fail the process on a T-SQL error) is still passed so a failed backup is never mistaken
+    /// for a successful one.
+    /// </summary>
+    [Fact]
+    public async Task CreateBackupTarget_SqlServer_KeepsCredentialsOutOfArgumentsAndFailsOnError()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword};Encrypt=False",
+        };
+        var runner = new RecordingProcessRunner();
+
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+        await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        runner.LastArguments.Should().Contain("-b");
+        runner.LastArguments.Should().NotContain(FixtureSqlPassword);
+        runner.LastEnvironment.Should().ContainKey("SQLCMDPASSWORD").WhoseValue.Should().Be(FixtureSqlPassword);
+    }
+
+    [Fact]
+    public void CreateRestoreCommand_SqlServer_KeepsCredentialsOutOfArguments()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword};Encrypt=False",
+        };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        command.Arguments.Should().Contain("-b");
+        command.Arguments.Should().NotContain(FixtureSqlPassword);
+        command.Environment.Should().ContainKey("SQLCMDPASSWORD").WhoseValue.Should().Be(FixtureSqlPassword);
+    }
+
+    /// <summary>
+    /// Integrated security keeps the same transport invariant: the credential form changes, but
+    /// the channel carrying the dump is the same one, so encryption is still required.
+    /// </summary>
+    [Fact]
+    public void CreateRestoreCommand_SqlServerIntegratedSecurity_StillRequiresEncryptedTransport()
+    {
+        var dbConfig = new DatabaseProviderConfiguration
+        {
+            Provider = "sqlserver",
+            ConnectionString = "Server=sqlhost;Database=printfarmer;Integrated Security=True;Encrypt=False;TrustServerCertificate=True",
+        };
+
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+
+        command.Arguments.Should().Contain("-E");
+        command.Arguments.Should().Contain("-N");
+        command.Arguments.Should().Contain("-C");
+        command.Arguments.Should().NotContain("-U");
+        command.Environment.Should().BeNull();
     }
 }

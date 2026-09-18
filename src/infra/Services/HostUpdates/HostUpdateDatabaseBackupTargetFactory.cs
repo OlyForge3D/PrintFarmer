@@ -76,9 +76,9 @@ public static class HostUpdateDatabaseBackupTargetFactory
 
         if (dbConfig.IsSqlServer)
         {
-            var builder = new SqlConnectionStringBuilder(dbConfig.ConnectionString);
+            SqlConnectionStringBuilder builder = EncryptedSqlServerBuilder(dbConfig.ConnectionString);
             string database = builder.InitialCatalog;
-            (IReadOnlyList<string> authArgs, IReadOnlyDictionary<string, string>? authEnvironment) = SqlServerAuthArgs(builder);
+            (IReadOnlyList<string> connectionArgs, IReadOnlyDictionary<string, string>? connectionEnvironment) = SqlServerConnectionArgs(builder);
             return new ProcessDatabaseBackupTarget(
                 name,
                 isExternallyOwned: false,
@@ -88,11 +88,11 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 [
                     "-S", builder.DataSource,
                     "-b",
-                    .. authArgs,
+                    .. connectionArgs,
                     "-Q", $"BACKUP DATABASE [{EscapeBracketedIdentifier(database)}] TO DISK = N'{EscapeQuotedLiteral(Path.Combine(dest, SqlServerFileName))}' WITH INIT",
                 ],
                 timeout,
-                authEnvironment);
+                connectionEnvironment);
         }
 
         throw new NotSupportedException($"unsupported_backup_provider:{dbConfig.Provider}");
@@ -140,30 +140,23 @@ public static class HostUpdateDatabaseBackupTargetFactory
 
         if (dbConfig.IsSqlServer)
         {
-            var builder = new SqlConnectionStringBuilder(dbConfig.ConnectionString);
+            SqlConnectionStringBuilder builder = EncryptedSqlServerBuilder(dbConfig.ConnectionString);
             string database = builder.InitialCatalog;
-            (IReadOnlyList<string> authArgs, IReadOnlyDictionary<string, string>? authEnvironment) = SqlServerAuthArgs(builder);
+            (IReadOnlyList<string> connectionArgs, IReadOnlyDictionary<string, string>? connectionEnvironment) = SqlServerConnectionArgs(builder);
             return targetDirectory => new HostUpdateRestoreCommand(
                 "sqlcmd",
                 [
                     "-S", builder.DataSource,
                     "-b",
-                    .. authArgs,
+                    .. connectionArgs,
                     "-Q", $"BEGIN TRY ALTER DATABASE [{EscapeBracketedIdentifier(database)}] SET SINGLE_USER WITH ROLLBACK IMMEDIATE; RESTORE DATABASE [{EscapeBracketedIdentifier(database)}] FROM DISK = N'{EscapeQuotedLiteral(Path.Combine(targetDirectory, SqlServerFileName))}' WITH REPLACE; ALTER DATABASE [{EscapeBracketedIdentifier(database)}] SET MULTI_USER; END TRY BEGIN CATCH IF DB_ID(N'{EscapeQuotedLiteral(database)}') IS NOT NULL ALTER DATABASE [{EscapeBracketedIdentifier(database)}] SET MULTI_USER; THROW; END CATCH",
                 ],
-                authEnvironment);
+                connectionEnvironment);
         }
 
         throw new NotSupportedException($"unsupported_restore_provider:{dbConfig.Provider}");
     }
 
-    /// <summary>
-    /// <c>sqlcmd</c>'s own credential-handling convention: username may safely appear as a
-    /// process argument, but the password must travel only through the <c>SQLCMDPASSWORD</c>
-    /// environment variable (supported natively by <c>sqlcmd</c>) so it never appears in a
-    /// process argument list -- visible via <c>ps</c>/process listings or argv-capturing
-    /// audit/process logging -- for either backup or restore.
-    /// </summary>
     /// <summary>
     /// Escapes a single-quoted literal for <c>sqlite3</c>'s own dot-command tokenizer (used by
     /// <c>.backup</c>/<c>.restore</c>) and for T-SQL <c>N'...'</c> string literals: both treat a
@@ -180,18 +173,75 @@ public static class HostUpdateDatabaseBackupTargetFactory
     /// </summary>
     private static string EscapeBracketedIdentifier(string value) => value.Replace("]", "]]", StringComparison.Ordinal);
 
-    private static (IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string>? Environment) SqlServerAuthArgs(SqlConnectionStringBuilder builder)
+    /// <summary>
+    /// Parses a SQL Server connection string and unconditionally hardens its transport security:
+    /// host-update backup and restore stream an entire database over that connection, so this
+    /// factory *requires* encryption rather than honouring whatever the ambient application
+    /// connection string happened to configure. A configured <c>Encrypt=false</c> is deliberately
+    /// overridden to <see cref="SqlConnectionEncryptOption.Mandatory"/>; only an explicitly
+    /// stronger setting (<c>Strict</c>) is preserved. The returned builder is therefore the single
+    /// place where the "host-update SQL Server traffic is always encrypted" invariant is
+    /// established, for both the parsed/effective connection string and the derived
+    /// <c>sqlcmd</c> switches.
+    /// </summary>
+    private static SqlConnectionStringBuilder EncryptedSqlServerBuilder(string connectionString)
     {
+        var builder = new SqlConnectionStringBuilder(connectionString);
+
+        if (builder.Encrypt != SqlConnectionEncryptOption.Strict)
+        {
+            builder.Encrypt = SqlConnectionEncryptOption.Mandatory;
+        }
+
+        return builder;
+    }
+
+    /// <summary>
+    /// Projects one already-hardened <see cref="EncryptedSqlServerBuilder"/> connection onto the
+    /// equivalent <c>sqlcmd</c> switches, so backup and restore share a single argument grammar.
+    /// <para>
+    /// <c>sqlcmd</c> applies its own build-specific encryption default rather than inheriting the
+    /// application's connection string, so <c>-N</c> is always emitted: without it a backup or
+    /// restore could traverse the network unencrypted even when every ordinary application
+    /// connection to the same server requires encryption.
+    /// </para>
+    /// <para>
+    /// <c>-C</c> (trust the server certificate without validating it) is emitted *only* when the
+    /// deployment explicitly configured <c>TrustServerCertificate=true</c>. That is an explicit
+    /// deployment trust policy -- appropriate for a self-signed certificate on a host-local or
+    /// private-network SQL Server -- and never disables encryption: the channel is still
+    /// encrypted under <c>-N</c>, only the certificate chain check is waived. It is never
+    /// inferred, so the default posture is encrypt *and* validate.
+    /// </para>
+    /// <para>
+    /// Credentials follow <c>sqlcmd</c>'s own convention: the username may safely appear as a
+    /// process argument, but the password travels only through the <c>SQLCMDPASSWORD</c>
+    /// environment variable so it never appears in a process argument list -- visible via
+    /// <c>ps</c>/process listings or argv-capturing audit logging -- for either backup or restore.
+    /// </para>
+    /// </summary>
+    private static (IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string>? Environment) SqlServerConnectionArgs(SqlConnectionStringBuilder builder)
+    {
+        var arguments = new List<string> { "-N" };
+
+        if (builder.TrustServerCertificate)
+        {
+            arguments.Add("-C");
+        }
+
         if (builder.IntegratedSecurity)
         {
-            return (["-E"], null);
+            arguments.Add("-E");
+            return (arguments, null);
         }
 
         string password = builder.Password ?? string.Empty;
         IReadOnlyDictionary<string, string>? environment = string.IsNullOrEmpty(password)
             ? null
             : new Dictionary<string, string>(StringComparer.Ordinal) { ["SQLCMDPASSWORD"] = password };
-        return (["-U", builder.UserID], environment);
+        arguments.Add("-U");
+        arguments.Add(builder.UserID);
+        return (arguments, environment);
     }
 }
 
