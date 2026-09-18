@@ -1,4 +1,5 @@
-import { useState } from 'react';
+import { useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { toast } from 'sonner';
 import { PageTemplate } from '@/common/components/PageTemplate';
@@ -24,6 +25,7 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
   const [editName, setEditName] = useState('');
   const [showRegisterModal, setShowRegisterModal] = useState(false);
   const [pendingDeviceName, setPendingDeviceName] = useState('');
+  const registrationInFlightRef = useRef(false);
 
   const { data: passkeys = [], isLoading } = useQuery({
     queryKey: ['passkeys'],
@@ -55,20 +57,38 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
   });
 
   const registerMutation = useMutation({
-    mutationFn: async (deviceName?: string) => {
+    mutationFn: async ({
+      deviceName,
+    }: {
+      deviceName?: string;
+      toastId: string | number;
+    }) => {
       const result = await registerPasskey();
-      if (deviceName?.trim()) {
-        await renamePasskey(result.newCredentialId, deviceName.trim());
+      if (deviceName) {
+        try {
+          await renamePasskey(result.newCredentialId, deviceName);
+        } catch (error) {
+          return { renameError: error instanceof Error ? error : new Error(String(error)) };
+        }
       }
+      return {};
     },
-    onSuccess: () => {
+    onSuccess: ({ renameError }, { toastId }) => {
       queryClient.invalidateQueries({ queryKey: ['passkeys'] });
-      toast.success('Passkey registered successfully');
-      setShowRegisterModal(false);
       setPendingDeviceName('');
+      if (renameError) {
+        toast.error(`Passkey registered, but failed to save device name: ${renameError.message}`, {
+          id: toastId,
+        });
+        return;
+      }
+      toast.success('Passkey registered successfully', { id: toastId });
     },
-    onError: (error: Error) => {
-      toast.error(error.message || 'Failed to register passkey');
+    onError: (error: Error, { toastId }) => {
+      toast.error(error.message || 'Failed to register passkey', { id: toastId });
+    },
+    onSettled: () => {
+      registrationInFlightRef.current = false;
     },
   });
 
@@ -80,6 +100,20 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
   function handleSaveRename() {
     if (!editTarget || !editName.trim()) return;
     renameMutation.mutate({ id: editTarget.id, name: editName.trim() });
+  }
+
+  function handleRegisterPasskey() {
+    if (registrationInFlightRef.current) return;
+
+    registrationInFlightRef.current = true;
+    const deviceName = pendingDeviceName.trim() || undefined;
+
+    flushSync(() => {
+      setShowRegisterModal(false);
+    });
+
+    const toastId = toast.loading('Complete the passkey prompt in your browser');
+    registerMutation.mutate({ deviceName, toastId });
   }
 
   function formatDate(dateStr: string | null): string {
@@ -103,6 +137,8 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
             variant="primary"
             onClick={() => setShowRegisterModal(true)}
             disabled={registerMutation.isPending}
+            explainedDisabled
+            title={registerMutation.isPending ? 'Passkey registration is in progress' : undefined}
           >
             <PlusIcon className="w-4 h-4" />
             <span>Add passkey</span>
@@ -186,7 +222,7 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
             </Button>
             <Button
               variant="primary"
-              onClick={() => registerMutation.mutate(pendingDeviceName || undefined)}
+              onClick={handleRegisterPasskey}
               disabled={registerMutation.isPending}
               loading={registerMutation.isPending}
             >
@@ -211,7 +247,7 @@ export function PasskeysPage({ embedded = false }: PasskeysPageProps) {
               disabled={registerMutation.isPending}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !registerMutation.isPending) {
-                  registerMutation.mutate(pendingDeviceName || undefined);
+                  handleRegisterPasskey();
                 }
               }}
             />
