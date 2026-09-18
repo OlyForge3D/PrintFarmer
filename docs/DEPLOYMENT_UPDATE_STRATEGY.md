@@ -1,4 +1,4 @@
----
+﻿---
 post_title: "Deployment visibility and safe update strategy"
 author1: "Parker"
 post_slug: "deployment-update-strategy"
@@ -189,6 +189,41 @@ expiry. Journal corruption is a fail-closed reconciliation condition.
 Issue #2663 owns all transitions after `Staged`, including drain, backup,
 migration, apply, verification, and recovery. Issue #2666 owns request
 integration and scheduling.
+
+**Issue #2663 implementation status:** concrete, repository-appropriate step
+adapters exist for every stage — preflight (`HostUpdatePreflightCheck`), drain
+(`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
+than cancelling), fence (`HostUpdateFenceCoordinator`, proving the durable admission
+gate, the queue outbox publisher, `PowerReadingPruneService`,
+`QueueRetentionPruneService`, and `AutoDispatchBackgroundService` have quiesced),
+backup (`HostUpdateBackupCoordinator` plus provider-native
+`HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
+closed for externally-owned databases and unexpectedly missing required owned
+directories), migration (`HostUpdateMigrationCoordinator` wrapping the existing
+`ProviderAwareMigrationRunner` under the executor's own lock), apply
+(`HostUpdateImageApplier`, staging pinned `repository@sha256` images before compose
+mutation and applying with `docker compose up -d --no-build --pull never`), verify
+(`HostUpdateHealthVerifier`, exact configured service set, exact running digests,
+and aggregate `/health` JSON requiring configured result entries to be present and
+healthy), and recovery (`HostUpdateRecoveryCoordinator`, image-only rollback vs.
+coordinated restore via structured process args/env only, with the
+`RolledBack`/`NeedsOperator` outcome durably persisted by
+`FileHostUpdateRecoveryOutcomeStore` before fence release). Production DI uses a
+host-root-backed `FileHostUpdateAdmissionGate`; the standalone split
+`Farm.Slicer.Host` registers that same gate without registering the full executor,
+so shared-root slicer submissions are rejected while the main API is draining. All
+of it is wired through production DI (`HostUpdateExecutionStartup.AddHostUpdateExecution`)
+behind a manual, permission-gated admin API (`HostUpdateController`) with no automatic
+scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter table,
+the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
+contract a scheduler must poll before ever invoking the executor. The production executor keeps availability closed for explicit operator-configured `RequiredUnavailableFacilities`, but no longer seeds #2663 placeholders by default: bridge/webhook delivery is fenced, and migration/apply crash uncertainty is reconciled only from concrete provider/container evidence after a `:before` marker without the matching `:after` marker.
+On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
+durable journal for any release left mid-flight or in `RecoveryRequired`
+without a confirmed `RolledBack` outcome and immediately re-closes every
+registered `IFenceableWriter` (the admission gate included) before reporting
+availability, closing the gap where the in-memory gate previously reset open
+on every restart regardless of an unresolved prior update; it never resumes
+or retries the update itself.
 
 Scope: single-host Docker Compose, monolith and split-service deployments,
 optional/local/remote workers, external databases, and offline installations.
@@ -1007,7 +1042,9 @@ resuming. Never infer success solely from process exit or replay uncertain work.
    Follow [migration-safe procedures](DEPLOYMENT.md#migration-safe-upgrades);
    do not rely on the current backup helper as proof of completeness.
 5. **Migrate:** A single selected owner applies and validates each context in
-   manifest order. Existing API/slicer startup migration behavior must be
+   manifest order from the authenticated target image or a dedicated target
+   migration runner. The current/old API assembly must not execute forward
+   target migrations. Existing API/slicer startup migration behavior must be
    explicitly coordinated before automation ships; do not start competing hosts
    and hope migration locks suffice. Use bounded, observable execution; on a
    timeout inspect provider state instead of assuming termination or retry safety.
@@ -1016,7 +1053,8 @@ resuming. Never infer success solely from process exit or replay uncertain work.
    routes/TLS, frontend assets, auth/key continuity, worker compatibility,
    artifact read/write probes, and queue consumers/reconciler/publisher health.
    Do not send real printer start commands as smoke tests. Readiness timeout
-   fails the operation. Reopen writes only after the whole set passes.
+   fails the operation. Reopen writes only after the whole set passes and the
+   durable terminal outcome plus installed-state transition have been recorded.
 7. **Complete:** Reconcile inventory, record approvals/actor, manifest/signature
    identity, prior/target/observed digests, schema transitions, backup references,
    timestamps and outcome. Retain host audit history independently of restored
@@ -1192,8 +1230,8 @@ production validation runs are implied by this design document.
 - **Dependencies:** I1 + I2 + I3's proven host-evidence eligibility gate;
   CLI must still work without the UI. **Acceptance:** Durable journal/lock,
   whole-set staging, drain,
-  coordinated backup, serialized migrations, strict verification, safe recovery,
-  complete offline bundle, and fixed-command plan export.
+  coordinated backup, target-image/dedicated serialized migrations, strict verification,
+  safe recovery, complete offline bundle, and fixed-command plan export.
   Bind channel/policy revision in evidence, plans, commands and journals;
   preflight/confirm/audit switches and execute only whole single-channel sets.
   Channel-aware rollback must not silently downgrade or reset enrollment.

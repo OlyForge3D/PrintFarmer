@@ -8,6 +8,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Data.Interceptors;
 using Farm.Infrastructure.Domain.Webhooks;
 using Farm.Infrastructure.Network;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Security;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -34,7 +35,8 @@ public sealed class WebhookService(
     IServiceScopeFactory scopeFactory,
     IHttpClientFactory httpClientFactory,
     ISensitiveDataProtector sensitiveDataProtector,
-    ILogger<WebhookService> logger) : BackgroundService, IWebhookService
+    ILogger<WebhookService> logger,
+    WebhookDeliveryFenceFlag? hostUpdateFenceFlag = null) : BackgroundService, IWebhookService
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -55,6 +57,7 @@ public sealed class WebhookService(
     private DateTime _lastCleanup = DateTime.MinValue;
 
     private readonly ConcurrentQueue<WebhookEvent> _queue = new();
+    private readonly WebhookDeliveryFenceFlag? _hostUpdateFenceFlag = hostUpdateFenceFlag;
 
     /// <inheritdoc />
     public void Enqueue(string eventType, object payload)
@@ -75,6 +78,13 @@ public sealed class WebhookService(
 
         while (!stoppingToken.IsCancellationRequested)
         {
+            if (_hostUpdateFenceFlag is not null && await _hostUpdateFenceFlag.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await _hostUpdateFenceFlag.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromSeconds(1), stoppingToken).ConfigureAwait(false);
+                continue;
+            }
+
             if (_queue.TryDequeue(out var evt))
             {
                 try

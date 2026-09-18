@@ -1,7 +1,9 @@
 ﻿extern alias SlicerHost;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Slicer.Module;
 using Farm.Slicer.Module.Api;
 using Farm.Slicer.Module.Data;
+using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -26,6 +28,7 @@ public sealed class SlicerHostServiceProviderScopeTests
         builder.Configuration["Slicer:PluginsPath"] = string.Empty;
         builder.Configuration["DB_PROVIDER"] = "sqlite";
         builder.Configuration["ConnectionStrings:Default"] = "Data Source=:memory:";
+        builder.Configuration["HostUpdateExecution:RootDirectory"] = Path.Combine(Path.GetTempPath(), "pf-slicer-host-update-" + Guid.NewGuid().ToString("N"));
 
         _ = builder.Services.AddSlicerModule(builder.Configuration);
         _ = builder.Services.AddSlicerApiServices(builder.Configuration);
@@ -64,5 +67,8 @@ public sealed class SlicerHostServiceProviderScopeTests
         Assert.NotNull(
             scope.ServiceProvider
                 .GetRequiredService<Farm.Slicer.Module.Api.Repositories.IPrinterProfileCheckRepository>());
+
+        scope.ServiceProvider.GetRequiredService<IHostUpdateAdmissionGate>()
+            .Should().BeOfType<FileHostUpdateAdmissionGate>();
     }
 }
