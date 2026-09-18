@@ -1732,6 +1732,37 @@ test_installer_lite_slicer_worker_key() {
     pass_test
 }
 
+test_installer_full_worker_inputs() {
+    start_test "installer accepts isolated immutable full worker deployment inputs"
+
+    local image_set="$TEST_TEMP_DIR/installer-full-worker-images.env"
+    cat > "$image_set" <<'EOF'
+API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+FRONTEND_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+SLICER_HOST_IMAGE=ghcr.io/olyforge3d/printfarmer-slicer-host@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+ORCASLICER_WORKER_IMAGE=ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+PRINTER_DISCOVERY_IMAGE=ghcr.io/olyforge3d/printfarmer-printer-discovery@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+EOF
+
+    capture_output "'$INSTALL_SCRIPT' --help"
+    local output
+    output=$(get_output)
+
+    assert_contains "$output" "--with-orca-worker" "Installer should document the canonical Orca worker topology option"
+    assert_contains "$output" "--image-set FILE" "Installer should document immutable image-set input"
+    assert_contains "$output" "--name NAME" "Installer should document isolated Compose resource naming"
+    assert_contains "$output" "--bind-address ADDR" "Installer should document loopback publishing"
+    assert_contains "$output" "--api-port PORT" "Installer should document API port isolation"
+    assert_contains "$output" "--slicer-host-port PORT" "Installer should document slicer-host port isolation"
+    assert_contains "$output" "--postgres-port PORT" "Installer should document PostgreSQL port isolation"
+
+    capture_output "'$INSTALL_SCRIPT' --non-interactive --profile standard --db postgres --with-orca-worker --image-set '$image_set' --dry-run"
+    output=$(get_output)
+    assert_contains "$output" "requires --profile full" "Worker topology should reject incomplete profile configuration"
+
+    pass_test
+}
+
 test_installer_standard_webauthn_configuration() {
     start_test "installer standard profile configures canonical passkey origin"
 
@@ -2206,6 +2237,7 @@ run_all_tests() {
     test_pfarm_variables_complete_set
     test_pfarm_variables_sourcing
     test_installer_lite_slicer_worker_key
+    test_installer_full_worker_inputs
     test_installer_standard_webauthn_configuration
     test_installer_upgrade_preserves_webauthn_configuration
     test_installer_rejects_invalid_webauthn_host

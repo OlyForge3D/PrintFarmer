@@ -3,13 +3,13 @@
 # NOTE: This file contains just the service configuration to be inserted under services.database:
 
 image: ${POSTGRES_IMAGE:-postgres:16-alpine}
-container_name: printfarmer-database-postgres
+container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-database-postgres
 environment:
   POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
   POSTGRES_USER: ${POSTGRES_USER:-postgres}
   POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
 ports:
-  - "5432:5432"
+  - "${BIND_ADDRESS:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
 networks:
   printfarmer-network:
     aliases:

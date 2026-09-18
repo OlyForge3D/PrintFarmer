@@ -33,8 +33,8 @@ services:
         SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
         SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
         SBOM_URL: ${SBOM_URL:-}
-    image: printfarmer-printer-discovery
-    container_name: printfarmer-printer-discovery
+    image: ${PRINTER_DISCOVERY_IMAGE:-printfarmer-printer-discovery}
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-printer-discovery
     restart: unless-stopped
     networks:
       - printfarmer-network
@@ -88,7 +88,7 @@ services:
 # Network and volume definitions shared with other services
 networks:
   printfarmer-network:
-    name: printfarmer-network
+    name: ${COMPOSE_PROJECT_NAME:-printfarmer}-network
     driver: bridge
 
 volumes:

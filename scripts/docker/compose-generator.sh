@@ -1032,6 +1032,11 @@ generate_compose() {
             log_warning "Failed to merge go2rtc service, continuing without it"
         fi
     fi
+
+    if [[ "${HTTP_ONLY:-false}" == "true" ]]; then
+        sed -i '/^[[:space:]]*- "${HTTPS_PORT:-8443}:443"[[:space:]]*$/d' "$compose_file"
+        log_info "Configured HTTP-only reverse proxy"
+    fi
     
     if [[ "$addons_merged" == "true" ]]; then
         log_info "Successfully merged addon services into compose file"
@@ -1155,6 +1160,21 @@ copy_configs() {
     # Always copy docker entrypoint config
     if [[ -f "$CONFIGS_DIR/docker-entrypoint-config.sh" ]]; then
         cp "$CONFIGS_DIR/docker-entrypoint-config.sh" "$output_dir/"
+    fi
+
+    if [[ -d "$REPO_ROOT/deploy/nginx" ]]; then
+        mkdir -p "$output_dir/deploy"
+        rm -rf "$output_dir/deploy/nginx"
+        cp -r "$REPO_ROOT/deploy/nginx" "$output_dir/deploy/"
+
+        if [[ "${HTTP_ONLY:-false}" == "true" ]]; then
+            local split_proxy="$output_dir/deploy/nginx/nginx-proxy-split.conf"
+            if [[ -f "$split_proxy" ]]; then
+                sed '/^[[:space:]]*# ── HTTPS server/,$d' "$split_proxy" > "${split_proxy}.tmp"
+                printf '}\n' >> "${split_proxy}.tmp"
+                mv "${split_proxy}.tmp" "$split_proxy"
+            fi
+        fi
     fi
     
     # Copy additional configs based on what's included

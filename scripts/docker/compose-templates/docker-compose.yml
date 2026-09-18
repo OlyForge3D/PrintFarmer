@@ -3,13 +3,13 @@
 # Optional addons (OrcaSlicer worker, monitoring, telemetry) can be merged via compose-generator.sh
 # NOTE: Health check and shared definitions are automatically injected from docker-compose.common.yml
 
-name: printfarmer
+name: ${COMPOSE_PROJECT_NAME:-printfarmer}
 
 services:
   # Database (configurable via environment - supports PostgreSQL, SQL Server)
   database:
     image: ${POSTGRES_IMAGE:-postgres:16-alpine}
-    container_name: printfarmer-database
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-database
     environment:
       # PostgreSQL (default)
       POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
@@ -20,7 +20,7 @@ services:
       MSSQL_SA_PASSWORD: ${MSSQL_SA_PASSWORD}
       MSSQL_PID: ${MSSQL_PID:-Developer}
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      - "${BIND_ADDRESS:-0.0.0.0}:${POSTGRES_PORT:-5432}:5432"
     networks:
       printfarmer-network:
         aliases:
@@ -55,11 +55,11 @@ services:
         SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
         SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
         SBOM_URL: ${SBOM_URL:-}
-    image: printfarmer-api
-    container_name: printfarmer-api
+    image: ${API_IMAGE:-printfarmer-api}
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-api
     restart: unless-stopped
     ports:
-      - "${API_PORT:-5245}:5245"
+      - "${BIND_ADDRESS:-0.0.0.0}:${API_PORT:-5245}:5245"
     depends_on:
       database:
         condition: service_healthy
@@ -141,8 +141,8 @@ services:
         VITE_SIGNALR_HARVEST_URL: /hubs/harvest
         GIT_SHA: ${GIT_SHA:-unknown}
         VITE_GIT_SHA: ${GIT_SHA:-unknown}
-    image: printfarmer-frontend
-    container_name: printfarmer-frontend
+    image: ${FRONTEND_IMAGE:-printfarmer-frontend}
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-frontend
     restart: unless-stopped
     environment:
       # Runtime env vars (for reference, but React reads build-time args)
@@ -162,10 +162,10 @@ services:
   # Reverse proxy - single entry point for all external traffic
   nginx-proxy:
     image: ${NGINX_IMAGE:-nginx:alpine}
-    container_name: printfarmer-nginx-proxy
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-nginx-proxy
     restart: unless-stopped
     ports:
-      - "${HTTP_PORT:-8080}:80"
+      - "${BIND_ADDRESS:-0.0.0.0}:${HTTP_PORT:-8080}:80"
       - "${HTTPS_PORT:-8443}:443"
     volumes:
       - ./deploy/nginx/${NGINX_CONFIG:-nginx-proxy.conf}:/etc/nginx/nginx.conf:ro
