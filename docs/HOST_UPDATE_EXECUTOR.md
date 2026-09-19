@@ -9,6 +9,31 @@ scheduler once it is granted standing permission — not yet the case here) subm
 preflight → drain → fence → backup → migration → apply → verify, or into `RecoveryRequired` on any
 failure. There is still no automatic/unattended execution path.
 
+## Issue #2757 validation boundary
+
+The executor's unit and integration tests prove request binding, image
+staging/apply ordering, availability gates, restart re-fencing, and durable
+recovery outcomes. They do not prove a live signed-release installation.
+Publication of `v0.2.3-insider.4` proves the release manifest and Sigstore bundle
+can be produced and verified; it does not bootstrap an older installed
+`v0.2.3-insider.2` host, enable the Update Now UI, or establish automatic policy.
+
+Acceptance still requires all of the following before this document can claim
+runtime support:
+
+- a documented, supported legacy-install bootstrap;
+- a signed target whose immutable images differ from the current installation;
+- confirmation, progress, completion, and an induced interruption with
+  restoration evidence;
+- the supported provider/topology matrix, including shared-database success and
+  split-database or unsupported-provider fail-closed results; and
+- explicit proof that automatic updates stay disabled unless an administrator
+  opts in and the executor/UI policy integration is available.
+
+Until that evidence exists, treat the admin API as a manual, permission-gated
+surface whose availability may be `Unavailable`; do not infer readiness from
+release publication or from passing unit tests.
+
 ## Configuration: `HostUpdateExecutionOptions`
 
 Bound from the `HostUpdateExecution` configuration section (see

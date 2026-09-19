@@ -108,10 +108,12 @@ mutation and again immediately before the `gh release upload` call, so nothing
 between those workflow steps and the actual upload can present an unsigned or
 mismatched manifest as the release's signed contract. Existing
 unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
-`v0.2.3-insider.2`; future signed `0.x.y-insider.N` releases are
-managed-update eligible. A valid signature authenticates the publisher and exact
-manifest bytes; it does not authorize or implement apply, installation,
-active-print handling, staging, recovery, or runtime safety.
+`v0.2.3-insider.2`. The first published signed insider candidate is
+`v0.2.3-insider.4`; it is a valid distribution artifact, but publication alone
+does not make an older installed host managed-update eligible. A valid signature
+authenticates the publisher and exact manifest bytes; it does not authorize or
+implement apply, installation, active-print handling, staging, recovery, or
+runtime safety.
 
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
@@ -163,6 +165,29 @@ release-workflow, release-guide and test changes inspected on 2026-09-12.
 “Current” denotes audited behavior or explicitly identified local implementation.
 Target updater contracts, routes and remaining delivery increments are
 **proposed**; channel-policy decisions fix their defaults and safeguards.
+
+### Issue #2757 acceptance evidence (2026-09-19)
+
+The signed-publication boundary is evidenced by the successful
+`v0.2.3-insider.4` release, including `update-manifest.json` and its Sigstore
+bundle. The following claims remain intentionally separate:
+
+| Area | Current evidence | Status |
+| --- | --- | --- |
+| GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft/prerelease filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. | Covered by focused tests |
+| Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
+| Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; `GET /api/settings/UpdateChannel` is unavailable. | Blocked |
+| Apply and recovery | The executor remains fail-closed when required facilities are unavailable; interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Code-tested, live evidence pending |
+| Automatic policy and UI execution | Update Now and automatic controls remain disabled, and the UI has no execute callback wiring. | Blocked |
+
+Do not describe insider.4 publication as an end-to-end update acceptance run.
+The remaining acceptance evidence is a supported legacy-install bootstrap,
+against a signed release whose images differ from the installed images, followed
+by confirmation, progress, completion, and an induced interruption with
+restoration. The provider/topology matrix must include the supported shared
+database case and explicitly record the split-database and unsupported-provider
+fail-closed outcomes. Automatic updates must remain opt-in and disabled until
+the policy and executor/UI integration are implemented and observed.
 
 ### Host updater foundation (#2662)
 
