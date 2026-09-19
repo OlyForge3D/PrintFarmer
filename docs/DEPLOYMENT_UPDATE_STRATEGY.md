@@ -108,10 +108,12 @@ mutation and again immediately before the `gh release upload` call, so nothing
 between those workflow steps and the actual upload can present an unsigned or
 mismatched manifest as the release's signed contract. Existing
 unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
-`v0.2.3-insider.2`; future signed `0.x.y-insider.N` releases are
-managed-update eligible. A valid signature authenticates the publisher and exact
-manifest bytes; it does not authorize or implement apply, installation,
-active-print handling, staging, recovery, or runtime safety.
+`v0.2.3-insider.2`. The first published signed insider candidate is
+`v0.2.3-insider.4`; it is a valid distribution artifact, but publication alone
+does not make an older installed host managed-update eligible. A valid signature
+authenticates the publisher and exact manifest bytes; it does not authorize or
+implement apply, installation, active-print handling, staging, recovery, or
+runtime safety.
 
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
@@ -163,6 +165,29 @@ release-workflow, release-guide and test changes inspected on 2026-09-12.
 “Current” denotes audited behavior or explicitly identified local implementation.
 Target updater contracts, routes and remaining delivery increments are
 **proposed**; channel-policy decisions fix their defaults and safeguards.
+
+### Issue #2757 acceptance evidence (2026-09-19)
+
+The signed-publication boundary is evidenced by the successful
+`v0.2.3-insider.4` release, including `update-manifest.json` and its Sigstore
+bundle. The following claims remain intentionally separate:
+
+| Area | Current evidence | Status |
+| --- | --- | --- |
+| GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft/prerelease filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. | Covered by focused tests |
+| Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
+| Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; `GET /api/settings/UpdateChannel` is unavailable. | Blocked |
+| Apply and recovery | Production execution is blocked by three built-in code-owned facilities: the target-image migration runner throws, queue-reconciliation writer fencing is incomplete, and SQL Server visible backup-path mapping is unverified. Separately, unsigned legacy installs remain `NotManaged` until protected bootstrap/trusted state is established. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code; live evidence pending after implementation |
+| Automatic policy and UI execution | Update Now and automatic controls remain disabled, and the UI has no execute callback wiring. | Blocked |
+
+Do not describe insider.4 publication as an end-to-end update acceptance run.
+The remaining acceptance evidence is a supported legacy-install bootstrap,
+against a signed release whose images differ from the installed images, followed
+by confirmation, progress, completion, and an induced interruption with
+restoration. The provider/topology matrix must include the supported shared
+database case and explicitly record the split-database and unsupported-provider
+fail-closed outcomes. Automatic updates must remain opt-in and disabled until
+the policy and executor/UI integration are implemented and observed.
 
 ### Host updater foundation (#2662)
 
@@ -230,7 +255,8 @@ migration, apply, verification, and recovery. Issue #2666 owns request
 integration and scheduling.
 
 **Issue #2663 implementation status:** concrete, repository-appropriate step
-adapters exist for every stage — preflight (`HostUpdatePreflightCheck`), drain
+adapters are present for the designed stages, but production execution is not
+available. The adapters cover preflight (`HostUpdatePreflightCheck`), drain
 (`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
 than cancelling), fence (`HostUpdateFenceCoordinator`, proving the durable admission
 gate, the queue outbox publisher, `PowerReadingPruneService`,
@@ -238,8 +264,10 @@ gate, the queue outbox publisher, `PowerReadingPruneService`,
 backup (`HostUpdateBackupCoordinator` plus provider-native
 `HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
 closed for externally-owned databases and unexpectedly missing required owned
-directories), migration (`HostUpdateMigrationCoordinator` wrapping the existing
-`ProviderAwareMigrationRunner` under the executor's own lock), apply
+directories), migration (`HostUpdateMigrationCoordinator` with
+`HostUpdateMigrationStep` explicitly unavailable until a target-image/dedicated
+migration runner exists; the current/old API assembly's
+`ProviderAwareMigrationRunner` is not used for forward updates), apply
 (`HostUpdateImageApplier`, staging pinned `repository@sha256` images before compose
 mutation and applying with `docker compose up -d --no-build --pull never`), verify
 (`HostUpdateHealthVerifier`, exact configured service set, exact running digests,
@@ -255,7 +283,15 @@ of it is wired through production DI (`HostUpdateExecutionStartup.AddHostUpdateE
 behind a manual, permission-gated admin API (`HostUpdateController`) with no automatic
 scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter table,
 the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
-contract a scheduler must poll before ever invoking the executor. The production executor keeps availability closed for explicit operator-configured `RequiredUnavailableFacilities`, but no longer seeds #2663 placeholders by default: bridge/webhook delivery is fenced, and migration/apply crash uncertainty is reconciled only from concrete provider/container evidence after a `:before` marker without the matching `:after` marker.
+contract a scheduler must poll before ever invoking the executor. The production
+executor keeps availability closed for explicit operator-configured
+`RequiredUnavailableFacilities` and also reports the three built-in
+`CodeOwnedUnavailableFacilities` (`target_image_migration_runner_unavailable`,
+`queue_reconciliation_writer_fence_unavailable`, and
+`sql_server_visible_backup_path_mapping_unverified`). Bridge/webhook delivery is
+fenced, and migration/apply crash uncertainty is reconciled only from concrete
+provider/container evidence after a `:before` marker without the matching `:after`
+marker.
 On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
 durable journal for any release left mid-flight or in `RecoveryRequired`
 without a confirmed `RolledBack` outcome and immediately re-closes every

@@ -3,11 +3,38 @@
 The safe-executor core (`HostUpdateExecutor`) supplies
 immutable release identity contracts, durable canonical request fingerprint binding, active-topology target validation, a bounded process/installation
 lock, a durable hash-chained journal, and a checkpoint-aware state machine. On top of that
-foundation, issue #2663 adds concrete, repository-appropriate step adapters that turn the
-foundation into a functional **manual-first** update path: an operator (or, later, #2666's
+foundation, issue #2663 adds concrete, repository-appropriate step adapters that form a
+partially implemented **manual-first** update foundation: an operator (or, later, #2666's
 scheduler once it is granted standing permission — not yet the case here) submits a staged release id through the admin API; execution resolves the immutable request only from server-side verified staging journal evidence, then drives it through
 preflight → drain → fence → backup → migration → apply → verify, or into `RecoveryRequired` on any
-failure. There is still no automatic/unattended execution path.
+failure. Production execution is currently blocked by code-owned unavailable
+facilities; there is still no automatic/unattended execution path.
+
+## Issue #2757 validation boundary
+
+The executor's unit and integration tests prove request binding, image
+staging/apply ordering, availability gates, restart re-fencing, and durable
+recovery outcomes. They do not prove a live signed-release installation.
+Publication of `v0.2.3-insider.4` proves the release manifest and Sigstore bundle
+can be produced and verified; it does not bootstrap an older installed
+`v0.2.3-insider.2` host, enable the Update Now UI, or establish automatic policy.
+
+Acceptance still requires all of the following before this document can claim
+runtime support:
+
+- a documented, supported legacy-install bootstrap;
+- a signed target whose immutable images differ from the current installation;
+- confirmation, progress, completion, and an induced interruption with
+  restoration evidence;
+- the supported provider/topology matrix, including shared-database success and
+  split-database or unsupported-provider fail-closed results; and
+- explicit proof that automatic updates stay disabled unless an administrator
+  opts in and the executor/UI policy integration is available.
+
+Until those facilities and the live evidence exist, treat the admin API as a
+manual, permission-gated surface whose availability is `Unavailable` in the
+current production configuration; do not infer readiness from release
+publication or from passing unit tests.
 
 ## Configuration: `HostUpdateExecutionOptions`
 
@@ -45,7 +72,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 | Drain | `HostUpdateDrainCoordinator` | Closes the admission gate to new submissions/scheduling, then bounded-polls every registered `IActiveWorkObservationPort`: `AppDbContext` active prints/pending outbox work plus `SlicerDbContext` active processing leases. In-flight slicer lease progress/completion/failure remains allowed so already claimed work can finish naturally; new enqueue/claim is blocked. Times out closed and never blind-cancels physical work. |
 | Fence | `HostUpdateFenceCoordinator` | Proves every registered `IFenceableWriter` (the admission gate; the queue-outbox publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService` via their own independent `IHostUpdateWriterActivityFlag`-derived instances) has actually quiesced before backup — bounded-polled, not assumed. The executor's availability provider also fails closed (`insufficient_fenced_writers:<names>`) if `HostUpdateExecutionOptions.RequiredFencedWriterNames` names a writer with no registered `IFenceableWriter`. |
 | Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
-| Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Intentionally unavailable for production execution until a target-image/dedicated migration runner exists. The concrete target refuses to use the current/old API assembly's `ProviderAwareMigrationRunner`, so an unexpected path into migration fails closed before old EF metadata can mutate the database. |
+| Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Intentionally unavailable for production execution until a target-image/dedicated migration runner exists. `HostUpdateMigrationStep` explicitly fails closed; the current/old API assembly's `ProviderAwareMigrationRunner` is not an approved forward-update path. |
 | Apply | `HostUpdateImageApplier` | Stages each immutable `repository@sha256` image first with `docker image pull` (`--platform` on forward execution), then applies via the existing compose templates and `docker compose up -d --no-build --pull never`, using an explicit process argument list — never shell interpolation, never a mutable tag. If staging any image fails, compose mutation is not attempted. |
 | Verify | `HostUpdateHealthVerifier` + `AggregateHostUpdateHealthCheck` + `DigestHostUpdateHealthCheck` | Confirms exact running digests via a two-step `docker container inspect --format {{.Image}}` → `docker image inspect --format {{index .RepoDigests 0}}` probe (`.RepoDigests` exists only on image-inspect output, never on container-inspect output -- see "Known limitations" for the bug this replaced) plus the aggregated `/health` endpoint's JSON body has a top-level `Status`/`status` of exactly `"Healthy"` and every configured required result entry (default: `comprehensive`, `signalr`, `spoolman`) is present and healthy. Verification also fails before probing if the digest map is not the exact configured service set, so partial target mappings cannot reopen writers. |
 | Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` + `FileHostUpdateRecoveryOutcomeStore` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling (structured process args/env only — no shell string, no password on argv), and durably persists the `RolledBack`/`NeedsOperator` outcome with the same write-through/atomic-replace primitive used by the journal. Restored payload files are flushed before the destination tree is synced; unmapped manifest targets fail closed. A duplicate/restarted `RolledBack` recovery does not replay restore/apply, but it does re-drive idempotent fence release if the previous process crashed before reopening. |
@@ -62,7 +89,7 @@ previous run's state) and then periodically rechecks, publishing every result in
 `HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
-`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, or a code-owned `facility_unavailable:...`) so an operator is never left guessing. Known #2663 physical gaps are now code-owned fail-closed availability reasons, not operator-omittable configuration: target-image migration runner, complete writer inventory beyond the audited queue/outbox/prune/autodispatch/webhook/slicer paths, queue reconciliation writer fencing, and SQL Server host/server backup-path mapping must be implemented before this executor can report production `Available`.
+`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, or a code-owned `facility_unavailable:...`) so an operator is never left guessing. In the current production code, availability is unconditionally closed by three built-in code-owned facilities: the target-image migration runner is unavailable, queue-reconciliation writer fencing is incomplete, and SQL Server visible backup-path mapping is unverified. Separately, unsigned legacy installs remain blocked by the `NotManaged` / `ManagedEligibilityNotEstablished` inventory state until protected bootstrap and trusted state are established. The three facilities are unimplemented fail-closed mechanisms, not missing acceptance evidence; they must be implemented before this executor can report production `Available`.
 
 ## DI wiring
 
@@ -134,7 +161,8 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   connection strings differ (compared only as a SHA256 fingerprint — the raw connection string,
   which may embed a password, is never logged or persisted), so a real split topology is
   explicitly refused rather than silently backing up only one database; the common
-  (monolith/shared-DB) case is fully supported.
+  (monolith/shared-DB) case is the only topology covered by the backup/restore
+  implementation, not an end-to-end production support claim.
 - Owned application directories (blobs/profiles/calibration/config/certs/keyrings) are fail-closed
   by default: a configured, required owned directory that is missing at backup time throws
   `HostUpdateBackupIncompleteException` instead of writing a `.empty` sentinel and reporting
