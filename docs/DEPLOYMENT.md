@@ -91,8 +91,9 @@ canonical Compose generator, which adds `slicer-host`, its authenticated
 `orcaslicer-worker`, the hardened socket-free `printer-discovery` service, and
 the split proxy routes for slicer APIs. Set `DISCOVERY_SUBNETS` before invoking
 the installer to a printer subnet reachable from Docker's bridge network.
-No Docker socket, elevated capabilities, host networking, or proxy sidecar is
-needed.
+No Docker socket, elevated container capabilities, or proxy sidecar is
+needed — discovery traffic reaches the configured subnet through the
+socket-free bridge on Docker's default (bridge-mode) network.
 
 The generated proxy is HTTP-only when installed this way, so users do not need
 TLS certificates for a `localhost` or loopback-only lab. `--bind-address
