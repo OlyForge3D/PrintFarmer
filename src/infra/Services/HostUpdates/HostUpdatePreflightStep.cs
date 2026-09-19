@@ -212,6 +212,7 @@ public sealed class HostUpdatePreflightCheck(
     IInstalledHostStateStore installedStateStore,
     IReadOnlyList<IHostUpdateMigrationTarget> migrationTargets,
     IHostUpdateProcessRunner processRunner,
+    IHostUpdateExecutableResolver executableResolver,
     string diskWatchPath,
     long minimumFreeBytes,
     IReadOnlySet<string> supportedProviderNames,
@@ -294,7 +295,7 @@ public sealed class HostUpdatePreflightCheck(
         try
         {
             dockerVersion = await processRunner.RunAsync(
-                "docker",
+                executableResolver.Resolve("docker"),
                 ["version", "--format", "{{.Server.Version}}"],
                 TimeSpan.FromSeconds(15),
                 cancellationToken).ConfigureAwait(false);

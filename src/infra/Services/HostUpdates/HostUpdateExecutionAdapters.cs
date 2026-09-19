@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Frozen;
+using System.Diagnostics;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -26,6 +27,31 @@ public interface IHostUpdateProcessRunner
         IReadOnlyDictionary<string, string>? environment = null);
 }
 
+public interface IHostUpdateExecutableResolver
+{
+    string Resolve(string toolName);
+}
+
+public sealed class ConfiguredHostUpdateExecutableResolver(IReadOnlyDictionary<string, string> executablePaths)
+    : IHostUpdateExecutableResolver
+{
+    public string Resolve(string toolName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
+        if (!executablePaths.TryGetValue(toolName, out string? path) || string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidOperationException($"host_update_executable_not_configured:{toolName}");
+        }
+
+        if (!Path.IsPathRooted(path))
+        {
+            throw new InvalidOperationException($"host_update_executable_path_not_configured:{toolName}");
+        }
+
+        return Path.GetFullPath(path);
+    }
+}
+
 /// <summary>
 /// Default <see cref="IHostUpdateProcessRunner"/> backed by <see cref="Process"/>. Arguments are
 /// passed via <see cref="ProcessStartInfo.ArgumentList"/> so no shell parses them.
@@ -48,6 +74,7 @@ public sealed class DefaultHostUpdateProcessRunner : IHostUpdateProcessRunner
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory,
         };
         foreach (string argument in arguments)
         {
@@ -102,6 +129,101 @@ public sealed class DefaultHostUpdateProcessRunner : IHostUpdateProcessRunner
         {
             // Process already exited between the check and the kill attempt.
         }
+    }
+}
+
+/// <summary>
+/// Restricts host-update execution to the audited tools used by the concrete adapters. This is a
+/// defense-in-depth boundary: callers still provide explicit arguments, but cannot turn the
+/// process runner into a general-purpose host command executor. Bare names are rejected;
+/// rooted executable paths must be explicitly configured or reside in fixed system tool
+/// directories, never an ambient PATH directory.
+/// </summary>
+public sealed class ConstrainedHostUpdateProcessRunner(
+    IHostUpdateProcessRunner inner,
+    IReadOnlySet<string>? configuredExecutablePaths = null) : IHostUpdateProcessRunner
+{
+    private static readonly FrozenSet<string> AllowedExecutables =
+        new[] { "docker", "sqlite3", "pg_dump", "pg_restore", "sqlcmd" }
+            .ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly string[] TrustedExecutableDirectories = BuildTrustedExecutableDirectories();
+
+    public Task<HostUpdateProcessResult> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        string executableName = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+        if (!AllowedExecutables.Contains(executableName)
+            || fileName.EndsWith('.')
+            || (extension.Length > 0 && !string.Equals(extension, ".exe", StringComparison.Ordinal)))
+        {
+            throw new InvalidOperationException($"host_update_executable_not_allowed:{fileName}");
+        }
+
+        if (!Path.IsPathRooted(fileName))
+        {
+            throw new InvalidOperationException($"host_update_executable_path_not_configured:{fileName}");
+        }
+
+        if (!IsTrustedExecutablePath(fileName))
+        {
+            throw new InvalidOperationException($"host_update_executable_path_not_trusted:{fileName}");
+        }
+
+        return inner.RunAsync(fileName, arguments, timeout, cancellationToken, environment);
+    }
+
+    private bool IsTrustedExecutablePath(string fileName)
+    {
+        string fullPath = Path.GetFullPath(fileName);
+        if (configuredExecutablePaths?.Contains(fullPath) == true)
+        {
+            return true;
+        }
+
+        string? directory = Path.GetDirectoryName(fullPath);
+        return directory is not null
+            && TrustedExecutableDirectories.Any(trustedDirectory =>
+                string.Equals(directory, trustedDirectory, StringComparison.Ordinal));
+    }
+
+    private static string[] BuildTrustedExecutableDirectories() =>
+    [
+        .. GetKnownSystemDirectories(),
+    ];
+
+    private static IEnumerable<string> GetKnownSystemDirectories()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            string systemDirectory = Environment.SystemDirectory;
+            if (!string.IsNullOrWhiteSpace(systemDirectory))
+            {
+                yield return Path.GetFullPath(systemDirectory);
+            }
+
+            string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+            if (!string.IsNullOrWhiteSpace(programFiles))
+            {
+                yield return Path.GetFullPath(programFiles);
+            }
+
+            yield break;
+        }
+
+        yield return "/bin";
+        yield return "/usr/bin";
+        yield return "/usr/local/bin";
+        yield return "/sbin";
+        yield return "/usr/sbin";
     }
 }
 
