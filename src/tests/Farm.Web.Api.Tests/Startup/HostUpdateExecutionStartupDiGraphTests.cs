@@ -54,6 +54,7 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             services.AddLogging();
             IConfiguration configuration = BuildConfiguration(root);
             services.AddSingleton(configuration);
+            services.AddSingleton<IHostUpdateAutomationPolicyRepository, UnavailableHostUpdateAutomationPolicyRepository>();
             services.AddHostUpdateExecution(configuration);
 
             using ServiceProvider provider = services.BuildServiceProvider();
@@ -86,6 +87,7 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             services.AddLogging();
             IConfiguration configuration = BuildConfiguration(root);
             services.AddSingleton(configuration);
+            services.AddSingleton<IHostUpdateAutomationPolicyRepository, UnavailableHostUpdateAutomationPolicyRepository>();
             services.AddHostUpdateExecution(configuration);
 
             using ServiceProvider provider = services.BuildServiceProvider();
@@ -116,6 +118,7 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             services.AddLogging();
             IConfiguration configuration = BuildConfiguration(root);
             services.AddSingleton(configuration);
+            services.AddSingleton<IHostUpdateAutomationPolicyRepository, UnavailableHostUpdateAutomationPolicyRepository>();
             services.AddHostUpdateExecution(configuration);
             services.AddScoped<IHostUpdateExecutionSteps, NoopHostUpdateExecutionSteps>();
 

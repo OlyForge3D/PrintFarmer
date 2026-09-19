@@ -193,12 +193,14 @@ public sealed record HostUpdateCancellationSignal(string RequestId, string Opera
 public enum HostUpdateCancellationResult
 {
     Signaled,
+    AlreadySignaled,
     NoActiveExecution,
 }
 
 public interface IHostUpdateSchedulerExecutor
 {
     Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct);
+    void PreArmCancellation(HostUpdateCancellationSignal signal);
 
     /// <summary>
     /// Requests cancellation at the next safe checkpoint. Implementations must deliver the
@@ -212,7 +214,7 @@ public sealed class HostUpdateSchedulerCancellationBridge
 {
     private readonly object _gate = new();
     private Func<CancellationToken, Task>? _cancel;
-    private bool _pending;
+    private HostUpdateCancellationSignal? _pending;
     private DateTimeOffset _pendingAt;
     private static readonly TimeSpan PendingLifetime = TimeSpan.FromSeconds(30);
 
@@ -227,15 +229,16 @@ public sealed class HostUpdateSchedulerCancellationBridge
         return new Registration(this, cancel);
     }
 
-    public Task CancelAsync(CancellationToken ct = default)
+    public Task CancelAsync(HostUpdateCancellationSignal signal, CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(signal);
         Func<CancellationToken, Task>? cancel;
         lock (_gate)
         {
             cancel = _cancel;
             if (cancel is null)
             {
-                _pending = true;
+                _pending = signal;
                 _pendingAt = DateTimeOffset.UtcNow;
             }
         }
@@ -243,12 +246,14 @@ public sealed class HostUpdateSchedulerCancellationBridge
         return cancel is null ? Task.CompletedTask : cancel(ct);
     }
 
-    public bool ConsumePending()
+    public HostUpdateCancellationSignal? ConsumePending()
     {
         lock (_gate)
         {
-            bool pending = _pending && DateTimeOffset.UtcNow - _pendingAt <= PendingLifetime;
-            _pending = false;
+            HostUpdateCancellationSignal? pending = _pending is not null && DateTimeOffset.UtcNow - _pendingAt <= PendingLifetime
+                ? _pending
+                : null;
+            _pending = null;
             return pending;
         }
     }
@@ -373,6 +378,8 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
             string correlationId = "decision:" + candidate.Identity;
             if (intent == HostUpdateReplayIntent.Reserve)
             {
+                // Reserve is advisory only; crash-safe exclusion remains provided by the
+                // execution lock and durable journal. Persisted reservations are tracked in #2757.
                 return new(HostUpdateReplayDisposition.Accepted, correlationId, false);
             }
 
@@ -1060,10 +1067,10 @@ public sealed class HostUpdateScheduler(
                 using IDisposable? cancellationRegistration = _cancellationBridge?.Register(
                     cancellationToken => executionAdapter.SignalSafeCheckpointCancellationAsync(
                         new HostUpdateCancellationSignal(request.RequestId, operationToken), cancellationToken));
-                if (_cancellationBridge?.ConsumePending() == true)
+                HostUpdateCancellationSignal? pending = _cancellationBridge?.ConsumePending();
+                if (pending is not null && pending == new HostUpdateCancellationSignal(request.RequestId, operationToken))
                 {
-                    await executionAdapter.SignalSafeCheckpointCancellationAsync(
-                        new HostUpdateCancellationSignal(request.RequestId, operationToken), ct).ConfigureAwait(false);
+                    executionAdapter.PreArmCancellation(pending);
                 }
                 HostUpdateExecutorResponse response = await executionAdapter.ExecuteAsync(request, ct);
                 HostUpdateSchedulerReason reason = response.Result switch
@@ -1145,9 +1152,14 @@ public sealed class HostUpdateScheduler(
         HostUpdateCancellationSignal signal;
         lock (_cancellationGate)
         {
-            if (Volatile.Read(ref _disposed) != 0 || _activeRequestId is null || _activeOperationToken is null || _activeRequestSignaled)
+            if (Volatile.Read(ref _disposed) != 0 || _activeRequestId is null || _activeOperationToken is null)
             {
                 return HostUpdateCancellationResult.NoActiveExecution;
+            }
+
+            if (_activeRequestSignaled)
+            {
+                return HostUpdateCancellationResult.AlreadySignaled;
             }
 
             signal = new HostUpdateCancellationSignal(_activeRequestId, _activeOperationToken);
@@ -1163,9 +1175,9 @@ public sealed class HostUpdateScheduler(
             {
                 await _directExecutor.SignalSafeCheckpointCancellationAsync(signal, ct).ConfigureAwait(false);
             }
-            else
+            else if (_cancellationBridge is not null)
             {
-                await (_cancellationBridge?.CancelAsync(ct) ?? Task.CompletedTask).ConfigureAwait(false);
+                await _cancellationBridge.CancelAsync(signal, ct).ConfigureAwait(false);
             }
             return HostUpdateCancellationResult.Signaled;
         }
@@ -1220,9 +1232,9 @@ public sealed class HostUpdateScheduler(
                     {
                         await _directExecutor.SignalSafeCheckpointCancellationAsync(signal, CancellationToken.None).ConfigureAwait(false);
                     }
-                    else
+                    else if (_cancellationBridge is not null)
                     {
-                        await (_cancellationBridge?.CancelAsync(CancellationToken.None) ?? Task.CompletedTask).ConfigureAwait(false);
+                        await _cancellationBridge.CancelAsync(signal, CancellationToken.None).ConfigureAwait(false);
                     }
                 }
                 catch (Exception ex)
@@ -1231,7 +1243,11 @@ public sealed class HostUpdateScheduler(
                 }
             }
 
-            await _tickGate.WaitAsync().ConfigureAwait(false);
+            if (!await _tickGate.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false))
+            {
+                _logger.LogWarning("host_update_scheduler_shutdown_wait_timeout");
+                return;
+            }
             if (Interlocked.Exchange(ref _tickGateDisposed, 1) == 0)
             {
                 _tickGate.Dispose();
@@ -1344,9 +1360,17 @@ public sealed class SystemHostUpdateClock : IHostUpdateClock
 
 public sealed class InstallationSeededHostUpdateJitter : IHostUpdateJitter
 {
+    private readonly string _installationSeed;
+
+    public InstallationSeededHostUpdateJitter(string installationSeed)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(installationSeed);
+        _installationSeed = installationSeed;
+    }
+
     public TimeSpan For(string identity, int attempt)
     {
-        string seed = $"{identity}:{attempt}";
+        string seed = $"{_installationSeed}:{identity}:{attempt}";
         byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
         uint value = BitConverter.ToUInt32(digest, 0);
         return TimeSpan.FromSeconds(value % (5 * 60));

@@ -28,7 +28,7 @@ public sealed class HostUpdateAutomationPolicyControllerTests
         repository.Setup(value => value.ReplaceAsync(It.IsAny<HostUpdateAutomationPolicy>(), 0, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HostUpdatePolicyReadResult(false, new HostUpdateAutomationPolicy(), "host_update_policy_invalid"));
 
-        HostUpdateAutomationPolicyController controller = new(repository.Object);
+        HostUpdateAutomationPolicyController controller = new(repository.Object, null!);
         ActionResult<HostUpdateAutomationPolicy> result = await controller.ReplaceAsync(
             new HostUpdateAutomationPolicyRequest(0, true, false, "bogus", false, 3600, null, 0, 24),
             CancellationToken.None);
@@ -47,7 +47,7 @@ public sealed class HostUpdateAutomationPolicyControllerTests
         repository.Setup(value => value.ReplaceAsync(It.IsAny<HostUpdateAutomationPolicy>(), 0, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HostUpdatePolicyReadResult(false, new HostUpdateAutomationPolicy(), error));
 
-        HostUpdateAutomationPolicyController controller = new(repository.Object);
+        HostUpdateAutomationPolicyController controller = new(repository.Object, null!);
         ActionResult<HostUpdateAutomationPolicy> result = await controller.ReplaceAsync(
             new HostUpdateAutomationPolicyRequest(0, true, false, "stable", false, 3600, null, 0, 24),
             CancellationToken.None);
@@ -65,7 +65,7 @@ public sealed class HostUpdateAutomationPolicyControllerTests
         repository.Setup(value => value.ReplaceAsync(It.IsAny<HostUpdateAutomationPolicy>(), 3, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HostUpdatePolicyReadResult(false, current, "host_update_policy_revision_conflict"));
 
-        HostUpdateAutomationPolicyController controller = new(repository.Object);
+        HostUpdateAutomationPolicyController controller = new(repository.Object, null!);
         ActionResult<HostUpdateAutomationPolicy> result = await controller.ReplaceAsync(
             new HostUpdateAutomationPolicyRequest(3, true, false, "stable", false, 3600, null, 0, 24),
             CancellationToken.None);

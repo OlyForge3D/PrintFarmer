@@ -89,6 +89,19 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
         Assert.Equal("canceled_at_safe_checkpoint", response.Reason);
     }
 
+    [Fact]
+    public async Task PreArmCancellation_IsDeliveredWhenExecutionRegistersLater()
+    {
+        BlockingExecutor executor = new();
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
+
+        adapter.PreArmCancellation(new HostUpdateCancellationSignal("request-1", "operation-1"));
+        HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(), default);
+
+        Assert.Equal(HostUpdateExecutorResult.Refused, response.Result);
+        Assert.Equal("canceled_at_safe_checkpoint", response.Reason);
+    }
+
     private sealed class CapturingExecutor(HostUpdateExecutionResult result) : IHostUpdateExecutor
     {
         public List<HostUpdateExecutionRequest> Requests { get; } = [];

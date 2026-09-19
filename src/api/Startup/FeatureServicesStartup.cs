@@ -384,7 +384,10 @@ public static class FeatureServicesStartup
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateClock,
             Farm.Infrastructure.Services.HostUpdates.SystemHostUpdateClock>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateJitter,
-            Farm.Infrastructure.Services.HostUpdates.InstallationSeededHostUpdateJitter>();
+            Farm.Infrastructure.Services.HostUpdates.InstallationSeededHostUpdateJitter>(sp =>
+                new Farm.Infrastructure.Services.HostUpdates.InstallationSeededHostUpdateJitter(
+                    sp.GetService<Farm.Infrastructure.Services.HostUpdates.HostStatePath>()?.Root
+                    ?? "unprovisioned-host"));
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionRequestResolver>(sp =>
             hostStateEnabled
                 ? ActivatorUtilities.CreateInstance<Farm.Infrastructure.Services.HostUpdates.HostUpdateExecutionRequestResolver>(sp)

@@ -80,6 +80,7 @@ public sealed class HostUpdateAutomationPolicyController(
 
     [HttpPost("cancel")]
     [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<IActionResult> CancelAsync(CancellationToken ct)
     {
         HostUpdateCancellationResult result = await scheduler.SignalSafeCheckpointCancellationAsync(ct).ConfigureAwait(false);

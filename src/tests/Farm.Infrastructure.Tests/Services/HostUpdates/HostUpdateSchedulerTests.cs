@@ -10,6 +10,15 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 public sealed class HostUpdateSchedulerTests
 {
     [Fact]
+    public void InstallationSeededJitter_DiffersByInstallationAndIsDeterministic()
+    {
+        InstallationSeededHostUpdateJitter first = new("installation-a");
+        InstallationSeededHostUpdateJitter second = new("installation-b");
+
+        Assert.Equal(first.For("candidate", 2), first.For("candidate", 2));
+        Assert.NotEqual(first.For("candidate", 2), second.For("candidate", 2));
+    }
+    [Fact]
     public async Task TickAsync_DefaultSettings_DoNotExecute()
     {
         FakeExecutor executor = new();
@@ -776,6 +785,7 @@ public sealed class HostUpdateSchedulerTests
 
     private class FakeExecutor : IHostUpdateSchedulerExecutor
     {
+        public void PreArmCancellation(HostUpdateCancellationSignal signal) { }
         public List<HostUpdateExecutorRequest> Requests { get; } = [];
         public HostUpdateExecutorResponse Response { get; set; } = new(HostUpdateExecutorResult.Accepted);
         public string? CancelledRequestId => CancelledSignal?.RequestId;

@@ -14,6 +14,7 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
     private readonly ConcurrentDictionary<string, ActiveOperation> _activeRequests = new(StringComparer.Ordinal);
     private readonly object _lifecycleGate = new();
     private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly ConcurrentDictionary<string, string> _preArmed = new(StringComparer.Ordinal);
     private int _disposed;
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
@@ -58,6 +59,14 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
             {
                 safeCancellation.Dispose();
                 return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
+            }
+
+            if (_preArmed.TryRemove(request.RequestId, out string? token) &&
+                string.Equals(token, request.OperationToken, StringComparison.Ordinal))
+            {
+#pragma warning disable CA1849 // Pre-arm runs under the lifecycle lock and must synchronously publish cancellation before execution starts.
+                safeCancellation.Cancel();
+#pragma warning restore CA1849
             }
         }
 
@@ -117,6 +126,24 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
         {
             // The request completed between lookup and cancellation delivery.
         }
+    }
+
+    public void PreArmCancellation(HostUpdateCancellationSignal signal)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+        if (string.IsNullOrWhiteSpace(signal.RequestId) || string.IsNullOrWhiteSpace(signal.OperationToken))
+        {
+            return;
+        }
+
+        if (_activeRequests.TryGetValue(signal.RequestId, out ActiveOperation? operation) &&
+            string.Equals(operation.OperationToken, signal.OperationToken, StringComparison.Ordinal))
+        {
+            operation.Cancellation.Cancel();
+            return;
+        }
+
+        _preArmed[signal.RequestId] = signal.OperationToken;
     }
 
 #pragma warning disable VSTHRD002
