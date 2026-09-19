@@ -1032,6 +1032,27 @@ generate_compose() {
             log_warning "Failed to merge go2rtc service, continuing without it"
         fi
     fi
+
+    if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+        sed -i '/^[[:space:]]*- "${HTTPS_PORT:-8443}:443"[[:space:]]*$/d' "$compose_file"
+        # HTTP-only lab installs never provision TLS certs, so the certs bind
+        # mount on frontend/nginx-proxy would reference a directory that is
+        # never populated. Drop it entirely.
+        sed -i '/^[[:space:]]*- \.\/deploy\/nginx\/certs:\/etc\/nginx\/certs:ro[[:space:]]*$/d' "$compose_file"
+
+        # Fail closed rather than silently shipping a compose file that
+        # still exposes 443 or mounts a certs directory nobody populated.
+        if grep -q ':443"' "$compose_file"; then
+            log_error "HTTP_ONLY trim failed: compose file still publishes a 443 port"
+            return 1
+        fi
+        if grep -q '/etc/nginx/certs:ro' "$compose_file"; then
+            log_error "HTTP_ONLY trim failed: compose file still mounts a certs volume"
+            return 1
+        fi
+
+        log_info "Configured HTTP-only reverse proxy (no TLS ports, no cert mounts)"
+    fi
     
     if [[ "$addons_merged" == "true" ]]; then
         log_info "Successfully merged addon services into compose file"
@@ -1155,6 +1176,52 @@ copy_configs() {
     # Always copy docker entrypoint config
     if [[ -f "$CONFIGS_DIR/docker-entrypoint-config.sh" ]]; then
         cp "$CONFIGS_DIR/docker-entrypoint-config.sh" "$output_dir/"
+    fi
+
+    if [[ -d "$REPO_ROOT/deploy/nginx" ]]; then
+        mkdir -p "$output_dir/deploy"
+        rm -rf "$output_dir/deploy/nginx"
+        cp -r "$REPO_ROOT/deploy/nginx" "$output_dir/deploy/"
+
+        if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+            local split_proxy="$output_dir/deploy/nginx/nginx-proxy-split.conf"
+            [[ -f "$split_proxy" ]] || { log_error "HTTP_ONLY requires nginx-proxy-split.conf"; return 1; }
+            grep -q 'HTTPS server' "$split_proxy" ||
+                { log_error "HTTP_ONLY cannot trim nginx-proxy-split.conf: HTTPS marker is missing"; return 1; }
+            sed '/^[[:space:]]*# ── HTTPS server/,$d' "$split_proxy" > "${split_proxy}.tmp"
+            printf '}\n' >> "${split_proxy}.tmp"
+            mv "${split_proxy}.tmp" "$split_proxy"
+
+            # HTTP-only lab installs never provision TLS certs, so the CA
+            # distribution endpoints (which alias /etc/nginx/certs/ca.cer,
+            # never populated in this mode) must not remain in the surviving
+            # HTTP server block either.
+            grep -q 'location = /ca.cer' "$split_proxy" ||
+                { log_error "HTTP_ONLY cannot trim nginx-proxy-split.conf: /ca.cer marker is missing"; return 1; }
+            "$PYTHON_CMD" - "$split_proxy" <<'PY'
+import re
+import sys
+
+path = sys.argv[1]
+with open(path, "r") as f:
+    lines = f.readlines()
+
+out = []
+skip = False
+for line in lines:
+    if re.match(r'^\s*location = /(ca\.cer|install-ca) \{', line):
+        skip = True
+        continue
+    if skip:
+        if re.match(r'^\s*\}\s*$', line):
+            skip = False
+        continue
+    out.append(line)
+
+with open(path, "w") as f:
+    f.writelines(out)
+PY
+        fi
     fi
     
     # Copy additional configs based on what's included

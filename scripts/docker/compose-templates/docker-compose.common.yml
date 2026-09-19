@@ -24,7 +24,7 @@ x-frontend-healthcheck: &frontend-healthcheck
   retries: 3
 
 x-nginx-healthcheck: &nginx-healthcheck
-  test: ["CMD", "curl", "-f", "http://nginx-proxy:80/health"]
+  test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/nginx-health"]
   interval: 30s
   timeout: 10s
   retries: 3
@@ -72,5 +72,5 @@ x-worker-security: &worker-security
 
 # Network definition
 x-printfarmer-network: &printfarmer-network
-  name: printfarmer-network
+  name: ${COMPOSE_PROJECT_NAME:-printfarmer}-network
   driver: bridge
