@@ -1179,12 +1179,22 @@ copy_configs() {
     fi
 
     if [[ -d "$REPO_ROOT/deploy/nginx" ]]; then
+        local source_nginx_dir
+        local target_nginx_dir
         mkdir -p "$output_dir/deploy"
-        rm -rf "$output_dir/deploy/nginx"
-        cp -r "$REPO_ROOT/deploy/nginx" "$output_dir/deploy/"
+        source_nginx_dir="$(cd "$REPO_ROOT/deploy/nginx" && pwd -P)"
+        target_nginx_dir="$(cd "$output_dir/deploy" && pwd -P)/nginx"
+
+        if [[ "$source_nginx_dir" != "$target_nginx_dir" ]]; then
+            rm -rf "$target_nginx_dir"
+            cp -r "$source_nginx_dir" "$target_nginx_dir"
+        elif [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+            log_error "HTTP_ONLY generation requires an output directory outside the repository root"
+            return 1
+        fi
 
         if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
-            local split_proxy="$output_dir/deploy/nginx/nginx-proxy-split.conf"
+            local split_proxy="$target_nginx_dir/nginx-proxy-split.conf"
             [[ -f "$split_proxy" ]] || { log_error "HTTP_ONLY requires nginx-proxy-split.conf"; return 1; }
             grep -q 'HTTPS server' "$split_proxy" ||
                 { log_error "HTTP_ONLY cannot trim nginx-proxy-split.conf: HTTPS marker is missing"; return 1; }
@@ -1401,4 +1411,6 @@ main() {
 }
 
 # Run main function
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

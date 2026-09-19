@@ -123,6 +123,44 @@ test_standard_generation() {
     pass_test
 }
 
+test_in_place_generation_preserves_nginx_configs() {
+    start_test "in-place generation preserves canonical nginx configs"
+
+    local fixture_root="$TEST_TEMP_DIR/in-place-root"
+    local helper_script="$TEST_TEMP_DIR/in-place-copy-configs-helper.sh"
+    mkdir -p "$fixture_root/deploy/nginx" "$fixture_root/configs"
+    printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$COMPOSE_GENERATOR"
+REPO_ROOT="$fixture_root"
+CONFIGS_DIR="$fixture_root/configs"
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INSTALLER_LAB=false
+HTTP_ONLY=false
+
+copy_configs "$fixture_root"
+grep -Fxq "canonical nginx config" "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+
+INSTALLER_LAB=true
+HTTP_ONLY=true
+if copy_configs "$fixture_root"; then
+    exit 1
+fi
+grep -Fxq "canonical nginx config" "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "$helper_script" \
+        "In-place generation should preserve nginx sources and reject HTTP-only source mutation"
+
+    pass_test
+}
+
 # Test microservices architecture generation
 test_microservices_generation() {
     start_test "microservices architecture generation"
@@ -2166,6 +2204,7 @@ run_all_tests() {
     
     test_help_output
     test_standard_generation
+    test_in_place_generation_preserves_nginx_configs
     test_microservices_generation
     test_discovery_network_consistency
     test_discovery_shared_key_wiring
