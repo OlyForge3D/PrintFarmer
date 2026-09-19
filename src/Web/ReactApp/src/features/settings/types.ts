@@ -161,13 +161,6 @@ export const SETTINGS_CATEGORIES_BY_SCOPE: Record<SettingsScopeId, SettingsCateg
   system: SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'system'),
 };
 
-/** @deprecated Use SETTINGS_CATEGORIES instead */
-export const SETTINGS_TABS: SettingsTab[] = SETTINGS_CATEGORIES.map((category) => ({
-  id: category.id,
-  label: category.label,
-  keywords: category.keywords,
-}));
-
 export const DEFAULT_SCOPE: SettingsScopeId = 'user';
 export const DEFAULT_CATEGORY = getDefaultCategoryForScope(DEFAULT_SCOPE);
 
