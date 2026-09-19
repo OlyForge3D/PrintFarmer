@@ -335,6 +335,7 @@ public static class FeatureServicesStartup
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.IHostUpdateSchedulingStatusProvider>(sp =>
             new Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateSchedulingStatusProvider(
                 sp.GetRequiredService<Farm.Infrastructure.Settings.ISettingsService>(),
+                sp.GetService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerStatusHolder>(),
                 sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAutomationPolicyRepository>(),
                 sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayAnchor>(),
                 sp.GetService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore>(),
@@ -382,6 +383,8 @@ public static class FeatureServicesStartup
             Farm.Infrastructure.Services.HostUpdates.UnavailableHostUpdateAdmissionFence>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateClock,
             Farm.Infrastructure.Services.HostUpdates.SystemHostUpdateClock>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateJitter,
+            Farm.Infrastructure.Services.HostUpdates.ZeroHostUpdateJitter>();
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionRequestResolver>(sp =>
             hostStateEnabled
                 ? ActivatorUtilities.CreateInstance<Farm.Infrastructure.Services.HostUpdates.HostUpdateExecutionRequestResolver>(sp)
@@ -393,6 +396,13 @@ public static class FeatureServicesStartup
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateCandidateReadiness>(),
                 OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported",
                 TimeSpan.FromHours(2)));
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerStatusHolder>();
+        services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerExecutor>(sp =>
+            new Farm.Infrastructure.Services.HostUpdates.DallasHostUpdateSchedulerExecutor(
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutor>(),
+                OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported"));
+        services.AddScoped<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>();
+        services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerHostedService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache, Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCache>();
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseManifestBindingStore,

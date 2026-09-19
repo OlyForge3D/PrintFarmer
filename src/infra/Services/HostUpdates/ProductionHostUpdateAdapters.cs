@@ -166,6 +166,7 @@ public static class HostUpdateSchedulingAvailability
 /// <summary>Reports registered-but-unavailable automatic updates without starting a hosted loop.</summary>
 public sealed class UnavailableHostUpdateSchedulingStatusProvider(
     Farm.Infrastructure.Settings.ISettingsService settings,
+    HostUpdateSchedulerStatusHolder? schedulerStatus = null,
     IHostUpdateAutomationPolicyRepository? policyRepository = null,
     IHostUpdateReplayAnchor? replayAnchor = null,
     IHostUpdateReplayStore? replayStore = null,
@@ -175,6 +176,46 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
     public HostUpdateSchedulingStatusDto GetStatus()
     {
         _ = settings;
+        if (schedulerStatus is not null)
+        {
+            HostUpdateSchedulerStatus current = schedulerStatus.Current;
+            HostUpdateAutomationPolicy currentPolicy = policyRepository?.Read().Policy ?? new HostUpdateAutomationPolicy();
+            return new HostUpdateSchedulingStatusDto
+            {
+                ConfiguredEnabled = current.Enabled,
+                EffectiveEnabled = current.EffectiveEnabled,
+                SelectedChannel = current.Channel,
+                EffectiveChannel = current.EffectiveEnabled ? current.Channel : null,
+                PolicyRevision = current.PolicyRevision,
+                LastAttemptAt = current.LastAttemptAt,
+                NextAttemptAt = current.NextPollAt,
+                Backoff = new HostUpdateBackoffDto
+                {
+                    State = current.NextPollAt is null
+                        ? HostUpdateBackoffState.Due
+                        : current.NextPollAt > DateTimeOffset.UtcNow
+                            ? HostUpdateBackoffState.Waiting
+                            : HostUpdateBackoffState.Due,
+                    ConsecutiveFailures = current.ConsecutiveFailures,
+                    Until = current.NextPollAt,
+                    Reasons = [current.Reason.ToString()],
+                },
+                KillSwitch = new HostUpdateKillSwitchDto
+                {
+                    Enabled = current.KillSwitch || currentPolicy.KillSwitch,
+                    Reason = (current.KillSwitch || currentPolicy.KillSwitch) ? "configured" : null,
+                },
+                Executor = new HostUpdateExecutorDto
+                {
+                    State = current.Reason is HostUpdateSchedulerReason.Admitted
+                        ? HostUpdateExecutorState.Available
+                        : HostUpdateExecutorState.Unavailable,
+                    Reason = current.Reason.ToString(),
+                },
+                Reasons = [current.Reason.ToString()],
+            };
+        }
+
         HostUpdatePolicyReadResult policyResult = policyRepository?.Read() ?? new(true, new HostUpdateAutomationPolicy(), null);
         HostUpdateAutomationPolicy policy = policyResult.Available ? policyResult.Policy : new HostUpdateAutomationPolicy();
         string selectedChannel = policyResult.Available ? policy.Channel : UpdateChannelSettings.StableChannel;

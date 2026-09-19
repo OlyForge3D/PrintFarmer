@@ -7,6 +7,8 @@ using System.Text.Json.Serialization;
 
 using Farm.Infrastructure.Settings;
 
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -681,6 +683,77 @@ public sealed record HostUpdateSchedulerStatus(
     DateTimeOffset? NextPollAt,
     int ConsecutiveFailures,
     HostUpdateSchedulerReason Reason);
+
+/// <summary>Retains the latest automatic scheduler observation for read-only status surfaces.</summary>
+public sealed class HostUpdateSchedulerStatusHolder
+{
+    private readonly object _gate = new();
+    private HostUpdateSchedulerStatus _current = new(
+        false,
+        false,
+        false,
+        UpdateChannelSettings.StableChannel,
+        0,
+        null,
+        null,
+        0,
+        HostUpdateSchedulerReason.Disabled);
+
+    public HostUpdateSchedulerStatus Current
+    {
+        get
+        {
+            lock (_gate)
+            {
+                return _current;
+            }
+        }
+    }
+
+    public void Update(HostUpdateSchedulerStatus status)
+    {
+        lock (_gate)
+        {
+            _current = status;
+        }
+    }
+}
+
+/// <summary>
+/// Runs policy-driven scheduling in a scope per tick. The scheduler itself remains fail-closed
+/// when replay, policy-fence, admission, or execution facilities are unavailable.
+/// </summary>
+public sealed class HostUpdateSchedulerHostedService(
+    IServiceScopeFactory scopeFactory,
+    HostUpdateSchedulerStatusHolder statusHolder,
+    ILogger<HostUpdateSchedulerHostedService> logger) : BackgroundService
+{
+    private static readonly TimeSpan PollCadence = TimeSpan.FromMinutes(1);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
+    {
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            try
+            {
+                using IServiceScope scope = scopeFactory.CreateScope();
+                HostUpdateScheduler scheduler = scope.ServiceProvider.GetRequiredService<HostUpdateScheduler>();
+                HostUpdateSchedulerStatus status = await scheduler.TickAsync(stoppingToken).ConfigureAwait(false);
+                statusHolder.Update(status);
+                await Task.Delay(PollCadence, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
+            }
+            catch (Exception exception)
+            {
+                logger.LogError(exception, "host_update_scheduler_tick_failed");
+                await Task.Delay(PollCadence, stoppingToken).ConfigureAwait(false);
+            }
+        }
+    }
+}
 
 public sealed class HostUpdateScheduler(
     IHostUpdateSchedulerSettings settings,

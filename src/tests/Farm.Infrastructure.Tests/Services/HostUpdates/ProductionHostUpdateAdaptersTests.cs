@@ -80,6 +80,37 @@ public sealed class ProductionHostUpdateAdaptersTests
         }
     }
 
+    [Fact]
+    public void SchedulerStatusHolder_ReportsPolicyStateWithoutClaimingExecutionReadiness()
+    {
+        HostUpdateSchedulerStatusHolder holder = new();
+        holder.Update(new HostUpdateSchedulerStatus(
+            Enabled: true,
+            EffectiveEnabled: true,
+            KillSwitch: true,
+            Channel: "insider",
+            PolicyRevision: 4,
+            LastAttemptAt: DateTimeOffset.UtcNow,
+            NextPollAt: DateTimeOffset.UtcNow.AddMinutes(5),
+            ConsecutiveFailures: 2,
+            Reason: HostUpdateSchedulerReason.AdmissionFenceActive));
+
+        UnavailableHostUpdateSchedulingStatusProvider provider = new(
+            settings: null!,
+            schedulerStatus: holder,
+            policyRepository: null);
+
+        HostUpdateSchedulingStatusDto status = provider.GetStatus();
+
+        Assert.True(status.ConfiguredEnabled);
+        Assert.True(status.EffectiveEnabled);
+        Assert.Equal("insider", status.SelectedChannel);
+        Assert.Equal(HostUpdateExecutorState.Unavailable, status.Executor.State);
+        Assert.Equal(HostUpdateBackoffState.Waiting, status.Backoff.State);
+        Assert.Contains(nameof(HostUpdateSchedulerReason.AdmissionFenceActive), status.Reasons);
+        Assert.True(status.KillSwitch.Enabled);
+    }
+
     private static VerifiedReleaseEvidenceDto Evidence(long sequence = 42) => new()
     {
         Sequence = sequence,
@@ -106,7 +137,5 @@ public sealed class ProductionHostUpdateAdaptersTests
         public bool IsNewer => true;
     }
 }
-
-
 
 
