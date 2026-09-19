@@ -177,7 +177,7 @@ bundle. The following claims remain intentionally separate:
 | GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft/prerelease filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. | Covered by focused tests |
 | Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
 | Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; `GET /api/settings/UpdateChannel` is unavailable. | Blocked |
-| Apply and recovery | Production execution is blocked by code-owned facilities: the target-image migration runner throws, protected bootstrap/trusted state for unsigned legacy installs is absent, queue-reconciliation writer fencing is incomplete, and SQL Server visible backup-path mapping is unverified. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code; live evidence pending after implementation |
+| Apply and recovery | Production execution is blocked by three built-in code-owned facilities: the target-image migration runner throws, queue-reconciliation writer fencing is incomplete, and SQL Server visible backup-path mapping is unverified. Separately, unsigned legacy installs remain `NotManaged` until protected bootstrap/trusted state is established. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code; live evidence pending after implementation |
 | Automatic policy and UI execution | Update Now and automatic controls remain disabled, and the UI has no execute callback wiring. | Blocked |
 
 Do not describe insider.4 publication as an end-to-end update acceptance run.
@@ -283,7 +283,15 @@ of it is wired through production DI (`HostUpdateExecutionStartup.AddHostUpdateE
 behind a manual, permission-gated admin API (`HostUpdateController`) with no automatic
 scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter table,
 the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
-contract a scheduler must poll before ever invoking the executor. The production executor keeps availability closed for explicit operator-configured `RequiredUnavailableFacilities`, but no longer seeds #2663 placeholders by default: bridge/webhook delivery is fenced, and migration/apply crash uncertainty is reconciled only from concrete provider/container evidence after a `:before` marker without the matching `:after` marker.
+contract a scheduler must poll before ever invoking the executor. The production
+executor keeps availability closed for explicit operator-configured
+`RequiredUnavailableFacilities` and also reports the three built-in
+`CodeOwnedUnavailableFacilities` (`target_image_migration_runner_unavailable`,
+`queue_reconciliation_writer_fence_unavailable`, and
+`sql_server_visible_backup_path_mapping_unverified`). Bridge/webhook delivery is
+fenced, and migration/apply crash uncertainty is reconciled only from concrete
+provider/container evidence after a `:before` marker without the matching `:after`
+marker.
 On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
 durable journal for any release left mid-flight or in `RecoveryRequired`
 without a confirmed `RolledBack` outcome and immediately re-closes every
