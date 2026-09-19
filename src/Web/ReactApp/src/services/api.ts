@@ -515,6 +515,18 @@ export class ApiClient {
         data: response.data,
       };
     }
+    if (
+      response.status === 409 &&
+      (typeof response.data?.currentState !== "string" ||
+        !Array.isArray(response.data?.activities) ||
+        typeof response.data?.releaseId !== "string")
+    ) {
+      throw {
+        message: "The host update authorization was rejected.",
+        statusCode: response.status,
+        data: response.data,
+      };
+    }
     return response.data;
   }
 

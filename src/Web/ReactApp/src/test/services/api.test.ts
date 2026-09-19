@@ -66,7 +66,31 @@ describe("ApiClient", () => {
     it("accepts recovery-required responses from execute", async () => {
       const response = {
         status: 409,
-        data: { releaseId: "release-1", currentState: "RecoveryRequired", activities: [] },
+        data: {
+          releaseId: "release-1",
+          currentState: "RecoveryRequired",
+          activities: [{
+            activityId: "activity-1",
+            releaseId: "release-1",
+            state: "RecoveryRequired",
+            phase: "apply",
+            recordedAt: "2026-09-19T19:00:00Z",
+            requestBinding: {
+              releaseId: "release-1",
+              authenticatedSequence: 4,
+              manifestDigest: "manifest",
+              sourceCommit: "commit",
+              channel: "Stable",
+              targets: [],
+              requestId: "request-1",
+              trustRoot: "root",
+              policyRevision: 1,
+              policyFingerprint: "policy",
+              hostPlatform: "linux-amd64",
+              authorizationKind: "Manual",
+            },
+          }],
+        },
       };
       const postMock = vi.fn().mockResolvedValue(response);
       (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
@@ -81,6 +105,20 @@ describe("ApiClient", () => {
       expect(config.validateStatus(409)).toBe(true);
       expect(config.validateStatus(503)).toBe(true);
       expect(config.validateStatus(500)).toBe(false);
+    });
+
+    it("rejects non-status conflict bodies instead of returning a success-shaped response", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 409,
+        data: { code: "request_not_authorized" },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).rejects.toMatchObject({
+        statusCode: 409,
+        message: "The host update authorization was rejected.",
+        data: { code: "request_not_authorized" },
+      });
     });
 
     it("surfaces unsupported-host responses as an API error", async () => {

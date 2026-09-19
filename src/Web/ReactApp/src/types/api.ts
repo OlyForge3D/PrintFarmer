@@ -5031,7 +5031,7 @@ export interface HostUpdateExecutionRequest {
   policyRevision: number;
   policyFingerprint: string;
   hostPlatform: string;
-  authorizationKind: "OneShot" | "StandingPolicy";
+  authorizationKind: "Manual" | "StandingPolicy";
 }
 
 export interface HostUpdateStatusResponse {
