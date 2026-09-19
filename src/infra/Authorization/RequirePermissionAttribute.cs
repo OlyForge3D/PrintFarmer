@@ -7,7 +7,7 @@ namespace Farm.Infrastructure.Authorization;
 
 [AttributeUsage(AttributeTargets.Class | AttributeTargets.Method, AllowMultiple = true)]
 public sealed class RequirePermissionAttribute
-    : AuthorizeAttribute, IAuthorizationRequirement, IAuthorizationRequirementData
+    : AuthorizeAttribute, IAuthorizationRequirement, IAuthorizationRequirementData, IPermissionMetadata
 {
     public RequirePermissionAttribute(string resource, string action)
     {

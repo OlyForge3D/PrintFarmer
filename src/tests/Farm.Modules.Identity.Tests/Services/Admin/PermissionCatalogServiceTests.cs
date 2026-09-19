@@ -4,6 +4,7 @@ using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Dtos;
 using Farm.Modules.Identity.Services.Admin;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.AspNetCore.Routing.Patterns;
@@ -16,13 +17,56 @@ namespace Farm.Modules.Identity.Tests.Services.Admin;
 /// <summary>
 /// Unit tests for <see cref="PermissionCatalogService"/>. These verify that the catalog is
 /// derived purely from <see cref="EndpointDataSource"/> metadata (not a hardcoded list),
-/// that both controller-level and method-level <see cref="RequirePermissionAttribute"/>
-/// placements are enumerated, that every enforced permission appears exactly once with its
-/// gating routes, and that database catalog rows unmatched by any endpoint are reported as
+/// that both controller-level and method-level permission declarations are enumerated,
+/// that every declared permission appears exactly once with its routes, and that database
+/// catalog rows unmatched by any endpoint are reported as
 /// orphaned rather than silently dropped.
 /// </summary>
 public class PermissionCatalogServiceTests
 {
+    [Fact]
+    public async Task GetCatalogAsync_CatalogOnlyMetadata_ListsPermissionWithoutAddingAuthorizationRequirements()
+    {
+        var marker = new PermissionCatalogAttribute("queue:write");
+        RouteEndpoint endpoint = BuildEndpoint("api/optional-upload", ["POST"], marker);
+        await using AppDbContext db = CreateContext();
+        await SeedCatalogAsync(db, ("queue", "Print Queue", "write", "Write"));
+        await GrantRolePermissionAsync(db, "queue", "write");
+
+        PermissionCatalogDto catalog = await CreateService(db, endpoint).GetCatalogAsync();
+
+        marker.Should().NotBeAssignableTo<IAuthorizeData>();
+        marker.Should().NotBeAssignableTo<IAuthorizationRequirement>();
+        marker.Should().NotBeAssignableTo<IAuthorizationRequirementData>();
+        PermissionCatalogEntryDto entry = catalog.Resources
+            .Should().ContainSingle().Which.Permissions.Should().ContainSingle().Which;
+        entry.Resource.Should().Be("queue");
+        entry.Action.Should().Be("write");
+        entry.Permission.Should().Be("queue:write");
+        entry.Routes.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new PermissionRouteDto { Method = "POST", Template = "api/optional-upload" });
+        catalog.OrphanedCatalogEntries.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task GetCatalogAsync_GatingAndCatalogMetadataForSamePermission_DeduplicatesEntryAndRoute()
+    {
+        RouteEndpoint endpoint = BuildEndpoint(
+            "api/queue",
+            ["POST"],
+            new RequirePermissionAttribute("queue", "write"),
+            new PermissionCatalogAttribute("queue:write"));
+        await using AppDbContext db = CreateContext();
+
+        PermissionCatalogDto catalog = await CreateService(db, endpoint).GetCatalogAsync();
+
+        PermissionCatalogEntryDto entry = catalog.Resources
+            .Should().ContainSingle().Which.Permissions.Should().ContainSingle().Which;
+        entry.Permission.Should().Be("queue:write");
+        entry.Routes.Should().ContainSingle()
+            .Which.Should().BeEquivalentTo(new PermissionRouteDto { Method = "POST", Template = "api/queue" });
+    }
+
     [Fact]
     public async Task GetCatalogAsync_EnumeratesMethodLevelAttribute_ExactlyOnce()
     {
@@ -131,7 +175,7 @@ public class PermissionCatalogServiceTests
     }
 
     [Fact]
-    public async Task GetCatalogAsync_EndpointWithoutRequirePermission_IsNotIncluded()
+    public async Task GetCatalogAsync_EndpointWithoutPermissionMetadata_IsNotIncluded()
     {
         RouteEndpoint anonymous = BuildEndpoint("api/health", ["GET"]);
 
@@ -217,14 +261,14 @@ public class PermissionCatalogServiceTests
     private static PermissionCatalogService CreateService(AppDbContext db, params RouteEndpoint[] endpoints) =>
         new(new FakeEndpointDataSource(endpoints), db);
 
-    private static RouteEndpoint BuildEndpoint(string template, string[] methods, params RequirePermissionAttribute[] permissions)
+    private static RouteEndpoint BuildEndpoint(string template, string[] methods, params IPermissionMetadata[] permissions)
     {
         RouteEndpointBuilder builder = new(
             requestDelegate: _ => Task.CompletedTask,
             routePattern: RoutePatternFactory.Parse(template),
             order: 0);
         builder.Metadata.Add(new HttpMethodMetadata(methods));
-        foreach (RequirePermissionAttribute permission in permissions)
+        foreach (IPermissionMetadata permission in permissions)
         {
             builder.Metadata.Add(permission);
         }

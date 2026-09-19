@@ -4,7 +4,10 @@ This guide explains how to configure popular slicers (PrusaSlicer, OrcaSlicer) t
 
 ## Overview
 
-PrintFarmer implements OctoPrint-compatible API endpoints that allow slicers to upload files directly to the print farm management system. Files uploaded through slicers are automatically added to the print queue and require approval before printing begins.
+PrintFarmer implements OctoPrint-compatible API endpoints that allow slicers to
+upload files directly to the G-code library. Selecting "Start print after upload"
+also submits the file to the print queue, where the farm's normal scheduling and
+approval settings apply.
 
 ### Internal artifact promotion credential
 
@@ -29,21 +32,36 @@ PrintFarmer provides the following OctoPrint-compatible endpoints required for s
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/api/octoprint/version` | GET | Returns server version information (required by slicers for compatibility check) |
-| `/api/octoprint/server` | GET | Returns server status |
-| `/api/octoprint/files/local` | POST | Uploads a new G-code file with optional auto-dispatch |
+| `/api/version` | GET | Returns server version information (required by slicers for compatibility check) |
+| `/api/server` | GET | Returns server status |
+| `/api/files/local` | POST | Uploads a new G-code file with optional queue submission |
 
 These are the minimal endpoints required for PrusaSlicer, OrcaSlicer, and SuperSlicer to upload files to PrintFarmer.
 
 ## Configuration Steps
 
-### 1. Generate API Key
+### 1. Choose the Authentication Mode
 
-Before configuring your slicer, you need to generate an API key in PrintFarmer:
+The **OctoPrint/Slicer API → Require API key** setting controls slicer access.
+Changes take effect on subsequent requests without restarting PrintFarmer.
+
+| Setting | Slicer configuration | Access |
+|---------|----------------------|--------|
+| Off | Leave the API key blank | Anonymous compatibility checks, uploads, and queue submission are allowed. |
+| On | Supply a valid, active, user-owned OctoPrint-purpose API key | Uploads use the owning user's queue permissions and printer-group access. |
+
+Anonymous mode is intended for trusted networks: anyone who can reach these
+endpoints can upload and submit jobs without per-user permission or group checks.
+Keep the API-key requirement enabled when exposing PrintFarmer to untrusted
+clients. Authenticated callers retain their normal permission checks.
+If the slicer still has an invalid or expired key saved, clear it to use anonymous
+mode. Failed credentials are rejected rather than silently treated as anonymous.
+
+If the setting is off, skip key creation. If it is on:
 
 1. Log into PrintFarmer web interface
-2. Navigate to **Settings** → **API Keys**
-3. Click **Generate New API Key**
+2. Navigate to **Settings** → **Profile** → **API Keys** (`/profile/api-keys`)
+3. Click **Create New API Key** and select **OctoPrint (compatible slicer uploads)**
 4. Give the key a descriptive name (e.g., "PrusaSlicer on Workstation")
 5. Copy the generated API key (you won't be able to see it again)
 
@@ -55,6 +73,11 @@ Before configuring your slicer, you need to generate an API key in PrintFarmer:
 > exchanged for a short-lived token. Provider migrations and the reserved authentication,
 > audit, expiry, scope, and redaction test tranche remain in #839.
 
+The global `OctoPrint:GlobalApiKey` can satisfy compatibility probes, but never
+authenticates uploads: it has no owning user whose permissions can be checked.
+When the requirement is off, leave the slicer's key blank for anonymous uploads;
+when it is on, use a user-owned OctoPrint-purpose key.
+
 ### 2. Configure PrusaSlicer
 
 1. Open PrusaSlicer
@@ -64,7 +87,7 @@ Before configuring your slicer, you need to generate an API key in PrintFarmer:
    - **Name**: `PrintFarmer` (or any descriptive name)
    - **Hostname/IP**: `your-printfarmer-server.local` or IP address
    - **Port**: `5245` (default PrintFarmer API port)
-   - **API Key**: Paste the API key you generated earlier
+   - **API Key**: Leave blank when the requirement is off; otherwise paste your OctoPrint-purpose key
    - **HTTPS**: Uncheck (unless you've configured HTTPS)
 5. Click **Test** to verify the connection
 6. Click **OK** to save
@@ -72,14 +95,19 @@ Before configuring your slicer, you need to generate an API key in PrintFarmer:
 ### 3. Configure OrcaSlicer
 
 1. Open OrcaSlicer
-2. Go to **Preferences** → **Network**
-3. In the **OctoPrint** section, click **Add**
+2. Open the printer's print-host/network connection settings
+3. Select **OctoPrint** as the host type for the PrintFarmer connection
 4. Fill in the following fields:
    - **Printer Name**: `PrintFarmer`
-   - **Host**: `http://your-printfarmer-server.local:5245` or `http://IP:5245`
-   - **API Key**: Paste the API key you generated earlier
+   - **Host**: Your PrintFarmer base URL, such as `https://your-printfarmer-server.example` for an HTTPS deployment or `http://your-printfarmer-server.local:5245` for native development
+   - **API Key**: Leave blank when the requirement is off; otherwise paste your OctoPrint-purpose key
 5. Click **Test** to verify the connection
 6. Click **OK** to save
+
+Use the hostname covered by the server's TLS certificate, rather than its IP
+address, for HTTPS. Do not append `/api` or `/api/octoprint` to the host URL.
+The slicer's OctoPrint host type is independent of the printer backend selected
+inside PrintFarmer; a Klipper printer still uses this same upload interface.
 
 ### 4. Configure SuperSlicer
 
@@ -98,22 +126,21 @@ After configuring your slicer:
 1. Slice your 3D model as usual
 2. Instead of **Export G-code**, click **Send to OctoPrint** (or similar option depending on slicer)
 3. Select your PrintFarmer connection
-4. Optionally check **Start print after upload** (file will be queued for approval)
+4. Optionally check **Start print after upload** to submit the file to the queue
 5. Click **Send**
 
 The file will be uploaded to PrintFarmer and appear in the G-code library.
 
-### Print Approval Workflow
+### Queueing and Approval
 
 When you upload a file with "Start print after upload" enabled:
 
 1. File is uploaded to PrintFarmer
-2. A print job is created in **Pending Approval** state
-3. Navigate to **Print Approvals** in PrintFarmer web interface
-4. Review the uploaded file details
-5. Click **Approve** to add it to the print queue
-6. Optionally assign a specific printer when approving
-7. The job will be scheduled for printing once a printer becomes available
+2. PrintFarmer attempts to queue it for a compatible printer
+3. Review the job in the **Print Queue** and follow your farm's approval workflow
+
+If no compatible printer is found, the response can report `UploadedOnly`; the
+file remains in the library for manual queueing.
 
 Without "Start print after upload", files are simply added to the library and can be queued manually later.
 
@@ -124,19 +151,27 @@ Without "Start print after upload", files are simply added to the library and ca
 **Error**: "Could not connect to OctoPrint"
 
 **Solutions**:
-- Verify PrintFarmer API server is running: `curl http://your-server:5245/api/octoprint/version`
+- Verify the compatibility endpoint is reachable: `curl http://your-server:5245/api/version` (add a valid API key when required)
 - Check firewall rules allow connections to port 5245
-- Ensure you're using `http://` not `https://` unless HTTPS is configured
-- Verify the API key is correct and hasn't been revoked
+- Match the deployment's HTTP/HTTPS scheme and use a hostname covered by the TLS certificate
+- When an API key is required, verify it is correct and hasn't been revoked
 
 ### Upload Fails
 
 **Error**: "Unauthorized" or "Invalid API key"
 
 **Solutions**:
-- Regenerate your API key and update slicer configuration
-- Check that the API key hasn't expired or been deleted
-- Verify the API key has upload permissions
+- If **Require API key** is off, anonymous uploads are supported; a missing key
+  should not cause HTTP 401. Clear any old, invalid key from the slicer to send an
+  anonymous request.
+- If it is on, use an active, non-expired, user-owned **OctoPrint** key in the
+  slicer's API-key field. Desktop keys and the printer's own credentials do not
+  authenticate PrintFarmer uploads.
+- A successful connection test does not prove upload authorization. A global key
+  can pass the probe but is rejected for uploads in either mode; leave the key
+  blank when using anonymous mode.
+- HTTP 403 for an authenticated upload means the key owner's queue permissions
+  or printer-group access need attention.
 
 ### Files Not Appearing
 
@@ -161,31 +196,23 @@ If you're uploading many files quickly, you may hit rate limits.
 ### Upload Endpoint
 
 ```http
-POST /api/octoprint/files/local?print=true&printerId=<guid>
+POST /api/files/local?printerId=<guid>
 Headers:
-  X-Api-Key: your-api-key-here
+  X-Api-Key: <OctoPrint-purpose API key, only needed when required>
   Content-Type: multipart/form-data
 Body:
   file: <binary G-code file>
+  print: true
 ```
 
 **Parameters**:
-- `print` (optional, default: false) - If true, creates a print job immediately
-- `printerId` (optional) - Specific printer GUID to assign the job to
+- `print` (optional form field, default: false) - If true, submits the uploaded file to the queue
+- `printerId` (optional query parameter) - Specific printer GUID to assign the job to
 
-**Response** (with print=true):
-```json
-{
-  "file": {
-    "fileName": "model.gcode",
-    "fileSize": 1234567,
-    "gcodeFileId": "guid-here"
-  },
-  "jobId": "job-guid",
-  "approvalId": "approval-guid",
-  "status": "PendingApproval"
-}
-```
+**Response:** Upload-only requests return the saved `file`. Successful queue
+submission returns HTTP 202 with `file`, `jobId`, `status: "Queued"`, and
+`assignedPrinter`. If no compatible printer is available, the file can instead
+be retained with `status: "UploadedOnly"` and an explanatory `message`.
 
 **Note**: File management (listing, deleting) should be done through the PrintFarmer web interface, not through the OctoPrint API.
 
@@ -193,8 +220,12 @@ Body:
 
 - **API keys are sensitive**: Treat them like passwords. Don't share or commit them to version control.
 - **Use HTTPS in production**: Configure HTTPS for PrintFarmer in production environments to encrypt API keys in transit.
+- **Anonymous mode is a trust decision**: Disabling the API-key requirement opens
+  upload and queue submission to anyone with network access to these endpoints;
+  it does not disable authentication on unrelated PrintFarmer APIs.
 - **Rate limiting**: PrintFarmer enforces rate limits to prevent abuse. Default is 60 uploads per minute per API key.
-- **Audit logging**: All uploads via API are logged with API key identifier for traceability.
+- **Attribution**: Anonymous submissions have no owning user. Enable the key
+  requirement when per-user permissions and attribution are needed.
 
 ## Advanced Configuration
 
@@ -207,7 +238,8 @@ If PrintFarmer is running on a non-standard port, update the hostname/IP in your
 ### Reverse Proxy Setup
 
 When using a reverse proxy (Nginx, Traefik):
-- Configure the proxy to forward `/api/octoprint/*` to the PrintFarmer API server
+- Forward `/api/version`, `/api/server`, and `/api/files/local` to the main
+  PrintFarmer API server, not the slicer-host service
 - Ensure WebSocket support is enabled for SignalR
 - Set appropriate timeouts for large file uploads
 - Update slicer configuration to use the proxy hostname/port
@@ -215,7 +247,7 @@ When using a reverse proxy (Nginx, Traefik):
 ### Multiple Printer Farms
 
 To manage multiple PrintFarmer instances:
-1. Generate separate API keys for each farm
+1. Generate a separate OctoPrint-purpose key for each farm that requires one
 2. Create separate printer connections in your slicer for each farm
 3. Give each connection a descriptive name (e.g., "PrintFarmer - Office", "PrintFarmer - Workshop")
 4. Select the appropriate connection when uploading
@@ -223,7 +255,7 @@ To manage multiple PrintFarmer instances:
 ## See Also
 
 - [API Documentation](API.md) - Complete PrintFarmer API reference
-- [Print Approval Workflow](#print-approval-workflow) - Upload and approval behavior
+- [Queueing and Approval](#queueing-and-approval) - Upload and queue behavior
 - [OctoPrint API Specification](https://docs.octoprint.org/en/master/api/) - Original OctoPrint API
 
 ## Desktop API-Key Exchange
