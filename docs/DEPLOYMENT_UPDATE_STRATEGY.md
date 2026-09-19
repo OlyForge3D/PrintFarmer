@@ -177,7 +177,7 @@ bundle. The following claims remain intentionally separate:
 | GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft/prerelease filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. | Covered by focused tests |
 | Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
 | Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; `GET /api/settings/UpdateChannel` is unavailable. | Blocked |
-| Apply and recovery | The executor remains fail-closed when required facilities are unavailable; interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Code-tested, live evidence pending |
+| Apply and recovery | Production execution is blocked by code-owned facilities: the target-image migration runner throws, protected bootstrap/trusted state for unsigned legacy installs is absent, queue-reconciliation writer fencing is incomplete, and SQL Server visible backup-path mapping is unverified. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code; live evidence pending after implementation |
 | Automatic policy and UI execution | Update Now and automatic controls remain disabled, and the UI has no execute callback wiring. | Blocked |
 
 Do not describe insider.4 publication as an end-to-end update acceptance run.
@@ -255,7 +255,8 @@ migration, apply, verification, and recovery. Issue #2666 owns request
 integration and scheduling.
 
 **Issue #2663 implementation status:** concrete, repository-appropriate step
-adapters exist for every stage — preflight (`HostUpdatePreflightCheck`), drain
+adapters are present for the designed stages, but production execution is not
+available. The adapters cover preflight (`HostUpdatePreflightCheck`), drain
 (`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
 than cancelling), fence (`HostUpdateFenceCoordinator`, proving the durable admission
 gate, the queue outbox publisher, `PowerReadingPruneService`,
@@ -263,8 +264,10 @@ gate, the queue outbox publisher, `PowerReadingPruneService`,
 backup (`HostUpdateBackupCoordinator` plus provider-native
 `HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
 closed for externally-owned databases and unexpectedly missing required owned
-directories), migration (`HostUpdateMigrationCoordinator` wrapping the existing
-`ProviderAwareMigrationRunner` under the executor's own lock), apply
+directories), migration (`HostUpdateMigrationCoordinator` with
+`HostUpdateMigrationStep` explicitly unavailable until a target-image/dedicated
+migration runner exists; the current/old API assembly's
+`ProviderAwareMigrationRunner` is not used for forward updates), apply
 (`HostUpdateImageApplier`, staging pinned `repository@sha256` images before compose
 mutation and applying with `docker compose up -d --no-build --pull never`), verify
 (`HostUpdateHealthVerifier`, exact configured service set, exact running digests,
