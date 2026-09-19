@@ -1221,7 +1221,8 @@ copy_configs() {
                 return 1
             fi
         done
-        if [[ -e "$source_nginx_dir/certs" && ! -d "$source_nginx_dir/certs" ]]; then
+        if { [[ -e "$source_nginx_dir/certs" ]] || [[ -L "$source_nginx_dir/certs" ]]; } &&
+            [[ ! -d "$source_nginx_dir/certs" ]]; then
             log_error "Nginx certificate path is not a directory: $source_nginx_dir/certs"
             return 1
         fi

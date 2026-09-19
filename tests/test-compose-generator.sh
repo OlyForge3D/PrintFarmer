@@ -129,6 +129,7 @@ test_in_place_generation_preserves_nginx_configs() {
     local fixture_root="$TEST_TEMP_DIR/in-place-root"
     local helper_script="$TEST_TEMP_DIR/in-place-copy-configs-helper.sh"
     local out_dir="$TEST_TEMP_DIR/out-of-place-root"
+    local sentinel_dir="$TEST_TEMP_DIR/nginx-sentinel"
     mkdir -p "$fixture_root/deploy/nginx/conf.d" "$fixture_root/configs"
     for nginx_config in \
         nginx-proxy.conf \
@@ -163,6 +164,12 @@ fi
 rm -rf "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
 printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
 
+ln -s "$TEST_TEMP_DIR/missing-certs" "$fixture_root/deploy/nginx/certs"
+if copy_configs "$fixture_root"; then
+    exit 1
+fi
+rm "$fixture_root/deploy/nginx/certs"
+
 INSTALLER_LAB=true
 HTTP_ONLY=true
 if copy_configs "$fixture_root"; then
@@ -173,9 +180,13 @@ grep -Fxq "canonical nginx config" "$fixture_root/deploy/nginx/nginx-proxy-split
 INSTALLER_LAB=false
 HTTP_ONLY=false
 mkdir -p "$out_dir"
-mkdir -p "$out_dir/deploy/nginx/nginx-proxy-split.conf"
-printf '%s\n' "sentinel" > "$out_dir/deploy/nginx/nginx-proxy-split.conf/sentinel"
+mkdir -p "$sentinel_dir"
+printf '%s\n' "sentinel" > "$sentinel_dir/keep"
+mkdir -p "$out_dir/deploy"
+ln -s "$sentinel_dir" "$out_dir/deploy/nginx"
 copy_configs "$out_dir"
+[[ -f "$sentinel_dir/keep" ]]
+[[ -d "$out_dir/deploy/nginx" && ! -L "$out_dir/deploy/nginx" ]]
 [[ -f "$out_dir/deploy/nginx/nginx-proxy-split.conf" ]]
 grep -Fxq "canonical nginx config" "$out_dir/deploy/nginx/nginx-proxy-split.conf"
 EOF
