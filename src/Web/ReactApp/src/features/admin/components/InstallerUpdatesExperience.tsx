@@ -47,8 +47,14 @@ function clearManualUpdateReleaseId() {
 }
 
 function isRolledBackStatus(status: HostUpdateStatusResponse) {
+  const activities = Array.isArray(status.activities) ? status.activities : [];
+  const terminal = activities.at(-1);
   return status.currentState === "Completed" &&
-    status.activities.some((activity) => activity.phase === "recovery:rolled_back");
+    terminal?.phase === "recovery:rolled_back";
+}
+
+function isTerminalManualUpdateStatus(status: HostUpdateStatusResponse) {
+  return status.currentState === "Completed" || status.currentState === "RecoveryRequired";
 }
 
 export interface InstallerUpdatesExperienceProps {
@@ -379,7 +385,7 @@ export function InstallerUpdatesExperience({
       setManualUpdateStatus(status);
       setManualUpdateOpen(true);
       setManualUpdateBusy(false);
-      if (status.currentState === "Completed") {
+      if (isTerminalManualUpdateStatus(status)) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
       }
@@ -541,7 +547,7 @@ export function InstallerUpdatesExperience({
       executeDispatched = true;
       const status = await onExecuteHostUpdate(authorization.authorizationId);
       setManualUpdateStatus(status);
-      if (status.currentState === "Completed") {
+      if (isTerminalManualUpdateStatus(status)) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
         setManualUpdateAttempted(false);
@@ -574,7 +580,9 @@ export function InstallerUpdatesExperience({
           // Preserve the original execute error when status cannot yet be read.
         }
       }
-      if (!executeDispatched) {
+      if (!executeDispatched || (isApiError(error) && [400, 409, 422].includes(error.statusCode))) {
+        clearManualUpdateReleaseId();
+        setManualUpdateReleaseId(null);
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
@@ -597,9 +605,10 @@ export function InstallerUpdatesExperience({
     try {
       const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
       setManualUpdateStatus(status);
-      if (status.currentState === "Completed") {
+      if (isTerminalManualUpdateStatus(status)) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
+        setManualUpdateStatus(null);
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
@@ -619,7 +628,7 @@ export function InstallerUpdatesExperience({
       setManualUpdateRecovery(recovery);
       if (onGetHostUpdateStatus) {
         const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
-        if (status.currentState === "Completed") {
+        if (isTerminalManualUpdateStatus(status)) {
           clearManualUpdateReleaseId();
           setManualUpdateReleaseId(null);
           setManualUpdateStatus(null);
@@ -633,6 +642,11 @@ export function InstallerUpdatesExperience({
         setManualUpdateReleaseId(null);
         setManualUpdateStatus(null);
         setManualUpdateRecovery(null);
+        setManualUpdateAttempted(false);
+        manualUpdateDispatchLock.current = false;
+      } else if (recovery.outcome === "NeedsOperator") {
+        clearManualUpdateReleaseId();
+        setManualUpdateReleaseId(null);
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
@@ -756,14 +770,18 @@ export function InstallerUpdatesExperience({
               type="button"
               variant="primary"
               disabled={!manualUpdateAvailable || manualUpdateBusy}
-              explainedDisabled={!manualUpdateAvailable}
-              title={!manualUpdateAvailable ? MANUAL_DISABLED_REASON : undefined}
+              explainedDisabled={!manualUpdateAvailable || manualUpdateBusy}
+              title={!manualUpdateAvailable
+                ? MANUAL_DISABLED_REASON
+                : manualUpdateBusy
+                  ? "An update operation is already in progress."
+                  : undefined}
               aria-describedby="manual-update-reason"
               loading={manualUpdateBusy}
               onClick={() => {
                 setManualUpdateError(null);
                 setManualUpdateRecovery(null);
-                if (manualUpdateStatus?.currentState === "Completed") {
+                if (manualUpdateStatus && isTerminalManualUpdateStatus(manualUpdateStatus)) {
                   clearManualUpdateReleaseId();
                   setManualUpdateReleaseId(null);
                   setManualUpdateStatus(null);
@@ -1018,7 +1036,7 @@ export function InstallerUpdatesExperience({
           </div>
         )}
         {manualUpdateError && (
-          <Alert type="error" title="Host update unavailable" role="alert">
+          <Alert type="error" title="Host update unavailable">
             {manualUpdateError}
           </Alert>
         )}

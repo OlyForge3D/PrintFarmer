@@ -343,6 +343,38 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.queryByText('Host update completed')).not.toBeInTheDocument();
   });
 
+  it('uses the terminal activity when a later retry completes successfully', async () => {
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'Completed',
+      activities: [
+        {
+          activityId: 'recovery-1',
+          releaseId: 'stable:1.2.4',
+          state: 'Completed',
+          phase: 'recovery:rolled_back',
+          recordedAt: '2026-09-19T19:01:00Z',
+        },
+        {
+          activityId: 'verify-2',
+          releaseId: 'stable:1.2.4',
+          state: 'Completed',
+          phase: 'verify',
+          recordedAt: '2026-09-19T19:02:00Z',
+        },
+      ],
+    });
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={status}
+    />);
+
+    expect(await screen.findByText('Host update completed')).toBeVisible();
+    expect(screen.queryByText('Host update rolled back')).not.toBeInTheDocument();
+  });
+
   it('allows a second direct update after the first one completes', async () => {
     const authorize = vi.fn()
       .mockResolvedValueOnce({
@@ -399,11 +431,17 @@ describe('InstallerUpdatesExperience', () => {
       policyFingerprint: 'policy',
       expiresAt: '2026-09-19T20:00:00Z',
     });
-    const execute = vi.fn().mockRejectedValue({
-      statusCode: 409,
-      message: 'The host update authorization was rejected.',
-      data: { code: 'request_not_authorized' },
-    });
+    const execute = vi.fn()
+      .mockRejectedValueOnce({
+        statusCode: 409,
+        message: 'The host update authorization was rejected.',
+        data: { code: 'request_not_authorized' },
+      })
+      .mockResolvedValueOnce({
+        releaseId: 'stable:1.2.4',
+        currentState: 'Completed',
+        activities: [],
+      });
 
     render(<InstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
@@ -417,6 +455,12 @@ describe('InstallerUpdatesExperience', () => {
 
     expect(await screen.findByRole('alert')).toHaveTextContent('The host update authorization was rejected.');
     expect(screen.queryByRole('list', { name: 'Host update progress' })).not.toBeInTheDocument();
+
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Update now' }));
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Authorize and update' }));
+    await waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it('allows retry after authorization fails before execute dispatch', async () => {
