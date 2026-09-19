@@ -1,4 +1,5 @@
-﻿using System.Diagnostics;
+﻿using System.Collections.Frozen;
+using System.Diagnostics;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -102,6 +103,37 @@ public sealed class DefaultHostUpdateProcessRunner : IHostUpdateProcessRunner
         {
             // Process already exited between the check and the kill attempt.
         }
+    }
+}
+
+/// <summary>
+/// Restricts host-update execution to the audited tools used by the concrete adapters. This is a
+/// defense-in-depth boundary: callers still provide explicit arguments, but cannot turn the
+/// process runner into a general-purpose host command executor or bypass the configured tool
+/// contract with a path-qualified executable.
+/// </summary>
+public sealed class ConstrainedHostUpdateProcessRunner(IHostUpdateProcessRunner inner) : IHostUpdateProcessRunner
+{
+    private static readonly FrozenSet<string> AllowedExecutables =
+        new[] { "docker", "sqlite3", "pg_dump", "pg_restore", "sqlcmd" }
+            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+
+    public Task<HostUpdateProcessResult> RunAsync(
+        string fileName,
+        IReadOnlyList<string> arguments,
+        TimeSpan timeout,
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<string, string>? environment = null)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        ArgumentNullException.ThrowIfNull(arguments);
+
+        if (!AllowedExecutables.Contains(fileName))
+        {
+            throw new InvalidOperationException($"host_update_executable_not_allowed:{fileName}");
+        }
+
+        return inner.RunAsync(fileName, arguments, timeout, cancellationToken, environment);
     }
 }
 

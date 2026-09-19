@@ -34,7 +34,9 @@ public static class HostUpdateExecutionStartup
             client.Timeout = TimeSpan.FromSeconds(options.ProcessDefaultTimeoutSeconds);
         });
 
-        services.AddSingleton<IHostUpdateProcessRunner, DefaultHostUpdateProcessRunner>();
+        services.AddSingleton<DefaultHostUpdateProcessRunner>();
+        services.AddSingleton<IHostUpdateProcessRunner>(sp =>
+            new ConstrainedHostUpdateProcessRunner(sp.GetRequiredService<DefaultHostUpdateProcessRunner>()));
 
         // Durable single-writer state, all rooted under the validated, host-controlled
         // RootDirectory (never the app DB, never a temp/cache path -- see
