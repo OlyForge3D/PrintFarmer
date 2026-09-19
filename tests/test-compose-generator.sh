@@ -128,8 +128,15 @@ test_in_place_generation_preserves_nginx_configs() {
 
     local fixture_root="$TEST_TEMP_DIR/in-place-root"
     local helper_script="$TEST_TEMP_DIR/in-place-copy-configs-helper.sh"
-    mkdir -p "$fixture_root/deploy/nginx" "$fixture_root/configs"
-    printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+    local out_dir="$TEST_TEMP_DIR/out-of-place-root"
+    mkdir -p "$fixture_root/deploy/nginx/conf.d" "$fixture_root/configs"
+    for nginx_config in \
+        nginx-proxy.conf \
+        nginx-proxy-split.conf \
+        nginx-frontend.conf \
+        conf.d/frontend-app.conf; do
+        printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/$nginx_config"
+    done
 
     cat > "$helper_script" << EOF
 #!/bin/bash
@@ -146,12 +153,28 @@ HTTP_ONLY=false
 copy_configs "$fixture_root"
 grep -Fxq "canonical nginx config" "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
 
+rm "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+mkdir "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+if copy_configs "$fixture_root"; then
+    exit 1
+fi
+[[ -d "$fixture_root/deploy/nginx/nginx-proxy-split.conf" ]]
+rm -rf "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+
 INSTALLER_LAB=true
 HTTP_ONLY=true
 if copy_configs "$fixture_root"; then
     exit 1
 fi
 grep -Fxq "canonical nginx config" "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+
+INSTALLER_LAB=false
+HTTP_ONLY=false
+mkdir -p "$out_dir"
+copy_configs "$out_dir"
+[[ -f "$out_dir/deploy/nginx/nginx-proxy-split.conf" ]]
+grep -Fxq "canonical nginx config" "$out_dir/deploy/nginx/nginx-proxy-split.conf"
 EOF
     chmod +x "$helper_script"
 

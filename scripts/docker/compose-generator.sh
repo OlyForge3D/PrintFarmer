@@ -1181,19 +1181,48 @@ copy_configs() {
     if [[ -d "$REPO_ROOT/deploy/nginx" ]]; then
         local source_nginx_dir
         local target_nginx_dir
+        local target_nginx_path
+        local nginx_config
+        local http_only_lab=false
+        if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+            http_only_lab=true
+        fi
+
         mkdir -p "$output_dir/deploy"
-        source_nginx_dir="$(cd "$REPO_ROOT/deploy/nginx" && pwd -P)"
-        target_nginx_dir="$(cd "$output_dir/deploy" && pwd -P)/nginx"
+        source_nginx_dir="$(cd "$REPO_ROOT/deploy/nginx" && pwd -P)" || {
+            log_error "Unable to resolve nginx configuration source: $REPO_ROOT/deploy/nginx"
+            return 1
+        }
+        target_nginx_path="$output_dir/deploy/nginx"
+        if [[ -d "$target_nginx_path" ]]; then
+            target_nginx_dir="$(cd "$target_nginx_path" && pwd -P)" || {
+                log_error "Unable to resolve nginx configuration output: $target_nginx_path"
+                return 1
+            }
+        else
+            target_nginx_dir="$(cd "$output_dir/deploy" && pwd -P)/nginx"
+        fi
+
+        for nginx_config in \
+            nginx-proxy.conf \
+            nginx-proxy-split.conf \
+            nginx-frontend.conf \
+            conf.d/frontend-app.conf; do
+            if [[ ! -f "$REPO_ROOT/deploy/nginx/$nginx_config" ]]; then
+                log_error "Required nginx configuration is missing or not a regular file: $REPO_ROOT/deploy/nginx/$nginx_config"
+                return 1
+            fi
+        done
 
         if [[ "$source_nginx_dir" != "$target_nginx_dir" ]]; then
             rm -rf "$target_nginx_dir"
             cp -r "$source_nginx_dir" "$target_nginx_dir"
-        elif [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+        elif [[ "$http_only_lab" == "true" ]]; then
             log_error "HTTP_ONLY generation requires an output directory outside the repository root"
             return 1
         fi
 
-        if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
+        if [[ "$http_only_lab" == "true" ]]; then
             local split_proxy="$target_nginx_dir/nginx-proxy-split.conf"
             [[ -f "$split_proxy" ]] || { log_error "HTTP_ONLY requires nginx-proxy-split.conf"; return 1; }
             grep -q 'HTTPS server' "$split_proxy" ||
