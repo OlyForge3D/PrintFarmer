@@ -4,6 +4,10 @@ import { generateUUID } from "@/utils/uuid";
 import { getApiBaseUrl } from "@/common/utils/apiUrlHelpers";
 import type {
   PrinterStatus,
+  HostUpdateManualAuthorizationIntent,
+  HostUpdateManualAuthorizationResponse,
+  HostUpdateRecoveryResult,
+  HostUpdateStatusResponse,
   UpdateChannelSettings,
 } from "@/types/api";
 import {
@@ -484,6 +488,44 @@ export class ApiClient {
     settings: UpdateChannelSettings,
   ): Promise<void> {
     return this.saveSettings("UpdateChannel", settings);
+  }
+
+  async authorizeHostUpdate(
+    intent: HostUpdateManualAuthorizationIntent = {},
+  ): Promise<HostUpdateManualAuthorizationResponse> {
+    const response = await this.client.post<HostUpdateManualAuthorizationResponse>(
+      "/admin/host-updates/authorizations",
+      intent,
+    );
+    return response.data;
+  }
+
+  async executeHostUpdate(
+    intent: HostUpdateManualAuthorizationIntent = {},
+  ): Promise<HostUpdateStatusResponse> {
+    const response = await this.client.post<HostUpdateStatusResponse>(
+      "/admin/host-updates/execute",
+      intent,
+    );
+    return response.data;
+  }
+
+  async getHostUpdateStatus(releaseId: string): Promise<HostUpdateStatusResponse> {
+    const response = await this.client.get<HostUpdateStatusResponse>(
+      `/admin/host-updates/${encodeURIComponent(releaseId)}/status`,
+    );
+    return response.data;
+  }
+
+  async recoverHostUpdate(
+    releaseId: string,
+    requestId?: string,
+  ): Promise<HostUpdateRecoveryResult> {
+    const response = await this.client.post<HostUpdateRecoveryResult>(
+      `/admin/host-updates/${encodeURIComponent(releaseId)}/recover`,
+      requestId ? { requestId } : {},
+    );
+    return response.data;
   }
 
   /**

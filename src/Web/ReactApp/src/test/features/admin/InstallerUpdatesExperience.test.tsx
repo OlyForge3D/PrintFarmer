@@ -19,6 +19,68 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByRole('button', { name: 'Save automatic update policy' })).toHaveAttribute('aria-disabled', 'true');
   });
 
+  it('confirms, reports progress, and offers recovery for a manual update', async () => {
+    const user = userEvent.setup();
+    const authorize = vi.fn().mockResolvedValue({
+      authorizationId: 'auth-1',
+      releaseId: 'stable:1.2.4',
+      sequence: 4,
+      channel: 'stable',
+      candidateFingerprint: 'candidate',
+      policyRevision: 1,
+      policyFingerprint: 'policy',
+      expiresAt: '2026-09-19T20:00:00Z',
+    });
+    const execute = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [{
+        activityId: 'activity-1',
+        releaseId: 'stable:1.2.4',
+        state: 'RecoveryRequired',
+        phase: 'apply',
+        recordedAt: '2026-09-19T19:00:00Z',
+      }],
+    });
+    const recover = vi.fn().mockResolvedValue({
+      outcome: 'RolledBack',
+      detail: 'image_only_rollback',
+    });
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'Completed',
+      activities: [{
+        activityId: 'activity-2',
+        releaseId: 'stable:1.2.4',
+        state: 'Completed',
+        phase: 'verify',
+        recordedAt: '2026-09-19T19:01:00Z',
+      }],
+    });
+
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={authorize}
+      onExecuteHostUpdate={execute}
+      onGetHostUpdateStatus={status}
+      onRecoverHostUpdate={recover}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    expect(screen.getByRole('heading', { name: 'Confirm host update' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    expect(authorize).toHaveBeenCalledOnce();
+    expect(execute).toHaveBeenCalledWith('auth-1');
+    expect(await screen.findByText('RecoveryRequired')).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Recover update' }));
+    await screen.findByText(/RolledBack: image_only_rollback/);
+    expect(recover).toHaveBeenCalledWith('stable:1.2.4');
+    expect(status).toHaveBeenCalledWith('stable:1.2.4');
+    expect(screen.getByText('Completed')).toBeVisible();
+  });
+
   it.each(['Eligible', 'Blocked', 'Unknown', 'NotManaged'] as const)(
     'renders %s readiness safely under #2661 semantics',
     (state) => {

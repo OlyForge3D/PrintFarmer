@@ -164,6 +164,16 @@ export function InstallerUpdatesPage() {
         void refetchInventory();
         return authoritative;
       }}
+      onAuthorizeHostUpdate={() => apiClient.authorizeHostUpdate()}
+      onExecuteHostUpdate={(authorizationId) =>
+        apiClient.executeHostUpdate({ authorizationId })
+      }
+      onGetHostUpdateStatus={(releaseId) =>
+        apiClient.getHostUpdateStatus(releaseId)
+      }
+      onRecoverHostUpdate={(releaseId, requestId) =>
+        apiClient.recoverHostUpdate(releaseId, requestId)
+      }
     />
   );
 }
