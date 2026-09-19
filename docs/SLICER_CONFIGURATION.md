@@ -261,7 +261,7 @@ To manage multiple PrintFarmer instances:
 ## Desktop API-Key Exchange
 
 The PrintFarmer Desktop app authenticates with a **Desktop**-purpose API key (see the note under
-[Generate API Key](#1-generate-api-key)), but never sends that key on every request. Instead it
+[Choose the Authentication Mode](#1-choose-the-authentication-mode)), but never sends that key on every request. Instead it
 exchanges the key once for a short-lived JWT, which is what the main API and the standalone
 slicer host both accept for model/library requests.
 
