@@ -73,6 +73,8 @@ WITH_ORCA_WORKER=false
 IMAGE_SET_FILE=""
 DEPLOYMENT_NAME="printfarmer"
 BIND_ADDRESS="0.0.0.0"
+SERVICE_BIND_ADDRESS="${PRINTFARMER_SERVICE_BIND_ADDRESS:-127.0.0.1}"
+SERVICE_BIND_ADDRESS_EXPLICIT=false
 HTTP_ONLY_MODE=false
 IMAGE_TAG_EXPLICIT=false
 HTTP_PORT_EXPLICIT=false
@@ -312,6 +314,8 @@ while [[ $# -gt 0 ]]; do
         --name=*)           DEPLOYMENT_NAME="${1#*=}"; NAME_EXPLICIT=true; shift ;;
         --bind-address)     BIND_ADDRESS="${2:?--bind-address requires an address}"; BIND_ADDRESS_EXPLICIT=true; shift 2 ;;
         --bind-address=*)   BIND_ADDRESS="${1#*=}"; BIND_ADDRESS_EXPLICIT=true; shift ;;
+        --service-bind-address) SERVICE_BIND_ADDRESS="${2:?--service-bind-address requires an address}"; SERVICE_BIND_ADDRESS_EXPLICIT=true; shift 2 ;;
+        --service-bind-address=*) SERVICE_BIND_ADDRESS="${1#*=}"; SERVICE_BIND_ADDRESS_EXPLICIT=true; shift ;;
         --profile)          DEPLOY_PROFILE="${2:?--profile requires lite, standard, or full}"; PROFILE_EXPLICIT=true; shift 2 ;;
         --profile=*)        DEPLOY_PROFILE="${1#*=}"; PROFILE_EXPLICIT=true; shift ;;
         --with-spoolman)    SPOOLMAN_URL="${2:?--with-spoolman requires a URL}"; shift 2 ;;
@@ -344,7 +348,9 @@ validate_bind_address() {
         die "--bind-address must be localhost or a supported IPv4 address."
     IFS=. read -r -a _bind_octets <<< "$address"
     for octet in "${_bind_octets[@]}"; do
-        (( octet <= 255 )) || die "--bind-address contains an IPv4 octet outside 0-255."
+        # Force base-10 interpretation so leading zeros (e.g. "010") are not
+        # misread as octal literals by bash arithmetic.
+        (( 10#$octet <= 255 )) || die "--bind-address contains an IPv4 octet outside 0-255."
     done
 }
 
@@ -378,6 +384,8 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     --image-set FILE      Read immutable per-service image references from FILE
     --name NAME           Compose project and resource prefix (default: printfarmer)
     --bind-address ADDR   Address for the public HTTP proxy (default: 0.0.0.0; API/DB remain loopback-only)
+    --service-bind-address ADDR  Address for direct API/DB/slicer-host binds (default: 127.0.0.1; set to
+                          0.0.0.0 only when you intentionally need non-proxied access to these services)
     --with-spoolman URL   Connect to Spoolman for filament tracking
     --dry-run             Generate config files without starting containers
     --reuse-config        Reuse existing .env if found (preserves secrets/DB config)
@@ -596,6 +604,7 @@ esac
 [[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
     die "--name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens."
 validate_bind_address "$BIND_ADDRESS"
+validate_bind_address "$SERVICE_BIND_ADDRESS"
 for port_name in HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT; do
     port_value="${!port_name}"
     [[ "$port_value" =~ ^[1-9][0-9]{0,4}$ ]] && (( port_value <= 65535 )) ||
@@ -708,32 +717,45 @@ if [[ "$DO_UPGRADE" == "true" ]]; then
     fi
     step "Upgrading PrintFarmer"
     cd "$INSTALL_DIR"
-    if [[ "$IMAGE_TAG" != "latest" ]]; then
-        # Update .env with new image tag
+
+    # Validate compatibility with the existing generated compose BEFORE touching
+    # .env, so a legacy (pre-parameterized) compose file fails loudly and
+    # atomically instead of leaving .env partially rewritten.
+    if [[ -n "$IMAGE_SET_FILE" ]]; then
+        upgrade_worker_enabled=false
+        if grep -Eq '^WITH_ORCA_WORKER=(true|yes|1)$' .env 2>/dev/null; then
+            upgrade_worker_enabled=true
+        fi
+        upgrade_image_variables=(API_IMAGE FRONTEND_IMAGE PRINTER_DISCOVERY_IMAGE)
+        if [[ "$upgrade_worker_enabled" == "true" ]]; then
+            upgrade_image_variables+=(SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE)
+        fi
+        for image_variable in "${upgrade_image_variables[@]}"; do
+            grep -Fq "\${${image_variable}:-" docker-compose.yml ||
+                die "Pinned upgrade cannot update legacy docker-compose.yml: ${image_variable} is not parameterized. Reinstall or regenerate the compose file before retrying --image-set."
+        done
+    fi
+
+    if [[ "$IMAGE_TAG_EXPLICIT" == "true" ]]; then
+        # Update .env with the new image tag
         if [[ -f .env ]]; then
             if grep -q '^IMAGE_TAG=' .env; then
                 sed -i.bak "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env && rm -f .env.bak
+            fi
+            if [[ -z "$IMAGE_SET_FILE" ]]; then
+                # An explicit --version without --image-set means the caller wants
+                # the tag-derived image to take effect. Strip any previously
+                # pinned per-service *_IMAGE lines so they cannot silently
+                # override the new tag (see issue: digest-pinned installs were
+                # a no-op under --upgrade --version).
+                for image_variable in API_IMAGE FRONTEND_IMAGE SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE PRINTER_DISCOVERY_IMAGE; do
+                    sed -i.bak "/^${image_variable}=/d" .env && rm -f .env.bak
+                done
             fi
         fi
         info "Image tag → ${IMAGE_TAG}"
     fi
     apply_image_set_to_env ".env"
-    if [[ -n "$IMAGE_SET_FILE" ]]; then
-        upgrade_worker_enabled=false
-        if grep -Eq '^WITH_ORCA_WORKER=(true|yes|1)$' .env; then
-            upgrade_worker_enabled=true
-        fi
-        for image_variable in API_IMAGE FRONTEND_IMAGE PRINTER_DISCOVERY_IMAGE; do
-            grep -Eq "\$\{${image_variable}:-" docker-compose.yml ||
-                die "Pinned upgrade cannot update legacy docker-compose.yml: ${image_variable} is not parameterized. Reinstall or regenerate the compose file before retrying --image-set."
-        done
-        if [[ "$upgrade_worker_enabled" == "true" ]]; then
-            for image_variable in SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE; do
-                grep -Eq "\$\{${image_variable}:-" docker-compose.yml ||
-                    die "Pinned upgrade cannot update legacy docker-compose.yml: ${image_variable} is not parameterized. Reinstall or regenerate the compose file before retrying --image-set."
-            done
-        fi
-    fi
     ensure_upgrade_slicer_worker_key ".env" "docker-compose.yml"
     run_with_spinner "Pulling latest images" $COMPOSE_CMD pull || die "Pull failed"
     info "Restarting containers..."
@@ -995,6 +1017,7 @@ if [[ -n "$EXISTING_ENV" ]]; then
     _existing_slicer_port=$(grep "^SLICER_HOST_PORT=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_postgres_port=$(grep "^POSTGRES_PORT=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_bind_address=$(grep "^BIND_ADDRESS=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_service_bind_address=$(grep "^SERVICE_BIND_ADDRESS=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_project_name=$(grep "^COMPOSE_PROJECT_NAME=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_worker=$(grep "^WITH_ORCA_WORKER=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_profile=$(grep "^DEPLOY_PROFILE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
@@ -1036,6 +1059,7 @@ if [[ -n "$EXISTING_ENV" ]]; then
     if [[ -n "$_existing_slicer_port" && "$SLICER_HOST_PORT_EXPLICIT" != "true" ]]; then SLICER_HOST_PORT="$_existing_slicer_port"; fi
     if [[ -n "$_existing_postgres_port" && "$POSTGRES_PORT_EXPLICIT" != "true" ]]; then POSTGRES_PORT="$_existing_postgres_port"; fi
     if [[ -n "$_existing_bind_address" && "$BIND_ADDRESS_EXPLICIT" != "true" ]]; then BIND_ADDRESS="$_existing_bind_address"; fi
+    if [[ -n "$_existing_service_bind_address" && "$SERVICE_BIND_ADDRESS_EXPLICIT" != "true" ]]; then SERVICE_BIND_ADDRESS="$_existing_service_bind_address"; fi
     if [[ -n "$_existing_project_name" && "$NAME_EXPLICIT" != "true" ]]; then DEPLOYMENT_NAME="$_existing_project_name"; fi
     if [[ -n "$_existing_profile" && "$PROFILE_EXPLICIT" != "true" ]]; then
         DEPLOY_PROFILE="$_existing_profile"
@@ -1109,6 +1133,7 @@ fi
 [[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
     die "--name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens."
 validate_bind_address "$BIND_ADDRESS"
+validate_bind_address "$SERVICE_BIND_ADDRESS"
 for port_name in HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT; do
     port_value="${!port_name}"
     [[ "$port_value" =~ ^[1-9][0-9]{0,4}$ ]] && (( port_value <= 65535 )) ||
@@ -1189,6 +1214,7 @@ API_PORT=${API_PORT}
 SLICER_HOST_PORT=${SLICER_HOST_PORT}
 POSTGRES_PORT=${POSTGRES_PORT}
 BIND_ADDRESS=${BIND_ADDRESS}
+SERVICE_BIND_ADDRESS=${SERVICE_BIND_ADDRESS}
 DEPLOY_PROFILE=${DEPLOY_PROFILE}
 COMPOSE_PROJECT_NAME=${DEPLOYMENT_NAME}
 HTTP_ONLY=${HTTP_ONLY_MODE}
@@ -1234,6 +1260,7 @@ API_PORT=${API_PORT}
 SLICER_HOST_PORT=${SLICER_HOST_PORT}
 POSTGRES_PORT=${POSTGRES_PORT}
 BIND_ADDRESS=${BIND_ADDRESS}
+SERVICE_BIND_ADDRESS=${SERVICE_BIND_ADDRESS}
 DEPLOY_PROFILE=${DEPLOY_PROFILE}
 COMPOSE_PROJECT_NAME=${DEPLOYMENT_NAME}
 HTTP_ONLY=${HTTP_ONLY_MODE}
@@ -1271,7 +1298,7 @@ cat >> "$ENV_TEMP_FILE" <<TOPOLOGYE
 WITH_ORCA_WORKER=${WITH_ORCA_WORKER}
 INSTALLER_LAB=true
 TOPOLOGYE
-if [[ -n "$IMAGE_SET_FILE" || -n "${API_IMAGE_PRESERVED:-}" || -n "${FRONTEND_IMAGE_PRESERVED:-}" ]]; then
+if [[ -n "$IMAGE_SET_FILE" || -n "${API_IMAGE_PRESERVED:-}" || -n "${FRONTEND_IMAGE_PRESERVED:-}" || -n "${SLICER_HOST_IMAGE_PRESERVED:-}" || -n "${ORCASLICER_WORKER_IMAGE_PRESERVED:-}" || -n "${PRINTER_DISCOVERY_IMAGE_PRESERVED:-}" ]]; then
     printf 'API_IMAGE=%s\n' "${API_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
     printf 'FRONTEND_IMAGE=%s\n' "${FRONTEND_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
     printf 'SLICER_HOST_IMAGE=%s\n' "${SLICER_HOST_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-slicer-host:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
@@ -1338,7 +1365,7 @@ if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
         export ConnectionStrings__Default="$CONNSTR"
         export Jwt__Key="$JWT_KEY" Jwt__Issuer Jwt__Audience
         export WORKER_SHARED_API_KEY PROMOTION_SHARED_API_KEY DISCOVERY_SHARED_API_KEY
-        export HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT BIND_ADDRESS DEPLOYMENT_NAME
+        export HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT BIND_ADDRESS SERVICE_BIND_ADDRESS DEPLOYMENT_NAME
         export COMPOSE_PROJECT_NAME="$DEPLOYMENT_NAME"
         export INSTALLER_LAB=true
         export HTTP_ONLY="$HTTP_ONLY_MODE"
@@ -1566,7 +1593,7 @@ else
       POSTGRES_USER: ${POSTGRES_USER:-printfarmer}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
-      - "127.0.0.1:${POSTGRES_PORT}:5432"
+      - "${SERVICE_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - printfarmer-database:/var/lib/postgresql/data
     healthcheck:
@@ -1682,7 +1709,7 @@ ${compose_database_service}
     container_name: ${DEPLOYMENT_NAME}-api
     restart: unless-stopped
     ports:
-      - "127.0.0.1:\${API_PORT:-5245}:5245"
+      - "\${SERVICE_BIND_ADDRESS:-127.0.0.1}:\${API_PORT:-5245}:5245"
 ${compose_api_depends}
     environment:
       - ASPNETCORE_ENVIRONMENT=\${ASPNETCORE_ENVIRONMENT:-Production}
