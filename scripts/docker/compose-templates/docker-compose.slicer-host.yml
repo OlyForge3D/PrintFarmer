@@ -28,11 +28,11 @@ services:
         SOURCE_REPOSITORY: ${SOURCE_REPOSITORY:-}
         SOURCE_ARCHIVE_URL: ${SOURCE_ARCHIVE_URL:-}
         SBOM_URL: ${SBOM_URL:-}
-    image: printfarmer-slicer-host
-    container_name: printfarmer-slicer-host
+    image: ${SLICER_HOST_IMAGE:-printfarmer-slicer-host}
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-slicer-host
     restart: unless-stopped
     ports:
-      - "${SLICER_HOST_PORT:-5246}:5246"
+      - "${SERVICE_BIND_ADDRESS:-127.0.0.1}:${SLICER_HOST_PORT:-5246}:5246"
     depends_on:
       api:
         condition: service_healthy

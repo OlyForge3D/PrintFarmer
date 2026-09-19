@@ -13,9 +13,16 @@
 #   --profile PROFILE     Deployment profile: lite, standard, or full
 #   --version TAG         Container image tag (default: latest)
 #   --port PORT           HTTP port (default: 8080)
+#   --api-port PORT       API port (default: 5245)
+#   --slicer-host-port PORT  Slicer-host port (default: 5246)
+#   --postgres-port PORT  PostgreSQL port (default: 5432)
 #   --host HOST           Canonical browser hostname for passkeys (default: localhost)
 #   --dir DIR             Install directory (default: ./printfarmer)
 #   --db sqlite|postgres  Database engine (default: sqlite)
+#   --with-orca-worker    Add slicer-host and one OrcaSlicer worker (full profile only)
+#   --image-set FILE      Immutable per-service image references
+#   --name NAME           Compose project and resource prefix (default: printfarmer)
+#   --bind-address ADDR   Address for the public HTTP proxy (default: 0.0.0.0; API/DB remain loopback-only)
 #   --with-spoolman URL   Enable Spoolman filament tracking
 #   --dry-run             Generate files only, don't start containers
 #   --reuse-config        Reuse existing .env if found (preserves secrets)
@@ -42,6 +49,9 @@ INSTALLER_VERSION="1.0.0"
 REGISTRY_HOST="ghcr.io/olyforge3d"
 IMAGE_TAG="${PRINTFARMER_VERSION:-latest}"
 HTTP_PORT="${PRINTFARMER_PORT:-8080}"
+API_PORT="${PRINTFARMER_API_PORT:-5245}"
+SLICER_HOST_PORT="${PRINTFARMER_SLICER_HOST_PORT:-5246}"
+POSTGRES_PORT="${PRINTFARMER_POSTGRES_PORT:-5432}"
 SERVER_HOST="${PRINTFARMER_HOST:-localhost}"
 SERVER_HOST_EXPLICIT=false
 if [[ -n "${PRINTFARMER_HOST+x}" ]]; then
@@ -59,6 +69,23 @@ DO_UNINSTALL=false
 DO_STATUS=false
 SHOW_HELP=false
 REUSE_CONFIG=false
+WITH_ORCA_WORKER=false
+IMAGE_SET_FILE=""
+DEPLOYMENT_NAME="printfarmer"
+BIND_ADDRESS="0.0.0.0"
+SERVICE_BIND_ADDRESS="${PRINTFARMER_SERVICE_BIND_ADDRESS:-127.0.0.1}"
+SERVICE_BIND_ADDRESS_EXPLICIT=false
+HTTP_ONLY_MODE=false
+IMAGE_TAG_EXPLICIT=false
+HTTP_PORT_EXPLICIT=false
+API_PORT_EXPLICIT=false
+SLICER_HOST_PORT_EXPLICIT=false
+POSTGRES_PORT_EXPLICIT=false
+PROFILE_EXPLICIT=false
+WORKER_EXPLICIT=false
+NAME_EXPLICIT=false
+BIND_ADDRESS_EXPLICIT=false
+IMAGE_SET_EXPLICIT=false
 
 # ─── Terminal capabilities ──────────────────────────────────────────────────
 USE_COLOR=true
@@ -141,6 +168,7 @@ upsert_env_value() {
             prefix = ENVIRON["ENV_NAME"] "="
             value = ENVIRON["ENV_VALUE"]
         }
+
         index($0, prefix) == 1 {
             if (!written) {
                 print prefix value
@@ -163,11 +191,22 @@ upsert_env_value() {
     mv "$temp_file" "$env_file"
 }
 
+apply_image_set_to_env() {
+    local env_file="$1" image_variable image_reference
+    [[ -n "$IMAGE_SET_FILE" ]] || return 0
+    while IFS='=' read -r image_variable image_reference || [[ -n "$image_variable" ]]; do
+        [[ -z "$image_variable" || "$image_variable" == \#* ]] && continue
+        upsert_env_value "$env_file" "$image_variable" "$image_reference"
+    done < "$IMAGE_SET_FILE"
+    upsert_env_value "$env_file" IMAGE_TAG "$IMAGE_TAG"
+    info "Pinned service images from $IMAGE_SET_FILE"
+}
+
 ensure_upgrade_slicer_worker_key() {
     local env_file="$1"
     local compose_file="$2"
 
-    if ! grep -q 'container_name: printfarmer-monolith' "$compose_file"; then
+    if ! grep -Eq 'container_name: [a-z][a-z0-9-]*-monolith' "$compose_file"; then
         return 0
     fi
     [[ -f "$env_file" ]] || die "Existing monolith installation is missing $env_file"
@@ -252,18 +291,33 @@ run_with_spinner() {
 while [[ $# -gt 0 ]]; do
     case "$1" in
         --non-interactive)  NON_INTERACTIVE=true; shift ;;
-        --version)          IMAGE_TAG="${2:?--version requires a tag}"; shift 2 ;;
-        --version=*)        IMAGE_TAG="${1#*=}"; shift ;;
-        --port)             HTTP_PORT="${2:?--port requires a number}"; shift 2 ;;
-        --port=*)           HTTP_PORT="${1#*=}"; shift ;;
+        --version)          IMAGE_TAG="${2:?--version requires a tag}"; IMAGE_TAG_EXPLICIT=true; shift 2 ;;
+        --version=*)        IMAGE_TAG="${1#*=}"; IMAGE_TAG_EXPLICIT=true; shift ;;
+        --port)             HTTP_PORT="${2:?--port requires a number}"; HTTP_PORT_EXPLICIT=true; shift 2 ;;
+        --port=*)           HTTP_PORT="${1#*=}"; HTTP_PORT_EXPLICIT=true; shift ;;
+        --api-port)         API_PORT="${2:?--api-port requires a number}"; API_PORT_EXPLICIT=true; shift 2 ;;
+        --api-port=*)       API_PORT="${1#*=}"; API_PORT_EXPLICIT=true; shift ;;
+        --slicer-host-port) SLICER_HOST_PORT="${2:?--slicer-host-port requires a number}"; SLICER_HOST_PORT_EXPLICIT=true; shift 2 ;;
+        --slicer-host-port=*) SLICER_HOST_PORT="${1#*=}"; SLICER_HOST_PORT_EXPLICIT=true; shift ;;
+        --postgres-port)    POSTGRES_PORT="${2:?--postgres-port requires a number}"; POSTGRES_PORT_EXPLICIT=true; shift 2 ;;
+        --postgres-port=*)  POSTGRES_PORT="${1#*=}"; POSTGRES_PORT_EXPLICIT=true; shift ;;
         --host)             SERVER_HOST="${2:?--host requires a DNS hostname}"; SERVER_HOST_EXPLICIT=true; shift 2 ;;
         --host=*)           SERVER_HOST="${1#*=}"; SERVER_HOST_EXPLICIT=true; shift ;;
         --dir)              INSTALL_DIR="${2:?--dir requires a path}"; shift 2 ;;
         --dir=*)            INSTALL_DIR="${1#*=}"; shift ;;
         --db)               DB_ENGINE="${2:?--db requires sqlite or postgres}"; DB_EXPLICIT=true; shift 2 ;;
         --db=*)             DB_ENGINE="${1#*=}"; DB_EXPLICIT=true; shift ;;
-        --profile)          DEPLOY_PROFILE="${2:?--profile requires lite, standard, or full}"; shift 2 ;;
-        --profile=*)        DEPLOY_PROFILE="${1#*=}"; shift ;;
+        --with-orca-worker) WITH_ORCA_WORKER=true; WORKER_EXPLICIT=true; shift ;;
+        --image-set)        IMAGE_SET_FILE="${2:?--image-set requires a file}"; IMAGE_SET_EXPLICIT=true; shift 2 ;;
+        --image-set=*)      IMAGE_SET_FILE="${1#*=}"; IMAGE_SET_EXPLICIT=true; shift ;;
+        --name)             DEPLOYMENT_NAME="${2:?--name requires a value}"; NAME_EXPLICIT=true; shift 2 ;;
+        --name=*)           DEPLOYMENT_NAME="${1#*=}"; NAME_EXPLICIT=true; shift ;;
+        --bind-address)     BIND_ADDRESS="${2:?--bind-address requires an address}"; BIND_ADDRESS_EXPLICIT=true; shift 2 ;;
+        --bind-address=*)   BIND_ADDRESS="${1#*=}"; BIND_ADDRESS_EXPLICIT=true; shift ;;
+        --service-bind-address) SERVICE_BIND_ADDRESS="${2:?--service-bind-address requires an address}"; SERVICE_BIND_ADDRESS_EXPLICIT=true; shift 2 ;;
+        --service-bind-address=*) SERVICE_BIND_ADDRESS="${1#*=}"; SERVICE_BIND_ADDRESS_EXPLICIT=true; shift ;;
+        --profile)          DEPLOY_PROFILE="${2:?--profile requires lite, standard, or full}"; PROFILE_EXPLICIT=true; shift 2 ;;
+        --profile=*)        DEPLOY_PROFILE="${1#*=}"; PROFILE_EXPLICIT=true; shift ;;
         --with-spoolman)    SPOOLMAN_URL="${2:?--with-spoolman requires a URL}"; shift 2 ;;
         --with-spoolman=*)  SPOOLMAN_URL="${1#*=}"; shift ;;
         --dry-run)          DRY_RUN=true; shift ;;
@@ -283,6 +337,21 @@ validate_webauthn_host() {
        [[ "$host" =~ ^[0-9]+(\.[0-9]+){3}$ ]]; then
         die "Passkey host must be a bare DNS hostname, not an IP address, scheme, port, or path."
     fi
+}
+
+validate_bind_address() {
+    local address="$1" octet
+    local -a _bind_octets
+    [[ "$address" != *:* ]] || die "--bind-address does not support IPv6; use an IPv4 address or localhost."
+    [[ "$address" == "localhost" || "$address" == "127.0.0.1" ]] && return 0
+    [[ "$address" =~ ^([0-9]{1,3}\.){3}[0-9]{1,3}$ ]] ||
+        die "--bind-address must be localhost or a supported IPv4 address."
+    IFS=. read -r -a _bind_octets <<< "$address"
+    for octet in "${_bind_octets[@]}"; do
+        # Force base-10 interpretation so leading zeros (e.g. "010") are not
+        # misread as octal literals by bash arithmetic.
+        (( 10#$octet <= 255 )) || die "--bind-address contains an IPv4 octet outside 0-255."
+    done
 }
 
 if [[ "$SERVER_HOST_EXPLICIT" == "true" ]]; then
@@ -305,9 +374,18 @@ if [[ "$SHOW_HELP" == "true" ]]; then
     --profile PROFILE     Deployment profile (lite, standard, full)
     --version TAG         Container image tag to pull (default: latest)
     --port PORT           HTTP port to expose (default: 8080)
+    --api-port PORT       API port to expose (default: 5245)
+    --slicer-host-port PORT  Slicer-host port to expose (default: 5246)
+    --postgres-port PORT  PostgreSQL port to expose (default: 5432)
     --host HOST           Canonical browser hostname for passkeys (default: localhost)
     --dir DIR             Where to install (default: ./printfarmer)
     --db sqlite|postgres  Database engine (default: sqlite — zero config)
+    --with-orca-worker    Add slicer-host and one OrcaSlicer worker (requires --profile full --db postgres)
+    --image-set FILE      Read immutable per-service image references from FILE
+    --name NAME           Compose project and resource prefix (default: printfarmer)
+    --bind-address ADDR   Address for the public HTTP proxy (default: 0.0.0.0; API/DB remain loopback-only)
+    --service-bind-address ADDR  Address for direct API/DB/slicer-host binds (default: 127.0.0.1; set to
+                          0.0.0.0 only when you intentionally need non-proxied access to these services)
     --with-spoolman URL   Connect to Spoolman for filament tracking
     --dry-run             Generate config files without starting containers
     --reuse-config        Reuse existing .env if found (preserves secrets/DB config)
@@ -342,6 +420,9 @@ if [[ "$SHOW_HELP" == "true" ]]; then
 
     # Full install with monitoring and discovery
     ./install.sh --non-interactive --profile full
+
+    # Full microservices install with PostgreSQL, discovery, and OrcaSlicer
+    ./install.sh --non-interactive --profile full --db postgres --with-orca-worker
 
     # Upgrade to a specific version
     ./install.sh --upgrade --version v2.1.0
@@ -520,6 +601,67 @@ case "$DEPLOY_PROFILE" in
         ;;
 esac
 
+[[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
+    die "--name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens."
+validate_bind_address "$BIND_ADDRESS"
+validate_bind_address "$SERVICE_BIND_ADDRESS"
+for port_name in HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT; do
+    port_value="${!port_name}"
+    [[ "$port_value" =~ ^[1-9][0-9]{0,4}$ ]] && (( port_value <= 65535 )) ||
+        die "$port_name must be a port between 1 and 65535."
+done
+
+if [[ -n "$IMAGE_SET_FILE" ]]; then
+    [[ -r "$IMAGE_SET_FILE" ]] || die "--image-set must name a readable file."
+    if [[ "$IMAGE_SET_FILE" != /* ]]; then
+        IMAGE_SET_FILE="$(cd "$(dirname "$IMAGE_SET_FILE")" && pwd)/$(basename "$IMAGE_SET_FILE")"
+    fi
+    required_image_variables=(API_IMAGE FRONTEND_IMAGE)
+    # printer-discovery only exists for the full profile / worker topology.
+    # On a fresh install, $DEPLOY_PROFILE above already reflects the
+    # requested topology, so it's safe to require it here. On --upgrade,
+    # $DEPLOY_PROFILE is just this run's CLI default (--profile is normally
+    # omitted for upgrades) and does NOT yet reflect the installed
+    # topology — .env hasn't been read yet at this point in the script.
+    # Completeness for the *actual* installed topology is re-validated
+    # later, after .env is read, in the --upgrade block below; skip the
+    # profile-based requirement here for upgrades to avoid false rejections
+    # of valid standard-profile parameterized installs.
+    if [[ "$DO_UPGRADE" != "true" ]]; then
+        if [[ "$DEPLOY_PROFILE" == "full" || "$WITH_ORCA_WORKER" == "true" ]]; then
+            required_image_variables+=(PRINTER_DISCOVERY_IMAGE)
+        fi
+    fi
+    if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
+        required_image_variables+=(SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE)
+    fi
+    image_seen=""
+    while IFS= read -r image_line || [[ -n "$image_line" ]]; do
+        [[ -z "$image_line" || "$image_line" == \#* ]] && continue
+        if [[ ! "$image_line" =~ ^(API_IMAGE|FRONTEND_IMAGE|SLICER_HOST_IMAGE|ORCASLICER_WORKER_IMAGE|PRINTER_DISCOVERY_IMAGE)=(ghcr\.io/olyforge3d/printfarmer-[a-z-]+@sha256:[a-f0-9]{64})$ ]]; then
+            die "--image-set contains an invalid image reference."
+        fi
+        image_variable="${BASH_REMATCH[1]}"
+        image_reference="${BASH_REMATCH[2]}"
+        case "$image_variable" in
+            API_IMAGE) expected_repository="printfarmer-api" ;;
+            FRONTEND_IMAGE) expected_repository="printfarmer-frontend" ;;
+            PRINTER_DISCOVERY_IMAGE) expected_repository="printfarmer-printer-discovery" ;;
+            SLICER_HOST_IMAGE) expected_repository="printfarmer-slicer-host" ;;
+            ORCASLICER_WORKER_IMAGE) expected_repository="printfarmer-orcaslicer-worker" ;;
+        esac
+        [[ ",$image_seen," != *",$image_variable,"* ]] || die "--image-set contains duplicate ${image_variable}."
+        [[ "$image_reference" == "ghcr.io/olyforge3d/${expected_repository}@"* ]] ||
+            die "--image-set ${image_variable} must use ghcr.io/olyforge3d/${expected_repository}."
+        image_seen="${image_seen}${image_seen:+,}${image_variable}"
+        printf -v "${image_variable}_PRESERVED" '%s' "$image_reference"
+    done < "$IMAGE_SET_FILE"
+    for image_variable in "${required_image_variables[@]}"; do
+        [[ ",$image_seen," == *",$image_variable,"* ]] ||
+            die "--image-set must include a valid ${image_variable} digest."
+    done
+fi
+
 ok "Profile: $DEPLOY_PROFILE"
 
 # ═══════════════════════════════════════════════════════════════════════════
@@ -590,19 +732,69 @@ if [[ "$DO_UPGRADE" == "true" ]]; then
     fi
     step "Upgrading PrintFarmer"
     cd "$INSTALL_DIR"
-    if [[ "$IMAGE_TAG" != "latest" ]]; then
-        # Update .env with new image tag
+
+    # Validate compatibility with the existing generated compose BEFORE touching
+    # .env, so a legacy (pre-parameterized) compose file fails loudly and
+    # atomically instead of leaving .env partially rewritten.
+    if [[ -n "$IMAGE_SET_FILE" ]]; then
+        upgrade_worker_enabled=false
+        if grep -Eq '^WITH_ORCA_WORKER=(true|yes|1)$' .env 2>/dev/null; then
+            upgrade_worker_enabled=true
+        fi
+        upgrade_profile=$(grep '^DEPLOY_PROFILE=' .env 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        upgrade_image_variables=(API_IMAGE FRONTEND_IMAGE)
+        # printer-discovery only exists for the full profile (inline non-worker
+        # path) or unconditionally for the worker/microservices path — do not
+        # require PRINTER_DISCOVERY_IMAGE parameterization/coverage for a
+        # standard-profile install, which has no printer-discovery service.
+        if [[ "$upgrade_worker_enabled" == "true" || "$upgrade_profile" == "full" ]]; then
+            upgrade_image_variables+=(PRINTER_DISCOVERY_IMAGE)
+        fi
+        if [[ "$upgrade_worker_enabled" == "true" ]]; then
+            upgrade_image_variables+=(SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE)
+        fi
+        for image_variable in "${upgrade_image_variables[@]}"; do
+            grep -Fq "\${${image_variable}:-" docker-compose.yml ||
+                die "Pinned upgrade cannot update legacy docker-compose.yml: ${image_variable} is not parameterized. Reinstall or regenerate the compose file before retrying --image-set."
+        done
+        # The earlier top-of-script --image-set validation only required the
+        # variables implied by WITH_ORCA_WORKER as known at that point (before
+        # .env was read). Now that the installed topology is known, confirm
+        # the supplied --image-set actually covers every service this
+        # deployment runs — an incomplete set must fail atomically, before
+        # any .env mutation below.
+        for image_variable in "${upgrade_image_variables[@]}"; do
+            preserved_var="${image_variable}_PRESERVED"
+            [[ -n "${!preserved_var:-}" ]] ||
+                die "--image-set is missing ${image_variable}, which this installation's topology (profile=${upgrade_profile:-unknown}, WITH_ORCA_WORKER=${upgrade_worker_enabled}) requires. Provide a complete --image-set covering every deployed service before upgrading."
+        done
+    fi
+
+    if [[ "$IMAGE_TAG_EXPLICIT" == "true" ]]; then
+        # Update .env with the new image tag
         if [[ -f .env ]]; then
             if grep -q '^IMAGE_TAG=' .env; then
                 sed -i.bak "s/^IMAGE_TAG=.*/IMAGE_TAG=${IMAGE_TAG}/" .env && rm -f .env.bak
             fi
+            if [[ -z "$IMAGE_SET_FILE" ]]; then
+                # An explicit --version without --image-set means the caller wants
+                # the tag-derived image to take effect. Strip any previously
+                # pinned per-service *_IMAGE lines so they cannot silently
+                # override the new tag (see issue: digest-pinned installs were
+                # a no-op under --upgrade --version).
+                for image_variable in API_IMAGE FRONTEND_IMAGE SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE PRINTER_DISCOVERY_IMAGE; do
+                    sed -i.bak "/^${image_variable}=/d" .env && rm -f .env.bak
+                done
+            fi
         fi
         info "Image tag → ${IMAGE_TAG}"
     fi
+    apply_image_set_to_env ".env"
     ensure_upgrade_slicer_worker_key ".env" "docker-compose.yml"
     run_with_spinner "Pulling latest images" $COMPOSE_CMD pull || die "Pull failed"
     info "Restarting containers..."
-    $COMPOSE_CMD up -d --remove-orphans 2>/dev/null
+    $COMPOSE_CMD up -d --remove-orphans ||
+        die "Failed to restart containers during upgrade. Check the Compose output above for errors."
     ok "Upgrade complete"
     echo ""
     exit 0
@@ -856,13 +1048,27 @@ if [[ -n "$EXISTING_ENV" ]]; then
     _existing_connstr=$(grep "^ConnectionStrings__Default=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_provider=$(grep "^DB_PROVIDER=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_port=$(grep "^HTTP_PORT=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_api_port=$(grep "^API_PORT=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_slicer_port=$(grep "^SLICER_HOST_PORT=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_postgres_port=$(grep "^POSTGRES_PORT=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_bind_address=$(grep "^BIND_ADDRESS=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_service_bind_address=$(grep "^SERVICE_BIND_ADDRESS=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_project_name=$(grep "^COMPOSE_PROJECT_NAME=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_worker=$(grep "^WITH_ORCA_WORKER=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_profile=$(grep "^DEPLOY_PROFILE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_tag=$(grep "^IMAGE_TAG=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_api_image=$(grep "^API_IMAGE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_frontend_image=$(grep "^FRONTEND_IMAGE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_slicer_image=$(grep "^SLICER_HOST_IMAGE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_orca_image=$(grep "^ORCASLICER_WORKER_IMAGE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_discovery_image=$(grep "^PRINTER_DISCOVERY_IMAGE=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_spoolman=$(grep "^PFARM__Spoolman__BaseUrl=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_webauthn_rp_id=$(read_env_value "$EXISTING_ENV" "WebAuthn__RelyingPartyId")
     _existing_webauthn_rp_name=$(read_env_value "$EXISTING_ENV" "WebAuthn__RelyingPartyName")
     _existing_webauthn_origin=$(read_env_value "$EXISTING_ENV" "WebAuthn__Origin")
     _existing_worker_key="$(read_slicer_shared_key "$EXISTING_ENV")"
+    _existing_promotion_key=$(grep "^PROMOTION_SHARED_API_KEY=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+    _existing_discovery_key=$(grep "^DISCOVERY_SHARED_API_KEY=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
     _existing_grafana_pw=$(grep "^GRAFANA_ADMIN_PASSWORD=" "$EXISTING_ENV" 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
 
     # Apply preserved values (CLI flags override where explicitly set)
@@ -881,13 +1087,19 @@ if [[ -n "$EXISTING_ENV" ]]; then
             DB_ENGINE="$(lc "$_existing_provider")"
         fi
     fi
-    if [[ -n "$_existing_port" && "$HTTP_PORT" == "${PRINTFARMER_PORT:-8080}" ]]; then
+    if [[ -n "$_existing_port" && "$HTTP_PORT_EXPLICIT" != "true" ]]; then
         HTTP_PORT="$_existing_port"
     fi
-    if [[ -n "$_existing_profile" && -z "$DEPLOY_PROFILE" ]]; then
+    if [[ -n "$_existing_api_port" && "$API_PORT_EXPLICIT" != "true" ]]; then API_PORT="$_existing_api_port"; fi
+    if [[ -n "$_existing_slicer_port" && "$SLICER_HOST_PORT_EXPLICIT" != "true" ]]; then SLICER_HOST_PORT="$_existing_slicer_port"; fi
+    if [[ -n "$_existing_postgres_port" && "$POSTGRES_PORT_EXPLICIT" != "true" ]]; then POSTGRES_PORT="$_existing_postgres_port"; fi
+    if [[ -n "$_existing_bind_address" && "$BIND_ADDRESS_EXPLICIT" != "true" ]]; then BIND_ADDRESS="$_existing_bind_address"; fi
+    if [[ -n "$_existing_service_bind_address" && "$SERVICE_BIND_ADDRESS_EXPLICIT" != "true" ]]; then SERVICE_BIND_ADDRESS="$_existing_service_bind_address"; fi
+    if [[ -n "$_existing_project_name" && "$NAME_EXPLICIT" != "true" ]]; then DEPLOYMENT_NAME="$_existing_project_name"; fi
+    if [[ -n "$_existing_profile" && "$PROFILE_EXPLICIT" != "true" ]]; then
         DEPLOY_PROFILE="$_existing_profile"
     fi
-    if [[ -n "$_existing_tag" && "$IMAGE_TAG" == "${PRINTFARMER_VERSION:-latest}" ]]; then
+    if [[ -n "$_existing_tag" && "$IMAGE_TAG_EXPLICIT" != "true" && "$IMAGE_SET_EXPLICIT" != "true" ]]; then
         # Don't override if user explicitly passed --version
         IMAGE_TAG="$_existing_tag"
     fi
@@ -902,6 +1114,18 @@ if [[ -n "$EXISTING_ENV" ]]; then
     if [[ -n "$_existing_worker_key" ]]; then
         WORKER_SHARED_API_KEY_PRESERVED="$_existing_worker_key"
     fi
+    if [[ -n "$_existing_promotion_key" ]]; then PROMOTION_SHARED_API_KEY_PRESERVED="$_existing_promotion_key"; fi
+    if [[ -n "$_existing_discovery_key" ]]; then DISCOVERY_SHARED_API_KEY_PRESERVED="$_existing_discovery_key"; fi
+    if [[ -n "$_existing_worker" && "$WORKER_EXPLICIT" != "true" ]]; then
+        [[ "$_existing_worker" == "true" || "$_existing_worker" == "yes" || "$_existing_worker" == "1" ]] && WITH_ORCA_WORKER=true
+    fi
+    if [[ "$IMAGE_SET_EXPLICIT" != "true" && "$IMAGE_TAG_EXPLICIT" != "true" ]]; then
+        [[ "$_existing_api_image" == *@sha256:* ]] && API_IMAGE_PRESERVED="$_existing_api_image"
+        [[ "$_existing_frontend_image" == *@sha256:* ]] && FRONTEND_IMAGE_PRESERVED="$_existing_frontend_image"
+        [[ "$_existing_slicer_image" == *@sha256:* ]] && SLICER_HOST_IMAGE_PRESERVED="$_existing_slicer_image"
+        [[ "$_existing_orca_image" == *@sha256:* ]] && ORCASLICER_WORKER_IMAGE_PRESERVED="$_existing_orca_image"
+        [[ "$_existing_discovery_image" == *@sha256:* ]] && PRINTER_DISCOVERY_IMAGE_PRESERVED="$_existing_discovery_image"
+    fi
     if [[ -n "$_existing_grafana_pw" ]]; then
         GRAFANA_ADMIN_PASSWORD_PRESERVED="$_existing_grafana_pw"
     fi
@@ -913,10 +1137,49 @@ if [[ -n "$EXISTING_ENV" ]]; then
 fi
 
 validate_webauthn_host "$SERVER_HOST"
+HTTP_ONLY_MODE=false
+if [[ "$SERVER_HOST" == "localhost" || "$SERVER_HOST" == "127.0.0.1" ]]; then
+    HTTP_ONLY_MODE=true
+fi
+
+# Revalidate the effective values after loading an existing installation. CLI
+# flags override preserved topology, and compatibility is checked only after
+# both have been combined.
+case "$DEPLOY_PROFILE" in
+    lite)
+        [[ "$DB_ENGINE" == "sqlite" ]] || die "Lite profile requires SQLite."
+        ;;
+    full)
+        [[ "$DB_ENGINE" == "sqlite" || "$DB_ENGINE" == "postgres" ]] ||
+            die "Full profile supports only SQLite or PostgreSQL."
+        ;;
+    standard)
+        ;;
+    *)
+        die "Invalid effective profile '$DEPLOY_PROFILE'. Choose: lite, standard, full."
+        ;;
+esac
+if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
+    [[ "$DEPLOY_PROFILE" == "full" ]] ||
+        die "--with-orca-worker requires --profile full."
+    [[ "$DB_ENGINE" == "postgres" ]] ||
+        die "--with-orca-worker requires --db postgres."
+fi
+[[ "$DEPLOYMENT_NAME" =~ ^[a-z][a-z0-9-]{0,62}$ ]] ||
+    die "--name must start with a lowercase letter and contain only lowercase letters, digits, and hyphens."
+validate_bind_address "$BIND_ADDRESS"
+validate_bind_address "$SERVICE_BIND_ADDRESS"
+for port_name in HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT; do
+    port_value="${!port_name}"
+    [[ "$port_value" =~ ^[1-9][0-9]{0,4}$ ]] && (( port_value <= 65535 )) ||
+        die "$port_name must be a port between 1 and 65535."
+done
 
 # ─── Generate secrets ───────────────────────────────────────────────────────
 JWT_KEY="${JWT_KEY_PRESERVED:-$(generate_secret 64)}"
 WORKER_SHARED_API_KEY="${WORKER_SHARED_API_KEY:-${WORKER_SHARED_API_KEY_PRESERVED:-$(generate_secret 64)}}"
+PROMOTION_SHARED_API_KEY="${PROMOTION_SHARED_API_KEY:-${PROMOTION_SHARED_API_KEY_PRESERVED:-$(generate_secret 64)}}"
+DISCOVERY_SHARED_API_KEY="${DISCOVERY_SHARED_API_KEY:-${DISCOVERY_SHARED_API_KEY_PRESERVED:-$(generate_secret 64)}}"
 # Grafana ships no safe default (see issue #1295); generate one whenever the
 # "full" profile (which includes the monitoring stack) is selected so the
 # compose file never has to fall back to a well-known admin/admin password.
@@ -982,7 +1245,14 @@ if [[ "$DB_ENGINE" == "postgres" ]]; then
 REGISTRY_HOST=${REGISTRY_HOST}
 IMAGE_TAG=${IMAGE_TAG}
 HTTP_PORT=${HTTP_PORT}
+API_PORT=${API_PORT}
+SLICER_HOST_PORT=${SLICER_HOST_PORT}
+POSTGRES_PORT=${POSTGRES_PORT}
+BIND_ADDRESS=${BIND_ADDRESS}
+SERVICE_BIND_ADDRESS=${SERVICE_BIND_ADDRESS}
 DEPLOY_PROFILE=${DEPLOY_PROFILE}
+COMPOSE_PROJECT_NAME=${DEPLOYMENT_NAME}
+HTTP_ONLY=${HTTP_ONLY_MODE}
 
 # Database: PostgreSQL
 DB_PROVIDER=Postgres
@@ -996,6 +1266,8 @@ Jwt__Key=${JWT_KEY}
 Jwt__Issuer=PrintFarmer
 Jwt__Audience=PrintFarmer
 WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
+PROMOTION_SHARED_API_KEY=${PROMOTION_SHARED_API_KEY}
+DISCOVERY_SHARED_API_KEY=${DISCOVERY_SHARED_API_KEY}
 
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
@@ -1007,6 +1279,8 @@ WebAuthn__Origin=${WEBAUTHN_ORIGIN}
 ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
+PFARM__NetworkDiscovery__DiscoverySubnets=${DISCOVERY_SUBNETS:-}
+DISCOVERY_SUBNETS=${DISCOVERY_SUBNETS:-}
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
 ENVEOF
 else
@@ -1017,7 +1291,14 @@ else
 REGISTRY_HOST=${REGISTRY_HOST}
 IMAGE_TAG=${IMAGE_TAG}
 HTTP_PORT=${HTTP_PORT}
+API_PORT=${API_PORT}
+SLICER_HOST_PORT=${SLICER_HOST_PORT}
+POSTGRES_PORT=${POSTGRES_PORT}
+BIND_ADDRESS=${BIND_ADDRESS}
+SERVICE_BIND_ADDRESS=${SERVICE_BIND_ADDRESS}
 DEPLOY_PROFILE=${DEPLOY_PROFILE}
+COMPOSE_PROJECT_NAME=${DEPLOYMENT_NAME}
+HTTP_ONLY=${HTTP_ONLY_MODE}
 
 # Database: SQLite (zero config)
 DB_PROVIDER=Sqlite
@@ -1028,6 +1309,8 @@ Jwt__Key=${JWT_KEY}
 Jwt__Issuer=PrintFarmer
 Jwt__Audience=PrintFarmer
 WORKER_SHARED_API_KEY=${WORKER_SHARED_API_KEY}
+PROMOTION_SHARED_API_KEY=${PROMOTION_SHARED_API_KEY}
+DISCOVERY_SHARED_API_KEY=${DISCOVERY_SHARED_API_KEY}
 
 # Runtime
 ASPNETCORE_ENVIRONMENT=Production
@@ -1039,12 +1322,30 @@ WebAuthn__Origin=${WEBAUTHN_ORIGIN}
 ALLOW_LOCAL_NETWORK=false
 ALLOWED_NETWORK_RANGES=192.168.0.0/16,10.0.0.0/8,172.16.0.0/12
 PFARM__NetworkDiscovery__EnableDiscovery=true
+PFARM__NetworkDiscovery__DiscoverySubnets=${DISCOVERY_SUBNETS:-}
+DISCOVERY_SUBNETS=${DISCOVERY_SUBNETS:-}
 PFARM__Spoolman__BaseUrl=${SPOOLMAN_URL}
 ENVEOF
 fi
 
+printf '\n# Installer topology and service images\n' >> "$ENV_TEMP_FILE"
+cat >> "$ENV_TEMP_FILE" <<TOPOLOGYE
+WITH_ORCA_WORKER=${WITH_ORCA_WORKER}
+INSTALLER_LAB=true
+TOPOLOGYE
+if [[ -n "$IMAGE_SET_FILE" || -n "${API_IMAGE_PRESERVED:-}" || -n "${FRONTEND_IMAGE_PRESERVED:-}" || -n "${SLICER_HOST_IMAGE_PRESERVED:-}" || -n "${ORCASLICER_WORKER_IMAGE_PRESERVED:-}" || -n "${PRINTER_DISCOVERY_IMAGE_PRESERVED:-}" ]]; then
+    printf 'API_IMAGE=%s\n' "${API_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'FRONTEND_IMAGE=%s\n' "${FRONTEND_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'SLICER_HOST_IMAGE=%s\n' "${SLICER_HOST_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-slicer-host:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'ORCASLICER_WORKER_IMAGE=%s\n' "${ORCASLICER_WORKER_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-orcaslicer-worker:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+    printf 'PRINTER_DISCOVERY_IMAGE=%s\n' "${PRINTER_DISCOVERY_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}" >> "$ENV_TEMP_FILE"
+fi
+if [[ -n "$IMAGE_SET_FILE" ]]; then
+    printf '# Immutable release image set: %s\n' "$IMAGE_SET_FILE" >> "$ENV_TEMP_FILE"
+fi
+
 # Append monitoring credentials when the "full" profile enables Grafana
-if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+if [[ "$DEPLOY_PROFILE" == "full" && "$WITH_ORCA_WORKER" != "true" ]]; then
     cat >> "$ENV_TEMP_FILE" <<MONITORINGEOF
 
 # Monitoring (Grafana admin credentials — no default; see issue #1295)
@@ -1085,6 +1386,44 @@ trap - EXIT INT TERM HUP
 
 ok "Environment config"
 
+if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
+    INSTALLER_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    CANONICAL_COMPOSE_GENERATOR="$INSTALLER_ROOT/scripts/docker/compose-generator.sh"
+    [[ -x "$CANONICAL_COMPOSE_GENERATOR" ]] ||
+        die "Canonical compose generator is unavailable: $CANONICAL_COMPOSE_GENERATOR"
+
+    info "Generating canonical microservices deployment"
+    (
+        cd "$INSTALL_DIR"
+        export DB_PROVIDER="Postgres"
+        export POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD
+        export ConnectionStrings__Default="$CONNSTR"
+        export Jwt__Key="$JWT_KEY" Jwt__Issuer Jwt__Audience
+        export WORKER_SHARED_API_KEY PROMOTION_SHARED_API_KEY DISCOVERY_SHARED_API_KEY
+        export HTTP_PORT API_PORT SLICER_HOST_PORT POSTGRES_PORT BIND_ADDRESS SERVICE_BIND_ADDRESS DEPLOYMENT_NAME
+        export COMPOSE_PROJECT_NAME="$DEPLOYMENT_NAME"
+        export INSTALLER_LAB=true
+        export HTTP_ONLY="$HTTP_ONLY_MODE"
+        export PFARM__NetworkDiscovery__EnableDiscovery=true
+        if [[ -n "${DISCOVERY_SUBNETS:-}" ]]; then
+            export PFARM__NetworkDiscovery__DiscoverySubnets="$DISCOVERY_SUBNETS"
+            export DISCOVERY_SUBNETS
+        fi
+        export API_IMAGE="${API_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}"
+        export FRONTEND_IMAGE="${FRONTEND_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}"
+        export SLICER_HOST_IMAGE="${SLICER_HOST_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-slicer-host:${IMAGE_TAG}}"
+        export ORCASLICER_WORKER_IMAGE="${ORCASLICER_WORKER_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-orcaslicer-worker:${IMAGE_TAG}}"
+        export PRINTER_DISCOVERY_IMAGE="${PRINTER_DISCOVERY_IMAGE_PRESERVED:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}"
+        "$CANONICAL_COMPOSE_GENERATOR" \
+            --output-dir "$INSTALL_DIR" \
+            --db-provider postgres \
+            --include-discovery \
+            --enable-orca-worker yes \
+            --exclude-monitoring \
+            --exclude-telemetry
+    ) || die "Canonical compose generation failed."
+    ok "Canonical microservices configuration"
+else
 # ─── Generate nginx config (standard/full only — lite serves directly) ──────
 if [[ "$DEPLOY_PROFILE" != "lite" ]]; then
 mkdir -p "$INSTALL_DIR/nginx"
@@ -1119,8 +1458,15 @@ http {
         server_name _;
 
         # Health endpoints
+        location = /nginx-health { default_type text/plain; return 200 "ok\n"; }
         location = /healthz { proxy_pass http://api_backend/healthz; proxy_http_version 1.1; proxy_set_header Host $host; }
         location = /health  { proxy_pass http://api_backend/health;  proxy_http_version 1.1; proxy_set_header Host $host; }
+NGINXEOF
+
+if [[ "$HTTP_ONLY_MODE" != "true" ]]; then
+# CA distribution endpoints (iOS trust workflow) — only relevant when TLS
+# certs are actually provisioned; HTTP-only lab installs never mount certs.
+cat >> "$INSTALL_DIR/nginx/nginx-proxy.conf" <<'NGINXEOF_CA'
         location = /ca.cer {
             alias /etc/nginx/certs/ca.cer;
             default_type application/x-x509-ca-cert;
@@ -1130,7 +1476,10 @@ http {
             default_type text/html;
             return 200 '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Install PrintFarmer CA</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:48rem;margin:0 auto;padding:2rem;line-height:1.5;color:#111827}h1{font-size:1.75rem;margin-bottom:0.5rem}a.button{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:0.85rem 1.1rem;border-radius:0.6rem;font-weight:600;margin:1rem 0}ol{padding-left:1.25rem}code{background:#f3f4f6;padding:0.15rem 0.35rem;border-radius:0.3rem}</style></head><body><h1>Install the PrintFarmer iPhone certificate</h1><p>Use Safari on your iPhone or iPad.</p><p><a class="button" href="/ca.cer">Download PrintFarmer CA</a></p><ol><li>Tap <strong>Download</strong> when Safari asks.</li><li>Open <strong>Settings</strong>. You should see <strong>Profile Downloaded</strong> near the top.</li><li>Tap the downloaded profile and choose <strong>Install</strong>.</li><li>Then go to <strong>Settings &gt; General &gt; About &gt; Certificate Trust Settings</strong>.</li><li>Enable trust for <strong>PrintFarmer Local CA</strong>.</li><li>If you previously installed a certificate named <strong>PrintFarmer</strong>, remove it. Only trust <strong>PrintFarmer Local CA</strong>; do not install <code>tls.crt</code>.</li><li>Return to the PrintFarmer app and sign in again.</li></ol><p>If you are opening this page over <code>http://</code>, that is expected. The certificate must be installed before iPhone will trust your local <code>https://</code> server.</p></body></html>';
         }
+NGINXEOF_CA
+fi
 
+cat >> "$INSTALL_DIR/nginx/nginx-proxy.conf" <<'NGINXEOF'
         # API — long timeout for gcode dispatch
         location ~ ^/api/job-queue/[^/]+/dispatch$ {
             proxy_pass http://api_backend;
@@ -1205,16 +1554,16 @@ if [[ "$DEPLOY_PROFILE" == "lite" ]]; then
 # Profile: lite | Database: sqlite | Single container
 # Docs: https://github.com/OlyForge3D/PrintFarmer
 
-name: printfarmer
+name: ${DEPLOYMENT_NAME}
 
 services:
   # PrintFarmer Monolith (API + Frontend in one container)
   printfarmer:
-    image: \${REGISTRY_HOST}/printfarmer-monolith:\${IMAGE_TAG}
-    container_name: printfarmer-monolith
+    image: \${MONOLITH_IMAGE:-\${REGISTRY_HOST}/printfarmer-monolith:\${IMAGE_TAG}}
+    container_name: ${DEPLOYMENT_NAME}-monolith
     restart: unless-stopped
     ports:
-      - "\${HTTP_PORT:-8080}:5000"
+      - "\${BIND_ADDRESS:-0.0.0.0}:\${HTTP_PORT:-8080}:5000"
     environment:
       - DEPLOYMENT_MODE=monolith
       - ASPNETCORE_ENVIRONMENT=\${ASPNETCORE_ENVIRONMENT:-Production}
@@ -1263,7 +1612,7 @@ volumes:
 
 networks:
   printfarmer-network:
-    name: printfarmer-network
+    name: ${DEPLOYMENT_NAME}-network
     driver: bridge
 COMPOSEEOF
 
@@ -1281,12 +1630,14 @@ else
   # PostgreSQL database
   database:
     image: postgres:16-alpine
-    container_name: printfarmer-database
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-database
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-printfarmer}
       POSTGRES_USER: ${POSTGRES_USER:-printfarmer}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    ports:
+      - "${SERVICE_BIND_ADDRESS:-127.0.0.1}:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - printfarmer-database:/var/lib/postgresql/data
     healthcheck:
@@ -1307,8 +1658,8 @@ else
         compose_extra_services='
   # Printer Discovery Service
   printer-discovery:
-    image: ${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}
-    container_name: printfarmer-printer-discovery
+    image: ${PRINTER_DISCOVERY_IMAGE:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-printer-discovery
     restart: unless-stopped
     entrypoint: ["dotnet", "Farm.PrinterDiscovery.dll"]
     environment:
@@ -1317,7 +1668,7 @@ else
       - Discovery__ApiBaseUrl=http://api:5245
       - EnablePeriodicDiscovery=${ENABLE_PERIODIC_DISCOVERY:-true}
       - ScanIntervalSeconds=${SCAN_INTERVAL_SECONDS:-300}
-      - Subnets=${DISCOVERY_SUBNETS:-192.168.0.0/24}
+      - Subnets=${DISCOVERY_SUBNETS:-}
       - ProbeTimeoutMs=${PROBE_TIMEOUT_MS:-1000}
       - MaxConcurrentProbes=${MAX_CONCURRENT_PROBES:-50}
       - PFARM__NetworkDiscovery__EnableDiscovery=${PFARM__NetworkDiscovery__EnableDiscovery:-true}
@@ -1342,7 +1693,7 @@ else
   # Prometheus — metrics collection
   prometheus:
     image: prom/prometheus:latest
-    container_name: printfarmer-prometheus
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-prometheus
     restart: unless-stopped
     command:
       - "--config.file=/etc/prometheus/prometheus.yml"
@@ -1365,7 +1716,7 @@ else
   # Grafana — dashboards
   grafana:
     image: grafana/grafana:latest
-    container_name: printfarmer-grafana
+    container_name: ${COMPOSE_PROJECT_NAME:-printfarmer}-grafana
     restart: unless-stopped
     environment:
       GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?GRAFANA_ADMIN_PASSWORD must be set to enable the monitoring stack}
@@ -1387,20 +1738,35 @@ else
   printfarmer-grafana-data:'
     fi
 
+    # HTTP-only lab installs never provision TLS certs, so cert mounts and the
+    # frontend "volumes:" stanza (which today only carries the certs mount)
+    # are omitted entirely rather than referencing a directory that is never
+    # populated.
+    frontend_volumes_block=""
+    nginx_proxy_certs_mount=""
+    if [[ "$HTTP_ONLY_MODE" != "true" ]]; then
+        frontend_volumes_block='    volumes:
+      - ./nginx/certs:/etc/nginx/certs:ro'
+        nginx_proxy_certs_mount='
+      - ./nginx/certs:/etc/nginx/certs:ro'
+    fi
+
     cat > "$INSTALL_DIR/docker-compose.yml" <<COMPOSEEOF
 # PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
 # Profile: ${DEPLOY_PROFILE} | Database: ${DB_ENGINE} | Images: \${REGISTRY_HOST}/*:\${IMAGE_TAG}
 # Docs: https://github.com/OlyForge3D/PrintFarmer
 
-name: printfarmer
+name: ${DEPLOYMENT_NAME}
 
 services:
 ${compose_database_service}
   # PrintFarmer API
   api:
-    image: \${REGISTRY_HOST}/printfarmer-api:\${IMAGE_TAG}
-    container_name: printfarmer-api
+    image: \${API_IMAGE:-\${REGISTRY_HOST}/printfarmer-api:\${IMAGE_TAG}}
+    container_name: ${DEPLOYMENT_NAME}-api
     restart: unless-stopped
+    ports:
+      - "\${SERVICE_BIND_ADDRESS:-127.0.0.1}:\${API_PORT:-5245}:5245"
 ${compose_api_depends}
     environment:
       - ASPNETCORE_ENVIRONMENT=\${ASPNETCORE_ENVIRONMENT:-Production}
@@ -1442,8 +1808,8 @@ ${compose_api_depends}
 
   # React Frontend (Nginx)
   frontend:
-    image: \${REGISTRY_HOST}/printfarmer-frontend:\${IMAGE_TAG}
-    container_name: printfarmer-frontend
+    image: \${FRONTEND_IMAGE:-\${REGISTRY_HOST}/printfarmer-frontend:\${IMAGE_TAG}}
+    container_name: ${DEPLOYMENT_NAME}-frontend
     restart: unless-stopped
     depends_on:
       api:
@@ -1455,26 +1821,24 @@ ${compose_api_depends}
       interval: 30s
       timeout: 10s
       retries: 3
-    volumes:
-      - ./nginx/certs:/etc/nginx/certs:ro
+${frontend_volumes_block}
     networks:
       - printfarmer-network
 
   # Nginx reverse proxy — single entry point
   nginx-proxy:
-    image: nginx:alpine
-    container_name: printfarmer-nginx-proxy
+    image: \${NGINX_IMAGE:-nginx:alpine}
+    container_name: ${DEPLOYMENT_NAME}-nginx-proxy
     restart: unless-stopped
     ports:
-      - "\${HTTP_PORT:-8080}:80"
+      - "\${BIND_ADDRESS:-0.0.0.0}:\${HTTP_PORT:-8080}:80"
     volumes:
-      - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro${nginx_proxy_certs_mount}
     depends_on:
       - frontend
       - api
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:80/healthz"]
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:80/nginx-health"]
       interval: 30s
       timeout: 10s
       retries: 3
@@ -1493,16 +1857,17 @@ ${compose_extra_volumes}
 
 networks:
   printfarmer-network:
-    name: printfarmer-network
+    name: ${DEPLOYMENT_NAME}-network
     driver: bridge
 COMPOSEEOF
 
 fi
 
 ok "docker-compose.yml"
+fi
 
 # ─── Generate monitoring config for full profile ────────────────────────────
-if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+if [[ "$DEPLOY_PROFILE" == "full" && "$WITH_ORCA_WORKER" != "true" ]]; then
     mkdir -p "$INSTALL_DIR/monitoring/prometheus"
     cat > "$INSTALL_DIR/monitoring/prometheus/prometheus.yml" <<'PROMEOF'
 global:
@@ -1572,10 +1937,12 @@ echo ""
 printf "  ${DIM}Files generated:${NC}\n"
 printf "    ${DIM}%s/docker-compose.yml${NC}\n" "$INSTALL_DIR"
 printf "    ${DIM}%s/.env${NC}\n" "$INSTALL_DIR"
-if [[ "$DEPLOY_PROFILE" != "lite" ]]; then
+if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
+    printf "    ${DIM}%s/deploy/nginx/nginx-proxy-split.conf${NC}\n" "$INSTALL_DIR"
+elif [[ "$DEPLOY_PROFILE" != "lite" ]]; then
     printf "    ${DIM}%s/nginx/nginx-proxy.conf${NC}\n" "$INSTALL_DIR"
 fi
-if [[ "$DEPLOY_PROFILE" == "full" ]]; then
+if [[ "$DEPLOY_PROFILE" == "full" && "$WITH_ORCA_WORKER" != "true" ]]; then
     printf "    ${DIM}%s/monitoring/prometheus/prometheus.yml${NC}\n" "$INSTALL_DIR"
 fi
 printf "    ${DIM}%s/printfarmer.sh${NC}\n" "$INSTALL_DIR"
@@ -1607,7 +1974,7 @@ if [[ "$START" == "true" ]]; then
         || die "Failed to pull images. Check your internet connection and try again."
 
     info "Starting containers..."
-    $COMPOSE_CMD up -d --remove-orphans 2>/dev/null
+    $COMPOSE_CMD up -d --remove-orphans || die "Failed to start containers. Check the Compose output above for the service or port conflict."
 
     # Wait for health
     echo ""
@@ -1620,11 +1987,11 @@ if [[ "$START" == "true" ]]; then
 
     # Container name depends on profile
     if [[ "$DEPLOY_PROFILE" == "lite" ]]; then
-        HEALTH_CONTAINER="printfarmer-monolith"
+        HEALTH_CONTAINER="${DEPLOYMENT_NAME}-monolith"
         HEALTH_LABEL="Monolith"
         LOGS_SERVICE="printfarmer"
     else
-        HEALTH_CONTAINER="printfarmer-api"
+        HEALTH_CONTAINER="${DEPLOYMENT_NAME}-api"
         HEALTH_LABEL="API"
         LOGS_SERVICE="api"
     fi
@@ -1656,7 +2023,7 @@ if [[ "$START" == "true" ]]; then
     printf "  ${BOLD}Open in your browser:${NC}\n"
     if [[ "$SERVER_HOST" == "localhost" ]]; then
         printf "    Local:   ${BOLD}${CYAN}http://localhost:${HTTP_PORT}${NC}\n"
-        if [[ "$LAN_IP" != "localhost" ]]; then
+        if [[ "$LAN_IP" != "localhost" && "$BIND_ADDRESS" != "127.0.0.1" && "$BIND_ADDRESS" != "localhost" ]]; then
             printf "    Network: ${BOLD}${CYAN}http://${LAN_IP}:${HTTP_PORT}${NC}\n"
         fi
     else

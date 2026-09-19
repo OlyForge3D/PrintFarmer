@@ -51,13 +51,13 @@ x-worker-deployment: &worker-deployment
 
 volumes:
   orcaslicer-custom-profiles:
-    name: printfarmer-custom-profiles-${ORCASLICER_VERSION:-2.4.2}
+    name: ${COMPOSE_PROJECT_NAME:-printfarmer}-custom-profiles-${ORCASLICER_VERSION:-2.4.2}
 
 services:
   orcaslicer-worker:
     build:
       <<: *orcaslicer-build
-    image: printfarmer-orcaslicer-worker
+    image: ${ORCASLICER_WORKER_IMAGE:-printfarmer-orcaslicer-worker}
     environment:
       - ASPNETCORE_ENVIRONMENT=Production
       - ASPNETCORE_URLS=http://+:8080

@@ -72,6 +72,53 @@ The script will:
 3. Configure database and networking
 4. Deploy and verify everything works
 
+### WSL local auto-update lab
+
+The canonical end-user installer supports an isolated, certificate-free WSL lab
+with PostgreSQL, socket-free printer discovery, slicer-host, and one
+authenticated OrcaSlicer worker:
+
+```bash
+./install.sh --non-interactive --profile full --db postgres --with-orca-worker \
+  --image-set ./v0.2.3-insider.2-images.env \
+  --name printfarmer-autoupdate-lab --bind-address 127.0.0.1 \
+  --port 28081 --api-port 15245 --slicer-host-port 15246 \
+  --postgres-port 15432 --dir "$HOME/printfarmer-autoupdate-lab"
+```
+
+`--with-orca-worker` requires the full PostgreSQL profile. It invokes the
+canonical Compose generator, which adds `slicer-host`, its authenticated
+`orcaslicer-worker`, the hardened socket-free `printer-discovery` service, and
+the split proxy routes for slicer APIs. Set `DISCOVERY_SUBNETS` before invoking
+the installer to a printer subnet reachable from Docker's bridge network.
+No Docker socket, elevated container capabilities, or proxy sidecar is
+needed — discovery traffic reaches the configured subnet through the
+socket-free bridge on Docker's default (bridge-mode) network.
+
+The generated proxy is HTTP-only when installed this way, so users do not need
+TLS certificates for a `localhost` or loopback-only lab. `--bind-address
+127.0.0.1` binds all published service ports to WSL loopback; `--name` isolates
+Compose containers, networks, and named volumes; `--dir` isolates generated
+configuration and bind-mounted data. `--port`, `--api-port`,
+`--slicer-host-port`, and `--postgres-port` make every published port explicit,
+so the lab can coexist with another deployment.
+
+Direct, non-proxied service ports (API, PostgreSQL, slicer-host) always bind to
+`--service-bind-address` (env `PRINTFARMER_SERVICE_BIND_ADDRESS`), independent
+of `--bind-address`, and default to `127.0.0.1`. Only pass
+`--service-bind-address 0.0.0.0` (or another non-loopback address) if you
+intentionally need to reach these services directly from other machines on
+your LAN — doing so exposes the database and the unproxied API without TLS or
+the reverse proxy's routing, so treat it as an explicit, informed opt-in, not
+a default.
+
+Use `--version` for a published common image tag. If a release publishes only
+immutable per-service images, pass `--image-set`. The file must provide
+`API_IMAGE`, `FRONTEND_IMAGE`, `SLICER_HOST_IMAGE`, `ORCASLICER_WORKER_IMAGE`,
+and `PRINTER_DISCOVERY_IMAGE`; every value must be the corresponding
+`ghcr.io/olyforge3d/printfarmer-*` `@sha256:` reference. The installer validates
+and persists these references in its owner-readable `.env`.
+
 ### iPhone / iPad HTTPS trust
 
 If you are using local HTTPS for the iOS app, generate or regenerate the certificates with:
