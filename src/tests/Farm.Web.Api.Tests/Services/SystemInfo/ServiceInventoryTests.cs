@@ -337,7 +337,7 @@ public sealed class ServiceInventoryTests
     }
 
     [Fact]
-    public void Readiness_ValidButDifferentPlatformDigest_Blocks()
+    public void Readiness_ValidButDifferentPlatformDigest_IsEligibleForUpdate()
     {
         string observedDigest = "sha256:" + new string('c', 64);
         string signedDigest = "sha256:" + new string('d', 64);
@@ -352,9 +352,9 @@ public sealed class ServiceInventoryTests
 
         ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
 
-        Assert.Equal(InventoryEligibility.Blocked, result.State);
-        Assert.Equal("PlatformMismatchOrInvalidDigestEvidence:api", Assert.Single(result.Reasons));
-        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence"], result.Hops);
+        Assert.Equal(InventoryEligibility.Eligible, result.State);
+        Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
     }
 
     [Fact]
