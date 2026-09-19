@@ -171,9 +171,6 @@ export const SETTINGS_TABS: SettingsTab[] = SETTINGS_CATEGORIES.map((category) =
 export const DEFAULT_SCOPE: SettingsScopeId = 'user';
 export const DEFAULT_CATEGORY = getDefaultCategoryForScope(DEFAULT_SCOPE);
 
-/** @deprecated Use DEFAULT_CATEGORY instead */
-export const DEFAULT_TAB = DEFAULT_CATEGORY;
-
 export function isSettingsScope(value: string | null | undefined): value is SettingsScopeId {
   return value === 'user' || value === 'system';
 }
