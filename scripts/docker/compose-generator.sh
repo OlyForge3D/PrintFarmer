@@ -1178,7 +1178,11 @@ copy_configs() {
         cp "$CONFIGS_DIR/docker-entrypoint-config.sh" "$output_dir/"
     fi
 
-    if [[ -d "$REPO_ROOT/deploy/nginx" ]]; then
+    if [[ ! -d "$REPO_ROOT/deploy/nginx" ]]; then
+        log_error "Required nginx configuration directory is missing or not a directory: $REPO_ROOT/deploy/nginx"
+        return 1
+    fi
+
         local source_nginx_dir
         local target_nginx_dir
         local target_nginx_path
@@ -1210,20 +1214,27 @@ copy_configs() {
             nginx-proxy.conf \
             nginx-proxy-split.conf \
             nginx-frontend.conf \
+            nginx.conf \
             conf.d/frontend-app.conf; do
             if [[ ! -f "$source_nginx_dir/$nginx_config" ]]; then
                 log_error "Required nginx configuration is missing or not a regular file: $source_nginx_dir/$nginx_config"
                 return 1
             fi
         done
-        if [[ ! -d "$source_nginx_dir/certs" ]]; then
-            log_error "Required nginx certificate directory is missing or not a directory: $source_nginx_dir/certs"
+        if [[ -e "$source_nginx_dir/certs" && ! -d "$source_nginx_dir/certs" ]]; then
+            log_error "Nginx certificate path is not a directory: $source_nginx_dir/certs"
             return 1
         fi
 
         if [[ "$source_nginx_dir" != "$target_nginx_dir" ]]; then
-            rm -rf "$target_nginx_path"
-            cp -r "$source_nginx_dir" "$target_nginx_path"
+            if ! rm -rf "$target_nginx_path"; then
+                log_error "Unable to remove existing nginx configuration output: $target_nginx_path"
+                return 1
+            fi
+            if ! cp -r "$source_nginx_dir" "$target_nginx_path"; then
+                log_error "Unable to copy nginx configuration to: $target_nginx_path"
+                return 1
+            fi
             target_nginx_dir="$(cd "$target_nginx_path" && pwd -P)" || {
                 log_error "Unable to resolve copied nginx configuration output: $target_nginx_path"
                 return 1
@@ -1272,7 +1283,6 @@ with open(path, "w") as f:
     f.writelines(out)
 PY
         fi
-    fi
     
     # Copy additional configs based on what's included
     if [[ "$INCLUDE_MONITORING" == "true" ]]; then

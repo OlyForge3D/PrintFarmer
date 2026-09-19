@@ -129,11 +129,12 @@ test_in_place_generation_preserves_nginx_configs() {
     local fixture_root="$TEST_TEMP_DIR/in-place-root"
     local helper_script="$TEST_TEMP_DIR/in-place-copy-configs-helper.sh"
     local out_dir="$TEST_TEMP_DIR/out-of-place-root"
-    mkdir -p "$fixture_root/deploy/nginx/conf.d" "$fixture_root/deploy/nginx/certs" "$fixture_root/configs"
+    mkdir -p "$fixture_root/deploy/nginx/conf.d" "$fixture_root/configs"
     for nginx_config in \
         nginx-proxy.conf \
         nginx-proxy-split.conf \
         nginx-frontend.conf \
+        nginx.conf \
         conf.d/frontend-app.conf; do
         printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/$nginx_config"
     done

@@ -121,6 +121,7 @@ jobs:
           setup
           trap teardown EXIT
           test_in_place_generation_preserves_nginx_configs
+          [[ "$TESTS_FAILED" -eq 0 ]]
 
       # Issue #2620: the full test-compose-generator.sh suite remains excluded
       # from this CI job per #1308, but these three regression functions are
