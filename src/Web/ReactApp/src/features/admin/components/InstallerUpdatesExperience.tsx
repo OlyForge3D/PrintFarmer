@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/common/components/ui";
 import { Modal } from "@/common/components/modals/Modal";
 import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
+import { getErrorMessage, isApiError } from "@/common/utils/apiErrors";
 import type {
   HostUpdateManualAuthorizationResponse,
   HostUpdateRecoveryResult,
@@ -19,6 +20,7 @@ const MANUAL_DISABLED_REASON =
   "Update now is unavailable because the runtime execution contract, including its constrained executor, fresh host evidence, recovery, reauthentication, and request-origin protections, is not available.";
 const AUTO_DISABLED_REASON =
   "Auto-update is off and unavailable because the runtime scheduler, bounded standing-permission, maintenance-window, recovery, and host-policy contract is not available.";
+const MANUAL_UPDATE_RELEASE_KEY = "printfarmer.manual-host-update.release-id";
 
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
@@ -296,6 +298,15 @@ export function InstallerUpdatesExperience({
   const [manualUpdateError, setManualUpdateError] = useState<string | null>(null);
   const [manualUpdateStatus, setManualUpdateStatus] = useState<HostUpdateStatusResponse | null>(null);
   const [manualUpdateRecovery, setManualUpdateRecovery] = useState<HostUpdateRecoveryResult | null>(null);
+  const [manualUpdateReleaseId, setManualUpdateReleaseId] = useState<string | null>(() => {
+    try {
+      return window.localStorage.getItem(MANUAL_UPDATE_RELEASE_KEY);
+    } catch {
+      return null;
+    }
+  });
+  const initialManualUpdateReleaseId = useRef(manualUpdateReleaseId);
+  const [manualUpdateAttempted, setManualUpdateAttempted] = useState(false);
   // Set immediately (synchronously, before any state update) by an
   // operation outcome handler -- save success, confirmed rejection, or
   // GET-only retry -- to the exact settings it just reconciled the UI to.
@@ -330,6 +341,27 @@ export function InstallerUpdatesExperience({
     setSaveOutcomeUnknown(false);
     setChannelError(null);
   }, [updateChannelSettings]);
+
+  useEffect(() => {
+    const releaseId = initialManualUpdateReleaseId.current;
+    if (!releaseId || !onGetHostUpdateStatus) return;
+    let active = true;
+    void onGetHostUpdateStatus(releaseId).then((status) => {
+      if (!active) return;
+      setManualUpdateStatus(status);
+      setManualUpdateOpen(true);
+    }).catch((error) => {
+      if (!active) return;
+      if (isApiError(error) && error.statusCode === 404) {
+        window.localStorage.removeItem(MANUAL_UPDATE_RELEASE_KEY);
+        setManualUpdateReleaseId(null);
+        return;
+      }
+      setManualUpdateError(getErrorMessage(error, "The previous host update status could not be loaded."));
+      setManualUpdateOpen(true);
+    });
+    return () => { active = false; };
+  }, [onGetHostUpdateStatus]);
 
   const settingsLoaded = updateChannelSettings != null && !updateChannelIsLoading && !updateChannelIsError;
   const channelControlDisabled = savingChannel || !settingsLoaded || !onSaveUpdateChannel || saveOutcomeUnknown || retryingUpdateChannel;
@@ -447,21 +479,38 @@ export function InstallerUpdatesExperience({
     onExecuteHostUpdate != null;
 
   const authorizeAndExecuteHostUpdate = async () => {
-    if (!onAuthorizeHostUpdate || !onExecuteHostUpdate || manualUpdateBusy) return;
+    if (!onAuthorizeHostUpdate || !onExecuteHostUpdate || manualUpdateBusy || manualUpdateAttempted) return;
+    setManualUpdateAttempted(true);
     setManualUpdateBusy(true);
     setManualUpdateError(null);
     setManualUpdateRecovery(null);
+    let releaseId: string | null = null;
     try {
       const authorization = await onAuthorizeHostUpdate();
+      releaseId = authorization.releaseId;
+      setManualUpdateReleaseId(releaseId);
+      window.localStorage.setItem(MANUAL_UPDATE_RELEASE_KEY, releaseId);
       const status = await onExecuteHostUpdate(authorization.authorizationId);
       setManualUpdateStatus(status);
+      if (status.currentState === "Completed") {
+        window.localStorage.removeItem(MANUAL_UPDATE_RELEASE_KEY);
+        setManualUpdateReleaseId(null);
+      }
       setManualUpdateOpen(true);
     } catch (error) {
-      setManualUpdateError(
-        error instanceof Error
-          ? error.message
-          : "The host update could not be authorized or started.",
-      );
+      if (releaseId && onGetHostUpdateStatus) {
+        try {
+          const status = await onGetHostUpdateStatus(releaseId);
+          setManualUpdateStatus(status);
+          setManualUpdateOpen(true);
+          return;
+        } catch {
+          // Preserve the original execute error when status cannot yet be read.
+        }
+      }
+      setManualUpdateError(isApiError(error) && error.statusCode === 503
+        ? "The host update subsystem is unavailable on this host. No update was started."
+        : getErrorMessage(error, "The host update could not be authorized or started."));
       setManualUpdateOpen(true);
     } finally {
       setManualUpdateBusy(false);
@@ -475,7 +524,7 @@ export function InstallerUpdatesExperience({
     try {
       setManualUpdateStatus(await onGetHostUpdateStatus(manualUpdateStatus.releaseId));
     } catch (error) {
-      setManualUpdateError(error instanceof Error ? error.message : "Update status could not be loaded.");
+      setManualUpdateError(getErrorMessage(error, "Update status could not be loaded."));
     } finally {
       setManualUpdateBusy(false);
     }
@@ -492,7 +541,7 @@ export function InstallerUpdatesExperience({
         setManualUpdateStatus(await onGetHostUpdateStatus(manualUpdateStatus.releaseId));
       }
     } catch (error) {
-      setManualUpdateError(error instanceof Error ? error.message : "Recovery could not be completed.");
+      setManualUpdateError(getErrorMessage(error, "Recovery could not be completed."));
     } finally {
       setManualUpdateBusy(false);
     }
@@ -618,7 +667,6 @@ export function InstallerUpdatesExperience({
               onClick={() => {
                 setManualUpdateError(null);
                 setManualUpdateRecovery(null);
-                setManualUpdateStatus(null);
                 setManualUpdateOpen(true);
               }}
             >
@@ -833,7 +881,7 @@ export function InstallerUpdatesExperience({
                 type="button"
                 variant="primary"
                 loading={manualUpdateBusy}
-                disabled={manualUpdateBusy || !manualUpdateAvailable}
+                disabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
                 onClick={() => { void authorizeAndExecuteHostUpdate(); }}
               >
                 Authorize and update

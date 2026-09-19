@@ -40,12 +40,14 @@ describe("ApiClient", () => {
       const getMock = vi.fn().mockResolvedValue({
         data: { channel: "insider", insiderAcknowledged: true },
       });
+
       (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
 
       await expect(apiClient.getUpdateChannelSettings()).resolves.toEqual({
         channel: "insider",
         insiderAcknowledged: true,
       });
+
       expect(getMock).toHaveBeenCalledWith("/settings/UpdateChannel");
 
       const postMock = vi.fn().mockResolvedValue({});
@@ -55,6 +57,42 @@ describe("ApiClient", () => {
       expect(postMock).toHaveBeenCalledWith("/settings/UpdateChannel", {
         channel: "stable",
         insiderAcknowledged: false,
+      });
+
+    });
+  });
+
+  describe("host updates", () => {
+    it("accepts recovery-required responses from execute", async () => {
+      const response = {
+        status: 409,
+        data: { releaseId: "release-1", currentState: "RecoveryRequired", activities: [] },
+      };
+      const postMock = vi.fn().mockResolvedValue(response);
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual(response.data);
+      expect(postMock).toHaveBeenCalledWith(
+        "/admin/host-updates/execute",
+        { authorizationId: "auth-1" },
+        { validateStatus: expect.any(Function) },
+      );
+      const config = postMock.mock.calls[0][2] as { validateStatus: (status: number) => boolean };
+      expect(config.validateStatus(409)).toBe(true);
+      expect(config.validateStatus(503)).toBe(true);
+      expect(config.validateStatus(500)).toBe(false);
+    });
+
+    it("surfaces unsupported-host responses as an API error", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 503,
+        data: { detail: "Host update execution is unavailable." },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
+        statusCode: 503,
+        message: "The host update subsystem is unavailable on this host.",
       });
     });
   });

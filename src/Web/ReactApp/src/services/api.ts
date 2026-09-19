@@ -506,7 +506,15 @@ export class ApiClient {
     const response = await this.client.post<HostUpdateStatusResponse>(
       "/admin/host-updates/execute",
       intent,
+      { validateStatus: (status) => [200, 409, 503].includes(status) },
     );
+    if (response.status === 503) {
+      throw {
+        message: "The host update subsystem is unavailable on this host.",
+        statusCode: response.status,
+        data: response.data,
+      };
+    }
     return response.data;
   }
 

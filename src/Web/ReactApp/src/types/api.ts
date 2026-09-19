@@ -5015,6 +5015,23 @@ export interface HostUpdateExecutionActivity {
   phase: string;
   recordedAt: string;
   requestFingerprint?: string | null;
+  requestBindingHash?: string | null;
+  requestBinding?: HostUpdateExecutionRequest | null;
+}
+
+export interface HostUpdateExecutionRequest {
+  releaseId: string;
+  authenticatedSequence: number;
+  manifestDigest: string;
+  sourceCommit: string;
+  channel: "Stable" | "Insider";
+  targets: Array<{ serviceId: string; platform: string; childDigest: string }>;
+  requestId: string;
+  trustRoot: string;
+  policyRevision: number;
+  policyFingerprint: string;
+  hostPlatform: string;
+  authorizationKind: "OneShot" | "StandingPolicy";
 }
 
 export interface HostUpdateStatusResponse {
