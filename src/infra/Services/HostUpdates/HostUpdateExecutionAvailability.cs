@@ -51,7 +51,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     IReadOnlyList<IFenceableWriter> fenceableWriters,
     IHostUpdateProcessRunner processRunner,
     IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore,
-    IHostUpdateExecutableResolver? executableResolver = null) : IHostUpdateExecutionAvailabilityProvider
+    IHostUpdateExecutableResolver executableResolver) : IHostUpdateExecutionAvailabilityProvider
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
@@ -132,10 +132,20 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
+        foreach (string toolName in new[] { "docker", "sqlite3", "pg_dump", "pg_restore", "sqlcmd" })
+        {
+            if (!options.HostExecutablePaths.TryGetValue(toolName, out string? configuredPath) ||
+                string.IsNullOrWhiteSpace(configuredPath) ||
+                !Path.IsPathRooted(configuredPath))
+            {
+                reasons.Add($"host_executable_not_configured:{toolName}");
+            }
+        }
+
         try
         {
             HostUpdateProcessResult result = await processRunner.RunAsync(
-                executableResolver?.Resolve("docker") ?? "docker",
+                executableResolver.Resolve("docker"),
                 ["version", "--format", "{{.Server.Version}}"],
                 TimeSpan.FromSeconds(options.ProcessDefaultTimeoutSeconds),
                 cancellationToken).ConfigureAwait(false);
@@ -143,6 +153,10 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             {
                 reasons.Add("docker_runtime_unavailable");
             }
+        }
+        catch (InvalidOperationException exception) when (exception.Message.StartsWith("host_update_executable_", StringComparison.Ordinal))
+        {
+            reasons.Add($"host_executable_not_configured:docker");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

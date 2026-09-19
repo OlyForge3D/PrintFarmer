@@ -210,7 +210,7 @@ public sealed class ConstrainedHostUpdateProcessRunner(
                 yield return Path.GetFullPath(systemDirectory);
             }
 
-            string? programFiles = Environment.GetEnvironmentVariable("ProgramFiles");
+            string programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
             if (!string.IsNullOrWhiteSpace(programFiles))
             {
                 yield return Path.GetFullPath(programFiles);

@@ -45,6 +45,7 @@ public static class HostUpdateExecutionStartup
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             var configuredPaths = options.HostExecutablePaths.Values
                 .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Where(Path.IsPathRooted)
                 .Select(Path.GetFullPath)
                 .ToHashSet(StringComparer.Ordinal);
             return new ConstrainedHostUpdateProcessRunner(new DefaultHostUpdateProcessRunner(), configuredPaths);
@@ -292,6 +293,7 @@ public static class HostUpdateExecutionStartup
             (serviceId, digest) => new DigestHostUpdateHealthCheck(
                 $"digest:{serviceId}",
                 processRunner,
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
                 ContainerNameFor(options, serviceId),
                 digest),
             TimeSpan.FromSeconds(options.VerifyTimeoutSeconds),

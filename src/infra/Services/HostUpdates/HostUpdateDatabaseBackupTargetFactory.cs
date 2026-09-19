@@ -19,25 +19,6 @@ public static class HostUpdateDatabaseBackupTargetFactory
     private const string SqlServerFileName = "database.bak";
     private const string SqliteFileName = "database.sqlite3";
 
-    private sealed class LegacyTestExecutableResolver : IHostUpdateExecutableResolver
-    {
-        public string Resolve(string toolName) => toolName;
-    }
-
-    public static IHostUpdateBackupTarget CreateBackupTarget(
-        string name,
-        Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig,
-        IHostUpdateProcessRunner processRunner,
-        TimeSpan timeout,
-        bool isExternallyOwned) =>
-        CreateBackupTarget(
-            name,
-            dbConfig,
-            processRunner,
-            new LegacyTestExecutableResolver(),
-            timeout,
-            isExternallyOwned);
-
     /// <summary>
     /// Creates the backup target for <paramref name="dbConfig"/>. Returns an
     /// externally-owned target (which fails the backup step closed, per
@@ -67,7 +48,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 name,
                 isExternallyOwned: false,
                 processRunner,
-                executableResolver.Resolve("sqlite3"),
+                () => executableResolver.Resolve("sqlite3"),
                 dest => [dbFilePath, $".backup '{EscapeQuotedLiteral(Path.Combine(dest, SqliteFileName))}'"],
                 timeout);
         }
@@ -80,7 +61,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 name,
                 isExternallyOwned: false,
                 processRunner,
-                executableResolver.Resolve("pg_dump"),
+                () => executableResolver.Resolve("pg_dump"),
                 dest =>
                 [
                     "-h", builder.Host ?? "localhost",
@@ -103,7 +84,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 name,
                 isExternallyOwned: false,
                 processRunner,
-                executableResolver.Resolve("sqlcmd"),
+                () => executableResolver.Resolve("sqlcmd"),
                 dest =>
                 [
                     "-S", builder.DataSource,
@@ -178,12 +159,6 @@ public static class HostUpdateDatabaseBackupTargetFactory
 
         throw new NotSupportedException($"unsupported_restore_provider:{dbConfig.Provider}");
     }
-
-    public static Func<string, HostUpdateRestoreCommand> CreateRestoreCommand(
-        Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig) =>
-        CreateRestoreCommand(
-            dbConfig,
-            new LegacyTestExecutableResolver());
 
     /// <summary>
     /// Escapes a single-quoted literal for <c>sqlite3</c>'s own dot-command tokenizer (used by

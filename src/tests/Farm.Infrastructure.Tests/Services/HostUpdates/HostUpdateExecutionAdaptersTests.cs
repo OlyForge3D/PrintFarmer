@@ -66,18 +66,23 @@ public sealed class HostUpdateExecutionAdaptersTests
     {
         var inner = new RecordingProcessRunner();
         var runner = new ConstrainedHostUpdateProcessRunner(inner);
-        string executable = Path.Combine(
-            (Environment.GetEnvironmentVariable("PATH") ?? string.Empty)
-                .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-                .FirstOrDefault(path => Path.IsPathRooted(path))
-                ?? Path.GetTempPath(),
-            "docker");
+        string directory = Directory.CreateTempSubdirectory("hu-path-").FullName;
+        string? originalPath = Environment.GetEnvironmentVariable("PATH");
+        string executable = Path.Combine(directory, "docker.exe");
+        try
+        {
+            Environment.SetEnvironmentVariable("PATH", directory + Path.PathSeparator + originalPath);
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+                runner.RunAsync(executable, [], TimeSpan.FromSeconds(1), CancellationToken.None));
 
-        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
-            runner.RunAsync(executable, [], TimeSpan.FromSeconds(1), CancellationToken.None));
-
-        Assert.Equal($"host_update_executable_path_not_trusted:{executable}", exception.Message);
-        Assert.Null(inner.FileName);
+            Assert.Equal($"host_update_executable_path_not_trusted:{executable}", exception.Message);
+            Assert.Null(inner.FileName);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("PATH", originalPath);
+            Directory.Delete(directory, recursive: true);
+        }
     }
 
     [Fact]
@@ -92,6 +97,40 @@ public sealed class HostUpdateExecutionAdaptersTests
 
         Assert.Equal($"host_update_executable_path_not_trusted:{executable}", exception.Message);
         Assert.Null(inner.FileName);
+    }
+
+    [Theory]
+    [InlineData("missing", null)]
+    [InlineData("empty", "")]
+    [InlineData("whitespace", "   ")]
+    [InlineData("relative", "docker.exe")]
+    public void ConfiguredResolver_InvalidMapping_FailsClosed(string key, string? path)
+    {
+        var mappings = new Dictionary<string, string>(StringComparer.Ordinal);
+        if (path is not null)
+        {
+            mappings[key] = path;
+        }
+
+        var resolver = new ConfiguredHostUpdateExecutableResolver(mappings);
+
+        InvalidOperationException exception = Assert.Throws<InvalidOperationException>(() => resolver.Resolve(key));
+
+        Assert.Equal(
+            key == "relative"
+                ? $"host_update_executable_path_not_configured:{key}"
+                : $"host_update_executable_not_configured:{key}",
+            exception.Message);
+    }
+
+    [Fact]
+    public void ConfiguredResolver_RootedMapping_ReturnsCanonicalPath()
+    {
+        string path = Path.Combine(Path.GetTempPath(), "tools", "..", "docker.exe");
+        var resolver = new ConfiguredHostUpdateExecutableResolver(
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["docker"] = path });
+
+        Assert.Equal(Path.GetFullPath(path), resolver.Resolve("docker"));
     }
 
     private sealed class RecordingProcessRunner : IHostUpdateProcessRunner
