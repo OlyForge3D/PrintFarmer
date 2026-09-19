@@ -174,9 +174,9 @@ bundle. The following claims remain intentionally separate:
 
 | Area | Current evidence | Status |
 | --- | --- | --- |
-| GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft/prerelease filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. | Covered by focused tests |
+| GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. The prerelease-metadata rejection path is not represented by the current fixtures. | Covered by focused tests; prerelease mismatch evidence remains pending |
 | Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
-| Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; `GET /api/settings/UpdateChannel` is unavailable. | Blocked |
+| Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. | Blocked |
 | Apply and recovery | Production execution is blocked by three built-in code-owned facilities: the target-image migration runner throws, queue-reconciliation writer fencing is incomplete, and SQL Server visible backup-path mapping is unverified. Separately, unsigned legacy installs remain `NotManaged` until protected bootstrap/trusted state is established. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code; live evidence pending after implementation |
 | Automatic policy and UI execution | Update Now and automatic controls remain disabled, and the UI has no execute callback wiring. | Blocked |
 
@@ -265,7 +265,8 @@ backup (`HostUpdateBackupCoordinator` plus provider-native
 `HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
 closed for externally-owned databases and unexpectedly missing required owned
 directories), migration (`HostUpdateMigrationCoordinator` with
-`HostUpdateMigrationStep` explicitly unavailable until a target-image/dedicated
+`DbContextMigrationTarget<T>` explicitly throws through the
+`HostUpdateMigrationStep` implementation until a target-image/dedicated
 migration runner exists; the current/old API assembly's
 `ProviderAwareMigrationRunner` is not used for forward updates), apply
 (`HostUpdateImageApplier`, staging pinned `repository@sha256` images before compose
