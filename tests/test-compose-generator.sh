@@ -123,6 +123,81 @@ test_standard_generation() {
     pass_test
 }
 
+test_in_place_generation_preserves_nginx_configs() {
+    start_test "in-place generation preserves canonical nginx configs"
+
+    local fixture_root="$TEST_TEMP_DIR/in-place-root"
+    local helper_script="$TEST_TEMP_DIR/in-place-copy-configs-helper.sh"
+    local out_dir="$TEST_TEMP_DIR/out-of-place-root"
+    local sentinel_dir="$TEST_TEMP_DIR/nginx-sentinel"
+    mkdir -p "$fixture_root/deploy/nginx/conf.d" "$fixture_root/configs"
+    for nginx_config in \
+        nginx-proxy.conf \
+        nginx-proxy-split.conf \
+        nginx-frontend.conf \
+        nginx.conf \
+        conf.d/frontend-app.conf; do
+        printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/$nginx_config"
+    done
+
+    cat > "$helper_script" << EOF
+#!/bin/bash
+set -euo pipefail
+source "$COMPOSE_GENERATOR"
+REPO_ROOT="$fixture_root"
+CONFIGS_DIR="$fixture_root/configs"
+INCLUDE_MONITORING=false
+INCLUDE_TELEMETRY=false
+INCLUDE_SECURITY=false
+INSTALLER_LAB=false
+HTTP_ONLY=false
+
+copy_configs "$fixture_root"
+grep -Fxq "canonical nginx config" "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+
+rm "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+mkdir "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+if copy_configs "$fixture_root"; then
+    exit 1
+fi
+[[ -d "$fixture_root/deploy/nginx/nginx-proxy-split.conf" ]]
+rm -rf "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+printf '%s\n' "canonical nginx config" > "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+
+ln -s "$TEST_TEMP_DIR/missing-certs" "$fixture_root/deploy/nginx/certs"
+if copy_configs "$fixture_root"; then
+    exit 1
+fi
+rm "$fixture_root/deploy/nginx/certs"
+
+INSTALLER_LAB=true
+HTTP_ONLY=true
+if copy_configs "$fixture_root"; then
+    exit 1
+fi
+grep -Fxq "canonical nginx config" "$fixture_root/deploy/nginx/nginx-proxy-split.conf"
+
+INSTALLER_LAB=false
+HTTP_ONLY=false
+mkdir -p "$out_dir"
+mkdir -p "$sentinel_dir"
+printf '%s\n' "sentinel" > "$sentinel_dir/keep"
+mkdir -p "$out_dir/deploy"
+ln -s "$sentinel_dir" "$out_dir/deploy/nginx"
+copy_configs "$out_dir"
+[[ -f "$sentinel_dir/keep" ]]
+[[ -d "$out_dir/deploy/nginx" && ! -L "$out_dir/deploy/nginx" ]]
+[[ -f "$out_dir/deploy/nginx/nginx-proxy-split.conf" ]]
+grep -Fxq "canonical nginx config" "$out_dir/deploy/nginx/nginx-proxy-split.conf"
+EOF
+    chmod +x "$helper_script"
+
+    assert_exit_code 0 "$helper_script" \
+        "In-place generation should preserve nginx sources and reject HTTP-only source mutation"
+
+    pass_test
+}
+
 # Test microservices architecture generation
 test_microservices_generation() {
     start_test "microservices architecture generation"
@@ -2166,6 +2241,7 @@ run_all_tests() {
     
     test_help_output
     test_standard_generation
+    test_in_place_generation_preserves_nginx_configs
     test_microservices_generation
     test_discovery_network_consistency
     test_discovery_shared_key_wiring
