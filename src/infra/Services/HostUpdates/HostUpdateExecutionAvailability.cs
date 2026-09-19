@@ -50,7 +50,8 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     IReadOnlyList<IHostUpdateBackupTarget> backupTargets,
     IReadOnlyList<IFenceableWriter> fenceableWriters,
     IHostUpdateProcessRunner processRunner,
-    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore) : IHostUpdateExecutionAvailabilityProvider
+    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore,
+    IHostUpdateExecutableResolver? executableResolver = null) : IHostUpdateExecutionAvailabilityProvider
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
@@ -134,7 +135,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         try
         {
             HostUpdateProcessResult result = await processRunner.RunAsync(
-                "docker",
+                executableResolver?.Resolve("docker") ?? "docker",
                 ["version", "--format", "{{.Server.Version}}"],
                 TimeSpan.FromSeconds(options.ProcessDefaultTimeoutSeconds),
                 cancellationToken).ConfigureAwait(false);

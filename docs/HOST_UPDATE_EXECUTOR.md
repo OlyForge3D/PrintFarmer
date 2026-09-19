@@ -15,6 +15,11 @@ Bound from the `HostUpdateExecution` configuration section (see
 `src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`) and validated by
 `HostUpdateExecutionOptionsValidator`. The executor remains default-off when the root is unset: validation permits process startup, but all derived executor paths now throw `root_directory_not_configured` instead of resolving under the current working directory, and the runtime availability provider reports `Unavailable` until a writable host-controlled root is configured:
 
+- **`HostExecutablePaths`** (required for process execution): explicit logical-tool to absolute executable
+  path mappings for `docker`, `sqlite3`, `pg_dump`, `pg_restore`, and `sqlcmd`. Bare names are rejected
+  and the ambient `PATH` is never consulted; configure host-controlled paths such as
+  `HostUpdateExecution__HostExecutablePaths__docker=/usr/bin/docker` (or equivalent JSON/YAML
+  dictionary nesting). Missing mappings keep process execution unavailable.
 - **`RootDirectory`** (required for execution, no usable default): an absolute, host-controlled, persistent directory
   that owns all executor state — the durable journal, the execution lock, installed-state, and
   coordinated backups. The validator rejects a relative path, a path under the OS temp directory,
@@ -64,12 +69,14 @@ without re-running the probe on every read. `Available` carries no reasons; `Una
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
 `compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, or a code-owned `facility_unavailable:...`) so an operator is never left guessing. Known #2663 physical gaps are now code-owned fail-closed availability reasons, not operator-omittable configuration: target-image migration runner, complete writer inventory beyond the audited queue/outbox/prune/autodispatch/webhook/slicer paths, queue reconciliation writer fencing, and SQL Server host/server backup-path mapping must be implemented before this executor can report production `Available`.
 
-The process boundary is production-ready independently of those facilities: `ConstrainedHostUpdateProcessRunner`
-allows only the audited native tools used by the adapters and still delegates through the existing
-no-shell `ArgumentList` runner. It does not bootstrap an updater, make unsigned legacy releases
-eligible, or change the manual authorization boundary. A future trusted bootstrap implementation
-must be selected by the release/operator owners before any of the remaining availability blockers
-are removed.
+The process boundary is production-ready independently of those facilities:
+`ConfiguredHostUpdateExecutableResolver` requires an explicit absolute path for each audited native
+tool, and `ConstrainedHostUpdateProcessRunner` rejects bare names, rejects ambient `PATH` lookup,
+allows only the audited tools, and accepts rooted paths only when explicitly configured or in fixed
+system directories. It still delegates through the existing no-shell `ArgumentList` runner. It does
+not bootstrap an updater, make unsigned legacy releases eligible, or change the manual authorization
+boundary. A future trusted bootstrap implementation must be selected by the release/operator owners
+before any of the remaining availability blockers are removed.
 
 ## DI wiring
 

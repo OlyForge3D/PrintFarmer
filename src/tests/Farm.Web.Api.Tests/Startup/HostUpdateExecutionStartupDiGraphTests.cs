@@ -25,6 +25,11 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["HostUpdateExecution:RootDirectory"] = rootDirectory,
+                ["HostUpdateExecution:HostExecutablePaths:docker"] = Path.Combine(AppContext.BaseDirectory, "docker.exe"),
+                ["HostUpdateExecution:HostExecutablePaths:sqlite3"] = Path.Combine(AppContext.BaseDirectory, "sqlite3.exe"),
+                ["HostUpdateExecution:HostExecutablePaths:pg_dump"] = Path.Combine(AppContext.BaseDirectory, "pg_dump.exe"),
+                ["HostUpdateExecution:HostExecutablePaths:pg_restore"] = Path.Combine(AppContext.BaseDirectory, "pg_restore.exe"),
+                ["HostUpdateExecution:HostExecutablePaths:sqlcmd"] = Path.Combine(AppContext.BaseDirectory, "sqlcmd.exe"),
             })
             .Build();
 

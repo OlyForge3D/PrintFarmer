@@ -34,8 +34,21 @@ public static class HostUpdateExecutionStartup
             client.Timeout = TimeSpan.FromSeconds(options.ProcessDefaultTimeoutSeconds);
         });
 
+        services.AddSingleton<IHostUpdateExecutableResolver>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new ConfiguredHostUpdateExecutableResolver(
+                options.HostExecutablePaths.ToDictionary(pair => pair.Key, pair => pair.Value, StringComparer.Ordinal));
+        });
         services.AddSingleton<IHostUpdateProcessRunner>(sp =>
-            new ConstrainedHostUpdateProcessRunner(new DefaultHostUpdateProcessRunner()));
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            var configuredPaths = options.HostExecutablePaths.Values
+                .Where(path => !string.IsNullOrWhiteSpace(path))
+                .Select(Path.GetFullPath)
+                .ToHashSet(StringComparer.Ordinal);
+            return new ConstrainedHostUpdateProcessRunner(new DefaultHostUpdateProcessRunner(), configuredPaths);
+        });
 
         // Durable single-writer state, all rooted under the validated, host-controlled
         // RootDirectory (never the app DB, never a temp/cache path -- see
@@ -128,6 +141,7 @@ public static class HostUpdateExecutionStartup
                 sp.GetRequiredService<IInstalledHostStateStore>(),
                 sp.GetRequiredService<IReadOnlyList<IHostUpdateMigrationTarget>>(),
                 sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
                 options.DiskWatchPath,
                 options.MinimumFreeBytes,
                 options.SupportedProviderNames.ToHashSet(StringComparer.Ordinal),
@@ -198,6 +212,7 @@ public static class HostUpdateExecutionStartup
                 "database",
                 dbConfig,
                 sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
                 TimeSpan.FromSeconds(options.BackupTimeoutSeconds),
                 options.DatabaseExternallyOwned);
         });
@@ -250,6 +265,7 @@ public static class HostUpdateExecutionStartup
             StringComparer.Ordinal);
         return new HostUpdateImageApplier(
             sp.GetRequiredService<IHostUpdateProcessRunner>(),
+            sp.GetRequiredService<IHostUpdateExecutableResolver>(),
             options.ComposeFiles,
             options.ComposeProjectName,
             mappings,
@@ -314,7 +330,9 @@ public static class HostUpdateExecutionStartup
             DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>());
             var restoreCommandsByTarget = new Dictionary<string, Func<string, HostUpdateRestoreCommand>>(StringComparer.Ordinal)
             {
-                ["database"] = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig),
+                ["database"] = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(
+                    dbConfig,
+                    sp.GetRequiredService<IHostUpdateExecutableResolver>()),
             };
             var directoryRestoreTargetsByName = new Dictionary<string, string>(options.OwnedDirectories, StringComparer.Ordinal);
             return new ProcessHostUpdateRestoreExecutor(

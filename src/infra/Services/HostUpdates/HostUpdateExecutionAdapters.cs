@@ -27,6 +27,31 @@ public interface IHostUpdateProcessRunner
         IReadOnlyDictionary<string, string>? environment = null);
 }
 
+public interface IHostUpdateExecutableResolver
+{
+    string Resolve(string toolName);
+}
+
+public sealed class ConfiguredHostUpdateExecutableResolver(IReadOnlyDictionary<string, string> executablePaths)
+    : IHostUpdateExecutableResolver
+{
+    public string Resolve(string toolName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(toolName);
+        if (!executablePaths.TryGetValue(toolName, out string? path) || string.IsNullOrWhiteSpace(path))
+        {
+            throw new InvalidOperationException($"host_update_executable_not_configured:{toolName}");
+        }
+
+        if (!Path.IsPathRooted(path))
+        {
+            throw new InvalidOperationException($"host_update_executable_path_not_configured:{toolName}");
+        }
+
+        return Path.GetFullPath(path);
+    }
+}
+
 /// <summary>
 /// Default <see cref="IHostUpdateProcessRunner"/> backed by <see cref="Process"/>. Arguments are
 /// passed via <see cref="ProcessStartInfo.ArgumentList"/> so no shell parses them.
@@ -110,10 +135,13 @@ public sealed class DefaultHostUpdateProcessRunner : IHostUpdateProcessRunner
 /// <summary>
 /// Restricts host-update execution to the audited tools used by the concrete adapters. This is a
 /// defense-in-depth boundary: callers still provide explicit arguments, but cannot turn the
-/// process runner into a general-purpose host command executor. Rooted executable paths are
-/// accepted only from host tool directories that are trusted for this deployment.
+/// process runner into a general-purpose host command executor. Bare names are rejected;
+/// rooted executable paths must be explicitly configured or reside in fixed system tool
+/// directories, never an ambient PATH directory.
 /// </summary>
-public sealed class ConstrainedHostUpdateProcessRunner(IHostUpdateProcessRunner inner) : IHostUpdateProcessRunner
+public sealed class ConstrainedHostUpdateProcessRunner(
+    IHostUpdateProcessRunner inner,
+    IReadOnlySet<string>? configuredExecutablePaths = null) : IHostUpdateProcessRunner
 {
     private static readonly FrozenSet<string> AllowedExecutables =
         new[] { "docker", "sqlite3", "pg_dump", "pg_restore", "sqlcmd" }
@@ -134,12 +162,18 @@ public sealed class ConstrainedHostUpdateProcessRunner(IHostUpdateProcessRunner 
         string executableName = Path.GetFileNameWithoutExtension(fileName);
         string extension = Path.GetExtension(fileName);
         if (!AllowedExecutables.Contains(executableName)
+            || fileName.EndsWith('.')
             || (extension.Length > 0 && !string.Equals(extension, ".exe", StringComparison.Ordinal)))
         {
             throw new InvalidOperationException($"host_update_executable_not_allowed:{fileName}");
         }
 
-        if (Path.IsPathRooted(fileName) && !IsTrustedExecutablePath(fileName))
+        if (!Path.IsPathRooted(fileName))
+        {
+            throw new InvalidOperationException($"host_update_executable_path_not_configured:{fileName}");
+        }
+
+        if (!IsTrustedExecutablePath(fileName))
         {
             throw new InvalidOperationException($"host_update_executable_path_not_trusted:{fileName}");
         }
@@ -147,9 +181,14 @@ public sealed class ConstrainedHostUpdateProcessRunner(IHostUpdateProcessRunner 
         return inner.RunAsync(fileName, arguments, timeout, cancellationToken, environment);
     }
 
-    private static bool IsTrustedExecutablePath(string fileName)
+    private bool IsTrustedExecutablePath(string fileName)
     {
         string fullPath = Path.GetFullPath(fileName);
+        if (configuredExecutablePaths?.Contains(fullPath) == true)
+        {
+            return true;
+        }
+
         string? directory = Path.GetDirectoryName(fullPath);
         return directory is not null
             && TrustedExecutableDirectories.Any(trustedDirectory =>
@@ -158,16 +197,8 @@ public sealed class ConstrainedHostUpdateProcessRunner(IHostUpdateProcessRunner 
 
     private static string[] BuildTrustedExecutableDirectories() =>
     [
-        Path.GetFullPath(AppContext.BaseDirectory),
-        .. GetConfiguredDirectories("PATH"),
         .. GetKnownSystemDirectories(),
     ];
-
-    private static IEnumerable<string> GetConfiguredDirectories(string variableName) =>
-        (Environment.GetEnvironmentVariable(variableName) ?? string.Empty)
-            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Where(directory => Path.IsPathRooted(directory))
-            .Select(Path.GetFullPath);
 
     private static IEnumerable<string> GetKnownSystemDirectories()
     {

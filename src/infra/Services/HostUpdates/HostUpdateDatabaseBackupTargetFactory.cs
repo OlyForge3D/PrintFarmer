@@ -19,6 +19,25 @@ public static class HostUpdateDatabaseBackupTargetFactory
     private const string SqlServerFileName = "database.bak";
     private const string SqliteFileName = "database.sqlite3";
 
+    private sealed class LegacyTestExecutableResolver : IHostUpdateExecutableResolver
+    {
+        public string Resolve(string toolName) => toolName;
+    }
+
+    public static IHostUpdateBackupTarget CreateBackupTarget(
+        string name,
+        Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig,
+        IHostUpdateProcessRunner processRunner,
+        TimeSpan timeout,
+        bool isExternallyOwned) =>
+        CreateBackupTarget(
+            name,
+            dbConfig,
+            processRunner,
+            new LegacyTestExecutableResolver(),
+            timeout,
+            isExternallyOwned);
+
     /// <summary>
     /// Creates the backup target for <paramref name="dbConfig"/>. Returns an
     /// externally-owned target (which fails the backup step closed, per
@@ -30,6 +49,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
         string name,
         Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig,
         IHostUpdateProcessRunner processRunner,
+        IHostUpdateExecutableResolver executableResolver,
         TimeSpan timeout,
         bool isExternallyOwned)
     {
@@ -47,7 +67,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 name,
                 isExternallyOwned: false,
                 processRunner,
-                "sqlite3",
+                executableResolver.Resolve("sqlite3"),
                 dest => [dbFilePath, $".backup '{EscapeQuotedLiteral(Path.Combine(dest, SqliteFileName))}'"],
                 timeout);
         }
@@ -60,7 +80,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 name,
                 isExternallyOwned: false,
                 processRunner,
-                "pg_dump",
+                executableResolver.Resolve("pg_dump"),
                 dest =>
                 [
                     "-h", builder.Host ?? "localhost",
@@ -83,7 +103,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 name,
                 isExternallyOwned: false,
                 processRunner,
-                "sqlcmd",
+                executableResolver.Resolve("sqlcmd"),
                 dest =>
                 [
                     "-S", builder.DataSource,
@@ -105,9 +125,11 @@ public static class HostUpdateDatabaseBackupTargetFactory
     /// invoked directly via <see cref="IHostUpdateProcessRunner"/> -- never through a shell -- so
     /// a connection password can only ever reach the child process via its environment (Postgres,
     /// SQL Server) or not at all (SQLite has no credential), the same guarantee
-    /// <see cref="CreateBackupTarget"/> already provides for backup.
+    /// the backup-target factory already provides for backup.
     /// </summary>
-    public static Func<string, HostUpdateRestoreCommand> CreateRestoreCommand(Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig)
+    public static Func<string, HostUpdateRestoreCommand> CreateRestoreCommand(
+        Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig,
+        IHostUpdateExecutableResolver executableResolver)
     {
         ArgumentNullException.ThrowIfNull(dbConfig);
 
@@ -115,7 +137,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
         {
             string dbFilePath = new SqliteConnectionStringBuilder(dbConfig.ConnectionString).DataSource;
             return targetDirectory => new HostUpdateRestoreCommand(
-                "sqlite3",
+                executableResolver.Resolve("sqlite3"),
                 [dbFilePath, $".restore '{EscapeQuotedLiteral(Path.Combine(targetDirectory, SqliteFileName))}'"],
                 null);
         }
@@ -125,7 +147,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
             var builder = new NpgsqlConnectionStringBuilder(dbConfig.ConnectionString);
             string password = builder.Password ?? string.Empty;
             return targetDirectory => new HostUpdateRestoreCommand(
-                "pg_restore",
+                executableResolver.Resolve("pg_restore"),
                 [
                     "--clean",
                     "--if-exists",
@@ -144,7 +166,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
             string database = builder.InitialCatalog;
             (IReadOnlyList<string> connectionArgs, IReadOnlyDictionary<string, string>? connectionEnvironment) = SqlServerConnectionArgs(builder);
             return targetDirectory => new HostUpdateRestoreCommand(
-                "sqlcmd",
+                executableResolver.Resolve("sqlcmd"),
                 [
                     "-S", builder.DataSource,
                     "-b",
@@ -156,6 +178,12 @@ public static class HostUpdateDatabaseBackupTargetFactory
 
         throw new NotSupportedException($"unsupported_restore_provider:{dbConfig.Provider}");
     }
+
+    public static Func<string, HostUpdateRestoreCommand> CreateRestoreCommand(
+        Farm.Infrastructure.Data.DatabaseProviderConfiguration dbConfig) =>
+        CreateRestoreCommand(
+            dbConfig,
+            new LegacyTestExecutableResolver());
 
     /// <summary>
     /// Escapes a single-quoted literal for <c>sqlite3</c>'s own dot-command tokenizer (used by
