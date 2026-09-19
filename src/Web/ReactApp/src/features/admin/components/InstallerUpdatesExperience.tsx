@@ -46,6 +46,11 @@ function clearManualUpdateReleaseId() {
   }
 }
 
+function isRolledBackStatus(status: HostUpdateStatusResponse) {
+  return status.currentState === "Completed" &&
+    status.activities.some((activity) => activity.phase === "recovery:rolled_back");
+}
+
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
   updateScheduling?: UpdateSchedulingStatus | null;
@@ -383,6 +388,7 @@ export function InstallerUpdatesExperience({
       if (isApiError(error) && error.statusCode === 404) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
+        setManualUpdateBusy(false);
         return;
       }
       setManualUpdateError(getErrorMessage(error, "The previous host update status could not be loaded."));
@@ -515,10 +521,12 @@ export function InstallerUpdatesExperience({
       manualUpdateAttempted ||
       manualUpdateDispatchLock.current
     ) return;
+    manualUpdateDispatchLock.current = true;
     setManualUpdateBusy(true);
     setManualUpdateError(null);
     setManualUpdateRecovery(null);
     let releaseId: string | null = null;
+    let executeDispatched = false;
     try {
       const authorization = await onAuthorizeHostUpdate();
       releaseId = authorization.releaseId;
@@ -529,8 +537,8 @@ export function InstallerUpdatesExperience({
       }
       setManualUpdateReleaseId(releaseId);
       writeManualUpdateReleaseId(releaseId);
-      manualUpdateDispatchLock.current = true;
       setManualUpdateAttempted(true);
+      executeDispatched = true;
       const status = await onExecuteHostUpdate(authorization.authorizationId);
       setManualUpdateStatus(status);
       if (status.currentState === "Completed") {
@@ -541,8 +549,7 @@ export function InstallerUpdatesExperience({
       }
       setManualUpdateOpen(true);
     } catch (error) {
-      const executeWasDispatched = manualUpdateDispatchLock.current;
-      if (executeWasDispatched && isApiError(error) && error.statusCode === 503) {
+      if (executeDispatched && isApiError(error) && error.statusCode === 503) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
         setManualUpdateAttempted(false);
@@ -551,7 +558,7 @@ export function InstallerUpdatesExperience({
         setManualUpdateOpen(true);
         return;
       }
-      if (executeWasDispatched && releaseId && onGetHostUpdateStatus) {
+      if (executeDispatched && releaseId && onGetHostUpdateStatus) {
         try {
           const status = await onGetHostUpdateStatus(releaseId);
           setManualUpdateStatus(status);
@@ -567,7 +574,7 @@ export function InstallerUpdatesExperience({
           // Preserve the original execute error when status cannot yet be read.
         }
       }
-      if (!executeWasDispatched) {
+      if (!executeDispatched) {
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
@@ -576,6 +583,9 @@ export function InstallerUpdatesExperience({
         : getErrorMessage(error, "The host update could not be authorized or started."));
       setManualUpdateOpen(true);
     } finally {
+      if (!executeDispatched) {
+        manualUpdateDispatchLock.current = false;
+      }
       setManualUpdateBusy(false);
     }
   };
@@ -1026,10 +1036,15 @@ export function InstallerUpdatesExperience({
                 </li>
               ))}
             </ol>
-            {manualUpdateStatus.currentState === "Completed" && (
+            {manualUpdateStatus.currentState === "Completed" && !isRolledBackStatus(manualUpdateStatus) && (
               <Alert type="success" title="Host update completed">
                 The host reported a completed update. Refresh the installation
                 observation to reconcile the running services.
+              </Alert>
+            )}
+            {isRolledBackStatus(manualUpdateStatus) && (
+              <Alert type="warning" title="Host update rolled back">
+                The host rolled back the update. No new installation is active.
               </Alert>
             )}
             {onGetHostUpdateStatus && manualUpdateStatus.currentState !== "Completed" && (

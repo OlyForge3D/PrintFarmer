@@ -64,9 +64,7 @@ describe("ApiClient", () => {
 
   describe("host updates", () => {
     it("accepts recovery-required responses from execute", async () => {
-      const response = {
-        status: 409,
-        data: {
+      const data = {
           releaseId: "release-1",
           currentState: "RecoveryRequired",
           activities: [{
@@ -90,8 +88,8 @@ describe("ApiClient", () => {
               authorizationKind: "Manual",
             },
           }],
-        },
-      };
+      } satisfies import("@/types/api").HostUpdateStatusResponse;
+      const response = { status: 409, data };
       const postMock = vi.fn().mockResolvedValue(response);
       (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
 
