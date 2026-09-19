@@ -337,7 +337,7 @@ public sealed class ServiceInventoryTests
     }
 
     [Fact]
-    public void Readiness_ValidButDifferentPlatformDigest_Blocks()
+    public void Readiness_ValidButDifferentPlatformDigest_IsEligibleForUpdate()
     {
         string observedDigest = "sha256:" + new string('c', 64);
         string signedDigest = "sha256:" + new string('d', 64);
@@ -352,9 +352,27 @@ public sealed class ServiceInventoryTests
 
         ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
 
+        Assert.Equal(InventoryEligibility.Eligible, result.State);
+        Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+    }
+
+    [Theory]
+    [InlineData("platform")]
+    [InlineData("index")]
+    public void Readiness_MalformedTargetDigest_Blocks(string digestKind)
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a")]);
+        ReleaseServiceRequirementDto target = Release(null).Services.Single();
+        target = digestKind == "platform"
+            ? target with { PlatformDigest = "sha256:invalid" }
+            : target with { IndexDigest = "sha256:invalid" };
+        VerifiedReleaseEvidenceDto release = Release(null) with { Services = [target] };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
         Assert.Equal(InventoryEligibility.Blocked, result.State);
         Assert.Equal("PlatformMismatchOrInvalidDigestEvidence:api", Assert.Single(result.Reasons));
-        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence"], result.Hops);
     }
 
     [Fact]
