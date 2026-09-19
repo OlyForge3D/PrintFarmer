@@ -20,13 +20,23 @@ namespace Farm.Web.Api.Tests.Startup;
 /// </summary>
 public sealed class HostUpdateExecutionStartupDiGraphTests
 {
-    private static IConfiguration BuildConfiguration(string rootDirectory) =>
-        new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["HostUpdateExecution:RootDirectory"] = rootDirectory,
-            })
-            .Build();
+    private static IConfiguration BuildConfiguration(string rootDirectory, bool includeExecutablePaths = true)
+    {
+        var values = new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = rootDirectory,
+        };
+        if (includeExecutablePaths)
+        {
+            values["HostUpdateExecution:HostExecutablePaths:docker"] = Path.Combine(AppContext.BaseDirectory, "docker.exe");
+            values["HostUpdateExecution:HostExecutablePaths:sqlite3"] = Path.Combine(AppContext.BaseDirectory, "sqlite3.exe");
+            values["HostUpdateExecution:HostExecutablePaths:pg_dump"] = Path.Combine(AppContext.BaseDirectory, "pg_dump.exe");
+            values["HostUpdateExecution:HostExecutablePaths:pg_restore"] = Path.Combine(AppContext.BaseDirectory, "pg_restore.exe");
+            values["HostUpdateExecution:HostExecutablePaths:sqlcmd"] = Path.Combine(AppContext.BaseDirectory, "sqlcmd.exe");
+        }
+
+        return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+    }
 
     // Must satisfy HostUpdateExecutionOptionsValidator (absolute; not under the OS temp
     // directory; not the current/working directory or a subdirectory of it) because resolving
@@ -96,6 +106,64 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             IHostUpdateBackupCoordinator coordinator = scope.ServiceProvider.GetRequiredService<IHostUpdateBackupCoordinator>();
 
             Assert.NotNull(coordinator);
+        }
+
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_ResolvingBackupTargetsWithoutExecutableMappings_DoesNotThrow()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root, includeExecutablePaths: false);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            using IServiceScope scope = provider.CreateScope();
+
+            IReadOnlyList<IHostUpdateBackupTarget> targets =
+                scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>();
+
+            Assert.Contains(targets, target => target.Name == "database");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_ResolvesOnlyConstrainedProcessRunner()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+
+            Assert.IsType<ConstrainedHostUpdateProcessRunner>(
+                provider.GetRequiredService<IHostUpdateProcessRunner>());
+            Assert.Throws<InvalidOperationException>(() =>
+                provider.GetRequiredService<DefaultHostUpdateProcessRunner>());
         }
         finally
         {

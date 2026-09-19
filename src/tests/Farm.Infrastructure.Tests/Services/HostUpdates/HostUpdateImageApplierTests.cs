@@ -14,6 +14,7 @@ public sealed class HostUpdateImageApplierTests
         var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(0, "ok", string.Empty));
         var applier = new HostUpdateImageApplier(
             runner,
+            new BareNameResolver(),
             ["compose.yml"],
             "printfarmer",
             new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
@@ -42,6 +43,7 @@ public sealed class HostUpdateImageApplierTests
         var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(1, string.Empty, "unauthorized"));
         var applier = new HostUpdateImageApplier(
             runner,
+            new BareNameResolver(),
             ["compose.yml"],
             "printfarmer",
             new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
@@ -69,6 +71,7 @@ public sealed class HostUpdateImageApplierTests
         var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(0, "ok", string.Empty));
         var applier = new HostUpdateImageApplier(
             runner,
+            new BareNameResolver(),
             ["compose.yml"],
             "printfarmer",
             new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
@@ -89,6 +92,7 @@ public sealed class HostUpdateImageApplierTests
         var runner = new RecordingProcessRunner(_ => new HostUpdateProcessResult(0, "ok", string.Empty));
         var applier = new HostUpdateImageApplier(
             runner,
+            new BareNameResolver(),
             ["compose.yml"],
             "printfarmer",
             new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal) { ["api"] = ApiMapping },
@@ -104,6 +108,11 @@ public sealed class HostUpdateImageApplierTests
         runner.Calls[1].Arguments.Should().ContainInOrder("--pull", "never");
     }
     private sealed record ProcessCall(string FileName, IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
+
+    private sealed class BareNameResolver : IHostUpdateExecutableResolver
+    {
+        public string Resolve(string toolName) => toolName;
+    }
 
     private sealed class RecordingProcessRunner(Func<ProcessCall, HostUpdateProcessResult> onRun) : IHostUpdateProcessRunner
     {

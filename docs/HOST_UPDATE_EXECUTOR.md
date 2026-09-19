@@ -12,9 +12,26 @@ failure. There is still no automatic/unattended execution path.
 ## Configuration: `HostUpdateExecutionOptions`
 
 Bound from the `HostUpdateExecution` configuration section (see
-`src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`) and validated by
-`HostUpdateExecutionOptionsValidator`. The executor remains default-off when the root is unset: validation permits process startup, but all derived executor paths now throw `root_directory_not_configured` instead of resolving under the current working directory, and the runtime availability provider reports `Unavailable` until a writable host-controlled root is configured:
+`src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`). Root and general executor
+settings are validated by `HostUpdateExecutionOptionsValidator`; executable mappings are
+validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor remains default-off when the root is unset: validation permits process startup, but all derived executor paths now throw `root_directory_not_configured` instead of resolving under the current working directory, and the runtime availability provider reports `Unavailable` until a writable host-controlled root is configured:
 
+- **`HostExecutablePaths`** (required for process execution): explicit logical-tool to absolute executable
+  path mappings for `docker`, `sqlite3`, `pg_dump`, `pg_restore`, and `sqlcmd`. Bare names are rejected
+  and the ambient `PATH` is never consulted. The executable filename and any `.exe` extension must
+  be lowercase; for example, `C:\Program Files\Docker\docker.exe` is accepted but
+  `C:\Program Files\Docker\DOCKER.EXE` is rejected. Missing, relative, or whitespace-only mappings
+  keep process execution unavailable and are reported in availability status rather than crashing startup.
+  Configure host-controlled paths such as
+  `HostUpdateExecution__HostExecutablePaths__docker=/usr/bin/docker`,
+  `HostUpdateExecution__HostExecutablePaths__sqlite3=/usr/bin/sqlite3`,
+  `HostUpdateExecution__HostExecutablePaths__pg_dump=/usr/bin/pg_dump`,
+  `HostUpdateExecution__HostExecutablePaths__pg_restore=/usr/bin/pg_restore`, and
+  `HostUpdateExecution__HostExecutablePaths__sqlcmd=/opt/mssql-tools18/bin/sqlcmd` (or equivalent
+  JSON/YAML dictionary nesting). On Windows, use absolute paths to the installed `.exe` files.
+  In containers, every configured path must exist in the container namespace; bind-mount host tools
+  read-only into fixed, root-owned locations and configure those mounted paths, rather than relying
+  on a host `PATH` that is not visible inside the container.
 - **`RootDirectory`** (required for execution, no usable default): an absolute, host-controlled, persistent directory
   that owns all executor state — the durable journal, the execution lock, installed-state, and
   coordinated backups. The validator rejects a relative path, a path under the OS temp directory,
@@ -46,7 +63,7 @@ Bound from the `HostUpdateExecution` configuration section (see
 | Fence | `HostUpdateFenceCoordinator` | Proves every registered `IFenceableWriter` (the admission gate; the queue-outbox publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService` via their own independent `IHostUpdateWriterActivityFlag`-derived instances) has actually quiesced before backup — bounded-polled, not assumed. The executor's availability provider also fails closed (`insufficient_fenced_writers:<names>`) if `HostUpdateExecutionOptions.RequiredFencedWriterNames` names a writer with no registered `IFenceableWriter`. |
 | Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
 | Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Intentionally unavailable for production execution until a target-image/dedicated migration runner exists. The concrete target refuses to use the current/old API assembly's `ProviderAwareMigrationRunner`, so an unexpected path into migration fails closed before old EF metadata can mutate the database. |
-| Apply | `HostUpdateImageApplier` | Stages each immutable `repository@sha256` image first with `docker image pull` (`--platform` on forward execution), then applies via the existing compose templates and `docker compose up -d --no-build --pull never`, using an explicit process argument list — never shell interpolation, never a mutable tag. If staging any image fails, compose mutation is not attempted. |
+| Apply | `HostUpdateImageApplier` | Stages each immutable `repository@sha256` image first with `docker image pull` (`--platform` on forward execution), then applies via the existing compose templates and `docker compose up -d --no-build --pull never`, using an explicit process argument list — never shell interpolation, never a mutable tag. Production DI wraps this runner in `ConstrainedHostUpdateProcessRunner`, which permits only the audited tool names (with explicit `.exe` support) and accepts rooted paths only from trusted host tool directories; unrelated names and untrusted rooted paths are rejected before launch. If staging any image fails, compose mutation is not attempted. |
 | Verify | `HostUpdateHealthVerifier` + `AggregateHostUpdateHealthCheck` + `DigestHostUpdateHealthCheck` | Confirms exact running digests via a two-step `docker container inspect --format {{.Image}}` → `docker image inspect --format {{index .RepoDigests 0}}` probe (`.RepoDigests` exists only on image-inspect output, never on container-inspect output -- see "Known limitations" for the bug this replaced) plus the aggregated `/health` endpoint's JSON body has a top-level `Status`/`status` of exactly `"Healthy"` and every configured required result entry (default: `comprehensive`, `signalr`, `spoolman`) is present and healthy. Verification also fails before probing if the digest map is not the exact configured service set, so partial target mappings cannot reopen writers. |
 | Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` + `FileHostUpdateRecoveryOutcomeStore` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling (structured process args/env only — no shell string, no password on argv), and durably persists the `RolledBack`/`NeedsOperator` outcome with the same write-through/atomic-replace primitive used by the journal. Restored payload files are flushed before the destination tree is synced; unmapped manifest targets fail closed. A duplicate/restarted `RolledBack` recovery does not replay restore/apply, but it does re-drive idempotent fence release if the previous process crashed before reopening. |
 
@@ -63,6 +80,15 @@ previous run's state) and then periodically rechecks, publishing every result in
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
 `compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, or a code-owned `facility_unavailable:...`) so an operator is never left guessing. Known #2663 physical gaps are now code-owned fail-closed availability reasons, not operator-omittable configuration: target-image migration runner, complete writer inventory beyond the audited queue/outbox/prune/autodispatch/webhook/slicer paths, queue reconciliation writer fencing, and SQL Server host/server backup-path mapping must be implemented before this executor can report production `Available`.
+
+The process boundary is production-ready independently of those facilities:
+`ConfiguredHostUpdateExecutableResolver` requires an explicit absolute path for each audited native
+tool, and `ConstrainedHostUpdateProcessRunner` rejects bare names, rejects ambient `PATH` lookup,
+allows only the audited tools, and accepts rooted paths only when explicitly configured or in fixed
+system directories. It still delegates through the existing no-shell `ArgumentList` runner. It does
+not bootstrap an updater, make unsigned legacy releases eligible, or change the manual authorization
+boundary. A future trusted bootstrap implementation must be selected by the release/operator owners
+before any of the remaining availability blockers are removed.
 
 ## DI wiring
 

@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Data.Migrations;
+using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Xunit;
@@ -119,6 +119,12 @@ public class HostUpdateExecutionAvailabilityTests
             records[record.ReleaseId] = record;
             return Task.CompletedTask;
         }
+
+    }
+
+    private sealed class TestExecutableResolver : IHostUpdateExecutableResolver
+    {
+        public string Resolve(string toolName) => Path.Combine(Path.GetTempPath(), toolName + ".exe");
     }
 
     [Fact]
@@ -136,7 +142,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -144,6 +151,8 @@ public class HostUpdateExecutionAvailabilityTests
             result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
+            result.Reasons.Should().Contain("host_executable_not_configured:docker");
+            result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
         }
         finally
         {
@@ -171,7 +180,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -195,7 +205,8 @@ public class HostUpdateExecutionAvailabilityTests
             [new FakeBackupTarget()],
             [],
             new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
         HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -219,7 +230,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -247,7 +259,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [],
                 [],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -274,7 +287,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -302,7 +316,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [],
                 new FakeProcessRunner(dockerAvailable: false),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -333,7 +348,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -364,7 +380,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -442,7 +459,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [admission, outbox],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -476,7 +494,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [admission],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -511,7 +530,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [admission],
                 new FakeProcessRunner(dockerAvailable: true),
-                outcomeStore);
+                outcomeStore,
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -545,7 +565,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [],
                 new FakeProcessRunner(dockerAvailable: true),
-                outcomeStore);
+                outcomeStore,
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
@@ -585,7 +606,8 @@ public class HostUpdateExecutionAvailabilityTests
                 [new FakeBackupTarget()],
                 [admission],
                 new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore());
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 

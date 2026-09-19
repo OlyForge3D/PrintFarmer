@@ -312,7 +312,7 @@ public sealed class SignedUpdateInfrastructureTests
         string firstJson = JsonSerializer.Serialize(first, JsonOptions);
         string latestJson = JsonSerializer.Serialize(latest, JsonOptions);
         string[] drafts = Enumerable.Range(1, 99).Select(index =>
-            $$"""{"id":{{index}},"tagName":"v99.0.0","draft":true,"prerelease":false,"assets":[]}""").ToArray();
+            $$"""{"id":{{index}},"tag_name":"v99.0.0","draft":true,"prerelease":false,"assets":[]}""").ToArray();
         string pageOne = "[" + string.Join(',', drafts.Append(ReleaseJson(100, "v1.2.3", false, false, true))) + "]";
         string pageTwo = "[" + string.Join(',', new[]
         {
@@ -720,7 +720,7 @@ public sealed class SignedUpdateInfrastructureTests
             {
                 string releaseJson = JsonSerializer.Serialize(new[]
                 {
-                    new { id = 1L, tagName = "v1.2.3", draft = false, prerelease = false, assets = new[]
+                    new { id = 1L, tag_name = "v1.2.3", draft = false, prerelease = false, assets = new[]
                     {
                         new { id = 11L, name = "update-manifest.json", browserDownloadUrl = "http://169.254.169.254/latest/meta-data" },
                         new { id = 12L, name = "update-manifest.sigstore.json", browserDownloadUrl = "https://attacker.invalid/bundle" },
@@ -741,7 +741,7 @@ public sealed class SignedUpdateInfrastructureTests
         string assetJson = assets
             ? $"[{{\"id\":{id}1,\"name\":\"update-manifest.json\",\"browserDownloadUrl\":\"http://169.254.169.254/manifest-{id}\"}},{{\"id\":{id}2,\"name\":\"update-manifest.sigstore.json\",\"browserDownloadUrl\":\"https://attacker.invalid/bundle-{id}\"}}]"
             : "[]";
-        return $"{{\"id\":{id},\"tagName\":\"{tag}\",\"draft\":{draft.ToString().ToLowerInvariant()},\"prerelease\":{prerelease.ToString().ToLowerInvariant()},\"assets\":{assetJson}}}";
+        return $"{{\"id\":{id},\"tag_name\":\"{tag}\",\"draft\":{draft.ToString().ToLowerInvariant()},\"prerelease\":{prerelease.ToString().ToLowerInvariant()},\"assets\":{assetJson}}}";
     }
 
     private sealed class ReleaseHandler(Dictionary<int, string> releasePages, Dictionary<long, byte[]> assets) : HttpMessageHandler

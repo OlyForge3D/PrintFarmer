@@ -134,7 +134,7 @@ public sealed class ProcessDatabaseBackupTarget(
     string name,
     bool isExternallyOwned,
     IHostUpdateProcessRunner processRunner,
-    string fileName,
+    Func<string> resolveFileName,
     Func<string, IReadOnlyList<string>> buildArguments,
     TimeSpan timeout,
     IReadOnlyDictionary<string, string>? environment = null) : IHostUpdateBackupTarget
@@ -146,7 +146,7 @@ public sealed class ProcessDatabaseBackupTarget(
     public async Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken)
     {
         HostUpdateProcessResult result = await processRunner.RunAsync(
-            fileName,
+            resolveFileName(),
             buildArguments(destinationDirectory),
             timeout,
             cancellationToken,
