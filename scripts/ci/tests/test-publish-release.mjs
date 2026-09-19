@@ -706,6 +706,14 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
   const buildSteps = workflow.jobs.build.steps;
   const signSteps = workflow.jobs.sign.steps;
   const publishSteps = workflow.jobs.publish.steps;
+  const cosignInstaller = 'sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6';
+  for (const [jobName, steps] of [['sign', signSteps], ['publish', publishSteps]]) {
+    const installer = steps.find(step => step.uses?.startsWith('sigstore/cosign-installer@'));
+    assert.equal(installer?.uses, cosignInstaller,
+      `${jobName} must use the supported immutable installer`);
+    assert.equal(installer?.with?.['cosign-release'], 'v3.0.6',
+      `${jobName} must retain the verified cosign release`);
+  }
   assert.equal(buildSteps.find(step => step.name === 'Checkout pinned application source').with.ref,
     '${{ needs.select.outputs.source_sha }}');
   assert.equal(signSteps.find(step => step.name === 'Verify owner dispatch and environment policy').run,
