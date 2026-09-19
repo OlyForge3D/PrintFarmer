@@ -44,6 +44,7 @@ public sealed record HostUpdateApplyServiceMapping(string ServiceId, string Comp
 /// </summary>
 public sealed class HostUpdateImageApplier(
     IHostUpdateProcessRunner processRunner,
+    IHostUpdateExecutableResolver executableResolver,
     IReadOnlyList<string> composeFiles,
     string projectName,
     IReadOnlyDictionary<string, HostUpdateApplyServiceMapping> serviceMappings,
@@ -99,7 +100,7 @@ public sealed class HostUpdateImageApplier(
             }
 
             pullArguments.Add(imageReference);
-            HostUpdateProcessResult pullResult = await processRunner.RunAsync("docker", pullArguments, timeout, cancellationToken).ConfigureAwait(false);
+            HostUpdateProcessResult pullResult = await processRunner.RunAsync(executableResolver.Resolve("docker"), pullArguments, timeout, cancellationToken).ConfigureAwait(false);
             if (!pullResult.Succeeded)
             {
                 throw new HostUpdateImageStagingFailedException(serviceId, pullResult.ExitCode, pullResult.StandardError);
@@ -119,7 +120,7 @@ public sealed class HostUpdateImageApplier(
         arguments.AddRange(["-p", projectName, "up", "-d", "--no-build", "--pull", "never"]);
         arguments.AddRange(composeServiceNames);
 
-        HostUpdateProcessResult result = await processRunner.RunAsync("docker", arguments, timeout, cancellationToken, environment)
+        HostUpdateProcessResult result = await processRunner.RunAsync(executableResolver.Resolve("docker"), arguments, timeout, cancellationToken, environment)
             .ConfigureAwait(false);
         if (!result.Succeeded)
         {

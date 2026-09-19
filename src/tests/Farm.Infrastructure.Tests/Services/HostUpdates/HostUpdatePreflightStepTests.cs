@@ -62,10 +62,16 @@ public sealed class HostUpdatePreflightStepTests
             new NullInstalledHostStateStore(),
             migrationTargets,
             new AlwaysDockerAvailableProcessRunner(),
+            new BareNameResolver(),
             Path.GetTempPath(),
             0,
             new HashSet<string>(StringComparer.Ordinal) { "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.SqlServer" },
             mappedServiceIds);
+
+    private sealed class BareNameResolver : IHostUpdateExecutableResolver
+    {
+        public string Resolve(string toolName) => toolName;
+    }
 
     [Fact]
     public async Task RunAsync_TargetServiceIdNotInServiceMappings_FailsClosedWithUnmappedServiceTarget()
