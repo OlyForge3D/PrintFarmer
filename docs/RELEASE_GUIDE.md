@@ -158,7 +158,8 @@ short-lived token **after** the long build. Only the isolated signing job reques
 `id-token: write` (the isolated signing job; the build and publication jobs do
 not), and the official Cosign installer is pinned to immutable action commit
 `6f9f17788090df1f26f669e9d70d6ae9567deba6` (`v4.1.2`), which supports the
-binary pin `v3.0.6` and verifies its keyless and KMS `.sigstore.json` bundles.
+binary pin `v3.0.6` as its bootstrap version and validates the downloaded
+binary against the platform SHA-256 digest embedded in the pinned action.
 The sign job verifies the signature immediately after signing. The publish job
 binds the signature artifact to the exact manifest SHA-256 and re-verifies the
 exact manifest and bundle immediately before release upload. Cosign verification
