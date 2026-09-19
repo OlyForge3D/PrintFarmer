@@ -49,6 +49,7 @@ public sealed class DefaultHostUpdateProcessRunner : IHostUpdateProcessRunner
             RedirectStandardError = true,
             UseShellExecute = false,
             CreateNoWindow = true,
+            WorkingDirectory = AppContext.BaseDirectory,
         };
         foreach (string argument in arguments)
         {
@@ -109,14 +110,16 @@ public sealed class DefaultHostUpdateProcessRunner : IHostUpdateProcessRunner
 /// <summary>
 /// Restricts host-update execution to the audited tools used by the concrete adapters. This is a
 /// defense-in-depth boundary: callers still provide explicit arguments, but cannot turn the
-/// process runner into a general-purpose host command executor or bypass the configured tool
-/// contract with a path-qualified executable.
+/// process runner into a general-purpose host command executor. Rooted executable paths are
+/// accepted only from host tool directories that are trusted for this deployment.
 /// </summary>
 public sealed class ConstrainedHostUpdateProcessRunner(IHostUpdateProcessRunner inner) : IHostUpdateProcessRunner
 {
     private static readonly FrozenSet<string> AllowedExecutables =
         new[] { "docker", "sqlite3", "pg_dump", "pg_restore", "sqlcmd" }
-            .ToFrozenSet(StringComparer.OrdinalIgnoreCase);
+            .ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly string[] TrustedExecutableDirectories = BuildTrustedExecutableDirectories();
 
     public Task<HostUpdateProcessResult> RunAsync(
         string fileName,
@@ -128,12 +131,68 @@ public sealed class ConstrainedHostUpdateProcessRunner(IHostUpdateProcessRunner 
         ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
         ArgumentNullException.ThrowIfNull(arguments);
 
-        if (!AllowedExecutables.Contains(fileName))
+        string executableName = Path.GetFileNameWithoutExtension(fileName);
+        string extension = Path.GetExtension(fileName);
+        if (!AllowedExecutables.Contains(executableName)
+            || (extension.Length > 0 && !string.Equals(extension, ".exe", StringComparison.Ordinal)))
         {
             throw new InvalidOperationException($"host_update_executable_not_allowed:{fileName}");
         }
 
+        if (Path.IsPathRooted(fileName) && !IsTrustedExecutablePath(fileName))
+        {
+            throw new InvalidOperationException($"host_update_executable_path_not_trusted:{fileName}");
+        }
+
         return inner.RunAsync(fileName, arguments, timeout, cancellationToken, environment);
+    }
+
+    private static bool IsTrustedExecutablePath(string fileName)
+    {
+        string fullPath = Path.GetFullPath(fileName);
+        string? directory = Path.GetDirectoryName(fullPath);
+        return directory is not null
+            && TrustedExecutableDirectories.Any(trustedDirectory =>
+                string.Equals(directory, trustedDirectory, StringComparison.Ordinal));
+    }
+
+    private static string[] BuildTrustedExecutableDirectories() =>
+    [
+        Path.GetFullPath(AppContext.BaseDirectory),
+        .. GetConfiguredDirectories("PATH"),
+        .. GetKnownSystemDirectories(),
+    ];
+
+    private static IEnumerable<string> GetConfiguredDirectories(string variableName) =>
+        (Environment.GetEnvironmentVariable(variableName) ?? string.Empty)
+            .Split(Path.PathSeparator, StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(directory => Path.IsPathRooted(directory))
+            .Select(Path.GetFullPath);
+
+    private static IEnumerable<string> GetKnownSystemDirectories()
+    {
+        if (OperatingSystem.IsWindows())
+        {
+            string systemDirectory = Environment.SystemDirectory;
+            if (!string.IsNullOrWhiteSpace(systemDirectory))
+            {
+                yield return Path.GetFullPath(systemDirectory);
+            }
+
+            string? programFiles = Environment.GetEnvironmentVariable("ProgramFiles");
+            if (!string.IsNullOrWhiteSpace(programFiles))
+            {
+                yield return Path.GetFullPath(programFiles);
+            }
+
+            yield break;
+        }
+
+        yield return "/bin";
+        yield return "/usr/bin";
+        yield return "/usr/local/bin";
+        yield return "/sbin";
+        yield return "/usr/sbin";
     }
 }
 

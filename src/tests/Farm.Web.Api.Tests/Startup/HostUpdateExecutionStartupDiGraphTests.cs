@@ -95,6 +95,35 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
 
             Assert.NotNull(coordinator);
         }
+
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_ResolvesOnlyConstrainedProcessRunner()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+
+            Assert.IsType<ConstrainedHostUpdateProcessRunner>(
+                provider.GetRequiredService<IHostUpdateProcessRunner>());
+            Assert.Throws<InvalidOperationException>(() =>
+                provider.GetRequiredService<DefaultHostUpdateProcessRunner>());
+        }
         finally
         {
             if (Directory.Exists(root))

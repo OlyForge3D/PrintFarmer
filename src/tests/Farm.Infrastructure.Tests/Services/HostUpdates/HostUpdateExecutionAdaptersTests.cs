@@ -11,6 +11,7 @@ public sealed class HostUpdateExecutionAdaptersTests
     [InlineData("pg_dump")]
     [InlineData("pg_restore")]
     [InlineData("sqlcmd")]
+    [InlineData("docker.exe")]
     public async Task RunAsync_ApprovedExecutable_DelegatesWithoutChangingArguments(string executable)
     {
         var inner = new RecordingProcessRunner();
@@ -31,9 +32,8 @@ public sealed class HostUpdateExecutionAdaptersTests
     [Theory]
     [InlineData("sh")]
     [InlineData("powershell")]
-    [InlineData("docker.exe")]
-    [InlineData("/usr/bin/docker")]
-    [InlineData(@"C:\Program Files\Docker\docker.exe")]
+    [InlineData("DOCKER")]
+    [InlineData("docker.bat")]
     public async Task RunAsync_UnapprovedOrPathQualifiedExecutable_FailsBeforeDelegation(string executable)
     {
         var inner = new RecordingProcessRunner();
@@ -43,6 +43,20 @@ public sealed class HostUpdateExecutionAdaptersTests
             runner.RunAsync(executable, [], TimeSpan.FromSeconds(1), CancellationToken.None));
 
         Assert.Equal($"host_update_executable_not_allowed:{executable}", exception.Message);
+        Assert.Null(inner.FileName);
+    }
+
+    [Fact]
+    public async Task RunAsync_RootedExecutableOutsideTrustedDirectory_FailsBeforeDelegation()
+    {
+        var inner = new RecordingProcessRunner();
+        var runner = new ConstrainedHostUpdateProcessRunner(inner);
+        string executable = Path.Combine(Path.GetTempPath(), "docker");
+
+        InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            runner.RunAsync(executable, [], TimeSpan.FromSeconds(1), CancellationToken.None));
+
+        Assert.Equal($"host_update_executable_path_not_trusted:{executable}", exception.Message);
         Assert.Null(inner.FileName);
     }
 
