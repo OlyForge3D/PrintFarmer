@@ -32,6 +32,15 @@ public static class OctoPrintUploadPolicy
             return false;
         }
 
+        // The combined policy authentication result discards individual scheme failures.
+        // Reject failed credentials even when another scheme authenticates successfully.
+        AuthenticateResult bearer = await httpContext.AuthenticateAsync(JwtBearerDefaults.AuthenticationScheme);
+        AuthenticateResult apiKey = await httpContext.AuthenticateAsync(OctoPrintApiKeyDefaults.AuthenticationScheme);
+        if (bearer.Failure is not null || apiKey.Failure is not null)
+        {
+            return false;
+        }
+
         if (context.User.Identity?.IsAuthenticated == true)
         {
             var authorization = httpContext.RequestServices.GetRequiredService<IAuthorizationService>();
@@ -43,15 +52,6 @@ public static class OctoPrintUploadPolicy
         }
 
         var settings = httpContext.RequestServices.GetRequiredService<ISettingsService>();
-        if (settings.Get<OctoPrintSettings>().RequireApiKey)
-        {
-            return false;
-        }
-
-        // The combined policy authentication result discards individual scheme failures.
-        // Never turn a rejected credential into a trusted anonymous queue actor.
-        AuthenticateResult bearer = await httpContext.AuthenticateAsync(JwtBearerDefaults.AuthenticationScheme);
-        AuthenticateResult apiKey = await httpContext.AuthenticateAsync(OctoPrintApiKeyDefaults.AuthenticationScheme);
-        return bearer.Failure is null && apiKey.Failure is null;
+        return !settings.Get<OctoPrintSettings>().RequireApiKey;
     }
 }

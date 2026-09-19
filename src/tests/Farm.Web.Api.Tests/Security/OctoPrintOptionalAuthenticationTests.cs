@@ -258,6 +258,37 @@ public sealed class OctoPrintOptionalAuthenticationTests : IAsyncLifetime
     }
 
     [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_ValidBearerWithInvalidApiKey_RejectsBeforeSaving(bool requireApiKey)
+    {
+        _settings = new OctoPrintSettings { RequireApiKey = requireApiKey };
+        SetBearer(_userId.ToString());
+        _client.DefaultRequestHeaders.Add("X-Api-Key", "invalid-key");
+
+        using HttpResponseMessage response = await UploadAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        AssertNoSideEffects();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_ValidApiKeyWithInvalidBearer_RejectsBeforeSaving(bool requireApiKey)
+    {
+        _settings = new OctoPrintSettings { RequireApiKey = requireApiKey };
+        SeedApiKey();
+        _client.DefaultRequestHeaders.Add("X-Api-Key", ApiKeyValue);
+        _client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", "invalid-token");
+
+        using HttpResponseMessage response = await UploadAsync();
+
+        Assert.Equal(HttpStatusCode.Forbidden, response.StatusCode);
+        AssertNoSideEffects();
+    }
+
+    [Theory]
     [InlineData(false, false)]
     [InlineData(true, false)]
     [InlineData(false, true)]
