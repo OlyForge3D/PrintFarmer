@@ -202,6 +202,50 @@ public interface IHostUpdateSchedulerExecutor
     Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct);
 }
 
+public sealed class HostUpdateSchedulerCancellationBridge
+{
+    private readonly object _gate = new();
+    private Func<CancellationToken, Task>? _cancel;
+
+    public IDisposable Register(Func<CancellationToken, Task> cancel)
+    {
+        ArgumentNullException.ThrowIfNull(cancel);
+        lock (_gate)
+        {
+            _cancel = cancel;
+        }
+
+        return new Registration(this, cancel);
+    }
+
+    public Task CancelAsync(CancellationToken ct = default)
+    {
+        Func<CancellationToken, Task>? cancel;
+        lock (_gate)
+        {
+            cancel = _cancel;
+        }
+
+        return cancel is null ? Task.CompletedTask : cancel(ct);
+    }
+
+    private void Unregister(Func<CancellationToken, Task> cancel)
+    {
+        lock (_gate)
+        {
+            if (ReferenceEquals(_cancel, cancel))
+            {
+                _cancel = null;
+            }
+        }
+    }
+
+    private sealed class Registration(HostUpdateSchedulerCancellationBridge owner, Func<CancellationToken, Task> cancel) : IDisposable
+    {
+        public void Dispose() => owner.Unregister(cancel);
+    }
+}
+
 public interface IHostUpdateSchedulerSettings
 {
     HostUpdateSchedulerSettings Current { get; }
@@ -724,7 +768,7 @@ public sealed class HostUpdateSchedulerStatusHolder
 /// when replay, policy-fence, admission, or execution facilities are unavailable.
 /// </summary>
 public sealed class HostUpdateSchedulerHostedService(
-    IServiceScopeFactory scopeFactory,
+    HostUpdateScheduler scheduler,
     HostUpdateSchedulerStatusHolder statusHolder,
     ILogger<HostUpdateSchedulerHostedService> logger) : BackgroundService
 {
@@ -736,8 +780,6 @@ public sealed class HostUpdateSchedulerHostedService(
         {
             try
             {
-                using IServiceScope scope = scopeFactory.CreateScope();
-                HostUpdateScheduler scheduler = scope.ServiceProvider.GetRequiredService<HostUpdateScheduler>();
                 HostUpdateSchedulerStatus status = await scheduler.TickAsync(stoppingToken).ConfigureAwait(false);
                 statusHolder.Update(status);
                 await Task.Delay(PollCadence, stoppingToken).ConfigureAwait(false);
@@ -760,16 +802,21 @@ public sealed class HostUpdateScheduler(
     IHostUpdateSchedulerCandidateCache cache,
     IHostUpdateReplayStore replayStore,
     IHostUpdatePolicyFence policyFence,
-    IHostUpdateSchedulerExecutor executor,
+    IHostUpdateSchedulerExecutor? executor,
     IHostUpdateClock clock,
     IHostUpdateJitter jitter,
     ILogger<HostUpdateScheduler>? logger = null,
-    IHostUpdateAdmissionFence? admissionFence = null) : IDisposable, IAsyncDisposable
+    IHostUpdateAdmissionFence? admissionFence = null,
+    IServiceScopeFactory? scopeFactory = null,
+    HostUpdateSchedulerCancellationBridge? cancellationBridge = null) : IDisposable, IAsyncDisposable
 {
     private static readonly TimeSpan MaxJitter = TimeSpan.FromMinutes(5);
 
     private readonly ILogger<HostUpdateScheduler> _logger = logger ?? NullLogger<HostUpdateScheduler>.Instance;
     private readonly IHostUpdateAdmissionFence _admissionFence = admissionFence ?? new InactiveHostUpdateAdmissionFence();
+    private readonly IServiceScopeFactory? _scopeFactory = scopeFactory;
+    private readonly HostUpdateSchedulerCancellationBridge? _cancellationBridge = cancellationBridge;
+    private readonly IHostUpdateSchedulerExecutor? _directExecutor = executor;
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private HostUpdateSchedulerStatus _status = new(false, false, false, UpdateChannelSettings.StableChannel, 0, null, null, 0, HostUpdateSchedulerReason.Disabled);
     private readonly object _cancellationGate = new();
@@ -908,7 +955,7 @@ public sealed class HostUpdateScheduler(
             HostUpdateReplayDecision decision;
             try
             {
-                decision = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Admit, ct);
+                decision = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Reserve, ct);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -983,7 +1030,13 @@ public sealed class HostUpdateScheduler(
             }
             try
             {
-                HostUpdateExecutorResponse response = await executor.ExecuteAsync(request, ct);
+                using IServiceScope? executionScope = _scopeFactory?.CreateScope();
+                IHostUpdateSchedulerExecutor executionAdapter = _directExecutor ?? executionScope?.ServiceProvider.GetRequiredService<IHostUpdateSchedulerExecutor>()
+                    ?? throw new InvalidOperationException("host_update_scheduler_executor_scope_unavailable");
+                using IDisposable? cancellationRegistration = _cancellationBridge?.Register(
+                    cancellationToken => executionAdapter.SignalSafeCheckpointCancellationAsync(
+                        new HostUpdateCancellationSignal(request.RequestId, operationToken), cancellationToken));
+                HostUpdateExecutorResponse response = await executionAdapter.ExecuteAsync(request, ct);
                 HostUpdateSchedulerReason reason = response.Result switch
                 {
                     HostUpdateExecutorResult.Accepted => HostUpdateSchedulerReason.Admitted,
@@ -993,7 +1046,7 @@ public sealed class HostUpdateScheduler(
                     _ => HostUpdateSchedulerReason.ExecutorFailed
                 };
                 _status = response.Result == HostUpdateExecutorResult.Accepted
-                    ? _status with { ConsecutiveFailures = 0, NextPollAt = SafeAdd(now, fresh.EffectivePollInterval), Reason = reason }
+                    ? await CommitSuccessfulExecutionAsync(candidate, now, fresh, reason, ct)
                     : Backoff(reason, candidate.Identity);
                 return _status;
             }
@@ -1018,6 +1071,35 @@ public sealed class HostUpdateScheduler(
         {
             _tickGate.Release();
         }
+    }
+
+    private async Task<HostUpdateSchedulerStatus> CommitSuccessfulExecutionAsync(
+        VerifiedHostUpdateCandidate candidate,
+        DateTimeOffset now,
+        HostUpdateSchedulerSettings fresh,
+        HostUpdateSchedulerReason reason,
+        CancellationToken ct)
+    {
+        try
+        {
+            HostUpdateReplayDecision committed = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Admit, ct);
+            if (committed.Disposition != HostUpdateReplayDisposition.Accepted)
+            {
+                return Backoff(HostUpdateSchedulerReason.ReplayRejected, candidate.Identity);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogError(ex, "host_update_replay_commit_failed");
+            return Backoff(HostUpdateSchedulerReason.ReplayStoreUnavailable, candidate.Identity);
+        }
+
+        return _status with
+        {
+            ConsecutiveFailures = 0,
+            NextPollAt = SafeAdd(now, fresh.EffectivePollInterval),
+            Reason = reason
+        };
     }
 
     /// <summary>
@@ -1045,7 +1127,14 @@ public sealed class HostUpdateScheduler(
 
         try
         {
-            await executor.SignalSafeCheckpointCancellationAsync(signal, ct).ConfigureAwait(false);
+            if (_directExecutor is not null)
+            {
+                await _directExecutor.SignalSafeCheckpointCancellationAsync(signal, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await (_cancellationBridge?.CancelAsync(ct) ?? Task.CompletedTask).ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -1094,7 +1183,14 @@ public sealed class HostUpdateScheduler(
             {
                 try
                 {
-                    await executor.SignalSafeCheckpointCancellationAsync(signal, CancellationToken.None).ConfigureAwait(false);
+                    if (_directExecutor is not null)
+                    {
+                        await _directExecutor.SignalSafeCheckpointCancellationAsync(signal, CancellationToken.None).ConfigureAwait(false);
+                    }
+                    else
+                    {
+                        await (_cancellationBridge?.CancelAsync(CancellationToken.None) ?? Task.CompletedTask).ConfigureAwait(false);
+                    }
                 }
                 catch (Exception ex)
                 {

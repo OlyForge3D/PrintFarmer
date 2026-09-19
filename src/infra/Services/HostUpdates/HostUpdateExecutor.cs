@@ -155,7 +155,8 @@ public sealed class HostUpdateExecutor(
     IHostUpdateExecutionSteps steps,
     IHostUpdateExecutionJournal journal,
     IHostUpdateExecutionLock updateLock,
-    IHostUpdateSideEffectReconciler? sideEffectReconciler = null) : IHostUpdateExecutor
+    IHostUpdateSideEffectReconciler? sideEffectReconciler = null,
+    IHostUpdateAutomationPolicyRepository? automationPolicyRepository = null) : IHostUpdateExecutor
 {
     private static readonly (HostUpdateExecutionState State, string Phase, bool Safe)[] Plan =
     [
@@ -178,6 +179,17 @@ public sealed class HostUpdateExecutor(
 
         string bindingHash = HostUpdateRequestBinding.Compute(request);
         using IHostUpdateExecutionLease lease = updateLock.Acquire(TimeSpan.FromSeconds(30), cancellationToken);
+        if (automationPolicyRepository is not null)
+        {
+            HostUpdatePolicyReadResult policy = automationPolicyRepository.Read();
+            if (!policy.Available ||
+                policy.Policy.Revision != request.PolicyRevision ||
+                !string.Equals(policy.Policy.Fingerprint, request.PolicyFingerprint, StringComparison.Ordinal))
+            {
+                return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "policy_drifted", []);
+            }
+        }
+
         List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList();
         HostUpdateExecutionState current = activities.LastOrDefault()?.State ?? HostUpdateExecutionState.Accepted;
         if (activities.Any(activity => activity.RequestBindingHash is not null && activity.RequestBindingHash != bindingHash))

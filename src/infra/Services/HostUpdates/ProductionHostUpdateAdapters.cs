@@ -179,7 +179,39 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
         if (schedulerStatus is not null)
         {
             HostUpdateSchedulerStatus current = schedulerStatus.Current;
-            HostUpdateAutomationPolicy currentPolicy = policyRepository?.Read().Policy ?? new HostUpdateAutomationPolicy();
+            HostUpdatePolicyReadResult holderPolicyResult = policyRepository?.Read() ?? new(true, new HostUpdateAutomationPolicy(), null);
+            HostUpdateAutomationPolicy holderPolicy = holderPolicyResult.Policy;
+            List<string> holderReasons = [];
+            if (!holderPolicyResult.Available)
+            {
+                holderReasons.Add(holderPolicyResult.Error ?? "host_update_policy_unavailable");
+            }
+
+            AddUnavailable(holderReasons, replayAnchor, HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason);
+            AddUnavailable(holderReasons, replayStore, "host_update_replay_store_unavailable");
+            HostUpdateAdmissionFenceStatus? holderAdmission = admissionFence?.GetStatus();
+            if (holderAdmission?.BlocksAdmission == true)
+            {
+                holderReasons.Add(string.IsNullOrWhiteSpace(holderAdmission.Reason) ? HostUpdateSchedulingAvailability.AdmissionFenceReason : holderAdmission.Reason);
+            }
+
+            string holderExecutorReason = executor is IHostUpdateAvailability { IsAvailable: false } holderExecutorAvailability
+                ? holderExecutorAvailability.UnavailableReason
+                : current.Reason == HostUpdateSchedulerReason.Admitted
+                    ? current.Reason.ToString()
+                    : HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason;
+            bool hasAttempt = current.LastAttemptAt is not null;
+            bool dependencyBlocked = holderReasons.Count > 0;
+            if (hasAttempt && (!dependencyBlocked || current.Reason is not HostUpdateSchedulerReason.Disabled))
+            {
+                holderReasons.Add(current.Reason.ToString());
+            }
+
+            if (holderReasons.Count == 0)
+            {
+                holderReasons.Add(current.Reason.ToString());
+            }
+
             return new HostUpdateSchedulingStatusDto
             {
                 ConfiguredEnabled = current.Enabled,
@@ -192,7 +224,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
                 Backoff = new HostUpdateBackoffDto
                 {
                     State = current.NextPollAt is null
-                        ? HostUpdateBackoffState.Due
+                        ? hasAttempt && !dependencyBlocked ? HostUpdateBackoffState.Due : HostUpdateBackoffState.Unknown
                         : current.NextPollAt > DateTimeOffset.UtcNow
                             ? HostUpdateBackoffState.Waiting
                             : HostUpdateBackoffState.Due,
@@ -202,17 +234,17 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
                 },
                 KillSwitch = new HostUpdateKillSwitchDto
                 {
-                    Enabled = current.KillSwitch || currentPolicy.KillSwitch,
-                    Reason = (current.KillSwitch || currentPolicy.KillSwitch) ? "configured" : null,
+                    Enabled = current.KillSwitch || holderPolicy.KillSwitch,
+                    Reason = (current.KillSwitch || holderPolicy.KillSwitch) ? "configured" : null,
                 },
                 Executor = new HostUpdateExecutorDto
                 {
                     State = current.Reason is HostUpdateSchedulerReason.Admitted
                         ? HostUpdateExecutorState.Available
                         : HostUpdateExecutorState.Unavailable,
-                    Reason = current.Reason.ToString(),
+                    Reason = holderExecutorReason,
                 },
-                Reasons = [current.Reason.ToString()],
+                Reasons = holderReasons.Distinct(StringComparer.Ordinal).ToArray(),
             };
         }
 

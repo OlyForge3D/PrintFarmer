@@ -397,11 +397,24 @@ public static class FeatureServicesStartup
                 OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported",
                 TimeSpan.FromHours(2)));
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerStatusHolder>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerCancellationBridge>();
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerExecutor>(sp =>
             new Farm.Infrastructure.Services.HostUpdates.DallasHostUpdateSchedulerExecutor(
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutor>(),
                 OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported"));
-        services.AddScoped<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>();
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>(sp =>
+            new Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler(
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerSettings>(),
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCandidateCache>(),
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateReplayStore>(),
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdatePolicyFence>(),
+                null,
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateClock>(),
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateJitter>(),
+                sp.GetRequiredService<ILogger<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>>(),
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionFence>(),
+                sp.GetRequiredService<IServiceScopeFactory>(),
+                sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerCancellationBridge>()));
         services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerHostedService>();
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache, Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCache>();

@@ -21,7 +21,9 @@ public sealed record HostUpdateAutomationPolicyRequest(
 [Route("api/admin/host-updates/automation-policy")]
 [RequirePermission("system_settings", "admin")]
 [Tags("Admin - Host Updates")]
-public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPolicyRepository repository) : ControllerBase
+public sealed class HostUpdateAutomationPolicyController(
+    IHostUpdateAutomationPolicyRepository repository,
+    HostUpdateSchedulerCancellationBridge? cancellationBridge = null) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(HostUpdateAutomationPolicy), StatusCodes.Status200OK)]
@@ -74,6 +76,18 @@ public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPo
         }
 
         return Ok(result.Policy);
+    }
+
+    [HttpPost("cancel")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    public async Task<IActionResult> CancelAsync(CancellationToken ct)
+    {
+        if (cancellationBridge is not null)
+        {
+            await cancellationBridge.CancelAsync(ct).ConfigureAwait(false);
+        }
+
+        return Accepted();
     }
 
     private ObjectResult AvailabilityProblem(string reason) => Problem(
