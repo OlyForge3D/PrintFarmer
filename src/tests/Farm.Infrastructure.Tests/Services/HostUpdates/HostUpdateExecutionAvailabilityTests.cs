@@ -573,7 +573,8 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionResult execution = await new HostUpdateExecutor(
                 new NoopExecutionSteps(),
                 journal,
-                NoopHostUpdateExecutionLock.Instance).ExecuteAsync(request);
+                NoopHostUpdateExecutionLock.Instance,
+                automationPolicyRepository: new InlinePolicyRepository()).ExecuteAsync(request);
             execution.State.Should().Be(HostUpdateExecutionState.Completed);
             var admission = new FakeFenceableWriter("api-admission");
 
@@ -616,7 +617,7 @@ public class HostUpdateExecutionAvailabilityTests
         RequestId = "request-5",
         TrustRoot = "root-1",
         PolicyRevision = 1,
-        PolicyFingerprint = "policy-1",
+        PolicyFingerprint = HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(new HostUpdateAutomationPolicy(Enabled: true, Revision: 1)).Fingerprint,
         HostPlatform = "linux-amd64",
     };
 
@@ -629,6 +630,16 @@ public class HostUpdateExecutionAvailabilityTests
         public Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
         public Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
         public Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class InlinePolicyRepository : IHostUpdateAutomationPolicyRepository
+    {
+        private static readonly HostUpdateAutomationPolicy Policy = new(Enabled: true, Revision: 1);
+
+        public HostUpdatePolicyReadResult Read() => new(true, Policy, null);
+
+        public Task<HostUpdatePolicyReadResult> ReplaceAsync(HostUpdateAutomationPolicy replacement, long expectedRevision, CancellationToken ct) =>
+            Task.FromResult(new HostUpdatePolicyReadResult(true, replacement, null));
     }
 
     private sealed class DelegateAvailabilityProvider(Func<HostUpdateExecutionAvailability> compute) : IHostUpdateExecutionAvailabilityProvider

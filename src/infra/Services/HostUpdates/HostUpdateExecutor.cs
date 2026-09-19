@@ -155,8 +155,8 @@ public sealed class HostUpdateExecutor(
     IHostUpdateExecutionSteps steps,
     IHostUpdateExecutionJournal journal,
     IHostUpdateExecutionLock updateLock,
-    IHostUpdateSideEffectReconciler? sideEffectReconciler = null,
-    IHostUpdateAutomationPolicyRepository? automationPolicyRepository = null) : IHostUpdateExecutor
+    IHostUpdateAutomationPolicyRepository automationPolicyRepository,
+    IHostUpdateSideEffectReconciler? sideEffectReconciler = null) : IHostUpdateExecutor
 {
     private static readonly (HostUpdateExecutionState State, string Phase, bool Safe)[] Plan =
     [
@@ -179,18 +179,15 @@ public sealed class HostUpdateExecutor(
 
         string bindingHash = HostUpdateRequestBinding.Compute(request);
         using IHostUpdateExecutionLease lease = updateLock.Acquire(TimeSpan.FromSeconds(30), cancellationToken);
-        if (automationPolicyRepository is not null)
+        HostUpdatePolicyReadResult policy = automationPolicyRepository.Read();
+        HostUpdateSchedulerSettings schedulerPolicy = policy.Available
+            ? HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(policy.Policy)
+            : new HostUpdateSchedulerSettings();
+        if (!policy.Available ||
+            schedulerPolicy.PolicyRevision != request.PolicyRevision ||
+            !string.Equals(schedulerPolicy.Fingerprint, request.PolicyFingerprint, StringComparison.Ordinal))
         {
-            HostUpdatePolicyReadResult policy = automationPolicyRepository.Read();
-            HostUpdateSchedulerSettings schedulerPolicy = policy.Available
-                ? HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(policy.Policy)
-                : new HostUpdateSchedulerSettings();
-            if (!policy.Available ||
-                schedulerPolicy.PolicyRevision != request.PolicyRevision ||
-                !string.Equals(schedulerPolicy.Fingerprint, request.PolicyFingerprint, StringComparison.Ordinal))
-            {
-                return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "policy_drifted", []);
-            }
+            return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "policy_drifted", []);
         }
 
         List<HostUpdateExecutionActivity> activities = journal.Read(request.ReleaseId).ToList();
