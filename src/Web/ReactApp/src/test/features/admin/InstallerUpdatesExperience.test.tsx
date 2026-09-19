@@ -463,6 +463,71 @@ describe('InstallerUpdatesExperience', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it('allows a retry after recovery terminates with NeedsOperator', async () => {
+    const authorize = vi.fn()
+      .mockResolvedValueOnce({
+        authorizationId: 'auth-1',
+        releaseId: 'stable:1.2.4',
+        sequence: 4,
+        channel: 'stable',
+        candidateFingerprint: 'candidate',
+        policyRevision: 1,
+        policyFingerprint: 'policy',
+        expiresAt: '2026-09-19T20:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        authorizationId: 'auth-2',
+        releaseId: 'stable:1.2.5',
+        sequence: 5,
+        channel: 'stable',
+        candidateFingerprint: 'candidate-2',
+        policyRevision: 1,
+        policyFingerprint: 'policy',
+        expiresAt: '2026-09-19T20:00:00Z',
+      });
+    const execute = vi.fn()
+      .mockResolvedValueOnce({
+        releaseId: 'stable:1.2.4',
+        currentState: 'RecoveryRequired',
+        activities: [],
+      })
+      .mockResolvedValueOnce({
+        releaseId: 'stable:1.2.5',
+        currentState: 'Completed',
+        activities: [],
+      });
+    const recover = vi.fn().mockResolvedValue({
+      outcome: 'NeedsOperator',
+      detail: 'manual_intervention_required',
+    });
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [],
+    });
+    const user = userEvent.setup();
+
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={authorize}
+      onExecuteHostUpdate={execute}
+      onGetHostUpdateStatus={status}
+      onRecoverHostUpdate={recover}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    await user.click(await screen.findByRole('button', { name: 'Recover update' }));
+    expect(await screen.findByText(/NeedsOperator: manual_intervention_required/)).toBeVisible();
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    await waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it('allows retry after authorization fails before execute dispatch', async () => {
     const authorize = vi.fn()
       .mockRejectedValueOnce({ statusCode: 503, message: 'Authorization unavailable.' })
