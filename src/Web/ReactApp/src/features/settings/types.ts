@@ -29,14 +29,6 @@ export interface SettingsScope {
   adminOnly?: boolean;
 }
 
-/** @deprecated Use SettingsCategory instead */
-export interface SettingsTab {
-  id: string;
-  label: string;
-  icon?: React.ReactNode;
-  keywords: string[];
-}
-
 export const SETTINGS_SCOPES: SettingsScope[] = [
   {
     id: 'user',
