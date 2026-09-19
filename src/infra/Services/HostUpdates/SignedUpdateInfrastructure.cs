@@ -358,7 +358,12 @@ public static partial class SignedUpdateManifestValidator
 }
 
 public sealed record GitHubReleaseAsset(long Id, string Name);
-public sealed record GitHubRelease(long Id, string TagName, bool Draft, bool Prerelease, IReadOnlyList<GitHubReleaseAsset> Assets);
+public sealed record GitHubRelease(
+    long Id,
+    [property: JsonPropertyName("tag_name")] string TagName,
+    bool Draft,
+    bool Prerelease,
+    IReadOnlyList<GitHubReleaseAsset> Assets);
 
 public interface ISignedReleaseVerifier
 {
