@@ -167,11 +167,17 @@ public sealed class AggregateHostUpdateHealthCheckTests
 /// </summary>
 public sealed class DigestHostUpdateHealthCheckTests
 {
+    private sealed class TestExecutableResolver : IHostUpdateExecutableResolver
+    {
+        public string Resolve(string toolName) => Path.Combine(Path.GetTempPath(), toolName + ".exe");
+    }
+
     private sealed class FakeProcessRunner(
         HostUpdateProcessResult containerInspectResult,
         HostUpdateProcessResult? imageInspectResult = null) : IHostUpdateProcessRunner
     {
         public List<IReadOnlyList<string>> Calls { get; } = [];
+        public List<string> FileNames { get; } = [];
 
         public Task<HostUpdateProcessResult> RunAsync(
             string fileName,
@@ -180,6 +186,7 @@ public sealed class DigestHostUpdateHealthCheckTests
             CancellationToken cancellationToken,
             IReadOnlyDictionary<string, string>? environment = null)
         {
+            FileNames.Add(fileName);
             Calls.Add(arguments);
             bool isContainerInspect = arguments.Count > 0 && string.Equals(arguments[0], "container", StringComparison.Ordinal);
             return Task.FromResult(isContainerInspect ? containerInspectResult : (imageInspectResult ?? containerInspectResult));
@@ -192,7 +199,7 @@ public sealed class DigestHostUpdateHealthCheckTests
         var runner = new FakeProcessRunner(
             new HostUpdateProcessResult(0, "sha256:" + new string('a', 64), string.Empty),
             new HostUpdateProcessResult(0, "example.com/api@sha256:" + new string('b', 64), string.Empty));
-        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, new TestExecutableResolver(), "api-1", "sha256:" + new string('b', 64));
 
         bool result = await check.IsHealthyAsync(CancellationToken.None);
 
@@ -208,7 +215,7 @@ public sealed class DigestHostUpdateHealthCheckTests
         var runner = new FakeProcessRunner(
             new HostUpdateProcessResult(0, "sha256:" + new string('a', 64), string.Empty),
             new HostUpdateProcessResult(0, "example.com/api@sha256:" + new string('c', 64), string.Empty));
-        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, new TestExecutableResolver(), "api-1", "sha256:" + new string('b', 64));
 
         bool result = await check.IsHealthyAsync(CancellationToken.None);
 
@@ -219,7 +226,7 @@ public sealed class DigestHostUpdateHealthCheckTests
     public async Task IsHealthyAsync_ContainerInspectFails_ReturnsFalseAndNeverInspectsImage()
     {
         var runner = new FakeProcessRunner(new HostUpdateProcessResult(1, string.Empty, "no such container"));
-        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, new TestExecutableResolver(), "api-1", "sha256:" + new string('b', 64));
 
         bool result = await check.IsHealthyAsync(CancellationToken.None);
 
@@ -233,11 +240,33 @@ public sealed class DigestHostUpdateHealthCheckTests
         var runner = new FakeProcessRunner(
             new HostUpdateProcessResult(0, "sha256:" + new string('a', 64), string.Empty),
             new HostUpdateProcessResult(1, string.Empty, "no such image"));
-        var check = new DigestHostUpdateHealthCheck("digest:api", runner, "api-1", "sha256:" + new string('b', 64));
+        var check = new DigestHostUpdateHealthCheck("digest:api", runner, new TestExecutableResolver(), "api-1", "sha256:" + new string('b', 64));
 
         bool result = await check.IsHealthyAsync(CancellationToken.None);
 
         result.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task IsHealthyAsync_UsesConfiguredAbsoluteDockerPathThroughConstrainedRunner()
+    {
+        var inner = new FakeProcessRunner(
+            new HostUpdateProcessResult(0, "sha256:" + new string('a', 64), string.Empty),
+            new HostUpdateProcessResult(0, "example.com/api@sha256:" + new string('b', 64), string.Empty));
+        string dockerPath = Path.Combine(Path.GetTempPath(), "docker.exe");
+        var runner = new ConstrainedHostUpdateProcessRunner(
+            inner,
+            new HashSet<string>(StringComparer.Ordinal) { dockerPath });
+        var check = new DigestHostUpdateHealthCheck(
+            "digest:api",
+            runner,
+            new TestExecutableResolver(),
+            "api-1",
+            "sha256:" + new string('b', 64));
+
+        Assert.True(await check.IsHealthyAsync(CancellationToken.None));
+        inner.Calls.Should().HaveCount(2);
+        inner.FileNames.Should().OnlyContain(fileName => fileName == dockerPath);
     }
 }
 public sealed class HostUpdateHealthVerifierTests

@@ -26,6 +26,13 @@ public sealed class HostUpdateExecutionOptions
     /// </summary>
     public string RootDirectory { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Explicit absolute paths to the host tools used by update adapters. Bare executable names
+    /// and ambient PATH lookup are never accepted by the process boundary.
+    /// </summary>
+    public IDictionary<string, string> HostExecutablePaths { get; set; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Durable state root (installed-state, journal, lock files): <c>{RootDirectory}/state</c>.</summary>
     public string StateDirectory => Combine("state");
 

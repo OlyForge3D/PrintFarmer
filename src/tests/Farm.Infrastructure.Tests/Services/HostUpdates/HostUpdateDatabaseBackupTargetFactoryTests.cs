@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
@@ -19,6 +19,14 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     /// argument list; it authenticates nothing.
     /// </summary>
     private const string FixtureSqlPassword = "fixture-not-a-real-credential";
+
+    private static readonly ConfiguredHostUpdateExecutableResolver TestExecutableResolver = new(new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["sqlite3"] = Path.Combine(Path.GetTempPath(), "sqlite3.exe"),
+        ["pg_dump"] = Path.Combine(Path.GetTempPath(), "pg_dump.exe"),
+        ["pg_restore"] = Path.Combine(Path.GetTempPath(), "pg_restore.exe"),
+        ["sqlcmd"] = Path.Combine(Path.GetTempPath(), "sqlcmd.exe"),
+    });
 
     private sealed class RecordingProcessRunner : IHostUpdateProcessRunner
     {
@@ -48,7 +56,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var dbConfig = new DatabaseProviderConfiguration { Provider = "postgres", ConnectionString = "Host=db;Database=x;Username=u;Password=p" };
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, new RecordingProcessRunner(), TimeSpan.FromSeconds(30), isExternallyOwned: true);
+            "database", dbConfig, new RecordingProcessRunner(), TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: true);
 
         target.IsExternallyOwned.Should().BeTrue();
         Func<Task> act = () => target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
@@ -62,11 +70,29 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
-        runner.LastFileName.Should().Be("sqlite3");
+        runner.LastFileName.Should().Be(TestExecutableResolver.Resolve("sqlite3"));
         target.IsExternallyOwned.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateBackupTarget_MissingExecutableMapping_FailsWhenBackupRuns()
+    {
+        var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlite", ConnectionString = "Data Source=farm.db" };
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database",
+            dbConfig,
+            new RecordingProcessRunner(),
+            new ConfiguredHostUpdateExecutableResolver(new Dictionary<string, string>(StringComparer.Ordinal)),
+            TimeSpan.FromSeconds(30),
+            isExternallyOwned: false);
+
+        Func<Task> act = () => target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("host_update_executable_not_configured:sqlite3");
     }
 
     [Fact]
@@ -80,10 +106,10 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
-        runner.LastFileName.Should().Be("pg_dump");
+        runner.LastFileName.Should().Be(TestExecutableResolver.Resolve("pg_dump"));
         runner.LastArguments.Should().NotContain("super-secret");
         runner.LastEnvironment.Should().ContainKey("PGPASSWORD").WhoseValue.Should().Be("super-secret");
     }
@@ -99,10 +125,10 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
-        runner.LastFileName.Should().Be("sqlcmd");
+        runner.LastFileName.Should().Be(TestExecutableResolver.Resolve("sqlcmd"));
         runner.LastArguments.Should().Contain("-b");
         runner.LastArguments.Should().Contain(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
     }
@@ -112,10 +138,10 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     {
         var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlite", ConnectionString = "Data Source=farm.db" };
 
-        Func<string, HostUpdateRestoreCommand> restoreCommand = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig);
+        Func<string, HostUpdateRestoreCommand> restoreCommand = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver);
         HostUpdateRestoreCommand command = restoreCommand(Path.GetTempPath());
 
-        command.FileName.Should().Be("sqlite3");
+        command.FileName.Should().Be(TestExecutableResolver.Resolve("sqlite3"));
         command.Arguments.Should().Contain(a => a.Contains(".restore", StringComparison.Ordinal));
     }
 
@@ -128,9 +154,9 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Host=dbhost;Port=5433;Database=printfarmer;Username=pf;Password=test-only-pw-1",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
-        command.FileName.Should().Be("pg_restore");
+        command.FileName.Should().Be(TestExecutableResolver.Resolve("pg_restore"));
         command.Arguments.Should().NotContain(a => a.Contains("test-only-pw-1", StringComparison.Ordinal));
         command.Environment.Should().ContainKey("PGPASSWORD").WhoseValue.Should().Be("test-only-pw-1");
     }
@@ -144,9 +170,9 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-2;TrustServerCertificate=True",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
-        command.FileName.Should().Be("sqlcmd");
+        command.FileName.Should().Be(TestExecutableResolver.Resolve("sqlcmd"));
         command.Arguments.Should().Contain("-b");
         command.Arguments.Should().Contain(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         command.Arguments.Should().NotContain(a => a.Contains("test-only-pw-2", StringComparison.Ordinal));
@@ -164,7 +190,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments.Should().NotContain(a => a.Contains("test-only-pw-3", StringComparison.Ordinal));
@@ -181,7 +207,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-6;TrustServerCertificate=True",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         query.Should().Contain("SET SINGLE_USER WITH ROLLBACK IMMEDIATE");
@@ -194,7 +220,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     {
         var dbConfig = new DatabaseProviderConfiguration { Provider = "unknown-provider", ConnectionString = "n/a" };
 
-        Action act = () => HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig);
+        Action act = () => HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver);
 
         act.Should().Throw<NotSupportedException>();
     }
@@ -220,7 +246,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         string query = runner.LastArguments!.Single(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
@@ -239,7 +265,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         };
         var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlserver", ConnectionString = builder.ConnectionString };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         query.Should().Contain("[printfarmer]]; DROP TABLE Users; --]");
@@ -253,7 +279,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         string hostileDestination = Path.Combine(Path.GetTempPath(), "it's-a-trap");
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(hostileDestination, CancellationToken.None);
 
         string backupCommand = runner.LastArguments!.Single(a => a.Contains(".backup", StringComparison.Ordinal));
@@ -271,7 +297,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         };
         string hostileTargetDirectory = Path.Combine(Path.GetTempPath(), "it's-a-trap");
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(hostileTargetDirectory);
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(hostileTargetDirectory);
 
         string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         query.Should().Contain("it''s-a-trap");
@@ -300,7 +326,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments.Should().Contain("-N");
@@ -319,7 +345,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{encryptSetting}",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Should().Contain("-N");
     }
@@ -347,7 +373,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments!.Contains("-C").Should().Be(expectTrustCertificate);
@@ -368,7 +394,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{trustSetting}",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Contains("-C").Should().Be(expectTrustCertificate);
         command.Arguments.Should().Contain("-N");
@@ -391,7 +417,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments.Should().Contain("-b");
@@ -408,7 +434,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword};Encrypt=False",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Should().Contain("-b");
         command.Arguments.Should().NotContain(FixtureSqlPassword);
@@ -428,7 +454,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Server=sqlhost;Database=printfarmer;Integrated Security=True;Encrypt=False;TrustServerCertificate=True",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Should().Contain("-E");
         command.Arguments.Should().Contain("-N");
