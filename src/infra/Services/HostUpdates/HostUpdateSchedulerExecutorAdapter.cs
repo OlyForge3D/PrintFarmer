@@ -3,11 +3,11 @@
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
-/// Bridges the scheduler's immutable, policy-bound request to Dallas's execution engine without
+/// Bridges the scheduler's immutable, policy-bound request to the host execution engine without
 /// discarding any authenticated release binding. Manual execution remains on <see cref="IHostUpdateExecutor"/>
 /// and is not authorized by this adapter.
 /// </summary>
-public sealed class DallasHostUpdateSchedulerExecutor(
+public sealed class HostUpdateSchedulerExecutorAdapter(
     IHostUpdateExecutor executor,
     string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable, IAsyncDisposable
 {

@@ -190,6 +190,12 @@ public sealed record HostUpdateExecutorResponse(HostUpdateExecutorResult Result,
 /// </summary>
 public sealed record HostUpdateCancellationSignal(string RequestId, string OperationToken);
 
+public enum HostUpdateCancellationResult
+{
+    Signaled,
+    NoActiveExecution,
+}
+
 public interface IHostUpdateSchedulerExecutor
 {
     Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct);
@@ -206,6 +212,9 @@ public sealed class HostUpdateSchedulerCancellationBridge
 {
     private readonly object _gate = new();
     private Func<CancellationToken, Task>? _cancel;
+    private bool _pending;
+    private DateTimeOffset _pendingAt;
+    private static readonly TimeSpan PendingLifetime = TimeSpan.FromSeconds(30);
 
     public IDisposable Register(Func<CancellationToken, Task> cancel)
     {
@@ -224,9 +233,24 @@ public sealed class HostUpdateSchedulerCancellationBridge
         lock (_gate)
         {
             cancel = _cancel;
+            if (cancel is null)
+            {
+                _pending = true;
+                _pendingAt = DateTimeOffset.UtcNow;
+            }
         }
 
         return cancel is null ? Task.CompletedTask : cancel(ct);
+    }
+
+    public bool ConsumePending()
+    {
+        lock (_gate)
+        {
+            bool pending = _pending && DateTimeOffset.UtcNow - _pendingAt <= PendingLifetime;
+            _pending = false;
+            return pending;
+        }
     }
 
     private void Unregister(Func<CancellationToken, Task> cancel)
@@ -873,7 +897,7 @@ public sealed class HostUpdateScheduler(
 
             if (_status.NextPollAt is DateTimeOffset nextPollAt && now < nextPollAt)
             {
-                return _status with { Reason = HostUpdateSchedulerReason.TooEarly };
+                return _status;
             }
 
             if (settings is IHostUpdatePolicyBackedSchedulerSettings policyBackedSettings)
@@ -1036,6 +1060,11 @@ public sealed class HostUpdateScheduler(
                 using IDisposable? cancellationRegistration = _cancellationBridge?.Register(
                     cancellationToken => executionAdapter.SignalSafeCheckpointCancellationAsync(
                         new HostUpdateCancellationSignal(request.RequestId, operationToken), cancellationToken));
+                if (_cancellationBridge?.ConsumePending() == true)
+                {
+                    await executionAdapter.SignalSafeCheckpointCancellationAsync(
+                        new HostUpdateCancellationSignal(request.RequestId, operationToken), ct).ConfigureAwait(false);
+                }
                 HostUpdateExecutorResponse response = await executionAdapter.ExecuteAsync(request, ct);
                 HostUpdateSchedulerReason reason = response.Result switch
                 {
@@ -1085,6 +1114,9 @@ public sealed class HostUpdateScheduler(
             HostUpdateReplayDecision committed = await replayStore.DecideAsync(candidate, HostUpdateReplayIntent.Admit, ct);
             if (committed.Disposition != HostUpdateReplayDisposition.Accepted)
             {
+                _logger.LogError(
+                    "host_update_replay_commit_rejected_after_success: {Disposition}",
+                    committed.Disposition);
                 return Backoff(HostUpdateSchedulerReason.ReplayRejected, candidate.Identity);
             }
         }
@@ -1108,14 +1140,14 @@ public sealed class HostUpdateScheduler(
     /// a delayed delivery cannot cancel a later run that reuses the same request ID, and a failed
     /// delivery for a finished generation cannot clear the newer generation's signalled state.
     /// </summary>
-    public async Task SignalSafeCheckpointCancellationAsync(CancellationToken ct = default)
+    public async Task<HostUpdateCancellationResult> SignalSafeCheckpointCancellationAsync(CancellationToken ct = default)
     {
         HostUpdateCancellationSignal signal;
         lock (_cancellationGate)
         {
             if (Volatile.Read(ref _disposed) != 0 || _activeRequestId is null || _activeOperationToken is null || _activeRequestSignaled)
             {
-                return;
+                return HostUpdateCancellationResult.NoActiveExecution;
             }
 
             signal = new HostUpdateCancellationSignal(_activeRequestId, _activeOperationToken);
@@ -1135,6 +1167,7 @@ public sealed class HostUpdateScheduler(
             {
                 await (_cancellationBridge?.CancelAsync(ct) ?? Task.CompletedTask).ConfigureAwait(false);
             }
+            return HostUpdateCancellationResult.Signaled;
         }
         catch
         {
@@ -1307,6 +1340,17 @@ public sealed class HostUpdateScheduler(
 public sealed class SystemHostUpdateClock : IHostUpdateClock
 {
     public DateTimeOffset UtcNow => DateTimeOffset.UtcNow;
+}
+
+public sealed class InstallationSeededHostUpdateJitter : IHostUpdateJitter
+{
+    public TimeSpan For(string identity, int attempt)
+    {
+        string seed = $"{identity}:{attempt}";
+        byte[] digest = SHA256.HashData(Encoding.UTF8.GetBytes(seed));
+        uint value = BitConverter.ToUInt32(digest, 0);
+        return TimeSpan.FromSeconds(value % (5 * 60));
+    }
 }
 
 public sealed class ZeroHostUpdateJitter : IHostUpdateJitter

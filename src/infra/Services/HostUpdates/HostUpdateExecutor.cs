@@ -182,9 +182,12 @@ public sealed class HostUpdateExecutor(
         if (automationPolicyRepository is not null)
         {
             HostUpdatePolicyReadResult policy = automationPolicyRepository.Read();
+            HostUpdateSchedulerSettings schedulerPolicy = policy.Available
+                ? HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(policy.Policy)
+                : new HostUpdateSchedulerSettings();
             if (!policy.Available ||
-                policy.Policy.Revision != request.PolicyRevision ||
-                !string.Equals(policy.Policy.Fingerprint, request.PolicyFingerprint, StringComparison.Ordinal))
+                schedulerPolicy.PolicyRevision != request.PolicyRevision ||
+                !string.Equals(schedulerPolicy.Fingerprint, request.PolicyFingerprint, StringComparison.Ordinal))
             {
                 return new(request.ReleaseId, HostUpdateExecutionState.RecoveryRequired, "policy_drifted", []);
             }

@@ -1,10 +1,10 @@
-﻿#pragma warning disable VSTHRD003
+#pragma warning disable VSTHRD003
 using Farm.Infrastructure.Services.HostUpdates;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
-public sealed class DallasHostUpdateSchedulerExecutorTests
+public sealed class HostUpdateSchedulerExecutorAdapterTests
 {
     private static HostUpdateExecutorRequest Request(string channel = "stable", string operationToken = "operation-1") => new(
         "request-1",
@@ -26,10 +26,10 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
         operationToken);
 
     [Fact]
-    public async Task ExecuteAsync_MapsImmutableSchedulerBindingToDallasRequest()
+    public async Task ExecuteAsync_MapsImmutableSchedulerBindingToHostUpdateRequest()
     {
         CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
-        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(), default);
 
@@ -49,10 +49,10 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
     [Theory]
     [InlineData(HostUpdateExecutionState.RecoveryRequired, HostUpdateExecutorResult.RecoveryRequired)]
     [InlineData(HostUpdateExecutionState.Applying, HostUpdateExecutorResult.Refused)]
-    public async Task ExecuteAsync_MapsDallasStateToSchedulerResult(HostUpdateExecutionState state, HostUpdateExecutorResult expected)
+    public async Task ExecuteAsync_MapsHostUpdateStateToSchedulerResult(HostUpdateExecutionState state, HostUpdateExecutorResult expected)
     {
         CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", state, "failure-code", []));
-        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(), default);
 
@@ -64,7 +64,7 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
     public async Task ExecuteAsync_MapsInsiderChannelWithoutSharingStableNamespace()
     {
         CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
-        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request("insider"), default);
 
@@ -76,7 +76,7 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
     public async Task SignalSafeCheckpointCancellation_CancelsOnlyCurrentAutomaticRequest()
     {
         BlockingExecutor executor = new();
-        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
         Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
         await executor.Started.Task;
 
@@ -122,7 +122,7 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
         // starts under the SAME request ID, and only then is the captured signal delivered. B must
         // survive that stale delivery and must still be cancellable by its own signal, exactly once.
         GatedExecutor executor = new();
-        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         Task<HostUpdateExecutorResponse> executionA = adapter.ExecuteAsync(Request(operationToken: "operation-a"), default);
         await executor.Started;
@@ -154,7 +154,7 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
     public async Task ExecuteAsync_RefusesRequestWithoutOperationToken()
     {
         CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
-        using DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(operationToken: " "), default);
 
@@ -167,7 +167,7 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
     public async Task DisposeAsync_CancelsAndWaitsForActiveExecution()
     {
         CancellationResistantExecutor executor = new();
-        DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
         Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
         await executor.Started.Task;
 
@@ -187,7 +187,7 @@ public sealed class DallasHostUpdateSchedulerExecutorTests
     public async Task DisposeAsync_ThrowingCancellationCallbackStillWaitsForActiveExecution()
     {
         ThrowingCancellationExecutor executor = new();
-        DallasHostUpdateSchedulerExecutor adapter = new(executor, "linux-amd64");
+        HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
         Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
         await executor.Started.Task;
 

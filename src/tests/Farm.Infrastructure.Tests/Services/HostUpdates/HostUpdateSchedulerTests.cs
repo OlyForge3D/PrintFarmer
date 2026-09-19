@@ -320,8 +320,7 @@ public sealed class HostUpdateSchedulerTests
 
         clock.UtcNow = first.NextPollAt!.Value.AddSeconds(-1);
         HostUpdateSchedulerStatus early = await scheduler.TickAsync();
-        Assert.Equal(HostUpdateSchedulerReason.TooEarly, early.Reason);
-        Assert.Equal(first, early with { Reason = first.Reason });
+        Assert.Equal(first, early);
 
         clock.UtcNow = first.NextPollAt!.Value;
         HostUpdateSchedulerStatus exact = await scheduler.TickAsync();

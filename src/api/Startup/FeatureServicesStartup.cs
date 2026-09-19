@@ -384,7 +384,7 @@ public static class FeatureServicesStartup
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateClock,
             Farm.Infrastructure.Services.HostUpdates.SystemHostUpdateClock>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateJitter,
-            Farm.Infrastructure.Services.HostUpdates.ZeroHostUpdateJitter>();
+            Farm.Infrastructure.Services.HostUpdates.InstallationSeededHostUpdateJitter>();
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutionRequestResolver>(sp =>
             hostStateEnabled
                 ? ActivatorUtilities.CreateInstance<Farm.Infrastructure.Services.HostUpdates.HostUpdateExecutionRequestResolver>(sp)
@@ -399,7 +399,7 @@ public static class FeatureServicesStartup
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerStatusHolder>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerCancellationBridge>();
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerExecutor>(sp =>
-            new Farm.Infrastructure.Services.HostUpdates.DallasHostUpdateSchedulerExecutor(
+            new Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerExecutorAdapter(
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateExecutor>(),
                 OperatingSystem.IsLinux() ? $"linux-{(System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture == System.Runtime.InteropServices.Architecture.Arm64 ? "arm64" : "amd64")}" : "unsupported"));
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>(sp =>
@@ -415,7 +415,11 @@ public static class FeatureServicesStartup
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionFence>(),
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerCancellationBridge>()));
-        services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerHostedService>();
+        if (hostStateEnabled)
+        {
+            services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerHostedService>();
+        }
+
         services.AddScoped<Farm.Infrastructure.Services.SystemStatus.ISystemInfoService, Farm.Infrastructure.Services.SystemStatus.SystemInfoService>();
         services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseEvidenceCache, Farm.Infrastructure.Services.HostUpdates.VerifiedReleaseEvidenceCache>();
         services.AddScoped<Farm.Infrastructure.Services.HostUpdates.IVerifiedReleaseManifestBindingStore,

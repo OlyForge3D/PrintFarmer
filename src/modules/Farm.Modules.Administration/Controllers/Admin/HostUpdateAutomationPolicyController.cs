@@ -23,7 +23,7 @@ public sealed record HostUpdateAutomationPolicyRequest(
 [Tags("Admin - Host Updates")]
 public sealed class HostUpdateAutomationPolicyController(
     IHostUpdateAutomationPolicyRepository repository,
-    HostUpdateSchedulerCancellationBridge? cancellationBridge = null) : ControllerBase
+    HostUpdateScheduler scheduler) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(HostUpdateAutomationPolicy), StatusCodes.Status200OK)]
@@ -82,9 +82,10 @@ public sealed class HostUpdateAutomationPolicyController(
     [ProducesResponseType(StatusCodes.Status202Accepted)]
     public async Task<IActionResult> CancelAsync(CancellationToken ct)
     {
-        if (cancellationBridge is not null)
+        HostUpdateCancellationResult result = await scheduler.SignalSafeCheckpointCancellationAsync(ct).ConfigureAwait(false);
+        if (result == HostUpdateCancellationResult.NoActiveExecution)
         {
-            await cancellationBridge.CancelAsync(ct).ConfigureAwait(false);
+            return Conflict(new { code = "no_active_automatic_update" });
         }
 
         return Accepted();
