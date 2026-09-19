@@ -132,7 +132,35 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
-        foreach (string toolName in new[] { "docker", "sqlite3", "pg_dump", "pg_restore", "sqlcmd" })
+        var requiredTools = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "docker",
+        };
+        foreach (IHostUpdateMigrationTarget target in migrationTargets)
+        {
+            string providerName = await target.GetProviderNameAsync(cancellationToken).ConfigureAwait(false);
+            switch (providerName)
+            {
+                case "Microsoft.EntityFrameworkCore.Sqlite":
+                    requiredTools.Add("sqlite3");
+                    break;
+                case "Npgsql.EntityFrameworkCore.PostgreSQL":
+                    requiredTools.Add("pg_dump");
+                    requiredTools.Add("pg_restore");
+                    break;
+                case "Microsoft.EntityFrameworkCore.SqlServer":
+                    requiredTools.Add("sqlcmd");
+                    break;
+                case "":
+                    reasons.Add($"database_provider_not_configured:{target.ContextName}");
+                    break;
+                default:
+                    reasons.Add($"database_provider_tooling_unsupported:{target.ContextName}:{providerName}");
+                    break;
+            }
+        }
+
+        foreach (string toolName in requiredTools)
         {
             if (!options.HostExecutablePaths.TryGetValue(toolName, out string? configuredPath) ||
                 string.IsNullOrWhiteSpace(configuredPath) ||
@@ -156,7 +184,11 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         }
         catch (InvalidOperationException exception) when (exception.Message.StartsWith("host_update_executable_", StringComparison.Ordinal))
         {
-            reasons.Add($"host_executable_not_configured:docker");
+            const string dockerNotConfiguredReason = "host_executable_not_configured:docker";
+            if (!reasons.Contains(dockerNotConfiguredReason, StringComparer.Ordinal))
+            {
+                reasons.Add(dockerNotConfiguredReason);
+            }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {

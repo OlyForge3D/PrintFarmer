@@ -17,8 +17,11 @@ settings are validated by `HostUpdateExecutionOptionsValidator`; executable mapp
 validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor remains default-off when the root is unset: validation permits process startup, but all derived executor paths now throw `root_directory_not_configured` instead of resolving under the current working directory, and the runtime availability provider reports `Unavailable` until a writable host-controlled root is configured:
 
 - **`HostExecutablePaths`** (required for process execution): explicit logical-tool to absolute executable
-  path mappings for `docker`, `sqlite3`, `pg_dump`, `pg_restore`, and `sqlcmd`. Bare names are rejected
-  and the ambient `PATH` is never consulted. The executable filename and any `.exe` extension must
+  path mappings. `docker` is required for every deployment; the active database provider additionally
+  requires `sqlite3` (SQLite), `pg_dump` and `pg_restore` (PostgreSQL), or `sqlcmd` (SQL Server).
+  The constrained runner continues to allow all five names, but availability requires only the tools
+  used by the live migration targets. Bare names are rejected and the ambient `PATH` is never consulted.
+  The executable filename and any `.exe` extension must
   be lowercase; for example, `C:\Program Files\Docker\docker.exe` is accepted but
   `C:\Program Files\Docker\DOCKER.EXE` is rejected. Missing, relative, or whitespace-only mappings
   keep process execution unavailable and are reported in availability status rather than crashing startup.
