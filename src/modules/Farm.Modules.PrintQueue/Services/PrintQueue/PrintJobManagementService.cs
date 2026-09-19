@@ -5238,42 +5238,6 @@ public class PrintJobManagementService(
     // ============= NOTIFICATION HELPERS (Phase 4.3) =============
 
     /// <summary>
-    /// Send job completion notification to user
-    /// NOTE: This method is reserved for future use when job completion events are refactored
-    /// to trigger through PrintQueueService instead of through background printer services.
-    /// </summary>
-    /// <param name="job">The print job that was completed.</param>
-    /// <param name="cancellationToken">Cancellation token to cancel the operation.</param>
-    [System.Diagnostics.CodeAnalysis.SuppressMessage("CodeQuality", "IDE0051:Remove unused private members", Justification = "This method is reserved for future use.")]
-    private async Task SendJobCompletionNotificationAsync(
-        PrintJob job,
-        CancellationToken cancellationToken = default)
-    {
-        if (_notificationService == null)
-        {
-            _logger.LogWarning("INotificationService not configured - skipping job completion notification for job {JobId}", job.Id);
-            return;
-        }
-
-        try
-        {
-            await _notificationService.SendJobCompletedAsync(
-                job.Id.ToString(),
-                job.Name,
-                job.AssignedPrinter?.Name,
-                cancellationToken);
-
-            _logger.LogInformation("Job completion notification sent for job {JobId}: {JobName}", job.Id, job.Name);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex, "Error sending job completion notification for job {JobId}", job.Id);
-
-            // Don't rethrow - notification failure shouldn't block queue operations
-        }
-    }
-
-    /// <summary>
     /// Send job failure notification to user
     /// </summary>
     /// <param name="job">The print job that failed.</param>

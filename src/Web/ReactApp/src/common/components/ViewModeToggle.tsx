@@ -1,15 +1,7 @@
-import React from 'react';
 import { 
   mdiViewList, 
   mdiViewGrid, 
   mdiViewComfy, 
-  // mdiViewQuilt,
-  // mdiBlur,
-  // mdiViewSequential,
-  // mdiLightbulbOn,
-  // mdiGauge,
-  // mdiFlipToBack,
-  // mdiArrowExpandDown,
 } from '@mdi/js';
 import { ViewToggle, type ViewModeOption } from '@/common/components/ui';
 
@@ -17,12 +9,6 @@ export type ViewMode =
   | 'collapsed' 
   | 'detailed'
   | 'table';
-  // | 'glass' 
-  // | 'segmented' 
-  // | 'statusGlow' 
-  // | 'dashboard' 
-  // | 'flip' 
-  // | 'drawer';
 
 interface ViewModeToggleProps {
   viewMode: ViewMode;
@@ -39,30 +25,13 @@ const coreViewModes: ViewModeOption<ViewMode>[] = [
 ];
 
 /**
- * Experimental view mode options for Printers page
- */
-// const experimentalViewModes: ViewModeOption<ViewMode>[] = [
-//   { mode: 'glass', icon: mdiBlur, title: '✨ Glassmorphism' },
-//   { mode: 'segmented', icon: mdiViewSequential, title: '📂 Segmented Sections' },
-//   { mode: 'statusGlow', icon: mdiLightbulbOn, title: '🔆 Status Glow' },
-//   { mode: 'dashboard', icon: mdiGauge, title: '📊 Dashboard Gauges' },
-//   { mode: 'flip', icon: mdiFlipToBack, title: '🔄 Flip Card' },
-//   { mode: 'drawer', icon: mdiArrowExpandDown, title: '📥 Expandable Drawer' },
-// ];
-
-/**
  * ViewModeToggle - Printers page view mode selector
- * 
- * Uses the generic ViewToggle component with two rows of options:
- * - Core modes (collapsed, detailed, table)
- * - Experimental modes (glass, segmented, statusGlow, dashboard, flip, drawer)
+ *
+ * Uses the generic ViewToggle component for the supported printer views.
  */
 export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
-  const experimentalOptions: ViewModeOption<ViewMode>[] = [];
-
   return (
     <div className="flex flex-col gap-1">
-      {/* Core view modes */}
       <ViewToggle
         value={viewMode}
         onChange={onChange}
@@ -71,18 +40,6 @@ export function ViewModeToggle({ viewMode, onChange }: ViewModeToggleProps) {
         className="p-1"
         ariaLabel="Core view modes"
       />
-      
-      {/* Experimental view modes */}
-      {experimentalOptions.length > 0 && (
-        <ViewToggle
-          value={viewMode}
-          onChange={onChange}
-          options={experimentalOptions}
-          size="sm"
-          className="p-1"
-          ariaLabel="Experimental view modes"
-        />
-      )}
     </div>
   );
 }

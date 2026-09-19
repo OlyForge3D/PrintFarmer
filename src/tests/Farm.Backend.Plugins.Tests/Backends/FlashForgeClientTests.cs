@@ -663,9 +663,9 @@ public sealed class FlashForgeClientTests
     public void BackendPlugin_DeclaresExpectedCapabilities()
     {
         // Cast required: default interface methods dispatch only via interface reference.
-        IBackendClientPlugin plugin = new FlashForgeBackendPlugin();
+        var plugin = new FlashForgeBackendPlugin();
 
-        IEnumerable<Type> capabilities = plugin.GetCapabilities();
+        IEnumerable<Type> capabilities = ((IBackendClientPlugin)plugin).GetCapabilities();
 
         capabilities.Should().Contain(typeof(ISupportsFileUpload));
         capabilities.Should().Contain(typeof(ISupportsStartPrint));
@@ -959,9 +959,9 @@ public sealed class FlashForgeClientTests
     [Fact]
     public void BackendPlugin_DeclaresMultiExtruderTemperatureCapability()
     {
-        IBackendClientPlugin plugin = new FlashForgeBackendPlugin();
+        var plugin = new FlashForgeBackendPlugin();
 
-        IEnumerable<Type> capabilities = plugin.GetCapabilities();
+        IEnumerable<Type> capabilities = ((IBackendClientPlugin)plugin).GetCapabilities();
 
         capabilities.Should().Contain(typeof(ISupportsMultiExtruderTemperatureControl),
             "plugin capability discovery should find ISupportsMultiExtruderTemperatureControl via reflection");
