@@ -379,7 +379,7 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
             if (intent == HostUpdateReplayIntent.Reserve)
             {
                 // Reserve is advisory only; crash-safe exclusion remains provided by the
-                // execution lock and durable journal. Persisted reservations are tracked in #2757.
+                // execution lock and durable journal. Persisted reservations are tracked in #2790.
                 return new(HostUpdateReplayDisposition.Accepted, correlationId, false);
             }
 
