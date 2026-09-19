@@ -1188,11 +1188,14 @@ copy_configs() {
             http_only_lab=true
         fi
 
-        mkdir -p "$output_dir/deploy"
         source_nginx_dir="$(cd "$REPO_ROOT/deploy/nginx" && pwd -P)" || {
             log_error "Unable to resolve nginx configuration source: $REPO_ROOT/deploy/nginx"
             return 1
         }
+        if ! mkdir -p "$output_dir/deploy"; then
+            log_error "Unable to create nginx configuration output parent: $output_dir/deploy"
+            return 1
+        fi
         target_nginx_path="$output_dir/deploy/nginx"
         if [[ -d "$target_nginx_path" ]]; then
             target_nginx_dir="$(cd "$target_nginx_path" && pwd -P)" || {
@@ -1208,15 +1211,23 @@ copy_configs() {
             nginx-proxy-split.conf \
             nginx-frontend.conf \
             conf.d/frontend-app.conf; do
-            if [[ ! -f "$REPO_ROOT/deploy/nginx/$nginx_config" ]]; then
-                log_error "Required nginx configuration is missing or not a regular file: $REPO_ROOT/deploy/nginx/$nginx_config"
+            if [[ ! -f "$source_nginx_dir/$nginx_config" ]]; then
+                log_error "Required nginx configuration is missing or not a regular file: $source_nginx_dir/$nginx_config"
                 return 1
             fi
         done
+        if [[ ! -d "$source_nginx_dir/certs" ]]; then
+            log_error "Required nginx certificate directory is missing or not a directory: $source_nginx_dir/certs"
+            return 1
+        fi
 
         if [[ "$source_nginx_dir" != "$target_nginx_dir" ]]; then
-            rm -rf "$target_nginx_dir"
-            cp -r "$source_nginx_dir" "$target_nginx_dir"
+            rm -rf "$target_nginx_path"
+            cp -r "$source_nginx_dir" "$target_nginx_path"
+            target_nginx_dir="$(cd "$target_nginx_path" && pwd -P)" || {
+                log_error "Unable to resolve copied nginx configuration output: $target_nginx_path"
+                return 1
+            }
         elif [[ "$http_only_lab" == "true" ]]; then
             log_error "HTTP_ONLY generation requires an output directory outside the repository root"
             return 1
