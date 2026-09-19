@@ -102,6 +102,15 @@ configuration and bind-mounted data. `--port`, `--api-port`,
 `--slicer-host-port`, and `--postgres-port` make every published port explicit,
 so the lab can coexist with another deployment.
 
+Direct, non-proxied service ports (API, PostgreSQL, slicer-host) always bind to
+`--service-bind-address` (env `PRINTFARMER_SERVICE_BIND_ADDRESS`), independent
+of `--bind-address`, and default to `127.0.0.1`. Only pass
+`--service-bind-address 0.0.0.0` (or another non-loopback address) if you
+intentionally need to reach these services directly from other machines on
+your LAN — doing so exposes the database and the unproxied API without TLS or
+the reverse proxy's routing, so treat it as an explicit, informed opt-in, not
+a default.
+
 Use `--version` for a published common image tag. If a release publishes only
 immutable per-service images, pass `--image-set`. The file must provide
 `API_IMAGE`, `FRONTEND_IMAGE`, `SLICER_HOST_IMAGE`, `ORCASLICER_WORKER_IMAGE`,

@@ -1681,6 +1681,42 @@ EOF
     chmod +x "$mock_bin/docker"
 }
 
+# Create a Docker stub identical to create_installer_docker_stub, except
+# `docker compose up ...` fails (non-zero exit + stderr) while every other
+# subcommand (--version, info, compose version, compose pull) still
+# succeeds. Used to prove that a failing `up -d` during --upgrade is
+# surfaced loudly instead of being silenced/ignored.
+create_installer_docker_stub_failing_up() {
+    local mock_bin="$1"
+    mkdir -p "$mock_bin"
+    cat > "$mock_bin/docker" <<'EOF'
+#!/usr/bin/env bash
+set -uo pipefail
+case "${1:-}" in
+    --version)
+        echo "Docker version 27.0.0, build test"
+        exit 0
+        ;;
+    info)
+        exit 0
+        ;;
+    compose)
+        if [[ "${2:-}" == "version" ]]; then
+            echo "Docker Compose version v2.29.0"
+            exit 0
+        fi
+        if [[ "${2:-}" == "up" ]]; then
+            echo "ERROR: simulated compose up failure (port already allocated)" >&2
+            exit 1
+        fi
+        exit 0
+        ;;
+esac
+exit 0
+EOF
+    chmod +x "$mock_bin/docker"
+}
+
 create_failing_command_stubs() {
     local mock_bin="$1"
     shift
@@ -2004,6 +2040,7 @@ test_installer_default_localhost_is_http_only() {
     generated_env=$(cat "$install_dir/.env")
     assert_contains "$generated_env" "HTTP_ONLY=true" "Default localhost install must be HTTP-only without requiring --host"
     assert_not_contains "$(cat "$install_dir/docker-compose.yml")" ":443" "HTTP-only default install must not publish HTTPS"
+    assert_not_contains "$(cat "$install_dir/docker-compose.yml")" "/etc/nginx/certs" "HTTP-only default install must not mount a certs volume"
 
     pass_test
 }
@@ -2038,6 +2075,17 @@ EOF
     assert_contains "$generated_env" "HTTP_ONLY=true" "Documented WSL lab command must be HTTP-only without --host"
     assert_contains "$generated_env" "COMPOSE_PROJECT_NAME=printfarmer-autoupdate-lab" "Documented WSL lab command must isolate the Compose project name"
     assert_not_contains "$(cat "$install_dir/docker-compose.yml")" ":443" "HTTP-only documented lab command must not publish HTTPS"
+    assert_not_contains "$(cat "$install_dir/docker-compose.yml")" "/etc/nginx/certs" "HTTP-only documented lab command must not mount a certs volume"
+
+    local proxy_conf="$install_dir/deploy/nginx/nginx-proxy-split.conf"
+    assert_file_exists "$proxy_conf" "Documented WSL lab command must generate the split nginx proxy config"
+    local proxy_conf_content
+    proxy_conf_content=$(cat "$proxy_conf")
+    assert_not_contains "$proxy_conf_content" "listen 443" "HTTP-only proxy config must not listen on 443"
+    assert_not_contains "$proxy_conf_content" "ssl_certificate" "HTTP-only proxy config must not reference ssl_certificate"
+    assert_not_contains "$proxy_conf_content" "/etc/nginx/certs" "HTTP-only proxy config must not reference the certs mount path"
+    assert_not_contains "$proxy_conf_content" "/ca.cer" "HTTP-only proxy config must not serve the CA download endpoint"
+    assert_not_contains "$proxy_conf_content" "/install-ca" "HTTP-only proxy config must not serve the CA install-guide endpoint"
 
     pass_test
 }
@@ -2168,6 +2216,206 @@ EOF
     generated_env=$(cat "$install_dir/.env")
     assert_contains "$generated_env" "API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:1111111111111111111111111111111111111111111111111111111111111111" "Upgrade --image-set should apply the new API digest"
     assert_contains "$generated_env" "FRONTEND_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:2222222222222222222222222222222222222222222222222222222222222222" "Upgrade --image-set should apply the new frontend digest"
+
+    pass_test
+}
+
+# Test: --upgrade --image-set succeeds on a standard-profile install (no
+# printer-discovery service) without requiring PRINTER_DISCOVERY_IMAGE in the
+# supplied --image-set, since that service does not exist for this topology.
+test_installer_upgrade_image_set_succeeds_on_standard_profile() {
+    start_test "installer upgrade --image-set succeeds on standard-profile (no printer-discovery)"
+
+    local image_set="$TEST_TEMP_DIR/upgrade-image-set-standard.env"
+    cat > "$image_set" <<'EOF'
+API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:7777777777777777777777777777777777777777777777777777777777777777
+FRONTEND_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:8888888888888888888888888888888888888888888888888888888888888888
+EOF
+
+    local install_dir="$TEST_TEMP_DIR/installer-upgrade-imgset-standard"
+    local mock_bin="$TEST_TEMP_DIR/installer-upgrade-imgset-standard-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+
+    cat > "$install_dir/.env" <<'EOF'
+IMAGE_TAG=v0.2.3-insider.2
+DEPLOY_PROFILE=standard
+COMPOSE_PROJECT_NAME=printfarmer
+WITH_ORCA_WORKER=false
+Jwt__Key=existing-jwt-key
+EOF
+    # Standard profile has no printer-discovery service at all.
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  api:
+    image: ${API_IMAGE:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}
+    container_name: printfarmer-api
+  frontend:
+    image: ${FRONTEND_IMAGE:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}
+    container_name: printfarmer-frontend
+EOF
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --image-set '$image_set' --dir '$install_dir'"
+    assert_equals "0" "$(get_output_exit_code)" "Standard-profile upgrade --image-set must not require PRINTER_DISCOVERY_IMAGE"
+
+    local generated_env
+    generated_env=$(cat "$install_dir/.env")
+    assert_contains "$generated_env" "API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:7777777777777777777777777777777777777777777777777777777777777777" "Standard-profile upgrade --image-set should apply the new API digest"
+
+    pass_test
+}
+
+# Test: --upgrade --image-set succeeds for a complete worker-topology image
+# set (covers slicer-host + orcaslicer-worker + printer-discovery in
+# addition to api/frontend).
+test_installer_upgrade_image_set_succeeds_for_complete_worker_topology() {
+    start_test "installer upgrade --image-set succeeds with complete worker-topology image set"
+
+    local image_set="$TEST_TEMP_DIR/upgrade-image-set-worker-complete.env"
+    cat > "$image_set" <<'EOF'
+API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:9999999999999999999999999999999999999999999999999999999999999999
+FRONTEND_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+SLICER_HOST_IMAGE=ghcr.io/olyforge3d/printfarmer-slicer-host@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+ORCASLICER_WORKER_IMAGE=ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc
+PRINTER_DISCOVERY_IMAGE=ghcr.io/olyforge3d/printfarmer-printer-discovery@sha256:dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd
+EOF
+
+    local install_dir="$TEST_TEMP_DIR/installer-upgrade-imgset-worker-complete"
+    local mock_bin="$TEST_TEMP_DIR/installer-upgrade-imgset-worker-complete-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+
+    cat > "$install_dir/.env" <<'EOF'
+IMAGE_TAG=v0.2.3-insider.2
+DEPLOY_PROFILE=full
+COMPOSE_PROJECT_NAME=printfarmer-lab
+WITH_ORCA_WORKER=true
+Jwt__Key=existing-jwt-key
+EOF
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  api:
+    image: ${API_IMAGE:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}
+    container_name: printfarmer-api
+  frontend:
+    image: ${FRONTEND_IMAGE:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}
+    container_name: printfarmer-frontend
+  printer-discovery:
+    image: ${PRINTER_DISCOVERY_IMAGE:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}
+    container_name: printfarmer-printer-discovery
+  slicer-host:
+    image: ${SLICER_HOST_IMAGE:-${REGISTRY_HOST}/printfarmer-slicer-host:${IMAGE_TAG}}
+    container_name: printfarmer-slicer-host
+  orcaslicer-worker:
+    image: ${ORCASLICER_WORKER_IMAGE:-${REGISTRY_HOST}/printfarmer-orcaslicer-worker:${IMAGE_TAG}}
+    container_name: printfarmer-orcaslicer-worker
+EOF
+
+    capture_output "PATH='$mock_bin:$PATH' '$INSTALL_SCRIPT' --upgrade --image-set '$image_set' --dir '$install_dir'"
+    assert_equals "0" "$(get_output_exit_code)" "Worker-topology upgrade --image-set with a complete set should succeed"
+
+    local generated_env
+    generated_env=$(cat "$install_dir/.env")
+    assert_contains "$generated_env" "SLICER_HOST_IMAGE=ghcr.io/olyforge3d/printfarmer-slicer-host@sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb" "Complete worker upgrade should apply the new slicer-host digest"
+    assert_contains "$generated_env" "ORCASLICER_WORKER_IMAGE=ghcr.io/olyforge3d/printfarmer-orcaslicer-worker@sha256:cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc" "Complete worker upgrade should apply the new orcaslicer-worker digest"
+
+    pass_test
+}
+
+# Test: --upgrade --image-set fails atomically (no .env mutation) when the
+# supplied --image-set omits a variable required by the installed worker
+# topology (here: ORCASLICER_WORKER_IMAGE), even though the compose file is
+# fully parameterized.
+test_installer_upgrade_image_set_fails_atomically_for_incomplete_worker_topology() {
+    start_test "installer upgrade --image-set fails atomically when worker-topology image set is incomplete"
+
+    local image_set="$TEST_TEMP_DIR/upgrade-image-set-worker-incomplete.env"
+    cat > "$image_set" <<'EOF'
+API_IMAGE=ghcr.io/olyforge3d/printfarmer-api@sha256:eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee
+FRONTEND_IMAGE=ghcr.io/olyforge3d/printfarmer-frontend@sha256:ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff00
+SLICER_HOST_IMAGE=ghcr.io/olyforge3d/printfarmer-slicer-host@sha256:1010101010101010101010101010101010101010101010101010101010101010
+PRINTER_DISCOVERY_IMAGE=ghcr.io/olyforge3d/printfarmer-printer-discovery@sha256:1212121212121212121212121212121212121212121212121212121212121212
+EOF
+
+    local install_dir="$TEST_TEMP_DIR/installer-upgrade-imgset-worker-incomplete"
+    local mock_bin="$TEST_TEMP_DIR/installer-upgrade-imgset-worker-incomplete-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub "$mock_bin"
+
+    local original_env
+    original_env=$'IMAGE_TAG=v0.2.3-insider.2\nDEPLOY_PROFILE=full\nCOMPOSE_PROJECT_NAME=printfarmer-lab\nWITH_ORCA_WORKER=true\nJwt__Key=existing-jwt-key'
+    printf '%s\n' "$original_env" > "$install_dir/.env"
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  api:
+    image: ${API_IMAGE:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}
+    container_name: printfarmer-api
+  frontend:
+    image: ${FRONTEND_IMAGE:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}
+    container_name: printfarmer-frontend
+  printer-discovery:
+    image: ${PRINTER_DISCOVERY_IMAGE:-${REGISTRY_HOST}/printfarmer-printer-discovery:${IMAGE_TAG}}
+    container_name: printfarmer-printer-discovery
+  slicer-host:
+    image: ${SLICER_HOST_IMAGE:-${REGISTRY_HOST}/printfarmer-slicer-host:${IMAGE_TAG}}
+    container_name: printfarmer-slicer-host
+  orcaslicer-worker:
+    image: ${ORCASLICER_WORKER_IMAGE:-${REGISTRY_HOST}/printfarmer-orcaslicer-worker:${IMAGE_TAG}}
+    container_name: printfarmer-orcaslicer-worker
+EOF
+
+    local output_file="$TEST_TEMP_DIR/installer-upgrade-imgset-worker-incomplete.out"
+    local exit_code
+    set +e
+    PATH="$mock_bin:$PATH" "$INSTALL_SCRIPT" --upgrade --image-set "$image_set" --dir "$install_dir" > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+
+    assert_not_equals "0" "$exit_code" "Upgrade --image-set must fail when it omits ORCASLICER_WORKER_IMAGE for a worker-topology install"
+    assert_contains "$(cat "$output_file")" "ORCASLICER_WORKER_IMAGE" "Failure should name the missing image variable"
+    assert_equals "$original_env" "$(cat "$install_dir/.env")" "Failed incomplete worker image-set upgrade must not mutate .env"
+
+    pass_test
+}
+
+# Test: --upgrade compose-up failure must surface loudly (non-zero exit,
+# visible error) instead of being silenced by a redirected stderr and a
+# false "success" claim.
+test_installer_upgrade_compose_up_failure_surfaces_loudly() {
+    start_test "installer upgrade surfaces a failing compose up instead of silencing it"
+
+    local install_dir="$TEST_TEMP_DIR/installer-upgrade-compose-up-fails"
+    local mock_bin="$TEST_TEMP_DIR/installer-upgrade-compose-up-fails-bin"
+    mkdir -p "$install_dir"
+    create_installer_docker_stub_failing_up "$mock_bin"
+
+    cat > "$install_dir/.env" <<'EOF'
+IMAGE_TAG=v0.2.3-insider.2
+DEPLOY_PROFILE=standard
+COMPOSE_PROJECT_NAME=printfarmer
+WITH_ORCA_WORKER=false
+Jwt__Key=existing-jwt-key
+EOF
+    cat > "$install_dir/docker-compose.yml" <<'EOF'
+services:
+  api:
+    image: ${API_IMAGE:-${REGISTRY_HOST}/printfarmer-api:${IMAGE_TAG}}
+    container_name: printfarmer-api
+  frontend:
+    image: ${FRONTEND_IMAGE:-${REGISTRY_HOST}/printfarmer-frontend:${IMAGE_TAG}}
+    container_name: printfarmer-frontend
+EOF
+
+    local output_file="$TEST_TEMP_DIR/installer-upgrade-compose-up-fails.out"
+    local exit_code
+    set +e
+    PATH="$mock_bin:$PATH" "$INSTALL_SCRIPT" --upgrade --dir "$install_dir" > "$output_file" 2>&1
+    exit_code=$?
+    set -e
+
+    assert_not_equals "0" "$exit_code" "Upgrade must fail non-zero when compose up fails"
+    assert_not_contains "$(cat "$output_file")" "Upgrade complete" "Upgrade must not claim success when compose up failed"
+    assert_contains "$(cat "$output_file")" "Failed to restart containers during upgrade" "Upgrade failure must surface a clear error"
 
     pass_test
 }
@@ -2605,6 +2853,10 @@ run_all_tests() {
     test_installer_upgrade_version_strips_pinned_images
     test_installer_upgrade_version_latest_strips_pinned_images
     test_installer_upgrade_image_set_succeeds_on_parameterized_compose
+    test_installer_upgrade_image_set_succeeds_on_standard_profile
+    test_installer_upgrade_image_set_succeeds_for_complete_worker_topology
+    test_installer_upgrade_image_set_fails_atomically_for_incomplete_worker_topology
+    test_installer_upgrade_compose_up_failure_surfaces_loudly
     test_installer_upgrade_image_set_fails_atomically_on_legacy_compose
     test_installer_reuse_config_explicit_version_overrides_tag
     test_installer_inline_full_profile_no_duplicate_ports_and_isolated_names

@@ -616,7 +616,22 @@ if [[ -n "$IMAGE_SET_FILE" ]]; then
     if [[ "$IMAGE_SET_FILE" != /* ]]; then
         IMAGE_SET_FILE="$(cd "$(dirname "$IMAGE_SET_FILE")" && pwd)/$(basename "$IMAGE_SET_FILE")"
     fi
-    required_image_variables=(API_IMAGE FRONTEND_IMAGE PRINTER_DISCOVERY_IMAGE)
+    required_image_variables=(API_IMAGE FRONTEND_IMAGE)
+    # printer-discovery only exists for the full profile / worker topology.
+    # On a fresh install, $DEPLOY_PROFILE above already reflects the
+    # requested topology, so it's safe to require it here. On --upgrade,
+    # $DEPLOY_PROFILE is just this run's CLI default (--profile is normally
+    # omitted for upgrades) and does NOT yet reflect the installed
+    # topology — .env hasn't been read yet at this point in the script.
+    # Completeness for the *actual* installed topology is re-validated
+    # later, after .env is read, in the --upgrade block below; skip the
+    # profile-based requirement here for upgrades to avoid false rejections
+    # of valid standard-profile parameterized installs.
+    if [[ "$DO_UPGRADE" != "true" ]]; then
+        if [[ "$DEPLOY_PROFILE" == "full" || "$WITH_ORCA_WORKER" == "true" ]]; then
+            required_image_variables+=(PRINTER_DISCOVERY_IMAGE)
+        fi
+    fi
     if [[ "$WITH_ORCA_WORKER" == "true" ]]; then
         required_image_variables+=(SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE)
     fi
@@ -726,13 +741,32 @@ if [[ "$DO_UPGRADE" == "true" ]]; then
         if grep -Eq '^WITH_ORCA_WORKER=(true|yes|1)$' .env 2>/dev/null; then
             upgrade_worker_enabled=true
         fi
-        upgrade_image_variables=(API_IMAGE FRONTEND_IMAGE PRINTER_DISCOVERY_IMAGE)
+        upgrade_profile=$(grep '^DEPLOY_PROFILE=' .env 2>/dev/null | cut -d= -f2- | tr -d '\r' || true)
+        upgrade_image_variables=(API_IMAGE FRONTEND_IMAGE)
+        # printer-discovery only exists for the full profile (inline non-worker
+        # path) or unconditionally for the worker/microservices path — do not
+        # require PRINTER_DISCOVERY_IMAGE parameterization/coverage for a
+        # standard-profile install, which has no printer-discovery service.
+        if [[ "$upgrade_worker_enabled" == "true" || "$upgrade_profile" == "full" ]]; then
+            upgrade_image_variables+=(PRINTER_DISCOVERY_IMAGE)
+        fi
         if [[ "$upgrade_worker_enabled" == "true" ]]; then
             upgrade_image_variables+=(SLICER_HOST_IMAGE ORCASLICER_WORKER_IMAGE)
         fi
         for image_variable in "${upgrade_image_variables[@]}"; do
             grep -Fq "\${${image_variable}:-" docker-compose.yml ||
                 die "Pinned upgrade cannot update legacy docker-compose.yml: ${image_variable} is not parameterized. Reinstall or regenerate the compose file before retrying --image-set."
+        done
+        # The earlier top-of-script --image-set validation only required the
+        # variables implied by WITH_ORCA_WORKER as known at that point (before
+        # .env was read). Now that the installed topology is known, confirm
+        # the supplied --image-set actually covers every service this
+        # deployment runs — an incomplete set must fail atomically, before
+        # any .env mutation below.
+        for image_variable in "${upgrade_image_variables[@]}"; do
+            preserved_var="${image_variable}_PRESERVED"
+            [[ -n "${!preserved_var:-}" ]] ||
+                die "--image-set is missing ${image_variable}, which this installation's topology (profile=${upgrade_profile:-unknown}, WITH_ORCA_WORKER=${upgrade_worker_enabled}) requires. Provide a complete --image-set covering every deployed service before upgrading."
         done
     fi
 
@@ -759,7 +793,8 @@ if [[ "$DO_UPGRADE" == "true" ]]; then
     ensure_upgrade_slicer_worker_key ".env" "docker-compose.yml"
     run_with_spinner "Pulling latest images" $COMPOSE_CMD pull || die "Pull failed"
     info "Restarting containers..."
-    $COMPOSE_CMD up -d --remove-orphans 2>/dev/null
+    $COMPOSE_CMD up -d --remove-orphans ||
+        die "Failed to restart containers during upgrade. Check the Compose output above for errors."
     ok "Upgrade complete"
     echo ""
     exit 0
@@ -1426,6 +1461,12 @@ http {
         location = /nginx-health { default_type text/plain; return 200 "ok\n"; }
         location = /healthz { proxy_pass http://api_backend/healthz; proxy_http_version 1.1; proxy_set_header Host $host; }
         location = /health  { proxy_pass http://api_backend/health;  proxy_http_version 1.1; proxy_set_header Host $host; }
+NGINXEOF
+
+if [[ "$HTTP_ONLY_MODE" != "true" ]]; then
+# CA distribution endpoints (iOS trust workflow) — only relevant when TLS
+# certs are actually provisioned; HTTP-only lab installs never mount certs.
+cat >> "$INSTALL_DIR/nginx/nginx-proxy.conf" <<'NGINXEOF_CA'
         location = /ca.cer {
             alias /etc/nginx/certs/ca.cer;
             default_type application/x-x509-ca-cert;
@@ -1435,7 +1476,10 @@ http {
             default_type text/html;
             return 200 '<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Install PrintFarmer CA</title><style>body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;max-width:48rem;margin:0 auto;padding:2rem;line-height:1.5;color:#111827}h1{font-size:1.75rem;margin-bottom:0.5rem}a.button{display:inline-block;background:#2563eb;color:#fff;text-decoration:none;padding:0.85rem 1.1rem;border-radius:0.6rem;font-weight:600;margin:1rem 0}ol{padding-left:1.25rem}code{background:#f3f4f6;padding:0.15rem 0.35rem;border-radius:0.3rem}</style></head><body><h1>Install the PrintFarmer iPhone certificate</h1><p>Use Safari on your iPhone or iPad.</p><p><a class="button" href="/ca.cer">Download PrintFarmer CA</a></p><ol><li>Tap <strong>Download</strong> when Safari asks.</li><li>Open <strong>Settings</strong>. You should see <strong>Profile Downloaded</strong> near the top.</li><li>Tap the downloaded profile and choose <strong>Install</strong>.</li><li>Then go to <strong>Settings &gt; General &gt; About &gt; Certificate Trust Settings</strong>.</li><li>Enable trust for <strong>PrintFarmer Local CA</strong>.</li><li>If you previously installed a certificate named <strong>PrintFarmer</strong>, remove it. Only trust <strong>PrintFarmer Local CA</strong>; do not install <code>tls.crt</code>.</li><li>Return to the PrintFarmer app and sign in again.</li></ol><p>If you are opening this page over <code>http://</code>, that is expected. The certificate must be installed before iPhone will trust your local <code>https://</code> server.</p></body></html>';
         }
+NGINXEOF_CA
+fi
 
+cat >> "$INSTALL_DIR/nginx/nginx-proxy.conf" <<'NGINXEOF'
         # API — long timeout for gcode dispatch
         location ~ ^/api/job-queue/[^/]+/dispatch$ {
             proxy_pass http://api_backend;
@@ -1694,6 +1738,19 @@ else
   printfarmer-grafana-data:'
     fi
 
+    # HTTP-only lab installs never provision TLS certs, so cert mounts and the
+    # frontend "volumes:" stanza (which today only carries the certs mount)
+    # are omitted entirely rather than referencing a directory that is never
+    # populated.
+    frontend_volumes_block=""
+    nginx_proxy_certs_mount=""
+    if [[ "$HTTP_ONLY_MODE" != "true" ]]; then
+        frontend_volumes_block='    volumes:
+      - ./nginx/certs:/etc/nginx/certs:ro'
+        nginx_proxy_certs_mount='
+      - ./nginx/certs:/etc/nginx/certs:ro'
+    fi
+
     cat > "$INSTALL_DIR/docker-compose.yml" <<COMPOSEEOF
 # PrintFarmer — generated $(date '+%Y-%m-%d %H:%M:%S')
 # Profile: ${DEPLOY_PROFILE} | Database: ${DB_ENGINE} | Images: \${REGISTRY_HOST}/*:\${IMAGE_TAG}
@@ -1764,8 +1821,7 @@ ${compose_api_depends}
       interval: 30s
       timeout: 10s
       retries: 3
-    volumes:
-      - ./nginx/certs:/etc/nginx/certs:ro
+${frontend_volumes_block}
     networks:
       - printfarmer-network
 
@@ -1777,8 +1833,7 @@ ${compose_api_depends}
     ports:
       - "\${BIND_ADDRESS:-0.0.0.0}:\${HTTP_PORT:-8080}:80"
     volumes:
-      - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro
-      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/nginx-proxy.conf:/etc/nginx/nginx.conf:ro${nginx_proxy_certs_mount}
     depends_on:
       - frontend
       - api
