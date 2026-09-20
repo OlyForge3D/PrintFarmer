@@ -72,12 +72,23 @@ public class HostUpdateWriterFencingTests : IDisposable
         return new CountingScopeFactory(sp.GetRequiredService<IServiceScopeFactory>());
     }
 
-    private static async Task WaitForPauseAcknowledgementAsync(IHostUpdateWriterActivityFlag fence)
+    private static async Task WaitForPauseAcknowledgementsAsync(
+        IHostUpdateWriterActivityFlag fence,
+        Func<int> acknowledgementCount,
+        int expectedAcknowledgements)
     {
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
-        while (!await fence.IsPausedAsync(timeout.Token))
+        try
         {
-            await Task.Delay(TimeSpan.FromMilliseconds(25), timeout.Token);
+            while (!await fence.IsPausedAsync(timeout.Token) || acknowledgementCount() < expectedAcknowledgements)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(25), timeout.Token);
+            }
+        }
+        catch (OperationCanceledException) when (timeout.IsCancellationRequested)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"Writer did not acknowledge the pause {expectedAcknowledgements} times within 10 seconds.");
         }
     }
 
@@ -93,9 +104,10 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<PowerReadingPruneService>.Instance,
             fence);
         await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementAsync(fence);
+        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
         await sut.StopAsync(CancellationToken.None);
 
+        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
         scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
     }
 
@@ -131,9 +143,10 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<QueueRetentionPruneService>.Instance,
             fence);
         await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementAsync(fence);
+        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
         await sut.StopAsync(CancellationToken.None);
 
+        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
         scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
     }
 

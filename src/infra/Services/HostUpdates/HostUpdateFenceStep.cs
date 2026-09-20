@@ -154,6 +154,9 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
 {
     private volatile bool _pauseRequested;
     private volatile bool _acknowledged;
+    private int _acknowledgementCount;
+
+    internal int AcknowledgementCount => Volatile.Read(ref _acknowledgementCount);
 
     public Task RequestPauseAsync(CancellationToken cancellationToken)
     {
@@ -183,6 +186,7 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
         if (await IsPauseRequestedAsync(cancellationToken).ConfigureAwait(false))
         {
             _acknowledged = true;
+            _ = Interlocked.Increment(ref _acknowledgementCount);
         }
     }
 }
@@ -207,6 +211,8 @@ public sealed class PowerReadingPruneFenceFlag(IHostUpdateAdmissionGate? durable
     public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
 
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
 }
 
 /// <summary>
@@ -227,6 +233,8 @@ public sealed class QueueRetentionPruneFenceFlag(IHostUpdateAdmissionGate? durab
     public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
 
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
 }
 
 /// <summary>

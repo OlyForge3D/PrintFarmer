@@ -640,6 +640,7 @@ public class HostUpdateExecutionAvailabilityTests
         using var cts = new CancellationTokenSource();
         await service.StartAsync(cts.Token);
         await firstProbe.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // StopAsync joins the hosted loop, ordering the holder assertion after the probe publishes.
         await service.StopAsync(CancellationToken.None);
 
         probeCount.Should().BeGreaterThanOrEqualTo(1);
