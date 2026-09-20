@@ -126,13 +126,25 @@ an unsigned manifest, a mutable image reference, or a matching version string
 cannot establish managed eligibility and must never be treated as a verified
 release. Historical releases are not retroactively signed.
 
+Threat-model status is intentionally explicit:
+- Implemented and verified: fail-closed inventory and executor availability
+  checks require signed-release evidence and keep unsigned legacy installs in
+  `NotManaged` / `ManagedEligibilityNotEstablished` until a current signed
+  release is installed and verified.
+- Implemented but unverified: live host execution and recovery on a
+  representative signed update path in a real deployment.
+- Not yet implemented: a managed update rollout path, automatic execution
+  authority, or any statement that the repository owner has granted deployment
+  authority. This document records risks, mitigations, and the current state
+  only; it does not grant authority to deploy or treat the path as ready for
+  rollout.
+
 The supported path is deliberately one-time and manual: install a current
 signed release through the documented deployment procedure, then refresh the
 inventory. The signed release manifest and its verified identity can establish
 managed eligibility from that point forward. Waiting for an executor facility
 fix does not change an unsigned installation's trust state, and downgrade is
 not a recovery path.
-
 Inventory reports this condition as
 `SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
 `facility_unavailable:*` evidence. The former is manual-only while verified
