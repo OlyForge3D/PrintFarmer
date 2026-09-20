@@ -516,9 +516,8 @@ describe('InstallerUpdatesExperience', () => {
     await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
     expect(await screen.findByRole('alert')).toHaveTextContent('The host update authorization was rejected.');
     expect(status).toHaveBeenCalledWith('stable:1.2.4');
+    expect(screen.getByRole('button', { name: 'Authorize and update' })).not.toBeDisabled();
 
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-    await user.click(screen.getByRole('button', { name: 'Update now' }));
     await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
     await waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
     expect(execute).toHaveBeenCalledTimes(2);

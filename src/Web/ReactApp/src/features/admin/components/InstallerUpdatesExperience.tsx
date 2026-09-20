@@ -579,6 +579,7 @@ export function InstallerUpdatesExperience({
           if (definitiveRejection) {
             clearManualUpdateReleaseId();
             setManualUpdateReleaseId(null);
+            setManualUpdateStatus(null);
             setManualUpdateAttempted(false);
             manualUpdateDispatchLock.current = false;
             setManualUpdateError(getErrorMessage(error, "The host update was rejected before it could start."));
@@ -647,6 +648,7 @@ export function InstallerUpdatesExperience({
       setManualUpdateRecovery(recovery);
       if (onGetHostUpdateStatus) {
         const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
+        setManualUpdateStatus(status);
         if (isTerminalForRetry(status)) {
           if (isTerminalForReleaseIdentity(status)) {
             clearManualUpdateReleaseId();
@@ -655,8 +657,6 @@ export function InstallerUpdatesExperience({
           }
           setManualUpdateAttempted(false);
           manualUpdateDispatchLock.current = false;
-        } else {
-          setManualUpdateStatus(status);
         }
       } else if (recovery.outcome === "RolledBack") {
         clearManualUpdateReleaseId();
@@ -800,7 +800,7 @@ export function InstallerUpdatesExperience({
               onClick={() => {
                 setManualUpdateError(null);
                 setManualUpdateRecovery(null);
-                if (manualUpdateStatus && (isTerminalForReleaseIdentity(manualUpdateStatus) || manualUpdateError)) {
+                if (manualUpdateStatus && isTerminalForReleaseIdentity(manualUpdateStatus)) {
                   clearManualUpdateReleaseId();
                   setManualUpdateReleaseId(null);
                   setManualUpdateStatus(null);
