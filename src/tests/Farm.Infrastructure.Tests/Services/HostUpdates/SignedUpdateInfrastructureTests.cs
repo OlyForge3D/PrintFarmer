@@ -337,6 +337,48 @@ public sealed class SignedUpdateInfrastructureTests
     }
 
     [Fact]
+    public async Task Discovery_StableTagWithPrereleaseMetadata_IsRejected()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
+        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        ReleaseHandler handler = new(
+            new Dictionary<int, string>
+            {
+                [1] = "[" + ReleaseJson(1, "v1.2.3", false, true, true) + "]",
+            },
+            new Dictionary<long, byte[]> { [11] = manifestBytes });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            verifier).DiscoverAsync("stable", default);
+
+        Assert.Null(result);
+        Assert.Empty(verifier.Identities);
+    }
+
+    [Fact]
+    public async Task Discovery_InsiderTagWithoutPrereleaseMetadata_IsRejected()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3-insider.4", "insider", "development");
+        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        ReleaseHandler handler = new(
+            new Dictionary<int, string>
+            {
+                [1] = "[" + ReleaseJson(1, "v1.2.3-insider.4", false, false, true) + "]",
+            },
+            new Dictionary<long, byte[]> { [11] = manifestBytes });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            verifier).DiscoverAsync("insider", default);
+
+        Assert.Null(result);
+        Assert.Empty(verifier.Identities);
+    }
+
+    [Fact]
     public async Task Discovery_UntrustedBrowserUrlAndRedirectOrigin_NeverEscapesPinnedGitHubAssetEndpoint()
     {
         List<Uri> requests = [];
