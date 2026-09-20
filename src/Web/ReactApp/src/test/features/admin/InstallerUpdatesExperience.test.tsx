@@ -84,7 +84,9 @@ describe('InstallerUpdatesExperience', () => {
     await screen.findByText(/RolledBack: image_only_rollback/);
     expect(recover).toHaveBeenCalledWith('stable:1.2.4');
     expect(status).toHaveBeenCalledWith('stable:1.2.4');
-    expect(screen.queryByRole('list', { name: 'Host update progress' })).not.toBeInTheDocument();
+    expect(screen.getByRole('list', { name: 'Host update progress' })).toBeVisible();
+    expect(screen.getByRole('heading', { name: 'Host update progress' })).toBeVisible();
+    expect(screen.queryByRole('button', { name: 'Authorize and update' })).not.toBeInTheDocument();
     expect(screen.getByText('RolledBack: image_only_rollback')).toBeVisible();
   });
 
@@ -486,6 +488,7 @@ describe('InstallerUpdatesExperience', () => {
         policyFingerprint: 'policy',
         expiresAt: '2026-09-19T20:00:00Z',
       });
+
     const execute = vi.fn()
       .mockRejectedValueOnce({
         statusCode: 409,
@@ -523,6 +526,35 @@ describe('InstallerUpdatesExperience', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it.each([401, 403])('releases an execute rejection for HTTP %s', async (statusCode) => {
+    const authorize = vi.fn().mockResolvedValue({
+      authorizationId: 'auth-1',
+      releaseId: 'stable:1.2.4',
+      sequence: 4,
+      channel: 'stable',
+      candidateFingerprint: 'candidate',
+      policyRevision: 1,
+      policyFingerprint: 'policy',
+      expiresAt: '2026-09-19T20:00:00Z',
+    });
+    const execute = vi.fn().mockRejectedValue({ statusCode, message: 'Authorization required.' });
+    const user = userEvent.setup();
+
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={authorize}
+      onExecuteHostUpdate={execute}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    expect(await screen.findByText('Authorization required.')).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    expect(screen.getByRole('button', { name: 'Authorize and update' })).toBeVisible();
+  });
+
   it('allows a retry after recovery terminates with NeedsOperator', async () => {
     const authorize = vi.fn().mockResolvedValue({
       authorizationId: 'auth-1',
@@ -534,6 +566,7 @@ describe('InstallerUpdatesExperience', () => {
       policyFingerprint: 'policy',
       expiresAt: '2026-09-19T20:00:00Z',
     });
+
     const execute = vi.fn().mockResolvedValue({
       releaseId: 'stable:1.2.4',
       currentState: 'RecoveryRequired',
@@ -565,6 +598,43 @@ describe('InstallerUpdatesExperience', () => {
     expect(await screen.findByText(/NeedsOperator: manual_intervention_required/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Recover update' })).toBeVisible();
     expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBe('stable:1.2.4');
+  });
+
+  it('explains fence-release-pending recovery without releasing the operation latch', async () => {
+    const authorize = vi.fn().mockResolvedValue({
+      authorizationId: 'auth-1',
+      releaseId: 'stable:1.2.4',
+      sequence: 4,
+      channel: 'stable',
+      candidateFingerprint: 'candidate',
+      policyRevision: 1,
+      policyFingerprint: 'policy',
+      expiresAt: '2026-09-19T20:00:00Z',
+    });
+    const execute = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [],
+    });
+    const recover = vi.fn().mockResolvedValue({
+      outcome: 'FenceReleasePending',
+      detail: 'fence_pending',
+    });
+    const user = userEvent.setup();
+
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={authorize}
+      onExecuteHostUpdate={execute}
+      onRecoverHostUpdate={recover}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    await user.click(await screen.findByRole('button', { name: 'Recover update' }));
+    expect(await screen.findByText(/Recovery is waiting for the host fence to be released/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Recover update' })).toBeVisible();
   });
 
   it('keeps recovery available after NeedsOperator when status cannot be rechecked', async () => {

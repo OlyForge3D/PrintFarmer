@@ -540,7 +540,10 @@ export class ApiClient {
     );
     if (response.status === 503) {
       throw {
-        message: "The host update subsystem is unavailable on this host.",
+        message:
+          typeof response.data?.detail === "string"
+            ? response.data.detail
+            : "The host update subsystem is unavailable on this host.",
         statusCode: response.status,
         data: response.data,
       };

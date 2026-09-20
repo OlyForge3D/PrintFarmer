@@ -186,7 +186,7 @@ describe("ApiClient", () => {
 
       await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
         statusCode: 503,
-        message: "The host update subsystem is unavailable on this host.",
+        message: "Host update execution is unavailable.",
       });
     });
   });

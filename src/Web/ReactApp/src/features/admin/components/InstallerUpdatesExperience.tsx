@@ -569,19 +569,17 @@ export function InstallerUpdatesExperience({
     } catch (error) {
       if (isApiError(error) && error.statusCode === 503) {
         setHostUpdateUnsupported(true);
+        if (executeDispatched) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
+        }
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
-        setManualUpdateError("The host update subsystem is unavailable on this host. No update was started.");
-        setManualUpdateOpen(true);
-        return;
-      }
-      if (executeDispatched && isApiError(error) && error.statusCode === 503) {
-        setHostUpdateUnsupported(true);
-        clearManualUpdateReleaseId();
-        setManualUpdateReleaseId(null);
-        setManualUpdateAttempted(false);
-        manualUpdateDispatchLock.current = false;
-        setManualUpdateError("The host update subsystem is unavailable on this host. No update was started.");
+        const detail = typeof error.data === "object" && error.data !== null &&
+          typeof (error.data as { detail?: unknown }).detail === "string"
+          ? (error.data as { detail: string }).detail
+          : "The host update subsystem is unavailable on this host.";
+        setManualUpdateError(`${detail} No update was started.`);
         setManualUpdateOpen(true);
         return;
       }
@@ -590,7 +588,7 @@ export function InstallerUpdatesExperience({
           const status = await onGetHostUpdateStatus(releaseId);
           setManualUpdateStatus(status);
           setManualUpdateOpen(true);
-          const definitiveRejection = isApiError(error) && [400, 409, 422].includes(error.statusCode);
+          const definitiveRejection = isApiError(error) && [400, 401, 403, 409, 422].includes(error.statusCode);
           if (definitiveRejection) {
             clearManualUpdateReleaseId();
             setManualUpdateReleaseId(null);
@@ -613,7 +611,7 @@ export function InstallerUpdatesExperience({
           // Preserve the original execute error when status cannot yet be read.
         }
       }
-      if (!executeDispatched || (isApiError(error) && [400, 409, 422].includes(error.statusCode))) {
+      if (!executeDispatched || (isApiError(error) && [400, 401, 403, 409, 422].includes(error.statusCode))) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
         setManualUpdateAttempted(false);
@@ -642,7 +640,6 @@ export function InstallerUpdatesExperience({
         if (isTerminalForReleaseIdentity(status)) {
           clearManualUpdateReleaseId();
           setManualUpdateReleaseId(null);
-          setManualUpdateStatus(null);
         }
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
@@ -673,7 +670,6 @@ export function InstallerUpdatesExperience({
           if (isTerminalForReleaseIdentity(status)) {
             clearManualUpdateReleaseId();
             setManualUpdateReleaseId(null);
-            setManualUpdateStatus(null);
           }
           setManualUpdateAttempted(false);
           manualUpdateDispatchLock.current = false;
@@ -681,8 +677,6 @@ export function InstallerUpdatesExperience({
       } else if (recovery.outcome === "RolledBack") {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
-        setManualUpdateStatus(null);
-        setManualUpdateRecovery(null);
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       } else if (recovery.outcome === "NeedsOperator") {
