@@ -5,28 +5,60 @@ import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MemoryRouter } from 'react-router';
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
+import type {
+  AutoDispatchGlobalStatus,
+  AutoDispatchReadyResult,
+  AutoDispatchStatus,
+} from '@/types/api';
 
-// Mock the auto-dispatch hooks
-vi.mock('@/features/printers/hooks/useAutoDispatch', () => ({
-  useAutoDispatchGlobalStatus: vi.fn(),
-  useAutoDispatchReadyFlow: vi.fn(),
-  useSkipNextJob: vi.fn(),
-  useCancelAutoDispatch: vi.fn(),
-  useSetAutoDispatchEnabled: vi.fn(),
-  useSetAllAutoDispatchEnabled: vi.fn(),
-  usePreClearBed: vi.fn(),
+type QueryResult = {
+  data: AutoDispatchGlobalStatus | undefined;
+  isLoading: boolean;
+  error: Error | null;
+};
+
+type MutationResult<TVariables> = {
+  mutate: (variables: TVariables) => void;
+  isPending: boolean;
+};
+
+type ReadyFlowResult = {
+  challenge: {
+    status: AutoDispatchStatus;
+    printerName: string;
+    result: AutoDispatchReadyResult;
+  } | null;
+  confirmation: { isPending: boolean };
+  confirmReady: (status: AutoDispatchStatus, printerName: string) => Promise<void>;
+  confirmFilamentOverride: () => Promise<void>;
+  cancelFilamentOverride: () => void;
+};
+
+type SetEnabledVariables = {
+  printerId: string;
+  enabled: boolean;
+  dispatchStateETag: string;
+  printerETag: string;
+};
+
+type SetGlobalEnabledVariables = {
+  enabled: boolean;
+  statuses: AutoDispatchStatus[];
+};
+
+// The dashboard consumes only these fields, so test doubles model that narrow contract
+// instead of asserting incomplete objects as full TanStack Query results.
+const autoDispatchHooks = vi.hoisted(() => ({
+  useAutoDispatchGlobalStatus: vi.fn<() => QueryResult>(),
+  useAutoDispatchReadyFlow: vi.fn<() => ReadyFlowResult>(),
+  useSkipNextJob: vi.fn<() => MutationResult<AutoDispatchStatus>>(),
+  useCancelAutoDispatch: vi.fn<() => MutationResult<AutoDispatchStatus>>(),
+  useSetAutoDispatchEnabled: vi.fn<() => MutationResult<SetEnabledVariables>>(),
+  useSetAllAutoDispatchEnabled: vi.fn<() => MutationResult<SetGlobalEnabledVariables>>(),
+  usePreClearBed: vi.fn<() => MutationResult<AutoDispatchStatus>>(),
 }));
 
-// Dynamic import after mocks
-const {
-  useAutoDispatchGlobalStatus,
-  useAutoDispatchReadyFlow,
-  useSkipNextJob,
-  useCancelAutoDispatch,
-  useSetAutoDispatchEnabled,
-  useSetAllAutoDispatchEnabled,
-  usePreClearBed,
-} = await import('@/features/printers/hooks/useAutoDispatch');
+vi.mock('@/features/printers/hooks/useAutoDispatch', () => autoDispatchHooks);
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -63,13 +95,13 @@ describe('AutoDispatchDashboardPage', () => {
       { name: 'Temperature OK', passed: true, message: 'Temperature in range', checkedAt: '2025-01-15T10:00:00Z' },
     ],
     state: 'PendingReady',
-  };
+  } satisfies AutoDispatchStatus;
 
   const mockPrintingStatus = {
     ...mockPrinterStatus,
     currentJobName: 'test-print.gcode',
     state: 'None',
-  };
+  } satisfies AutoDispatchStatus;
 
   const mockPreClearedStatus = {
     ...mockPrinterStatus,
@@ -81,12 +113,12 @@ describe('AutoDispatchDashboardPage', () => {
       { name: 'Bed Clear Confirmed', passed: true, message: 'Bed pre-cleared for immediate dispatch', checkedAt: '2025-01-15T10:00:00Z' },
       { name: 'Temperature OK', passed: true, message: 'Temperature in range', checkedAt: '2025-01-15T10:00:00Z' },
     ],
-  };
+  } satisfies AutoDispatchStatus;
 
   const mockGlobalStatus = {
     globalEnabled: true,
     printers: [mockPrinterStatus],
-  };
+  } satisfies AutoDispatchGlobalStatus;
 
   const mockConfirmReady = vi.fn().mockResolvedValue(undefined);
   const mockConfirmFilamentOverride = vi.fn().mockResolvedValue(undefined);
@@ -127,22 +159,20 @@ describe('AutoDispatchDashboardPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     
-    vi.mocked(useAutoDispatchReadyFlow).mockReturnValue(
-      mockReadyFlow as ReturnType<typeof useAutoDispatchReadyFlow>
-    );
-    vi.mocked(useSkipNextJob).mockReturnValue(mockSkipMutation as ReturnType<typeof useSkipNextJob>);
-    vi.mocked(useCancelAutoDispatch).mockReturnValue(mockCancelMutation as ReturnType<typeof useCancelAutoDispatch>);
-    vi.mocked(useSetAutoDispatchEnabled).mockReturnValue(mockSetEnabledMutation as ReturnType<typeof useSetAutoDispatchEnabled>);
-    vi.mocked(useSetAllAutoDispatchEnabled).mockReturnValue(mockSetGlobalEnabledMutation as ReturnType<typeof useSetAllAutoDispatchEnabled>);
-    vi.mocked(usePreClearBed).mockReturnValue(mockPreClearMutation as ReturnType<typeof usePreClearBed>);
+    autoDispatchHooks.useAutoDispatchReadyFlow.mockReturnValue(mockReadyFlow);
+    autoDispatchHooks.useSkipNextJob.mockReturnValue(mockSkipMutation);
+    autoDispatchHooks.useCancelAutoDispatch.mockReturnValue(mockCancelMutation);
+    autoDispatchHooks.useSetAutoDispatchEnabled.mockReturnValue(mockSetEnabledMutation);
+    autoDispatchHooks.useSetAllAutoDispatchEnabled.mockReturnValue(mockSetGlobalEnabledMutation);
+    autoDispatchHooks.usePreClearBed.mockReturnValue(mockPreClearMutation);
   });
 
   it('renders dashboard with global toggle and printer cards', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -156,11 +186,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('shows loading spinner while data is fetching', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: undefined,
       isLoading: true,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -175,11 +205,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('shows empty state when no printers configured', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: { globalEnabled: true, printers: [] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -192,11 +222,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('displays ready-gate checks with pass/fail indicators', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -212,11 +242,11 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('global enable/disable toggle calls correct mutation', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -234,11 +264,11 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('per-printer auto-dispatch toggle works', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -261,11 +291,11 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('mark ready button calls mutation with correct printerId', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -281,12 +311,12 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('shows and confirms a filament challenge on the dashboard', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
-    vi.mocked(useAutoDispatchReadyFlow).mockReturnValue({
+    });
+    autoDispatchHooks.useAutoDispatchReadyFlow.mockReturnValue({
       ...mockReadyFlow,
       challenge: {
         status: mockPrinterStatus,
@@ -312,7 +342,7 @@ describe('AutoDispatchDashboardPage', () => {
           },
         },
       },
-    } as ReturnType<typeof useAutoDispatchReadyFlow>);
+    });
 
     render(
       <TestWrapper>
@@ -327,11 +357,11 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('skip button calls skip mutation', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -347,11 +377,11 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('cancel button calls cancel mutation', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: { globalEnabled: true, printers: [mockPrintingStatus] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -366,11 +396,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('ready-gate check items show pass indicator for passed checks', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -386,11 +416,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('shows error message when data fails to load', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: undefined,
       isLoading: false,
       error: new Error('Failed to fetch auto-dispatch status'),
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -402,11 +432,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('hides Mark Ready button when printer is actively printing', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: { globalEnabled: true, printers: [mockPrintingStatus] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -419,11 +449,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('hides Cancel button when printer is not printing', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -436,11 +466,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('shows Printing badge when printer is actively printing', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: { globalEnabled: true, printers: [mockPrintingStatus] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -455,11 +485,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('shows Awaiting Bed Clear badge when in PendingReady state', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: mockGlobalStatus,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -471,11 +501,11 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('shows pre-cleared readiness state without a failed bed-clear diagnostic', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: { globalEnabled: true, printers: [mockPreClearedStatus] },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -490,7 +520,7 @@ describe('AutoDispatchDashboardPage', () => {
   });
 
   it('sorts printers with the same state by queue depth before name', () => {
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: {
         globalEnabled: true,
         printers: [
@@ -510,7 +540,7 @@ describe('AutoDispatchDashboardPage', () => {
       },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -524,7 +554,7 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('filters to printers that have queued jobs regardless of current state', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: {
         globalEnabled: true,
         printers: [
@@ -562,7 +592,7 @@ describe('AutoDispatchDashboardPage', () => {
       },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
@@ -580,7 +610,7 @@ describe('AutoDispatchDashboardPage', () => {
 
   it('includes pre-cleared printers in the Ready filter instead of Idle', async () => {
     const user = userEvent.setup();
-    vi.mocked(useAutoDispatchGlobalStatus).mockReturnValue({
+    autoDispatchHooks.useAutoDispatchGlobalStatus.mockReturnValue({
       data: {
         globalEnabled: true,
         printers: [
@@ -600,7 +630,7 @@ describe('AutoDispatchDashboardPage', () => {
       },
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useAutoDispatchGlobalStatus>);
+    });
 
     render(
       <TestWrapper>
