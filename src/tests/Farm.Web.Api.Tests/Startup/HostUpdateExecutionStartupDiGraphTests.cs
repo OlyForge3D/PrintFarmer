@@ -61,6 +61,36 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
     }
 
     [Fact]
+    public void AddHostUpdateExecution_RegistersEveryRequiredFence()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+
+            Assert.NotNull(provider.GetRequiredService<QueueReconciliationFenceFlag>());
+            IReadOnlyList<IFenceableWriter> writers = provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>();
+            foreach (string requiredWriterName in new HostUpdateExecutionOptions().RequiredFencedWriterNames)
+            {
+                Assert.Contains(writers, writer => writer.Name == requiredWriterName);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void AddHostUpdateExecution_ResolvingBackupTargetList_DoesNotRecurseAndReturnsRealTargets()
     {
         string root = CreateValidRoot();

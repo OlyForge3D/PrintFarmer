@@ -1145,7 +1145,6 @@ describe('InstallerUpdatesExperience', () => {
         state: 'Blocked',
         reasons: [
           'facility_unavailable:target_image_migration_runner_unavailable',
-          'facility_unavailable:queue_reconciliation_writer_fence_unavailable',
           'facility_unavailable:sql_server_visible_backup_path_mapping_unverified',
         ],
         hops: [],

@@ -192,7 +192,7 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
-    public async Task CheckAsync_KnownPhysicalGapsRemain_ReportsCodeOwnedUnavailableFacilities()
+    public async Task CheckAsync_UnconfiguredDockerAndUnsupportedProvider_ReportsConcreteReasons()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -212,10 +212,11 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
-            result.Reasons.Should().NotContain(r => r.StartsWith("facility_unavailable:sql_server_visible_backup_path_mapping_unverified", StringComparison.Ordinal));
-            result.Reasons.Should().Contain("host_executable_not_configured:docker");
-            result.Reasons.Should().Contain("database_provider_tooling_unsupported:Fake:Microsoft.EntityFrameworkCore.Sqlite");
+            result.Reasons.Should().BeEquivalentTo(
+            [
+                "host_executable_not_configured:docker",
+                "database_provider_tooling_unsupported:Fake:Microsoft.EntityFrameworkCore.Sqlite",
+            ]);
         }
         finally
         {
@@ -226,7 +227,7 @@ public class HostUpdateExecutionAvailabilityTests
     [Theory]
     [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", "pg_dump", "pg_restore")]
     [InlineData("Microsoft.EntityFrameworkCore.SqlServer", "sqlcmd")]
-    public async Task CheckAsync_SingleConfiguredProvider_LeavesOnlyCodeOwnedFacilities(string providerName, params string[] providerTools)
+    public async Task CheckAsync_SingleConfiguredProvider_IsAvailable(string providerName, params string[] providerTools)
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -247,11 +248,47 @@ public class HostUpdateExecutionAvailabilityTests
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().BeEquivalentTo(
-            [
-                "facility_unavailable:queue_reconciliation_writer_fence_unavailable",
-            ]);
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.Reasons.Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_DefaultRequiredWritersAllPresent_IsAvailable()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = new()
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredUnavailableFacilities = [],
+            };
+            ConfigureExecutablePaths(options, root, "docker", "pg_dump", "pg_restore");
+            FakeFenceableWriter[] writers = options.RequiredFencedWriterNames
+                .Select(name => new FakeFenceableWriter(name))
+                .ToArray();
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget("Npgsql.EntityFrameworkCore.PostgreSQL")],
+                [new FakeBackupTarget()],
+                writers,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.Reasons.Should().BeEmpty();
         }
         finally
         {
