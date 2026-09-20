@@ -119,6 +119,28 @@ authenticates the publisher and exact manifest bytes; it does not authorize or
 implement apply, installation, active-print handling, staging, recovery, or
 runtime safety.
 
+### Unsigned legacy installations: permanent manual-only decision
+
+Unsigned legacy installations do not have a trust bootstrap. Operator assertion,
+an unsigned manifest, a mutable image reference, or a matching version string
+cannot establish managed eligibility and must never be treated as a verified
+release. Historical releases are not retroactively signed.
+
+The supported path is deliberately one-time and manual: install a current
+signed release through the documented deployment procedure, then refresh the
+inventory. The signed release manifest and its verified identity can establish
+managed eligibility from that point forward. Waiting for an executor facility
+fix does not change an unsigned installation's trust state, and downgrade is
+not a recovery path.
+
+Inventory reports this condition as
+`SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
+`facility_unavailable:*` evidence. The former is manual-only while verified
+signed release evidence is unavailable; repaired binding metadata can establish
+that evidence without a manual reinstall. The latter identifies code-owned
+host-update facilities that may clear when their implementations land. Neither
+condition authorizes execution, and both remain fail-closed.
+
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
 `release-insider` must allow only `development`. The release tooling queries
@@ -180,14 +202,16 @@ bundle. The following claims remain intentionally separate:
 | --- | --- | --- |
 | GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. The prerelease-metadata rejection path is not represented by the current fixtures. | Covered by focused tests; prerelease mismatch evidence remains pending |
 | Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
-| Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. | Blocked |
-| Apply and recovery | Production execution is blocked by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`). It is also blocked when audited `HostExecutablePaths` are missing (`host_executable_not_configured:<tool>`). Separately, unsigned legacy installs remain `NotManaged` until protected bootstrap/trusted state is established. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code/configuration; live evidence pending after implementation |
+| Legacy installation transition | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. The supported transition is a one-time manual installation of a current signed release, followed by inventory refresh; no protected bootstrap or operator assertion is supported. | Manual operator action required |
+| Apply and recovery | Production execution is blocked by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`). It is also blocked when audited `HostExecutablePaths` are missing (`host_executable_not_configured:<tool>`). Separately, unsigned legacy installs remain `NotManaged` until a current signed release is manually installed and verified. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code/configuration; live evidence pending after implementation |
 | Automatic policy and UI execution | As of `ce8f4c182`, Update Now and automatic controls render disabled with no execute callback wired (`InstallerUpdatesExperience.tsx`); no live execution has been demonstrated end-to-end. | Blocked |
 
 Do not describe insider.4 publication as an end-to-end update acceptance run.
-The remaining acceptance evidence is a supported legacy-install bootstrap,
-against a signed release whose images differ from the installed images, followed
-by confirmation, progress, completion, and an induced interruption with
+The remaining legacy-install acceptance evidence is the documented one-time
+manual installation of a current signed release, followed by inventory refresh;
+it is not a supported trust bootstrap. Separate execution acceptance requires a
+signed release whose images differ from the installed images, followed by
+confirmation, progress, completion, and an induced interruption with
 restoration. The provider/topology matrix must include the supported shared
 database case and explicitly record the split-database and unsupported-provider
 fail-closed outcomes. Automatic updates must remain opt-in and disabled until

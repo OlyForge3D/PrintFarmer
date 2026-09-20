@@ -536,6 +536,9 @@ export function InstallerUpdatesExperience({
     ? readiness.reasons
     : [];
   const readinessHops = Array.isArray(readiness?.hops) ? readiness.hops : [];
+  const unsignedLegacyInstallation = eligibilityReasons.includes(
+    "SignedReleaseEvidenceUnavailableManualOnly",
+  );
   const manualUpdateAvailable =
     observation === "connected" &&
     readiness?.state === "Eligible" &&
@@ -732,12 +735,26 @@ export function InstallerUpdatesExperience({
         </div>
       )}
       <Alert
-        type={blocked ? "error" : "info"}
+        type={blocked || unsignedLegacyInstallation ? "error" : "info"}
         title="Read-only release availability"
       >
-        {blocked
-          ? "The observed installation is blocked. Wait, fix forward, or use the documented restore path; downgrade is not offered as a bypass."
-          : "Availability is read-only until trusted host evidence and the constrained executor are accepted. Missing evidence is not treated as installable."}
+        {unsignedLegacyInstallation && (
+          <>
+            This installation cannot present verified signed release evidence and
+            cannot establish managed eligibility. Verify the inventory adapter's
+            evidence or install a current signed release manually once;
+            subsequent managed eligibility never accepts operator assertion.
+          </>
+        )}
+        {blocked && (
+          <>
+            {unsignedLegacyInstallation && " "}
+            The observed installation is blocked. Wait, fix forward, or use the
+            documented restore path; downgrade is not offered as a bypass.
+          </>
+        )}
+        {!unsignedLegacyInstallation && !blocked &&
+          "Availability is read-only until trusted host evidence and the constrained executor are accepted. Missing evidence is not treated as installable."}
       </Alert>
       {insider && (
         <Alert type="warning" title="Insider channel">
@@ -817,6 +834,14 @@ export function InstallerUpdatesExperience({
             {inventory?.eligibility ?? UNKNOWN}.{" "}
             {eligibilityReasons.join(", ") || "No reasons reported."}
           </p>
+          {unsignedLegacyInstallation && (
+            <Alert type="warning" title="Manual signed install required">
+              This installation cannot present verified signed release evidence.
+              Do not wait for a facility fix or use a downgrade; manually install
+              a current signed release, then refresh inventory to establish
+              managed eligibility.
+            </Alert>
+          )}
           <p>
             Readiness reasons: {readinessReasons.join(", ") || UNKNOWN}.
             Readiness hops: {readinessHops.join(" → ") || UNKNOWN}.
