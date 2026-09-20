@@ -347,6 +347,7 @@ export function InstallerUpdatesExperience({
   const initialManualUpdateReleaseId = useRef(manualUpdateReleaseId);
   const [manualUpdateAttempted, setManualUpdateAttempted] = useState(false);
   const manualUpdateDispatchLock = useRef(false);
+  const channelDispatchLock = useRef(false);
   const rehydrationAttempted = useRef(false);
   // Set immediately (synchronously, before any state update) by an
   // operation outcome handler -- save success, confirmed rejection, or
@@ -442,7 +443,8 @@ export function InstallerUpdatesExperience({
   };
 
   const retryUpdateChannel = async () => {
-    if (!onRetryUpdateChannel || retryingUpdateChannel) return;
+    if (!onRetryUpdateChannel || retryingUpdateChannel || channelDispatchLock.current) return;
+    channelDispatchLock.current = true;
     setRetryingUpdateChannel(true);
     try {
       // An explicit successful GET is authoritative on its own: reconcile
@@ -459,6 +461,7 @@ export function InstallerUpdatesExperience({
       // The retry itself could not confirm anything; leave the existing
       // unknown-outcome/error state as-is so the admin can retry again.
     } finally {
+      channelDispatchLock.current = false;
       setRetryingUpdateChannel(false);
     }
   };
@@ -467,7 +470,8 @@ export function InstallerUpdatesExperience({
     settings: UpdateChannelSettings,
     options: { closeAcknowledgementOnSuccess?: boolean } = {},
   ) => {
-    if (!onSaveUpdateChannel) return;
+    if (!onSaveUpdateChannel || channelDispatchLock.current) return;
+    channelDispatchLock.current = true;
     setSavingChannel(true);
     setChannelError(null);
     setChannelStatus("");
@@ -516,6 +520,7 @@ export function InstallerUpdatesExperience({
         setChannelError("Update channel save outcome is unknown because the authoritative UpdateChannel settings could not be confirmed. Retry before saving again.");
       }
     } finally {
+      channelDispatchLock.current = false;
       setSavingChannel(false);
     }
   };
