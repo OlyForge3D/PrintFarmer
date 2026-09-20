@@ -854,7 +854,8 @@ When a team member has a **Reviewer** role (e.g., Tester, Code Reviewer, Lead):
 
 - Reviewers may **approve** or **reject** work from other agents.
 - On an ordinary **rejection**, the original author self-revises and re-requests review —
-  no special action needed.
+  dispatch follow-on panel rounds under
+  [Delta-Only Panel Rereview](../copilot-instructions.md#delta-only-panel-rereview).
 - The Reviewer may instead explicitly **invoke lockout** by choosing ONE of:
   1. **Reassign:** Require a *different* agent to do the revision (not the original author).
   2. **Escalate:** Require a *new* agent be spawned with specific expertise.

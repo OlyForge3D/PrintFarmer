@@ -4,16 +4,18 @@ import {
   cp,
   mkdtemp,
   mkdir,
+  readFile,
   rm,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  clampedOverride,
   classifyDiagnostics,
   countTestFiles,
   evaluate,
@@ -59,6 +61,151 @@ test("fails compiler signal death and null status before another guard can match
   });
   assert.match(signal.message, /did not complete/);
   assert.match(nullStatus.message, /did not complete/);
+});
+
+test("fails closed on a timed-out compiler with a distinct message (spawnSync timeout hardening)", () => {
+  const timeoutError = Object.assign(new Error("spawnSync tsc ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+  const result = evaluateGate({
+    compilerResult: { status: null, signal: "SIGTERM", error: timeoutError },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.showListFilesOutput, false);
+  assert.match(result.message, /timed out/);
+});
+
+test("binds the listFiles ETIMEDOUT guard and preserves the list-file output flag", () => {
+  const timeoutError = Object.assign(new Error("listFiles tsc ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+  const result = evaluateGate({
+    listFilesResult: { status: null, signal: "SIGTERM", error: timeoutError },
+    compilerResult: { status: 0, signal: null, error: undefined },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /timed out/);
+  assert.equal(result.showListFilesOutput, true);
+});
+
+test("clampedOverride only accepts shrink-only values and defaults invalid bounds", () => {
+  const defaultValue = 120_000;
+  const cases = [
+    [undefined, defaultValue],
+    ["", defaultValue],
+    ["0", defaultValue],
+    ["-1", defaultValue],
+    ["NaN", defaultValue],
+    ["abc", defaultValue],
+    ["300", 300],
+    ["120000", defaultValue],
+    ["120001", defaultValue],
+    ["1e21", defaultValue],
+    ["1.5", defaultValue],
+    ["119999", 119_999],
+  ];
+
+  for (const [value, expected] of cases) {
+    assert.equal(
+      clampedOverride(value, defaultValue),
+      expected,
+      `clampedOverride(${String(value)}, ${defaultValue}) should be ${expected}`,
+    );
+  }
+});
+
+test("typecheck-tests driver keeps both CLI sinks routed through the shared nullish-coalescing formatter", () => {
+  const source = readFileSync(
+    path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
+    "utf8",
+  );
+  const coreSource = readFileSync(
+    path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /const output = formatSinkOutput\(compilerResult\.stdout, compilerResult\.stderr\);/,
+  );
+  assert.match(
+    source,
+    /const listFilesOutput = formatSinkOutput\(\s*listFilesResult\.stdout,\s*listFilesResult\.stderr,\s*\);/,
+  );
+  assert.match(coreSource, /return `\$\{stdout \?\? ""\}\$\{stderr \?\? ""\}`;/);
+});
+
+// Real CLI wiring: the first compiler run passes, then the listFiles pass hangs
+// under --listFilesOnly. This binds the `showListFilesOutput` flag to the actual
+// script path rather than a hand-built object.
+test("CLI binds listFiles ETIMEDOUT to the real output sink and showListFilesOutput flag", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-tests-listfiles-timeout-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests.mjs"),
+    );
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/test-typecheck-baseline.json"),
+      JSON.stringify(baseline),
+    );
+    const invocationLogPath = path.join(
+      fixtureDirectory,
+      "invocation-count.log",
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        'const fs = require("node:fs");',
+        'const args = process.argv.slice(2);',
+        'const log = process.env.INVOCATION_LOG_PATH;',
+        'fs.appendFileSync(log, args.includes("--listFilesOnly") ? "listFiles\\n" : "compiler\\n");',
+        'if (args.includes("--listFilesOnly")) {',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '  setInterval(() => {}, 1000);',
+        '} else {',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '}',
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-tests.mjs")],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TYPECHECK_TEST_TIMEOUT_MS: "300",
+          INVOCATION_LOG_PATH: invocationLogPath,
+        },
+        timeout: 10_000,
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.match(output, /timed out/);
+    assert.match(output, /src\/test\/example\.test\.ts/);
+
+    const invocationLines = (await readFile(invocationLogPath, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0);
+    assert.equal(invocationLines.length, 2);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("fails global compiler diagnostics before the nonzero-file fallback", () => {
@@ -464,6 +611,88 @@ test("no *.spec.* file exists under src/ -- the gap neither gate covers is pinne
       `isTestFile, re-baselining testDiagnosticCount/minimumTestFileCount ` +
       `deliberately) before removing this guard.`,
   );
+});
+
+test("CLI kills a hung compiler via the spawnSync timeout instead of hanging forever", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-tests-timeout-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests.mjs"),
+    );
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/test-typecheck-baseline.json"),
+      JSON.stringify(baseline),
+    );
+    const invocationLogPath = path.join(
+      fixtureDirectory,
+      "invocation-count.log",
+    );
+    // Never exits on its own -- without a spawnSync `timeout` option, this
+    // would hang the CLI (and therefore the CI job) forever. The override is
+    // intentionally tiny so the test finishes quickly while still exercising
+    // production's timeout behavior; the outer harness watchdog remains a
+    // safety net only for regressions that remove the timeout entirely.
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      `require("node:fs").appendFileSync(${JSON.stringify(invocationLogPath)}, "invoked\\n");\nsetInterval(() => {}, 1000);`,
+    );
+
+    const start = Date.now();
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-tests.mjs")],
+      {
+        encoding: "utf8",
+        env: { ...process.env, TYPECHECK_TEST_TIMEOUT_MS: "300" },
+        timeout: 10_000,
+      },
+    );
+    const elapsedMs = Date.now() - start;
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      "the outer test-harness watchdog fired, meaning the CLI's own " +
+        "production timeout did not kill the hung compiler -- this is the " +
+        "exact regression this test exists to catch",
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(output, /TypeScript test compiler timed out and was killed/);
+    assert.doesNotMatch(output, /Test type-check passed/);
+
+    const invocationLines = (await readFile(invocationLogPath, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0);
+    assert.equal(
+      invocationLines.length,
+      1,
+      `expected exactly 1 tsc invocation (the second, --listFilesOnly spawn ` +
+        `must be short-circuited once the first spawn is already fatal), ` +
+        `but observed ${invocationLines.length}`,
+    );
+    assert.ok(
+      elapsedMs < 5_000,
+      `expected the CLI to return well under 5s once the compiler timeout fired; took ${elapsedMs}ms`,
+    );
+
+    assert.doesNotMatch(output, /typecheck-tests\.mjs:\d+/);
+    assert.doesNotMatch(output, /baseline is stale/);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("CLI fails without success or baseline-reduction advice after compiler signal death", async () => {

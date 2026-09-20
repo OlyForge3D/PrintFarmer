@@ -105,7 +105,8 @@ or rejection from a PR that never had squad evidence.
 
 - `REVIEWED` and `APPROVED` are valid merge evidence only for the PR's exact
   current head.
-- `CHANGES_REQUESTED` routes the findings back to the original author.
+- `CHANGES_REQUESTED` routes the findings back to the original author. Dispatch
+  follow-on panel rounds using [Delta-Only Panel Rereview](copilot-instructions.md#delta-only-panel-rereview).
 - `NOT_APPLICABLE` means the PR does not carry the `squad` label, so the gate did
   not evaluate it and no review evidence exists. It is **not** a passing review.
   Do not merge it unattended — leave it for a human, or add the `squad` label
@@ -113,7 +114,11 @@ or rejection from a PR that never had squad evidence.
 - `SUPERSEDED`, `MISSING`, or `INVALID` is not a review record and does not
   preserve an old rejection. Require fresh panel records naming the new head,
   or an administrator override.
-- A current administrator GitHub approval remains valid merge evidence.
+- A verified `APPROVED` owner override takes precedence over agent rejections
+  or missing panel evidence; do not separately veto it using old agent findings
+  or GitHub's aggregate `reviewDecision`. Apply the current-state precedence in
+  [Repository verdict evidence](copilot-instructions.md#repository-verdict-evidence).
+  CI, draft/scope checks, and the exact-head merge guard still apply.
 - Never infer a review from a free-text PR comment. Only the canonical
   `Squad-Reviewer:` / `Squad-Verdict:` / `Squad-Head-SHA:` block, evaluated by
   `.github/workflows/squad-review-verdict.yml`, produces the trusted
