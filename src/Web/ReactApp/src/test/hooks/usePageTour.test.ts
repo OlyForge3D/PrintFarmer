@@ -5,7 +5,7 @@ import { usePageTour } from '@/common/hooks/usePageTour';
 
 const destroyMock = vi.fn();
 const driveMock = vi.fn();
-const driverMock = vi.fn((..._args: unknown[]) => ({
+const driverMock = vi.fn(() => ({
   drive: driveMock,
   destroy: destroyMock,
 }));

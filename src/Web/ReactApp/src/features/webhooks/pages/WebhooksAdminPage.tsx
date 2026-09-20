@@ -6,7 +6,7 @@ import { Modal } from '@/common/components/modals/Modal';
 import { PlusIcon, DeleteIcon, EditIcon, RefreshIcon, LoadingIcon, CheckIcon, CloseIcon, ExternalLinkIcon, HistoryIcon } from '@/common/components/icons/MdiIcons';
 import { useWebhooks, useWebhookEventTypes, useWebhookDeliveries, useCreateWebhook, useUpdateWebhook, useDeleteWebhook, useTestWebhook } from '../hooks/useWebhooks';
 import { toast } from 'sonner';
-import type { WebhookSubscription, CreateWebhookDto, UpdateWebhookDto } from '@/types/api';
+import type { WebhookSubscription, CreateWebhookDto } from '@/types/api';
 
 export function WebhooksAdminPage({ embedded = false }: EmbeddablePageProps) {
  const { data: webhooks, isLoading, error } = useWebhooks();

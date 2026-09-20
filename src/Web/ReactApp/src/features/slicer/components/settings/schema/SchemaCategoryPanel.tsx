@@ -13,7 +13,6 @@ interface SchemaCategoryPanelProps {
   disabled?: boolean;
   hasChanges?: (key: string) => boolean;
   onReset?: (key: string) => void;
-  getOriginalValue?: (key: string) => unknown;
 }
 
 export function SchemaCategoryPanel({
@@ -25,7 +24,6 @@ export function SchemaCategoryPanel({
   disabled = false,
   hasChanges,
   onReset,
-  getOriginalValue,
 }: SchemaCategoryPanelProps) {
   const [showAdvanced, setShowAdvanced] = useState(false);
 
