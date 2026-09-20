@@ -1,7 +1,10 @@
 ﻿using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
+using System.Text;
+using System.Text.Json;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
@@ -11,16 +14,55 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// <c>RootDirectory</c> is configured, proves the executor can never start with its durable root
 /// resolving under a temp directory or the process's working directory, and that every other
 /// required field is enforced. When <c>RootDirectory</c> is left empty (the default -- no
-/// supported deployment configures it yet), validation short-circuits to success instead of
-/// crashing every host at startup; runtime unavailability for that case is reported instead by
-/// <see cref="HostUpdateExecutionAvailabilityProvider"/> (see
+/// supported deployment configures it yet), deployment-specific validation short-circuits
+/// instead of crashing every host at startup; runtime unavailability for that case is reported
+/// by <see cref="HostUpdateExecutionAvailabilityProvider"/> while the code-owned writer minimum
+/// remains non-negotiable (see
 /// <c>Validate_MissingRootDirectory_SucceedsAsOptionalDefaultOffFeature</c> below).
 /// </summary>
 public class HostUpdateExecutionOptionsValidatorTests
 {
+    private static readonly string[] CodeOwnedRequiredFencedWriterNames =
+    [
+        "api-admission",
+        "queue-outbox-publisher",
+        "power-reading-prune",
+        "queue-retention-prune",
+        "backend-start-command-consumer",
+        "backend-control-command-consumer",
+        "bed-clear-acknowledgement-expiry",
+        "auto-dispatch",
+        "webhook-delivery",
+        "queue-reconciliation",
+    ];
+
     private static readonly HostUpdateExecutionOptionsValidator Validator = new();
 
     private static HostUpdateExecutionOptions ValidOptions(string root) => new() { RootDirectory = root };
+
+    private static HostUpdateExecutionOptions BindRequiredFencedWriterNames(params string[] writerNames)
+    {
+        string json = JsonSerializer.Serialize(new
+        {
+            HostUpdateExecution = new
+            {
+                RequiredFencedWriterNames = writerNames,
+            },
+        });
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddJsonStream(stream)
+            .Build();
+        var options = new HostUpdateExecutionOptions
+        {
+            RequiredFencedWriterNames = [],
+        };
+        configuration.GetSection(HostUpdateExecutionOptions.SectionName).Bind(options);
+        options.RootDirectory = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+            "printfarmer-host-updates-test-root");
+        return options;
+    }
 
     [Fact]
     public void Validate_ValidAbsoluteRootOutsideTempAndCwd_Succeeds()
@@ -93,6 +135,114 @@ public class HostUpdateExecutionOptionsValidatorTests
 
         result.Failed.Should().BeTrue();
         result.FailureMessage.Should().Contain("must be greater than 319 seconds");
+    }
+
+    [Fact]
+    public void Validate_ConfiguredEmptyRequiredFencedWriterNames_FailsWithExactCodeOwnedSet()
+    {
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames();
+        options.RequiredFencedWriterNames.Should().BeEmpty();
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + string.Join(',', CodeOwnedRequiredFencedWriterNames)
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_ConfiguredPartialRequiredFencedWriterNames_FailsWithExactMissingSet()
+    {
+        string[] partialSet = CodeOwnedRequiredFencedWriterNames[..^2];
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(partialSet);
+        options.RequiredFencedWriterNames.Should().Equal(partialSet);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + string.Join(',', CodeOwnedRequiredFencedWriterNames[^2..])
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_ConfiguredSetMissingExactlyOneRequiredFencedWriter_FailsWithExactMissingName()
+    {
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(
+            CodeOwnedRequiredFencedWriterNames[..^1]);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + CodeOwnedRequiredFencedWriterNames[^1]
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_NullRequiredFencedWriterNames_FailsWithExactCodeOwnedSet()
+    {
+        HostUpdateExecutionOptions options = ValidOptions(
+            Path.Combine(
+                Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+                "printfarmer-host-updates-test-root"));
+        options.RequiredFencedWriterNames = null!;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + string.Join(',', CodeOwnedRequiredFencedWriterNames)
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_CaseOnlyRequiredFencedWriterName_DoesNotSatisfyCanonicalName()
+    {
+        string[] caseVariantSet =
+        [
+            "API-ADMISSION",
+            .. CodeOwnedRequiredFencedWriterNames[1..],
+        ];
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(caseVariantSet);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: api-admission.");
+    }
+
+    [Fact]
+    public void Validate_MissingRootDirectoryWithNarrowedFencedWriterNames_StillFails()
+    {
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(
+            CodeOwnedRequiredFencedWriterNames[..^2]);
+        options.RootDirectory = string.Empty;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + string.Join(',', CodeOwnedRequiredFencedWriterNames[^2..])
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_ConfiguredSupersetRequiredFencedWriterNames_Succeeds()
+    {
+        string[] superset = [.. CodeOwnedRequiredFencedWriterNames, "deployment-specific-writer"];
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(superset);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Succeeded.Should().BeTrue();
     }
 
     [Fact]

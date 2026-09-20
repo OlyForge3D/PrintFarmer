@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { clampedOverride, countNoCheckFiles, evaluate } from "../typecheck-app-core.mjs";
+import {
+  clampedOverride,
+  countApplicationFiles,
+  countNoCheckFiles,
+  evaluate,
+} from "../typecheck-app-core.mjs";
 
 const scriptsDirectory = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -14,7 +19,11 @@ const scriptsDirectory = path.resolve(
 );
 const projectDirectory = path.resolve(scriptsDirectory, "..");
 
-const baseline = { applicationDiagnosticCount: 1, applicationNoCheckFileCount: 0 };
+const baseline = {
+  applicationDiagnosticCount: 1,
+  applicationNoCheckFileCount: 0,
+  minimumAppFileCount: 1,
+};
 const fileDiagnostic =
   "src/services/example.ts(1,1): error TS2322: Type error.";
 
@@ -104,11 +113,111 @@ test("fails above and below the exact diagnostic baseline", () => {
   );
 });
 
-test("fails an unsuccessful project-file listing (R2)", () => {
+test("fails an unsuccessful project-file listing before consuming its output (R2)", () => {
+  for (const listFilesResult of [
+    { status: 2, signal: null, error: undefined },
+    { status: null, signal: "SIGKILL", error: undefined },
+    { status: null, signal: null, error: new Error("list failed") },
+  ]) {
+    const result = evaluateGate({
+      listFilesResult,
+      listFilesOutput: "src/services/example.ts",
+    });
+    assert.match(result.message, /could not list its project files/);
+    // A failed listing is printed for diagnosis but never counted, preserving
+    // R2's decisional invariant against misleading file-floor failures.
+    assert.equal(result.showListFilesOutput, true);
+  }
+});
+
+test("requests list-file output when the application file floor fails", () => {
   const result = evaluateGate({
-    listFilesResult: { status: 2, signal: null, error: undefined },
+    baseline: { ...baseline, minimumAppFileCount: 2 },
   });
-  assert.match(result.message, /could not list its project files/);
+  assert.equal(result.ok, false);
+  assert.equal(result.showListFilesOutput, true);
+});
+
+test("does not request list-file output for an unrelated diagnostic failure", () => {
+  const result = evaluateGate({
+    output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.showListFilesOutput, false);
+});
+
+test("returns a boolean list-file output contract for every evaluation path", () => {
+  const timeoutError = Object.assign(new Error("spawnSync tsc ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+  const scenarios = [
+    {},
+    { baseline: null },
+    {
+      compilerResult: { status: null, signal: "SIGKILL", error: undefined },
+    },
+    { compilerResult: { status: null, signal: null, error: timeoutError } },
+    { output: "error TS18003: No inputs were found in config file." },
+    {
+      compilerResult: { status: 1, signal: null, error: undefined },
+      output: "",
+    },
+    { output: "" },
+    {
+      listFilesResult: { status: 2, signal: null, error: undefined },
+    },
+    { baseline: { ...baseline, minimumAppFileCount: 2 } },
+    {
+      output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+    },
+  ];
+
+  for (const overrides of scenarios) {
+    assert.equal(typeof evaluateGate(overrides).showListFilesOutput, "boolean");
+  }
+});
+
+test("fails when a counted application file is removed from the project", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-file-floor-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src/services"), {
+      recursive: true,
+    });
+    const firstFile = path.join(fixtureDirectory, "src/services/first.ts");
+    const secondFile = path.join(fixtureDirectory, "src/services/second.ts");
+    await writeFile(firstFile, "export const first = 1;\n");
+    await writeFile(secondFile, "export const second = 2;\n");
+
+    const listedFiles = "src/services/first.ts\nsrc/services/second.ts";
+    const common = {
+      baseline: { ...baseline, minimumAppFileCount: 2 },
+      compilerResult: { status: 0, signal: null, error: undefined },
+      listFilesResult: { status: 0, signal: null, error: undefined },
+      output: fileDiagnostic,
+      directory: fixtureDirectory,
+    };
+
+    assert.equal(countApplicationFiles(listedFiles, fixtureDirectory), 2);
+    assert.equal(
+      evaluate({ ...common, listFilesOutput: listedFiles }).ok,
+      true,
+    );
+
+    await rm(secondFile);
+    const remainingFile = "src/services/first.ts";
+    assert.equal(countApplicationFiles(remainingFile, fixtureDirectory), 1);
+    const result = evaluate({ ...common, listFilesOutput: remainingFile });
+    assert.equal(result.ok, false);
+    assert.match(
+      result.message,
+      /found 1 application file\(s\); expected at least 2\. Regenerate minimumAppFileCount/,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("fails above and below the exact @ts-nocheck file count (R2)", async () => {
@@ -234,6 +343,27 @@ test("fails missing, malformed, and non-object baselines", () => {
   );
   assert.match(
     evaluateGate({
+      baseline: {
+        applicationDiagnosticCount: 1,
+        applicationNoCheckFileCount: 0,
+      },
+    }).message,
+    /minimumAppFileCount must be a positive integer\./,
+  );
+  for (const minimumAppFileCount of [0, -1]) {
+    assert.equal(
+      evaluateGate({
+        baseline: {
+          applicationDiagnosticCount: 1,
+          applicationNoCheckFileCount: 0,
+          minimumAppFileCount,
+        },
+      }).message,
+      "Invalid application type-check baseline: minimumAppFileCount must be a positive integer.",
+    );
+  }
+  assert.match(
+    evaluateGate({
       baseline: { applicationDiagnosticCount: 1.5, applicationNoCheckFileCount: 0 },
     }).message,
     /applicationDiagnosticCount/,
@@ -345,6 +475,63 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
     }
     assert.doesNotMatch(output, /typecheck-app\.mjs:\d+/);
     assert.doesNotMatch(output, /Application type-check passed/);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CLI prints nonempty list-file output when the application file floor fails", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-list-output-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app-core.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
+      JSON.stringify({ ...baseline, minimumAppFileCount: 2 }),
+    );
+    const listedPath = "src/services/known.ts";
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        'const listedPath = "src/services/known.ts";',
+        'if (process.argv.includes("--listFilesOnly")) {',
+        "  process.stdout.write(`${listedPath}\\n`);",
+        "} else {",
+        '  process.stdout.write("src/services/example.ts(1,1): error TS2322: Type error.\\n");',
+        "}",
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-app.mjs")],
+      { encoding: "utf8" },
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      /TypeScript application compiler found 1 application file\(s\); expected at least 2/,
+    );
+    assert.match(result.stdout, /tsc --listFilesOnly output:\n/);
+    assert.match(result.stdout, new RegExp(listedPath.replace("/", "\\/")));
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }
