@@ -80,8 +80,10 @@ test("fails below the exact test-file floor", () => {
   const result = evaluateGate({
     baseline: { ...baseline, minimumTestFileCount: 2 },
   });
-  assert.match(result.message, /expected at least 2/);
-  assert.match(result.message, /Regenerate minimumTestFileCount.*same commit/);
+  assert.match(
+    result.message,
+    /found 1 test file\(s\); expected at least 2\. Regenerate minimumTestFileCount in scripts\/test-typecheck-baseline\.json in the same commit/,
+  );
 });
 
 test("fails above and below the exact diagnostic baseline", () => {
@@ -89,10 +91,13 @@ test("fails above and below the exact diagnostic baseline", () => {
     output: `${testDiagnostic}\n${testDiagnostic.replace("(1,1)", "(2,1)")}`,
   });
   const below = evaluateGate({ output: appDiagnostic });
-  assert.match(above.message, /do not raise the exact snapshot/);
+  assert.match(
+    above.message,
+    /measured 2 direct test diagnostic\(s\); expected exact snapshot 1\. Fix the errors; do not raise the exact snapshot/,
+  );
   assert.match(
     below.message,
-    /exact snapshot is stale; regenerate testDiagnosticCount.*same commit/,
+    /measured 0 direct test diagnostic\(s\); expected exact snapshot 1\. The exact snapshot is stale; regenerate testDiagnosticCount in scripts\/test-typecheck-baseline\.json in the same commit/,
   );
 });
 
@@ -131,6 +136,7 @@ test("classifies project-relative and absolute test paths while excluding depend
     false,
   );
   assert.equal(isTestFile("../../outside.test.ts", packageDirectory), false);
+  assert.equal(isTestFile("Z:/outside.test.ts", packageDirectory), false);
   assert.equal(isTestFile("src/services/e.ts", packageDirectory), false);
 });
 

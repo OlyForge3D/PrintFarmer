@@ -10,6 +10,7 @@ const baselinePath = resolve(
   projectDirectory,
   "scripts/test-typecheck-baseline.json",
 );
+// Keep diagnostics and file discovery on the identical compiler project.
 const tscArguments = [
   "-p",
   "tsconfig.test.json",
@@ -45,11 +46,12 @@ const evaluation = evaluate({
 });
 
 if (!evaluation.ok) {
+  console.error(evaluation.message);
+
   if (evaluation.showListFilesOutput) {
     process.stdout.write(listFilesOutput);
   }
 
-  console.error(evaluation.message);
   process.exitCode = 1;
 } else {
   console.warn(evaluation.message);

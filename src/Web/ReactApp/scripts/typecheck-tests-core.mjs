@@ -1,4 +1,4 @@
-import { relative, resolve } from "node:path";
+import { isAbsolute, relative, resolve } from "node:path";
 
 export function classifyDiagnostics(output, directory) {
   const lines = output.split(/\r?\n/).filter(Boolean);
@@ -150,6 +150,7 @@ export function isTestFile(path, directory) {
     "/",
   );
   return (
+    !isAbsolute(normalized) &&
     !normalized.startsWith("../") &&
     !normalized.startsWith("node_modules/") &&
     (normalized.startsWith("src/test/") ||

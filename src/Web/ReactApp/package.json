@@ -22,6 +22,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "pretest:coverage": "npm run ci:typecheck-tests",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "test:e2e": "playwright test",
