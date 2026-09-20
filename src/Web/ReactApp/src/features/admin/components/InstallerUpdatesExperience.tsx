@@ -398,7 +398,11 @@ export function InstallerUpdatesExperience({
     rehydrationAttempted.current = true;
     let active = true;
     void onGetHostUpdateStatus(releaseId).then((status) => {
-      if (!active || readManualUpdateReleaseId() !== releaseId) return;
+      if (!active) return;
+      if (readManualUpdateReleaseId() !== releaseId) {
+        setManualUpdateBusy(false);
+        return;
+      }
       setManualUpdateStatus(status);
       setManualUpdateOpen(true);
       setManualUpdateBusy(false);
@@ -407,7 +411,11 @@ export function InstallerUpdatesExperience({
         setManualUpdateReleaseId(null);
       }
     }).catch((error) => {
-      if (!active || readManualUpdateReleaseId() !== releaseId) return;
+      if (!active) return;
+      if (readManualUpdateReleaseId() !== releaseId) {
+        setManualUpdateBusy(false);
+        return;
+      }
       if (isApiError(error) && error.statusCode === 404) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
@@ -641,9 +649,7 @@ export function InstallerUpdatesExperience({
         : getErrorMessage(error, "The host update could not be authorized or started."));
       setManualUpdateOpen(true);
     } finally {
-      if (!executeDispatched) {
-        manualUpdateDispatchLock.current = false;
-      }
+      manualUpdateDispatchLock.current = false;
       setManualUpdateBusy(false);
     }
   };

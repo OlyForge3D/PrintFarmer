@@ -394,7 +394,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBeNull();
     status.mockClear();
     mounted.unmount();
-    render(<InstallerUpdatesExperience
+    const remounted = render(<InstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -403,6 +403,7 @@ describe('InstallerUpdatesExperience', () => {
     />);
     await waitFor(() => expect(screen.getByRole('button', { name: 'Update now' })).not.toHaveAttribute('aria-disabled', 'true'));
     expect(status).not.toHaveBeenCalled();
+    remounted.unmount();
   });
 
   it('uses the terminal activity when a later retry completes successfully', async () => {
@@ -427,7 +428,7 @@ describe('InstallerUpdatesExperience', () => {
         },
       ],
     });
-    render(<InstallerUpdatesExperience
+    const mounted = render(<InstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -435,6 +436,108 @@ describe('InstallerUpdatesExperience', () => {
 
     expect(await screen.findByText('Host update completed')).toBeVisible();
     expect(screen.queryByText('Host update rolled back')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBeNull();
+    status.mockClear();
+    mounted.unmount();
+    const remounted = render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={status}
+      onAuthorizeHostUpdate={vi.fn()}
+      onExecuteHostUpdate={vi.fn()}
+    />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Update now' })).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(status).not.toHaveBeenCalled();
+    remounted.unmount();
+  });
+
+  it('refreshes a non-terminal update status after dispatch', async () => {
+    const user = userEvent.setup();
+    let resolveStatus!: (value: { releaseId: string; currentState: 'Applying'; activities: never[] }) => void;
+    const execute = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'Applying',
+      activities: [],
+    });
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'Applying',
+      activities: [],
+    });
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={vi.fn().mockResolvedValue({ authorizationId: 'auth-1', releaseId: 'stable:1.2.4' })}
+      onExecuteHostUpdate={execute}
+      onGetHostUpdateStatus={status}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    await screen.findByText('Applying');
+    status.mockClear();
+    status.mockImplementation(() => new Promise((resolve) => {
+      resolveStatus = resolve;
+    }));
+    await user.click(screen.getByRole('button', { name: 'Refresh update status' }));
+    await waitFor(() => expect(status).toHaveBeenCalledWith('stable:1.2.4'));
+    await act(async () => {
+      resolveStatus({ releaseId: 'stable:1.2.4', currentState: 'Applying', activities: [] });
+    });
+  });
+
+  it('serializes rapid refresh events before the busy state commits', async () => {
+    let resolveStatus!: (value: { releaseId: string; currentState: 'Applying'; activities: never[] }) => void;
+    const status = vi.fn().mockResolvedValueOnce({
+      releaseId: 'stable:1.2.4',
+      currentState: 'Applying',
+      activities: [],
+    }).mockImplementation(() => new Promise((resolve) => {
+      resolveStatus = resolve;
+    }));
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={status}
+    />);
+
+    await screen.findByText('Applying');
+    status.mockClear();
+    const action = screen.getByRole('button', { name: 'Refresh update status' });
+    act(() => {
+      fireEvent.click(action);
+      fireEvent.click(action);
+    });
+    expect(status).toHaveBeenCalledOnce();
+    await act(async () => {
+      resolveStatus({ releaseId: 'stable:1.2.4', currentState: 'Applying', activities: [] });
+    });
+  });
+
+  it('clears busy state when stale rehydration resolves after persisted identity changes', async () => {
+    let resolveStatus!: (value: { releaseId: string; currentState: 'Applying'; activities: never[] }) => void;
+    const status = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      resolveStatus = resolve;
+    }));
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={status}
+      onAuthorizeHostUpdate={vi.fn()}
+      onExecuteHostUpdate={vi.fn()}
+    />);
+
+    await waitFor(() => expect(status).toHaveBeenCalledWith('stable:1.2.4'));
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.5');
+    await act(async () => {
+      resolveStatus({ releaseId: 'stable:1.2.4', currentState: 'Applying', activities: [] });
+    });
+    expect(screen.queryByText('Applying')).not.toBeInTheDocument();
+    const update = screen.getByRole('button', { name: 'Update now' });
+    expect(update).not.toHaveAttribute('aria-busy', 'true');
+    expect(update).not.toHaveAttribute('aria-disabled', 'true');
   });
 
   it('allows a second direct update after the first one completes', async () => {
