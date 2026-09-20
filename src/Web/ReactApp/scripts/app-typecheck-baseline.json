@@ -1,0 +1,4 @@
+{
+  "_comment": "applicationDiagnosticCount is an exact snapshot of measured tsc -p tsconfig.app.json diagnostics (application source only; test/fixture roots are excluded by tsconfig.app.json itself). Update it deliberately in the same change that moves the count. See #2820 for the plan to drive it to zero.",
+  "applicationDiagnosticCount": 225
+}

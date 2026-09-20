@@ -21,3 +21,21 @@ describe("test type-check lifecycle", () => {
     );
   });
 });
+
+describe("application type-check lifecycle", () => {
+  it("runs the application ratchet before build", async () => {
+    const packageJson = JSON.parse(
+      await readFile(path.join(packageDirectory, "package.json"), "utf8"),
+    );
+
+    expect(packageJson.scripts.build).toBeDefined();
+    expect(packageJson.scripts.prebuild).toBe("npm run ci:typecheck-app");
+    expect(packageJson.scripts["ci:typecheck-app"]).toBe(
+      "node --test ./scripts/tests/test-typecheck-app.mjs && npm run typecheck:app",
+    );
+    expect(packageJson.scripts["typecheck:app"]).toBe(
+      "node ./scripts/typecheck-app.mjs",
+    );
+  });
+});
+

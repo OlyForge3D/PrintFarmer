@@ -1,11 +1,23 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import {
+  cp,
+  mkdtemp,
+  mkdir,
+  rm,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { evaluate, isTestFile } from "../typecheck-tests-core.mjs";
+import {
+  countTestFiles,
+  evaluate,
+  isCountableTestFile,
+  isTestFile,
+} from "../typecheck-tests-core.mjs";
 
 const packageDirectory = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -99,6 +111,85 @@ test("fails above and below the exact diagnostic baseline", () => {
     below.message,
     /measured 0 direct test diagnostic\(s\); expected exact snapshot 1\. The exact snapshot is stale; regenerate testDiagnosticCount in scripts\/test-typecheck-baseline\.json in the same commit/,
   );
+});
+
+test("reports the file-count and diagnostic-snapshot failures together, not sequentially (#2811 item 1)", () => {
+  const result = evaluateGate({
+    baseline: { testDiagnosticCount: 1, minimumTestFileCount: 2 },
+    output: appDiagnostic,
+  });
+  assert.match(result.message, /found 1 test file\(s\); expected at least 2/);
+  assert.match(
+    result.message,
+    /measured 0 direct test diagnostic\(s\); expected exact snapshot 1/,
+  );
+  assert.equal(result.showListFilesOutput, true);
+});
+
+test("isCountableTestFile excludes non-test helpers under test roots that isTestFile still accepts (#2811 item 3)", () => {
+  const helper = "src/test/setup.ts";
+  const fixtureUnderTests = "src/x/__tests__/fixture.ts";
+  assert.equal(isTestFile(helper, packageDirectory), true);
+  assert.equal(isCountableTestFile(helper, packageDirectory), false);
+  assert.equal(isTestFile(fixtureUnderTests, packageDirectory), true);
+  assert.equal(isCountableTestFile(fixtureUnderTests, packageDirectory), false);
+  assert.equal(isCountableTestFile("src/test/a.test.ts", packageDirectory), true);
+});
+
+test("countTestFiles ignores non-test helper files even though isTestFile still classifies their diagnostics (#2811 items 3-4)", () => {
+  const listing = "src/test/a.test.ts\nsrc/test/helper.ts";
+  assert.equal(countTestFiles(listing, packageDirectory), 1);
+  // The helper's diagnostics remain gated by testDiagnostics/isTestFile even
+  // though it no longer counts toward the file-count floor.
+  assert.equal(isTestFile("src/test/helper.ts", packageDirectory), true);
+});
+
+test("countTestFiles dedups a symlink to an already-counted test file via realpath (#2811 item 2)", async (t) => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-dedup-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src/test"), { recursive: true });
+    const targetPath = path.join(fixtureDirectory, "src/test/real.test.ts");
+    const linkPath = path.join(fixtureDirectory, "src/test/link.test.ts");
+    await writeFile(targetPath, "export const a = 1;\n");
+
+    try {
+      await symlink(targetPath, linkPath, "file");
+    } catch (error) {
+      t.skip(`symlinks unavailable in this environment: ${error.message}`);
+      return;
+    }
+
+    const listing = "src/test/real.test.ts\nsrc/test/link.test.ts";
+    assert.equal(countTestFiles(listing, fixtureDirectory), 1);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("countTestFiles excludes a test file carrying // @ts-nocheck from the floor (#2811 item 5)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-nocheck-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src/test"), { recursive: true });
+    await writeFile(
+      path.join(fixtureDirectory, "src/test/normal.test.ts"),
+      "export const a = 1;\n",
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "src/test/nocheck.test.ts"),
+      "// @ts-nocheck\nexport const b: number = 'not a number';\n",
+    );
+
+    const listing = "src/test/normal.test.ts\nsrc/test/nocheck.test.ts";
+    assert.equal(countTestFiles(listing, fixtureDirectory), 1);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("fails missing, malformed, and non-object baselines", () => {
