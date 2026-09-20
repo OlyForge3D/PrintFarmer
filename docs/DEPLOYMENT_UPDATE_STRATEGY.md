@@ -156,13 +156,17 @@ state, and downgrade is not a recovery path.
 The unsigned legacy installation condition is reported as
 `SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
 `facility_unavailable:*` evidence. The former is manual-only while signed release
-identity evidence is unavailable; repaired binding metadata can establish that evidence
-without a manual reinstall. The latter identifies actionable deployment
-evidence: an explicit `RequiredUnavailableFacilities` override or an unverified SQL Server
-visible-backup-path mapping. Clearing executor facility blockers establishes host
-execution capability only; it does not satisfy or bypass trust-state verification, and an
-unsigned installation remains manual-only until a signed release is manually installed and
-verified. Neither condition authorizes execution, and both remain fail-closed until the
+identity evidence is unavailable. If the installation is signed but the binding metadata is
+missing or invalid (for example a null `VerificationSource`, wrong branch/tag/channel,
+unpeeled SHA, self-report, or incorrect canonical version), repairing that metadata can clear
+the manual-only marker without a reinstall; the evaluator remains `NotManaged` even after the
+marker is cleared. The latter identifies actionable deployment evidence: an explicit
+`RequiredUnavailableFacilities` override or an unverified SQL Server visible-backup-path
+mapping. Clearing executor facility blockers establishes host execution capability only; it
+does not satisfy or bypass trust-state verification. A genuinely unsigned installation that
+predates signed publication has no verified signed release to repair, so the supported
+transition is one manual installation of a current signed release followed by inventory
+refresh. Neither condition authorizes execution, and both remain fail-closed until the
 deployment issue is resolved.
 
 Before the first stable signed publication, a maintainer must update the live
