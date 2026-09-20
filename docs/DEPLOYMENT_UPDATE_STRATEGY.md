@@ -127,32 +127,43 @@ cannot establish managed eligibility and must never be treated as a verified
 release. Historical releases are not retroactively signed.
 
 Threat-model status is intentionally explicit:
-- Implemented and verified: fail-closed inventory and executor availability
-  checks require signed-release evidence and keep unsigned legacy installs in
-  `NotManaged` / `ManagedEligibilityNotEstablished` until a current signed
-  release is installed and verified.
-- Implemented but unverified: live host execution and recovery on a
-  representative signed update path in a real deployment.
-- Not yet implemented: a managed update rollout path, automatic execution
-  authority, or any statement that the repository owner has granted deployment
-  authority. This document records risks, mitigations, and the current state
-  only; it does not grant authority to deploy or treat the path as ready for
-  rollout.
+- The update machinery is implemented and wired: the scheduler, executor adapter,
+  candidate cache, cancellation bridge, and manual execute/recover entry points
+  are all present.
+- Production admission is fail-closed in all configurations: `FeatureServicesStartup.cs`
+  registers `IHostUpdateAdmissionFence -> UnavailableHostUpdateAdmissionFence` outside the
+  `hostStateEnabled` gate, so the request path remains closed even when host-state settings are enabled.
+- No live end-to-end execution evidence exists: current test and model coverage does not
+  include a full signed-release acceptance run on a real host.
+- No deployment authority is granted: nothing in this document authorizes rollout,
+  constitutes owner acceptance, or declares the path ready for deployment.
+
+Nothing in this document grants authority to deploy, constitutes owner acceptance, or declares the path ready for rollout.
+
+Inventory and executor availability are separate fail-closed boundaries. Inventory evaluation
+checks signed-release evidence state; `HostUpdateExecutionAvailabilityProvider.CheckAsync`
+checks storage, journal health, backup and migration targets, fenced writers, executables,
+and Docker reachability without any signed-release input. The request resolver
+(`IHostUpdateExecutionRequestResolver`) is where signed evidence is consumed for admission.
 
 The supported path is deliberately one-time and manual: install a current
 signed release through the documented deployment procedure, then refresh the
 inventory. The signed release manifest and its verified identity can establish
-managed eligibility from that point forward. Waiting for an executor facility
-fix does not change an unsigned installation's trust state, and downgrade is
-not a recovery path.
-Inventory reports this condition as
+the evidence required for managed eligibility from that point forward. Waiting
+for an executor facility fix does not change an unsigned installation's trust
+state, and downgrade is not a recovery path.
+
+The unsigned legacy installation condition is reported as
 `SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
-`facility_unavailable:*` evidence. The former is manual-only while verified
-signed release evidence is unavailable; repaired binding metadata can establish
-that evidence without a manual reinstall. The latter identifies actionable deployment
+`facility_unavailable:*` evidence. The former is manual-only while signed release
+identity evidence is unavailable; repaired binding metadata can establish that evidence
+without a manual reinstall. The latter identifies actionable deployment
 evidence: an explicit `RequiredUnavailableFacilities` override or an unverified SQL Server
-visible-backup-path mapping. Neither condition authorizes execution, and both remain
-fail-closed until the deployment issue is resolved.
+visible-backup-path mapping. Clearing executor facility blockers establishes host
+execution capability only; it does not satisfy or bypass trust-state verification, and an
+unsigned installation remains manual-only until a signed release is manually installed and
+verified. Neither condition authorizes execution, and both remain fail-closed until the
+deployment issue is resolved.
 
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
