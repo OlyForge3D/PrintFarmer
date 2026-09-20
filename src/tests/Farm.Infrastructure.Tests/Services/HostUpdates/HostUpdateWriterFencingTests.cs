@@ -28,7 +28,8 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateWriterFencingTests : IDisposable
 {
-    // Each paused outer-loop iteration acknowledges at its top and interval boundary.
+    // A paused writer acknowledges once per ~250 ms loop iteration; two observations prove
+    // the loop is live and re-checking rather than latched after its first acknowledgement.
     private const int AcknowledgementsPerPausedIteration = 2;
 
     private readonly SqliteConnection _connection;
@@ -53,11 +54,16 @@ public class HostUpdateWriterFencingTests : IDisposable
     private sealed class CountingScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
     {
         private int _scopesOpened;
+        private int _scopesDisposed;
 
         public TaskCompletionSource FirstScopeOpened { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
 
+        public TaskCompletionSource FirstScopeDisposed { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int ScopesOpened => Volatile.Read(ref _scopesOpened);
+        public int ScopesDisposed => Volatile.Read(ref _scopesDisposed);
 
         public IServiceScope CreateScope()
         {
@@ -66,7 +72,48 @@ public class HostUpdateWriterFencingTests : IDisposable
                 FirstScopeOpened.TrySetResult();
             }
 
-            return inner.CreateScope();
+            return new CountingScope(inner.CreateScope(), () =>
+            {
+                if (Interlocked.Increment(ref _scopesDisposed) == 1)
+                {
+                    FirstScopeDisposed.TrySetResult();
+                }
+            });
+        }
+
+        private sealed class CountingScope(IServiceScope inner, Action disposed) : IServiceScope, IAsyncDisposable
+        {
+            private int _disposeStarted;
+
+            public IServiceProvider ServiceProvider => inner.ServiceProvider;
+
+            public void Dispose()
+            {
+                inner.Dispose();
+                SignalDisposed();
+            }
+
+            public async ValueTask DisposeAsync()
+            {
+                if (inner is IAsyncDisposable asyncDisposable)
+                {
+                    await asyncDisposable.DisposeAsync();
+                }
+                else
+                {
+                    inner.Dispose();
+                }
+
+                SignalDisposed();
+            }
+
+            private void SignalDisposed()
+            {
+                if (Interlocked.Exchange(ref _disposeStarted, 1) == 0)
+                {
+                    disposed();
+                }
+            }
         }
     }
 
@@ -119,9 +166,58 @@ public class HostUpdateWriterFencingTests : IDisposable
         catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
             int observed = acknowledgementCount();
+            bool paused = await fence.IsPausedAsync(CancellationToken.None);
+            int missing = Math.Max(0, expectedAcknowledgements - observed);
             throw new Xunit.Sdk.XunitException(
-                $"Writer acknowledged the pause {observed} times, expected {expectedAcknowledgements}; " +
-                $"missing {expectedAcknowledgements - observed} acknowledgement(s) within 10 seconds.");
+                $"Writer pause wait timed out: IsPausedAsync={paused}, observed {observed} " +
+                $"acknowledgement(s), expected {expectedAcknowledgements}, missing {missing} " +
+                "within 10 seconds.");
+        }
+    }
+
+    private static async Task WaitForIntervalBoundaryAcknowledgementAsync(
+        IHostUpdateWriterActivityFlag fence,
+        Func<int> acknowledgementCount,
+        TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        try
+        {
+            while (!await fence.IsPausedAsync(cancellation.Token) || acknowledgementCount() < 1)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(25), cancellation.Token);
+            }
+        }
+
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            int observed = acknowledgementCount();
+            bool paused = await fence.IsPausedAsync(CancellationToken.None);
+            throw new Xunit.Sdk.XunitException(
+                $"Interval-boundary pause acknowledgement timed out after {timeout}: " +
+                $"IsPausedAsync={paused}, observed {observed} acknowledgement(s). " +
+                "The pause must be observed during the interruptible interval wait.");
+        }
+    }
+
+    private static async Task WaitForScopeDisposalsAsync(
+        CountingScopeFactory scopeFactory,
+        int expected,
+        TimeSpan timeout)
+    {
+        using var cancellation = new CancellationTokenSource(timeout);
+        try
+        {
+            while (scopeFactory.ScopesDisposed < expected)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(25), cancellation.Token);
+            }
+        }
+        catch (OperationCanceledException) when (cancellation.IsCancellationRequested)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"Expected {expected} completed work scope(s) within {timeout}, " +
+                $"but observed {scopeFactory.ScopesDisposed}.");
         }
     }
 
@@ -232,6 +328,32 @@ public class HostUpdateWriterFencingTests : IDisposable
     }
 
     [Fact]
+    public async Task BackendStartCommandConsumerService_PauseDuringInterval_AcknowledgesBeforePollInterval()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var fence = new BackendStartCommandConsumerFenceFlag();
+        var sut = new BackendStartCommandConsumerService(
+            scopeFactory,
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            fence);
+
+        await sut.StartAsync(CancellationToken.None);
+        await WaitForScopeDisposalsAsync(scopeFactory, 2, TimeSpan.FromSeconds(10));
+        int scopesBeforePause = scopeFactory.ScopesOpened;
+        await fence.RequestPauseAsync(CancellationToken.None);
+
+        await WaitForIntervalBoundaryAcknowledgementAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            TimeSpan.FromSeconds(2));
+        await sut.StopAsync(CancellationToken.None);
+
+        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
+        scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
+            "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+    }
+
+    [Fact]
     public async Task BackendControlCommandConsumerService_WhilePauseRequested_AcknowledgesWithoutOpeningScope()
     {
         CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
@@ -251,6 +373,32 @@ public class HostUpdateWriterFencingTests : IDisposable
 
         fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
         scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
+    }
+
+    [Fact]
+    public async Task BackendControlCommandConsumerService_PauseDuringInterval_AcknowledgesBeforePollInterval()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var fence = new BackendControlCommandConsumerFenceFlag();
+        var sut = new BackendControlCommandConsumerService(
+            scopeFactory,
+            NullLogger<BackendControlCommandConsumerService>.Instance,
+            fence);
+
+        await sut.StartAsync(CancellationToken.None);
+        await WaitForScopeDisposalsAsync(scopeFactory, 2, TimeSpan.FromSeconds(10));
+        int scopesBeforePause = scopeFactory.ScopesOpened;
+        await fence.RequestPauseAsync(CancellationToken.None);
+
+        await WaitForIntervalBoundaryAcknowledgementAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            TimeSpan.FromSeconds(2));
+        await sut.StopAsync(CancellationToken.None);
+
+        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
+        scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
+            "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
     }
 
     [Fact]
@@ -315,5 +463,67 @@ public class HostUpdateWriterFencingTests : IDisposable
         fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
         spy.InvalidationCount.Should().Be(1, "the paused scanner must not delegate acknowledgement writes");
         scopeFactory.ScopesOpened.Should().Be(1, "the positive control opens the only scanner scope; the paused scanner must not open another");
+    }
+
+    [Fact]
+    public async Task BedClearAcknowledgementExpiryService_PauseDuringInterval_AcknowledgesBeforeScanInterval()
+    {
+        var spy = new BedClearAcknowledgementSpy();
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory(spy);
+        using (AppDbContext seedDb = new(
+                   new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options))
+        {
+            Guid manufacturerId = Guid.NewGuid();
+            Guid modelId = Guid.NewGuid();
+            seedDb.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Test manufacturer" });
+            seedDb.PrinterModels.Add(new PrinterModel
+            {
+                Id = modelId,
+                Name = "Test model",
+                ManufacturerId = manufacturerId,
+            });
+            Printer printer = new PrinterBuilder()
+                .WithId(Guid.NewGuid())
+                .WithName("Test printer")
+                .WithServerUrl("http://192.168.1.3")
+                .Build();
+            printer.ManufacturerId = manufacturerId;
+            printer.ModelId = modelId;
+            printer.DispatchState = new PrinterDispatchState
+            {
+                PrinterId = printer.Id,
+                AcknowledgedJobId = Guid.NewGuid(),
+                AcknowledgedAtUtc = DateTime.UtcNow,
+            };
+            seedDb.Printers.Add(printer);
+            await seedDb.SaveChangesAsync();
+        }
+
+        using var metrics = new BedClearAcknowledgementExpiryMetrics();
+        var fence = new BedClearAcknowledgementExpiryFenceFlag();
+        var sut = new BedClearAcknowledgementExpiryService(
+            scopeFactory,
+            NullLogger<BedClearAcknowledgementExpiryService>.Instance,
+            metrics,
+            fence);
+
+        await sut.StartAsync(CancellationToken.None);
+        await scopeFactory.FirstScopeDisposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        int scopesBeforePause = scopeFactory.ScopesOpened;
+        int writesBeforePause = spy.InvalidationCount;
+        writesBeforePause.Should().Be(1, "the unpaused scan must complete before pausing the interval");
+        await fence.RequestPauseAsync(CancellationToken.None);
+
+        await WaitForIntervalBoundaryAcknowledgementAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            TimeSpan.FromSeconds(2));
+        await sut.StopAsync(CancellationToken.None);
+
+        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
+        scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
+            "the interval-boundary acknowledgement must stop the next scan before it opens another scope");
+        spy.InvalidationCount.Should().Be(writesBeforePause,
+            "the interval-boundary acknowledgement must precede any subsequent delegated write");
     }
 }
