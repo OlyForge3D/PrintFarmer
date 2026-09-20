@@ -344,8 +344,28 @@ jobs:
             async function loadReviews() {
               const raw = await github.paginate(github.rest.pulls.listReviews,
                 { owner, repo, pull_number: prNumber, per_page: 100 });
+              let dismissalEvents = [];
+              if (raw.some((review) =>
+                review.state === 'DISMISSED' && review.commit_id === headSha)) {
+                try {
+                  dismissalEvents = await github.paginate(
+                    github.rest.issues.listEvents,
+                    { owner, repo, issue_number: prNumber, per_page: 100 },
+                  );
+                } catch (error) {
+                  core.warning(
+                    `Could not read review dismissal events: ${error.message}. ` +
+                    'Affected administrator overrides will fail closed.',
+                  );
+                }
+              }
               const reviews = [];
               for (const review of raw) {
+                // submitted_at stays at the original submission after dismissal.
+                const dismissals = dismissalEvents.filter((event) =>
+                  event.event === 'review_dismissed' &&
+                  review.id != null &&
+                  String(event.dismissed_review?.review_id) === String(review.id));
                 // Permission is resolved for every decisive state, not just
                 // APPROVED: an administrator's later CHANGES_REQUESTED has to be
                 // able to outrank their own earlier approval on the same commit.
@@ -353,6 +373,8 @@ jobs:
                   id: review.id,
                   state: review.state,
                   submittedAt: review.submitted_at,
+                  dismissedAt: dismissals.length === 1
+                    ? dismissals[0].created_at : undefined,
                   commitId: review.commit_id,
                   login: review.user?.login ?? '',
                   isAdmin: decisiveReviewStates.includes(review.state)

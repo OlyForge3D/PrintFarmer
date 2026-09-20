@@ -793,6 +793,7 @@ export function evaluateGate({
   // Native reviews and explicit owner comments share one decision timeline per
   // authenticated account. Agent identities never enter this timeline.
   const latestAdminActions = new Map();
+  const unresolvedDismissals = new Set();
   function recordAdminDecision(candidate) {
     const login = String(candidate.login ?? '').toLowerCase();
     if (!login) return;
@@ -801,7 +802,8 @@ export function evaluateGate({
     const newTime = Date.parse(candidate.recordedAt ?? '') || 0;
     const oldTime = Date.parse(previous?.recordedAt ?? '') || 0;
     if (!previous || newTime > oldTime ||
-        (newTime === oldTime && candidate.id >= previous.id)) {
+        (newTime === oldTime && (candidate.state === 'DISMISSED' ||
+          (previous.state !== 'DISMISSED' && candidate.id >= previous.id)))) {
       latestAdminActions.set(key, candidate);
     }
   }
@@ -813,10 +815,18 @@ export function evaluateGate({
     ) {
       continue;
     }
+    if (review.state === 'DISMISSED') {
+      const dismissedAt = Date.parse(review.dismissedAt ?? '');
+      const submittedAt = Date.parse(review.submittedAt ?? '');
+      if (!Number.isFinite(dismissedAt) || !Number.isFinite(submittedAt) ||
+          dismissedAt < submittedAt) {
+        unresolvedDismissals.add(String(review.login ?? '').toLowerCase());
+      }
+    }
     recordAdminDecision({
       ...review,
       id: Number(review.id) || 0,
-      recordedAt: review.submittedAt,
+      recordedAt: review.state === 'DISMISSED' ? review.dismissedAt : review.submittedAt,
       override: 'github-review',
     });
   }
@@ -851,7 +861,15 @@ export function evaluateGate({
     }
   }
   const adminDecisions = [...latestAdminDecision.values()];
-  const adminDecision = adminDecisions.find((decision) => decision.state === 'APPROVED') ??
+  for (const login of unresolvedDismissals) {
+    notes.push(
+      `Administrator ${login} has a current-head dismissal with unproven timing; ` +
+      'approvals from this account cannot override the gate.',
+    );
+  }
+  const adminDecision = adminDecisions.find((decision) =>
+    decision.state === 'APPROVED' &&
+    !unresolvedDismissals.has(decision.login.toLowerCase())) ??
     adminDecisions.find((decision) => decision.state === 'CHANGES_REQUESTED');
   if (adminDecision) {
     const passed = adminDecision.state === 'APPROVED';

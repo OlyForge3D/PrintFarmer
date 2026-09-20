@@ -581,8 +581,22 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
   action across native reviews and explicit own-login comments** at the current
   head. Native `APPROVED` / `CHANGES_REQUESTED` / `DISMISSED` are decisive;
   `COMMENTED` and agent-named records are not owner decisions. Compare native
-  submission times and comment update times, using IDs only within the same
-  resource; a cross-resource timestamp tie cannot clear a rejection or dismissal.
+  submission times and comment update times, except that native dismissals use
+  the matching `review_dismissed` issue event's `created_at`, joined by
+  `dismissed_review.review_id`. GitHub retains the original review `submitted_at`
+  after dismissal; it is not dismissal chronology. See GitHub's
+  [review dismissal event contract](https://docs.github.com/en/rest/using-the-rest-api/issue-event-types#review_dismissed).
+  Use IDs only within the same resource; a cross-resource timestamp tie cannot
+  clear a rejection, and no timestamp tie can clear a dismissal using review IDs
+  assigned at submission. If a current-head dismissal lacks exactly one matching
+  event with a valid timestamp at or after the original submission (including
+  failed event lookups), suppress **all approvals from that account** as owner
+  overrides for that head. Do not guess recency from submission time, event
+  delivery, or the evaluation clock. Another authenticated administrator's
+  approval remains eligible; otherwise normal agent-review requirements apply
+  unless an administrator's effective decision is REQUEST_CHANGES. A later
+  approval from the affected account can restore its override only when dismissal
+  chronology is proven.
   A later own-login approval clears that account's earlier native rejection,
   and a later rejection or dismissal revokes its earlier approval across either
   channel. Any remaining current administrator approval wins over agent decisions,

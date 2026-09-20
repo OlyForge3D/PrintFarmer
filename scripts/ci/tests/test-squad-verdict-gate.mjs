@@ -858,11 +858,144 @@ test('later native rejection or dismissal revokes the same owner comment approva
       reviews: [{
         id: 1, state, commitId: headSha, login: 'jpapiez', isAdmin: true,
         submittedAt: '2026-08-08T02:00:00Z',
+        dismissedAt: state === 'DISMISSED' ? '2026-08-08T03:00:00Z' : undefined,
       }],
     });
     assert.equal(result.passed, false, state);
     assert.doesNotMatch(result.description, /^APPROVE/, state);
   }
+});
+
+test('workflow uses dismissal events, not original submission, for owner chronology', async () => {
+  const workflow = yaml.load(await readFile(
+    path.join(repositoryRoot, '.github', 'workflows', 'squad-review-verdict.yml'), 'utf8',
+  ));
+  const script = workflow.jobs.record.steps.find((step) => step.with?.script).with.script;
+  const start = script.indexOf('const decisiveReviewStates =');
+  const end = script.indexOf('\nif (isFork)', start);
+  assert.ok(start >= 0 && end > start);
+  const loadReviews = new Function(
+    'github', 'core', 'isAdmin', 'headSha',
+    `const owner = 'OlyForge3D', repo = 'PrintFarmer', prNumber = 2883;
+     ${script.slice(start, end)}
+     return loadReviews();`,
+  );
+  const dismissedReview = {
+    id: 10, state: 'DISMISSED', commit_id: headSha, user: { login: 'jpapiez' },
+    submitted_at: '2026-08-08T01:00:00Z',
+  };
+  const dismissal = {
+    event: 'review_dismissed', created_at: '2026-08-08T03:00:00Z',
+    dismissed_review: { review_id: '10' },
+  };
+  const listReviews = Symbol('listReviews');
+  const listEvents = Symbol('listEvents');
+  const warnings = [];
+  async function collect(events, raw = [dismissedReview]) {
+    return loadReviews({
+      rest: { pulls: { listReviews }, issues: { listEvents } },
+      paginate: async (endpoint, params) => {
+        assert.equal(params.owner, 'OlyForge3D');
+        assert.equal(params.repo, 'PrintFarmer');
+        assert.equal(params.per_page, 100);
+        if (endpoint === listReviews) {
+          assert.equal(params.pull_number, 2883);
+          return raw;
+        }
+        assert.equal(endpoint, listEvents);
+        assert.equal(params.issue_number, 2883);
+        if (events instanceof Error) throw events;
+        return events;
+      },
+    }, { warning: (message) => warnings.push(message) },
+    async (login) => login === 'jpapiez', headSha);
+  }
+  function approvalAt(updated_at) {
+    return comment('jpapiez', 'APPROVE', headSha, {
+      squadAdminOverride: true, updated_at,
+    });
+  }
+  const reviews = await collect([dismissal]);
+  assert.equal(reviews[0].submittedAt, dismissedReview.submitted_at);
+  assert.equal(reviews[0].dismissedAt, dismissal.created_at);
+  // T1 submission < T2 comment < T3 dismissal, despite submitted_at remaining T1.
+  for (const time of ['2026-08-08T02:00:00Z', dismissal.created_at]) {
+    assert.equal(gate({ reviews, comments: [approvalAt(time)] }).passed, false);
+  }
+  assert.equal(gate({
+    reviews, comments: [approvalAt('2026-08-08T04:00:00Z')],
+  }).override, 'owner-comment');
+
+  for (const events of [
+    [],
+    [{ ...dismissal, event: 'reviewed' }],
+    [{ ...dismissal, dismissed_review: { review_id: 11 } }],
+    [{ ...dismissal, created_at: undefined }],
+    [{ ...dismissal, created_at: 'invalid' }],
+    [{ ...dismissal, created_at: '2026-08-08T00:00:00Z' }],
+    [dismissal, { ...dismissal, created_at: '2026-08-08T05:00:00Z' }],
+    new Error('event lookup failed'),
+  ]) {
+    const unresolved = await collect(events, [
+      dismissedReview,
+      {
+        ...dismissedReview, id: 20, state: 'APPROVED',
+        submitted_at: '2026-08-08T04:00:00Z',
+      },
+    ]);
+    const result = gate({
+      reviews: unresolved, comments: [approvalAt('2026-08-08T05:00:00Z')],
+    });
+    assert.equal(result.passed, false);
+    assert.ok(result.notes.some((note) => note.includes('unproven timing')));
+    assert.equal(gate({
+      reviews: unresolved,
+      comments: [
+        approvalAt('2026-08-08T05:00:00Z'),
+        comment('other-admin', 'APPROVE', headSha, {
+          user: { login: 'other-admin' }, squadAdminOverride: true,
+        }),
+      ],
+    }).passed, true, 'uncertainty only suppresses the affected account');
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /event lookup failed.*fail closed/);
+});
+
+test('dismissal chronology supersedes review IDs and tied approvals in native-only evaluations', () => {
+  const dismissed = {
+    id: 1, state: 'DISMISSED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+    submittedAt: '2026-08-08T01:00:00Z', dismissedAt: '2026-08-08T03:00:00Z',
+  };
+  for (const time of ['2026-08-08T02:00:00Z', dismissed.dismissedAt]) {
+    const approval = { ...dismissed, id: 999, state: 'APPROVED', submittedAt: time };
+    for (const reviews of [[dismissed, approval], [approval, dismissed]]) {
+      assert.equal(gate({ reviews }).passed, false);
+    }
+  }
+  assert.equal(gate({
+    reviews: [dismissed, {
+      ...dismissed, id: 999, state: 'APPROVED', submittedAt: '2026-08-08T04:00:00Z',
+    }],
+  }).override, 'github-review');
+});
+
+test('unproven dismissals still require the same head and authenticated account', () => {
+  const dismissal = {
+    state: 'DISMISSED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+    submittedAt: '2026-08-08T00:00:00Z',
+  };
+  const comments = [comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true })];
+  for (const review of [
+    { ...dismissal, commitId: staleSha },
+    { ...dismissal, isAdmin: false },
+    { ...dismissal, login: 'other-admin' },
+  ]) {
+    assert.equal(gate({ comments, reviews: [review] }).passed, true);
+  }
+  const result = gate({ comments, reviews: [dismissal] });
+  assert.equal(result.passed, false);
+  assert.ok(result.notes.some((note) => note.includes('unproven timing')));
 });
 
 test('a later native owner approval clears their earlier comment rejection', () => {
@@ -944,6 +1077,7 @@ test('a revoked owner comment cannot fall back to an agent record for a rostered
     reviews: [{
       state: 'DISMISSED', commitId: headSha, login: 'jpapiez', isAdmin: true,
       submittedAt: '2026-08-08T02:00:00Z',
+      dismissedAt: '2026-08-08T03:00:00Z',
     }],
   });
   assert.equal(result.passed, false);
