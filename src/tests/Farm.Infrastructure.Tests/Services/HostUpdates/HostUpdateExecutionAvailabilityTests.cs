@@ -13,6 +13,20 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateExecutionAvailabilityTests
 {
+    private static readonly string[] CodeOwnedRequiredFencedWriterNames =
+    [
+        "api-admission",
+        "queue-outbox-publisher",
+        "power-reading-prune",
+        "queue-retention-prune",
+        "backend-start-command-consumer",
+        "backend-control-command-consumer",
+        "bed-clear-acknowledgement-expiry",
+        "auto-dispatch",
+        "webhook-delivery",
+        "queue-reconciliation",
+    ];
+
     private sealed class FakeJournal : IHostUpdateExecutionJournal
     {
         public bool ThrowOnRead { get; set; }
@@ -204,7 +218,7 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
-                [],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
                 new TestExecutableResolver());
@@ -241,7 +255,7 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal(),
                 [new FakeMigrationTarget(providerName)],
                 [new FakeBackupTarget()],
-                [],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
                 new TestExecutableResolver());
@@ -529,7 +543,7 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
-    public async Task CheckAsync_DefaultRequiredFencedWriters_ReportUnavailableWhenWriterCoverageMissing()
+    public async Task CheckAsync_ConfiguredEmptyRequiredFencedWriters_ReportsExactCodeOwnedMissingSet()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -540,6 +554,7 @@ public class HostUpdateExecutionAvailabilityTests
             {
                 RootDirectory = root,
                 ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [],
             };
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 options,
@@ -554,14 +569,245 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
-            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal)).Should().Contain("webhook-delivery");
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task CheckAsync_ConfiguredPartialRequiredFencedWriters_ReportsExactCodeOwnedMissingSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = CodeOwnedRequiredFencedWriterNames[..^2],
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ConfiguredSupersetRequiredFencedWriters_ReportsExactCodeOwnedThenAdditionalSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            string[] configuredSuperset =
+            [
+                .. CodeOwnedRequiredFencedWriterNames.Reverse(),
+                "deployment-specific-writer",
+            ];
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = configuredSuperset,
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be(
+                    $"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)},deployment-specific-writer");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_NullConfiguredRequiredFencedWriters_ReportsExactCodeOwnedMissingSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = null!,
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_WhitespaceConfiguredRequiredFencedWriters_DropsWhitespaceFromExactMissingSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [" ", "\t"],
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_CaseOnlyConfiguredRequiredFencedWriter_DoesNotSatisfyCanonicalName()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            const string caseVariant = "API-ADMISSION";
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [caseVariant],
+            };
+            IFenceableWriter[] registeredWriters =
+            [
+                new FakeFenceableWriter(caseVariant),
+                .. CodeOwnedRequiredFencedWriterNames[1..].Select(name => new FakeFenceableWriter(name)),
+            ];
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                registeredWriters,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be("insufficient_fenced_writers:api-admission");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_DuplicateAndCaseVariantConfiguredWriters_ReportEachOrdinalNameOnceInFirstOccurrenceOrder()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames =
+                [
+                    "deployment-writer",
+                    "deployment-writer",
+                    "DEPLOYMENT-WRITER",
+                ],
+            };
+            IFenceableWriter[] registeredWriters = CodeOwnedRequiredFencedWriterNames
+                .Select(name => new FakeFenceableWriter(name))
+                .ToArray();
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                registeredWriters,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be("insufficient_fenced_writers:deployment-writer,DEPLOYMENT-WRITER");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task CheckAsync_RootDirectoryNotConfiguredAndJournalUnavailable_ReportsUnavailableWithReasons()
     {
@@ -706,21 +952,21 @@ public class HostUpdateExecutionAvailabilityTests
         try
         {
             HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
-            options.RequiredFencedWriterNames = ["api-admission", "queue-outbox-publisher"];
+            options.RequiredFencedWriterNames = [.. CodeOwnedRequiredFencedWriterNames, "deployment-specific-writer"];
 
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 options,
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
-                [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
+                options.RequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
                 new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().NotContain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
         }
         finally
         {
@@ -737,14 +983,14 @@ public class HostUpdateExecutionAvailabilityTests
         try
         {
             HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
-            options.RequiredFencedWriterNames = ["api-admission", "queue-outbox-publisher", "history-seeding"];
+            options.RequiredFencedWriterNames = [.. CodeOwnedRequiredFencedWriterNames, "history-seeding"];
 
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 options,
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
-                [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
                 new TestExecutableResolver());
