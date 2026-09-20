@@ -270,7 +270,9 @@ public sealed class HostUpdateSchedulerTests
         Assert.Equal(HostUpdateReplayDisposition.Accepted, reservation.Disposition);
         Assert.False(reservation.Reused);
         Assert.Equal(HostUpdateReplayDisposition.Accepted, lower.Disposition);
+        Assert.False(lower.Reused);
         Assert.Equal(HostUpdateReplayDisposition.Accepted, final.Disposition);
+        Assert.False(final.Reused);
     }
 
     [Fact]
