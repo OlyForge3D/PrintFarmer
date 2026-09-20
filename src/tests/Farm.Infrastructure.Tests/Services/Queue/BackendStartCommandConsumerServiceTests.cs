@@ -377,18 +377,24 @@ public sealed class BackendStartCommandConsumerServiceTests
         // just from a narrower window than before.
         await harness.Service.StartAsync(CancellationToken.None);
 
-        // Wait for an explicit signal instead of a fixed real-time delay: `FirstTimerCreated`
-        // completes only when `WaitForIntervalOrPauseAsync`'s `Task.Delay(..., clock, ...)`
-        // first calls `clock.CreateTimer`, which production code can only reach after
-        // `ExecuteAsync`'s first `ProcessPendingCommandsAsync` call has returned (see
-        // `AcceleratedTimeProvider.FirstTimerCreated`'s doc comment). A panel review found a
-        // fixed 250ms delay here was not guaranteed to outlast that first pass under
-        // scheduler/SQLite contention, so the "still Pending" assertion below could
-        // spuriously pass without the pass having actually finished; this signal cannot
-        // complete before it has.
+        // Wait for an explicit signal instead of a fixed real-time delay:
+        // `PollIntervalTimerCreated` completes only when a `CreateTimer` call's due-time
+        // exactly matches `WaitForIntervalOrPauseAsync`'s literal 250ms poll-delay -- NOT
+        // on just any `CreateTimer` call. A panel review caught that an earlier version of
+        // this signal fired on ANY timer creation, which is wrong: `ProcessPendingCommandsAsync`
+        // itself creates a (310s iteration-deadline) timer at its own first line, before doing
+        // any real work, so that version of the signal resolved almost instantly and proved
+        // nothing about the first pass having completed. Matching the specific 250ms due-time
+        // is what actually proves `WaitForIntervalOrPauseAsync` was reached, which production
+        // code can only do after `ExecuteAsync`'s `ProcessPendingCommandsAsync` call has
+        // returned (see `AcceleratedTimeProvider.PollIntervalTimerCreated`'s doc comment for
+        // why no other timer this service creates can share that due-time). A fixed real-time
+        // delay here was not guaranteed to outlast that first pass under scheduler/SQLite
+        // contention, so the "still Pending" assertion below could spuriously pass without the
+        // pass having actually finished; this signal cannot complete before it has.
         bool firstPassCompleted = await Task.WhenAny(
-            clock.FirstTimerCreated,
-            Task.Delay(TimeSpan.FromSeconds(20))) == clock.FirstTimerCreated;
+            clock.PollIntervalTimerCreated,
+            Task.Delay(TimeSpan.FromSeconds(20))) == clock.PollIntervalTimerCreated;
         firstPassCompleted.Should().BeTrue(
             "the hosted loop must reach WaitForIntervalOrPauseAsync's poll-delay timer " +
             "creation -- i.e. complete its first ProcessPendingCommandsAsync pass -- within " +
@@ -464,16 +470,44 @@ public sealed class BackendStartCommandConsumerServiceTests
         persisted.Status.Should().Be(QueueOutboxEventStatus.Published);
     }
 
+    /// <summary>
+    /// Polls until the row is <see cref="QueueOutboxEventStatus.Published"/> or <paramref
+    /// name="timeout"/> elapses. This runs concurrently with the hosted
+    /// <see cref="BackendStartCommandConsumerService"/>'s own background scopes, both of
+    /// which share the single physical <see cref="SqliteConnection"/>
+    /// <see cref="TestHarness.CreateAsync"/> hands every <c>AppDbContext</c> (so all scopes
+    /// observe the same in-memory database). Each new <c>AppDbContext</c>'s first use of that
+    /// shared connection registers Sqlite user-defined functions
+    /// (<c>SqliteRelationalConnection.InitializeDbConnection</c>); if that registration lands
+    /// on the exact instant another scope (foreground or background) has an active statement
+    /// open on the same connection, Sqlite raises "SQLite Error 5: unable to delete/modify
+    /// user-function due to active statements" -- a transient condition, not a correctness
+    /// bug (verified empirically: reproduces intermittently under back-to-back local runs of
+    /// this test, at roughly the same rate whether or not the PollIntervalTimerCreated fix
+    /// above is applied, i.e. it predates and is unrelated to that fix). Production code
+    /// already tolerates this the same way: <c>ExecuteAsync</c>'s outer
+    /// <c>catch (Exception ex)</c> logs and retries on the next loop iteration. This spin-wait
+    /// is already a bounded polling retry by design, so it must extend that same tolerance to
+    /// its own read instead of letting the transient exception escape as a hard test failure.
+    /// </summary>
     private static async Task<bool> SpinWaitUntilPublishedAsync(
         TestHarness harness, Guid eventId, TimeSpan timeout)
     {
         var deadline = System.Diagnostics.Stopwatch.StartNew();
         while (deadline.Elapsed < timeout)
         {
-            QueueDispatchOutbox row = await harness.GetOutboxEventAsync(eventId);
-            if (row.Status == QueueOutboxEventStatus.Published)
+            try
             {
-                return true;
+                QueueDispatchOutbox row = await harness.GetOutboxEventAsync(eventId);
+                if (row.Status == QueueOutboxEventStatus.Published)
+                {
+                    return true;
+                }
+            }
+            catch (SqliteException)
+            {
+                // Transient contention on the shared in-memory connection (see doc comment
+                // above) -- treat exactly like "not yet published" and keep polling.
             }
 
             await Task.Delay(10);
@@ -505,13 +539,31 @@ public sealed class BackendStartCommandConsumerServiceTests
 
         public static async Task<TestHarness> CreateAsync(TimeProvider clock)
         {
-            var connection = new SqliteConnection("Data Source=:memory:");
+            // A single physical SqliteConnection object shared directly across every
+            // AppDbContext (the previous "Data Source=:memory:" + UseSqlite(connection)
+            // approach) is not safe for genuine concurrent multi-threaded access: each new
+            // AppDbContext's first use of that connection registers Sqlite user-defined
+            // functions (SqliteRelationalConnection.InitializeDbConnection), and if that
+            // registration lands while another scope has an active statement open on the
+            // same connection, Sqlite raises "SQLite Error 5: unable to delete/modify
+            // user-function due to active statements". Only the hosted-loop test below
+            // actually runs the background service concurrently with foreground DB access,
+            // and hit this intermittently. The fix -- and this repo's established pattern
+            // for tests needing genuine cross-context concurrency, see
+            // AutoDispatchConcurrencyTests -- is a uniquely-named Mode=Memory;Cache=Shared
+            // database referenced by connection STRING (so every AppDbContext gets its own
+            // separate, properly-locked connection to the same shared-cache in-memory
+            // database), with one anchor connection kept open for the harness's lifetime so
+            // the shared-cache database isn't dropped once all per-context connections close.
+            string connectionString =
+                $"Data Source=backend-start-consumer-{Guid.NewGuid():N};Mode=Memory;Cache=Shared;Default Timeout=5";
+            var connection = new SqliteConnection(connectionString);
             await connection.OpenAsync();
 
             var printJobManagement = new Mock<IPrintJobManagementService>();
 
             var services = new ServiceCollection();
-            services.AddDbContext<AppDbContext>(options => options.UseSqlite(connection));
+            services.AddDbContext<AppDbContext>(options => options.UseSqlite(connectionString));
             services.AddSingleton(printJobManagement.Object);
             ServiceProvider provider = services.BuildServiceProvider();
 
@@ -699,8 +751,25 @@ public sealed class BackendStartCommandConsumerServiceTests
         private readonly double _accelerationFactor;
         private readonly object _gate = new();
         private global::System.Diagnostics.Stopwatch? _stopwatch;
-        private readonly TaskCompletionSource _firstTimerCreated =
+        private readonly TaskCompletionSource _pollIntervalTimerCreated =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        /// <summary>
+        /// The exact literal due-time <c>WaitForIntervalOrPauseAsync</c> passes to
+        /// <c>Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, ...)</c>. A prior
+        /// version of this fake signalled on ANY <see cref="CreateTimer"/> call, which a
+        /// panel review found was wrong: <c>ProcessPendingCommandsAsync</c> itself calls
+        /// <c>CreateTimer</c> (via <c>new CancellationTokenSource(IterationDeadline,
+        /// _timeProvider)</c>) at its own very first line, before any real work -- so "any
+        /// timer created" fired almost instantly and proved nothing about the pass having
+        /// completed. Matching this specific literal due-time is what actually
+        /// distinguishes "WaitForIntervalOrPauseAsync's poll-delay timer" from every other
+        /// timer this service creates (the 310s iteration deadline, the 4s outcome
+        /// persistence deadline, and the concurrency backoff's
+        /// <c>100 * concurrencyAttempt</c> ms delays, none of which can ever equal exactly
+        /// 250ms for any integer attempt count).
+        /// </summary>
+        private static readonly TimeSpan PollDelayDueTime = TimeSpan.FromMilliseconds(250);
 
         public AcceleratedTimeProvider(DateTime utcNow, double accelerationFactor)
         {
@@ -709,19 +778,21 @@ public sealed class BackendStartCommandConsumerServiceTests
         }
 
         /// <summary>
-        /// Completes the first time <see cref="CreateTimer"/> is invoked. In this test's
-        /// harness (<c>hostUpdateFence: null</c>), the ONLY caller of
-        /// <c>TimeProvider.CreateTimer</c> on this instance is
-        /// <c>WaitForIntervalOrPauseAsync</c>'s <c>Task.Delay(..., this, ...)</c> call, which
-        /// production code only reaches after <c>ExecuteAsync</c>'s call to
-        /// <c>ProcessPendingCommandsAsync</c> has returned. Awaiting this task is therefore an
-        /// exact, deterministic proof that the hosted loop's first frozen-time processing pass
-        /// has fully completed -- unlike a fixed real-time delay, it cannot complete early
-        /// under a fast run and cannot spuriously miss the pass under scheduler/SQLite
-        /// contention on a slow one, closing the race a panel review flagged twice against
-        /// earlier fixed-delay designs.
+        /// Completes the first time <see cref="CreateTimer"/> is invoked with a due-time
+        /// exactly matching <see cref="PollDelayDueTime"/> -- i.e. the first time
+        /// <c>WaitForIntervalOrPauseAsync</c>'s poll-delay <c>Task.Delay</c> is reached.
+        /// Production code can only reach that call after <c>ExecuteAsync</c>'s call to
+        /// <c>ProcessPendingCommandsAsync</c> has returned (see
+        /// <c>ExecuteAsync</c>: the try/catch around <c>ProcessPendingCommandsAsync</c> is
+        /// unconditionally followed by <c>WaitForIntervalOrPauseAsync</c>), so awaiting this
+        /// task is a deterministic proof the hosted loop's first frozen-time processing pass
+        /// has fully completed -- unlike a fixed real-time delay, which cannot guarantee
+        /// that under scheduler/SQLite contention, and unlike matching any <see
+        /// cref="CreateTimer"/> call, which fires far too early because
+        /// <c>ProcessPendingCommandsAsync</c> itself creates a (much longer-lived) timer at
+        /// its own first line.
         /// </summary>
-        public Task FirstTimerCreated => _firstTimerCreated.Task;
+        public Task PollIntervalTimerCreated => _pollIntervalTimerCreated.Task;
 
         /// <summary>
         /// Begins advancing this clock's virtual time. Before this is called,
@@ -769,7 +840,11 @@ public sealed class BackendStartCommandConsumerServiceTests
 
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
-            _firstTimerCreated.TrySetResult();
+            if (dueTime == PollDelayDueTime)
+            {
+                _pollIntervalTimerCreated.TrySetResult();
+            }
+
             return System.CreateTimer(callback, state, ScaleDown(dueTime), ScaleDown(period));
         }
 
