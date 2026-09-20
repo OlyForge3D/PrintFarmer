@@ -188,7 +188,9 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
-        foreach (string unavailableFacility in options.RequiredUnavailableFacilities.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal))
+        foreach (string unavailableFacility in (options.RequiredUnavailableFacilities ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal))
         {
             reasons.Add($"facility_unavailable:{unavailableFacility}");
         }
