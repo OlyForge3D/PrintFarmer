@@ -18,18 +18,18 @@ settings are validated by `HostUpdateExecutionOptionsValidator`; executable mapp
 validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor remains default-off when the root is unset: validation permits process startup, but all derived executor paths now throw `root_directory_not_configured` instead of resolving under the current working directory, and the runtime availability provider reports `Unavailable` until a writable host-controlled root is configured:
 
 - **`HostExecutablePaths`** (required for process execution): explicit logical-tool to absolute executable
-  path mappings for `docker`, `sqlite3`, `pg_dump`, `pg_restore`, and `sqlcmd`. Bare names are rejected
-  and the ambient `PATH` is never consulted. The executable filename and any `.exe` extension must
+  path mappings. `docker` is required for every deployment; availability derives any additional
+  database tooling from the live migration targets in `HostUpdateExecutionAvailabilityProvider`.
+  `ConstrainedHostUpdateProcessRunner.AllowedExecutables` separately defines which tool names may
+  execute. Bare names are rejected and the ambient `PATH` is never consulted. The executable filename
+  and any `.exe` extension must
   be lowercase; for example, `C:\Program Files\Docker\docker.exe` is accepted but
   `C:\Program Files\Docker\DOCKER.EXE` is rejected. Missing, relative, or whitespace-only mappings
   keep process execution unavailable and are reported in availability status rather than crashing startup.
   Configure host-controlled paths such as
-  `HostUpdateExecution__HostExecutablePaths__docker=/usr/bin/docker`,
-  `HostUpdateExecution__HostExecutablePaths__sqlite3=/usr/bin/sqlite3`,
-  `HostUpdateExecution__HostExecutablePaths__pg_dump=/usr/bin/pg_dump`,
-  `HostUpdateExecution__HostExecutablePaths__pg_restore=/usr/bin/pg_restore`, and
-  `HostUpdateExecution__HostExecutablePaths__sqlcmd=/opt/mssql-tools18/bin/sqlcmd` (or equivalent
-  JSON/YAML dictionary nesting). On Windows, use absolute paths to the installed `.exe` files.
+  `HostUpdateExecution__HostExecutablePaths__docker=/usr/bin/docker` and the database-native
+  tooling required by that deployment (or equivalent JSON/YAML dictionary nesting). On Windows,
+  use absolute paths to the installed `.exe` files.
   In containers, every configured path must exist in the container namespace; bind-mount host tools
   read-only into fixed, root-owned locations and configure those mounted paths, rather than relying
   on a host `PATH` that is not visible inside the container.

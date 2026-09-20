@@ -46,11 +46,24 @@ public class HostUpdateExecutionAvailabilityTests
         public IReadOnlyList<string> ListReleaseIds() => ThrowOnRead ? throw new InvalidDataException("journal_corrupt") : releaseOrder;
     }
 
-    private sealed class FakeMigrationTarget : IHostUpdateMigrationTarget
+    private sealed class FakeMigrationTarget(string providerName = "Microsoft.EntityFrameworkCore.Sqlite") : IHostUpdateMigrationTarget
     {
         public string ContextName => "Fake";
 
-        public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult("Microsoft.EntityFrameworkCore.Sqlite");
+        public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult(providerName);
+
+        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+
+        public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new DatabaseMigrationResult(false, []));
+    }
+
+    private sealed class ThrowingMigrationTarget : IHostUpdateMigrationTarget
+    {
+        public string ContextName => "UnavailableSlicer";
+
+        public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("slicer_db_context_not_registered");
 
         public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
 
@@ -127,6 +140,19 @@ public class HostUpdateExecutionAvailabilityTests
         public string Resolve(string toolName) => Path.Combine(Path.GetTempPath(), toolName + ".exe");
     }
 
+    private sealed class MissingDockerExecutableResolver : IHostUpdateExecutableResolver
+    {
+        public string Resolve(string toolName) => throw new InvalidOperationException($"host_update_executable_not_configured:{toolName}");
+    }
+
+    private static void ConfigureExecutablePaths(HostUpdateExecutionOptions options, string root, params string[] toolNames)
+    {
+        foreach (string toolName in toolNames)
+        {
+            options.HostExecutablePaths[toolName] = Path.Combine(root, toolName);
+        }
+    }
+
     [Fact]
     public async Task CheckAsync_KnownPhysicalGapsRemain_ReportsCodeOwnedUnavailableFacilities()
     {
@@ -152,6 +178,185 @@ public class HostUpdateExecutionAvailabilityTests
             result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
             result.Reasons.Should().Contain("host_executable_not_configured:docker");
+            result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Microsoft.EntityFrameworkCore.Sqlite", "sqlite3")]
+    [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", "pg_dump", "pg_restore")]
+    [InlineData("Microsoft.EntityFrameworkCore.SqlServer", "sqlcmd")]
+    public async Task CheckAsync_SingleConfiguredProvider_LeavesOnlyCodeOwnedFacilities(string providerName, params string[] providerTools)
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            ConfigureExecutablePaths(options, root, ["docker", .. providerTools]);
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget(providerName)],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().BeEquivalentTo(
+            [
+                "facility_unavailable:target_image_migration_runner_unavailable",
+                "facility_unavailable:queue_reconciliation_writer_fence_unavailable",
+                "facility_unavailable:sql_server_visible_backup_path_mapping_unverified",
+            ]);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_DockerResolverReportsMissingConfiguration_ReportsSingleReason()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            ConfigureExecutablePaths(options, root, "sqlite3");
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new MissingDockerExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Where(reason => reason == "host_executable_not_configured:docker").Should().ContainSingle();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("Microsoft.EntityFrameworkCore.Sqlite", "sqlite3", "")]
+    [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", "pg_restore", "pg_dump")]
+    [InlineData("Microsoft.EntityFrameworkCore.SqlServer", "sqlcmd", "")]
+    public async Task CheckAsync_ActiveProviderToolMissing_ReportsToolNotConfigured(
+        string providerName,
+        string missingTool,
+        string configuredProviderTool)
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            ConfigureExecutablePaths(options, root, "docker");
+            if (!string.IsNullOrEmpty(configuredProviderTool))
+            {
+                ConfigureExecutablePaths(options, root, configuredProviderTool);
+            }
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget(providerName)],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain($"host_executable_not_configured:{missingTool}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("Unknown.EntityFrameworkCore.Provider")]
+    public async Task CheckAsync_ProviderNameMissingOrUnsupported_ReportsExplicitReason(string providerName)
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            ConfigureExecutablePaths(options, root, "docker");
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget(providerName)],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain(
+                string.IsNullOrEmpty(providerName)
+                    ? "database_provider_not_configured:Fake"
+                    : $"database_provider_tooling_unsupported:Fake:{providerName}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ProviderInspectionThrows_ReportsUnavailableWithoutAbortingProbe()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            ConfigureExecutablePaths(options, root, "docker");
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new ThrowingMigrationTarget(), new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain("database_provider_inspection_failed:UnavailableSlicer:InvalidOperationException");
             result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
         }
         finally

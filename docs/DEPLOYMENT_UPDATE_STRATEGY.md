@@ -31,6 +31,10 @@ missing signed feed must not be advertised as ready. The production GitHub
 metadata-provider/discovery adapter is read-only evidence input; it does not
 make automatic scheduling or installation effective without the separate
 protected admission, readiness and executor gates described below.
+Focused signed-update discovery tests cover pagination, draft filtering, exact
+channel/tag/workflow identity, immutable manifest bytes, malformed candidates,
+bounded asset URLs, and rejection of channel-matching tags with inverted
+prerelease metadata.
 
 ### Active host-update scheduler and execution policy (#2666, 2026-09-17)
 
