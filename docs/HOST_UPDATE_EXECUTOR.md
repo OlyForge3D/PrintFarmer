@@ -80,7 +80,7 @@ previous run's state) and then periodically rechecks, publishing every result in
 `HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
-`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, a code-owned `facility_unavailable:...`, or `host_executable_not_configured:<tool>`) so an operator is never left guessing. In the current production code, availability is unconditionally closed by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`). It is also closed when a required audited host tool path is not configured (`host_executable_not_configured:<tool>`). Separately, unsigned legacy installs remain blocked by the `NotManaged` / `ManagedEligibilityNotEstablished` inventory state until protected bootstrap and trusted state are established. These are unimplemented or unconfigured fail-closed mechanisms, not missing acceptance evidence; they must be addressed before this executor can report production `Available`.
+`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, a code-owned `facility_unavailable:...`, or `host_executable_not_configured:<tool>`) so an operator is never left guessing. In the current production code, availability is unconditionally closed by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`). It is also closed when a required audited host tool path is not configured (`host_executable_not_configured:<tool>`). Separately, installations without verified signed release evidence remain manual-only and fail closed in the `NotManaged` / `ManagedEligibilityNotEstablished` inventory state. No trust bootstrap is planned or supported: the supported transition is one manual installation of a current signed release followed by inventory refresh, after which normal signed discovery can establish managed eligibility. These are unimplemented or unconfigured fail-closed mechanisms, not missing acceptance evidence; they must be addressed before this executor can report production `Available`.
 
 The process boundary is production-ready independently of those facilities:
 `ConfiguredHostUpdateExecutableResolver` requires an explicit absolute path for each audited native
@@ -88,8 +88,8 @@ tool, and `ConstrainedHostUpdateProcessRunner` rejects bare names, rejects ambie
 allows only the audited tools, and accepts rooted paths only when explicitly configured or in fixed
 system directories. It still delegates through the existing no-shell `ArgumentList` runner. It does
 not bootstrap an updater, make unsigned legacy releases eligible, or change the manual authorization
-boundary. A future trusted bootstrap implementation must be selected by the release/operator owners
-before any of the remaining availability blockers are removed.
+boundary. No protected bootstrap or operator assertion is supported; signed verification remains required before
+managed eligibility can be established.
 
 ## DI wiring
 

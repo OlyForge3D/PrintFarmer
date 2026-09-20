@@ -69,7 +69,7 @@ export function ServiceVersionsTable({ inventory }: { inventory: ServiceInventor
           <div><dt>Observed compatibility state</dt><dd>{inventory.compatibilityState}</dd></div>
           <div><dt>Observed compatibility reasons</dt><dd>{Array.isArray(inventory.compatibilityReasons) && inventory.compatibilityReasons.length > 0 ? inventory.compatibilityReasons.join(', ') : UNKNOWN}</dd></div>
           <div><dt>Effective frontend compatibility</dt><dd>{displayedCompatibility}: {assetSkew ? 'CachedFrontendMismatch' : Array.isArray(inventory.compatibilityReasons) && inventory.compatibilityReasons.length > 0 ? inventory.compatibilityReasons.join(', ') : UNKNOWN}</dd></div>
-          <div><dt>Normal update eligibility</dt><dd>{displayedEligibility}: {assetSkew ? 'CachedFrontendMismatch, ReadOnlyInventory' : inventory.eligibilityReasons.join(', ')}</dd></div>
+          <div><dt>Normal update eligibility</dt><dd>{displayedEligibility}: {[...(assetSkew ? ['CachedFrontendMismatch'] : []), ...inventory.eligibilityReasons].join(', ')}</dd></div>
           <div><dt>Inventory collected</dt><dd>{timestamp(inventory.collectedAt)}</dd></div>
         </dl>
         {insider && <Alert type="warning" title="Insider channel">{INSIDER_WARNING}</Alert>}
