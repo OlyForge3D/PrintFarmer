@@ -61,22 +61,20 @@ public class HostUpdateWriterFencingTests : IDisposable
     }
 
     [Fact]
-    public async Task FenceCoordinator_AtDeadline_PerformsFinalQuiescenceProbe()
+    public async Task FenceCoordinator_AtDeadline_DoesNotRepeatQuiescenceProbe()
     {
         var writer = new Mock<IFenceableWriter>();
         writer.SetupGet(candidate => candidate.Name).Returns("deadline-writer");
         writer.Setup(candidate => candidate.QuiesceAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        writer.SetupSequence(candidate =>
-                candidate.IsQuiescedAsync(It.IsAny<CancellationToken>()))
-            .ReturnsAsync(false)
-            .ReturnsAsync(true);
+        writer.Setup(candidate => candidate.IsQuiescedAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false);
         var coordinator = new HostUpdateFenceCoordinator(
             [writer.Object],
             proofTimeout: TimeSpan.Zero,
             pollInterval: TimeSpan.FromSeconds(2));
 
-        await coordinator.RunAsync(
+        Func<Task> act = () => coordinator.RunAsync(
             new HostUpdateExecutionRequest(
                 "release-1",
                 1,
@@ -86,8 +84,9 @@ public class HostUpdateWriterFencingTests : IDisposable
                 []),
             CancellationToken.None);
 
+        await act.Should().ThrowAsync<HostUpdateFenceProofFailedException>();
         writer.Verify(candidate => candidate.IsQuiescedAsync(
-            It.IsAny<CancellationToken>()), Times.Exactly(2));
+            It.IsAny<CancellationToken>()), Times.Once);
     }
 
     /// <summary>Counts how many times a fresh scope was actually opened, without changing behavior.</summary>

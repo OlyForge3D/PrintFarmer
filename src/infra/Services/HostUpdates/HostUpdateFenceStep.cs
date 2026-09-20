@@ -69,15 +69,6 @@ public sealed class HostUpdateFenceCoordinator(
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
-                // A writer can quiesce between the final poll and deadline observation.
-                // Probe once more before failing closed so poll granularity cannot cause
-                // a false timeout for a writer that became quiescent within the budget.
-                unproven = await GetUnprovenWritersAsync(cancellationToken).ConfigureAwait(false);
-                if (unproven.Count == 0)
-                {
-                    return;
-                }
-
                 _logger?.LogWarning(
                     "host_update_writer_fence_rejected release_id={ReleaseId} writers={WriterNames}",
                     request.ReleaseId,
