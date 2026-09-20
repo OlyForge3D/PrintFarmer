@@ -36,7 +36,7 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
             HostUpdateExecutionAvailabilityProvider.NormalizeConfiguredRequiredFencedWriterNames(
                 options.RequiredFencedWriterNames);
         string[] missingCodeOwnedWriterNames = HostUpdateExecutionAvailabilityProvider.CodeOwnedRequiredFencedWriterNames
-            .Where(name => !HostUpdateExecutionAvailabilityProvider.ContainsConfiguredRequiredFencedWriterName(
+            .Where(name => !HostUpdateExecutionAvailabilityProvider.ContainsRequiredFencedWriterName(
                 configuredFencedWriterNames,
                 name))
             .ToArray();

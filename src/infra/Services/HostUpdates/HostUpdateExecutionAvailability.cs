@@ -56,8 +56,6 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
-    private static readonly string[] CodeOwnedUnavailableFacilities = [];
-
     internal static readonly ImmutableArray<string> CodeOwnedRequiredFencedWriterNames =
     [
         "api-admission",
@@ -73,7 +71,10 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     ];
 
     /// <summary>
-    /// Removes non-names and exact duplicates while preserving first-occurrence order.
+    /// Drops null/whitespace-only entries and de-duplicates while preserving first-occurrence
+    /// order. Does not trim surrounding whitespace from otherwise-valid names: an untrimmed name
+    /// simply fails to match anywhere else in the system, so the deployment fails closed as
+    /// unavailable rather than silently normalizing a typo'd name into a different one.
     /// </summary>
     /// <remarks>
     /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
@@ -90,7 +91,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
     /// effective-set construction depend on case variants remaining distinct.
     /// </remarks>
-    internal static bool ContainsConfiguredRequiredFencedWriterName(
+    internal static bool ContainsRequiredFencedWriterName(
         ImmutableArray<string> writerNames,
         string candidateName) =>
         writerNames.Contains(candidateName, StringComparer.Ordinal);
@@ -104,7 +105,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         [
             .. CodeOwnedRequiredFencedWriterNames,
             .. normalizedConfiguredWriterNames.Where(
-                name => !ContainsConfiguredRequiredFencedWriterName(
+                name => !ContainsRequiredFencedWriterName(
                     CodeOwnedRequiredFencedWriterNames,
                     name)),
         ];
@@ -187,7 +188,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
-        foreach (string unavailableFacility in CodeOwnedUnavailableFacilities.Concat(options.RequiredUnavailableFacilities).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal))
+        foreach (string unavailableFacility in options.RequiredUnavailableFacilities.Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal))
         {
             reasons.Add($"facility_unavailable:{unavailableFacility}");
         }
