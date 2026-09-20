@@ -350,11 +350,31 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
       {
         encoding: "utf8",
         env: { ...process.env, TYPECHECK_APP_TIMEOUT_MS: "300" },
+        // This outer bound is a test-harness watchdog, not the behavior
+        // under test: if the production timeout in typecheck-app.mjs is
+        // ever removed, the fixture's `tsc` never exits on its own and this
+        // spawnSync call must not itself hang the test run (and, in CI, the
+        // whole job) waiting on it. Ten seconds is far above the 300ms
+        // production timeout this test expects to observe, so it never
+        // fires on correct code -- only on a regression.
+        timeout: 10_000,
       },
     );
     const elapsedMs = Date.now() - start;
     const output = `${result.stdout}${result.stderr}`;
 
+    // Check the watchdog did not have to intervene before trusting any
+    // assertion below: if it did, `result.status` is null and the CLI's own
+    // timeout message never appears, which the assertions further down would
+    // otherwise (mis)report as "does not match /timed out/" -- a confusing,
+    // unattributed failure mode rather than a named one.
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      "the outer test-harness watchdog fired, meaning the CLI's own " +
+        "production timeout did not kill the hung compiler -- this is the " +
+        "exact regression this test exists to catch",
+    );
     assert.notEqual(result.status, 0);
     assert.match(output, /TypeScript application compiler timed out and was killed/);
     assert.doesNotMatch(output, /Application type-check passed/);
