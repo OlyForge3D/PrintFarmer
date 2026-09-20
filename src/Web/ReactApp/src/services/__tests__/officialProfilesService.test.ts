@@ -1,5 +1,12 @@
+import { AxiosHeaders, type AxiosResponse } from 'axios';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { officialProfilesService } from '../officialProfilesService';
+import type { ImportedProfileNamesDto } from '@/features/tasks/components/profile-wizard/types';
+import type { OrcaProcessProfile, SlicerProfileListItem } from '../slicerProfilesService';
+import {
+  officialProfilesService,
+  type BulkProfileImportResult,
+  type SelectiveProfileImportResult,
+} from '../officialProfilesService';
 import { apiClient } from '../api';
 
 vi.mock('../api', () => ({
@@ -8,6 +15,16 @@ vi.mock('../api', () => ({
     post: vi.fn(),
   },
 }));
+
+function createApiResponse<T>(data: T): AxiosResponse<T> {
+  return {
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+  };
+}
 
 describe('officialProfilesService', () => {
   beforeEach(() => {
@@ -24,7 +41,7 @@ describe('officialProfilesService', () => {
     };
 
     it('should post selective import request and return result', async () => {
-      const mockResult = {
+      const mockResult: SelectiveProfileImportResult = {
         printerModelId: modelId,
         machineProfilesImported: 1,
         processProfilesImported: 1,
@@ -33,7 +50,7 @@ describe('officialProfilesService', () => {
         skipped: 0,
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResult });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResult));
 
       const result = await officialProfilesService.importSelectedProfilesForModel(modelId, request);
 
@@ -60,7 +77,7 @@ describe('officialProfilesService', () => {
         selectedProcessProfiles: [],
         selectedFilamentProfiles: [],
       };
-      const mockResult = {
+      const mockResult: SelectiveProfileImportResult = {
         printerModelId: modelId,
         machineProfilesImported: 0,
         processProfilesImported: 0,
@@ -69,7 +86,7 @@ describe('officialProfilesService', () => {
         skipped: 0,
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResult });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResult));
 
       const result = await officialProfilesService.importSelectedProfilesForModel(modelId, emptyRequest);
 
@@ -77,7 +94,7 @@ describe('officialProfilesService', () => {
     });
 
     it('should handle partial import with skipped profiles', async () => {
-      const mockResult = {
+      const mockResult: SelectiveProfileImportResult = {
         printerModelId: modelId,
         machineProfilesImported: 1,
         processProfilesImported: 0,
@@ -86,7 +103,7 @@ describe('officialProfilesService', () => {
         skipped: 1,
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResult });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResult));
 
       const result = await officialProfilesService.importSelectedProfilesForModel(modelId, request);
 
@@ -99,13 +116,13 @@ describe('officialProfilesService', () => {
     const modelId = 'model-abc-123';
 
     it('should fetch imported profile names for a model', async () => {
-      const mockNames = {
+      const mockNames: ImportedProfileNamesDto = {
         machineProfileNames: ['Prusa MK4 0.4mm'],
         processProfileNames: ['0.20mm Standard @MK4', '0.15mm Quality @MK4'],
         filamentProfileNames: ['Generic PLA @MK4'],
       };
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockNames });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockNames));
 
       const result = await officialProfilesService.getImportedProfileNamesForModel(modelId);
 
@@ -117,13 +134,13 @@ describe('officialProfilesService', () => {
     });
 
     it('should return empty lists when no profiles imported', async () => {
-      const mockNames = {
+      const mockNames: ImportedProfileNamesDto = {
         machineProfileNames: [],
         processProfileNames: [],
         filamentProfileNames: [],
       };
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockNames });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockNames));
 
       const result = await officialProfilesService.getImportedProfileNamesForModel(modelId);
 
@@ -143,12 +160,26 @@ describe('officialProfilesService', () => {
 
   describe('getAvailableProfilesFromWorker', () => {
     it('should fetch profiles from the worker', async () => {
-      const mockProfiles = [
-        { id: 'p1', name: '0.20mm Standard', type: 'process' },
-        { id: 'p2', name: 'Generic PLA', type: 'filament' },
+      const mockProfiles: OrcaProcessProfile[] = [
+        {
+          name: '0.20mm Standard',
+          quality: 'standard',
+          layerHeight: 0.2,
+          infillPercentage: 20,
+          printSpeed: 50,
+          supports: false,
+        },
+        {
+          name: '0.15mm Quality',
+          quality: 'quality',
+          layerHeight: 0.15,
+          infillPercentage: 20,
+          printSpeed: 40,
+          supports: false,
+        },
       ];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockProfiles });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockProfiles));
 
       const result = await officialProfilesService.getAvailableProfilesFromWorker();
 
@@ -174,7 +205,7 @@ describe('officialProfilesService', () => {
         orcaslicerVersion: '2.2.0',
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResult });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResult));
 
       const result = await officialProfilesService.forceReseedSystemProfilesFromWorker();
 
@@ -190,7 +221,7 @@ describe('officialProfilesService', () => {
     it('should post bulk import request for a registered printer', async () => {
       const printerId = 'printer-xyz';
       const request = { profileIds: ['profile-1', 'profile-2'], makePublic: false };
-      const mockResult = {
+      const mockResult: BulkProfileImportResult = {
         printerId,
         printerName: 'My Printer',
         totalRequested: 2,
@@ -199,7 +230,7 @@ describe('officialProfilesService', () => {
         duplicated: 0,
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResult });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResult));
 
       const result = await officialProfilesService.bulkImportProfilesForPrinter(printerId, request);
 
@@ -214,11 +245,23 @@ describe('officialProfilesService', () => {
   describe('getAvailableProfilesForPrinter', () => {
     it('should fetch available profiles for a registered printer', async () => {
       const printerId = 'printer-xyz';
-      const mockProfiles = [
-        { id: 'p1', name: '0.20mm Standard', type: 'process' },
+      const mockProfiles: SlicerProfileListItem[] = [
+        {
+          id: 'p1',
+          name: '0.20mm Standard',
+          slicerType: 'OrcaSlicer',
+          isDefault: false,
+          isSystem: true,
+          isPublic: true,
+          hash: 'profile-hash',
+          profileType: 'process',
+          quality: 'standard',
+          layerHeight: 0.2,
+          infillPercentage: 20,
+        },
       ];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockProfiles });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockProfiles));
 
       const result = await officialProfilesService.getAvailableProfilesForPrinter(printerId);
 
