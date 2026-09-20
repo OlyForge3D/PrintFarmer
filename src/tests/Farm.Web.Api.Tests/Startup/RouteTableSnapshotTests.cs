@@ -1,5 +1,6 @@
 ﻿using Farm.Infrastructure.Authorization;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
@@ -13,7 +14,8 @@ namespace Farm.Web.Api.Tests.Startup;
 ///
 /// <para>
 /// Captures the full controller-action route table -- HTTP verb(s), attribute-route template,
-/// and assembly-qualified controller/action identity -- and asserts it against a checked-in
+/// declared endpoint authorization metadata, and assembly-qualified controller/action identity --
+/// and asserts it against a checked-in
 /// snapshot (<c>Startup/RouteTableSnapshot.txt</c>). Every subsequent phase that moves a
 /// controller into a <c>Farm.Modules.*</c> assembly (phases 8-18) must leave this snapshot
 /// byte-identical: a diff here means a route silently changed template, verb, or moved to a
@@ -26,7 +28,7 @@ namespace Farm.Web.Api.Tests.Startup;
 /// </para>
 /// <para>
 /// Renaming a controller/action or intentionally changing a route requires regenerating the
-/// snapshot deliberately (see <see cref="BuildRouteTable"/>) and reviewing the diff -- it must
+/// snapshot deliberately (see <see cref="BuildRouteTableAsync"/>) and reviewing the diff -- it must
 /// never be regenerated reflexively to make a failing test pass.
 /// </para>
 /// </summary>
@@ -36,30 +38,36 @@ public sealed class RouteTableSnapshotTests
         Path.Join(AppContext.BaseDirectory, "..", "..", "..", "Startup", "RouteTableSnapshot.txt"));
 
     [Fact]
-    public void ControllerActionRouteTable_MatchesCheckedInSnapshot()
+    public async Task ControllerActionRouteTable_MatchesCheckedInSnapshot()
     {
         using CustomWebApplicationFactory factory = new();
 
         EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        IAuthorizationPolicyProvider policyProvider =
+            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>();
 
-        string[] actual = BuildRouteTable(endpointDataSource);
+        string[] actual = await BuildRouteTableAsync(endpointDataSource, policyProvider);
         string[] expected = File.ReadAllLines(SnapshotPath);
 
         AssertSnapshotMatches(actual, expected);
     }
 
     [Fact]
-    public void ControllerActionRouteTable_RejectsAnonymousRegressionOnPrivilegedRoute()
+    public async Task ControllerActionRouteTable_RejectsAnonymousRegressionOnPrivilegedRoute()
     {
         using CustomWebApplicationFactory factory = new();
 
         EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
-        string[] expected = BuildRouteTable(endpointDataSource);
-        string privilegedRoute = expected.Single(line =>
-            line.Contains(
-                "DELETE /api/admin/roles/{roleId:guid}",
-                StringComparison.Ordinal) &&
-            line.Contains("permission=roles:admin", StringComparison.Ordinal));
+        IAuthorizationPolicyProvider policyProvider =
+            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>();
+        string[] expected = await BuildRouteTableAsync(endpointDataSource, policyProvider);
+        string privilegedRoute = expected.Should().ContainSingle(
+            line =>
+                line.Contains(
+                    "DELETE /api/admin/roles/{roleId:guid}",
+                    StringComparison.Ordinal) &&
+                line.Contains("permission=roles:admin", StringComparison.Ordinal),
+            "the privileged route used by this regression test must be unique").Which;
         string[] regressed = expected
             .Select(line => line == privilegedRoute
                 ? line[..line.IndexOf(" [", StringComparison.Ordinal)] + " [auth=anonymous]"
@@ -72,11 +80,13 @@ public sealed class RouteTableSnapshotTests
     }
 
     [Fact]
-    public void ControllerActionRouteTable_RecordsEffectiveAuthorizationMetadata()
+    public async Task ControllerActionRouteTable_RecordsEffectiveAuthorizationMetadata()
     {
         using CustomWebApplicationFactory factory = new();
 
-        string[] actual = BuildRouteTable(factory.Services.GetRequiredService<EndpointDataSource>());
+        string[] actual = await BuildRouteTableAsync(
+            factory.Services.GetRequiredService<EndpointDataSource>(),
+            factory.Services.GetRequiredService<IAuthorizationPolicyProvider>());
 
         _ = actual.Should().Contain(line =>
             line.Contains(
@@ -92,31 +102,42 @@ public sealed class RouteTableSnapshotTests
             line.Contains(
                 "GET /api/schema-health/ready",
                 StringComparison.Ordinal) &&
-            line.EndsWith("[auth=anonymous]", StringComparison.Ordinal));
+            line.EndsWith("[auth=anonymous:AllowAnonymousAttribute]", StringComparison.Ordinal));
         _ = actual.Should().Contain(line =>
             line.Contains(
                 "UnifiedSettingsController.GetSettingsByKeyName",
                 StringComparison.Ordinal) &&
-            line.EndsWith("[auth=anonymous]", StringComparison.Ordinal));
+            line.EndsWith("[auth=anonymous:AllowAnonymousAttribute]", StringComparison.Ordinal));
+        _ = actual.Should().Contain(line =>
+            line.Contains(
+                "POST /api/files/local",
+                StringComparison.Ordinal) &&
+            line.Contains("catalog-permission=queue:write", StringComparison.Ordinal));
         _ = actual.Count(line => line.Contains("permission=", StringComparison.Ordinal))
             .Should().BeGreaterThan(0);
-        _ = actual.Count(line => line.EndsWith("[auth=anonymous]", StringComparison.Ordinal))
+        _ = actual.Count(line => line.Contains("[auth=anonymous:", StringComparison.Ordinal))
+            .Should().BeGreaterThan(0);
+        _ = actual.Count(line => line.EndsWith("[auth=fallback:RequireAuthenticatedUser]", StringComparison.Ordinal))
             .Should().BeGreaterThan(0);
     }
 
     /// <summary>
     /// Builds the sorted, checked-in-snapshot line format: one line per runtime controller
     /// endpoint, each listing every HTTP verb it accepts, its attribute-route template,
-    /// effective authorization metadata, and its <c>Assembly::Controller.Action</c> identity.
+    /// declared endpoint authorization metadata, and its <c>Assembly::Controller.Action</c>
+    /// identity. This does not observe authorization implemented by action filters or handler
+    /// bodies.
     /// The assembly qualifier deliberately makes
     /// two identically-named controllers in different assemblies produce distinct lines (see
     /// class remarks); no <c>Distinct()</c> is applied afterward, so a genuine duplicate route
     /// registration -- which this format could otherwise mask -- instead surfaces as a real
     /// diff against the snapshot rather than being silently deduplicated away.
     /// </summary>
-    private static string[] BuildRouteTable(EndpointDataSource endpointDataSource)
+    private static async Task<string[]> BuildRouteTableAsync(
+        EndpointDataSource endpointDataSource,
+        IAuthorizationPolicyProvider policyProvider)
     {
-        return endpointDataSource.Endpoints
+        Task<string>[] lines = endpointDataSource.Endpoints
             .OfType<RouteEndpoint>()
             .Select(endpoint => new
             {
@@ -124,7 +145,7 @@ public sealed class RouteTableSnapshotTests
                 Action = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()
             })
             .Where(item => item.Action is not null)
-            .Select(item =>
+            .Select(async item =>
             {
                 RouteEndpoint endpoint = item.Endpoint;
                 ControllerActionDescriptor action = item.Action!;
@@ -142,18 +163,29 @@ public sealed class RouteTableSnapshotTests
                 string template = action.AttributeRouteInfo?.Template ?? string.Empty;
                 string assemblyName = action.ControllerTypeInfo.Assembly.GetName().Name ?? "?";
                 string identity = $"{assemblyName}::{action.ControllerTypeInfo.FullName}.{action.MethodInfo.Name}";
-                string authorization = BuildAuthorization(endpoint.Metadata);
+                string authorization = await BuildAuthorizationAsync(endpoint.Metadata, policyProvider);
                 return $"{methods} /{template} -> {identity} [{authorization}]";
             })
+            .ToArray();
+
+        return (await Task.WhenAll(lines))
             .OrderBy(line => line, StringComparer.Ordinal)
             .ToArray();
     }
 
-    private static string BuildAuthorization(EndpointMetadataCollection metadata)
+    private static async Task<string> BuildAuthorizationAsync(
+        EndpointMetadataCollection metadata,
+        IAuthorizationPolicyProvider policyProvider)
     {
-        if (metadata.GetMetadata<IAllowAnonymous>() is not null)
+        string[] anonymousMetadata = metadata
+            .GetOrderedMetadata<IAllowAnonymous>()
+            .Select(item => item.GetType().Name)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal)
+            .ToArray();
+        if (anonymousMetadata.Length > 0)
         {
-            return "auth=anonymous";
+            return $"auth=anonymous:{string.Join("+", anonymousMetadata)}";
         }
 
         string[] requirements = metadata
@@ -168,19 +200,32 @@ public sealed class RouteTableSnapshotTests
             .Concat(
                 metadata
                     .GetOrderedMetadata<IPermissionMetadata>()
-                    .Select(permission => $"permission={permission.Permission}"))
+                    // Slicer filter-based RequirePermissionAttribute is intentionally not
+                    // IPermissionMetadata; track that observability gap in follow-up #2818.
+                    .Select(permission => permission is IAuthorizeData
+                        ? $"permission={permission.Permission}"
+                        : $"catalog-permission={permission.Permission}"))
             .ToArray();
 
-        return requirements.Length == 0
-            ? "auth=none"
-            : $"auth={string.Join("|", requirements)}";
+        if (requirements.Length > 0)
+        {
+            return $"auth={string.Join("|", requirements)}";
+        }
+
+        AuthorizationPolicy? fallbackPolicy = await policyProvider.GetFallbackPolicyAsync();
+        if (fallbackPolicy?.Requirements.OfType<DenyAnonymousAuthorizationRequirement>().Any() == true)
+        {
+            return "auth=fallback:RequireAuthenticatedUser";
+        }
+
+        return "auth=none";
     }
 
     private static void AssertSnapshotMatches(string[] actual, string[] expected)
     {
         actual.Should().Equal(
             expected,
-            "the controller-action route table and effective authorization must not change while " +
+            "the controller-action route table and declared endpoint authorization metadata must not change while " +
             "Farm.Modules.Abstractions lands the module host seam (issue #2035) -- if this is a " +
             "deliberate route or authorization change, regenerate Startup/RouteTableSnapshot.txt " +
             "and review the diff carefully");
