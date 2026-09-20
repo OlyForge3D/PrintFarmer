@@ -3168,9 +3168,10 @@ public class PrintJobManagementService(
                 lockState.Semaphore.Release();
             }
 
-            if (lockState.ReleaseReferenceAndMarkUsed(_timeProvider.GetUtcNow().UtcDateTime) == 0)
+            DateTime releaseTimestamp = _timeProvider.GetUtcNow().UtcDateTime;
+            if (lockState.ReleaseReferenceAndMarkUsed(releaseTimestamp) == 0)
             {
-                TryCleanupStalePrinterHistorySyncLocks(_timeProvider.GetUtcNow().UtcDateTime);
+                TryCleanupStalePrinterHistorySyncLocks(releaseTimestamp);
             }
         }
     }

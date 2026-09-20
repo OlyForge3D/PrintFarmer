@@ -461,7 +461,13 @@ public sealed class BackendStartCommandConsumerService(
         }
     }
 
-    private async Task<bool> PersistDeadlineCancellationWithinDeadlineAsync(
+    /// <summary>
+    /// Internal (rather than private) so <c>Farm.Infrastructure.Tests</c> can drive the
+    /// concurrency-retry disposition logic directly, forcing a
+    /// <see cref="DbUpdateConcurrencyException"/> on the first save without needing to
+    /// reproduce the real iteration-deadline timing that triggers this path in production.
+    /// </summary>
+    internal async Task<bool> PersistDeadlineCancellationWithinDeadlineAsync(
         AppDbContext db,
         QueueDispatchOutbox evt,
         BedClearCommandStatus commandStatus,
@@ -469,6 +475,17 @@ public sealed class BackendStartCommandConsumerService(
     {
         const int maxConcurrencyAttempts = 3;
         QueueDispatchOutbox originalEvent = evt;
+
+        // Capture the caller's intended disposition before any retry reload can
+        // discard it. The caller (the OperationCanceledException handler above)
+        // already set these fields on `evt` to reflect either a dead-letter or a
+        // rearmed-retry outcome; a concurrency retry reloads `evt` fresh from the
+        // database and would otherwise silently lose that disposition.
+        QueueOutboxEventStatus intendedStatus = evt.Status;
+        string? intendedLastError = evt.LastError;
+        DateTime? intendedRetryAfterUtc = evt.RetryAfterUtc;
+        DateTime? intendedCompletedAtUtc = evt.CompletedAtUtc;
+
         using var persistenceTimeout = new CancellationTokenSource(
             OutcomePersistenceDeadline,
             _timeProvider);
@@ -505,6 +522,17 @@ public sealed class BackendStartCommandConsumerService(
                 {
                     command.Status = commandStatus;
                     command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+
+                    // Re-apply the caller's intended outbox disposition onto the
+                    // (possibly just-reloaded) tracked entity. Without this, a
+                    // reload on a concurrency retry leaves `evt` holding its stale
+                    // pre-retry values, so SaveChangesAsync below persists the
+                    // command update but never writes the dead-letter/retry
+                    // disposition to the outbox row.
+                    evt.Status = intendedStatus;
+                    evt.LastError = intendedLastError;
+                    evt.RetryAfterUtc = intendedRetryAfterUtc;
+                    evt.CompletedAtUtc = intendedCompletedAtUtc;
                 }
 
                 await db.SaveChangesAsync(persistenceDeadline.Token);
