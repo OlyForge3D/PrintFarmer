@@ -197,11 +197,13 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
                 holderReasons.Add(string.IsNullOrWhiteSpace(holderAdmission.Reason) ? HostUpdateSchedulingAvailability.AdmissionFenceReason : holderAdmission.Reason);
             }
 
-            string holderExecutorReason = executor is IHostUpdateAvailability { IsAvailable: false } holderExecutorAvailability
-                ? holderExecutorAvailability.UnavailableReason
-                : current.Reason == HostUpdateSchedulerReason.Admitted
-                    ? current.Reason.ToString()
-                    : HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason;
+            string? holderExecutorReason = executor switch
+            {
+                IHostUpdateAvailability { IsAvailable: false } holderExecutorAvailability =>
+                    holderExecutorAvailability.UnavailableReason,
+                IHostUpdateAvailability { IsAvailable: true } => null,
+                _ => HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason
+            };
             bool hasAttempt = current.LastAttemptAt is not null;
             bool dependencyBlocked = holderReasons.Count > 0;
             if (hasAttempt && (!dependencyBlocked || current.Reason is not HostUpdateSchedulerReason.Disabled))
@@ -209,7 +211,11 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
                 holderReasons.Add(current.Reason.ToString());
             }
 
-            holderReasons.Add(holderExecutorReason);
+            if (holderExecutorReason is not null)
+            {
+                holderReasons.Add(holderExecutorReason);
+            }
+
             if (holderReasons.Count == 0)
             {
                 holderReasons.Add(current.Reason.ToString());
@@ -242,7 +248,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
                 },
                 Executor = new HostUpdateExecutorDto
                 {
-                    State = current.Reason is HostUpdateSchedulerReason.Admitted
+                    State = holderExecutorReason is null
                         ? HostUpdateExecutorState.Available
                         : HostUpdateExecutorState.Unavailable,
                     Reason = holderExecutorReason,
