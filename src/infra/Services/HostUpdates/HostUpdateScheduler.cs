@@ -1009,6 +1009,8 @@ public sealed class HostUpdateScheduler(
                 return Backoff(reason, candidate.Identity);
             }
 
+            // Reserve is advisory until the execution succeeds; replay exclusion is provided
+            // by the execution lock and journal, then Admit durably records the success.
             if (settings is IHostUpdatePolicyBackedSchedulerSettings freshPolicyBackedSettings)
             {
                 HostUpdatePolicyReadResult freshPolicyResult = freshPolicyBackedSettings.ReadPolicy();

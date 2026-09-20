@@ -68,6 +68,84 @@ public sealed class HostUpdateSchedulerTests
         Assert.NotEqual(HostUpdateSchedulerReason.Admitted, status.Reason);
         Assert.True(hostExecutor.CancellationRequested, status.Reason.ToString());
     }
+
+    [Fact]
+    public async Task TickAsync_ScopedExecutorIsDisposedAfterSuccess()
+    {
+        using ServiceProvider services = new ServiceCollection()
+            .AddScoped<IHostUpdateSchedulerExecutor, FakeExecutor>()
+            .BuildServiceProvider();
+        RecordingScopeFactory scopes = new(services.GetRequiredService<IServiceScopeFactory>());
+        HostUpdateScheduler scheduler = Create(
+            new HostUpdateSchedulerSettings(true),
+            Candidate(),
+            executor: null,
+            scopeFactory: scopes);
+
+        HostUpdateSchedulerStatus status = await scheduler.TickAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.Admitted, status.Reason);
+        Assert.Equal(1, scopes.Created);
+        Assert.Equal(1, scopes.Disposed);
+    }
+
+    [Fact]
+    public async Task TickAsync_ScopedExecutorIsDisposedAfterExecutorFailure()
+    {
+        using ServiceProvider services = new ServiceCollection()
+            .AddScoped<IHostUpdateSchedulerExecutor>(_ => new ThrowingExecutor())
+            .BuildServiceProvider();
+        RecordingScopeFactory scopes = new(services.GetRequiredService<IServiceScopeFactory>());
+        HostUpdateScheduler scheduler = Create(
+            new HostUpdateSchedulerSettings(true),
+            Candidate(),
+            executor: null,
+            scopeFactory: scopes);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scheduler.TickAsync());
+
+        Assert.Equal(1, scopes.Created);
+        Assert.Equal(1, scopes.Disposed);
+    }
+
+    [Fact]
+    public async Task TickAsync_OrdersReserveExecuteAdmitOnSuccess()
+    {
+        RecordingReplayStore replay = new();
+        RecordingExecutor executor = new(replay.Events);
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, replay);
+
+        await scheduler.TickAsync();
+
+        Assert.Equal(["Reserve", "Execute", "Admit"], replay.Events);
+    }
+
+    [Theory]
+    [InlineData(HostUpdateExecutorResult.Refused)]
+    [InlineData(HostUpdateExecutorResult.Failed)]
+    [InlineData(HostUpdateExecutorResult.RecoveryRequired)]
+    public async Task TickAsync_DoesNotAdmitNonSuccessfulExecution(HostUpdateExecutorResult result)
+    {
+        RecordingReplayStore replay = new();
+        RecordingExecutor executor = new(replay.Events) { Response = new(result, "not admitted") };
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, replay);
+
+        await scheduler.TickAsync();
+
+        Assert.Equal(["Reserve", "Execute"], replay.Events);
+    }
+
+    [Fact]
+    public async Task TickAsync_DoesNotAdmitWhenExecutionThrows()
+    {
+        RecordingReplayStore replay = new();
+        RecordingExecutor executor = new(replay.Events) { Throw = true };
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, replay);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scheduler.TickAsync());
+
+        Assert.Equal(["Reserve", "Execute"], replay.Events);
+    }
     [Fact]
     public async Task TickAsync_DefaultSettings_DoNotExecute()
     {
@@ -896,6 +974,80 @@ public sealed class HostUpdateSchedulerTests
             }
 
             return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
+        }
+    }
+
+    private sealed class RecordingScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
+    {
+        public int Created { get; private set; }
+        public int Disposed { get; private set; }
+
+        public IServiceScope CreateScope()
+        {
+            Created++;
+            return new RecordingScope(inner.CreateScope(), () => Disposed++);
+        }
+    }
+
+    private sealed class RecordingScope(IServiceScope inner, Action onDispose) : IServiceScope
+    {
+        public IServiceProvider ServiceProvider => inner.ServiceProvider;
+
+        public void Dispose()
+        {
+            inner.Dispose();
+            onDispose();
+        }
+    }
+
+    private sealed class ThrowingExecutor : FakeExecutor
+    {
+        public override Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct) =>
+            throw new InvalidOperationException("executor failed");
+    }
+
+    private sealed class RecordingExecutor(List<string> events) : IHostUpdateSchedulerExecutor
+    {
+        public HostUpdateExecutorResponse Response { get; set; } = new(HostUpdateExecutorResult.Accepted);
+        public bool Throw { get; set; }
+
+        public void PreArmCancellation(HostUpdateCancellationSignal signal) { }
+
+        public Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
+        {
+            events.Add("Execute");
+            if (Throw)
+            {
+                throw new InvalidOperationException("executor failed");
+            }
+
+            return Task.FromResult(Response);
+        }
+    }
+
+    private sealed class RecordingReplayStore : IHostUpdateReplayStore
+    {
+        public List<string> Events { get; } = [];
+
+        public Task<HostUpdateReplayDecision> DecideAsync(
+            VerifiedHostUpdateCandidate candidate,
+            HostUpdateReplayIntent intent,
+            CancellationToken ct)
+        {
+            string name = intent switch
+            {
+                HostUpdateReplayIntent.Reserve => "Reserve",
+                HostUpdateReplayIntent.Admit => "Admit",
+                _ => "Reject"
+            };
+            Events.Add(name);
+            return Task.FromResult(new HostUpdateReplayDecision(
+                HostUpdateReplayDisposition.Accepted,
+                "recording-decision",
+                false));
         }
     }
 

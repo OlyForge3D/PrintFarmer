@@ -98,7 +98,8 @@ public sealed class HostStatePersistenceTests
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
             {
-                return;
+                throw Xunit.Sdk.SkipException.ForSkip(
+                    "The test environment cannot create a symbolic link; enable Windows Developer Mode or run with the required privilege.");
             }
 
             Assert.Throws<SecurityException>(() => HostUpdateInstallationIdentity.GetOrCreate(root));
