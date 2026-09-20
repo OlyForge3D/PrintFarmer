@@ -36,7 +36,7 @@ blocker naming the capability and the review step it prevents.
 
 ## Machine-Local Execution Policy (this worktree)
 
-On this machine, Hicks uses reasoning effort **`medium`** and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until mandatory gate (consensus with Bishop + Vasquez) is satisfied. Unavoidable platform/provider hard limits still apply.
+On this machine, Hicks uses reasoning effort **`medium`** and does not self-impose time, tool-call, review-round, or iteration budgets. Reviews continue until the assigned risk-based review is complete. Unavoidable platform/provider hard limits still apply.
 
 ## Review Protocol
 
@@ -53,18 +53,23 @@ When reviewing:
 - **Stack:** C# .NET 10 (API), React 19 TypeScript (Frontend), ASP.NET Core, EF Core, SignalR, Tailwind CSS
 - **Owner:** Jeff Papiez
 
-## STANDING RULE — PRE-PR BRANCH REVIEW GATE (effective 2026-05-31)
+## Readiness and Merge Review Gate
 
-ALL code MUST pass 3-way adversarial review (Bishop + Hicks + Vasquez consensus APPROVE) on the BRANCH before any PR is opened (via `create_pull_request` or `gh pr create`). No more "ship PR then review." Flow:
-1. Builder pushes branch (no PR yet)
-2. Trio reviews branch HEAD (diff against development)
-3. Consensus 3/3 APPROVE → builder (or wrangler) opens PR
-4. Consensus REQUEST_CHANGES → builder revises on branch → re-review
-5. Reviews still adversarial — independent verdicts, then consensus synthesis
+Primary lens: **behavior/contracts/tests**. Review observable behavior,
+compatibility, and regression evidence across the complete assigned diff.
+Reviewer count and escalation follow
+[Risk-Based Review Scope](../../../.github/copilot-instructions.md#risk-based-review-scope).
+Draft PRs may open early; required reviews, CI, and current-head evidence gate readiness/merge.
 
-Revisions to ALREADY-OPEN PRs (fix-ups) follow the existing PR-review loop, not this gate.
+Use [Delta-Only Panel Rereview](../../../.github/copilot-instructions.md#delta-only-panel-rereview)
+for follow-on rounds. Resume the reviewer session first when supported; otherwise
+use a compact immutable checkpoint under
+[Findings and Reviewer Checkpoints](../../../.github/copilot-instructions.md#findings-and-reviewer-checkpoints).
+Reuse stable finding IDs, severity, owner, failure scenario, and closure criteria.
+Third-reviewer escalation addresses disagreement, a critical finding, or unresolved
+cross-domain risk; another approval cannot erase an active rejection.
 
-**PRE-PR REVIEW GATE CHECKLIST:**
+**Readiness checklist:**
 - [ ] PR body contains `Closes #N` / `Fixes #N` / `Resolves #N` for every linked issue (verify with `gh pr view <num> --json closingIssuesReferences` — must return at least one entry when an issue exists). REJECT if missing.
 
 ## iOS Review Rubric (apply to every `area:ios` / `mobile/` Swift diff)

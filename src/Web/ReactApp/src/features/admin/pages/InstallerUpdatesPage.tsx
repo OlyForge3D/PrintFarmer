@@ -88,6 +88,20 @@ export function InstallerUpdatesPage() {
     };
   }, [canView, markUnknown, refetch]);
 
+  const authorizeHostUpdate = useCallback(() => apiClient.authorizeHostUpdate(), []);
+  const executeHostUpdate = useCallback(
+    (authorizationId: string) => apiClient.executeHostUpdate({ authorizationId }),
+    [],
+  );
+  const getHostUpdateStatus = useCallback(
+    (releaseId: string) => apiClient.getHostUpdateStatus(releaseId),
+    [],
+  );
+  const recoverHostUpdate = useCallback(
+    (releaseId: string, requestId?: string) => apiClient.recoverHostUpdate(releaseId, requestId),
+    [],
+  );
+
   if (!canView)
     return (
       <Alert type="error" title="Access denied">
@@ -164,6 +178,10 @@ export function InstallerUpdatesPage() {
         void refetchInventory();
         return authoritative;
       }}
+      onAuthorizeHostUpdate={authorizeHostUpdate}
+      onExecuteHostUpdate={executeHostUpdate}
+      onGetHostUpdateStatus={getHostUpdateStatus}
+      onRecoverHostUpdate={recoverHostUpdate}
     />
   );
 }

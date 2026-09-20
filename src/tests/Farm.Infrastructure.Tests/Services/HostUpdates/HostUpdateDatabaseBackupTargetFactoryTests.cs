@@ -1,4 +1,4 @@
-﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Data.SqlClient;
@@ -19,6 +19,14 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     /// argument list; it authenticates nothing.
     /// </summary>
     private const string FixtureSqlPassword = "fixture-not-a-real-credential";
+
+    private static readonly ConfiguredHostUpdateExecutableResolver TestExecutableResolver = new(new Dictionary<string, string>(StringComparer.Ordinal)
+    {
+        ["sqlite3"] = Path.Combine(Path.GetTempPath(), "sqlite3.exe"),
+        ["pg_dump"] = Path.Combine(Path.GetTempPath(), "pg_dump.exe"),
+        ["pg_restore"] = Path.Combine(Path.GetTempPath(), "pg_restore.exe"),
+        ["sqlcmd"] = Path.Combine(Path.GetTempPath(), "sqlcmd.exe"),
+    });
 
     private sealed class RecordingProcessRunner : IHostUpdateProcessRunner
     {
@@ -42,13 +50,29 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         }
     }
 
+    /// <summary>
+    /// Simulates the process runner itself throwing (e.g. the OS refusing to start the
+    /// executable) rather than sqlcmd running and returning a nonzero exit code -- a distinct
+    /// failure mode from <see cref="ServerSideWritingProcessRunner"/>'s <c>succeeds: false</c>.
+    /// </summary>
+    private sealed class ThrowingProcessRunner : IHostUpdateProcessRunner
+    {
+        public Task<HostUpdateProcessResult> RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyDictionary<string, string>? environment = null) =>
+            throw new InvalidOperationException("simulated process start failure");
+    }
+
     [Fact]
     public async Task CreateBackupTarget_ExternallyOwned_ReturnsFailClosedTarget()
     {
         var dbConfig = new DatabaseProviderConfiguration { Provider = "postgres", ConnectionString = "Host=db;Database=x;Username=u;Password=p" };
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, new RecordingProcessRunner(), TimeSpan.FromSeconds(30), isExternallyOwned: true);
+            "database", dbConfig, new RecordingProcessRunner(), TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: true);
 
         target.IsExternallyOwned.Should().BeTrue();
         Func<Task> act = () => target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
@@ -62,11 +86,29 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
-        runner.LastFileName.Should().Be("sqlite3");
+        runner.LastFileName.Should().Be(TestExecutableResolver.Resolve("sqlite3"));
         target.IsExternallyOwned.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task CreateBackupTarget_MissingExecutableMapping_FailsWhenBackupRuns()
+    {
+        var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlite", ConnectionString = "Data Source=farm.db" };
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database",
+            dbConfig,
+            new RecordingProcessRunner(),
+            new ConfiguredHostUpdateExecutableResolver(new Dictionary<string, string>(StringComparer.Ordinal)),
+            TimeSpan.FromSeconds(30),
+            isExternallyOwned: false);
+
+        Func<Task> act = () => target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("host_update_executable_not_configured:sqlite3");
     }
 
     [Fact]
@@ -80,10 +122,10 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
-        runner.LastFileName.Should().Be("pg_dump");
+        runner.LastFileName.Should().Be(TestExecutableResolver.Resolve("pg_dump"));
         runner.LastArguments.Should().NotContain("super-secret");
         runner.LastEnvironment.Should().ContainKey("PGPASSWORD").WhoseValue.Should().Be("super-secret");
     }
@@ -99,10 +141,10 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
-        runner.LastFileName.Should().Be("sqlcmd");
+        runner.LastFileName.Should().Be(TestExecutableResolver.Resolve("sqlcmd"));
         runner.LastArguments.Should().Contain("-b");
         runner.LastArguments.Should().Contain(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
     }
@@ -112,10 +154,10 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     {
         var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlite", ConnectionString = "Data Source=farm.db" };
 
-        Func<string, HostUpdateRestoreCommand> restoreCommand = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig);
+        Func<string, HostUpdateRestoreCommand> restoreCommand = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver);
         HostUpdateRestoreCommand command = restoreCommand(Path.GetTempPath());
 
-        command.FileName.Should().Be("sqlite3");
+        command.FileName.Should().Be(TestExecutableResolver.Resolve("sqlite3"));
         command.Arguments.Should().Contain(a => a.Contains(".restore", StringComparison.Ordinal));
     }
 
@@ -128,9 +170,9 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Host=dbhost;Port=5433;Database=printfarmer;Username=pf;Password=test-only-pw-1",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
-        command.FileName.Should().Be("pg_restore");
+        command.FileName.Should().Be(TestExecutableResolver.Resolve("pg_restore"));
         command.Arguments.Should().NotContain(a => a.Contains("test-only-pw-1", StringComparison.Ordinal));
         command.Environment.Should().ContainKey("PGPASSWORD").WhoseValue.Should().Be("test-only-pw-1");
     }
@@ -144,9 +186,9 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-2;TrustServerCertificate=True",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
-        command.FileName.Should().Be("sqlcmd");
+        command.FileName.Should().Be(TestExecutableResolver.Resolve("sqlcmd"));
         command.Arguments.Should().Contain("-b");
         command.Arguments.Should().Contain(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         command.Arguments.Should().NotContain(a => a.Contains("test-only-pw-2", StringComparison.Ordinal));
@@ -164,7 +206,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments.Should().NotContain(a => a.Contains("test-only-pw-3", StringComparison.Ordinal));
@@ -181,7 +223,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=test-only-pw-6;TrustServerCertificate=True",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         query.Should().Contain("SET SINGLE_USER WITH ROLLBACK IMMEDIATE");
@@ -194,7 +236,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     {
         var dbConfig = new DatabaseProviderConfiguration { Provider = "unknown-provider", ConnectionString = "n/a" };
 
-        Action act = () => HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig);
+        Action act = () => HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver);
 
         act.Should().Throw<NotSupportedException>();
     }
@@ -220,7 +262,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         string query = runner.LastArguments!.Single(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
@@ -239,7 +281,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         };
         var dbConfig = new DatabaseProviderConfiguration { Provider = "sqlserver", ConnectionString = builder.ConnectionString };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         query.Should().Contain("[printfarmer]]; DROP TABLE Users; --]");
@@ -253,7 +295,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         string hostileDestination = Path.Combine(Path.GetTempPath(), "it's-a-trap");
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(hostileDestination, CancellationToken.None);
 
         string backupCommand = runner.LastArguments!.Single(a => a.Contains(".backup", StringComparison.Ordinal));
@@ -271,7 +313,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         };
         string hostileTargetDirectory = Path.Combine(Path.GetTempPath(), "it's-a-trap");
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(hostileTargetDirectory);
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(hostileTargetDirectory);
 
         string query = command.Arguments.Single(a => a.Contains("RESTORE DATABASE", StringComparison.Ordinal));
         query.Should().Contain("it''s-a-trap");
@@ -300,7 +342,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments.Should().Contain("-N");
@@ -319,7 +361,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{encryptSetting}",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Should().Contain("-N");
     }
@@ -347,7 +389,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments!.Contains("-C").Should().Be(expectTrustCertificate);
@@ -368,7 +410,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword}{trustSetting}",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Contains("-C").Should().Be(expectTrustCertificate);
         command.Arguments.Should().Contain("-N");
@@ -391,7 +433,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         var runner = new RecordingProcessRunner();
 
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-            "database", dbConfig, runner, TimeSpan.FromSeconds(30), isExternallyOwned: false);
+            "database", dbConfig, runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false);
         await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
         runner.LastArguments.Should().Contain("-b");
@@ -408,7 +450,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword};Encrypt=False",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Should().Contain("-b");
         command.Arguments.Should().NotContain(FixtureSqlPassword);
@@ -428,7 +470,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             ConnectionString = "Server=sqlhost;Database=printfarmer;Integrated Security=True;Encrypt=False;TrustServerCertificate=True",
         };
 
-        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig)(Path.GetTempPath());
+        HostUpdateRestoreCommand command = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(dbConfig, TestExecutableResolver)(Path.GetTempPath());
 
         command.Arguments.Should().Contain("-E");
         command.Arguments.Should().Contain("-N");
@@ -436,4 +478,308 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         command.Arguments.Should().NotContain("-U");
         command.Environment.Should().BeNull();
     }
+
+    /// <summary>
+    /// A process runner standing in for the SQL Server engine: when it sees a
+    /// <c>BACKUP DATABASE ... TO DISK = N'...'</c> statement it writes a file, simulating the
+    /// engine's own filesystem write, so tests exercise a genuine round trip rather than
+    /// asserting on configuration shape alone. When <paramref name="physicalWriteRedirectDirectory"/>
+    /// is set, the file is written there instead of at the literal path extracted from the SQL
+    /// text -- simulating a broken bind mount: the SQL Server container's local disk happens to
+    /// have something at that path label, but it is not actually the shared volume PrintFarmer
+    /// reads from. This is the realistic "same configured path, different physical storage"
+    /// failure mode a single shared <c>BackupRootDirectory</c> can still exhibit.
+    /// </summary>
+    private sealed class ServerSideWritingProcessRunner(bool succeeds, string? physicalWriteRedirectDirectory = null) : IHostUpdateProcessRunner
+    {
+        public IReadOnlyList<string>? LastArguments { get; private set; }
+
+        public int CallCount { get; private set; }
+
+        public Task<HostUpdateProcessResult> RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyDictionary<string, string>? environment = null)
+        {
+            CallCount++;
+            LastArguments = arguments;
+            if (succeeds)
+            {
+                string? query = arguments.FirstOrDefault(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
+                if (query is not null)
+                {
+                    int start = query.IndexOf("N'", StringComparison.Ordinal) + 2;
+                    int end = query.IndexOf('\'', start);
+                    string configuredPath = query[start..end];
+                    string physicalPath = physicalWriteRedirectDirectory is null
+                        ? configuredPath
+                        : Path.Combine(physicalWriteRedirectDirectory, Path.GetFileName(configuredPath));
+                    Directory.CreateDirectory(Path.GetDirectoryName(physicalPath)!);
+                    File.WriteAllText(physicalPath, "probe");
+                }
+            }
+
+            return Task.FromResult(succeeds
+                ? new HostUpdateProcessResult(0, string.Empty, string.Empty)
+                : new HostUpdateProcessResult(1, string.Empty, "backup failed"));
+        }
+    }
+
+    private static DatabaseProviderConfiguration SqlServerConfig() => new()
+    {
+        Provider = "sqlserver",
+        ConnectionString = $"Server=sqlhost;Database=printfarmer;User Id=sa;Password={FixtureSqlPassword};TrustServerCertificate=True",
+    };
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_SameDirectoryRealBackupsUse_RealRoundTripSucceeds()
+    {
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-shared-").FullName;
+        try
+        {
+            var runner = new ServerSideWritingProcessRunner(succeeds: true);
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), runner, TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().BeNull();
+            Directory.GetFiles(backupRootDirectory).Should().BeEmpty("the probe file must be cleaned up after a successful verification");
+
+            // A stubbed-success runner that never actually writes anything would also leave the
+            // directory empty and return null evidence -- so the two assertions above alone do not
+            // prove a real write happened. Assert the engine was actually invoked exactly once
+            // with a genuine BACKUP DATABASE [master] command targeting the probe path under the
+            // configured backup root, using WITH INIT, COPY_ONLY (the same real-backup command
+            // shape production code issues), so this test cannot pass vacuously.
+            runner.CallCount.Should().Be(1, "the probe must invoke sqlcmd exactly once per verification, not zero times or repeatedly");
+            string probeQuery = runner.LastArguments!.Single(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
+            probeQuery.Should().Contain("BACKUP DATABASE [master] TO DISK");
+            probeQuery.Should().Contain(backupRootDirectory);
+            probeQuery.Should().Contain("WITH INIT, COPY_ONLY");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_ConfiguredPathIsNotActuallyASharedMount_FailsClosedWithDistinctEvidence()
+    {
+        // Same literal directory string is configured on both "sides" (there is only one
+        // configuration value now), but the fake engine's physical write is redirected
+        // elsewhere -- reproducing a broken bind mount where the SQL Server container's local
+        // disk at that path label is not really the volume PrintFarmer reads from.
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-client-").FullName;
+        string serverPhysicalStorage = Directory.CreateTempSubdirectory("hu-mapping-server-").FullName;
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true, serverPhysicalStorage), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().Be("probe_file_not_visible_from_printfarmer");
+            Directory.GetFiles(serverPhysicalStorage).Should().ContainSingle("the engine really did write the probe file -- only PrintFarmer's own read (at the shared path) failed");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+            Directory.Delete(serverPhysicalStorage, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_SqlcmdReportsFailure_FailsClosedWithoutAssumingSuccess()
+    {
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-fail-").FullName;
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: false), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().Be("probe_backup_command_failed:1", "the evidence must retain sqlcmd's exit code, not just a generic failure marker");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_ProcessRunnerThrows_FailsClosedWithExceptionTypeEvidence()
+    {
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-throw-").FullName;
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ThrowingProcessRunner(), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().Be(
+                "probe_backup_invocation_failed:InvalidOperationException",
+                "a thrown exception from starting the process is a distinct failure mode from sqlcmd running and reporting a nonzero exit code");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_BackupRootParentIsAFile_FailsClosedWithDirectoryCreationEvidence()
+    {
+        // Directory.CreateDirectory(backupRootDirectory) throws when a path segment above it
+        // already exists as a file rather than a directory -- reproducing a misconfigured
+        // RootDirectory that collides with an existing file. This must fail closed with the
+        // dedicated probe_directory_creation_failed evidence (distinguishable from every other
+        // evidence string), not silently proceed or report a different failure mode. The exact
+        // exception *type* the BCL raises for this shape is platform-dependent
+        // (IOException on Windows, DirectoryNotFoundException on Linux) -- both are caught by
+        // the `is IOException or UnauthorizedAccessException` filter in production code (
+        // DirectoryNotFoundException derives from IOException), so only the evidence-category
+        // prefix is contractual here, not the exception-type suffix.
+        string parentDirectory = Directory.CreateTempSubdirectory("hu-mapping-dircreate-").FullName;
+        string fileBlockingCreation = Path.Combine(parentDirectory, "not-a-directory");
+        await File.WriteAllTextAsync(fileBlockingCreation, "this is a file, not a directory");
+        string backupRootDirectory = Path.Combine(fileBlockingCreation, "backups");
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().StartWith(
+                "probe_directory_creation_failed:",
+                "a backup root whose parent path is occupied by a file must fail closed with directory-creation evidence, "
+                + "distinguishable from every other evidence string; the exception type suffix is platform-dependent "
+                + "(IOException on Windows, DirectoryNotFoundException on Linux, both caught by the IOException filter) "
+                + "so only the evidence prefix is contractual");
+        }
+        finally
+        {
+            Directory.Delete(parentDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_RepeatedChecksAgainstBrokenMapping_ReuseSingleProbeFileWithoutAccumulating()
+    {
+        // Reproduces the availability hosted service re-checking a persistently broken mapping
+        // every ~5 minutes: the fixed probe filename must be overwritten in place on the SQL
+        // Server volume, not accumulate a new file per check.
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-repeat-client-").FullName;
+        string serverPhysicalStorage = Directory.CreateTempSubdirectory("hu-mapping-repeat-server-").FullName;
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true, serverPhysicalStorage), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+            var serverSideTarget = (IHostUpdateServerSideBackupTarget)target;
+
+            await serverSideTarget.VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+            await serverSideTarget.VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+            await serverSideTarget.VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            Directory.GetFiles(serverPhysicalStorage).Should().ContainSingle(
+                "a fixed, reused probe filename must overwrite in place on every re-check, never accumulate a new file per invocation");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+            Directory.Delete(serverPhysicalStorage, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_StalePrintFarmerVisibleProbeFile_DoesNotFalselyVerifyBrokenMapping()
+    {
+        // Simulates a stale probe file left behind at the PrintFarmer-visible path (e.g. from an
+        // earlier successful verification whose best-effort cleanup failed). If the mapping is
+        // then broken, the engine's write is redirected elsewhere -- but without removing the
+        // stale file first, the read-back would observe it and incorrectly report success.
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-stale-client-").FullName;
+        string serverPhysicalStorage = Directory.CreateTempSubdirectory("hu-mapping-stale-server-").FullName;
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(backupRootDirectory, SqlServerProcessDatabaseBackupTarget.ProbeFileName),
+                "stale probe from an earlier check");
+
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true, serverPhysicalStorage), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().Be(
+                "probe_file_not_visible_from_printfarmer",
+                "a stale leftover file must never be mistaken for this invocation's own round trip");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+            Directory.Delete(serverPhysicalStorage, recursive: true);
+        }
+    }
+
+    [Theory]
+    [InlineData("", "backup_root_directory_not_configured")]
+    [InlineData("relative/backups", "backup_root_directory_not_absolute")]
+    public async Task VerifyVisibleBackupPathMappingAsync_UnconfiguredOrRelativeDirectory_FailsClosedWithoutInvokingSqlcmd(
+        string backupRootDirectory, string expectedEvidence)
+    {
+        var runner = new RecordingProcessRunner();
+        IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+            "database", SqlServerConfig(), runner, TestExecutableResolver,
+            TimeSpan.FromSeconds(30), isExternallyOwned: false,
+            backupRootDirectory: backupRootDirectory);
+
+        string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+        evidence.Should().Be(expectedEvidence);
+        runner.LastFileName.Should().BeNull("an unresolved/misconfigured mapping must never invoke sqlcmd");
+    }
+
+    [Fact]
+    public async Task CreateBackupTarget_SqlServer_StillDelegatesNormalBackupAsyncToInnerTargetWhenWrapped()
+    {
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-delegate-").FullName;
+        try
+        {
+            var runner = new RecordingProcessRunner();
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
+
+            runner.LastFileName.Should().Be(TestExecutableResolver.Resolve("sqlcmd"));
+            runner.LastArguments.Should().Contain(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+        }
+    }
 }
+

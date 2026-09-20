@@ -79,7 +79,9 @@ Dynamically generates `docker-compose.yml` from reusable YAML templates based on
 - `--db-provider` - postgres | sqlserver
 - `--enable-orca-worker` - yes | no (enable distributed slicing)
 - `--include-monitoring`, `--include-telemetry`, `--include-discovery` - optional services
-- `--output-dir` - where to write generated files
+- `--output-dir` - where to write generated files; HTTP-only installer-lab output
+  must use a directory outside the repository root so canonical nginx sources are
+  never modified in place
 
 MySQL and SQLite are rejected because the current Docker release supports
 migration-safe Compose deployments only for PostgreSQL and SQL Server.

@@ -26,6 +26,13 @@ public sealed class HostUpdateExecutionOptions
     /// </summary>
     public string RootDirectory { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Explicit absolute paths to the host tools used by update adapters. Bare executable names
+    /// and ambient PATH lookup are never accepted by the process boundary.
+    /// </summary>
+    public IDictionary<string, string> HostExecutablePaths { get; set; } =
+        new Dictionary<string, string>(StringComparer.Ordinal);
+
     /// <summary>Durable state root (installed-state, journal, lock files): <c>{RootDirectory}/state</c>.</summary>
     public string StateDirectory => Combine("state");
 
@@ -49,7 +56,6 @@ public sealed class HostUpdateExecutionOptions
     [
         "Npgsql.EntityFrameworkCore.PostgreSQL",
         "Microsoft.EntityFrameworkCore.SqlServer",
-        "Microsoft.EntityFrameworkCore.Sqlite",
     ];
 
     /// <summary>Bounded wait for active prints/pending outbox commands to finish naturally during drain.</summary>
@@ -58,12 +64,15 @@ public sealed class HostUpdateExecutionOptions
     public int DrainPollIntervalSeconds { get; set; } = 5;
 
     /// <summary>Bounded wait to prove every registered writer has actually quiesced before backup.</summary>
-    public int FenceProofTimeoutSeconds { get; set; } = 60;
+    public int FenceProofTimeoutSeconds { get; set; } = 321;
 
     public int FencePollIntervalSeconds { get; set; } = 2;
 
     /// <summary>Timeout for each provider-native backup/restore tool invocation.</summary>
     public int BackupTimeoutSeconds { get; set; } = 900;
+
+    /// <summary>Timeout for each digest-pinned target-image migration command.</summary>
+    public int MigrationTimeoutSeconds { get; set; } = 900;
 
     /// <summary>Bounded wait for every readiness/digest health check to report healthy.</summary>
     public int VerifyTimeoutSeconds { get; set; } = 300;
@@ -107,21 +116,15 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>
     /// Writer names (matching <see cref="IFenceableWriter.Name"/>) that must all be present in
-    /// the registered fence coordinator before the executor is considered available. Backfills
-    /// coverage over time as more background writers are fenced (issue #2663); an entry here
-    /// with no corresponding registered <see cref="IFenceableWriter"/> makes the executor
-    /// explicitly <see cref="HostUpdateExecutionAvailabilityState.Unavailable"/> rather than
-    /// silently proceeding to fence only whatever happens to be registered.
+    /// the registered fence coordinator before the executor is considered available. The
+    /// code-owned baseline cannot be removed by configuration; configured entries may only add
+    /// deployment-specific writers. Any required name with no corresponding registered
+    /// <see cref="IFenceableWriter"/> makes the executor explicitly
+    /// <see cref="HostUpdateExecutionAvailabilityState.Unavailable"/> rather than silently
+    /// proceeding to fence only whatever happens to be registered.
     /// </summary>
     public string[] RequiredFencedWriterNames { get; set; } =
-    [
-        "api-admission",
-        "queue-outbox-publisher",
-        "power-reading-prune",
-        "queue-retention-prune",
-        "auto-dispatch",
-        "webhook-delivery",
-    ];
+        [.. HostUpdateExecutionAvailabilityProvider.CodeOwnedRequiredFencedWriterNames];
 
     /// <summary>
     /// Application-owned directories to back up (name to absolute path), matching this host's

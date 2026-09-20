@@ -6,6 +6,7 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 public sealed class HostUpdateExecutorTests
 {
+    private static HostUpdateAutomationPolicy Policy() => new(Enabled: true, Revision: 1);
     private static HostUpdateExecutionRequest Request() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, [
         new("api", "linux-amd64", "sha256:" + new string('a', 64)),
         new("frontend", "linux-amd64", "sha256:" + new string('b', 64)),
@@ -18,7 +19,7 @@ public sealed class HostUpdateExecutorTests
         RequestId = "request-1",
         TrustRoot = "root-1",
         PolicyRevision = 1,
-        PolicyFingerprint = "policy-1",
+        PolicyFingerprint = HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(Policy()).Fingerprint,
         HostPlatform = "linux-amd64",
     };
 
@@ -26,12 +27,27 @@ public sealed class HostUpdateExecutorTests
     [Fact] public void Request_rejects_duplicate_service_ids() { var request = Request() with { Targets = Request().Targets.Select((t, i) => i == 5 ? t with { ServiceId = "svc-1" } : t).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_set_invalid", error); }
     [Fact] public void Request_rejects_noncanonical_platform() { var request = Request() with { HostPlatform = "linux-armv8" }; Assert.False(request.IsValid(out var error)); Assert.Equal("release_binding_invalid", error); }
     [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)); Assert.Single(journal.Read("r")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("r")); } finally { if (File.Exists(path)) { File.Delete(path); } } }
-    [Fact] public async Task Executor_persists_transition_order_and_completion_async() { var steps = new FakeSteps(); var journal = new MemoryJournal(); var executor = new HostUpdateExecutor(steps, journal, new NoopLock()); var result = await executor.ExecuteAsync(Request()); Assert.True(result.Succeeded); Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls); }
+    [Fact] public async Task Executor_persists_transition_order_and_completion_async() { var steps = new FakeSteps(); var journal = new MemoryJournal(); var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())); var result = await executor.ExecuteAsync(Request()); Assert.True(result.Succeeded); Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls); }
+    [Fact]
+    public async Task Executor_rejects_policy_fingerprint_drift_before_execution()
+    {
+        var steps = new FakeSteps();
+        HostUpdateExecutionResult result = await new HostUpdateExecutor(
+            steps,
+            new MemoryJournal(),
+            new NoopLock(),
+            automationPolicyRepository: new InlinePolicyRepository(Policy() with { PollIntervalSeconds = 1200 }))
+            .ExecuteAsync(Request());
+
+        Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
+        Assert.Equal("policy_drifted", result.FailureCode);
+        Assert.Empty(steps.Calls);
+    }
     [Fact]
     public async Task Executor_defers_safe_checkpoint_cancellation_until_after_unsafe_apply()
     {
         var steps = new CancellationObservingSteps();
-        var executor = new HostUpdateExecutor(steps, new MemoryJournal(), new NoopLock());
+        var executor = new HostUpdateExecutor(steps, new MemoryJournal(), new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy()));
         using CancellationTokenSource cancellation = new();
 
         Task<HostUpdateExecutionResult> execution = executor.ExecuteAsync(Request(), cancellation.Token);
@@ -51,12 +67,91 @@ public sealed class HostUpdateExecutorTests
     {
         var journal = new MemoryJournal();
         var failing = new FailingSteps();
-        HostUpdateExecutionResult first = await new HostUpdateExecutor(failing, journal, new NoopLock()).ExecuteAsync(Request());
-        HostUpdateExecutionResult restarted = await new HostUpdateExecutor(new FakeSteps(), journal, new NoopLock()).ExecuteAsync(Request());
+        HostUpdateExecutionResult first = await new HostUpdateExecutor(failing, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())).ExecuteAsync(Request());
+        HostUpdateExecutionResult restarted = await new HostUpdateExecutor(new FakeSteps(), journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())).ExecuteAsync(Request());
 
         Assert.Equal(HostUpdateExecutionState.RecoveryRequired, first.State);
         Assert.Equal(HostUpdateExecutionState.RecoveryRequired, restarted.State);
         Assert.Equal("recovery_required", restarted.FailureCode);
+    }
+
+    [Fact]
+    public async Task Reserve_reliance_ExecutionLockAndJournal_survives_restart_without_reexecution()
+    {
+        string root = Directory.CreateTempSubdirectory("pf-host-update-reserve-").FullName;
+        try
+        {
+            string replayPath = Path.Combine(root, "host-update-replay.json");
+            await File.WriteAllTextAsync(replayPath, HostUpdateReplayPersistenceCodec.Serialize(HostUpdateReplayPersistenceCodec.Empty()));
+            VerifiedHostUpdateCandidate candidate = Candidate();
+            using (var replayBeforeCrash = new FileHostUpdateReplayStore(root, new InMemoryReplayAnchor()))
+            {
+                HostUpdateReplayDecision reservation = await replayBeforeCrash.DecideAsync(candidate, HostUpdateReplayIntent.Reserve, default);
+                Assert.Equal(HostUpdateReplayDisposition.Accepted, reservation.Disposition);
+            }
+
+            string journalPath = Path.Combine(root, "journal.ndjson");
+            string lockPath = Path.Combine(root, "execution.lock");
+            HostUpdateExecutionResult first = await new HostUpdateExecutor(
+                new FailingSteps(),
+                new FileHostUpdateExecutionJournal(journalPath),
+                new FileHostUpdateExecutionLock(lockPath),
+                automationPolicyRepository: new InlinePolicyRepository(Policy()))
+                .ExecuteAsync(Request());
+
+            HostUpdateReplayDecision restartedReservation;
+            using (var replayAfterCrash = new FileHostUpdateReplayStore(root, new InMemoryReplayAnchor()))
+            {
+                restartedReservation = await replayAfterCrash.DecideAsync(candidate, HostUpdateReplayIntent.Reserve, default);
+            }
+            var restartedSteps = new FakeSteps();
+            HostUpdateExecutionResult restarted = await new HostUpdateExecutor(
+                restartedSteps,
+                new FileHostUpdateExecutionJournal(journalPath),
+                new FileHostUpdateExecutionLock(lockPath),
+                automationPolicyRepository: new InlinePolicyRepository(Policy()))
+                .ExecuteAsync(Request());
+
+            Assert.Equal(HostUpdateExecutionState.RecoveryRequired, first.State);
+            Assert.Equal(HostUpdateReplayDisposition.Accepted, restartedReservation.Disposition);
+            Assert.Equal(HostUpdateExecutionState.RecoveryRequired, restarted.State);
+            Assert.Equal("recovery_required", restarted.FailureCode);
+            Assert.Empty(restartedSteps.Calls);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    private static VerifiedHostUpdateCandidate Candidate() => new(
+        "rel-1",
+        new string('b', 40),
+        1,
+        "sha256:" + new string('a', 64),
+        "Stable",
+        CryptographicallyVerified: true,
+        CompatibilityReady: true,
+        InstallationAvailable: true,
+        SafetyPassed: true,
+        MaintenanceWindowOpen: true,
+        IsNewer: true,
+        new HostUpdatePlatformDigests(
+            "sha256:" + new string('1', 64),
+            "sha256:" + new string('2', 64),
+            "sha256:" + new string('3', 64),
+            "sha256:" + new string('4', 64),
+            "sha256:" + new string('5', 64),
+            "sha256:" + new string('6', 64)),
+        TrustRoot: "root-1");
+
+    private sealed class InMemoryReplayAnchor : IHostUpdateReplayAnchor
+    {
+        public Task<long> ReadEpochAsync(CancellationToken ct) => Task.FromResult(0L);
+        public Task<string> ReadStateHashAsync(CancellationToken ct) =>
+            Task.FromResult(Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(
+                System.Text.Encoding.UTF8.GetBytes(HostUpdateReplayPersistenceCodec.Serialize(HostUpdateReplayPersistenceCodec.Empty())))));
+        public Task AdvanceEpochAsync(long epoch, string stateHash, CancellationToken ct) => Task.CompletedTask;
     }
 
 
@@ -106,7 +201,7 @@ public sealed class HostUpdateExecutorTests
             });
             FakeSteps steps = new();
 
-            HostUpdateExecutionResult result = await new HostUpdateExecutor(steps, new FileHostUpdateExecutionJournal(path), new NoopLock()).ExecuteAsync(request);
+            HostUpdateExecutionResult result = await new HostUpdateExecutor(steps, new FileHostUpdateExecutionJournal(path), new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())).ExecuteAsync(request);
 
             Assert.Equal(HostUpdateExecutionState.RecoveryRequired, result.State);
             Assert.Equal("uncertain_side_effect:" + phase + ":reconciler_unavailable", result.FailureCode);
@@ -122,6 +217,12 @@ public sealed class HostUpdateExecutorTests
             }
         }
     }
+    private sealed class InlinePolicyRepository(HostUpdateAutomationPolicy policy) : IHostUpdateAutomationPolicyRepository
+    {
+        public HostUpdatePolicyReadResult Read() => new(true, policy, null);
+        public Task<HostUpdatePolicyReadResult> ReplaceAsync(HostUpdateAutomationPolicy replacement, long expectedRevision, CancellationToken ct) => Task.FromResult(new HostUpdatePolicyReadResult(true, replacement, null));
+    }
+
     private sealed class CancellationObservingSteps : IHostUpdateExecutionSteps
     {
         public List<string> Calls { get; } = [];

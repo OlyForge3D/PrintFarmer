@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -50,16 +51,65 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     IReadOnlyList<IHostUpdateBackupTarget> backupTargets,
     IReadOnlyList<IFenceableWriter> fenceableWriters,
     IHostUpdateProcessRunner processRunner,
-    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore) : IHostUpdateExecutionAvailabilityProvider
+    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore,
+    IHostUpdateExecutableResolver executableResolver) : IHostUpdateExecutionAvailabilityProvider
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
-    private static readonly string[] CodeOwnedUnavailableFacilities =
+    internal static readonly ImmutableArray<string> CodeOwnedRequiredFencedWriterNames =
     [
-        "target_image_migration_runner_unavailable",
-        "queue_reconciliation_writer_fence_unavailable",
-        "sql_server_visible_backup_path_mapping_unverified",
+        "api-admission",
+        "queue-outbox-publisher",
+        "power-reading-prune",
+        "queue-retention-prune",
+        "backend-start-command-consumer",
+        "backend-control-command-consumer",
+        "bed-clear-acknowledgement-expiry",
+        "auto-dispatch",
+        "webhook-delivery",
+        "queue-reconciliation",
     ];
+
+    /// <summary>
+    /// Drops null/whitespace-only entries and de-duplicates while preserving first-occurrence
+    /// order. Does not trim surrounding whitespace from otherwise-valid names: an untrimmed name
+    /// simply fails to match anywhere else in the system, so the deployment fails closed as
+    /// unavailable rather than silently normalizing a typo'd name into a different one.
+    /// </summary>
+    /// <remarks>
+    /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
+    /// runtime availability depend on case variants remaining distinct.
+    /// </remarks>
+    internal static ImmutableArray<string> NormalizeConfiguredRequiredFencedWriterNames(
+        string[]? configuredWriterNames) =>
+        [.. (configuredWriterNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)];
+
+    /// <summary>Determines whether <paramref name="candidateName"/> is present in <paramref name="writerNames"/>.</summary>
+    /// <remarks>
+    /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
+    /// effective-set construction depend on case variants remaining distinct.
+    /// </remarks>
+    internal static bool ContainsRequiredFencedWriterName(
+        ImmutableArray<string> writerNames,
+        string candidateName) =>
+        writerNames.Contains(candidateName, StringComparer.Ordinal);
+
+    private static ImmutableArray<string> GetEffectiveRequiredFencedWriterNames(
+        string[]? configuredWriterNames)
+    {
+        ImmutableArray<string> normalizedConfiguredWriterNames =
+            NormalizeConfiguredRequiredFencedWriterNames(configuredWriterNames);
+        return
+        [
+            .. CodeOwnedRequiredFencedWriterNames,
+            .. normalizedConfiguredWriterNames.Where(
+                name => !ContainsRequiredFencedWriterName(
+                    CodeOwnedRequiredFencedWriterNames,
+                    name)),
+        ];
+    }
 
     public async Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken)
     {
@@ -109,13 +159,44 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             reasons.Add("no_backup_targets_configured");
         }
 
-        foreach (string unavailableFacility in CodeOwnedUnavailableFacilities.Concat(options.RequiredUnavailableFacilities).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal))
+        // sql_server_visible_backup_path_mapping_unverified (issue #2788): only meaningful for a
+        // deployment that actually has a SQL Server-backed backup target. Never a blanket
+        // config-presence assertion -- each such target must positively prove, via a real
+        // server-side write/client-side read round trip, that PrintFarmer's own visible backup
+        // directory and the SQL Server engine's visible directory refer to the same physical
+        // location before this facility is considered resolved for this host.
+        foreach (IHostUpdateBackupTarget target in backupTargets)
+        {
+            if (target is not IHostUpdateServerSideBackupTarget serverSideTarget)
+            {
+                continue;
+            }
+
+            string? unverifiedEvidence;
+            try
+            {
+                unverifiedEvidence = await serverSideTarget.VerifyVisibleBackupPathMappingAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                unverifiedEvidence = $"probe_exception:{exception.GetType().Name}";
+            }
+
+            if (unverifiedEvidence is not null)
+            {
+                reasons.Add($"facility_unavailable:sql_server_visible_backup_path_mapping_unverified:{unverifiedEvidence}");
+            }
+        }
+
+        foreach (string unavailableFacility in options.RequiredUnavailableFacilities
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal))
         {
             reasons.Add($"facility_unavailable:{unavailableFacility}");
         }
 
         var fencedNames = new HashSet<string>(fenceableWriters.Select(w => w.Name), StringComparer.Ordinal);
-        string[] missingWriters = options.RequiredFencedWriterNames
+        string[] missingWriters = GetEffectiveRequiredFencedWriterNames(options.RequiredFencedWriterNames)
             .Where(name => !fencedNames.Contains(name))
             .ToArray();
         if (missingWriters.Length > 0)
@@ -131,16 +212,72 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
+        var requiredTools = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "docker",
+        };
+        foreach (IHostUpdateMigrationTarget target in migrationTargets)
+        {
+            string providerName;
+            try
+            {
+                providerName = await target.GetProviderNameAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                reasons.Add($"database_provider_inspection_failed:{target.ContextName}:{exception.GetType().Name}");
+                continue;
+            }
+
+            switch (providerName)
+            {
+                case "Microsoft.EntityFrameworkCore.Sqlite":
+                    reasons.Add($"database_provider_tooling_unsupported:{target.ContextName}:{providerName}");
+                    break;
+                case "Npgsql.EntityFrameworkCore.PostgreSQL":
+                    requiredTools.Add("pg_dump");
+                    requiredTools.Add("pg_restore");
+                    break;
+                case "Microsoft.EntityFrameworkCore.SqlServer":
+                    requiredTools.Add("sqlcmd");
+                    break;
+                case "":
+                    reasons.Add($"database_provider_not_configured:{target.ContextName}");
+                    break;
+                default:
+                    reasons.Add($"database_provider_tooling_unsupported:{target.ContextName}:{providerName}");
+                    break;
+            }
+        }
+
+        foreach (string toolName in requiredTools)
+        {
+            if (!options.HostExecutablePaths.TryGetValue(toolName, out string? configuredPath) ||
+                string.IsNullOrWhiteSpace(configuredPath) ||
+                !Path.IsPathRooted(configuredPath))
+            {
+                reasons.Add($"host_executable_not_configured:{toolName}");
+            }
+        }
+
         try
         {
             HostUpdateProcessResult result = await processRunner.RunAsync(
-                "docker",
+                executableResolver.Resolve("docker"),
                 ["version", "--format", "{{.Server.Version}}"],
                 TimeSpan.FromSeconds(options.ProcessDefaultTimeoutSeconds),
                 cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
                 reasons.Add("docker_runtime_unavailable");
+            }
+        }
+        catch (InvalidOperationException exception) when (exception.Message.StartsWith("host_update_executable_", StringComparison.Ordinal))
+        {
+            const string dockerNotConfiguredReason = "host_executable_not_configured:docker";
+            if (!reasons.Contains(dockerNotConfiguredReason, StringComparer.Ordinal))
+            {
+                reasons.Add(dockerNotConfiguredReason);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

@@ -14,6 +14,9 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "ci:typecheck-app": "node --test ./scripts/tests/test-typecheck-app.mjs && npm run typecheck:app",
+    "ci:typecheck-tests": "node --test ./scripts/tests/test-typecheck-tests.mjs && npm run typecheck:test",
+    "ci:typecheck-src-coverage": "node --test ./scripts/tests/test-typecheck-src-coverage.mjs && npm run typecheck:src-coverage",
     "lint": "eslint .",
     "lint:inventory-inert-state": "node ./eslint-rules/inventory-inert-state-variants.js",
     "check:empty-attrs": "node ./scripts/check-empty-attrs.cjs",
@@ -21,6 +24,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
+    "pretest:coverage": "npm run ci:typecheck-tests && npm run ci:typecheck-app && npm run ci:typecheck-src-coverage",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "test:e2e": "playwright test",
@@ -32,6 +36,9 @@
     "test:e2e:moonraker": "playwright test e2e/emulator/ --grep Moonraker --workers=1",
     "test:e2e:monolith-smoke": "playwright test e2e/monolith-smoke/ --project=chromium --workers=1",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
+    "typecheck:test": "node ./scripts/typecheck-tests.mjs",
+    "typecheck:app": "node ./scripts/typecheck-app.mjs",
+    "typecheck:src-coverage": "node ./scripts/typecheck-src-coverage.mjs",
     "test:e2e:list": "playwright test --list",
     "test:e2e:update-snapshots": "playwright test --update-snapshots",
     "icons": "dotnet run --project ../../tools/IconGen/IconGen.csproj"

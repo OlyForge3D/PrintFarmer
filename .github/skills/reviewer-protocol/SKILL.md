@@ -34,6 +34,20 @@ When a team member has a **Reviewer** role:
   get to self-revise for that artifact.
 - If the Reviewer approves, work proceeds normally.
 
+### Follow-On Review Dispatch
+
+For follow-on panel rounds, follow the canonical
+[Delta-Only Panel Rereview](../../copilot-instructions.md#delta-only-panel-rereview)
+scope. Resume the same reviewer session first when supported; otherwise supply
+its compact immutable checkpoint under
+[Findings and Reviewer Checkpoints](../../copilot-instructions.md#findings-and-reviewer-checkpoints).
+Include that reviewer's prior reviewed head, new head, all unresolved findings,
+and correction summary; require the complete endpoint delta and fresh current-head verdict.
+Route distinct primary lenses under
+[Risk-Based Review Scope](../../copilot-instructions.md#risk-based-review-scope);
+invoke the third reviewer only for disagreement, a critical finding, or unresolved
+cross-domain risk. An additional approval never erases active rejection.
+
 ### Strict Lockout Mechanics (once invoked)
 
 These rules apply only after a Reviewer has explicitly invoked lockout per the canonical
@@ -67,18 +81,23 @@ rule — they do not apply to an ordinary rejection:
 6. Keaton reviews v2
 
 **Example 3: Deadlock handling**
-1. Fenster writes module → rejected
+1. Fenster writes module → rejected with explicit lockout: "A different agent must revise this"
 2. Verbal revises → rejected
 3. Hockney revises → rejected
 4. All 3 eligible agents are now locked out
 5. Coordinator: "All eligible agents have been locked out. Escalating to user: [artifact details]"
 
 **Example 4: Reviewer accidentally names original author**
-1. Fenster writes module → rejected
-2. Hockney says: "Fenster should fix the error handling"
+1. Fenster writes module → rejected with explicit lockout: "A different agent must revise this"
+2. Hockney then accidentally says: "Fenster should fix the error handling"
 3. Coordinator: "Fenster is locked out as the original author. Please name a different agent."
 4. Hockney: "Verbal, then"
 5. Coordinator spawns Verbal
+
+**Example 5: Ordinary rejection, no lockout**
+1. Fenster writes module → REQUEST_CHANGES: "Fix the error handling"
+2. Coordinator routes the finding back to Fenster with its stable ID and closure criteria
+3. Fenster revises; the reviewer checks the complete delta and posts fresh current-head evidence
 
 ## Anti-Patterns
 

@@ -105,7 +105,8 @@ or rejection from a PR that never had squad evidence.
 
 - `REVIEWED` and `APPROVED` are valid merge evidence only for the PR's exact
   current head.
-- `CHANGES_REQUESTED` routes the findings back to the original author.
+- `CHANGES_REQUESTED` routes the findings back to the original author. Dispatch
+  follow-on panel rounds using [Delta-Only Panel Rereview](copilot-instructions.md#delta-only-panel-rereview).
 - `NOT_APPLICABLE` means the PR does not carry the `squad` label, so the gate did
   not evaluate it and no review evidence exists. It is **not** a passing review.
   Do not merge it unattended — leave it for a human, or add the `squad` label
@@ -113,7 +114,14 @@ or rejection from a PR that never had squad evidence.
 - `SUPERSEDED`, `MISSING`, or `INVALID` is not a review record and does not
   preserve an old rejection. Require fresh panel records naming the new head,
   or an administrator override.
-- A current administrator GitHub approval remains valid merge evidence.
+- A verified `APPROVED` owner override takes precedence over agent rejections
+  or missing panel evidence; do not separately veto it using old agent findings
+  or GitHub's aggregate `reviewDecision`. Apply the current-state precedence in
+  [Repository verdict evidence](copilot-instructions.md#repository-verdict-evidence).
+  CI, draft/scope checks, and the exact-head merge guard still apply.
+  Preserve the status's `dissent=N; short=N` counts and linked findings in the
+  handoff; overridden dissent is not resolved review. The workflow audit names
+  the dissenters and panel members without approval.
 - Never infer a review from a free-text PR comment. Only the canonical
   `Squad-Reviewer:` / `Squad-Verdict:` / `Squad-Head-SHA:` block, evaluated by
   `.github/workflows/squad-review-verdict.yml`, produces the trusted
@@ -129,12 +137,13 @@ or rejection from a PR that never had squad evidence.
     merge on it; someone unverifiable tried to assert a review.
   - `fork PR needs a repository administrator` — fork PR, agent records are not
     read at all. Only a real administrator approval can clear it.
-  - `have <n>/<required>[, missing <agents>][ (stale at <agent>@<sha>, ...)]` —
+  - `have <n>/<required>[, choose <agents>][ (stale at <agent>@<sha>, ...)]` —
     too few accepted records for this change's scope. Match this as a **pattern,
-    not a fixed string**: the `missing` and `stale at` clauses each appear only
-    when they apply, so real forms include `have 1/3, missing hicks+vasquez`,
+    not a fixed string**: the `choose` and `stale at` clauses each appear only
+    when they apply, so real forms include `have 1/2, choose hicks+vasquez`,
     `have 0/1 (stale at dallas@<sha>)`, and
-    `have 0/3, missing bishop+hicks+vasquez (stale at bishop@<sha>, ...)`.
+    `have 0/2, choose bishop+hicks+vasquez (stale at bishop@<sha>, ...)`.
+    `choose` lists candidates for the remaining quorum, not mandatory individuals.
     A `stale at` clause means those reviewers reviewed a superseded head.
   - `reviewer <agent> is the PR author` — the only record came from the author.
   Act on the named condition — do not park the PR, and do not route it back to
@@ -150,6 +159,14 @@ or rejection from a PR that never had squad evidence.
   GitHub approval as fallback. Exit `4` is deliberately **not** `0`: it means no
   review was required because the PR is out of scope, which is never the same as
   a review having happened. Do not merge on it.
+
+Draft PRs may open before review. Readiness and merge require CI and verified
+current-head evidence under [Risk-Based Review Scope](copilot-instructions.md#risk-based-review-scope).
+Route distinct primary lenses and invoke the third reviewer only for disagreement,
+a critical finding, or unresolved cross-domain risk. Resume prior reviewer sessions
+when supported; otherwise pass compact immutable checkpoints and the deduplicated
+finding ledger under [Findings and Reviewer Checkpoints](copilot-instructions.md#findings-and-reviewer-checkpoints).
+Do not replace a rejecting reviewer just to obtain an approval.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)

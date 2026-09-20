@@ -34,6 +34,33 @@ public interface IHostUpdateBackupTarget
     Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Implemented by a backup target whose write is actually performed by a separate server
+/// process's own engine, rather than by the client process invoking the backup command
+/// (issue #2788). SQL Server's <c>BACKUP DATABASE ... TO DISK</c> is the motivating case:
+/// <c>sqlcmd</c> merely sends the T-SQL statement over the wire, but the SQL Server engine
+/// itself -- typically running in its own container, with its own filesystem view -- performs
+/// the actual write. A successfully *executed* backup command therefore proves nothing about
+/// whether PrintFarmer can ever read the resulting file back for verification or restore; only
+/// an explicit round-trip probe does. This is distinct from <c>sqlite3</c> (runs in-process/
+/// same container) and <c>pg_dump</c> (a client tool that itself writes the dump file locally),
+/// neither of which has this failure mode.
+/// </summary>
+public interface IHostUpdateServerSideBackupTarget
+{
+    /// <summary>
+    /// Performs a real, lightweight round-trip probe: instructs the server engine to write a
+    /// small marker file into the single configured backup directory, then confirms
+    /// PrintFarmer can read that same physical file back from that same directory (there is no
+    /// separate "server-visible" vs. "PrintFarmer-visible" path — production backups use one
+    /// directory, so verification must exercise exactly that one). Returns
+    /// <see langword="null"/> when the mapping is verified; otherwise returns an
+    /// explicit, fail-closed evidence suffix (never assumes success from configuration
+    /// presence alone, and never assumes a default path when unconfigured).
+    /// </summary>
+    Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>One file recorded, checksummed, in a completed backup manifest.</summary>
 public sealed record HostUpdateBackupManifestFile(string RelativePath, string Sha256, long Length);
 
@@ -134,7 +161,7 @@ public sealed class ProcessDatabaseBackupTarget(
     string name,
     bool isExternallyOwned,
     IHostUpdateProcessRunner processRunner,
-    string fileName,
+    Func<string> resolveFileName,
     Func<string, IReadOnlyList<string>> buildArguments,
     TimeSpan timeout,
     IReadOnlyDictionary<string, string>? environment = null) : IHostUpdateBackupTarget
@@ -146,7 +173,7 @@ public sealed class ProcessDatabaseBackupTarget(
     public async Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken)
     {
         HostUpdateProcessResult result = await processRunner.RunAsync(
-            fileName,
+            resolveFileName(),
             buildArguments(destinationDirectory),
             timeout,
             cancellationToken,

@@ -31,6 +31,10 @@ missing signed feed must not be advertised as ready. The production GitHub
 metadata-provider/discovery adapter is read-only evidence input; it does not
 make automatic scheduling or installation effective without the separate
 protected admission, readiness and executor gates described below.
+Focused signed-update discovery tests cover pagination, draft filtering, exact
+channel/tag/workflow identity, immutable manifest bytes, malformed candidates,
+bounded asset URLs, and rejection of channel-matching tags with inverted
+prerelease metadata.
 
 ### Active host-update scheduler and execution policy (#2666, 2026-09-17)
 
@@ -108,10 +112,63 @@ mutation and again immediately before the `gh release upload` call, so nothing
 between those workflow steps and the actual upload can present an unsigned or
 mismatched manifest as the release's signed contract. Existing
 unsigned releases remain manual-only, including legacy `v0.2.3-insider.1` and
-`v0.2.3-insider.2`; future signed `0.x.y-insider.N` releases are
-managed-update eligible. A valid signature authenticates the publisher and exact
-manifest bytes; it does not authorize or implement apply, installation,
-active-print handling, staging, recovery, or runtime safety.
+`v0.2.3-insider.2`. The first published signed insider candidate is
+`v0.2.3-insider.4`; it is a valid distribution artifact, but publication alone
+does not make an older installed host managed-update eligible. A valid signature
+authenticates the publisher and exact manifest bytes; it does not authorize or
+implement apply, installation, active-print handling, staging, recovery, or
+runtime safety.
+
+### Unsigned legacy installations: permanent manual-only decision
+
+Unsigned legacy installations do not have a trust bootstrap. Operator assertion,
+an unsigned manifest, a mutable image reference, or a matching version string
+cannot establish managed eligibility and must never be treated as a verified
+release. Historical releases are not retroactively signed.
+
+Threat-model status is intentionally explicit:
+- The update machinery is implemented and wired: the scheduler, executor adapter,
+  candidate cache, cancellation bridge, and manual execute/recover entry points
+  are all present.
+- Production admission is fail-closed in all configurations: `FeatureServicesStartup.cs`
+  registers `IHostUpdateAdmissionFence -> UnavailableHostUpdateAdmissionFence` outside the
+  `hostStateEnabled` gate, so the request path remains closed even when host-state settings are enabled.
+- No live end-to-end execution evidence exists: current test and model coverage does not
+  include a full signed-release acceptance run on a real host.
+- No deployment authority is granted: nothing in this document authorizes rollout,
+  constitutes owner acceptance, or declares the path ready for deployment.
+
+Nothing in this document grants authority to deploy, constitutes owner acceptance, or declares the path ready for rollout.
+
+Inventory and executor availability are separate fail-closed boundaries. Inventory evaluation
+checks signed-release evidence state; `HostUpdateExecutionAvailabilityProvider.CheckAsync`
+checks storage, journal health, backup and migration targets, fenced writers, executables,
+and Docker reachability without any signed-release input. The request resolver
+(`IHostUpdateExecutionRequestResolver`) is where signed evidence is consumed for admission.
+
+The supported path is deliberately one-time and manual: install a current
+signed release through the documented deployment procedure, then refresh the
+inventory. The signed release manifest and its verified identity can establish
+the evidence required for managed eligibility from that point forward. Waiting
+for an executor facility fix does not change an unsigned installation's trust
+state, and downgrade is not a recovery path.
+
+The unsigned legacy installation condition is reported as
+`SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
+`facility_unavailable:*` evidence. The former is manual-only while signed release
+identity evidence is unavailable. If the installation is signed but the binding metadata is
+missing or invalid (for example a null `VerificationSource`, wrong branch/tag/channel,
+unpeeled SHA, self-report, or incorrect canonical version), repairing that metadata can clear
+the manual-only marker without a reinstall. Clearing the marker does not establish managed
+eligibility; absent blocking compatibility or channel evidence, the evaluator remains
+`NotManaged`. The latter identifies actionable deployment evidence: an explicit
+`RequiredUnavailableFacilities` override or an unverified SQL Server visible-backup-path
+mapping. Clearing executor facility blockers establishes host execution capability only; it
+does not satisfy or bypass trust-state verification. A genuinely unsigned installation that
+predates signed publication has no verified signed release to repair, so the supported
+transition is one manual installation of a current signed release followed by inventory
+refresh. Neither condition authorizes execution, and both remain fail-closed until the
+deployment issue is resolved.
 
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
@@ -143,9 +200,15 @@ evidence was complete.
 The `Eligible`, `Blocked`, `Unknown`, and `NotManaged` readiness lifecycle is a
 pure evidence evaluation. `Eligible` requires a complete signature-verified
 release and fresh, complete compatible observations for every required service,
-including platform, migration head, and worker requirements. Until release
-distribution supplies a verified target, an evaluator returns `NotManaged`; the
-live API does not currently emit readiness and does not offer or install software.
+including platform, migration head, and worker requirements. While release
+distribution has not supplied a verified target, the inventory evaluator's
+state is `NotManaged`; the accompanying reasons explain why and are carried
+alongside the state, not fused into it — `ManagedEligibilityNotEstablished`
+when no blocking evidence exists, plus `SignedReleaseEvidenceUnavailableManualOnly`
+for an unsigned legacy installation. If blocking compatibility or channel
+evidence is also present, the state is `Blocked` instead and
+`ManagedEligibilityNotEstablished` is not among the reasons. The live API does
+not currently emit readiness and does not offer or install software.
 
 Deliver **read-only installed-version inventory first**, followed by compatible
 release alerts. Make an **operator-approved, host-run updater** the first
@@ -163,6 +226,31 @@ release-workflow, release-guide and test changes inspected on 2026-09-12.
 “Current” denotes audited behavior or explicitly identified local implementation.
 Target updater contracts, routes and remaining delivery increments are
 **proposed**; channel-policy decisions fix their defaults and safeguards.
+
+### Issue #2757 acceptance evidence (2026-09-19)
+
+The signed-publication boundary is evidenced by the successful
+`v0.2.3-insider.4` release, including `update-manifest.json` and its Sigstore
+bundle. The following claims remain intentionally separate:
+
+| Area | Current evidence | Status |
+| --- | --- | --- |
+| GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. The prerelease-metadata rejection path is not represented by the current fixtures. | Covered by focused tests; prerelease mismatch evidence remains pending |
+| Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
+| Legacy installation transition | An authenticated insider.2 lab still reports the `NotManaged` state with the `ManagedEligibilityNotEstablished` reason (the state and reason are independent — a `NotManaged` result carries this reason only when no blocking evidence is also present); that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. The supported transition is a one-time manual installation of a current signed release, followed by inventory refresh; no protected bootstrap or operator assertion is supported. | Manual operator action required |
+| Apply and recovery | There is no code-owned blanket unavailability list; production availability closes on concrete runtime evidence, including missing fenced writers, unverified SQL Server backup-path mapping, unsupported provider tooling, missing audited `HostExecutablePaths`, or an unreachable Docker runtime. `RequiredUnavailableFacilities` remains an explicit operator override. Separately, unsigned legacy installs remain `NotManaged` (or `Blocked`, if blocking compatibility or channel evidence is also present) while signed-release identity evidence is unavailable; a current signed release clears the manual-only reason but does not itself create an `Eligible` evaluator state. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Runtime prerequisites implemented; live execution and recovery evidence pending |
+| Automatic policy and UI execution | As of `ce8f4c182`, Update Now and automatic controls render disabled with no execute callback wired (`InstallerUpdatesExperience.tsx`); no live execution has been demonstrated end-to-end. | Blocked |
+
+Do not describe insider.4 publication as an end-to-end update acceptance run.
+The remaining legacy-install acceptance evidence is the documented one-time
+manual installation of a current signed release, followed by inventory refresh;
+it is not a supported trust bootstrap. Separate execution acceptance requires a
+signed release whose images differ from the installed images, followed by
+confirmation, progress, completion, and an induced interruption with
+restoration. The provider/topology matrix must include the supported shared
+database case and explicitly record the split-database and unsupported-provider
+fail-closed outcomes. Automatic updates must remain opt-in and disabled until
+the policy and executor/UI integration are implemented and observed.
 
 ### Host updater foundation (#2662)
 
@@ -230,7 +318,8 @@ migration, apply, verification, and recovery. Issue #2666 owns request
 integration and scheduling.
 
 **Issue #2663 implementation status:** concrete, repository-appropriate step
-adapters exist for every stage — preflight (`HostUpdatePreflightCheck`), drain
+adapters are present for the designed stages, but production execution is not
+available. The adapters cover preflight (`HostUpdatePreflightCheck`), drain
 (`HostUpdateDrainCoordinator`, bounded-polling active prints/outbox work rather
 than cancelling), fence (`HostUpdateFenceCoordinator`, proving the durable admission
 gate, the queue outbox publisher, `PowerReadingPruneService`,
@@ -238,8 +327,11 @@ gate, the queue outbox publisher, `PowerReadingPruneService`,
 backup (`HostUpdateBackupCoordinator` plus provider-native
 `HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
 closed for externally-owned databases and unexpectedly missing required owned
-directories), migration (`HostUpdateMigrationCoordinator` wrapping the existing
-`ProviderAwareMigrationRunner` under the executor's own lock), apply
+directories), migration (`HostUpdateMigrationCoordinator` with
+`DbContextMigrationTarget<T>`, which explicitly throws through the
+`HostUpdateMigrationStep.cs` implementation until a target-image/dedicated
+migration runner exists; the current/old API assembly's
+`ProviderAwareMigrationRunner` is not used for forward updates), apply
 (`HostUpdateImageApplier`, staging pinned `repository@sha256` images before compose
 mutation and applying with `docker compose up -d --no-build --pull never`), verify
 (`HostUpdateHealthVerifier`, exact configured service set, exact running digests,
@@ -255,7 +347,15 @@ of it is wired through production DI (`HostUpdateExecutionStartup.AddHostUpdateE
 behind a manual, permission-gated admin API (`HostUpdateController`) with no automatic
 scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter table,
 the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
-contract a scheduler must poll before ever invoking the executor. The production executor keeps availability closed for explicit operator-configured `RequiredUnavailableFacilities`, but no longer seeds #2663 placeholders by default: bridge/webhook delivery is fenced, and migration/apply crash uncertainty is reconciled only from concrete provider/container evidence after a `:before` marker without the matching `:after` marker.
+contract a scheduler must poll before ever invoking the executor. The production
+executor keeps availability closed for explicit operator-configured
+`RequiredUnavailableFacilities`; there is no code-owned blanket unavailability list,
+so built-in readiness is determined by concrete runtime probes and required writer
+coverage.
+Bridge/webhook delivery is
+fenced, and migration/apply crash uncertainty is reconciled only from concrete
+provider/container evidence after a `:before` marker without the matching `:after`
+marker.
 On process restart, `HostUpdateExecutionAvailabilityProvider` now scans the
 durable journal for any release left mid-flight or in `RecoveryRequired`
 without a confirmed `RolledBack` outcome and immediately re-closes every
@@ -864,7 +964,8 @@ Proposed check policy, subject to approval:
   signed channel-local sequence for anti-replay, not a replacement comparator.
   Tags are discovery hints, never equality/provenance proof.
   Pins block execution and label a newer candidate as policy-held. Channel
-  changes never silently downgrade; custom/unrecognized builds are `NotManaged`.
+  changes never silently downgrade; custom/unrecognized builds are `NotManaged` (or
+  `Blocked`, if blocking compatibility or channel evidence is also present).
   Cache, dismissal and in-flight results are keyed by installation policy
   revision and channel; durable replay state is independently keyed by enrolled
   trust root and channel as above. A late response from the previous selection

@@ -1,11 +1,14 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.Queue;
 
@@ -32,15 +35,40 @@ namespace Farm.Infrastructure.Services.Queue;
 /// </summary>
 public sealed class BackendStartCommandConsumerService(
     IServiceScopeFactory scopeFactory,
-    ILogger<BackendStartCommandConsumerService> logger) : BackgroundService
+    ILogger<BackendStartCommandConsumerService> logger,
+    IOptions<BackendTimeoutSettings> backendTimeoutSettings,
+    BackendStartCommandConsumerFenceFlag? hostUpdateFence = null,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(15);
+
+    public static readonly TimeSpan DispatchCompletionMargin = TimeSpan.FromSeconds(1);
+
+    public static readonly TimeSpan IterationDeadline = TimeSpan.FromSeconds(310);
+
+    public static readonly TimeSpan CancellationCleanupDeadline = TimeSpan.FromSeconds(4);
+
+    public static readonly TimeSpan OutcomePersistenceDeadline = TimeSpan.FromSeconds(4);
+
+    public static readonly TimeSpan FenceAcknowledgementMargin = TimeSpan.FromSeconds(1);
+
+    public static readonly TimeSpan RequiredFenceProofDuration =
+        IterationDeadline +
+        CancellationCleanupDeadline +
+        OutcomePersistenceDeadline +
+        FenceAcknowledgementMargin;
+
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
         PropertyNameCaseInsensitive = true,
     };
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly TimeSpan _minimumDispatchWindow =
+        GetMinimumDispatchWindow(
+            (backendTimeoutSettings ?? throw new ArgumentNullException(nameof(backendTimeoutSettings))).Value);
 
     private const int MaxAttempts = 10;
     private const string CommandEventType = BedClearAcknowledgementService.BackendStartCommandEventType;
@@ -59,6 +87,14 @@ public sealed class BackendStartCommandConsumerService(
         {
             try
             {
+                if (hostUpdateFence is not null &&
+                    await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+                {
+                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 await ProcessPendingCommandsAsync(stoppingToken);
             }
             catch (OperationCanceledException)
@@ -70,10 +106,30 @@ public sealed class BackendStartCommandConsumerService(
                 logger.LogError(ex, "[BackendStartConsumer] Error processing backend-start commands");
             }
 
-            await Task.Delay(PollInterval, stoppingToken);
+            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+            }
         }
 
         logger.LogInformation("[BackendStartConsumer] Durable backend-start command consumer stopped");
+    }
+
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
+        while (_timeProvider.GetUtcNow() < until)
+        {
+            if (hostUpdateFence is not null &&
+                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -88,7 +144,7 @@ public sealed class BackendStartCommandConsumerService(
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            DateTime staleCutoff = DateTime.UtcNow - StaleLeaseAge;
+            DateTime staleCutoff = _timeProvider.GetUtcNow().UtcDateTime - StaleLeaseAge;
 
             // Rows whose backend outcome is UNKNOWN are deliberately excluded: they may have
             // been delivered, so re-running them could double-start a printer. They stay
@@ -111,7 +167,7 @@ public sealed class BackendStartCommandConsumerService(
                 {
                     evt.Status = QueueOutboxEventStatus.Pending;
                     evt.LastError = "Recovered from stale lease (previous process crash).";
-                    evt.RetryAfterUtc = DateTime.UtcNow + PollInterval;
+                    evt.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime + PollInterval;
 
                     logger.LogWarning(
                         "[BackendStartConsumer] Stale lease recovered: EventId={EventId} Job={JobId} AttemptCount={Count}",
@@ -123,6 +179,9 @@ public sealed class BackendStartCommandConsumerService(
                 await db.SaveChangesAsync(ct);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "[BackendStartConsumer] Error recovering stale leases");
@@ -131,28 +190,59 @@ public sealed class BackendStartCommandConsumerService(
 
     internal async Task ProcessPendingCommandsAsync(CancellationToken ct)
     {
-        await RecoverStaleLeasesAsync(ct);
-        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        // Capture the start before arming the timer. This guarantees elapsed time is never
+        // shorter than the CTS lifetime, so the remaining-window guard cannot miss expiry.
+        long iterationStarted = _timeProvider.GetTimestamp();
+        using var timeout = new CancellationTokenSource(IterationDeadline, _timeProvider);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
 
-        DateTime now = DateTime.UtcNow;
-        List<QueueDispatchOutbox> pending = await db.QueueDispatchOutbox
-            .Where(e =>
-                e.EventType == CommandEventType &&
-                e.Status == QueueOutboxEventStatus.Pending &&
-                (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
-            .OrderBy(e => e.Sequence)
-            .Take(10)
-            .ToListAsync(ct);
-
-        if (pending.Count == 0)
+        try
         {
-            return;
+            await RecoverStaleLeasesAsync(deadline.Token);
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+            List<QueueDispatchOutbox> pending = await db.QueueDispatchOutbox
+                .Where(e =>
+                    e.EventType == CommandEventType &&
+                    e.Status == QueueOutboxEventStatus.Pending &&
+                    (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
+                .OrderBy(e => e.Sequence)
+                .Take(10)
+                .ToListAsync(deadline.Token);
+
+            if (pending.Count == 0)
+            {
+                return;
+            }
+
+            foreach (QueueDispatchOutbox evt in pending)
+            {
+                TimeSpan remaining =
+                    IterationDeadline - _timeProvider.GetElapsedTime(iterationStarted);
+                if (remaining < _minimumDispatchWindow)
+                {
+                    logger.LogWarning(
+                        "[BackendStartConsumer] Iteration deadline window exhausted; deferring {Count} command(s)",
+                        pending.Count - pending.IndexOf(evt));
+                    break;
+                }
+
+                await ProcessSingleCommandAsync(
+                    scope,
+                    db,
+                    evt,
+                    deadline.Token,
+                    ct);
+            }
         }
-
-        foreach (QueueDispatchOutbox evt in pending)
+        catch (OperationCanceledException) when (
+            timeout.IsCancellationRequested &&
+            !ct.IsCancellationRequested)
         {
-            await ProcessSingleCommandAsync(scope, db, evt, ct);
+            logger.LogInformation(
+                "[BackendStartConsumer] Iteration deadline reached during command dispatch; remaining commands deferred");
         }
     }
 
@@ -160,7 +250,8 @@ public sealed class BackendStartCommandConsumerService(
         AsyncServiceScope scope,
         AppDbContext db,
         QueueDispatchOutbox evt,
-        CancellationToken ct)
+        CancellationToken iterationToken,
+        CancellationToken stoppingToken)
     {
         // ===================================================================
         // Step 1: Deserialize payload. Dead-letter on corrupt payload.
@@ -180,10 +271,10 @@ public sealed class BackendStartCommandConsumerService(
                 evt.Id);
             evt.Status = QueueOutboxEventStatus.DeadLettered;
             evt.LastError = $"Invalid payload JSON: {jsonEx.Message}"[..Math.Min(jsonEx.Message.Length + 24, 2047)];
-            evt.CompletedAtUtc = DateTime.UtcNow;
+            evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
             await SetBedClearCommandStatusAsync(
-                db, evt.Id, BedClearCommandStatus.Rejected, ct);
-            await db.SaveChangesAsync(ct);
+                db, evt.Id, BedClearCommandStatus.Rejected, iterationToken);
+            await db.SaveChangesAsync(iterationToken);
             return;
         }
 
@@ -196,13 +287,13 @@ public sealed class BackendStartCommandConsumerService(
             evt.LastError =
                 "BackendStartCommand payload is missing required fields " +
                 "(jobId, actorSubject, acknowledgementKey).";
-            evt.CompletedAtUtc = DateTime.UtcNow;
+            evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
             await SetBedClearCommandStatusAsync(
-                db, evt.Id, BedClearCommandStatus.Rejected, ct);
+                db, evt.Id, BedClearCommandStatus.Rejected, iterationToken);
             logger.LogError(
                 "[BackendStartConsumer] Event {EventId} has incomplete payload — dead-lettered",
                 evt.Id);
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(iterationToken);
             return;
         }
 
@@ -214,12 +305,12 @@ public sealed class BackendStartCommandConsumerService(
         // ===================================================================
         evt.Status = QueueOutboxEventStatus.Processing;
         evt.AttemptCount++;
-        evt.LastAttemptedAtUtc = DateTime.UtcNow;
+        evt.LastAttemptedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         evt.LastError = null;
 
         try
         {
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(iterationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -237,10 +328,10 @@ public sealed class BackendStartCommandConsumerService(
             payload.ActorSubject);
 
         // ===================================================================
-        // Step 3: Awaited backend execution (NOT fire-and-forget).
-        // The event remains in Processing until success/failure is recorded.
-        // A crash here leaves the event in Processing; RecoverStaleLeasesAsync
-        // resets it to Pending on the next process start.
+        // Step 3: Awaited backend execution (NOT fire-and-forget). Cancellation can escape
+        // immediately before or after the dispatch-claim transaction commits, so persisted
+        // command state determines whether retry is safe. Committed claims remain leased as
+        // Unknown so they cannot double-start a printer.
         // ===================================================================
         try
         {
@@ -249,17 +340,75 @@ public sealed class BackendStartCommandConsumerService(
                 payload.JobId.ToString(),
                 payload.ActorSubject,
                 payload.AcknowledgementKey,
-                ct);
+                iterationToken);
 
-            await ApplyOutcomeAsync(evt.Id, payload.JobId, outcome, ct);
+            await ApplyOutcomeWithinDeadlineAsync(
+                evt.Id,
+                payload.JobId,
+                outcome,
+                stoppingToken);
+        }
+        catch (OperationCanceledException) when (
+            iterationToken.IsCancellationRequested &&
+            !stoppingToken.IsCancellationRequested)
+        {
+            BedClearCommandStatus commandStatus;
+            if (evt.AttemptCount >= MaxAttempts)
+            {
+                evt.Status = QueueOutboxEventStatus.DeadLettered;
+                evt.LastError =
+                    "Pre-dispatch iteration deadline reached the maximum attempt count.";
+                evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                evt.RetryAfterUtc = null;
+                commandStatus = BedClearCommandStatus.Rejected;
+            }
+            else
+            {
+                double backoffSeconds =
+                    RetryBackoffBase.TotalSeconds * Math.Pow(2, evt.AttemptCount - 1);
+                evt.Status = QueueOutboxEventStatus.Pending;
+                evt.LastError =
+                    "Iteration deadline reached before dispatch claim acquisition; command rearmed.";
+                evt.RetryAfterUtc =
+                    _timeProvider.GetUtcNow().UtcDateTime +
+                    TimeSpan.FromSeconds(backoffSeconds);
+                commandStatus = BedClearCommandStatus.Pending;
+            }
+
+            bool claimCommitted = await PersistDeadlineCancellationWithinDeadlineAsync(
+                db,
+                evt,
+                commandStatus,
+                stoppingToken);
+            if (claimCommitted)
+            {
+                logger.LogWarning(
+                    "[BackendStartConsumer] Iteration deadline reached after dispatch claim acquisition for EventId={EventId}; row remains leased for reconciliation",
+                    evt.Id);
+            }
+            else if (evt.Status == QueueOutboxEventStatus.DeadLettered)
+            {
+                logger.LogError(
+                    "[BackendStartConsumer] Pre-claim deadline dead-lettered EventId={EventId} after {AttemptCount} attempts",
+                    evt.Id,
+                    evt.AttemptCount);
+            }
+            else
+            {
+                logger.LogInformation(
+                    "[BackendStartConsumer] Iteration deadline reached with no committed dispatch claim for EventId={EventId}; retry scheduled at {RetryAfterUtc}",
+                    evt.Id,
+                    evt.RetryAfterUtc);
+            }
+
+            throw;
         }
         catch (OperationCanceledException)
         {
-            // Shutdown — leave event in Processing for recovery on next start.
             logger.LogInformation(
                 "[BackendStartConsumer] Execution cancelled (shutdown) for EventId={EventId} — will recover on restart",
                 evt.Id);
-            throw; // Propagate cancellation to stop the loop.
+            throw;
         }
         catch (Exception ex)
         {
@@ -272,11 +421,85 @@ public sealed class BackendStartCommandConsumerService(
 
             // An unexpected exception is an UNKNOWN outcome: never mark it Published,
             // never retry blindly. Keep the row leased for the reconciler.
-            await ApplyOutcomeAsync(
+            await ApplyOutcomeWithinDeadlineAsync(
                 evt.Id,
                 payload.JobId,
                 BackendStartOutcome.Unknown(ex.Message, attemptId: null),
-                ct);
+                stoppingToken);
+        }
+    }
+
+    private async Task ApplyOutcomeWithinDeadlineAsync(
+        Guid eventId,
+        Guid jobId,
+        BackendStartOutcome outcome,
+        CancellationToken stoppingToken)
+    {
+        using var outcomeTimeout = new CancellationTokenSource(
+            OutcomePersistenceDeadline,
+            _timeProvider);
+        using var outcomeDeadline = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken,
+            outcomeTimeout.Token);
+        try
+        {
+            await ApplyOutcomeAsync(eventId, jobId, outcome, outcomeDeadline.Token);
+        }
+        catch (OperationCanceledException) when (
+            outcomeTimeout.IsCancellationRequested &&
+            !stoppingToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "[BackendStartConsumer] Outcome persistence deadline reached for EventId={EventId}; durable attempt reconciliation remains authoritative",
+                eventId);
+        }
+    }
+
+    private async Task<bool> PersistDeadlineCancellationWithinDeadlineAsync(
+        AppDbContext db,
+        QueueDispatchOutbox evt,
+        BedClearCommandStatus commandStatus,
+        CancellationToken stoppingToken)
+    {
+        using var persistenceTimeout = new CancellationTokenSource(
+            OutcomePersistenceDeadline,
+            _timeProvider);
+        using var persistenceDeadline = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken,
+            persistenceTimeout.Token);
+        try
+        {
+            BedClearCommandRecord? command = await db.BedClearCommandRecords
+                .FirstOrDefaultAsync(
+                    candidate => candidate.OutboxEventId == evt.Id,
+                    persistenceDeadline.Token);
+            bool claimCommitted = command?.Status == BedClearCommandStatus.Claimed;
+            if (claimCommitted)
+            {
+                await db.Entry(evt).ReloadAsync(persistenceDeadline.Token);
+                evt.Status = QueueOutboxEventStatus.Processing;
+                evt.FailureCode = UnknownOutcomeFailureCode;
+                evt.LastError =
+                    "Iteration deadline reached after dispatch claim acquisition; reconciliation is required.";
+                evt.RetryAfterUtc = null;
+            }
+            else if (command is not null)
+            {
+                command.Status = commandStatus;
+                command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+            }
+
+            await db.SaveChangesAsync(persistenceDeadline.Token);
+            return claimCommitted;
+        }
+        catch (OperationCanceledException) when (
+            persistenceTimeout.IsCancellationRequested &&
+            !stoppingToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
+                evt.Id);
+            return false;
         }
     }
 
@@ -309,7 +532,7 @@ public sealed class BackendStartCommandConsumerService(
         {
             case BackendStartStatus.Accepted:
                 row.Status = QueueOutboxEventStatus.Published;
-                row.CompletedAtUtc = DateTime.UtcNow;
+                row.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
                 row.LastError = null;
                 row.FailureCode = null;
                 row.AttemptId = outcome.AttemptId ?? row.AttemptId;
@@ -322,7 +545,7 @@ public sealed class BackendStartCommandConsumerService(
                 break;
             case BackendStartStatus.AlreadyStarted when outcome.BackendAcceptanceProven:
                 row.Status = QueueOutboxEventStatus.Published;
-                row.CompletedAtUtc = DateTime.UtcNow;
+                row.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
                 row.LastError = null;
                 row.FailureCode = null;
                 row.AttemptId = outcome.AttemptId ?? row.AttemptId;
@@ -366,7 +589,7 @@ public sealed class BackendStartCommandConsumerService(
                 if (!outcome.IsRetryable || row.AttemptCount >= MaxAttempts)
                 {
                     row.Status = QueueOutboxEventStatus.DeadLettered;
-                    row.CompletedAtUtc = DateTime.UtcNow;
+                    row.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
                     await SetBedClearCommandStatusAsync(
                         outcomeDb, eventId, BedClearCommandStatus.Rejected, ct);
                     logger.LogError(
@@ -379,7 +602,8 @@ public sealed class BackendStartCommandConsumerService(
                 {
                     double backoffSeconds = RetryBackoffBase.TotalSeconds * Math.Pow(2, row.AttemptCount - 1);
                     row.Status = QueueOutboxEventStatus.Pending;
-                    row.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(backoffSeconds);
+                    row.RetryAfterUtc =
+                        _timeProvider.GetUtcNow().UtcDateTime + TimeSpan.FromSeconds(backoffSeconds);
                     await SetBedClearCommandStatusAsync(
                         outcomeDb, eventId, BedClearCommandStatus.Pending, ct);
                 }
@@ -390,7 +614,25 @@ public sealed class BackendStartCommandConsumerService(
         _ = await outcomeDb.SaveChangesAsync(ct);
     }
 
-    private static async Task SetBedClearCommandStatusAsync(
+    private static TimeSpan GetMinimumDispatchWindow(BackendTimeoutSettings settings)
+    {
+        TimeSpan minimumDispatchWindow = settings.FileUploadTimeout + DispatchCompletionMargin;
+        if (minimumDispatchWindow > IterationDeadline)
+        {
+            throw new OptionsValidationException(
+                nameof(BackendTimeoutSettings),
+                typeof(BackendTimeoutSettings),
+                [
+                    $"{nameof(BackendTimeoutSettings.FileUploadTimeoutSeconds)} plus the " +
+                    $"{DispatchCompletionMargin.TotalSeconds:0}-second dispatch completion margin " +
+                    $"must not exceed the {IterationDeadline.TotalSeconds:0}-second backend-start iteration deadline.",
+                ]);
+        }
+
+        return minimumDispatchWindow;
+    }
+
+    private async Task SetBedClearCommandStatusAsync(
         AppDbContext db,
         Guid outboxEventId,
         BedClearCommandStatus status,
@@ -403,7 +645,7 @@ public sealed class BackendStartCommandConsumerService(
         if (command is not null)
         {
             command.Status = status;
-            command.UpdatedAtUtc = DateTime.UtcNow;
+            command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         }
     }
 

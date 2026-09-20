@@ -30,7 +30,60 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.ObservedChannel);
         Assert.Null(result.TargetChannel);
         Assert.Equal(InventoryEligibility.NotManaged, result.Eligibility);
+        Assert.Contains("ManagedEligibilityNotEstablished", result.EligibilityReasons);
         Assert.Equal(InventoryCompatibilityState.Unknown, result.CompatibilityState);
+    }
+
+    [Fact]
+    public void Evaluate_UnsignedVersionedInstallation_IsDistinctlyManualOnly()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            new()
+            {
+                ServiceId = "api",
+                ApplicationVersion = "0.2.3-insider.2",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+        ]);
+
+        result.Eligibility.Should().Be(InventoryEligibility.NotManaged);
+        result.EligibilityReasons.Should().Equal(
+            "SignedReleaseEvidenceUnavailableManualOnly",
+            "ManagedEligibilityNotEstablished",
+            "ReadOnlyInventory");
+    }
+
+    [Fact]
+    public void Evaluate_MixedUnsignedReleases_PreservesLegacyAndCompatibilityReasons()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            new()
+            {
+                ServiceId = "api",
+                ApplicationVersion = "0.2.3-insider.2",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+            new()
+            {
+                ServiceId = "worker",
+                ApplicationVersion = "0.2.3-insider.1",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+        ]);
+
+        result.Eligibility.Should().Be(InventoryEligibility.Blocked);
+        result.EligibilityReasons.Should().Equal(
+            "SignedReleaseEvidenceUnavailableManualOnly",
+            "MixedApplicationReleases",
+            "ReadOnlyInventory");
     }
 
     [Fact]
@@ -168,6 +221,20 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.Services[0].Identity);
         Assert.Null(result.ObservedChannel);
         Assert.Equal(InventoryCompatibilityState.Unknown, result.CompatibilityState);
+        Assert.Equal(InventoryEligibility.NotManaged, result.Eligibility);
+        Assert.Contains("SignedReleaseEvidenceUnavailableManualOnly", result.EligibilityReasons);
+    }
+
+    [Fact]
+    public void Evaluate_BindingMetadataRepairRemovesManualOnlyEvidenceMarker()
+    {
+        ServiceReplicaObservationDto incomplete = Verified("a") with { VerificationSource = null };
+        ServiceInventoryDto before = Evaluate([incomplete]);
+        before.EligibilityReasons.Should().Contain("SignedReleaseEvidenceUnavailableManualOnly");
+
+        ServiceInventoryDto after = Evaluate([Verified("a")]);
+        after.EligibilityReasons.Should().NotContain("SignedReleaseEvidenceUnavailableManualOnly");
+        after.Eligibility.Should().Be(InventoryEligibility.NotManaged);
     }
 
     [Fact]
@@ -337,7 +404,7 @@ public sealed class ServiceInventoryTests
     }
 
     [Fact]
-    public void Readiness_ValidButDifferentPlatformDigest_Blocks()
+    public void Readiness_ValidButDifferentPlatformDigest_IsEligibleForUpdate()
     {
         string observedDigest = "sha256:" + new string('c', 64);
         string signedDigest = "sha256:" + new string('d', 64);
@@ -352,9 +419,48 @@ public sealed class ServiceInventoryTests
 
         ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
 
+        Assert.Equal(InventoryEligibility.Eligible, result.State);
+        Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+    }
+
+    [Fact]
+    public void Readiness_ValidButDifferentIndexDigest_IsEligibleForUpdate()
+    {
+        string observedDigest = "sha256:" + new string('c', 64);
+        string signedDigest = "sha256:" + new string('d', 64);
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { IndexDigest = observedDigest }]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                Release(null).Services.Single() with { IndexDigest = signedDigest },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Eligible, result.State);
+        Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+    }
+
+    [Theory]
+    [InlineData("platform")]
+    [InlineData("index")]
+    public void Readiness_MalformedTargetDigest_Blocks(string digestKind)
+    {
+        ServiceInventoryDto inventory = Evaluate([Verified("a")]);
+        ReleaseServiceRequirementDto target = Release(null).Services.Single();
+        target = digestKind == "platform"
+            ? target with { PlatformDigest = "sha256:invalid" }
+            : target with { IndexDigest = "sha256:invalid" };
+        VerifiedReleaseEvidenceDto release = Release(null) with { Services = [target] };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
         Assert.Equal(InventoryEligibility.Blocked, result.State);
         Assert.Equal("PlatformMismatchOrInvalidDigestEvidence:api", Assert.Single(result.Reasons));
-        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence"], result.Hops);
     }
 
     [Fact]

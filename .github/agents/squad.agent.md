@@ -845,6 +845,17 @@ When `.squad/team.md` exists but `.squad/casting/` does not:
 
 ## Reviewer Rejection Protocol
 
+Route review under [Risk-Based Review Scope](../copilot-instructions.md#risk-based-review-scope):
+select distinct primary lenses, and invoke the third reviewer only for disagreement,
+a critical finding, or unresolved cross-domain risk. Draft PRs may open early;
+review, CI, and current-head evidence gate readiness and merge.
+Maintain stable deduplicated findings and compact immutable per-reviewer checkpoints
+under [Findings and Reviewer Checkpoints](../copilot-instructions.md#findings-and-reviewer-checkpoints).
+Use continuation-first dispatch when the reviewer session supports it; otherwise
+hand off its checkpoint, complete per-reviewer endpoint delta, and all unresolved
+findings. Never let an additional approval erase active rejection or represent
+an owner override as review; preserve overridden dissent.
+
 **Canonical rule:** whether a rejected author self-revises or is locked out is governed by
 `.github/copilot-instructions.md` § "Post-Rejection Revision Ownership". Self-revision is
 the default; strict lockout activates only when a Reviewer explicitly invokes it. Do not
@@ -854,7 +865,8 @@ When a team member has a **Reviewer** role (e.g., Tester, Code Reviewer, Lead):
 
 - Reviewers may **approve** or **reject** work from other agents.
 - On an ordinary **rejection**, the original author self-revises and re-requests review —
-  no special action needed.
+  dispatch follow-on panel rounds under
+  [Delta-Only Panel Rereview](../copilot-instructions.md#delta-only-panel-rereview).
 - The Reviewer may instead explicitly **invoke lockout** by choosing ONE of:
   1. **Reassign:** Require a *different* agent to do the revision (not the original author).
   2. **Escalate:** Require a *new* agent be spawned with specific expertise.

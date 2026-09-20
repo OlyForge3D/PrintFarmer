@@ -1178,13 +1178,75 @@ copy_configs() {
         cp "$CONFIGS_DIR/docker-entrypoint-config.sh" "$output_dir/"
     fi
 
-    if [[ -d "$REPO_ROOT/deploy/nginx" ]]; then
-        mkdir -p "$output_dir/deploy"
-        rm -rf "$output_dir/deploy/nginx"
-        cp -r "$REPO_ROOT/deploy/nginx" "$output_dir/deploy/"
+    if [[ ! -d "$REPO_ROOT/deploy/nginx" ]]; then
+        log_error "Required nginx configuration directory is missing or not a directory: $REPO_ROOT/deploy/nginx"
+        return 1
+    fi
 
+        local source_nginx_dir
+        local target_nginx_dir
+        local target_nginx_path
+        local nginx_config
+        local http_only_lab=false
         if [[ "${INSTALLER_LAB:-false}" == "true" && "${HTTP_ONLY:-false}" == "true" ]]; then
-            local split_proxy="$output_dir/deploy/nginx/nginx-proxy-split.conf"
+            http_only_lab=true
+        fi
+
+        source_nginx_dir="$(cd "$REPO_ROOT/deploy/nginx" && pwd -P)" || {
+            log_error "Unable to resolve nginx configuration source: $REPO_ROOT/deploy/nginx"
+            return 1
+        }
+        if ! mkdir -p "$output_dir/deploy"; then
+            log_error "Unable to create nginx configuration output parent: $output_dir/deploy"
+            return 1
+        fi
+        target_nginx_path="$output_dir/deploy/nginx"
+        if [[ -d "$target_nginx_path" ]]; then
+            target_nginx_dir="$(cd "$target_nginx_path" && pwd -P)" || {
+                log_error "Unable to resolve nginx configuration output: $target_nginx_path"
+                return 1
+            }
+        else
+            target_nginx_dir="$(cd "$output_dir/deploy" && pwd -P)/nginx"
+        fi
+
+        for nginx_config in \
+            nginx-proxy.conf \
+            nginx-proxy-split.conf \
+            nginx-frontend.conf \
+            nginx.conf \
+            conf.d/frontend-app.conf; do
+            if [[ ! -f "$source_nginx_dir/$nginx_config" ]]; then
+                log_error "Required nginx configuration is missing or not a regular file: $source_nginx_dir/$nginx_config"
+                return 1
+            fi
+        done
+        if { [[ -e "$source_nginx_dir/certs" ]] || [[ -L "$source_nginx_dir/certs" ]]; } &&
+            [[ ! -d "$source_nginx_dir/certs" ]]; then
+            log_error "Nginx certificate path is not a directory: $source_nginx_dir/certs"
+            return 1
+        fi
+
+        if [[ "$source_nginx_dir" != "$target_nginx_dir" ]]; then
+            if ! rm -rf "$target_nginx_path"; then
+                log_error "Unable to remove existing nginx configuration output: $target_nginx_path"
+                return 1
+            fi
+            if ! cp -r "$source_nginx_dir" "$target_nginx_path"; then
+                log_error "Unable to copy nginx configuration to: $target_nginx_path"
+                return 1
+            fi
+            target_nginx_dir="$(cd "$target_nginx_path" && pwd -P)" || {
+                log_error "Unable to resolve copied nginx configuration output: $target_nginx_path"
+                return 1
+            }
+        elif [[ "$http_only_lab" == "true" ]]; then
+            log_error "HTTP_ONLY generation requires an output directory outside the repository root"
+            return 1
+        fi
+
+        if [[ "$http_only_lab" == "true" ]]; then
+            local split_proxy="$target_nginx_dir/nginx-proxy-split.conf"
             [[ -f "$split_proxy" ]] || { log_error "HTTP_ONLY requires nginx-proxy-split.conf"; return 1; }
             grep -q 'HTTPS server' "$split_proxy" ||
                 { log_error "HTTP_ONLY cannot trim nginx-proxy-split.conf: HTTPS marker is missing"; return 1; }
@@ -1222,7 +1284,6 @@ with open(path, "w") as f:
     f.writelines(out)
 PY
         fi
-    fi
     
     # Copy additional configs based on what's included
     if [[ "$INCLUDE_MONITORING" == "true" ]]; then
@@ -1401,4 +1462,6 @@ main() {
 }
 
 # Run main function
-main "$@"
+if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then
+    main "$@"
+fi

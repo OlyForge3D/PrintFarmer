@@ -1,4 +1,9 @@
-import { render as rtlRender, screen, fireEvent, waitFor } from "@testing-library/react";
+import {
+  render as rtlRender,
+  screen,
+  fireEvent,
+  waitFor,
+} from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
@@ -34,27 +39,41 @@ vi.mock("@/services/api", () => ({
 
 vi.mock("@/features/filament-coverage/hooks", () => ({
   useFleetFilamentCoverage: () => mockGetCoverage(),
-  usePrinterFilamentCoverage: vi.fn(() => ({ data: null, isLoading: false, isError: false })),
+  usePrinterFilamentCoverage: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    isError: false,
+  })),
   __resetFilamentCoverageSubscriptionForTests: vi.fn(),
 }));
 
 function render(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: {
-      queries: { retry: false, refetchInterval: false, refetchOnWindowFocus: false, gcTime: 0 },
+      queries: {
+        retry: false,
+        refetchInterval: false,
+        refetchOnWindowFocus: false,
+        gcTime: 0,
+      },
     },
   });
-  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return rtlRender(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
-
 describe("QueueJobsTable Component", () => {
-  const createMockJob = (overrides?: Partial<QueuedPrintJobWithFileMetaDto>): QueuedPrintJobWithFileMetaDto => ({
-    id: "job-1",
+  const createMockJob = (
+    overrides?: Partial<QueuedPrintJobWithFileMetaDto>,
+  ): QueuedPrintJobWithFileMetaDto => ({
     job: {
       id: "job-1",
       name: "test-print",
       gcodeFileId: "file-1",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
       status: "Queued",
       priority: PrintJobPriority.Low,
       queuePosition: 1,
@@ -65,6 +84,7 @@ describe("QueueJobsTable Component", () => {
     },
     gcodeFile: {
       id: "file-1",
+      name: "test-print.gcode",
       fileName: "test-print.gcode",
       fileSizeBytes: 1024,
       materialType: "PLA",
@@ -82,11 +102,13 @@ describe("QueueJobsTable Component", () => {
 
   const mockJobs: QueuedPrintJobWithFileMetaDto[] = [
     createMockJob({
-      id: "job-1",
       job: {
         id: "job-1",
         name: "test-print",
         gcodeFileId: "file-1",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
         status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
@@ -98,6 +120,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-1",
+        name: "test-print.gcode",
         fileName: "test-print.gcode",
         fileSizeBytes: 1024,
         materialType: "PLA",
@@ -105,11 +128,13 @@ describe("QueueJobsTable Component", () => {
       },
     }),
     createMockJob({
-      id: "job-2",
       job: {
         id: "job-2",
         name: "another-print",
         gcodeFileId: "file-2",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
         status: "Printing",
         priority: PrintJobPriority.Normal,
         queuePosition: 0,
@@ -121,6 +146,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-2",
+        name: "another-print.gcode",
         fileName: "another-print.gcode",
         fileSizeBytes: 2048,
         materialType: "PETG",
@@ -201,11 +227,13 @@ describe("QueueJobsTable Component", () => {
     };
 
     const dueSoonJob = createMockJob({
-      id: "job-due-soon",
       job: {
         id: "job-due-soon",
         name: "due-soon-print",
         gcodeFileId: "file-3",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
         status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 2,
@@ -217,7 +245,9 @@ describe("QueueJobsTable Component", () => {
       },
     });
 
-    render(<QueueJobsTable jobs={[mockJobs[1], dueSoonJob]} {...mockHandlers} />);
+    render(
+      <QueueJobsTable jobs={[mockJobs[1], dueSoonJob]} {...mockHandlers} />,
+    );
 
     expect(screen.getByText("Overdue")).toBeInTheDocument();
     expect(screen.getByText("Due soon")).toBeInTheDocument();
@@ -270,10 +300,14 @@ describe("QueueJobsTable Component", () => {
 
     const cancelButtons = screen.getAllByRole("button", { name: /^Cancel /i });
     expect(cancelButtons).toHaveLength(2);
-    const cancelNames = cancelButtons.map((button) => button.getAttribute("aria-label"));
+    const cancelNames = cancelButtons.map((button) =>
+      button.getAttribute("aria-label"),
+    );
     expect(new Set(cancelNames).size).toBe(cancelNames.length);
     expect(cancelNames[0]).toBe("Cancel test-print.gcode on Printer 1 Queued");
-    expect(cancelNames[1]).toBe("Cancel another-print.gcode on Printer 1 Printing");
+    expect(cancelNames[1]).toBe(
+      "Cancel another-print.gcode on Printer 1 Printing",
+    );
 
     // Visible label must stay concise — only the accessible name is qualified.
     expect(cancelButtons[0]).toHaveTextContent("Cancel");
@@ -281,11 +315,16 @@ describe("QueueJobsTable Component", () => {
     expect(cancelButtons[1]).toHaveTextContent("Cancel");
     expect(cancelButtons[1]).not.toHaveTextContent("another-print.gcode");
 
-    const abortButton = screen.getByRole("button", { name: "Abort another-print.gcode on Printer 1 Printing" });
+    const abortButton = screen.getByRole("button", {
+      name: "Abort another-print.gcode on Printer 1 Printing",
+    });
     expect(abortButton).toHaveTextContent("Abort");
     expect(abortButton).not.toHaveTextContent("another-print.gcode");
-    expect(screen.getByRole("button", { name: "Pause another-print.gcode on Printer 1 Printing" }))
-      .toHaveTextContent("Pause");
+    expect(
+      screen.getByRole("button", {
+        name: "Pause another-print.gcode on Printer 1 Printing",
+      }),
+    ).toHaveTextContent("Pause");
   });
 
   it.each([
@@ -309,39 +348,71 @@ describe("QueueJobsTable Component", () => {
   );
 
   it("qualifies the Schedule accessible name without changing its visible label", () => {
-    const job = createMockJob({ job: { ...createMockJob().job, status: "Queued" } });
+    const job = createMockJob({
+      job: { ...createMockJob().job, status: "Queued" },
+    });
 
-    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} onSchedule={vi.fn()} />);
+    render(
+      <QueueJobsTable jobs={[job]} onCancel={vi.fn()} onSchedule={vi.fn()} />,
+    );
 
-    const button = screen.getByRole("button", { name: "Schedule test-print.gcode on Printer 1 Queued" });
+    const button = screen.getByRole("button", {
+      name: "Schedule test-print.gcode on Printer 1 Queued",
+    });
     expect(button).toHaveTextContent("Schedule");
     expect(button).not.toHaveTextContent("test-print.gcode");
   });
 
   it("qualifies the Pause and Abort accessible names for a Printing job without changing their visible labels", () => {
-    const job = createMockJob({ job: { ...createMockJob().job, status: "Printing" } });
+    const job = createMockJob({
+      job: { ...createMockJob().job, status: "Printing" },
+    });
 
-    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} onPause={vi.fn()} onAbortPrint={vi.fn()} />);
+    render(
+      <QueueJobsTable
+        jobs={[job]}
+        onCancel={vi.fn()}
+        onPause={vi.fn()}
+        onAbortPrint={vi.fn()}
+      />,
+    );
 
-    const pauseButton = screen.getByRole("button", { name: "Pause test-print.gcode on Printer 1 Printing" });
+    const pauseButton = screen.getByRole("button", {
+      name: "Pause test-print.gcode on Printer 1 Printing",
+    });
     expect(pauseButton).toHaveTextContent("Pause");
     expect(pauseButton).not.toHaveTextContent("test-print.gcode");
 
-    const abortButton = screen.getByRole("button", { name: "Abort test-print.gcode on Printer 1 Printing" });
+    const abortButton = screen.getByRole("button", {
+      name: "Abort test-print.gcode on Printer 1 Printing",
+    });
     expect(abortButton).toHaveTextContent("Abort");
     expect(abortButton).not.toHaveTextContent("test-print.gcode");
   });
 
   it("qualifies the Resume and Abort accessible names for a Paused job without changing their visible labels", () => {
-    const job = createMockJob({ job: { ...createMockJob().job, status: "Paused" } });
+    const job = createMockJob({
+      job: { ...createMockJob().job, status: "Paused" },
+    });
 
-    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} onResume={vi.fn()} onAbortPrint={vi.fn()} />);
+    render(
+      <QueueJobsTable
+        jobs={[job]}
+        onCancel={vi.fn()}
+        onResume={vi.fn()}
+        onAbortPrint={vi.fn()}
+      />,
+    );
 
-    const resumeButton = screen.getByRole("button", { name: "Resume test-print.gcode on Printer 1 Paused" });
+    const resumeButton = screen.getByRole("button", {
+      name: "Resume test-print.gcode on Printer 1 Paused",
+    });
     expect(resumeButton).toHaveTextContent("Resume");
     expect(resumeButton).not.toHaveTextContent("test-print.gcode");
 
-    const abortButton = screen.getByRole("button", { name: "Abort test-print.gcode on Printer 1 Paused" });
+    const abortButton = screen.getByRole("button", {
+      name: "Abort test-print.gcode on Printer 1 Paused",
+    });
     expect(abortButton).toHaveTextContent("Abort");
     expect(abortButton).not.toHaveTextContent("test-print.gcode");
   });
@@ -354,7 +425,9 @@ describe("QueueJobsTable Component", () => {
       onPriority: vi.fn(),
     };
 
-    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+    const { container } = render(
+      <QueueJobsTable jobs={mockJobs} {...mockHandlers} />,
+    );
 
     expect(screen.queryByLabelText("Drag to reorder")).not.toBeInTheDocument();
     expect(container.querySelector("tbody[draggable]")).not.toBeInTheDocument();
@@ -371,11 +444,13 @@ describe("QueueJobsTable Component", () => {
     // Externally-started print: gcodeFile has no thumbnailUrl, but the printer
     // reports one live over SignalR.
     const externalJob = createMockJob({
-      id: "ext-1",
       job: {
         id: "ext-1",
         name: "external-print",
         gcodeFileId: "",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
         status: "Printing",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
@@ -386,6 +461,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-ext",
+        name: "file-ext",
         fileName: "external-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -402,7 +478,9 @@ describe("QueueJobsTable Component", () => {
     const { container } = render(
       <QueueJobsTable
         jobs={[externalJob]}
-        printThumbnailByPrinterId={{ "printer-live": "http://printer/thumb.png" }}
+        printThumbnailByPrinterId={{
+          "printer-live": "http://printer/thumb.png",
+        }}
         {...mockHandlers}
       />,
     );
@@ -420,9 +498,9 @@ describe("QueueJobsTable Component", () => {
     };
 
     const job = createMockJob({
-      id: "job-thumb",
       gcodeFile: {
         id: "file-thumb",
+        name: "file-thumb",
         fileName: "has-thumb.gcode",
         fileSizeBytes: 1024,
         thumbnailUrl: "http://server/gcode-thumb.png",
@@ -440,13 +518,19 @@ describe("QueueJobsTable Component", () => {
     const { container } = render(
       <QueueJobsTable
         jobs={[job]}
-        printThumbnailByPrinterId={{ "printer-live": "http://printer/live-thumb.png" }}
+        printThumbnailByPrinterId={{
+          "printer-live": "http://printer/live-thumb.png",
+        }}
         {...mockHandlers}
       />,
     );
 
-    expect(container.querySelector('img[src="http://server/gcode-thumb.png"]')).toBeInTheDocument();
-    expect(container.querySelector('img[src="http://printer/live-thumb.png"]')).not.toBeInTheDocument();
+    expect(
+      container.querySelector('img[src="http://server/gcode-thumb.png"]'),
+    ).toBeInTheDocument();
+    expect(
+      container.querySelector('img[src="http://printer/live-thumb.png"]'),
+    ).not.toBeInTheDocument();
   });
 
   it("should NOT show the live printer thumbnail on a Queued job pre-assigned to a busy printer", () => {
@@ -461,11 +545,13 @@ describe("QueueJobsTable Component", () => {
     // DIFFERENT job. The live thumbnail belongs to the printing job, not this
     // queued one — it must not leak onto the queued row.
     const queuedJob = createMockJob({
-      id: "queued-1",
       job: {
         id: "queued-1",
         name: "waiting-print",
         gcodeFileId: "",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
         status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
@@ -475,6 +561,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-queued",
+        name: "file-queued",
         fileName: "waiting-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -491,12 +578,16 @@ describe("QueueJobsTable Component", () => {
     const { container } = render(
       <QueueJobsTable
         jobs={[queuedJob]}
-        printThumbnailByPrinterId={{ "printer-busy": "http://printer/other-job.png" }}
+        printThumbnailByPrinterId={{
+          "printer-busy": "http://printer/other-job.png",
+        }}
         {...mockHandlers}
       />,
     );
 
-    expect(container.querySelector('img[src="http://printer/other-job.png"]')).not.toBeInTheDocument();
+    expect(
+      container.querySelector('img[src="http://printer/other-job.png"]'),
+    ).not.toBeInTheDocument();
   });
 
   it("should render the placeholder, not a broken <img>, when the gcode file has no thumbnail metadata (#1911)", () => {
@@ -511,11 +602,13 @@ describe("QueueJobsTable Component", () => {
     // must omit gcodeFile.thumbnailUrl entirely (not point at a 404), and the
     // row must fall back to the placeholder rather than an <img> tag.
     const jobWithoutThumbnail = createMockJob({
-      id: "no-thumb-1",
       job: {
         id: "no-thumb-1",
         name: "no-thumbnail-print",
         gcodeFileId: "file-no-thumb",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
         status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
@@ -525,6 +618,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-no-thumb",
+        name: "file-no-thumb",
         fileName: "no-thumbnail-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -532,7 +626,9 @@ describe("QueueJobsTable Component", () => {
       },
     });
 
-    const { container } = render(<QueueJobsTable jobs={[jobWithoutThumbnail]} {...mockHandlers} />);
+    const { container } = render(
+      <QueueJobsTable jobs={[jobWithoutThumbnail]} {...mockHandlers} />,
+    );
 
     expect(container.querySelector("img")).not.toBeInTheDocument();
     expect(screen.getByText("—")).toBeInTheDocument();
@@ -548,7 +644,9 @@ describe("QueueJobsTable Component", () => {
       onEdit,
     };
 
-    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+    const { container } = render(
+      <QueueJobsTable jobs={mockJobs} {...mockHandlers} />,
+    );
 
     // The secondary (detail) row lives in the same <tbody> as the primary row;
     // clicking a detail chip must still open edit (handlers live on the <tbody>).
@@ -571,7 +669,9 @@ describe("QueueJobsTable Component", () => {
       onEdit,
     };
 
-    const { container } = render(<QueueJobsTable jobs={mockJobs} {...mockHandlers} />);
+    const { container } = render(
+      <QueueJobsTable jobs={mockJobs} {...mockHandlers} />,
+    );
     const firstBody = container.querySelector("tbody") as Element;
 
     // Enter on the row itself opens edit.
@@ -584,7 +684,6 @@ describe("QueueJobsTable Component", () => {
     fireEvent.keyDown(cancelButton, { key: "Enter" });
     expect(onEdit).not.toHaveBeenCalled();
   });
-
 });
 
 // ---------------------------------------------------------------------------
@@ -593,11 +692,13 @@ describe("QueueJobsTable Component", () => {
 
 describe("QueueJobsTable — filament coverage badge", () => {
   const jobWithPrinter = {
-    id: "badge-job",
     job: {
       id: "badge-job",
       name: "badge-test-print",
       gcodeFileId: "f-badge",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
       status: "Queued" as const,
       priority: PrintJobPriority.Low,
       queuePosition: 1,
@@ -608,6 +709,7 @@ describe("QueueJobsTable — filament coverage badge", () => {
     },
     gcodeFile: {
       id: "f-badge",
+      name: "f-badge",
       fileName: "badge-test.gcode",
       fileSizeBytes: 512,
       createdAtUtc: new Date().toISOString(),
@@ -667,7 +769,9 @@ describe("QueueJobsTable — filament coverage badge", () => {
     mockGetCoverage.mockReturnValue(fleetWithStatus("unknown"));
     render(<QueueJobsTable jobs={[jobWithPrinter]} />);
     await waitFor(() =>
-      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("status", { name: /runout risk/i }),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -675,7 +779,9 @@ describe("QueueJobsTable — filament coverage badge", () => {
     mockGetCoverage.mockReturnValue(fleetWithStatus("covers"));
     render(<QueueJobsTable jobs={[jobWithPrinter]} />);
     await waitFor(() =>
-      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("status", { name: /runout risk/i }),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -688,7 +794,9 @@ describe("QueueJobsTable — filament coverage badge", () => {
     });
     render(<QueueJobsTable jobs={[jobWithPrinter]} />);
     await waitFor(() =>
-      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("status", { name: /runout risk/i }),
+      ).not.toBeInTheDocument(),
     );
   });
 
@@ -700,7 +808,9 @@ describe("QueueJobsTable — filament coverage badge", () => {
     };
     render(<QueueJobsTable jobs={[offlineJob]} />);
     await waitFor(() =>
-      expect(screen.queryByRole("status", { name: /runout risk/i })).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("status", { name: /runout risk/i }),
+      ).not.toBeInTheDocument(),
     );
   });
 });

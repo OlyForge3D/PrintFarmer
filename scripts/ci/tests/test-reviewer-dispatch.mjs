@@ -28,18 +28,21 @@ test('reviewer agent definitions: tool grants, model diversity, and read-only bo
       expectedName: 'Bishop',
       expectedModelFamily: 'opus',
       expectedReviewer: 'bishop',
+      expectedLens: 'integration/architecture',
     },
     {
       file: '.github/agents/code-review-gemini.agent.md',
       expectedName: 'Vasquez',
       expectedModelFamily: 'gemini',
       expectedReviewer: 'vasquez',
+      expectedLens: 'trust/failure/concurrency',
     },
     {
       file: '.github/agents/code-review-codex.agent.md',
       expectedName: 'Hicks',
       expectedModelFamily: 'gpt-5.6',
       expectedReviewer: 'hicks',
+      expectedLens: 'behavior/contracts/tests',
     },
   ];
 
@@ -104,6 +107,13 @@ test('reviewer agent definitions: tool grants, model diversity, and read-only bo
         body.includes('Squad-Head-SHA:'),
         'Agent prompt must include Squad-Head-SHA field in template',
       );
+      for (const text of [
+        spec.expectedLens, 'stable finding ID', '**Failure scenario:**', '**Owner:**',
+        '**Closure criteria:**', '## Checkpoint', 'immutable', 'continuation-first',
+        'complete per-reviewer prior-SHA -> new-head delta', 'fresh current-head evidence',
+      ]) {
+        assert.ok(body.includes(text), `${spec.file} must include ${text}`);
+      }
     });
   }
 
@@ -123,6 +133,113 @@ test('review prompt template (.github/prompts/review.prompt.md)', async () => {
   assert.ok(body.includes('<!-- squad-verdict -->'));
   assert.ok(body.includes('agent_type: "code-review"'));
   assert.ok(!/agent_type:\s*"Code Review \(/i.test(body), 'Prompt must not reference legacy Code Review (...) agent types');
+  assert.match(body, /High-risk work gets two differentiated reviewers/);
+  assert.match(body, /one qualified non-author reviewer from a different model family/);
+  assert.match(body, /third only for disagreement,\s+a critical finding, or unresolved cross-domain risk/);
+  assert.match(body, /continuation-first/);
+  assert.doesNotMatch(body, /3\/3|unanimous APPROVE|MUST inline the full persona/);
 });
 
+test('lean policy is canonical and all readiness entry points link to it', async () => {
+  const canonicalPath = path.join(repositoryRoot, '.github/copilot-instructions.md');
+  const canonical = await readFile(canonicalPath, 'utf8');
+  for (const invariant of [
+    /Draft PRs may open early; review gates readiness and merge/,
+    /High-risk changes require TWO\s+qualified reviewers/,
+    /accepts any two eligible panel approvals/,
+    /no accepted current-head rejection/,
+    /third reviewer only for disagreement, a critical finding, or unresolved\s+cross-domain risk/,
+    /one deduplicated finding ledger/,
+    /stable ID/,
+    /severity/,
+    /failure scenario, fix owner,\s+closure criteria/,
+    /compact immutable per-reviewer checkpoint/,
+    /Never edit a prior checkpoint/,
+    /copies all unresolved findings into every follow-on packet/,
+    /owner override marks dissent overridden, never verified or withdrawn/,
+    /dissent=N; short=N/,
+    /--match-head-commit/,
+  ]) {
+    assert.match(canonical, invariant);
+  }
+  for (const file of [
+    '.github/prompts/review.prompt.md', '.github/agents/squad.agent.md',
+    '.github/ralph-reference.md', '.github/pull_request_template.md',
+    '.github/skills/reviewer-protocol/SKILL.md',
+    '.squad/issue-lifecycle.md', '.squad/templates/issue-lifecycle.md',
+    ...['bishop', 'hicks', 'vasquez'].map((member) => `.squad/agents/${member}/charter.md`),
+  ]) {
+    const content = await readFile(path.join(repositoryRoot, file), 'utf8');
+    const link = content.match(/\[[^\]]+\]\(([^)]+)#risk-based-review-scope\)/);
+    assert.ok(link, `${file} must link reviewer routing to canonical policy`);
+    assert.equal(path.resolve(repositoryRoot, path.dirname(file), link[1]), canonicalPath);
+    assert.doesNotMatch(content,
+      /Pre-PR Review Gate|pre-PR review gate|3\/3 APPROVE|before any PR is opened/,
+      `${file} must not restore pre-creation or routine three-reviewer gates`);
+  }
+});
 
+test('lifecycle copies gate readiness and use exact-head merge, not CI-only merge', async () => {
+  for (const file of ['.squad/issue-lifecycle.md', '.squad/templates/issue-lifecycle.md']) {
+    const content = await readFile(path.join(repositoryRoot, file), 'utf8');
+    assert.match(content, /Draft PRs may open before\s+review/);
+    assert.match(content, /Mark ready only after required review, CI, and current-head evidence pass/);
+    assert.match(content, /gh pr create --draft/);
+    assert.match(content, /--label squad/);
+    assert.match(content, /Closes #/);
+    for (const command of content.matchAll(/^gh pr merge .*$/gm)) {
+      assert.match(command[0], /--match-head-commit/);
+    }
+    assert.doesNotMatch(content, /CI-only projects|If CI passes, Ralph auto-merges|Single Agent, No Review/);
+  }
+});
+
+test('lockout examples require explicit invocation rather than ordinary rejection', async () => {
+  const content = await readFile(
+    path.join(repositoryRoot, '.github/skills/reviewer-protocol/SKILL.md'), 'utf8',
+  );
+  for (const name of ['Example 3:', 'Example 4:']) {
+    const example = content.split(name)[1].split('**Example')[0];
+    assert.match(example, /rejected with explicit lockout/);
+  }
+  assert.match(content, /Example 5: Ordinary rejection, no lockout/);
+});
+
+test('panel rereview entry points link to the canonical delta-only scope', async () => {
+  const entryPoints = [
+    '.github/agents/code-review-opus.agent.md',
+    '.github/agents/code-review-codex.agent.md',
+    '.github/agents/code-review-gemini.agent.md',
+    '.github/agents/squad.agent.md',
+    '.github/prompts/review.prompt.md',
+    '.github/skills/reviewer-protocol/SKILL.md',
+    '.github/ralph-reference.md',
+    ...['bishop', 'hicks', 'vasquez'].map((member) => `.squad/agents/${member}/charter.md`),
+  ];
+  const canonicalPath = path.join(repositoryRoot, '.github/copilot-instructions.md');
+  const canonical = await readFile(canonicalPath, 'utf8');
+  const section = canonical.split('### Delta-Only Panel Rereview\n')[1]?.split('\n### ')[0];
+  assert.ok(section, 'A single canonical rereview scope must exist');
+  assert.equal(canonical.match(/^### Delta-Only Panel Rereview$/gm)?.length, 1);
+  for (const invariant of [
+    /only the revision delta/,
+    /git diff <last-reviewed-sha> <new-head-sha>/,
+    /not\s+a merge-base\/three-dot diff/,
+    /surrounding code, callers, and tests/,
+    /every.*\n.*change in that range/,
+    /unresolved prior findings/,
+    /their own last reviewed SHA/,
+    /recover it before proceeding/,
+    /Squad-Head-SHA.*equal to the\s+\*\*new current head\*\*/,
+    /full PR change/,
+    /never from the smaller delta/,
+  ]) {
+    assert.match(section, invariant);
+  }
+  for (const file of entryPoints) {
+    const content = await readFile(path.join(repositoryRoot, file), 'utf8');
+    const link = content.match(/\[Delta-Only Panel Rereview\]\(([^)]+)#delta-only-panel-rereview\)/);
+    assert.ok(link, `${file} must route follow-on rounds to canonical policy`);
+    assert.equal(path.resolve(repositoryRoot, path.dirname(file), link[1]), canonicalPath);
+  }
+});

@@ -1,4 +1,4 @@
-// Pure evaluation logic for the squad pre-PR review record.
+// Pure evaluation logic for the squad readiness/merge review record.
 //
 // ⚠️ THIS IS NOT INDEPENDENT REVIEW AND PROVIDES NO SEPARATION OF DUTIES.
 // Every squad agent runs under the repository owner's authority and posts
@@ -27,8 +27,8 @@
 export const verdictContext = 'squad/pre-pr-verdict';
 
 /**
- * Squad members that form the elevated review panel. Three agents reviewing
- * instead of one is a quality measure, not three independent parties.
+ * Eligible elevated reviewers. Two are required; the third adjudicates
+ * escalations. These are fresh perspectives, not independent parties.
  */
 export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
 
@@ -573,7 +573,8 @@ export function collectVerdicts(comments, headSha, { carriedShas } = {}) {
       continue;
     }
     const isCurrentHead = record.headSha === head;
-    const isCarried = !isCurrentHead && carried.has(record.headSha);
+    const isCarried = !isCurrentHead && !record.isSelfDeclaredAdmin &&
+      carried.has(record.headSha);
     const pool = (isCurrentHead || isCarried) ? current : staleLatest;
     const candidate = isCarried ? { ...record, carriedAcrossSync: true } : record;
     const previous = pool.get(candidate.reviewer);
@@ -789,13 +790,23 @@ export function evaluateGate({
     };
   }
 
-  // 1. Owner override through GitHub's native review UI at the exact current
-  //    head. Only each administrator's MOST RECENT decisive review at that head
-  //    counts: taking any matching approval would let an earlier APPROVED
-  //    survive after the same administrator later recorded CHANGES_REQUESTED on
-  //    the same commit. COMMENTED reviews are not decisive — GitHub itself does
-  //    not treat them as changing approval state — and DISMISSED clears.
-  const latestAdminReview = new Map();
+  // Native reviews and explicit owner comments share one decision timeline per
+  // authenticated account. Agent identities never enter this timeline.
+  const latestAdminActions = new Map();
+  const unresolvedDismissals = new Set();
+  function recordAdminDecision(candidate) {
+    const login = String(candidate.login ?? '').toLowerCase();
+    if (!login) return;
+    const key = `${login}:${candidate.override}`;
+    const previous = latestAdminActions.get(key);
+    const newTime = Date.parse(candidate.recordedAt ?? '') || 0;
+    const oldTime = Date.parse(previous?.recordedAt ?? '') || 0;
+    if (!previous || newTime > oldTime ||
+        (newTime === oldTime && (candidate.state === 'DISMISSED' ||
+          (previous.state !== 'DISMISSED' && candidate.id >= previous.id)))) {
+      latestAdminActions.set(key, candidate);
+    }
+  }
   for (const review of reviews ?? []) {
     if (
       review?.isAdmin !== true ||
@@ -804,63 +815,108 @@ export function evaluateGate({
     ) {
       continue;
     }
-    const login = String(review.login ?? '').toLowerCase();
-    const previous = latestAdminReview.get(login);
-    const rank = (entry) => [
-      Date.parse(entry.submittedAt ?? '') || 0,
-      Number(entry.id) || 0,
-    ];
-    if (!previous) {
-      latestAdminReview.set(login, review);
+    if (review.state === 'DISMISSED') {
+      const dismissedAt = Date.parse(review.dismissedAt ?? '');
+      const submittedAt = Date.parse(review.submittedAt ?? '');
+      if (!Number.isFinite(dismissedAt) || !Number.isFinite(submittedAt) ||
+          dismissedAt < submittedAt) {
+        unresolvedDismissals.add(String(review.login ?? '').toLowerCase());
+      }
+    }
+    recordAdminDecision({
+      ...review,
+      id: Number(review.id) || 0,
+      recordedAt: review.state === 'DISMISSED' ? review.dismissedAt : review.submittedAt,
+      override: 'github-review',
+    });
+  }
+
+  for (const comment of comments ?? []) {
+    const record = parseVerdictComment(comment);
+    if (!record?.trusted || !record.isSelfDeclaredAdmin ||
+        record.headSha !== head ||
+        record.reviewer !== normalizeMember(record.commenter)) {
       continue;
     }
-    const [newTime, newId] = rank(review);
-    const [oldTime, oldId] = rank(previous);
-    if (newTime > oldTime || (newTime === oldTime && newId >= oldId)) {
-      latestAdminReview.set(login, review);
+    recordAdminDecision({
+      id: Number(comment.id) || 0,
+      login: record.commenter,
+      state: record.verdict === 'APPROVE' ? 'APPROVED' : 'CHANGES_REQUESTED',
+      recordedAt: record.recordedAt,
+      override: 'owner-comment',
+    });
+  }
+
+  // First collapse each resource independently: IDs from reviews and comments
+  // are not comparable. Cross-resource ties cannot erase a rejection/dismissal.
+  const latestAdminDecision = new Map();
+  for (const candidate of latestAdminActions.values()) {
+    const login = candidate.login.toLowerCase();
+    const previous = latestAdminDecision.get(login);
+    const newTime = Date.parse(candidate.recordedAt ?? '') || 0;
+    const oldTime = Date.parse(previous?.recordedAt ?? '') || 0;
+    if (!previous || newTime > oldTime ||
+        (newTime === oldTime && candidate.state !== 'APPROVED')) {
+      latestAdminDecision.set(login, candidate);
     }
   }
-
-  // A standing administrator change request outranks another approval.
-  const adminBlock = [...latestAdminReview.values()]
-    .find((review) => review.state === 'CHANGES_REQUESTED');
-  if (adminBlock) {
+  const adminDecisions = [...latestAdminDecision.values()];
+  for (const login of unresolvedDismissals) {
+    notes.push(
+      `Administrator ${login} has a current-head dismissal with unproven timing; ` +
+      'approvals from this account cannot override the gate.',
+    );
+  }
+  const adminDecision = adminDecisions.find((decision) =>
+    decision.state === 'APPROVED' &&
+    !unresolvedDismissals.has(decision.login.toLowerCase())) ??
+    adminDecisions.find((decision) => decision.state === 'CHANGES_REQUESTED');
+  const { current, stale, unauthenticated } = collectVerdicts(comments, head, { carriedShas });
+  const scope = classifyChangeScope(changedPaths);
+  const requiredCount = scope.highRisk ? 2 : 1;
+  const requiredMembers = scope.highRisk ? reviewPanel : [];
+  if (adminDecision) {
+    const passed = adminDecision.state === 'APPROVED';
+    const agentRecords = [...current.values()].filter((record) =>
+      !record.isSelfDeclaredAdmin && roster.has(record.reviewer) &&
+      !authorMembers.has(record.reviewer));
+    const dissent = agentRecords
+      .filter((record) => record.verdict === 'REQUEST_CHANGES')
+      .map((record) => record.reviewer).sort();
+    const approvals = agentRecords
+      .filter((record) => record.verdict === 'APPROVE' &&
+        (!scope.highRisk || reviewPanel.includes(record.reviewer)))
+      .map((record) => record.reviewer).sort();
+    const missingApprovals = Math.max(0, requiredCount - approvals.length);
+    const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
+    notes.push(
+      `Owner decision is authorization, not agent review. Agent approvals: ${approvals.join(', ') || '(none)'}.`,
+      `Dissent preserved: ${dissent.join(', ') || '(none)'}.`,
+      `Review quorum: ${approvals.length}/${requiredCount}; missing approvals: ${missingApprovals}. ` +
+      `Panel members without approval: ${missingPanel.join(', ') || '(none)'}.`,
+    );
     return {
-      state: 'failure',
-      passed: false,
-      override: 'github-review',
+      state: passed ? 'success' : 'failure',
+      passed,
+      override: adminDecision.override,
       description: truncate(
-        `REQUEST_CHANGES @ ${shortSha(head)} by ${adminBlock.login}`,
+        passed
+          ? `APPROVE (owner) @ ${shortSha(head)} by ${adminDecision.login}; dissent=${dissent.length}; short=${missingApprovals}`
+          : `REQUEST_CHANGES @ ${shortSha(head)} by ${adminDecision.login}`,
       ),
       reason:
-        `administrator ${adminBlock.login} requested changes on the current ` +
-        'head through GitHub review',
+        `administrator ${adminDecision.login} recorded ${adminDecision.state} ` +
+        `on the current head via ${adminDecision.override}`,
       notes,
-      requiredMembers: [],
-      approvals: [],
-      stale: [],
+      requiredMembers,
+      requiredCount,
+      approvals,
+      dissent,
+      missingApprovals,
+      stale,
     };
   }
 
-  const adminApproval = [...latestAdminReview.values()]
-    .find((review) => review.state === 'APPROVED');
-  if (adminApproval) {
-    return {
-      state: 'success',
-      passed: true,
-      override: 'github-review',
-      description: truncate(
-        `APPROVE (owner) @ ${shortSha(head)} by ${adminApproval.login}`,
-      ),
-      reason: `administrator ${adminApproval.login} approved the current head on GitHub`,
-      notes,
-      requiredMembers: [],
-      approvals: [adminApproval.login],
-      stale: [],
-    };
-  }
-
-  const { current, stale, unauthenticated } = collectVerdicts(comments, head, { carriedShas });
   if (unauthenticated.length > 0) {
     notes.push(
       `Rejected ${unauthenticated.length} record(s) whose author could not be ` +
@@ -871,35 +927,9 @@ export function evaluateGate({
     );
   }
 
-  // 2. Owner override via record comment: an administrator who names their own
-  //    GitHub login as the reviewer is speaking as the owner rather than as an
-  //    agent. This is the one path that is a real authorisation rather than a
-  //    self-attested agent record, so it is labelled `(owner)`.
-  for (const record of current.values()) {
-    if (record.isSelfDeclaredAdmin) {
-      const passed = record.verdict === 'APPROVE';
-      return {
-        state: passed ? 'success' : 'failure',
-        passed,
-        override: 'owner-comment',
-        description: truncate(
-          passed
-            ? `APPROVE (owner) @ ${shortSha(head)} by ${record.commenter}`
-            : `REQUEST_CHANGES @ ${shortSha(head)} by ${record.commenter}`,
-        ),
-        reason: `repository administrator ${record.commenter} recorded ${record.verdict}`,
-        notes,
-        requiredMembers: [],
-        approvals: passed ? [record.commenter] : [],
-        stale,
-      };
-    }
-  }
-
-  const scope = classifyChangeScope(changedPaths);
   notes.push(
     scope.highRisk
-      ? `High-risk gate (${scope.reason}): the ${reviewPanel.join('/')} panel is required.`
+      ? `High-risk gate (${scope.reason}): ${requiredCount} approvals from ${reviewPanel.join('/')} are required.`
       : `${scope.docsOnly ? 'Documentation-only change' : 'Standard change'} (${scope.reason}): one reviewer required.`,
   );
   if (authorMembers.size > 0) {
@@ -942,6 +972,10 @@ export function evaluateGate({
   }
   const eligible = new Map();
   for (const [member, record] of current) {
+    if (record.isSelfDeclaredAdmin) {
+      notes.push(`Ignored ${member}: owner decisions are not agent review records.`);
+      continue;
+    }
     if (!roster.has(member)) {
       notes.push(`Ignored ${member}: not a known squad identity.`);
       continue;
@@ -965,10 +999,7 @@ export function evaluateGate({
     eligible.set(member, record);
   }
 
-  // 4. Any current-head rejection blocks, regardless of approval count. This is
-  //    the only path that emits a REQUEST_CHANGES status: it is a reviewer
-  //    decision, unlike the BLOCKED states below, which mean evidence is
-  //    absent rather than negative.
+  // Without an owner override, any current-head agent rejection blocks.
   const rejection = [...eligible.values()].find(
     (record) => record.verdict === 'REQUEST_CHANGES');
   if (rejection) {
@@ -987,18 +1018,14 @@ export function evaluateGate({
   }
 
   const approvals = [...eligible.values()]
-    .filter((record) => record.verdict === 'APPROVE')
+    .filter((record) => record.verdict === 'APPROVE' &&
+      (!scope.highRisk || reviewPanel.includes(record.reviewer)))
     .map((record) => record.reviewer)
     .sort();
 
   // 5. Reviewer count and panel membership.
-  const requiredCount = scope.highRisk ? 3 : 1;
-  const requiredMembers = scope.highRisk
-    ? reviewPanel
-    : [];
-
   const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
-  if (missingPanel.length > 0 || approvals.length < requiredCount) {
+  if (approvals.length < requiredCount) {
     const staleNote = stale.length > 0
       ? ` (stale at ${stale.map((r) => `${r.reviewer}@${shortSha(r.headSha)}`).join(', ')})`
       : '';
@@ -1008,7 +1035,7 @@ export function evaluateGate({
           `(${unauthenticated.length} unauthenticated)`
         : `no review recorded for ${shortSha(head)}`)
       : `have ${approvals.length}/${requiredCount}` +
-        (missingPanel.length > 0 ? `, missing ${missingPanel.join('+')}` : '') +
+        (missingPanel.length > 0 ? `, choose ${missingPanel.join('+')}` : '') +
         staleNote;
     return {
       state: 'failure',
@@ -1021,6 +1048,7 @@ export function evaluateGate({
         : detail,
       notes,
       requiredMembers,
+      requiredCount,
       approvals,
       stale,
     };
@@ -1031,7 +1059,7 @@ export function evaluateGate({
   // audit trail must say so explicitly — never silently present a carried
   // record as a fresh review of the current head.
   const carried = [...eligible.values()]
-    .filter((record) => record.verdict === 'APPROVE' && record.carriedAcrossSync === true);
+    .filter((record) => approvals.includes(record.reviewer) && record.carriedAcrossSync === true);
   if (carried.length > 0) {
     notes.push(
       `Carried across sync: ${carried
@@ -1060,6 +1088,7 @@ export function evaluateGate({
         : ''),
     notes,
     requiredMembers,
+    requiredCount,
     approvals,
     stale,
     carried: carried.map((record) => record.reviewer),

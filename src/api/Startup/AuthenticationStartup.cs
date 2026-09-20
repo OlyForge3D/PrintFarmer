@@ -121,8 +121,8 @@ public static class AuthenticationStartup
             // Real authentication scheme for the OctoPrint-compatible X-Api-Key header (issue #1666).
             // Chained onto the same AddAuthentication("Bearer") builder — NOT a second
             // AddAuthentication() call — so "Bearer" remains the default scheme while
-            // OctoPrintApiKey is available as an additional scheme actions can opt into via
-            // [Authorize(AuthenticationSchemes = "Bearer,OctoPrintApiKey")].
+            // OctoPrintApiKey is available as an additional scheme configured by
+            // OctoPrintUploadPolicy.Configure for the settings-aware upload endpoint.
             .AddScheme<AuthenticationSchemeOptions, OctoPrintApiKeyAuthenticationHandler>(
                 OctoPrintApiKeyDefaults.AuthenticationScheme,
                 _ => { });
@@ -135,6 +135,7 @@ public static class AuthenticationStartup
                 .Build();
 
             options.AddPolicy("RequireAuthentication", policy => policy.RequireAuthenticatedUser());
+            options.AddPolicy(OctoPrintUploadPolicy.Name, OctoPrintUploadPolicy.Configure);
 
             // NOTE: "RequireAdmin", "farm_admin", and "CanViewSliceQueue" were role-backed
             // policy aliases (policy.RequireRole("farm_admin")) that were functionally

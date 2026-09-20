@@ -2,6 +2,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -70,6 +71,63 @@ public sealed class HostStatePath
         HostStateFileSecurity.ValidateExistingPathComponents(path);
         return path;
     }
+}
+
+public static class HostUpdateInstallationIdentity
+{
+    private const string FileName = "installation.id";
+    private static readonly object Gate = new();
+
+    public static string GetOrCreate(string? hostStateRoot)
+    {
+        if (string.IsNullOrWhiteSpace(hostStateRoot))
+        {
+            // Unprovisioned hosts must not write outside the validated host-state root.
+            return CreateIdentity();
+        }
+
+        string root = Path.GetFullPath(hostStateRoot);
+        HostStateFileSecurity.ValidateExistingPathComponents(root);
+        try
+        {
+            Directory.CreateDirectory(root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return CreateIdentity();
+        }
+        HostStateFileSecurity.ValidateExistingPathComponents(root);
+        string path = Path.Combine(root, FileName);
+
+        lock (Gate)
+        {
+            try
+            {
+                HostStateFileSecurity.RejectReparseTarget(path);
+                if (File.Exists(path))
+                {
+                    HostStateFileSecurity.RejectReparseTarget(path);
+                    string existing = File.ReadAllText(path).Trim();
+                    if (!string.IsNullOrWhiteSpace(existing))
+                    {
+                        return existing;
+                    }
+                }
+
+                string identity = CreateIdentity();
+                HostStateFileSecurity.RejectReparseTarget(path);
+                File.WriteAllText(path, identity);
+                return identity;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return CreateIdentity();
+            }
+        }
+    }
+
+    private static string CreateIdentity() =>
+        Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 }
 
 public static class HostStateFileSecurity
