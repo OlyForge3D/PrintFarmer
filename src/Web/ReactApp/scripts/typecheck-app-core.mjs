@@ -82,6 +82,21 @@ export function countNoCheckFiles(listFilesOutput, directory) {
   return { count: seen.size, paths: [...seen.values()].sort() };
 }
 
+// Bounds an env-var-supplied override for a spawnSync limit (timeout or
+// maxBuffer) so the seam can only ever SHORTEN the given default, never
+// lengthen or disable it. The env var is read unconditionally, in every run
+// -- production, CI, and Docker alike -- so anything invalid, non-finite, or
+// above the ceiling -- including a value technically representable as a
+// JS number, such as 1e21 (which fails Number.isSafeInteger, since it
+// exceeds Number.MAX_SAFE_INTEGER) -- must silently fall back to the
+// default rather than disabling the bound it exists to enforce.
+export function clampedOverride(envValue, defaultValue) {
+  const parsed = Number(envValue);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= defaultValue
+    ? parsed
+    : defaultValue;
+}
+
 export function validateBaseline(baseline) {
   if (!baseline || typeof baseline !== "object") {
     return "baseline must be an object.";

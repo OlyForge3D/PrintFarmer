@@ -6,7 +6,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { countNoCheckFiles, evaluate } from "../typecheck-app-core.mjs";
+import { clampedOverride, countNoCheckFiles, evaluate } from "../typecheck-app-core.mjs";
 
 const scriptsDirectory = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -244,6 +244,44 @@ test("fails missing, malformed, and non-object baselines", () => {
   );
 });
 
+test("clampedOverride lets an in-range override through, and clamps everything else to the default (Hicks R6 blocking)", () => {
+  // Valid, in-range overrides -- this is the only path CI/production is
+  // expected to exercise (nothing sets these env vars outside tests).
+  assert.equal(clampedOverride("300", 120_000), 300);
+  assert.equal(clampedOverride("120000", 120_000), 120_000);
+  assert.equal(clampedOverride("1", 120_000), 1);
+
+  // Missing/unset entirely.
+  assert.equal(clampedOverride(undefined, 120_000), 120_000);
+
+  // Non-numeric / malformed strings.
+  assert.equal(clampedOverride("abc", 120_000), 120_000);
+  assert.equal(clampedOverride("", 120_000), 120_000);
+  assert.equal(clampedOverride("  ", 120_000), 120_000);
+
+  // Zero and negative -- must not disable or invert the bound.
+  assert.equal(clampedOverride("0", 120_000), 120_000);
+  assert.equal(clampedOverride("-1", 120_000), 120_000);
+
+  // Fractional -- spawnSync's own timeout validation would reject this
+  // outright, but the clamp itself must not accept it either.
+  assert.equal(clampedOverride("1.5", 120_000), 120_000);
+
+  // Non-finite.
+  assert.equal(clampedOverride("Infinity", 120_000), 120_000);
+
+  // Above the default ceiling -- an override may only shorten the bound,
+  // never lengthen it.
+  assert.equal(clampedOverride("999999999", 120_000), 120_000);
+
+  // The exact case Bishop found accepted by a naive `Number(x) || default`:
+  // 1e21 is a valid JS number (so `Number("1e21")` does not produce NaN),
+  // but it exceeds Number.MAX_SAFE_INTEGER, so Number.isSafeInteger rejects
+  // it and it falls back to the default instead of silently disabling the
+  // timeout/maxBuffer bound.
+  assert.equal(clampedOverride("1e21", 120_000), 120_000);
+});
+
 test("CLI fails without success or baseline-reduction advice after compiler signal death", async () => {
   const fixtureDirectory = await mkdtemp(
     path.join(tmpdir(), "typecheck-app-"),
@@ -280,6 +318,11 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
       [path.join(fixtureDirectory, "scripts/typecheck-app.mjs")],
       {
         encoding: "utf8",
+        // Consistency with the hung-compiler and malformed-baseline tests
+        // below: a real signal-death should return almost immediately, but
+        // this bounds the test itself in case a future regression turns the
+        // signal-death path into a hang.
+        timeout: 10_000,
       },
     );
     const output = `${result.stdout}${result.stderr}`;
@@ -380,10 +423,19 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
     assert.doesNotMatch(output, /Application type-check passed/);
     // The hung tsc must actually be killed near the overridden 300ms bound,
     // not merely reported as timed out while the process (and the wrapping
-    // CLI's wait on it) continues indefinitely in the background.
+    // CLI's wait on it) continues indefinitely in the background. This bound
+    // must sit well BELOW the 10s outer watchdog above -- otherwise the
+    // preceding assertion (the watchdog did not fire) already proves this
+    // one true, making it vacuous. Since typecheck-app.mjs short-circuits
+    // the second (--listFilesOnly) spawnSync once the first compiler call is
+    // already fatal (a hung/timed-out compiler is exactly that case), a hung
+    // compiler now burns the 300ms override only once, not twice; 5s leaves
+    // generous CI scheduling slack over that ~300ms while still genuinely
+    // binding the override (a regression back to two sequential spawns, or
+    // one at ~9s, would still dodge the 10s watchdog but trip this).
     assert.ok(
-      elapsedMs < 30_000,
-      `expected the CLI to return well under 30s once the compiler timeout fired; took ${elapsedMs}ms`,
+      elapsedMs < 5_000,
+      `expected the CLI to return well under 5s once the compiler timeout fired once (not twice); took ${elapsedMs}ms`,
     );
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
