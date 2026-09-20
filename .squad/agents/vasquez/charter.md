@@ -60,9 +60,9 @@ When reviewing:
 
 ALL code MUST pass 3-way adversarial review (Bishop + Hicks + Vasquez consensus APPROVE) on the BRANCH before any PR is opened (via `create_pull_request` or `gh pr create`). No more "ship PR then review." Flow:
 1. Builder pushes branch (no PR yet)
-2. Trio reviews branch HEAD (diff against development)
+2. Trio reviews branch HEAD (initial diff against development)
 3. Consensus 3/3 APPROVE → builder (or wrangler) opens PR
-4. Consensus REQUEST_CHANGES → builder revises on branch → re-review
+4. Consensus REQUEST_CHANGES → builder revises on branch → [Delta-Only Panel Rereview](../../../.github/copilot-instructions.md#delta-only-panel-rereview)
 5. Reviews still adversarial — independent verdicts, then consensus synthesis
 
 Revisions to ALREADY-OPEN PRs (fix-ups) follow the existing PR-review loop, not this gate.
