@@ -5,6 +5,7 @@
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Printers;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,7 +20,8 @@ namespace Farm.Infrastructure.Services.Queue;
 /// </summary>
 public sealed class BackendControlCommandConsumerService(
     IServiceScopeFactory scopeFactory,
-    ILogger<BackendControlCommandConsumerService> logger) : BackgroundService
+    ILogger<BackendControlCommandConsumerService> logger,
+    BackendControlCommandConsumerFenceFlag? hostUpdateFence = null) : BackgroundService
 {
     public const string EventType = "PrintFarmer.Queue.BackendControlCommand.v1";
 
@@ -39,6 +41,14 @@ public sealed class BackendControlCommandConsumerService(
         {
             try
             {
+                if (hostUpdateFence is not null &&
+                    await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+                {
+                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 await RecoverStaleLeasesAsync(stoppingToken);
                 await ProcessPendingAsync(stoppingToken);
             }
@@ -51,8 +61,28 @@ public sealed class BackendControlCommandConsumerService(
                 logger.LogError(exception, "Backend control command scan failed.");
             }
 
-            await Task.Delay(PollInterval, stoppingToken);
+            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+            }
         }
+    }
+
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + PollInterval;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (hostUpdateFence is not null &&
+                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     internal async Task RecoverStaleLeasesAsync(CancellationToken ct)

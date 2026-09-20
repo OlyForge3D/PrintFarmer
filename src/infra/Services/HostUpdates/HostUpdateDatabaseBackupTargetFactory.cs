@@ -25,6 +25,15 @@ public static class HostUpdateDatabaseBackupTargetFactory
     /// <see cref="HostUpdateBackupCoordinator"/>) when <paramref name="isExternallyOwned"/> is
     /// true -- e.g. a customer-managed external PostgreSQL/SQL Server instance this host does
     /// not control.
+    /// <paramref name="backupRootDirectory"/> (only meaningful when <paramref name="dbConfig"/>
+    /// is SQL Server) is the exact same directory <see cref="HostUpdateBackupCoordinator"/> uses
+    /// to build every real backup's destination directory. It drives the round-trip mapping
+    /// check exposed via <see cref="IHostUpdateServerSideBackupTarget"/> (issue #2788), which
+    /// deliberately verifies this one directory -- not a separately configured "SQL Server side"
+    /// path -- because that is the exact directory the SQL Server engine is asked to write into
+    /// for a real backup; verifying any other path would not prove what production backups
+    /// depend on. Leaving it empty makes the check fail closed with explicit evidence rather
+    /// than skip silently.
     /// </summary>
     public static IHostUpdateBackupTarget CreateBackupTarget(
         string name,
@@ -32,7 +41,8 @@ public static class HostUpdateDatabaseBackupTargetFactory
         IHostUpdateProcessRunner processRunner,
         IHostUpdateExecutableResolver executableResolver,
         TimeSpan timeout,
-        bool isExternallyOwned)
+        bool isExternallyOwned,
+        string backupRootDirectory = "")
     {
         ArgumentNullException.ThrowIfNull(dbConfig);
 
@@ -80,7 +90,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
             SqlConnectionStringBuilder builder = EncryptedSqlServerBuilder(dbConfig.ConnectionString);
             string database = builder.InitialCatalog;
             (IReadOnlyList<string> connectionArgs, IReadOnlyDictionary<string, string>? connectionEnvironment) = SqlServerConnectionArgs(builder);
-            return new ProcessDatabaseBackupTarget(
+            var inner = new ProcessDatabaseBackupTarget(
                 name,
                 isExternallyOwned: false,
                 processRunner,
@@ -94,6 +104,22 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 ],
                 timeout,
                 connectionEnvironment);
+
+            // Wrapped (never bypassing the lazy resolveFileName/fail-explicit contract #2787
+            // established) so availability checks can prove the visible-backup-path mapping is
+            // real (#2788) without reintroducing eager resolution: the wrapper's constructor
+            // captures only already-lazy delegates and configuration values, and only actually
+            // resolves sqlcmd or touches the filesystem when VerifyVisibleBackupPathMappingAsync
+            // is invoked.
+            return new SqlServerProcessDatabaseBackupTarget(
+                inner,
+                processRunner,
+                () => executableResolver.Resolve("sqlcmd"),
+                builder.DataSource,
+                connectionArgs,
+                connectionEnvironment,
+                backupRootDirectory,
+                timeout);
         }
 
         throw new NotSupportedException($"unsupported_backup_provider:{dbConfig.Provider}");
@@ -167,7 +193,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
     /// closes a security-review finding that a backup-root path containing a single quote could
     /// otherwise terminate the literal early and inject additional dot-command/T-SQL text.
     /// </summary>
-    private static string EscapeQuotedLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
+    internal static string EscapeQuotedLiteral(string value) => value.Replace("'", "''", StringComparison.Ordinal);
 
     /// <summary>
     /// Escapes a T-SQL bracketed identifier (<c>[name]</c>) by doubling any embedded <c>]</c>,
@@ -248,6 +274,196 @@ public static class HostUpdateDatabaseBackupTargetFactory
         arguments.Add("-U");
         arguments.Add(builder.UserID);
         return (arguments, environment);
+    }
+}
+
+/// <summary>
+/// Wraps a <see cref="ProcessDatabaseBackupTarget"/> configured for SQL Server with a real
+/// round-trip verification of the visible-backup-path mapping (issue #2788): asks the SQL
+/// Server engine to write a probe file into the exact same
+/// <see cref="HostUpdateExecutionOptions.BackupRootDirectory"/> real backups use, then confirms
+/// PrintFarmer can read that exact file back from that same directory. Delegates every normal
+/// <see cref="IHostUpdateBackupTarget"/> operation unchanged to the wrapped target; only adds
+/// <see cref="IHostUpdateServerSideBackupTarget"/>. Every dependency captured here is either
+/// already-lazy (<paramref name="resolveFileName"/>) or a plain configuration value, so
+/// constructing this wrapper never resolves <c>sqlcmd</c> or touches the filesystem -- only
+/// <see cref="VerifyVisibleBackupPathMappingAsync"/> does, and only when actually invoked
+/// (preserving the lazy-resolution, no-DI-graph-crash contract #2787 established for
+/// <see cref="ProcessDatabaseBackupTarget"/>).
+/// </summary>
+internal sealed class SqlServerProcessDatabaseBackupTarget(
+    IHostUpdateBackupTarget inner,
+    IHostUpdateProcessRunner processRunner,
+    Func<string> resolveFileName,
+    string dataSource,
+    IReadOnlyList<string> connectionArguments,
+    IReadOnlyDictionary<string, string>? connectionEnvironment,
+    string backupRootDirectory,
+    TimeSpan timeout) : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
+{
+    // Fixed (not per-invocation-unique) name: BACKUP DATABASE ... WITH INIT overwrites an
+    // existing file at this path, so every ~5-minute availability re-check reuses and
+    // overwrites the same single probe file instead of accumulating a new one on the SQL
+    // Server volume each time the mapping is broken and PrintFarmer cannot see (and so cannot
+    // clean up) the file it just asked the engine to write.
+    internal const string ProbeFileName = "printfarmer-mapping-probe.bak";
+
+    // The probe backs up only [master] with COPY_ONLY -- a tiny, fixed-size operation -- so it
+    // should never need anywhere near the full configured BackupTimeoutSeconds (which may be
+    // tens of minutes, sized for a real production-database backup). Capping it keeps a
+    // hung/unreachable SQL Server from blocking every ~5-minute availability check for that long.
+    private static readonly TimeSpan MaxProbeTimeout = TimeSpan.FromSeconds(30);
+
+    public string Name => inner.Name;
+
+    public bool IsExternallyOwned => inner.IsExternallyOwned;
+
+    public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) =>
+        inner.BackupAsync(destinationDirectory, cancellationToken);
+
+    /// <summary>
+    /// Instructs the SQL Server engine itself to write a small, disposable probe file (a
+    /// <c>BACKUP DATABASE [master]</c> -- the same statement shape and code path real backups
+    /// use) into the configured <c>backupRootDirectory</c>'s value -- the same
+    /// <see cref="HostUpdateExecutionOptions.BackupRootDirectory"/> every real backup destination
+    /// is created under (see <see cref="HostUpdateBackupCoordinator"/>) -- then confirms
+    /// PrintFarmer can read that exact physical file back
+    /// from that same directory. Deliberately does not accept a separately configured
+    /// "SQL Server side" directory: production backups never translate the destination path, so
+    /// verifying anything other than the literal directory real backups use would not prove the
+    /// mapping those backups actually depend on. Never assumes success from configuration
+    /// presence: an empty/relative directory, a failed <c>sqlcmd</c> invocation, or a probe file
+    /// that the engine reports as written but PrintFarmer cannot see all fail closed with
+    /// distinct, explicit evidence.
+    /// </summary>
+    public async Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(backupRootDirectory))
+        {
+            return "backup_root_directory_not_configured";
+        }
+
+        if (!Path.IsPathRooted(backupRootDirectory))
+        {
+            return "backup_root_directory_not_absolute";
+        }
+
+        string probePath = Path.Combine(backupRootDirectory, ProbeFileName);
+        TimeSpan probeTimeout = timeout < MaxProbeTimeout ? timeout : MaxProbeTimeout;
+
+        // Ensure the directory exists from PrintFarmer's own side before asking the engine to
+        // write into it. On a freshly configured host, RootDirectory may exist while its
+        // "backups" subdirectory has not yet been created (real backups create it lazily too),
+        // which would otherwise make BACKUP DATABASE fail with an OS-level "path not found"
+        // error indistinguishable from a genuinely broken mapping.
+        try
+        {
+            Directory.CreateDirectory(backupRootDirectory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"probe_directory_creation_failed:{exception.GetType().Name}";
+        }
+
+        // Remove any pre-existing probe file from PrintFarmer's own view before asking the
+        // engine to write a fresh one. Without this, a stale file left behind by an earlier
+        // successful verification (e.g. because the best-effort cleanup below failed) could
+        // still be sitting at probePath if the mapping is later broken -- and the read-back
+        // check further down would then observe that stale file and report the mapping
+        // verified even though the engine's write never reached PrintFarmer's filesystem at
+        // all. Failing closed here (rather than proceeding with an indeterminate starting
+        // state) is required so a positive verification always reflects this specific
+        // invocation's round trip, not a leftover from a previous one.
+        try
+        {
+            if (File.Exists(probePath))
+            {
+                File.Delete(probePath);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"probe_stale_file_removal_failed:{exception.GetType().Name}";
+        }
+
+        HostUpdateProcessResult result;
+        try
+        {
+            result = await processRunner.RunAsync(
+                resolveFileName(),
+                [
+                    "-S", dataSource,
+                    "-b",
+                    .. connectionArguments,
+                    "-Q", $"BACKUP DATABASE [master] TO DISK = N'{HostUpdateDatabaseBackupTargetFactory.EscapeQuotedLiteral(probePath)}' WITH INIT, COPY_ONLY",
+                ],
+                probeTimeout,
+                cancellationToken,
+                connectionEnvironment).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return $"probe_backup_invocation_failed:{exception.GetType().Name}";
+        }
+
+        if (!result.Succeeded)
+        {
+            return $"probe_backup_command_failed:{result.ExitCode}";
+        }
+
+        try
+        {
+            // Actually open and read a byte from the file rather than only checking FileInfo
+            // metadata: proving PrintFarmer can read real bytes back is what the mapping needs
+            // to guarantee (verification/restore later reads this same directory), not merely
+            // that a directory-listing sees an entry. A real BACKUP DATABASE [master] file can
+            // be several MB, so this deliberately reads a single byte via a stream instead of
+            // File.ReadAllBytesAsync -- proving readability does not require buffering the
+            // whole backup into memory on every periodic availability check.
+            int bytesRead;
+            try
+            {
+                byte[] probeBuffer = new byte[1];
+                await using FileStream probeStream = new(probePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                bytesRead = await probeStream.ReadAsync(probeBuffer.AsMemory(0, 1), cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return "probe_file_not_visible_from_printfarmer";
+            }
+
+            if (bytesRead == 0)
+            {
+                return "probe_file_not_visible_from_printfarmer";
+            }
+        }
+        finally
+        {
+            TryDeleteProbeFile(probePath);
+        }
+
+        return null;
+    }
+
+    private static void TryDeleteProbeFile(string path)
+    {
+        try
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            // Best-effort cleanup only: the round trip this invocation just performed (a fresh
+            // sqlcmd write, verified readable above) already proved the mapping, so a failure to
+            // delete the probe file here does not invalidate *that* result. It is not silently
+            // tolerated indefinitely, though: the next check's pre-invocation removal (above)
+            // will hit this same file and, if it still cannot be deleted, fail closed with
+            // probe_stale_file_removal_failed -- so a persistently undeletable probe still ends
+            // up reporting Unavailable rather than masking the problem forever.
+        }
     }
 }
 

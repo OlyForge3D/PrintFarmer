@@ -159,6 +159,21 @@ public class HostUpdateExecutionOptionsValidatorTests
         result.FailureMessage.Should().Contain("DrainTimeoutSeconds");
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(-1)]
+    public void Validate_NonPositiveMigrationTimeout_Fails(int migrationTimeoutSeconds)
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.MigrationTimeoutSeconds = migrationTimeoutSeconds;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("HostUpdateExecution:MigrationTimeoutSeconds must be positive.");
+    }
+
     [Fact]
     public void Validate_InvalidHealthCheckBaseUrl_Fails()
     {
