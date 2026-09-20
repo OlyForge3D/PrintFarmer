@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { ApiClient } from "@/services/api";
-import { PrinterBackend } from "@/types/api";
+import { MotionType, PrinterBackend, type Printer } from "@/types/api";
 import { loadWireContractFixture } from "@/test/wireContracts";
 
 // Mock axios
@@ -233,20 +233,26 @@ describe("ApiClient", () => {
     });
   });
 
-  describe("getPrinters", () => {
-    it("should call the correct endpoint", async () => {
+  describe("printer responses", () => {
+    it.each(["getPrinters", "getPrintersFast"] as const)("%s preserves the list wire shape", async (method) => {
       const mockResponse = {
         data: [
           {
             id: "1",
             name: "Test Printer",
-            serverUrl: "http://test.local",
             notes: "Test notes",
-            isOnline: true,
+            isOnline: false,
             state: "idle",
             backend: PrinterBackend.Moonraker,
+            motionType: MotionType.CoreXY,
+            backendPort: 7125,
+            inMaintenance: false,
+            isEnabled: true,
+            obicoEnabled: false,
+            hasCatalogUpdate: false,
+            useModelDispatchDefaults: true,
           },
-        ],
+        ] satisfies Printer[],
       };
 
       // Mock the get method
@@ -255,11 +261,35 @@ describe("ApiClient", () => {
       (apiClient as unknown as { client: { get: typeof mockGet } }).client.get =
         mockGet;
 
-      const result = await apiClient.getPrinters();
+      const result = await apiClient[method]();
 
-      // Updated endpoint now uses the faster summary list endpoint
       expect(mockGet).toHaveBeenCalledWith("/printers", { params: undefined });
       expect(result).toEqual(mockResponse.data);
+      expect(result[0].backend).toBe("Moonraker");
+      expect(result[0].isOnline).toBe(false);
+      expect(result[0]).not.toHaveProperty("backendUrl");
+      expect(result[0]).not.toHaveProperty("isReachable");
+    });
+
+    it("getPrinter preserves detail status without synthesizing connection fields", async () => {
+      const data = {
+        id: "1",
+        name: "Test Printer",
+        backend: PrinterBackend.PrusaLink,
+        isOnline: true,
+        state: "idle",
+      } satisfies Printer;
+      const mockGet = vi.fn().mockResolvedValue({ data });
+      (apiClient as unknown as { client: { get: typeof mockGet } }).client.get = mockGet;
+
+      const result = await apiClient.getPrinter("1");
+
+      expect(mockGet).toHaveBeenCalledWith("/printers/1");
+      expect(result).toEqual(data);
+      expect(result.backend).toBe("PrusaLink");
+      expect(result.isOnline).toBe(true);
+      expect(result).not.toHaveProperty("backendUrl");
+      expect(result).not.toHaveProperty("isReachable");
     });
   });
 

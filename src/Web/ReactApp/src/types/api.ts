@@ -115,7 +115,7 @@ export interface PrinterCredentials {
  * Used by DTOs that need to establish connections.
  */
 export interface PrinterConnection {
-  /** Backend API URL (e.g., "http://192.168.1.100:7125") */
+  /** Client-side connection URL; omitted from serialized printer read DTOs. */
   backendUrl?: string;
   /** Frontend web interface URL (e.g., "http://192.168.1.100") */
   frontendUrl?: string;
@@ -392,10 +392,8 @@ export interface Printer extends
   PrinterTemperatures,
   PrinterPosition,
   PrinterJobInfo {
-  // Required override - backendUrl is required for Printer
-  backendUrl: string;
-  // Additional Printer-specific fields
-  isReachable: boolean;
+  /** Client-side alias only; API responses report reachability through isOnline. */
+  isReachable?: boolean;
   motionType?: MotionType;
   homedAxes?: string;
 }
@@ -469,10 +467,7 @@ export interface PrinterFast extends
   PrinterBase,
   PrinterLiveStatus,
   PrinterTemperatures,
-  PrinterPosition {
-  // Required override - backendUrl is required for PrinterFast
-  backendUrl: string;
-}
+  PrinterPosition {}
 
 export interface PrinterSummary {
   id: string;
