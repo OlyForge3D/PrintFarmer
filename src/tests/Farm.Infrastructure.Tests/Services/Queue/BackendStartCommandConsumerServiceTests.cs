@@ -320,13 +320,26 @@ public sealed class BackendStartCommandConsumerServiceTests
         DateTime anchor = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
         const double accelerationFactor = 200;
         var clock = new AcceleratedTimeProvider(anchor, accelerationFactor);
+
+        // The clock is intentionally NOT started yet: GetUtcNow() stays frozen at
+        // `anchor` for the entire setup/seeding block below, no matter how long that
+        // setup actually takes in real wall-clock time. This closes a race a panel
+        // review caught: with the clock running from construction, real time spent on
+        // SQLite provisioning and seeding (which is unbounded and can legitimately take
+        // tens of milliseconds) could, at this acceleration factor, silently carry the
+        // virtual clock past the seeded RetryAfterUtc below BEFORE the hosted loop even
+        // starts -- making the event eligible on the very first
+        // ProcessPendingCommandsAsync pass and letting the test's "load-bearing"
+        // assertion pass without WaitForIntervalOrPauseAsync's poll/delay cycle ever
+        // actually running.
         await using TestHarness harness = await TestHarness.CreateAsync(clock);
 
         // RetryAfterUtc is 3 simulated seconds in the future: inside the 5-second
         // PollInterval, but strictly after the very first ProcessPendingCommandsAsync
-        // call (which runs at simulated time ~= anchor). The event is therefore NOT
-        // eligible on the hosted loop's first iteration and can only be picked up after
-        // WaitForIntervalOrPauseAsync's poll/delay cycle has advanced the clock past it.
+        // call (which runs at simulated time ~= anchor, since the clock has not been
+        // started yet). The event is therefore NOT eligible on the hosted loop's first
+        // iteration and can only be picked up after WaitForIntervalOrPauseAsync's
+        // poll/delay cycle has advanced the clock past it.
         Guid eventId = await harness.SeedOutboxEventAsync(
             status: QueueOutboxEventStatus.Pending,
             retryAfterUtc: anchor + TimeSpan.FromSeconds(3));
@@ -336,12 +349,36 @@ public sealed class BackendStartCommandConsumerServiceTests
                 It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(BackendStartOutcome.Accepted(Guid.NewGuid()));
 
+        // Deterministic proof the race is closed: no matter how much real wall-clock
+        // time the setup above actually took, the virtual clock is still exactly
+        // `anchor` right up to this point, because AcceleratedTimeProvider.Start() has
+        // not been called yet. This assertion alone would fail immediately (not
+        // flakily) if the clock were still started eagerly in its constructor and the
+        // test happened to run on a slow machine/CI runner.
+        clock.GetUtcNow().Should().Be(
+            new DateTimeOffset(anchor, TimeSpan.Zero),
+            "the accelerated clock must stay frozen at the seed instant throughout test " +
+            "setup so setup time can never race past the seeded RetryAfterUtc before the " +
+            "hosted loop starts");
+
         var wallClock = System.Diagnostics.Stopwatch.StartNew();
+        clock.Start();
         await harness.Service.StartAsync(CancellationToken.None);
         bool published;
         try
         {
-            published = await SpinWaitUntilPublishedAsync(harness, eventId, TimeSpan.FromSeconds(5));
+            // 20 real seconds is a generous bound chosen for stability under a
+            // contended, fully-parallel test run (observed up to ~3s of real time for
+            // a 200x-accelerated 3-simulated-second wait when many other test classes
+            // are competing for CPU/thread-pool time). It remains far smaller than
+            // what an un-accelerated reversion would need: RetryAfterUtc is seeded
+            // relative to `anchor` (2031), a date that never matches the real system
+            // clock, so if WaitForIntervalOrPauseAsync were reverted to ignore the
+            // injected TimeProvider, this event could NEVER become eligible under the
+            // real clock and this SpinWait would time out completely regardless of how
+            // generous the budget is -- this is the actual load-bearing property, not
+            // the specific numeric threshold.
+            published = await SpinWaitUntilPublishedAsync(harness, eventId, TimeSpan.FromSeconds(20));
         }
         finally
         {
@@ -356,23 +393,26 @@ public sealed class BackendStartCommandConsumerServiceTests
         // WaitForIntervalOrPauseAsync's poll/delay loop. If PollInterval's delay, or the
         // `_timeProvider.GetUtcNow() < until` loop condition, were reverted to raw
         // `Task.Delay`/`DateTime.UtcNow` (i.e. ignoring the injected TimeProvider), this
-        // fake clock could never advance the loop's notion of "now" past RetryAfterUtc,
-        // and the event would still be Pending when the 5-second real-time SpinWait
-        // above times out.
+        // fake clock could never advance the loop's notion of "now" past RetryAfterUtc
+        // (RetryAfterUtc is anchored to the fictitious year 2031, so a real clock could
+        // never reach it either), and the event would still be Pending when the
+        // 20-second real-time SpinWait above times out.
         published.Should().BeTrue(
             "the hosted loop must advance past the poll/delay cycle and retry the event " +
             "once its RetryAfterUtc has elapsed");
 
-        // Second load-bearing assertion: proves the loop advanced via the accelerated
-        // TimeProvider rather than real wall-clock time. Production requires at least one
-        // full 5-second PollInterval wait (RetryAfterUtc is inside that window but after
-        // the first iteration) before this event becomes eligible; observing success in
-        // well under one real second demonstrates the timers were actually driven by the
-        // injected TimeProvider, not the system clock.
+        // Secondary (non-flaky-by-design) sanity check: proves the loop advanced via
+        // the accelerated TimeProvider rather than genuinely blocking for real
+        // wall-clock time. The threshold is deliberately generous -- it only needs to
+        // be far below what an un-accelerated reversion would require (which, per the
+        // comment above, is effectively unbounded, not merely "5 seconds") -- so this
+        // assertion stays stable under a fully-parallel, CPU-contended test run rather
+        // than flaking on an incidental scheduling delay.
         wallClock.Elapsed.Should().BeLessThan(
-            TimeSpan.FromSeconds(2),
+            TimeSpan.FromSeconds(15),
             "the accelerated TimeProvider must let the hosted loop advance through the " +
-            "poll/delay cycle without the test blocking for real wall-clock time");
+            "poll/delay cycle without the test blocking anywhere near as long as an " +
+            "un-accelerated wait for a RetryAfterUtc anchored in the year 2031 would take");
 
         QueueDispatchOutbox persisted = await harness.GetOutboxEventAsync(eventId);
         persisted.Status.Should().Be(QueueOutboxEventStatus.Published);
@@ -610,8 +650,9 @@ public sealed class BackendStartCommandConsumerServiceTests
     private sealed class AcceleratedTimeProvider : TimeProvider
     {
         private readonly DateTimeOffset _startUtc;
-        private readonly global::System.Diagnostics.Stopwatch _stopwatch = global::System.Diagnostics.Stopwatch.StartNew();
         private readonly double _accelerationFactor;
+        private readonly object _gate = new();
+        private global::System.Diagnostics.Stopwatch? _stopwatch;
 
         public AcceleratedTimeProvider(DateTime utcNow, double accelerationFactor)
         {
@@ -619,8 +660,43 @@ public sealed class BackendStartCommandConsumerServiceTests
             _accelerationFactor = accelerationFactor;
         }
 
-        private TimeSpan AcceleratedElapsed =>
-            TimeSpan.FromTicks((long)(_stopwatch.Elapsed.Ticks * _accelerationFactor));
+        /// <summary>
+        /// Begins advancing this clock's virtual time. Before this is called,
+        /// <see cref="GetUtcNow"/>/<see cref="GetTimestamp"/> stay frozen at the
+        /// constructor-supplied instant no matter how much real wall-clock time
+        /// elapses. This closes a race a panel review caught (PR #2877): the previous
+        /// design started its Stopwatch in the constructor, so real time spent on test
+        /// setup performed AFTER construction but BEFORE the code under test actually
+        /// runs (SQLite provisioning, seeding, mock wiring) leaked into the virtual
+        /// clock and could silently carry it past a seeded RetryAfterUtc/deadline
+        /// before the hosted loop had even started -- letting the test's "load-bearing"
+        /// assertion pass without the poll/delay cycle it claims to exercise ever
+        /// actually running. Callers must do all setup first, then call Start()
+        /// immediately before invoking the code under test.
+        /// </summary>
+        public void Start()
+        {
+            lock (_gate)
+            {
+                _stopwatch ??= global::System.Diagnostics.Stopwatch.StartNew();
+            }
+        }
+
+        private TimeSpan AcceleratedElapsed
+        {
+            get
+            {
+                global::System.Diagnostics.Stopwatch? stopwatch;
+                lock (_gate)
+                {
+                    stopwatch = _stopwatch;
+                }
+
+                return stopwatch is null
+                    ? TimeSpan.Zero
+                    : TimeSpan.FromTicks((long)(stopwatch.Elapsed.Ticks * _accelerationFactor));
+            }
+        }
 
         public override DateTimeOffset GetUtcNow() => _startUtc + AcceleratedElapsed;
 
