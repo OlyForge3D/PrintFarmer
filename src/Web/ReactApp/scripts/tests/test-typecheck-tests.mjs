@@ -80,7 +80,8 @@ test("fails below the exact test-file floor", () => {
   const result = evaluateGate({
     baseline: { ...baseline, minimumTestFileCount: 2 },
   });
-  assert.match(result.message, /below the 2-file floor/);
+  assert.match(result.message, /expected at least 2/);
+  assert.match(result.message, /Regenerate minimumTestFileCount.*same commit/);
 });
 
 test("fails above and below the exact diagnostic baseline", () => {
@@ -88,8 +89,11 @@ test("fails above and below the exact diagnostic baseline", () => {
     output: `${testDiagnostic}\n${testDiagnostic.replace("(1,1)", "(2,1)")}`,
   });
   const below = evaluateGate({ output: appDiagnostic });
-  assert.match(above.message, /do not raise the baseline/);
-  assert.match(below.message, /baseline is stale/);
+  assert.match(above.message, /do not raise the exact snapshot/);
+  assert.match(
+    below.message,
+    /exact snapshot is stale; regenerate testDiagnosticCount.*same commit/,
+  );
 });
 
 test("fails missing, malformed, and non-object baselines", () => {

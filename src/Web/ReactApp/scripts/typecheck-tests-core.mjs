@@ -120,7 +120,7 @@ export function evaluate({
   if (testFileCount < baseline.minimumTestFileCount) {
     return {
       ok: false,
-      message: `TypeScript test compiler found ${testFileCount} test file(s), below the ${baseline.minimumTestFileCount}-file floor.`,
+      message: `TypeScript test compiler found ${testFileCount} test file(s); expected at least ${baseline.minimumTestFileCount}. Regenerate minimumTestFileCount in scripts/test-typecheck-baseline.json in the same commit.`,
       showListFilesOutput: true,
     };
   }
@@ -128,11 +128,11 @@ export function evaluate({
   if (diagnostics.testDiagnostics.length !== baseline.testDiagnosticCount) {
     const direction =
       diagnostics.testDiagnostics.length > baseline.testDiagnosticCount
-        ? "Fix the errors; do not raise the baseline."
-        : "The baseline is stale; lower testDiagnosticCount to the current count.";
+        ? "Fix the errors; do not raise the exact snapshot."
+        : "The exact snapshot is stale; regenerate testDiagnosticCount in scripts/test-typecheck-baseline.json in the same commit.";
     return {
       ok: false,
-      message: `Test type-check found ${diagnostics.testDiagnostics.length} test diagnostic(s); expected exactly ${baseline.testDiagnosticCount}. ${direction}`,
+      message: `Test type-check measured ${diagnostics.testDiagnostics.length} direct test diagnostic(s); expected exact snapshot ${baseline.testDiagnosticCount}. ${direction}`,
       showListFilesOutput: false,
     };
   }
