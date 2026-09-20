@@ -188,15 +188,9 @@ public interface IHostUpdateMigrationTarget
 
     Task<string> GetProviderNameAsync(CancellationToken cancellationToken);
 
-    Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken);
+    Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 
-    Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken);
-
-    Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
-        HasPendingMigrationsAsync(cancellationToken);
-
-    Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
-        MigrateAsync(cancellationToken);
+    Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 
     /// <summary>
     /// A non-secret SHA256 fingerprint of this context's resolved connection string. Used only

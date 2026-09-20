@@ -56,7 +56,6 @@ public sealed class HostUpdateExecutionOptions
     [
         "Npgsql.EntityFrameworkCore.PostgreSQL",
         "Microsoft.EntityFrameworkCore.SqlServer",
-        "Microsoft.EntityFrameworkCore.Sqlite",
     ];
 
     /// <summary>Bounded wait for active prints/pending outbox commands to finish naturally during drain.</summary>

@@ -27,16 +27,18 @@ public sealed class HostUpdateMigrationStepTests
         processRunner.Calls[0].Arguments.Should().Equal(
             "image", "pull", "--platform", "linux/amd64",
             $"ghcr.io/olyforge3d/printfarmer-{serviceId}@sha256:{new string('a', 64)}");
-        processRunner.Calls[1].Arguments.Should().ContainInOrder(
+        processRunner.Calls[1].Arguments.Should().Equal(
             "run", "--rm", "--pull", "never", "--platform", "linux/amd64",
             "--network", "printfarmer-network",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--user", "appuser", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid",
             "--entrypoint", "dotnet",
-            "--env", "ConnectionStrings__Default", "--env", "DB_PROVIDER",
+            "--env", "ConnectionStrings__Default", "--env", "DATAPROTECTION_KEYS_PATH",
+            "--env", "DB_PROVIDER", "--env", "Jwt__Key",
             $"ghcr.io/olyforge3d/printfarmer-{serviceId}@sha256:{new string('a', 64)}",
             assembly, "--host-update-migration", contextName, "probe", providerName);
         processRunner.Calls[1].Environment.Should().ContainKey("ConnectionStrings__Default");
+        processRunner.Calls[1].Environment.Should().ContainKey("DATAPROTECTION_KEYS_PATH");
     }
 
     [Fact]
@@ -99,6 +101,22 @@ public sealed class HostUpdateMigrationStepTests
     }
 
     [Fact]
+    public async Task HasPendingMigrationsAsync_DockerResolutionFailure_IsClassifiedAsStageFailure()
+    {
+        var processRunner = new RecordingProcessRunner(new HostUpdateProcessResult(0, string.Empty, string.Empty));
+        var runner = CreateRunner(processRunner, new ThrowingDockerResolver());
+
+        Func<Task> act = () => runner.HasPendingMigrationsAsync(
+            CreateRequest(),
+            "AppDbContext",
+            _ => Task.FromResult("Npgsql.EntityFrameworkCore.PostgreSQL"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateTargetImageMigrationException>()
+            .WithMessage("target_image_migration_stage_failed:AppDbContext:InvalidOperationException");
+    }
+
+    [Fact]
     public async Task MigrateAsync_TargetImageReportsAppliedMigrationIds()
     {
         var processRunner = new RecordingProcessRunner(new HostUpdateProcessResult(
@@ -156,10 +174,12 @@ public sealed class HostUpdateMigrationStepTests
             .WithMessage("target_image_migration_probe_invalid:AppDbContext");
     }
 
-    private static HostUpdateTargetImageMigrationRunner CreateRunner(RecordingProcessRunner processRunner) =>
+    private static HostUpdateTargetImageMigrationRunner CreateRunner(
+        RecordingProcessRunner processRunner,
+        IHostUpdateExecutableResolver? executableResolver = null) =>
         new(
             processRunner,
-            new DockerResolver(),
+            executableResolver ?? new DockerResolver(),
             new Dictionary<string, HostUpdateApplyServiceMapping>(StringComparer.Ordinal)
             {
                 ["api"] = new("api", "api", "PRINTFARMER_API_IMAGE", "ghcr.io/olyforge3d/printfarmer-api"),
@@ -192,6 +212,11 @@ public sealed class HostUpdateMigrationStepTests
         public string Resolve(string toolName) => Path.Combine(Path.GetTempPath(), "docker");
     }
 
+    private sealed class ThrowingDockerResolver : IHostUpdateExecutableResolver
+    {
+        public string Resolve(string toolName) => throw new InvalidOperationException("host_update_executable_not_configured:docker");
+    }
+
     private sealed record ProcessCall(IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
 
     private sealed class RecordingProcessRunner(params HostUpdateProcessResult[] results) : IHostUpdateProcessRunner
@@ -213,7 +238,7 @@ public sealed class HostUpdateMigrationStepTests
 
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult("Npgsql.EntityFrameworkCore.PostgreSQL");
 
-        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken)
+        public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
         {
             if (probeException is not null)
             {
@@ -223,7 +248,7 @@ public sealed class HostUpdateMigrationStepTests
             return Task.FromResult(pending);
         }
 
-        public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken)
+        public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
         {
             MigrateCalls++;
             return Task.FromResult(new Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult(false, []));

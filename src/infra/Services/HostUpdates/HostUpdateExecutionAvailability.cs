@@ -151,7 +151,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             switch (providerName)
             {
                 case "Microsoft.EntityFrameworkCore.Sqlite":
-                    requiredTools.Add("sqlite3");
+                    reasons.Add($"database_provider_tooling_unsupported:{target.ContextName}:{providerName}");
                     break;
                 case "Npgsql.EntityFrameworkCore.PostgreSQL":
                     requiredTools.Add("pg_dump");

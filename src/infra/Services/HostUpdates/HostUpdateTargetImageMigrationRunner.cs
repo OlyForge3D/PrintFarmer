@@ -30,7 +30,7 @@ public sealed class HostUpdateTargetImageMigrationRunner(
             ["SlicerDbContext"] = "slicer-host",
         };
 
-    private static readonly HashSet<string> SupportedProviders = new(StringComparer.Ordinal)
+    public static IReadOnlySet<string> SupportedProviders { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         "Npgsql.EntityFrameworkCore.PostgreSQL",
         "Microsoft.EntityFrameworkCore.SqlServer",
@@ -135,12 +135,23 @@ public sealed class HostUpdateTargetImageMigrationRunner(
             throw new HostUpdateTargetImageMigrationException(exception.Message);
         }
 
-        var pullArguments = new List<string> { "image", "pull", "--platform", dockerPlatform, image };
-        HostUpdateProcessResult pullResult = await processRunner.RunAsync(
-            executableResolver.Resolve("docker"),
-            pullArguments,
-            timeout,
-            cancellationToken).ConfigureAwait(false);
+        HostUpdateProcessResult pullResult;
+        string dockerPath;
+        try
+        {
+            dockerPath = executableResolver.Resolve("docker");
+            var pullArguments = new List<string> { "image", "pull", "--platform", dockerPlatform, image };
+            pullResult = await processRunner.RunAsync(
+                dockerPath,
+                pullArguments,
+                timeout,
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            throw new HostUpdateTargetImageMigrationException($"target_image_migration_stage_failed:{contextName}:{exception.GetType().Name}");
+        }
+
         if (!pullResult.Succeeded)
         {
             throw new HostUpdateTargetImageMigrationException($"target_image_migration_stage_failed:{contextName}:exit={pullResult.ExitCode}");
@@ -173,7 +184,7 @@ public sealed class HostUpdateTargetImageMigrationRunner(
         try
         {
             result = await processRunner.RunAsync(
-                executableResolver.Resolve("docker"),
+                dockerPath,
                 arguments,
                 timeout,
                 cancellationToken,

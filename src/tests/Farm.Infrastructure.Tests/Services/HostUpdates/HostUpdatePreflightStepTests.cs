@@ -37,9 +37,9 @@ public sealed class HostUpdatePreflightStepTests
 
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult(provider);
 
-        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(false);
 
-        public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) => Task.FromResult(new DatabaseMigrationResult(false, []));
+        public Task<DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(new DatabaseMigrationResult(false, []));
 
         public Task<string> GetConnectionStringFingerprintAsync(CancellationToken cancellationToken) =>
             Task.FromResult(connectionStringFingerprint ?? string.Empty);
@@ -132,6 +132,6 @@ public sealed class HostUpdatePreflightStepTests
         Func<Task> act = () => check.RunAsync(Request(SixServiceIds), CancellationToken.None);
 
         HostUpdatePreflightFailedException exception = (await act.Should().ThrowAsync<HostUpdatePreflightFailedException>()).Which;
-        exception.Code.Should().StartWith("unsupported_provider:");
+        exception.Code.Should().Be("unsupported_provider:Microsoft.EntityFrameworkCore.Sqlite");
     }
 }

@@ -101,10 +101,4 @@ public sealed class TargetImageMigrationTarget<TContext>(
 
     public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
         runner.MigrateAsync(request, ContextName, GetProviderNameAsync, cancellationToken);
-
-    public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) =>
-        throw new HostUpdateTargetImageMigrationException($"target_image_migration_request_required:{ContextName}");
-
-    public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) =>
-        throw new HostUpdateTargetImageMigrationException($"target_image_migration_request_required:{ContextName}");
 }
