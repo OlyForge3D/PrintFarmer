@@ -138,6 +138,34 @@ public sealed class ProductionHostUpdateAdaptersTests
         Assert.DoesNotContain(HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason, status.Reasons);
     }
 
+    [Fact]
+    public void SchedulerStatusHolder_ReportsAdmittedReasonOnceForAvailableExecutor()
+    {
+        HostUpdateSchedulerStatusHolder holder = new();
+        holder.Update(new HostUpdateSchedulerStatus(
+            Enabled: true,
+            EffectiveEnabled: true,
+            KillSwitch: false,
+            Channel: "stable",
+            PolicyRevision: 1,
+            LastAttemptAt: DateTimeOffset.UtcNow,
+            NextPollAt: DateTimeOffset.UtcNow.AddMinutes(5),
+            ConsecutiveFailures: 0,
+            Reason: HostUpdateSchedulerReason.Admitted));
+
+        UnavailableHostUpdateSchedulingStatusProvider provider = new(
+            settings: null!,
+            schedulerStatus: holder,
+            executor: new AvailableExecutor());
+
+        HostUpdateSchedulingStatusDto status = provider.GetStatus();
+
+        Assert.Equal(1, status.Reasons.Count(reason => reason == nameof(HostUpdateSchedulerReason.Admitted)));
+        Assert.DoesNotContain(HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason, status.Reasons);
+        Assert.Equal(HostUpdateExecutorState.Available, status.Executor.State);
+        Assert.Null(status.Executor.Reason);
+    }
+
     private static VerifiedReleaseEvidenceDto Evidence(long sequence = 42) => new()
     {
         Sequence = sequence,
@@ -179,4 +207,3 @@ public sealed class ProductionHostUpdateAdaptersTests
                 []));
     }
 }
-
