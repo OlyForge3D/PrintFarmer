@@ -127,6 +127,22 @@ test("fails an unsuccessful project-file listing before consuming its output (R2
   }
 });
 
+test("requests list-file output when the application file floor fails", () => {
+  const result = evaluateGate({
+    baseline: { ...baseline, minimumAppFileCount: 2 },
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.showListFilesOutput, true);
+});
+
+test("does not request list-file output for an unrelated diagnostic failure", () => {
+  const result = evaluateGate({
+    output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+  });
+  assert.equal(result.ok, false);
+  assert.equal(result.showListFilesOutput, false);
+});
+
 test("fails when a counted application file is removed from the project", async () => {
   const fixtureDirectory = await mkdtemp(
     path.join(tmpdir(), "typecheck-app-file-floor-"),

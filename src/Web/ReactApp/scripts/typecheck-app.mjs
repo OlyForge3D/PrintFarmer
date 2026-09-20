@@ -88,6 +88,9 @@ const evaluation = evaluate({
 
 if (!evaluation.ok) {
   console.error(evaluation.message);
+  if (evaluation.showListFilesOutput) {
+    process.stdout.write(listFilesOutput);
+  }
   process.exitCode = 1;
 } else {
   console.warn(evaluation.message);
