@@ -180,4 +180,31 @@ public class HostUpdateWriterFencingTests : IDisposable
 
         scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
     }
+
+    [Fact]
+    public async Task QueueReconciliationFence_AfterProcessRestart_RejectsReconciliation()
+    {
+        string root = Directory.CreateTempSubdirectory("pf-host-update-restart-fence-").FullName;
+        try
+        {
+            HostUpdateExecutionOptions options = new() { RootDirectory = root };
+            await new FileHostUpdateAdmissionGate(options).CloseAsync(CancellationToken.None);
+
+            CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+            var restartedFence = new QueueReconciliationFenceFlag(new FileHostUpdateAdmissionGate(options));
+            var service = new QueueReconciliationService(
+                scopeFactory,
+                NullLogger<QueueReconciliationService>.Instance,
+                restartedFence);
+
+            await service.ReconcileStaleAttemptsAsync(CancellationToken.None);
+
+            (await restartedFence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            scopeFactory.ScopesOpened.Should().Be(0, "a restarted reconciler must not touch queue state while the durable fence is closed");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }

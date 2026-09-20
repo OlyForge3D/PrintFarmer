@@ -27,7 +27,8 @@ namespace Farm.Infrastructure.Services.Queue;
 /// </summary>
 public sealed class QueueReconciliationService(
     IServiceScopeFactory scopeFactory,
-    ILogger<QueueReconciliationService> logger) : BackgroundService
+    ILogger<QueueReconciliationService> logger,
+    Farm.Infrastructure.Services.HostUpdates.QueueReconciliationFenceFlag? hostUpdateFence = null) : BackgroundService
 {
     /// <summary>How often to scan for attempts requiring reconciliation.</summary>
     private static readonly TimeSpan ReconciliationInterval = TimeSpan.FromMinutes(2);
@@ -47,7 +48,15 @@ public sealed class QueueReconciliationService(
         {
             try
             {
-                await ReconcileStaleAttemptsAsync(stoppingToken);
+                if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
+                {
+                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+                    logger.LogWarning("queue_reconciliation_writer_fence_rejected");
+                }
+                else
+                {
+                    await ReconcileStaleAttemptsAsync(stoppingToken);
+                }
             }
             catch (OperationCanceledException)
             {
@@ -66,6 +75,13 @@ public sealed class QueueReconciliationService(
 
     internal async Task ReconcileStaleAttemptsAsync(CancellationToken ct)
     {
+        if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
+        {
+            await hostUpdateFence.AcknowledgePausedAsync(ct);
+            logger.LogWarning("queue_reconciliation_writer_fence_rejected");
+            return;
+        }
+
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         IDbOutboxSequenceAllocator? sequenceAllocator = scope.ServiceProvider.GetService<IDbOutboxSequenceAllocator>();

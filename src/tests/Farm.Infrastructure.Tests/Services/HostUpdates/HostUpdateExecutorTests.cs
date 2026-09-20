@@ -75,6 +75,40 @@ public sealed class HostUpdateExecutorTests
         Assert.Equal("recovery_required", restarted.FailureCode);
     }
 
+    [Fact]
+    public async Task Reserve_reliance_ExecutionLockAndJournal_survives_restart_without_reexecution()
+    {
+        string root = Directory.CreateTempSubdirectory("pf-host-update-reserve-").FullName;
+        try
+        {
+            string journalPath = Path.Combine(root, "journal.ndjson");
+            string lockPath = Path.Combine(root, "execution.lock");
+            HostUpdateExecutionResult first = await new HostUpdateExecutor(
+                new FailingSteps(),
+                new FileHostUpdateExecutionJournal(journalPath),
+                new FileHostUpdateExecutionLock(lockPath),
+                automationPolicyRepository: new InlinePolicyRepository(Policy()))
+                .ExecuteAsync(Request());
+
+            var restartedSteps = new FakeSteps();
+            HostUpdateExecutionResult restarted = await new HostUpdateExecutor(
+                restartedSteps,
+                new FileHostUpdateExecutionJournal(journalPath),
+                new FileHostUpdateExecutionLock(lockPath),
+                automationPolicyRepository: new InlinePolicyRepository(Policy()))
+                .ExecuteAsync(Request());
+
+            Assert.Equal(HostUpdateExecutionState.RecoveryRequired, first.State);
+            Assert.Equal(HostUpdateExecutionState.RecoveryRequired, restarted.State);
+            Assert.Equal("recovery_required", restarted.FailureCode);
+            Assert.Empty(restartedSteps.Calls);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
 
     [Fact]
     public void File_journal_preserves_complete_history_and_discards_interrupted_stage()

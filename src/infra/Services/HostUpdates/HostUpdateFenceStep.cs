@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.HostUpdates;
+﻿using Microsoft.Extensions.Logging;
+
+namespace Farm.Infrastructure.Services.HostUpdates;
 
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
 /// <summary>Thrown when one or more writers could not be proven fenced within the bounded timeout.</summary>
@@ -37,9 +39,11 @@ public sealed class HostUpdateFenceCoordinator(
     IReadOnlyList<IFenceableWriter> writers,
     TimeSpan proofTimeout,
     TimeSpan pollInterval,
-    TimeProvider? timeProvider = null) : IHostUpdateFenceCoordinator
+    TimeProvider? timeProvider = null,
+    ILogger<HostUpdateFenceCoordinator>? logger = null) : IHostUpdateFenceCoordinator
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly ILogger<HostUpdateFenceCoordinator>? _logger = logger;
 
     public async Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
@@ -47,6 +51,10 @@ public sealed class HostUpdateFenceCoordinator(
         foreach (IFenceableWriter writer in writers)
         {
             await writer.QuiesceAsync(cancellationToken).ConfigureAwait(false);
+            _logger?.LogInformation(
+                "host_update_writer_fence_acquired writer={WriterName} release_id={ReleaseId}",
+                writer.Name,
+                request.ReleaseId);
         }
 
         DateTimeOffset deadline = _timeProvider.GetUtcNow() + proofTimeout;
@@ -68,6 +76,10 @@ public sealed class HostUpdateFenceCoordinator(
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
+                _logger?.LogWarning(
+                    "host_update_writer_fence_rejected release_id={ReleaseId} writers={WriterNames}",
+                    request.ReleaseId,
+                    string.Join(',', unproven));
                 throw new HostUpdateFenceProofFailedException(unproven);
             }
 
@@ -80,6 +92,7 @@ public sealed class HostUpdateFenceCoordinator(
         foreach (IFenceableWriter writer in writers)
         {
             await writer.ResumeAsync(cancellationToken).ConfigureAwait(false);
+            _logger?.LogInformation("host_update_writer_fence_released writer={WriterName}", writer.Name);
         }
     }
 }
@@ -270,6 +283,26 @@ public sealed class AutoDispatchFenceFlag(IHostUpdateAdmissionGate? durableFence
 /// start while the host-update executor is in its pre-backup/migration/apply critical section.
 /// </summary>
 public sealed class WebhookDeliveryFenceFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}
+
+/// <summary>
+/// Durable-backed fence for queue reconciliation. The concrete type keeps this writer's
+/// acknowledgement state independent from other background writers while the shared admission
+/// marker makes a closed fence visible to a process that starts after the update began.
+/// </summary>
+public sealed class QueueReconciliationFenceFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
 {
     private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
 

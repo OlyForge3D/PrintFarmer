@@ -175,7 +175,6 @@ public class HostUpdateExecutionAvailabilityTests
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
-            result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
             result.Reasons.Should().Contain("host_executable_not_configured:docker");
             result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
@@ -215,7 +214,6 @@ public class HostUpdateExecutionAvailabilityTests
             result.Reasons.Should().BeEquivalentTo(
             [
                 "facility_unavailable:target_image_migration_runner_unavailable",
-                "facility_unavailable:queue_reconciliation_writer_fence_unavailable",
                 "facility_unavailable:sql_server_visible_backup_path_mapping_unverified",
             ]);
         }

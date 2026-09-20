@@ -1009,8 +1009,11 @@ public sealed class HostUpdateScheduler(
                 return Backoff(reason, candidate.Identity);
             }
 
-            // Reserve is advisory until the execution succeeds; replay exclusion is provided
-            // by the execution lock and journal, then Admit durably records the success.
+            // Reserve is intentionally advisory: the execution lock is the cross-process
+            // exclusion and the hash-chained journal is the restart-durable execution record.
+            // HostUpdateExecutorTests proves that a restarted executor observes the journal's
+            // terminal state and cannot re-run the update; Admit records successful replay state
+            // only after that durable execution boundary completes.
             if (settings is IHostUpdatePolicyBackedSchedulerSettings freshPolicyBackedSettings)
             {
                 HostUpdatePolicyReadResult freshPolicyResult = freshPolicyBackedSettings.ReadPolicy();

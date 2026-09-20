@@ -58,7 +58,6 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     private static readonly string[] CodeOwnedUnavailableFacilities =
     [
         "target_image_migration_runner_unavailable",
-        "queue_reconciliation_writer_fence_unavailable",
         "sql_server_visible_backup_path_mapping_unverified",
     ];
 
