@@ -361,9 +361,43 @@ public sealed class BackendStartCommandConsumerServiceTests
             "setup so setup time can never race past the seeded RetryAfterUtc before the " +
             "hosted loop starts");
 
+        // Start the hosted loop while the clock is STILL frozen. AcceleratedTimeProvider's
+        // CreateTimer scales its dueTime purely from real elapsed wall-clock time and does
+        // NOT depend on Start() having been called (only GetUtcNow()/GetTimestamp() do), so
+        // the loop's poll-interval timer still fires -- and ProcessPendingCommandsAsync still
+        // runs one or more real passes -- well before Start() below, even though "now" stays
+        // pinned at anchor throughout. This closes a narrower version of the same race a
+        // panel review found in the first fix: previously the clock resumed ticking
+        // immediately before StartAsync, so real time spent on the hosted loop's OWN startup
+        // overhead (deadline-timer creation, RecoverStaleLeasesAsync's EF/SQLite work on its
+        // very first pass) happened while the clock was already live, and at this
+        // acceleration factor as little as ~15ms of that overhead could carry "now" past the
+        // seeded RetryAfterUtc before the loop had even reached its first poll/delay wait --
+        // making the event eligible on the very first pass and defeating the coverage again,
+        // just from a narrower window than before.
+        await harness.Service.StartAsync(CancellationToken.None);
+
+        // Give the loop a deliberately generous real-time window to complete at least one
+        // full ProcessPendingCommandsAsync pass (and, because CreateTimer's scaling above is
+        // independent of the freeze, likely many more) while "now" is still pinned at anchor.
+        await Task.Delay(TimeSpan.FromMilliseconds(250));
+
+        // Deterministic proof the freeze held through the loop's own startup overhead, not
+        // just through this test's setup code above: while the clock remains frozen at
+        // anchor, RetryAfterUtc (anchor + 3s) can never be satisfied, so the event MUST still
+        // be Pending no matter how many passes just ran or how long they took in real time.
+        // If this were anything else, the freeze failed to hold through the loop's runtime,
+        // which is exactly the remaining race a panel review flagged against the first fix.
+        QueueDispatchOutbox stillFrozen = await harness.GetOutboxEventAsync(eventId);
+        stillFrozen.Status.Should().Be(
+            QueueOutboxEventStatus.Pending,
+            "the event must still be Pending after the hosted loop's own startup passes " +
+            "while the clock remains frozen at anchor -- otherwise the freeze did not hold " +
+            "through the loop's startup overhead (deadline-timer creation, the first " +
+            "RecoverStaleLeasesAsync pass), only through this test's own setup code");
+
         var wallClock = System.Diagnostics.Stopwatch.StartNew();
         clock.Start();
-        await harness.Service.StartAsync(CancellationToken.None);
         bool published;
         try
         {
