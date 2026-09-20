@@ -114,6 +114,7 @@ public class NfcTagService(
     public async Task<NfcTagBindingDto> LinkTagAsync(LinkNfcTagRequest request, CancellationToken ct)
     {
         const int maxRetries = 3;
+        DateTime? normalizedReadAt = NormalizeUtc(request.ReadAt);
 
         for (int attempt = 0; attempt < maxRetries; attempt++)
         {
@@ -146,7 +147,7 @@ public class NfcTagService(
             binding.SpoolName = request.SpoolName;
             binding.PrinterId = request.PrinterId;
             binding.TrayId = request.TrayId;
-            binding.SpoolLastSeenAt = request.ReadAt ?? binding.SpoolLastSeenAt;
+            binding.SpoolLastSeenAt = normalizedReadAt ?? binding.SpoolLastSeenAt;
             binding.UpdatedAt = DateTime.UtcNow;
 
             if (request.PrinterId.HasValue)
@@ -190,7 +191,12 @@ public class NfcTagService(
         existing.SpoolName = request.SpoolName;
         existing.PrinterId = request.PrinterId;
         existing.TrayId = request.TrayId;
-        existing.SpoolLastSeenAt = request.ReadAt ?? existing.SpoolLastSeenAt;
+        if (normalizedReadAt.HasValue &&
+            (!existing.SpoolLastSeenAt.HasValue || normalizedReadAt.Value >= existing.SpoolLastSeenAt.Value))
+        {
+            existing.SpoolLastSeenAt = normalizedReadAt.Value;
+        }
+
         existing.UpdatedAt = DateTime.UtcNow;
         await fallbackDb.SaveChangesAsync(ct);
 
@@ -290,6 +296,23 @@ public class NfcTagService(
         CreatedAt = b.CreatedAt,
         UpdatedAt = b.UpdatedAt
     };
+
+    private static DateTime? NormalizeUtc(DateTime? value)
+    {
+        if (!value.HasValue)
+        {
+            return null;
+        }
+
+        DateTime timestamp = value.Value;
+        return timestamp.Kind switch
+        {
+            DateTimeKind.Utc => timestamp,
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(timestamp, DateTimeKind.Utc),
+            DateTimeKind.Local => timestamp.ToUniversalTime(),
+            _ => DateTime.SpecifyKind(timestamp, DateTimeKind.Utc)
+        };
+    }
 
     /// <summary>
     /// Detects unique constraint violations across database providers.
