@@ -13,7 +13,14 @@ import {
   useUpdatePrinter,
 } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
-import { PrinterBackend, Printer, PrintJobPriority, PrintJobStatus, JobQueuePrintJob, QueuedPrintJobWithFileMetaDto } from '@/types/api';
+import {
+  type JobQueuePrintJob,
+  PrintJobPriority,
+  PrintJobStatus,
+  PrinterBackend,
+  type Printer,
+  type QueuedPrintJobWithFileMetaDto,
+} from '@/types/api';
 
 // Utility to create a fresh QueryClient per test
 function createTestClient() {

@@ -64,10 +64,6 @@ export function SchemaSettingsEditor({
     });
   };
 
-  const getOriginalValue = (key: string): unknown => {
-    return originalValues?.[key];
-  };
-
   const categories = useMemo(() => {
     if (!schema) return [];
     return schema.categories.filter(cat => {
@@ -133,7 +129,6 @@ export function SchemaSettingsEditor({
                 disabled={disabled}
                 hasChanges={hasChanges}
                 onReset={handleReset}
-                getOriginalValue={getOriginalValue}
               />
             </Tabs.Panel>
           ))}
