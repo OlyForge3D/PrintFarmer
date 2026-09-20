@@ -23,9 +23,35 @@ namespace Farm.Modules.PrintQueue.Tests.Services;
 public class PrintJobManagementServiceQueuePlanningTests
 {
     [Fact]
+    public async Task GetModelStatsAsync_UsesInjectedTimeProviderForAnalyticsCutoff()
+    {
+        DateTime expectedNow = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
+        FakeTimeProvider clock = new(expectedNow);
+        Mock<IPrintJobManagementRepository> repository = new();
+        repository.Setup(r => r.GetModelStatsAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+        repository.Setup(r => r.GetCompletedJobsForAnalyticsAsync(
+                null,
+                expectedNow.AddDays(-30),
+                null,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync([]);
+
+        PrintJobManagementService service = CreateService(repository, settingsService: null, clock);
+
+        await service.GetModelStatsAsync();
+
+        repository.Verify(r => r.GetCompletedJobsForAnalyticsAsync(
+            null,
+            expectedNow.AddDays(-30),
+            null,
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
     public async Task GetQueueStatsAsync_WithWorkingHoursSettings_ReturnsNaiveAndStaffedCompletion()
     {
-        DateTime now = DateTime.UtcNow;
+        DateTime now = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
         Guid printerId = Guid.NewGuid();
 
         Mock<IPrintJobManagementRepository> repository = new();
@@ -175,7 +201,8 @@ public class PrintJobManagementServiceQueuePlanningTests
 
     private static PrintJobManagementService CreateService(
         Mock<IPrintJobManagementRepository> repository,
-        Mock<ISettingsService>? settingsService)
+        Mock<ISettingsService>? settingsService,
+        TimeProvider? timeProvider = null)
     {
         return new PrintJobManagementService(
             repository.Object,
@@ -191,6 +218,14 @@ public class PrintJobManagementServiceQueuePlanningTests
             jobCostCalculationService: Mock.Of<IJobCostCalculationService>(),
             cameraSnapshotService: Mock.Of<ICameraSnapshotService>(),
             serviceScopeFactory: Mock.Of<IServiceScopeFactory>(),
-            settingsService: settingsService?.Object);
+            settingsService: settingsService?.Object,
+            timeProvider: timeProvider);
+    }
+
+    private sealed class FakeTimeProvider(DateTime utcNow) : TimeProvider
+    {
+        private readonly DateTimeOffset _utcNow = new(utcNow, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
     }
 }

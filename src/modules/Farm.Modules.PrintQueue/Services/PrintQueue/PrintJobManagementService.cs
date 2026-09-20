@@ -168,14 +168,15 @@ public class PrintJobManagementService(
     {
         private int _referenceCount;
         private int _retired;
-        private long _lastUsedUtcTicks = DateTime.UtcNow.Ticks;
+        private long _lastUsedUtcTicks;
 
         public SemaphoreSlim Semaphore { get; } = new(1, 1);
 
-        public static PrinterSyncLockState CreateWithReference()
+        public static PrinterSyncLockState CreateWithReference(DateTime utcNow)
         {
             var state = new PrinterSyncLockState();
             state._referenceCount = 1;
+            state._lastUsedUtcTicks = utcNow.Ticks;
             return state;
         }
 
@@ -196,9 +197,9 @@ public class PrintJobManagementService(
             }
         }
 
-        public int ReleaseReferenceAndMarkUsed()
+        public int ReleaseReferenceAndMarkUsed(DateTime utcNow)
         {
-            Volatile.Write(ref _lastUsedUtcTicks, DateTime.UtcNow.Ticks);
+            Volatile.Write(ref _lastUsedUtcTicks, utcNow.Ticks);
             return Interlocked.Decrement(ref _referenceCount);
         }
 
@@ -420,7 +421,10 @@ public class PrintJobManagementService(
                 offset: 0,
                 ct: cancellationToken);
 
-            QueuePlanningProjection planning = BuildQueuePlanningProjection(activeJobs, settings, DateTime.UtcNow);
+            QueuePlanningProjection planning = BuildQueuePlanningProjection(
+                activeJobs,
+                settings,
+                _timeProvider.GetUtcNow().UtcDateTime);
 
             return new QueueStatsDto
             {
@@ -459,7 +463,7 @@ public class PrintJobManagementService(
             List<PrinterModelQueueStats> stats = await _repository.GetModelStatsAsync(cancellationToken);
 
             // Calculate per-model average wait times from recently completed jobs
-            DateTime cutoff = DateTime.UtcNow.AddDays(-30);
+            DateTime cutoff = _timeProvider.GetUtcNow().UtcDateTime.AddDays(-30);
             List<PrintJob> recentJobs = await _repository.GetCompletedJobsForAnalyticsAsync(
                 dateFrom: cutoff, ct: cancellationToken);
 
@@ -669,7 +673,10 @@ public class PrintJobManagementService(
             }
 
             QueuePlanningSettings queuePlanningSettings = GetQueuePlanningSettings();
-            DateTime? resolvedDeadlineAtUtc = ResolveEnqueueDeadline(request.DeadlineAtUtc, queuePlanningSettings);
+            DateTime? resolvedDeadlineAtUtc = ResolveEnqueueDeadline(
+                request.DeadlineAtUtc,
+                queuePlanningSettings,
+                _timeProvider.GetUtcNow().UtcDateTime);
             var job = new PrintJob
             {
                 Id = Guid.NewGuid(),
@@ -693,9 +700,9 @@ public class PrintJobManagementService(
                 SourceArtifactId = classification.SourceArtifactId,
                 SliceJobId = classification.SliceJobId,
                 GcodeContentSha256 = classification.GcodeContentSha256 ?? gcodeFile.FileHash,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                QueuedAt = DateTime.UtcNow
+                CreatedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                QueuedAt = _timeProvider.GetUtcNow().UtcDateTime
             };
 
             // Calculate queue position
@@ -865,10 +872,13 @@ public class PrintJobManagementService(
 
             if (request.DeadlineAtUtc.HasValue)
             {
-                job.DeadlineAtUtc = ValidateProvidedDeadline(request.DeadlineAtUtc, GetQueuePlanningSettings());
+                job.DeadlineAtUtc = ValidateProvidedDeadline(
+                    request.DeadlineAtUtc,
+                    GetQueuePlanningSettings(),
+                    _timeProvider.GetUtcNow().UtcDateTime);
             }
 
-            job.UpdatedAt = DateTime.UtcNow;
+            job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
             if (queueShapeChanged)
             {
@@ -973,7 +983,7 @@ public class PrintJobManagementService(
             }
 
             job.Priority = (int)newPriority;
-            job.UpdatedAt = DateTime.UtcNow;
+            job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
             if (job.AssignedPrinterId.HasValue)
             {
                 await AdvanceQueueRevisionAsync(
@@ -1656,7 +1666,7 @@ public class PrintJobManagementService(
                     printEx.GetType().Name);
             }
 
-            job.UpdatedAt = DateTime.UtcNow;
+            job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
             await _repository.SaveChangesAsync(cancellationToken);
 
             if (job.Status == PrintJobStatus.Printing
@@ -1757,7 +1767,7 @@ public class PrintJobManagementService(
             return;
         }
 
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         job.DispatchedAt ??= now;
         job.DispatchMode ??= (int)Farm.Infrastructure.Services.Queue.Dispatch.DispatchMode.Manual;
         _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
@@ -2278,7 +2288,7 @@ public class PrintJobManagementService(
                         cancellationToken)
                     : null;
             PrintJobStatus previousStatus = job.Status;
-            DateTime cancelledAt = DateTime.UtcNow;
+            DateTime cancelledAt = _timeProvider.GetUtcNow().UtcDateTime;
             job.Status = PrintJobStatus.Cancelled;
             job.UpdatedAt = cancelledAt;
             job.ActualEndTime = cancelledAt;
@@ -2427,7 +2437,7 @@ public class PrintJobManagementService(
                 : null;
         job.Status = PrintJobStatus.Queued;
         job.ActualStartTime = null;
-        job.UpdatedAt = DateTime.UtcNow;
+        job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
 
         await ReleaseDispatchLeaseAsync(job, cancellationToken);
         if (job.AssignedPrinterId.HasValue)
@@ -2511,7 +2521,7 @@ public class PrintJobManagementService(
             SuccessfulCount = 0,
             FailedCount = 0,
             Failures = new(),
-            CompletedAtUtc = DateTime.UtcNow
+            CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime
         };
 
         try
@@ -2644,9 +2654,9 @@ public class PrintJobManagementService(
                 EstimatedPrintTime = originalJob.EstimatedPrintTime,
                 EstimatedFilamentUsage = originalJob.EstimatedFilamentUsage,
                 DeadlineAtUtc = originalJob.DeadlineAtUtc,
-                CreatedAt = DateTime.UtcNow,
-                UpdatedAt = DateTime.UtcNow,
-                QueuedAt = DateTime.UtcNow
+                CreatedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime,
+                QueuedAt = _timeProvider.GetUtcNow().UtcDateTime
             };
 
             // Carry per-tool requirements across the rerun. Prefer verbatim copy of the
@@ -2812,7 +2822,8 @@ public class PrintJobManagementService(
         HistorySyncOptions options,
         CancellationToken cancellationToken)
     {
-        PrinterSyncLockState lockState = AcquirePrinterHistorySyncLock(printer.Id);
+        DateTime utcNow = _timeProvider.GetUtcNow().UtcDateTime;
+        PrinterSyncLockState lockState = AcquirePrinterHistorySyncLock(printer.Id, utcNow);
         bool lockAcquired = false;
 
         try
@@ -2970,7 +2981,7 @@ public class PrintJobManagementService(
                                 matchingExisting.ExternalJobId = historyJob.JobId;
                                 matchingExisting.SourcePrinterId = printer.Id;
                                 UpdatePrintJobFromHistory(matchingExisting, historyJob);
-                                matchingExisting.UpdatedAt = DateTime.UtcNow;
+                                matchingExisting.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
                                 if (hasValidStartTime)
                                 {
                                     existingActualStartTimes.Add(startTimeUtc);
@@ -2991,7 +3002,7 @@ public class PrintJobManagementService(
                             if (seededJob != null)
                             {
                                 UpdatePrintJobFromHistory(seededJob, historyJob);
-                                seededJob.UpdatedAt = DateTime.UtcNow;
+                                seededJob.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
                                 if (hasValidStartTime)
                                 {
                                     existingActualStartTimes.Add(startTimeUtc);
@@ -3008,7 +3019,7 @@ public class PrintJobManagementService(
                             if (seededJob != null)
                             {
                                 UpdatePrintJobFromHistory(seededJob, historyJob);
-                                seededJob.UpdatedAt = DateTime.UtcNow;
+                                seededJob.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
                                 if (hasValidStartTime)
                                 {
                                     existingActualStartTimes.Add(startTimeUtc);
@@ -3041,7 +3052,7 @@ public class PrintJobManagementService(
                             if (isInitialSeed || options.UpdateKnownJobsOnIncremental)
                             {
                                 UpdatePrintJobFromHistory(existingByExternalId, historyJob);
-                                existingByExternalId.UpdatedAt = DateTime.UtcNow;
+                                existingByExternalId.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
                                 if (hasValidStartTime)
                                 {
                                     existingActualStartTimes.Add(startTimeUtc);
@@ -3071,7 +3082,7 @@ public class PrintJobManagementService(
                             matchingExisting.ExternalJobId = historyJob.JobId;
                             matchingExisting.SourcePrinterId = printer.Id;
                             UpdatePrintJobFromHistory(matchingExisting, historyJob);
-                            matchingExisting.UpdatedAt = DateTime.UtcNow;
+                            matchingExisting.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
                             existingExternalJobIds.Add(historyJob.JobId); // Track for this batch
                             if (hasValidStartTime)
                             {
@@ -3157,9 +3168,9 @@ public class PrintJobManagementService(
                 lockState.Semaphore.Release();
             }
 
-            if (lockState.ReleaseReferenceAndMarkUsed() == 0)
+            if (lockState.ReleaseReferenceAndMarkUsed(_timeProvider.GetUtcNow().UtcDateTime) == 0)
             {
-                TryCleanupStalePrinterHistorySyncLocks();
+                TryCleanupStalePrinterHistorySyncLocks(_timeProvider.GetUtcNow().UtcDateTime);
             }
         }
     }
@@ -3328,7 +3339,7 @@ public class PrintJobManagementService(
             ActualPrintTime = endTime.HasValue ? endTime.Value - startTime : null,
             ActualFilamentUsage = historyJob.FilamentUsed > 0 ? historyJob.FilamentUsed * 0.003 : null, // mm to grams: ~3g per meter for 1.75mm filament
             CreatedAt = startTime,
-            UpdatedAt = DateTime.UtcNow,
+            UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime,
             QueuedAt = startTime,
 
             // Nozzle and material from metadata
@@ -3459,11 +3470,11 @@ public class PrintJobManagementService(
         }
     }
 
-    private static PrinterSyncLockState AcquirePrinterHistorySyncLock(Guid printerId)
+    private static PrinterSyncLockState AcquirePrinterHistorySyncLock(Guid printerId, DateTime utcNow)
     {
         while (true)
         {
-            PrinterSyncLockState created = PrinterSyncLockState.CreateWithReference();
+            PrinterSyncLockState created = PrinterSyncLockState.CreateWithReference(utcNow);
             PrinterSyncLockState state = PrinterHistorySyncLocks.GetOrAdd(printerId, created);
 
             if (ReferenceEquals(state, created))
@@ -3480,18 +3491,17 @@ public class PrintJobManagementService(
         }
     }
 
-    private static void TryCleanupStalePrinterHistorySyncLocks()
+    private static void TryCleanupStalePrinterHistorySyncLocks(DateTime utcNow)
     {
         if (Interlocked.Increment(ref _historySyncReleaseCounter) % 64 != 0)
         {
             return;
         }
 
-        DateTime now = DateTime.UtcNow;
         foreach (KeyValuePair<Guid, PrinterSyncLockState> entry in PrinterHistorySyncLocks)
         {
             PrinterSyncLockState state = entry.Value;
-            if (state.ReferenceCount != 0 || !state.IsIdleFor(PrinterHistorySyncLockIdleTtl, now))
+            if (state.ReferenceCount != 0 || !state.IsIdleFor(PrinterHistorySyncLockIdleTtl, utcNow))
             {
                 continue;
             }
@@ -3838,9 +3848,11 @@ public class PrintJobManagementService(
         }
     }
 
-    private static DateTime? ResolveEnqueueDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    private static DateTime? ResolveEnqueueDeadline(
+        DateTime? requestedDeadlineAtUtc,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
     {
-        DateTime nowUtc = DateTime.UtcNow;
         DateTime? normalizedDeadline = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalizedDeadline.HasValue)
         {
@@ -3859,7 +3871,10 @@ public class PrintJobManagementService(
         return normalizedDeadline;
     }
 
-    private static DateTime ValidateProvidedDeadline(DateTime? requestedDeadlineAtUtc, QueuePlanningSettings settings)
+    private static DateTime ValidateProvidedDeadline(
+        DateTime? requestedDeadlineAtUtc,
+        QueuePlanningSettings settings,
+        DateTime nowUtc)
     {
         DateTime? normalized = NormalizeUtcDeadline(requestedDeadlineAtUtc);
         if (!normalized.HasValue)
@@ -3867,7 +3882,10 @@ public class PrintJobManagementService(
             throw new ValidationException("Deadline is required by queue policy.");
         }
 
-        ValidateDeadlineLeadTime(normalized, settings.MinimumLeadHours, DateTime.UtcNow);
+        ValidateDeadlineLeadTime(
+            normalized,
+            settings.MinimumLeadHours,
+            nowUtc);
         return normalized.Value;
     }
 
@@ -4037,7 +4055,7 @@ public class PrintJobManagementService(
                 "The active dispatch attempt changed before the control command could be queued.");
         }
 
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         QueueDispatchAttempt? attempt = null;
         if (dispatchState.ActiveDispatchAttemptId.HasValue)
         {
@@ -4241,7 +4259,7 @@ public class PrintJobManagementService(
             attempt.ErrorDetail ??= "The job was cancelled or aborted before the attempt completed.";
             attempt.RequiresReconciliation = false;
             attempt.IsRetryable = false;
-            attempt.UpdatedAtUtc = DateTime.UtcNow;
+            attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         }
     }
 
@@ -4886,10 +4904,13 @@ public class PrintJobManagementService(
 
             if (updates.DeadlineAtUtc.HasValue)
             {
-                job.DeadlineAtUtc = ValidateProvidedDeadline(updates.DeadlineAtUtc, GetQueuePlanningSettings());
+                job.DeadlineAtUtc = ValidateProvidedDeadline(
+                    updates.DeadlineAtUtc,
+                    GetQueuePlanningSettings(),
+                    _timeProvider.GetUtcNow().UtcDateTime);
             }
 
-            job.UpdatedAt = DateTime.UtcNow;
+            job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
             await _repository.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation(
@@ -4980,7 +5001,7 @@ public class PrintJobManagementService(
             }
 
             job.Notes = notes;
-            job.UpdatedAt = DateTime.UtcNow;
+            job.UpdatedAt = _timeProvider.GetUtcNow().UtcDateTime;
             await _repository.SaveChangesAsync(cancellationToken);
 
             _logger.LogInformation("Notes updated for job {JobId}", LogSanitizer.Sanitize(jobId));
