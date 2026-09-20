@@ -280,6 +280,9 @@ public static class HostUpdateExecutionStartup
             environment[environmentKey] = value;
         }
 
+#pragma warning disable S5443 // The target image receives a private tmpfs at /tmp.
+        environment["DATAPROTECTION_KEYS_PATH"] = "/tmp/dp-keys";
+#pragma warning restore S5443
         return environment;
     }
 

@@ -152,6 +152,9 @@ public sealed class HostUpdateTargetImageMigrationRunner(
             "--network", composeNetwork,
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
             "--user", "appuser", "--read-only",
+#pragma warning disable S5443 // This target container mounts only an ephemeral, non-executable tmpfs.
+            "--tmpfs", "/tmp:rw,noexec,nosuid",
+#pragma warning restore S5443
             "--entrypoint", "dotnet",
         };
         foreach (string environmentName in migrationEnvironment.Keys.OrderBy(name => name, StringComparer.Ordinal))

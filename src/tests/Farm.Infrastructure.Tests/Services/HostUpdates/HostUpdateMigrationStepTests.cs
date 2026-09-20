@@ -31,7 +31,7 @@ public sealed class HostUpdateMigrationStepTests
             "run", "--rm", "--pull", "never", "--platform", "linux/amd64",
             "--network", "printfarmer-network",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
-            "--user", "appuser", "--read-only",
+            "--user", "appuser", "--read-only", "--tmpfs", "/tmp:rw,noexec,nosuid",
             "--entrypoint", "dotnet",
             "--env", "ConnectionStrings__Default", "--env", "DB_PROVIDER",
             $"ghcr.io/olyforge3d/printfarmer-{serviceId}@sha256:{new string('a', 64)}",
@@ -170,6 +170,7 @@ public sealed class HostUpdateMigrationStepTests
                 ["DB_PROVIDER"] = "Postgres",
                 ["ConnectionStrings__Default"] = "Host=postgres",
                 ["Jwt__Key"] = "test-secret",
+                ["DATAPROTECTION_KEYS_PATH"] = "/tmp/dp-keys",
             },
             "printfarmer-network",
             TimeSpan.FromSeconds(30));

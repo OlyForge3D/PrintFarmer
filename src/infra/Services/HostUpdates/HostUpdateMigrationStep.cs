@@ -18,6 +18,8 @@ public sealed class HostUpdateMigrationCoordinator(IReadOnlyList<IHostUpdateMigr
         foreach (IHostUpdateMigrationTarget target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
+
+            // Every probe must succeed before any target-image validation/migration can mutate state.
             _ = await target.HasPendingMigrationsAsync(request, cancellationToken).ConfigureAwait(false);
         }
 
