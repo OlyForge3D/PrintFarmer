@@ -39,21 +39,6 @@ public sealed class HostUpdateExecutionOptions
     /// <summary>Root directory for coordinated, checksummed backups: <c>{RootDirectory}/backups</c>.</summary>
     public string BackupRootDirectory => Combine("backups");
 
-    /// <summary>
-    /// Required only for a SQL Server-backed deployment: the absolute path the SQL Server
-    /// *engine's own process* sees for the same physical location PrintFarmer sees at
-    /// <see cref="BackupRootDirectory"/>. SQL Server runs <c>BACKUP DATABASE ... TO DISK</c>
-    /// inside its own engine -- typically its own container -- so the path handed to that
-    /// statement is resolved against SQL Server's filesystem view, not PrintFarmer's. In a
-    /// containerized deployment this requires a single shared volume bind-mounted into both
-    /// containers, at <see cref="BackupRootDirectory"/> for the PrintFarmer container and at
-    /// this path for the SQL Server container (see the deployment docs for the exact mount
-    /// configuration). Left empty when this deployment does not run SQL Server; a configured
-    /// SQL Server provider with this unset always fails the visible-backup-path-mapping
-    /// verification closed rather than assuming a default (issue #2788).
-    /// </summary>
-    public string SqlServerVisibleBackupDirectory { get; set; } = string.Empty;
-
     /// <summary>Path whose volume/drive is checked for free space during preflight.</summary>
     public string DiskWatchPath => RootDirectory;
 

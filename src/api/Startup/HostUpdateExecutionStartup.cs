@@ -211,6 +211,16 @@ public static class HostUpdateExecutionStartup
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>());
+
+            // BackupRootDirectory throws root_directory_not_configured when RootDirectory is
+            // unset (the executor's normal default-off state). Do not let that exception
+            // propagate out of DI resolution here -- it would crash any scoped resolution of
+            // IHostUpdateBackupTarget (e.g. HostUpdateExecutionAvailabilityProvider.CheckAsync's
+            // unconditional backupTargets.Count check) instead of the intended graceful
+            // fail-closed reporting. An unset root passes an empty directory through, which the
+            // #2788 mapping verification already reports as backup_root_directory_not_configured.
+            string backupRootDirectory = string.IsNullOrWhiteSpace(options.RootDirectory) ? string.Empty : options.BackupRootDirectory;
+
             return HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
                 "database",
                 dbConfig,
@@ -218,8 +228,7 @@ public static class HostUpdateExecutionStartup
                 sp.GetRequiredService<IHostUpdateExecutableResolver>(),
                 TimeSpan.FromSeconds(options.BackupTimeoutSeconds),
                 options.DatabaseExternallyOwned,
-                options.BackupRootDirectory,
-                options.SqlServerVisibleBackupDirectory);
+                backupRootDirectory);
         });
 
         // Bishop/Hicks review (issue #2663): do NOT register IEnumerable<IHostUpdateBackupTarget>

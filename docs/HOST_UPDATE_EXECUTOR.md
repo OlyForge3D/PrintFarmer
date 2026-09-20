@@ -194,33 +194,37 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   terminate the literal early and inject additional dot-command/T-SQL text into the same batch.
 - **SQL Server visible backup-path mapping is now verified with a real round trip, not assumed.**
   SQL Server writes backups from the *server process's* filesystem view, not the client's, so the
-  path PrintFarmer hands to `BACKUP DATABASE` must resolve to the same physical location the
-  SQL Server container can write to and PrintFarmer can later read back for verification and
-  restore. This requires a **shared bind mount**: configure
-  `HostUpdateExecution__BackupRootDirectory` (PrintFarmer's own view of the shared volume) and
-  `HostUpdateExecution__SqlServerVisibleBackupDirectory` (the same physical location, as the SQL
-  Server container sees it) as two absolute paths into one common host volume/mount — for example
-  a Docker named volume or bind mount attached to both the `api`/host-update-executor container and
-  the `sqlserver` container, with `BackupRootDirectory=/data/backups` on the PrintFarmer side and
-  `SqlServerVisibleBackupDirectory=/var/opt/mssql/printfarmer-backups` (or whatever mount point the
-  SQL Server container uses) on the same underlying volume. Before every backup/migration
-  execution, `HostUpdateExecutionAvailabilityProvider.CheckAsync` asks the configured backup target
-  to prove the mapping: `SqlServerProcessDatabaseBackupTarget.VerifyVisibleBackupPathMappingAsync`
-  runs a real `BACKUP DATABASE [master] TO DISK` probe through the same `sqlcmd` path as production
-  backups, writing a uniquely named probe file to `SqlServerVisibleBackupDirectory`, then checks
-  from PrintFarmer's own filesystem view (`BackupRootDirectory`) that the identical probe file is
-  visible with nonzero length, and best-effort deletes it afterward. A configuration-presence
-  check alone is explicitly not sufficient and is not what this does — an absent, misconfigured
-  (missing, relative, or unwritable), or unreadable-back mapping is reported as
-  `facility_unavailable:sql_server_visible_backup_path_mapping_unverified:<evidence>` (e.g.
-  `sql_server_visible_directory_not_configured`, `sql_server_visible_directory_not_absolute`,
-  `printfarmer_visible_directory_not_configured`, `printfarmer_visible_directory_not_absolute`,
-  `probe_backup_command_failed`, `probe_file_not_visible_from_printfarmer`) and closes availability
-  for the whole executor, exactly like the other code-owned facilities. This verification is
-  resolved lazily (only when the availability probe or a real backup actually runs), so a
-  deployment that only uses PostgreSQL or SQLite never touches SQL Server-specific resolution at
-  all. See `HostUpdateDatabaseBackupTargetFactoryTests` for the fail-closed and successful
-  round-trip regression coverage.
+  path PrintFarmer hands to `BACKUP DATABASE` must resolve to the same physical location PrintFarmer
+  can later read back for verification and restore. This requires a **shared bind mount**: the exact
+  same absolute directory PrintFarmer configures as `HostUpdateExecution__BackupRootDirectory` must
+  be mounted into the SQL Server container at the identical path — for example a Docker named
+  volume or bind mount attached to both the `api`/host-update-executor container and the `sqlserver`
+  container, each mounting it at, say, `/data/backups`, with
+  `HostUpdateExecution__BackupRootDirectory=/data/backups` configured once. There is deliberately no
+  separate "SQL Server side" directory setting: `HostUpdateBackupCoordinator` already hands this
+  same `BackupRootDirectory`-derived directory straight to `BACKUP DATABASE` for every real backup
+  with no translation step, so verifying any other path would not prove what production backups
+  actually depend on. Before every backup/migration execution,
+  `HostUpdateExecutionAvailabilityProvider.CheckAsync` asks the configured backup target to prove
+  the mapping: `SqlServerProcessDatabaseBackupTarget.VerifyVisibleBackupPathMappingAsync` runs a
+  real `BACKUP DATABASE [master] TO DISK` probe through the same `sqlcmd` path as production
+  backups, writing a small, fixed-name probe file into `BackupRootDirectory` (reused, not
+  regenerated, on every check so a persistently broken mapping cannot accumulate probe files on the
+  SQL Server volume — each check simply overwrites the same file via `WITH INIT`), then checks from
+  PrintFarmer's own filesystem view that the identical probe file is visible with nonzero length,
+  and best-effort deletes it afterward. The probe itself is capped at a short, fixed timeout
+  (independent of the full `BackupTimeoutSeconds` used for real backups) so a hung or unreachable
+  SQL Server cannot block every ~5-minute availability check for as long as a real backup would be
+  allowed to run. A configuration-presence check alone is explicitly not sufficient and is not what
+  this does — an absent, misconfigured (missing or relative), or unreadable-back mapping is
+  reported as `facility_unavailable:sql_server_visible_backup_path_mapping_unverified:<evidence>`
+  (e.g. `backup_root_directory_not_configured`, `backup_root_directory_not_absolute`,
+  `probe_backup_command_failed:<exit-code>`, `probe_file_not_visible_from_printfarmer`) and closes
+  availability for the whole executor, exactly like the other code-owned facilities. This
+  verification is resolved lazily (only when the availability probe or a real backup actually
+  runs), so a deployment that only uses PostgreSQL or SQLite never touches SQL Server-specific
+  resolution at all. See `HostUpdateDatabaseBackupTargetFactoryTests` for the fail-closed and
+  successful round-trip regression coverage.
 - Recovery's `NeedsOperator`/`RolledBack` outcome is now durably persisted by
   `FileHostUpdateRecoveryOutcomeStore` (one JSON file per release, atomic write-then-rename) as
   part of `RecoverAsync` itself — including when recovery is cancelled mid-flight — so the outcome

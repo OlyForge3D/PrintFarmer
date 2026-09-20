@@ -25,11 +25,15 @@ public static class HostUpdateDatabaseBackupTargetFactory
     /// <see cref="HostUpdateBackupCoordinator"/>) when <paramref name="isExternallyOwned"/> is
     /// true -- e.g. a customer-managed external PostgreSQL/SQL Server instance this host does
     /// not control.
-    /// <paramref name="printFarmerVisibleBackupDirectory"/> and
-    /// <paramref name="sqlServerVisibleBackupDirectory"/> (only meaningful when
-    /// <paramref name="dbConfig"/> is SQL Server) configure the round-trip mapping check
-    /// exposed via <see cref="IHostUpdateServerSideBackupTarget"/> (issue #2788); leaving either
-    /// empty makes that check fail closed with explicit evidence rather than skip silently.
+    /// <paramref name="backupRootDirectory"/> (only meaningful when <paramref name="dbConfig"/>
+    /// is SQL Server) is the exact same directory <see cref="HostUpdateBackupCoordinator"/> uses
+    /// to build every real backup's destination directory. It drives the round-trip mapping
+    /// check exposed via <see cref="IHostUpdateServerSideBackupTarget"/> (issue #2788), which
+    /// deliberately verifies this one directory -- not a separately configured "SQL Server side"
+    /// path -- because that is the exact directory the SQL Server engine is asked to write into
+    /// for a real backup; verifying any other path would not prove what production backups
+    /// depend on. Leaving it empty makes the check fail closed with explicit evidence rather
+    /// than skip silently.
     /// </summary>
     public static IHostUpdateBackupTarget CreateBackupTarget(
         string name,
@@ -38,8 +42,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
         IHostUpdateExecutableResolver executableResolver,
         TimeSpan timeout,
         bool isExternallyOwned,
-        string printFarmerVisibleBackupDirectory = "",
-        string sqlServerVisibleBackupDirectory = "")
+        string backupRootDirectory = "")
     {
         ArgumentNullException.ThrowIfNull(dbConfig);
 
@@ -115,8 +118,7 @@ public static class HostUpdateDatabaseBackupTargetFactory
                 builder.DataSource,
                 connectionArgs,
                 connectionEnvironment,
-                printFarmerVisibleBackupDirectory,
-                sqlServerVisibleBackupDirectory,
+                backupRootDirectory,
                 timeout);
         }
 
@@ -277,16 +279,17 @@ public static class HostUpdateDatabaseBackupTargetFactory
 
 /// <summary>
 /// Wraps a <see cref="ProcessDatabaseBackupTarget"/> configured for SQL Server with a real
-/// round-trip verification of the visible-backup-path mapping (issue #2788): PrintFarmer's
-/// <see cref="HostUpdateExecutionOptions.BackupRootDirectory"/>-derived directory versus the SQL
-/// Server engine's own <see cref="HostUpdateExecutionOptions.SqlServerVisibleBackupDirectory"/>.
-/// Delegates every normal <see cref="IHostUpdateBackupTarget"/> operation unchanged to the
-/// wrapped target; only adds <see cref="IHostUpdateServerSideBackupTarget"/>. Every dependency
-/// captured here is either already-lazy (<paramref name="resolveFileName"/>) or a plain
-/// configuration value, so constructing this wrapper never resolves <c>sqlcmd</c> or touches the
-/// filesystem -- only <see cref="VerifyVisibleBackupPathMappingAsync"/> does, and only when
-/// actually invoked (preserving the lazy-resolution, no-DI-graph-crash contract #2787
-/// established for <see cref="ProcessDatabaseBackupTarget"/>).
+/// round-trip verification of the visible-backup-path mapping (issue #2788): asks the SQL
+/// Server engine to write a probe file into the exact same
+/// <see cref="HostUpdateExecutionOptions.BackupRootDirectory"/> real backups use, then confirms
+/// PrintFarmer can read that exact file back from that same directory. Delegates every normal
+/// <see cref="IHostUpdateBackupTarget"/> operation unchanged to the wrapped target; only adds
+/// <see cref="IHostUpdateServerSideBackupTarget"/>. Every dependency captured here is either
+/// already-lazy (<paramref name="resolveFileName"/>) or a plain configuration value, so
+/// constructing this wrapper never resolves <c>sqlcmd</c> or touches the filesystem -- only
+/// <see cref="VerifyVisibleBackupPathMappingAsync"/> does, and only when actually invoked
+/// (preserving the lazy-resolution, no-DI-graph-crash contract #2787 established for
+/// <see cref="ProcessDatabaseBackupTarget"/>).
 /// </summary>
 internal sealed class SqlServerProcessDatabaseBackupTarget(
     IHostUpdateBackupTarget inner,
@@ -295,11 +298,21 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
     string dataSource,
     IReadOnlyList<string> connectionArguments,
     IReadOnlyDictionary<string, string>? connectionEnvironment,
-    string printFarmerVisibleBackupDirectory,
-    string sqlServerVisibleBackupDirectory,
+    string backupRootDirectory,
     TimeSpan timeout) : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
 {
-    private const string ProbeFilePrefix = "printfarmer-mapping-probe-";
+    // Fixed (not per-invocation-unique) name: BACKUP DATABASE ... WITH INIT overwrites an
+    // existing file at this path, so every ~5-minute availability re-check reuses and
+    // overwrites the same single probe file instead of accumulating a new one on the SQL
+    // Server volume each time the mapping is broken and PrintFarmer cannot see (and so cannot
+    // clean up) the file it just asked the engine to write.
+    private const string ProbeFileName = "printfarmer-mapping-probe.bak";
+
+    // The probe backs up only [master] with COPY_ONLY -- a tiny, fixed-size operation -- so it
+    // should never need anywhere near the full configured BackupTimeoutSeconds (which may be
+    // tens of minutes, sized for a real production-database backup). Capping it keeps a
+    // hung/unreachable SQL Server from blocking every ~5-minute availability check for that long.
+    private static readonly TimeSpan MaxProbeTimeout = TimeSpan.FromSeconds(30);
 
     public string Name => inner.Name;
 
@@ -311,38 +324,31 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
     /// <summary>
     /// Instructs the SQL Server engine itself to write a small, disposable probe file (a
     /// <c>BACKUP DATABASE [master]</c> -- the same statement shape and code path real backups
-    /// use, so this proves the exact mapping production backups depend on, not a synthetic
-    /// stand-in) to the server-visible directory, then confirms PrintFarmer can read that exact
-    /// physical file back at its own mapped path. Never assumes success from configuration
+    /// use) into the configured <c>backupRootDirectory</c>'s value -- the exact same directory
+    /// <see cref="HostUpdateBackupCoordinator"/> passes to every real backup target's
+    /// <c>BackupAsync</c> -- then confirms PrintFarmer can read that exact physical file back
+    /// from that same directory. Deliberately does not accept a separately configured
+    /// "SQL Server side" directory: production backups never translate the destination path, so
+    /// verifying anything other than the literal directory real backups use would not prove the
+    /// mapping those backups actually depend on. Never assumes success from configuration
     /// presence: an empty/relative directory, a failed <c>sqlcmd</c> invocation, or a probe file
     /// that the engine reports as written but PrintFarmer cannot see all fail closed with
     /// distinct, explicit evidence.
     /// </summary>
     public async Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(sqlServerVisibleBackupDirectory))
+        if (string.IsNullOrWhiteSpace(backupRootDirectory))
         {
-            return "sql_server_visible_directory_not_configured";
+            return "backup_root_directory_not_configured";
         }
 
-        if (!Path.IsPathRooted(sqlServerVisibleBackupDirectory))
+        if (!Path.IsPathRooted(backupRootDirectory))
         {
-            return "sql_server_visible_directory_not_absolute";
+            return "backup_root_directory_not_absolute";
         }
 
-        if (string.IsNullOrWhiteSpace(printFarmerVisibleBackupDirectory))
-        {
-            return "printfarmer_visible_directory_not_configured";
-        }
-
-        if (!Path.IsPathRooted(printFarmerVisibleBackupDirectory))
-        {
-            return "printfarmer_visible_directory_not_absolute";
-        }
-
-        string probeFileName = ProbeFilePrefix + Guid.NewGuid().ToString("N") + ".bak";
-        string serverVisiblePath = Path.Combine(sqlServerVisibleBackupDirectory, probeFileName);
-        string printFarmerVisiblePath = Path.Combine(printFarmerVisibleBackupDirectory, probeFileName);
+        string probePath = Path.Combine(backupRootDirectory, ProbeFileName);
+        TimeSpan probeTimeout = timeout < MaxProbeTimeout ? timeout : MaxProbeTimeout;
 
         HostUpdateProcessResult result;
         try
@@ -353,9 +359,9 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
                     "-S", dataSource,
                     "-b",
                     .. connectionArguments,
-                    "-Q", $"BACKUP DATABASE [master] TO DISK = N'{HostUpdateDatabaseBackupTargetFactory.EscapeQuotedLiteral(serverVisiblePath)}' WITH INIT, COPY_ONLY",
+                    "-Q", $"BACKUP DATABASE [master] TO DISK = N'{HostUpdateDatabaseBackupTargetFactory.EscapeQuotedLiteral(probePath)}' WITH INIT, COPY_ONLY",
                 ],
-                timeout,
+                probeTimeout,
                 cancellationToken,
                 connectionEnvironment).ConfigureAwait(false);
         }
@@ -366,12 +372,12 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
 
         if (!result.Succeeded)
         {
-            return "probe_backup_command_failed";
+            return $"probe_backup_command_failed:{result.ExitCode}";
         }
 
         try
         {
-            var probeFileInfo = new FileInfo(printFarmerVisiblePath);
+            var probeFileInfo = new FileInfo(probePath);
             if (!probeFileInfo.Exists || probeFileInfo.Length == 0)
             {
                 return "probe_file_not_visible_from_printfarmer";
@@ -379,7 +385,7 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
         }
         finally
         {
-            TryDeleteProbeFile(printFarmerVisiblePath);
+            TryDeleteProbeFile(probePath);
         }
 
         return null;

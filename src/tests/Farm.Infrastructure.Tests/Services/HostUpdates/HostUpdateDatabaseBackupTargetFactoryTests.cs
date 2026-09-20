@@ -465,11 +465,16 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
 
     /// <summary>
     /// A process runner standing in for the SQL Server engine: when it sees a
-    /// <c>BACKUP DATABASE ... TO DISK = N'...'</c> statement it actually writes an empty file at
-    /// the extracted path (simulating the engine's own filesystem write), so tests exercise a
-    /// genuine round trip rather than asserting on configuration shape alone.
+    /// <c>BACKUP DATABASE ... TO DISK = N'...'</c> statement it writes a file, simulating the
+    /// engine's own filesystem write, so tests exercise a genuine round trip rather than
+    /// asserting on configuration shape alone. When <paramref name="physicalWriteRedirectDirectory"/>
+    /// is set, the file is written there instead of at the literal path extracted from the SQL
+    /// text -- simulating a broken bind mount: the SQL Server container's local disk happens to
+    /// have something at that path label, but it is not actually the shared volume PrintFarmer
+    /// reads from. This is the realistic "same configured path, different physical storage"
+    /// failure mode a single shared <c>BackupRootDirectory</c> can still exhibit.
     /// </summary>
-    private sealed class ServerSideWritingProcessRunner(bool succeeds) : IHostUpdateProcessRunner
+    private sealed class ServerSideWritingProcessRunner(bool succeeds, string? physicalWriteRedirectDirectory = null) : IHostUpdateProcessRunner
     {
         public IReadOnlyList<string>? LastArguments { get; private set; }
 
@@ -488,9 +493,12 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
                 {
                     int start = query.IndexOf("N'", StringComparison.Ordinal) + 2;
                     int end = query.IndexOf('\'', start);
-                    string serverWrittenPath = query[start..end];
-                    Directory.CreateDirectory(Path.GetDirectoryName(serverWrittenPath)!);
-                    File.WriteAllText(serverWrittenPath, "probe");
+                    string configuredPath = query[start..end];
+                    string physicalPath = physicalWriteRedirectDirectory is null
+                        ? configuredPath
+                        : Path.Combine(physicalWriteRedirectDirectory, Path.GetFileName(configuredPath));
+                    Directory.CreateDirectory(Path.GetDirectoryName(physicalPath)!);
+                    File.WriteAllText(physicalPath, "probe");
                 }
             }
 
@@ -507,85 +515,87 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     };
 
     [Fact]
-    public async Task VerifyVisibleBackupPathMappingAsync_MappedDirectoriesMatch_RealRoundTripSucceeds()
+    public async Task VerifyVisibleBackupPathMappingAsync_SameDirectoryRealBackupsUse_RealRoundTripSucceeds()
     {
-        string sharedDirectory = Directory.CreateTempSubdirectory("hu-mapping-shared-").FullName;
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-shared-").FullName;
         try
         {
             IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
                 "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true), TestExecutableResolver,
                 TimeSpan.FromSeconds(30), isExternallyOwned: false,
-                printFarmerVisibleBackupDirectory: sharedDirectory, sqlServerVisibleBackupDirectory: sharedDirectory);
+                backupRootDirectory: backupRootDirectory);
 
             string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
 
             evidence.Should().BeNull();
-            Directory.GetFiles(sharedDirectory).Should().BeEmpty("the probe file must be cleaned up after a successful verification");
+            Directory.GetFiles(backupRootDirectory).Should().BeEmpty("the probe file must be cleaned up after a successful verification");
         }
         finally
         {
-            Directory.Delete(sharedDirectory, recursive: true);
+            Directory.Delete(backupRootDirectory, recursive: true);
         }
     }
 
     [Fact]
-    public async Task VerifyVisibleBackupPathMappingAsync_DirectoriesDoNotActuallyShareAMount_FailsClosedWithDistinctEvidence()
+    public async Task VerifyVisibleBackupPathMappingAsync_ConfiguredPathIsNotActuallyASharedMount_FailsClosedWithDistinctEvidence()
     {
-        string serverSideOnlyDirectory = Directory.CreateTempSubdirectory("hu-mapping-server-").FullName;
-        string printFarmerDirectory = Directory.CreateTempSubdirectory("hu-mapping-client-").FullName;
+        // Same literal directory string is configured on both "sides" (there is only one
+        // configuration value now), but the fake engine's physical write is redirected
+        // elsewhere -- reproducing a broken bind mount where the SQL Server container's local
+        // disk at that path label is not really the volume PrintFarmer reads from.
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-client-").FullName;
+        string serverPhysicalStorage = Directory.CreateTempSubdirectory("hu-mapping-server-").FullName;
         try
         {
             IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true), TestExecutableResolver,
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true, serverPhysicalStorage), TestExecutableResolver,
                 TimeSpan.FromSeconds(30), isExternallyOwned: false,
-                printFarmerVisibleBackupDirectory: printFarmerDirectory, sqlServerVisibleBackupDirectory: serverSideOnlyDirectory);
+                backupRootDirectory: backupRootDirectory);
 
             string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
 
             evidence.Should().Be("probe_file_not_visible_from_printfarmer");
-            Directory.GetFiles(serverSideOnlyDirectory).Should().ContainSingle("the engine really did write the probe file -- only PrintFarmer's own read failed");
+            Directory.GetFiles(serverPhysicalStorage).Should().ContainSingle("the engine really did write the probe file -- only PrintFarmer's own read (at the shared path) failed");
         }
         finally
         {
-            Directory.Delete(serverSideOnlyDirectory, recursive: true);
-            Directory.Delete(printFarmerDirectory, recursive: true);
+            Directory.Delete(backupRootDirectory, recursive: true);
+            Directory.Delete(serverPhysicalStorage, recursive: true);
         }
     }
 
     [Fact]
     public async Task VerifyVisibleBackupPathMappingAsync_SqlcmdReportsFailure_FailsClosedWithoutAssumingSuccess()
     {
-        string directory = Directory.CreateTempSubdirectory("hu-mapping-fail-").FullName;
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-fail-").FullName;
         try
         {
             IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
                 "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: false), TestExecutableResolver,
                 TimeSpan.FromSeconds(30), isExternallyOwned: false,
-                printFarmerVisibleBackupDirectory: directory, sqlServerVisibleBackupDirectory: directory);
+                backupRootDirectory: backupRootDirectory);
 
             string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
 
-            evidence.Should().Be("probe_backup_command_failed");
+            evidence.Should().Be("probe_backup_command_failed:1", "the evidence must retain sqlcmd's exit code, not just a generic failure marker");
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(backupRootDirectory, recursive: true);
         }
     }
 
     [Theory]
-    [InlineData("", "/absolute/printfarmer", "sql_server_visible_directory_not_configured")]
-    [InlineData("relative/server", "/absolute/printfarmer", "sql_server_visible_directory_not_absolute")]
-    [InlineData("/absolute/server", "", "printfarmer_visible_directory_not_configured")]
-    [InlineData("/absolute/server", "relative/printfarmer", "printfarmer_visible_directory_not_absolute")]
-    public async Task VerifyVisibleBackupPathMappingAsync_UnconfiguredOrRelativeDirectories_FailsClosedWithoutInvokingSqlcmd(
-        string sqlServerDirectory, string printFarmerDirectory, string expectedEvidence)
+    [InlineData("", "backup_root_directory_not_configured")]
+    [InlineData("relative/backups", "backup_root_directory_not_absolute")]
+    public async Task VerifyVisibleBackupPathMappingAsync_UnconfiguredOrRelativeDirectory_FailsClosedWithoutInvokingSqlcmd(
+        string backupRootDirectory, string expectedEvidence)
     {
         var runner = new RecordingProcessRunner();
         IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
             "database", SqlServerConfig(), runner, TestExecutableResolver,
             TimeSpan.FromSeconds(30), isExternallyOwned: false,
-            printFarmerVisibleBackupDirectory: printFarmerDirectory, sqlServerVisibleBackupDirectory: sqlServerDirectory);
+            backupRootDirectory: backupRootDirectory);
 
         string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
 
@@ -596,13 +606,13 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     [Fact]
     public async Task CreateBackupTarget_SqlServer_StillDelegatesNormalBackupAsyncToInnerTargetWhenWrapped()
     {
-        string directory = Directory.CreateTempSubdirectory("hu-mapping-delegate-").FullName;
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-delegate-").FullName;
         try
         {
             var runner = new RecordingProcessRunner();
             IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
                 "database", SqlServerConfig(), runner, TestExecutableResolver, TimeSpan.FromSeconds(30), isExternallyOwned: false,
-                printFarmerVisibleBackupDirectory: directory, sqlServerVisibleBackupDirectory: directory);
+                backupRootDirectory: backupRootDirectory);
 
             await target.BackupAsync(Path.GetTempPath(), CancellationToken.None);
 
@@ -611,7 +621,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         }
         finally
         {
-            Directory.Delete(directory, recursive: true);
+            Directory.Delete(backupRootDirectory, recursive: true);
         }
     }
 }
