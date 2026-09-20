@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Authorization;
+using Farm.Modules.Devices.Filters;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Infrastructure;
 using Microsoft.AspNetCore.Http;
@@ -25,6 +26,12 @@ namespace Farm.Web.Api.Tests.Startup;
 /// future move that accidentally leaves a stale copy of a controller behind in the old
 /// assembly, alongside the moved copy in the new one, produces two distinct lines instead of
 /// silently collapsing to one.
+/// </para>
+/// <para>
+/// This intentionally covers controller-action endpoints only. Minimal APIs (including health,
+/// liveness, and network-discovery mappings) and SignalR hub endpoints are outside this snapshot.
+/// Authorization implemented by action filters or handler bodies is also outside the declared
+/// endpoint metadata view.
 /// </para>
 /// <para>
 /// Renaming a controller/action or intentionally changing a route requires regenerating the
@@ -66,7 +73,7 @@ public sealed class RouteTableSnapshotTests
                 line.Contains(
                     "DELETE /api/admin/roles/{roleId:guid}",
                     StringComparison.Ordinal) &&
-                line.Contains("permission=roles:admin", StringComparison.Ordinal),
+                line.Contains("|permission=roles:admin", StringComparison.Ordinal),
             "the privileged route used by this regression test must be unique").Which;
         string[] regressed = expected
             .Select(line => line == privilegedRoute
@@ -80,7 +87,7 @@ public sealed class RouteTableSnapshotTests
     }
 
     [Fact]
-    public async Task ControllerActionRouteTable_RecordsEffectiveAuthorizationMetadata()
+    public async Task ControllerActionRouteTable_RecordsDeclaredAuthorizationMetadata()
     {
         using CustomWebApplicationFactory factory = new();
 
@@ -92,12 +99,12 @@ public sealed class RouteTableSnapshotTests
             line.Contains(
                 "GET /api/admin/overview",
                 StringComparison.Ordinal) &&
-            line.Contains("permission=system_settings:admin", StringComparison.Ordinal));
+            line.Contains("|permission=system_settings:admin", StringComparison.Ordinal));
         _ = actual.Should().Contain(line =>
             line.Contains(
                 "GET /api/admin/roles",
                 StringComparison.Ordinal) &&
-            line.Contains("permission=roles:admin", StringComparison.Ordinal));
+            line.Contains("|permission=roles:admin", StringComparison.Ordinal));
         _ = actual.Should().Contain(line =>
             line.Contains(
                 "GET /api/schema-health/ready",
@@ -113,12 +120,37 @@ public sealed class RouteTableSnapshotTests
                 "POST /api/files/local",
                 StringComparison.Ordinal) &&
             line.Contains("catalog-permission=queue:write", StringComparison.Ordinal));
-        _ = actual.Count(line => line.Contains("permission=", StringComparison.Ordinal))
+        _ = actual.Count(line => line.Contains("|permission=", StringComparison.Ordinal))
             .Should().BeGreaterThan(0);
         _ = actual.Count(line => line.Contains("[auth=anonymous:", StringComparison.Ordinal))
             .Should().BeGreaterThan(0);
-        _ = actual.Count(line => line.EndsWith("[auth=fallback:RequireAuthenticatedUser]", StringComparison.Ordinal))
+        _ = actual.Count(line => line.EndsWith("[auth=fallback:DenyAnonymousAuthorizationRequirement]", StringComparison.Ordinal))
             .Should().BeGreaterThan(0);
+    }
+
+    [Fact]
+    public void ControllerActionRouteTable_BindsOctoPrintApiKeyFiltersToPublicActions()
+    {
+        using CustomWebApplicationFactory factory = new();
+
+        EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        ControllerActionDescriptor[] actions = endpointDataSource.Endpoints
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => endpoint.Metadata.GetMetadata<ControllerActionDescriptor>())
+            .Where(action => action is not null &&
+                action.ControllerTypeInfo.AsType() == typeof(Farm.Web.Api.Controllers.OctoPrintCompatController) &&
+                action.ActionName is "GetVersion" or "GetServer")
+            .Cast<ControllerActionDescriptor>()
+            .ToArray();
+
+        _ = actions.Should().ContainSingle(action => action.ActionName == "GetVersion")
+            .Which.FilterDescriptors.Should().Contain(
+                descriptor => descriptor.Filter is OctoPrintApiKeyAttribute,
+                "GetVersion must remain bound to its OctoPrint API-key authorization filter");
+        _ = actions.Should().ContainSingle(action => action.ActionName == "GetServer")
+            .Which.FilterDescriptors.Should().Contain(
+                descriptor => descriptor.Filter is OctoPrintApiKeyAttribute,
+                "GetServer must remain bound to its OctoPrint API-key authorization filter");
     }
 
     /// <summary>
@@ -202,7 +234,8 @@ public sealed class RouteTableSnapshotTests
                     .GetOrderedMetadata<IPermissionMetadata>()
                     // Slicer filter-based RequirePermissionAttribute is intentionally not
                     // IPermissionMetadata; track that observability gap in follow-up #2818.
-                    .Select(permission => permission is IAuthorizeData
+                    .Select(permission => permission is IAuthorizationRequirementData data &&
+                        data.GetRequirements().Any()
                         ? $"permission={permission.Permission}"
                         : $"catalog-permission={permission.Permission}"))
             .ToArray();
@@ -213,9 +246,16 @@ public sealed class RouteTableSnapshotTests
         }
 
         AuthorizationPolicy? fallbackPolicy = await policyProvider.GetFallbackPolicyAsync();
-        if (fallbackPolicy?.Requirements.OfType<DenyAnonymousAuthorizationRequirement>().Any() == true)
+        if (fallbackPolicy is not null)
         {
-            return "auth=fallback:RequireAuthenticatedUser";
+            string[] fallbackRequirements = fallbackPolicy.Requirements
+                .Select(requirement => requirement.GetType().Name)
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(name => name, StringComparer.Ordinal)
+                .ToArray();
+            return $"auth=fallback:{(fallbackRequirements.Length == 0
+                ? "empty"
+                : string.Join("+", fallbackRequirements))}";
         }
 
         return "auth=none";
