@@ -1,10 +1,14 @@
-﻿using Farm.Infrastructure.Data;
+﻿using System.Collections.Concurrent;
+using System.Data.Common;
+using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Electricity;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -67,10 +71,13 @@ public class HostUpdateWriterFencingTests : IDisposable
         }
     }
 
-    private CountingScopeFactory BuildCountingScopeFactory()
+    private CountingScopeFactory BuildCountingScopeFactory(params IInterceptor[] interceptors)
     {
         ServiceCollection services = new();
-        _ = services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(_connection));
+        _ = services.AddDbContext<AppDbContext>(
+            builder => builder
+                .UseSqlite(_connection)
+                .AddInterceptors(interceptors));
         ServiceProvider sp = services.BuildServiceProvider();
         return new CountingScopeFactory(sp.GetRequiredService<IServiceScopeFactory>());
     }
@@ -254,5 +261,155 @@ public class HostUpdateWriterFencingTests : IDisposable
         await service.StopAsync(CancellationToken.None);
 
         (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task QueueReconciliationService_PauseAfterAttempt_SavesBeforeAcknowledging()
+    {
+        await DisableForeignKeysAsync();
+        await SeedStaleAttemptsAsync(2);
+
+        var fence = new QueueReconciliationFenceFlag();
+        var saveObserver = new FenceAwareSaveChangesInterceptor(fence);
+        var pauseTrigger = new PauseOnDispatchStateReadInterceptor(fence);
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory(saveObserver, pauseTrigger);
+        var service = new QueueReconciliationService(
+            scopeFactory,
+            NullLogger<QueueReconciliationService>.Instance,
+            fence);
+        saveObserver.IsEnabled = true;
+        pauseTrigger.IsEnabled = true;
+
+        await service.ReconcileStaleAttemptsAsync(CancellationToken.None);
+
+        saveObserver.AcknowledgementCounts.Should().NotBeEmpty();
+        saveObserver.AcknowledgementCounts.Should().OnlyContain(
+            count => count == 0,
+            "all staged queue mutations must commit before the writer acknowledges quiescence");
+        fence.AcknowledgementCount.Should().Be(1);
+    }
+
+    [Fact]
+    public async Task QueueReconciliationService_PauseAfterNullAttemptRecovery_SavesBeforeAcknowledging()
+    {
+        await DisableForeignKeysAsync();
+        Guid printerId = Guid.NewGuid();
+        Guid attemptId = Guid.NewGuid();
+        Guid jobId = Guid.NewGuid();
+        await using (AppDbContext seed = new(
+                         new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options))
+        {
+            seed.PrinterDispatchStates.Add(new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                ActiveJobId = jobId,
+                ActiveDispatchAttemptId = attemptId,
+            });
+            seed.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+            {
+                Id = Guid.NewGuid(),
+                Sequence = 1,
+                AggregateType = nameof(PrintJob),
+                AggregateId = jobId,
+                EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+                Status = QueueOutboxEventStatus.Processing,
+                FailureCode = "backend_outcome_unknown",
+                PrinterId = printerId,
+                AttemptId = null,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+            await seed.SaveChangesAsync();
+        }
+
+        var fence = new QueueReconciliationFenceFlag();
+        var saveObserver = new FenceAwareSaveChangesInterceptor(fence);
+        var pauseTrigger = new PauseOnDispatchStateReadInterceptor(fence);
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory(saveObserver, pauseTrigger);
+        var service = new QueueReconciliationService(
+            scopeFactory,
+            NullLogger<QueueReconciliationService>.Instance,
+            fence);
+        saveObserver.IsEnabled = true;
+        pauseTrigger.IsEnabled = true;
+
+        await service.ReconcileStaleAttemptsAsync(CancellationToken.None);
+
+        saveObserver.AcknowledgementCounts.Should().ContainSingle();
+        saveObserver.AcknowledgementCounts.Should().OnlyContain(
+            count => count == 0,
+            "null-attempt recovery must commit before the writer acknowledges quiescence");
+        fence.AcknowledgementCount.Should().Be(1);
+    }
+
+    private async Task DisableForeignKeysAsync()
+    {
+        await using DbCommand command = _connection.CreateCommand();
+        command.CommandText = "PRAGMA foreign_keys = OFF;";
+        await command.ExecuteNonQueryAsync();
+    }
+
+    private async Task SeedStaleAttemptsAsync(int count)
+    {
+        await using AppDbContext seed = new(
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options);
+        seed.QueueDispatchAttempts.AddRange(
+            Enumerable.Range(0, count).Select(_ => new QueueDispatchAttempt
+            {
+                Id = Guid.NewGuid(),
+                PrinterId = Guid.NewGuid(),
+                ActorSubject = "host-update-fence-test",
+                StartPathKind = "Manual",
+                ClaimedAtUtc = DateTime.UtcNow.AddMinutes(-15),
+                Outcome = DispatchAttemptOutcome.InProgress,
+                UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-15),
+            }));
+        await seed.SaveChangesAsync();
+    }
+
+    private sealed class FenceAwareSaveChangesInterceptor(QueueReconciliationFenceFlag fence)
+        : SaveChangesInterceptor
+    {
+        private readonly ConcurrentQueue<int> _acknowledgementCounts = new();
+
+        public bool IsEnabled { get; set; }
+
+        public IReadOnlyCollection<int> AcknowledgementCounts => _acknowledgementCounts.ToArray();
+
+        public override ValueTask<InterceptionResult<int>> SavingChangesAsync(
+            DbContextEventData eventData,
+            InterceptionResult<int> result,
+            CancellationToken cancellationToken = default)
+        {
+            if (IsEnabled)
+            {
+                _acknowledgementCounts.Enqueue(fence.AcknowledgementCount);
+            }
+
+            return base.SavingChangesAsync(eventData, result, cancellationToken);
+        }
+    }
+
+    private sealed class PauseOnDispatchStateReadInterceptor(QueueReconciliationFenceFlag fence)
+        : DbCommandInterceptor
+    {
+        private int _pauseRequested;
+
+        public bool IsEnabled { get; set; }
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command,
+            CommandExecutedEventData eventData,
+            DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            if (IsEnabled &&
+                command.CommandText.Contains("PrinterDispatchStates", StringComparison.Ordinal) &&
+                Interlocked.Exchange(ref _pauseRequested, 1) == 0)
+            {
+                await fence.RequestPauseAsync(cancellationToken);
+            }
+
+            return result;
+        }
     }
 }

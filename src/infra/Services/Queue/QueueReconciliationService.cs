@@ -43,6 +43,7 @@ public sealed class QueueReconciliationService(
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
         logger.LogInformation("[Reconciliation] Queue reconciliation service started");
+        bool hasPaused = false;
 
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -50,13 +51,18 @@ public sealed class QueueReconciliationService(
             {
                 if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
                 {
-                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                    logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_reconciliation");
+                    if (!hasPaused)
+                    {
+                        await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
+                        logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_reconciliation");
+                        hasPaused = true;
+                    }
+
                     await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
                 }
                 else
                 {
-                    await ReconcileStaleAttemptsAsync(stoppingToken);
+                    hasPaused = await ReconcileStaleAttemptsAsync(stoppingToken);
                 }
             }
             catch (OperationCanceledException)
@@ -68,19 +74,31 @@ public sealed class QueueReconciliationService(
                 logger.LogError(ex, "[Reconciliation] Error during reconciliation scan");
             }
 
-            await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false);
+            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+            {
+                if (!hasPaused)
+                {
+                    await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                    logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_during_interval");
+                    hasPaused = true;
+                }
+            }
+            else
+            {
+                hasPaused = false;
+            }
         }
 
         logger.LogInformation("[Reconciliation] Queue reconciliation service stopped");
     }
 
-    internal async Task ReconcileStaleAttemptsAsync(CancellationToken ct)
+    internal async Task<bool> ReconcileStaleAttemptsAsync(CancellationToken ct)
     {
         if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
         {
             await hostUpdateFence.AcknowledgePausedAsync(ct);
             logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_reconciliation");
-            return;
+            return true;
         }
 
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
@@ -156,10 +174,18 @@ public sealed class QueueReconciliationService(
         {
             if (recoveredNullAttemptCommands)
             {
+                if (await SaveThenAcknowledgePauseAsync(
+                        db,
+                        "pause_observed_after_null_attempt_recovery",
+                        ct))
+                {
+                    return true;
+                }
+
                 await db.SaveChangesAsync(ct);
             }
 
-            return;
+            return false;
         }
 
         logger.LogWarning(
@@ -171,32 +197,52 @@ public sealed class QueueReconciliationService(
 
         foreach (QueueDispatchAttempt attempt in toReconcile)
         {
-            await ReconcileSingleAttemptAsync(db, printersSvc, sequenceAllocator, attempt, ct);
-            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
+            if (await SaveThenAcknowledgePauseAsync(db, "pause_observed_before_attempt", ct))
             {
-                await hostUpdateFence.AcknowledgePausedAsync(ct);
-                logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_after_attempt");
-                break;
+                return true;
+            }
+
+            await ReconcileSingleAttemptAsync(db, printersSvc, sequenceAllocator, attempt, ct);
+            if (await SaveThenAcknowledgePauseAsync(db, "pause_observed_after_attempt", ct))
+            {
+                return true;
             }
         }
 
         await db.SaveChangesAsync(ct);
+        return false;
     }
 
-    private async Task WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
     {
         DateTimeOffset until = DateTimeOffset.UtcNow + ReconciliationInterval;
         while (DateTimeOffset.UtcNow < until)
         {
             if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
             {
-                await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_during_interval");
-                return;
+                return true;
             }
 
             await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
         }
+
+        return false;
+    }
+
+    private async Task<bool> SaveThenAcknowledgePauseAsync(
+        AppDbContext db,
+        string reason,
+        CancellationToken ct)
+    {
+        if (hostUpdateFence is null || !await hostUpdateFence.IsPauseRequestedAsync(ct))
+        {
+            return false;
+        }
+
+        await db.SaveChangesAsync(ct);
+        await hostUpdateFence.AcknowledgePausedAsync(ct);
+        logger.LogWarning("queue_reconciliation_writer_fence_rejected reason={Reason}", reason);
+        return true;
     }
 
     private static async Task<bool> RecoverNullAttemptCommandsAsync(
@@ -338,8 +384,6 @@ public sealed class QueueReconciliationService(
 
         if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
         {
-            await hostUpdateFence.AcknowledgePausedAsync(ct);
-            logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_write");
             return;
         }
 
@@ -355,6 +399,11 @@ public sealed class QueueReconciliationService(
         // Query the authoritative backend for the current printer state.
         BackendReconciliationOutcome outcome = await QueryBackendOutcomeAsync(
             printersSvc, attempt, ct);
+        if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
+        {
+            return;
+        }
+
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(db, ct);
         activeState.Revision = Math.Max(1, activeState.Revision) + 1;
