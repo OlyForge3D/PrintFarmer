@@ -13,7 +13,10 @@ const signalr = vi.hoisted(() => {
     stop: vi.fn(async () => {
       connection.state = "Disconnected";
     }),
-    invoke: vi.fn(async () => undefined),
+    invoke: vi.fn(async (...args: unknown[]): Promise<unknown> => {
+      void args;
+      return undefined;
+    }),
     on: vi.fn((name: string, handler: (payload: unknown) => void) => {
       eventHandlers.set(name, handler);
     }),
@@ -207,9 +210,9 @@ describe("PrinterSignalRService queue cursor recovery", () => {
       events: [],
     });
     signalr.connection.invoke.mockImplementation(async (
-      method: string,
-      arg?: unknown
-    ) => {
+      ...args: unknown[]
+    ): Promise<string[] | undefined> => {
+      const [method, arg] = args as [string, unknown?];
       if (method === "SubscribeToPrintersAsync") {
         return arg as string[];
       }
@@ -233,8 +236,8 @@ describe("PrinterSignalRService queue cursor recovery", () => {
       // Issue #1764: reconnect must issue exactly ONE batched printer
       // subscribe invocation instead of one per printer, so assert the call
       // count, not just that the args were seen at some point.
-      const printerInvocations = signalr.connection.invoke.mock.calls.filter(
-        ([method]: [string, unknown]) => method === "SubscribeToPrintersAsync"
+      const printerInvocations = (signalr.connection.invoke.mock.calls as [string, unknown?][]).filter(
+        (call) => call[0] === "SubscribeToPrintersAsync"
       );
       expect(printerInvocations).toHaveLength(1);
       expect(printerInvocations[0][1]).toEqual([
@@ -277,8 +280,9 @@ describe("PrinterSignalRService queue cursor recovery", () => {
     await service.connect();
     await service.subscribeToQueueJob("job-revoked");
     signalr.connection.invoke.mockImplementation(async (
-      method: string
+      ...args: unknown[]
     ): Promise<undefined> => {
+      const [method] = args as [string, ...unknown[]];
       if (method === "SubscribeToQueueJobAsync") {
         throw new Error("resource_forbidden");
       }

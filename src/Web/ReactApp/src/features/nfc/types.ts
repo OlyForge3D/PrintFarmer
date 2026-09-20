@@ -39,6 +39,20 @@ export interface NfcLinkResponse {
   updatedAt: string;
 }
 
+/** Response shape for NFC tag bindings listed by GET /api/nfc/bindings. */
+export interface NfcBindingDto {
+  id: string;
+  tagUid: string;
+  spoolId?: number | null;
+  spoolName?: string;
+  printerId?: string;
+  printerName?: string;
+  trayId?: string;
+  spoolLastSeenAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
 export type NfcPairingStep =
   | 'scanning'
   | 'detected'

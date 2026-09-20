@@ -5,13 +5,16 @@ import { usePageTour } from '@/common/hooks/usePageTour';
 
 const destroyMock = vi.fn();
 const driveMock = vi.fn();
-const driverMock = vi.fn(() => ({
-  drive: driveMock,
-  destroy: destroyMock,
-}));
+const driverMock = vi.fn((config: unknown) => {
+  void config;
+  return {
+    drive: driveMock,
+    destroy: destroyMock,
+  };
+});
 
 vi.mock('driver.js', () => ({
-  driver: (...args: unknown[]) => driverMock(...args),
+  driver: (config: unknown) => driverMock(config),
 }));
 
 describe('usePageTour', () => {

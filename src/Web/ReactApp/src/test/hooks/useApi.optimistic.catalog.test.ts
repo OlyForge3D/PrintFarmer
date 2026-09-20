@@ -7,7 +7,12 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryKeys, useCancelPrintQueueJob, useCreateManufacturer, useCreateModel, useDeletePrintQueueJob, useQueuePrintJob } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
-import { PrinterModelDto, QueuedPrintJobWithFileMetaDto, JobQueuePrintJob } from '@/types/api';
+import {
+  JobQueuePrintJob,
+  PrintJobPriority,
+  PrinterModelDto,
+  QueuedPrintJobWithFileMetaDto,
+} from '@/types/api';
 
 function createClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -132,7 +137,7 @@ describe('optimistic job cancel/delete', () => {
       fileName: 'f.gcode',
       assignedPrinterId: 'p1',
       status: 'Queued',
-      priority: 0,
+      priority: PrintJobPriority.Normal,
       queuePosition: 1,
       createdAtUtc: new Date().toISOString(),
       updatedAtUtc: new Date().toISOString(),

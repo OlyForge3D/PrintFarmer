@@ -558,17 +558,24 @@ export class ApiClient {
   async executeHostUpdate(
     intent: HostUpdateManualAuthorizationIntent = {},
   ): Promise<HostUpdateExecutionResult> {
-    const response = await this.client.post<HostUpdateStatusResponse>(
+    const response = await this.client.post<
+      HostUpdateStatusResponse | { detail?: string }
+    >(
       "/admin/host-updates/execute",
       intent,
       { validateStatus: (status) => [200, 409, 503].includes(status) },
     );
     if (response.status === 503) {
+      const data = response.data;
+      const detail =
+        typeof data === "object" &&
+        data !== null &&
+        "detail" in data &&
+        typeof data.detail === "string"
+          ? data.detail
+          : undefined;
       throw {
-        message:
-          typeof response.data?.detail === "string"
-            ? response.data.detail
-            : "The host update subsystem is unavailable on this host.",
+        message: detail ?? "The host update subsystem is unavailable on this host.",
         statusCode: response.status,
         data: response.data,
       };
