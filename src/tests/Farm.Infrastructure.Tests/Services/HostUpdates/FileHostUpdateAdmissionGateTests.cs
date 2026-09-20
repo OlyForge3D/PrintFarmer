@@ -42,4 +42,27 @@ public sealed class FileHostUpdateAdmissionGateTests
 
         closed.Should().BeFalse();
     }
+
+    [Fact]
+    public async Task IsClosedAsync_WhenMarkerIsCorrupt_FailsClosed()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "pf-host-update-gate-corrupt-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            var options = new HostUpdateExecutionOptions { RootDirectory = root };
+            Directory.CreateDirectory(options.StateDirectory);
+            await File.WriteAllTextAsync(Path.Combine(options.StateDirectory, "admission.closed"), "{truncated");
+
+            bool closed = await new FileHostUpdateAdmissionGate(options).IsClosedAsync(CancellationToken.None);
+
+            closed.Should().BeTrue();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
 }

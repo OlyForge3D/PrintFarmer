@@ -51,7 +51,8 @@ public sealed class QueueReconciliationService(
                 if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                    logger.LogWarning("queue_reconciliation_writer_fence_rejected");
+                    logger.LogWarning(
+                        "queue_reconciliation_writer_fence_rejected reason=durable_fence_closed_or_unreadable");
                 }
                 else
                 {
@@ -78,7 +79,8 @@ public sealed class QueueReconciliationService(
         if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
         {
             await hostUpdateFence.AcknowledgePausedAsync(ct);
-            logger.LogWarning("queue_reconciliation_writer_fence_rejected");
+            logger.LogWarning(
+                "queue_reconciliation_writer_fence_rejected reason=durable_fence_closed_or_unreadable");
             return;
         }
 

@@ -207,4 +207,32 @@ public class HostUpdateWriterFencingTests : IDisposable
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task QueueReconciliationFence_WhenDurableMarkerIsCorrupt_RefusesReconciliation()
+    {
+        string root = Directory.CreateTempSubdirectory("pf-host-update-corrupt-fence-").FullName;
+        try
+        {
+            HostUpdateExecutionOptions options = new() { RootDirectory = root };
+            Directory.CreateDirectory(options.StateDirectory);
+            await File.WriteAllTextAsync(Path.Combine(options.StateDirectory, "admission.closed"), "{truncated");
+
+            CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+            var fence = new QueueReconciliationFenceFlag(new FileHostUpdateAdmissionGate(options));
+            var service = new QueueReconciliationService(
+                scopeFactory,
+                NullLogger<QueueReconciliationService>.Instance,
+                fence);
+
+            await service.ReconcileStaleAttemptsAsync(CancellationToken.None);
+
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            scopeFactory.ScopesOpened.Should().Be(0, "an unreadable durable fence must block reconciliation");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
 }
