@@ -14,6 +14,8 @@ public class HostUpdateExecutionOptionsDefaultsTests
 
         options.FenceProofTimeoutSeconds.Should().Be(321);
         options.FencePollIntervalSeconds.Should().Be(2);
+        BackendStartCommandConsumerService.RequiredFenceProofDuration
+            .Should().Be(TimeSpan.FromSeconds(319));
         TimeSpan.FromSeconds(
                 options.FenceProofTimeoutSeconds - options.FencePollIntervalSeconds)
             .Should().BeGreaterThanOrEqualTo(
