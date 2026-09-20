@@ -183,7 +183,8 @@ apply, or recover an update.
 Observed channel still comes only from bound, independently verified release
 evidence. After discovery verifies a signed target, the inventory readiness result
 compares that discovered target with the selected channel and the host's current
-service/platform evidence. Until then, readiness remains `NotManaged` rather than
+service/platform evidence. Until then, inventory readiness remains `NotManaged` (or
+`Blocked`, if blocking compatibility or channel evidence is also present) rather than
 inventing a target. When insider is selected or reported, the page persistently
 states:
 

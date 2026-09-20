@@ -1144,14 +1144,14 @@ describe('InstallerUpdatesExperience', () => {
       readiness: {
         state: 'Blocked',
         reasons: [
-          'facility_unavailable:target_image_migration_runner_unavailable',
+          'facility_unavailable:operator-configured-example',
           'facility_unavailable:sql_server_visible_backup_path_mapping_unverified',
         ],
         hops: [],
       },
     })} observation="connected" />);
 
-    expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
+    expect(screen.getByText(/facility_unavailable:operator-configured-example/)).toBeVisible();
     expect(screen.queryByText('Manual signed install required')).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot establish managed eligibility/)).not.toBeInTheDocument();
 
@@ -1173,7 +1173,7 @@ describe('InstallerUpdatesExperience', () => {
       compatibilityState: 'Compatible',
       readiness: {
         state: 'Blocked',
-        reasons: ['facility_unavailable:target_image_migration_runner_unavailable'],
+        reasons: ['facility_unavailable:operator-configured-example'],
         hops: [],
       },
     })} observation="connected" />);
@@ -1183,7 +1183,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(availability).toHaveTextContent(/This installation cannot present verified signed release evidence/);
     expect(availability).toHaveTextContent(/install a current signed release manually once/);
     expect(availability).toHaveTextContent(/The observed installation is blocked/);
-    expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
+    expect(screen.getByText(/facility_unavailable:operator-configured-example/)).toBeVisible();
   });
 
   it('renders every observed replica and marks conflicting identities without proposing a target', async () => {

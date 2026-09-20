@@ -7,11 +7,13 @@ using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -1103,7 +1105,8 @@ public class CalibrationQueueConcurrencyTests : IAsyncDisposable
         {
             var consumer = new BackendStartCommandConsumerService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                NullLogger<BackendStartCommandConsumerService>.Instance);
+                NullLogger<BackendStartCommandConsumerService>.Instance,
+                Options.Create(new BackendTimeoutSettings()));
 
             await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
 
