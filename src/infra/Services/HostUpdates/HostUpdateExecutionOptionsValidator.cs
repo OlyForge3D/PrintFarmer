@@ -96,6 +96,7 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
         CheckPositive(options.FenceProofTimeoutSeconds, "FenceProofTimeoutSeconds", failures);
         CheckPositive(options.FencePollIntervalSeconds, "FencePollIntervalSeconds", failures);
         CheckPositive(options.BackupTimeoutSeconds, "BackupTimeoutSeconds", failures);
+        CheckPositive(options.MigrationTimeoutSeconds, "MigrationTimeoutSeconds", failures);
         CheckPositive(options.VerifyTimeoutSeconds, "VerifyTimeoutSeconds", failures);
         CheckPositive(options.VerifyPollIntervalSeconds, "VerifyPollIntervalSeconds", failures);
         CheckPositive(options.ApplyTimeoutSeconds, "ApplyTimeoutSeconds", failures);

@@ -72,6 +72,9 @@ public sealed class HostUpdateExecutionOptions
     /// <summary>Timeout for each provider-native backup/restore tool invocation.</summary>
     public int BackupTimeoutSeconds { get; set; } = 900;
 
+    /// <summary>Timeout for each digest-pinned target-image migration command.</summary>
+    public int MigrationTimeoutSeconds { get; set; } = 900;
+
     /// <summary>Bounded wait for every readiness/digest health check to report healthy.</summary>
     public int VerifyTimeoutSeconds { get; set; } = 300;
 

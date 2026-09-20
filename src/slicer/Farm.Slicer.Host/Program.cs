@@ -3,6 +3,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.PrinterCalibration;
 using Farm.Infrastructure.Services.Authentication;
 using Farm.Slicer.Host;
@@ -267,7 +268,7 @@ static async Task<bool> RunHostUpdateMigrationAsync(IReadOnlyList<string> args, 
         return false;
     }
 
-    if (args.Count != commandIndex + 3 ||
+    if (args.Count != commandIndex + 4 ||
         !string.Equals(args[commandIndex + 1], "SlicerDbContext", StringComparison.Ordinal))
     {
         Environment.ExitCode = 1;
@@ -276,10 +277,12 @@ static async Task<bool> RunHostUpdateMigrationAsync(IReadOnlyList<string> args, 
     }
 
     string operation = args[commandIndex + 2];
+    string expectedProvider = args[commandIndex + 3];
     await using AsyncServiceScope scope = services.CreateAsyncScope();
     SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
     string provider = context.Database.ProviderName ?? string.Empty;
-    if (provider is not "Npgsql.EntityFrameworkCore.PostgreSQL" and not "Microsoft.EntityFrameworkCore.SqlServer")
+    if (provider is not "Npgsql.EntityFrameworkCore.PostgreSQL" and not "Microsoft.EntityFrameworkCore.SqlServer" ||
+        !string.Equals(provider, expectedProvider, StringComparison.Ordinal))
     {
         Environment.ExitCode = 1;
         await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:SlicerDbContext:provider_unsupported:{provider}");
@@ -302,12 +305,17 @@ static async Task<bool> RunHostUpdateMigrationAsync(IReadOnlyList<string> args, 
             return true;
         }
 
-        if (pending)
-        {
-            await context.Database.MigrateAsync();
-        }
-
-        await Console.Out.WriteLineAsync("HOST_UPDATE_MIGRATION_APPLIED:SlicerDbContext");
+        DatabaseMigrationResult result = await ProviderAwareMigrationRunner.MigrateAsync(
+            context,
+            DatabaseMigrationTarget.Slicer,
+            scope.ServiceProvider.GetRequiredService<ILogger<SlicerDbContext>>(),
+            CancellationToken.None);
+        await Console.Out.WriteLineAsync($"HOST_UPDATE_MIGRATION_APPLIED:SlicerDbContext:{string.Join(',', result.AppliedMigrations)}");
+    }
+    catch (DatabaseMigrationContractException exception)
+    {
+        Environment.ExitCode = 1;
+        await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:SlicerDbContext:{exception.Code}");
     }
     catch (Exception exception) when (exception is not OperationCanceledException)
     {

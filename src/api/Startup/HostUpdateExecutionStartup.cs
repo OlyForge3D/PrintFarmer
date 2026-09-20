@@ -197,7 +197,9 @@ public static class HostUpdateExecutionStartup
                     mapping => mapping.ServiceId,
                     mapping => new HostUpdateApplyServiceMapping(mapping.ServiceId, mapping.ComposeServiceName, mapping.ImageEnvironmentVariable, mapping.ImageRepository),
                     StringComparer.Ordinal),
-                TimeSpan.FromSeconds(options.BackupTimeoutSeconds));
+                () => CreateMigrationEnvironment(sp.GetRequiredService<IConfiguration>()),
+                options.ComposeProjectName + "_printfarmer-network",
+                TimeSpan.FromSeconds(options.MigrationTimeoutSeconds));
         });
         services.AddScoped<IHostUpdateMigrationTarget>(sp => new TargetImageMigrationTarget<AppDbContext>(
             "AppDbContext",
@@ -254,6 +256,31 @@ public static class HostUpdateExecutionStartup
                 ? new UnconfiguredHostUpdateBackupCoordinator()
                 : new HostUpdateBackupCoordinator(sp.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>(), options.BackupRootDirectory);
         });
+    }
+
+    private static Dictionary<string, string> CreateMigrationEnvironment(IConfiguration configuration)
+    {
+        (string ConfigurationKey, string EnvironmentKey)[] requiredKeys =
+        [
+            ("DB_PROVIDER", "DB_PROVIDER"),
+            ("ConnectionStrings:Default", "ConnectionStrings__Default"),
+            ("Jwt:Key", "Jwt__Key"),
+            ("Jwt:Issuer", "Jwt__Issuer"),
+            ("Jwt:Audience", "Jwt__Audience"),
+        ];
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string configurationKey, string environmentKey) in requiredKeys)
+        {
+            string? value = configuration[configurationKey];
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException($"target_image_migration_configuration_missing:{configurationKey}");
+            }
+
+            environment[environmentKey] = value;
+        }
+
+        return environment;
     }
 
     private static void AddApplyAndVerify(IServiceCollection services)

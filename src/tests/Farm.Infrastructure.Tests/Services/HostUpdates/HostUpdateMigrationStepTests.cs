@@ -23,10 +23,19 @@ public sealed class HostUpdateMigrationStepTests
         bool pending = await runner.HasPendingMigrationsAsync(CreateRequest(), contextName, _ => Task.FromResult(providerName), CancellationToken.None);
 
         pending.Should().BeTrue();
-        processRunner.Arguments.Should().ContainInOrder(
-            "run", "--rm", "--network", "host", "--entrypoint", "dotnet",
+        processRunner.Calls.Should().HaveCount(2);
+        processRunner.Calls[0].Arguments.Should().Equal(
+            "image", "pull", "--platform", "linux-amd64",
+            $"ghcr.io/olyforge3d/printfarmer-{serviceId}@sha256:{new string('a', 64)}");
+        processRunner.Calls[1].Arguments.Should().ContainInOrder(
+            "run", "--rm", "--pull", "never", "--platform", "linux-amd64",
+            "--network", "printfarmer_printfarmer-network",
+            "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--entrypoint", "dotnet",
+            "--env", "DB_PROVIDER", "--env", "ConnectionStrings__Default",
             $"ghcr.io/olyforge3d/printfarmer-{serviceId}@sha256:{new string('a', 64)}",
-            assembly, "--host-update-migration", contextName, "probe");
+            assembly, "--host-update-migration", contextName, "probe", providerName);
+        processRunner.Calls[1].Environment.Should().ContainKey("ConnectionStrings__Default");
     }
 
     [Fact]
@@ -43,14 +52,14 @@ public sealed class HostUpdateMigrationStepTests
 
         await act.Should().ThrowAsync<HostUpdateTargetImageMigrationException>()
             .WithMessage("target_image_migration_provider_unsupported:AppDbContext:Microsoft.EntityFrameworkCore.Sqlite");
-        processRunner.Arguments.Should().BeEmpty();
+        processRunner.Calls.Should().BeEmpty();
     }
 
     [Fact]
     public async Task RunAsync_ProbeFailure_PreventsAnyMigrationMutation()
     {
-        var first = new ProbeTarget("AppDbContext", new InvalidOperationException("target unavailable"));
-        var second = new ProbeTarget("SlicerDbContext", null);
+        var first = new ProbeTarget("AppDbContext", null);
+        var second = new ProbeTarget("SlicerDbContext", new InvalidOperationException("target unavailable"));
         var coordinator = new HostUpdateMigrationCoordinator([first, second]);
 
         await Assert.ThrowsAsync<InvalidOperationException>(() => coordinator.RunAsync(CreateRequest(), CancellationToken.None));
@@ -60,7 +69,7 @@ public sealed class HostUpdateMigrationStepTests
     }
 
     [Fact]
-    public async Task MigrateAsync_TargetImageReturnsFailure_FailsClosed()
+    public async Task MigrateAsync_TargetImageStageFailure_FailsClosed()
     {
         var processRunner = new RecordingProcessRunner(new HostUpdateProcessResult(17, string.Empty, "migration failed"));
         var runner = CreateRunner(processRunner);
@@ -72,7 +81,47 @@ public sealed class HostUpdateMigrationStepTests
             CancellationToken.None);
 
         await act.Should().ThrowAsync<HostUpdateTargetImageMigrationException>()
-            .WithMessage("target_image_migration_execution_failed:AppDbContext:exit=17");
+            .WithMessage("target_image_migration_stage_failed:AppDbContext:exit=17");
+    }
+
+    [Fact]
+    public async Task MigrateAsync_TargetImageReportsAppliedMigrationIds()
+    {
+        var processRunner = new RecordingProcessRunner(new HostUpdateProcessResult(
+            0,
+            "HOST_UPDATE_MIGRATION_APPLIED:AppDbContext:20260101010101_One,20260101010102_Two",
+            string.Empty));
+        var runner = CreateRunner(processRunner);
+
+        var result = await runner.MigrateAsync(
+            CreateRequest(),
+            "AppDbContext",
+            _ => Task.FromResult("Npgsql.EntityFrameworkCore.PostgreSQL"),
+            CancellationToken.None);
+
+        result.AppliedMigrations.Should().Equal("20260101010101_One", "20260101010102_Two");
+        processRunner.Calls.Should().HaveCount(2);
+        processRunner.Calls[1].Arguments.Should().ContainInOrder(
+            "--host-update-migration", "AppDbContext", "apply", "Npgsql.EntityFrameworkCore.PostgreSQL");
+    }
+
+    [Fact]
+    public async Task HasPendingMigrationsAsync_DuplicateTargetMarkers_FailsClosed()
+    {
+        var processRunner = new RecordingProcessRunner(new HostUpdateProcessResult(
+            0,
+            "HOST_UPDATE_MIGRATION_PENDING:AppDbContext:1\nHOST_UPDATE_MIGRATION_PENDING:AppDbContext:1",
+            string.Empty));
+        var runner = CreateRunner(processRunner);
+
+        Func<Task> act = () => runner.HasPendingMigrationsAsync(
+            CreateRequest(),
+            "AppDbContext",
+            _ => Task.FromResult("Npgsql.EntityFrameworkCore.PostgreSQL"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateTargetImageMigrationException>()
+            .WithMessage("target_image_migration_probe_invalid:AppDbContext");
     }
 
     private static HostUpdateTargetImageMigrationRunner CreateRunner(RecordingProcessRunner processRunner) =>
@@ -84,6 +133,13 @@ public sealed class HostUpdateMigrationStepTests
                 ["api"] = new("api", "api", "PRINTFARMER_API_IMAGE", "ghcr.io/olyforge3d/printfarmer-api"),
                 ["slicer-host"] = new("slicer-host", "slicer-host", "PRINTFARMER_SLICER_HOST_IMAGE", "ghcr.io/olyforge3d/printfarmer-slicer-host"),
             },
+            () => new Dictionary<string, string>(StringComparer.Ordinal)
+            {
+                ["DB_PROVIDER"] = "Postgres",
+                ["ConnectionStrings__Default"] = "Host=postgres",
+                ["Jwt__Key"] = "test-secret",
+            },
+            "printfarmer_printfarmer-network",
             TimeSpan.FromSeconds(30));
 
     private static HostUpdateExecutionRequest CreateRequest() =>
@@ -103,13 +159,15 @@ public sealed class HostUpdateMigrationStepTests
         public string Resolve(string toolName) => Path.Combine(Path.GetTempPath(), "docker");
     }
 
+    private sealed record ProcessCall(IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
+
     private sealed class RecordingProcessRunner(HostUpdateProcessResult result) : IHostUpdateProcessRunner
     {
-        public IReadOnlyList<string> Arguments { get; private set; } = [];
+        public List<ProcessCall> Calls { get; } = [];
 
         public Task<HostUpdateProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? environment = null)
         {
-            Arguments = arguments;
+            Calls.Add(new ProcessCall(arguments, environment ?? new Dictionary<string, string>()));
             return Task.FromResult(result);
         }
     }

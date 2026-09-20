@@ -143,7 +143,7 @@ public static class CliCommandExtensions
     private static async Task RunHostUpdateMigrationAsync(List<string> rawArgs, IServiceProvider services)
     {
         int commandIndex = rawArgs.IndexOf("--host-update-migration");
-        if (commandIndex < 0 || rawArgs.Count != commandIndex + 3 ||
+        if (commandIndex < 0 || rawArgs.Count != commandIndex + 4 ||
             !string.Equals(rawArgs[commandIndex + 1], "AppDbContext", StringComparison.Ordinal))
         {
             Environment.ExitCode = 1;
@@ -152,9 +152,11 @@ public static class CliCommandExtensions
         }
 
         string operation = rawArgs[commandIndex + 2];
+        string expectedProvider = rawArgs[commandIndex + 3];
         AppDbContext context = services.GetRequiredService<AppDbContext>();
         string provider = context.Database.ProviderName ?? string.Empty;
-        if (provider is not "Npgsql.EntityFrameworkCore.PostgreSQL" and not "Microsoft.EntityFrameworkCore.SqlServer")
+        if (provider is not "Npgsql.EntityFrameworkCore.PostgreSQL" and not "Microsoft.EntityFrameworkCore.SqlServer" ||
+            !string.Equals(provider, expectedProvider, StringComparison.Ordinal))
         {
             Environment.ExitCode = 1;
             await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:AppDbContext:provider_unsupported:{provider}");
@@ -177,12 +179,17 @@ public static class CliCommandExtensions
                 return;
             }
 
-            if (pending)
-            {
-                await context.Database.MigrateAsync();
-            }
-
-            await Console.Out.WriteLineAsync("HOST_UPDATE_MIGRATION_APPLIED:AppDbContext");
+            DatabaseMigrationResult result = await ProviderAwareMigrationRunner.MigrateAsync(
+                context,
+                DatabaseMigrationTarget.Core,
+                services.GetRequiredService<ILogger<AppDbContext>>(),
+                CancellationToken.None);
+            await Console.Out.WriteLineAsync($"HOST_UPDATE_MIGRATION_APPLIED:AppDbContext:{string.Join(',', result.AppliedMigrations)}");
+        }
+        catch (DatabaseMigrationContractException exception)
+        {
+            Environment.ExitCode = 1;
+            await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:AppDbContext:{exception.Code}");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
