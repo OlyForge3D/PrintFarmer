@@ -208,6 +208,90 @@ test("CLI binds listFiles ETIMEDOUT to the real output sink and showListFilesOut
   }
 });
 
+test("CLI times out the dedicated --listFilesOnly spawn before the outer fixture watchdog fires", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-tests-listfiles-watchdog-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests.mjs"),
+    );
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/test-typecheck-baseline.json"),
+      JSON.stringify(baseline),
+    );
+    const invocationLogPath = path.join(
+      fixtureDirectory,
+      "invocation-order.log",
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        'const fs = require("node:fs");',
+        'const args = process.argv.slice(2);',
+        'const log = process.env.INVOCATION_LOG_PATH;',
+        'const isListFilesOnly = args.includes("--listFilesOnly");',
+        'fs.appendFileSync(log, isListFilesOnly ? "listFiles\\n" : "compiler\\n");',
+        'if (isListFilesOnly) {',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '  setInterval(() => {}, 1000);',
+        '} else {',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '  process.exit(0);',
+        '}',
+      ].join("\n"),
+    );
+
+    const start = Date.now();
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-tests.mjs")],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TYPECHECK_TEST_TIMEOUT_MS: "300",
+          INVOCATION_LOG_PATH: invocationLogPath,
+        },
+        timeout: 2_000,
+      },
+    );
+    const elapsedMs = Date.now() - start;
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      "the outer fixture watchdog fired, meaning the dedicated listFilesOnly spawn lost its own production timeout",
+    );
+    assert.notEqual(result.status, 0);
+    assert.match(output, /timed out/);
+    assert.match(output, /src\/test\/example\.test\.ts/);
+    assert.doesNotMatch(output, /Test type-check passed/);
+
+    const invocationLines = (await readFile(invocationLogPath, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0);
+    assert.deepEqual(invocationLines, ["compiler", "listFiles"]);
+    assert.ok(
+      elapsedMs < 1_500,
+      `expected the CLI to return well under 1.5s once the listFiles timeout fired; took ${elapsedMs}ms`,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
 test("fails global compiler diagnostics before the nonzero-file fallback", () => {
   const result = evaluateGate({
     output: "error TS18003: No inputs were found in config file.",
