@@ -31,9 +31,9 @@ const FOCUSABLE_SELECTOR = [
 ].join(', ');
 
 const SYSTEM_SERVICE_HEALTH = {
-  Healthy: 'Healthy',
-  Degraded: 'Degraded',
-  Critical: 'Critical',
+  Healthy: SystemServiceHealth.Healthy,
+  Degraded: SystemServiceHealth.Degraded,
+  Critical: SystemServiceHealth.Critical,
 } satisfies Record<SystemServiceHealth, SystemServiceHealth>;
 
 type HealthBadgeVariant = 'success' | 'warning' | 'error';
