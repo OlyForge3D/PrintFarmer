@@ -404,6 +404,42 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
+    public async Task CheckAsync_RequiredUnavailableFacilities_NormalizeWhitespaceDuplicatesAndCaseVariants_ExactOrder()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            options.RequiredUnavailableFacilities = [" ", "facility-a", "facility-a", "FACILITY-A"];
+            ConfigureExecutablePaths(options, root, "docker", "pg_dump", "pg_restore");
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget("Npgsql.EntityFrameworkCore.PostgreSQL")],
+                [new FakeBackupTarget()],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().ContainInOrder(
+                "facility_unavailable:facility-a",
+                "facility_unavailable:FACILITY-A");
+            result.Reasons.Should().HaveCount(2);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CheckAsync_DockerResolverReportsMissingConfiguration_ReportsSingleReason()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
@@ -717,6 +753,54 @@ public class HostUpdateExecutionAvailabilityTests
 
             result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
                 .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    /// <summary>
+    /// Binds the no-trim contract documented on <see cref="HostUpdateExecutionAvailabilityProvider.NormalizeConfiguredRequiredFencedWriterNames"/>:
+    /// a configured writer name with surrounding whitespace is a distinct name from its unpadded
+    /// form, so it must never be silently satisfied by a registered writer whose name is only
+    /// unpadded. This only binds on the fenced-writer path -- the padded name has to fail an
+    /// ordinal-equality match against the registered <see cref="IFenceableWriter"/> set to prove
+    /// anything, whereas an unavailable-facility name is emitted verbatim regardless of padding
+    /// and so would make an equivalent test on that path a tautology.
+    /// </summary>
+    [Fact]
+    public async Task CheckAsync_PaddedConfiguredRequiredFencedWriter_NotSatisfiedByUnpaddedRegisteredWriter()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [" deployment-specific-writer "],
+            };
+            FakeFenceableWriter[] writers =
+            [
+                .. CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)),
+                new FakeFenceableWriter("deployment-specific-writer"),
+            ];
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                writers,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Should().Contain("insufficient_fenced_writers: deployment-specific-writer ");
         }
         finally
         {
