@@ -1,3 +1,11 @@
+## [Unreleased]
+
+### Fixes
+
+- Honor **OctoPrint/Slicer API → Require API key** for slicer uploads: allow
+  anonymous uploads and queue submission when disabled, while preserving
+  authenticated users' queue and printer-group permissions (#2779).
+
 ## [0.2.3]
 
 ### Features

@@ -1,6 +1,8 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Settings;
 using Farm.Web.IntegrationTests;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Integration.OctoPrint;
@@ -16,7 +18,7 @@ namespace Farm.Web.Api.Tests.Integration.OctoPrint;
 /// Slicers validate specific fields (e.g., "OctoPrint" in version.text) and
 /// will reject connections if the format doesn't match expectations.
 /// </summary>
-public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplicationFactory>
+public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplicationFactory>, IAsyncLifetime
 {
     private readonly CustomWebApplicationFactory _factory;
     private readonly HttpClient _client;
@@ -25,6 +27,19 @@ public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplication
     {
         _factory = factory;
         _client = factory.CreateClient();
+    }
+
+    public Task InitializeAsync()
+    {
+        SetApiKeyRequirement(false);
+        return Task.CompletedTask;
+    }
+
+    public Task DisposeAsync()
+    {
+        SetApiKeyRequirement(false);
+        _client.Dispose();
+        return Task.CompletedTask;
     }
 
     /// <summary>
@@ -143,13 +158,23 @@ public class OctoPrintCompatControllerTests : IClassFixture<CustomWebApplication
         _ = JsonDocument.Parse(content);
     }
 
-    [Fact]
-    public async Task UploadFile_AnonymousWithoutApiKey_ReturnsUnauthorized()
+    [Theory]
+    [InlineData(false, HttpStatusCode.BadRequest)]
+    [InlineData(true, HttpStatusCode.Unauthorized)]
+    public async Task UploadFile_AnonymousWithoutApiKey_HonorsRequirement(bool requireApiKey, HttpStatusCode expectedStatus)
     {
+        SetApiKeyRequirement(requireApiKey);
         using var content = new MultipartFormDataContent();
 
         HttpResponseMessage response = await _client.PostAsync("/api/files/local", content);
 
-        Assert.Equal(HttpStatusCode.Unauthorized, response.StatusCode);
+        Assert.Equal(expectedStatus, response.StatusCode);
+    }
+
+    private void SetApiKeyRequirement(bool required)
+    {
+        using IServiceScope scope = _factory.Services.CreateScope();
+        scope.ServiceProvider.GetRequiredService<ISettingsService>()
+            .Save(new OctoPrintSettings { RequireApiKey = required });
     }
 }
