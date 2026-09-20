@@ -2,8 +2,13 @@
 using System.Reflection.Emit;
 using System.Runtime.CompilerServices;
 using Farm.Infrastructure.Authorization;
+using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Modules.Devices.Authentication;
+using Farm.Web.Api.Authorization;
+using Farm.Web.Api.Controllers;
 using FluentAssertions;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 
 namespace Farm.Web.Api.Tests.Security;
@@ -16,7 +21,9 @@ namespace Farm.Web.Api.Tests.Security;
 /// best-effort static call-graph walk from every controller action in <see cref="WalkableAssemblies"/> and
 /// fails if any action that transitively reaches <see cref="IJobQueueService.AddJobToQueueAsync"/>
 /// does not itself carry a <c>queue:write</c>-or-stronger <see cref="RequirePermissionAttribute"/>
-/// (method- or class-level), so a future endpoint cannot reintroduce the same class of bug.
+/// (method- or class-level) or a documented, separately tested policy exception, so a future
+/// endpoint cannot reintroduce the same class of bug. <c>[AllowAnonymous]</c> is rejected even
+/// when permission attributes or an allowlist entry are present.
 ///
 /// Companion to <see cref="AuthorizeRolesGateArchitectureTests"/>, which guards a different
 /// (role-name) bypass on the same "every action must carry a real permission gate" principle.
@@ -32,6 +39,12 @@ public sealed class QueueEnqueuePermissionArchitectureTests
     /// </summary>
     private static readonly HashSet<string> Allowlist = new(StringComparer.Ordinal)
     {
+        // Issue #2779: explicitly optional trusted-network uploads use a live-settings policy.
+        // Authenticated callers still require queue:write and retain resource ACLs; failures
+        // never fall back to anonymous. The dedicated test below pins the policy metadata,
+        // and OctoPrintOptionalAuthenticationTests exercises both modes through real middleware.
+        "Farm.Web.Api.Controllers.OctoPrintCompatController.UploadFileAsync",
+
         // PrintApprovalsController.ApproveAsync/RejectAsync are farm_admin-only administrative
         // overrides gated by "job_queue:admin" (a distinct resource from "queue" by design — see
         // DatabaseInitializer's resource seed comments). They call PrintApprovalService, which
@@ -55,7 +68,8 @@ public sealed class QueueEnqueuePermissionArchitectureTests
     /// </summary>
     private static readonly HashSet<Assembly> WalkableAssemblies = new()
     {
-        typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly, // Farm.Web.Api
+        typeof(OctoPrintCompatController).Assembly, // Farm.Web.Api
+        typeof(Farm.Modules.Printers.Controllers.PrintersController).Assembly, // Farm.Modules.Printers
         typeof(IJobQueueService).Assembly, // Farm.Infrastructure
         typeof(Farm.Modules.PrintQueue.Controllers.JobQueueController).Assembly, // Farm.Modules.PrintQueue
         typeof(Farm.Modules.Calibration.Controllers.CalibrationProjectsController).Assembly, // Farm.Modules.Calibration
@@ -71,6 +85,45 @@ public sealed class QueueEnqueuePermissionArchitectureTests
     };
 
     private static readonly Dictionary<short, OpCode> OpCodesByValue = BuildOpCodeMap();
+
+    [Fact]
+    public void OctoPrintUpload_OptionalAuthentication_UsesPolicyWithoutAllowAnonymous()
+    {
+        WalkableAssemblies.Should().Contain(typeof(OctoPrintCompatController).Assembly);
+        MethodInfo action = typeof(OctoPrintCompatController)
+            .GetMethod(nameof(OctoPrintCompatController.UploadFileAsync))!;
+
+        action.GetCustomAttribute<AuthorizeAttribute>()!.Policy.Should().Be(OctoPrintUploadPolicy.Name);
+        action.GetCustomAttribute<PermissionCatalogAttribute>()!.Permission.Should().Be(PrintFarmerPermissions.Queue.Write);
+        action.GetCustomAttributes<RequirePermissionAttribute>(inherit: true).Should().BeEmpty();
+        action.GetCustomAttributes<AllowAnonymousAttribute>(inherit: true).Should().BeEmpty();
+        typeof(OctoPrintCompatController).GetCustomAttributes<AllowAnonymousAttribute>(inherit: true).Should().BeEmpty();
+
+        var policy = new AuthorizationPolicyBuilder();
+        OctoPrintUploadPolicy.Configure(policy);
+        policy.AuthenticationSchemes.Should().Equal("Bearer", OctoPrintApiKeyDefaults.AuthenticationScheme);
+    }
+
+    [Theory]
+    [InlineData(typeof(AnonymousActionController))]
+    [InlineData(typeof(AnonymousController))]
+    public void QueueAuthorizationGate_AnonymousMetadataWithPermission_IsRejected(Type controllerType)
+    {
+        MethodInfo action = controllerType.GetMethod(nameof(AnonymousActionController.Enqueue))!;
+
+        HasEffectiveQueueAuthorization(action, controllerType).Should().BeFalse(
+            "[AllowAnonymous] skips authorization even when [RequirePermission] is present");
+    }
+
+    [Fact]
+    public void QueueAuthorizationGate_CatalogOnlyMetadata_IsRejected()
+    {
+        Type controllerType = typeof(CatalogOnlyController);
+        MethodInfo action = controllerType.GetMethod(nameof(CatalogOnlyController.Enqueue))!;
+
+        HasEffectiveQueueAuthorization(action, controllerType).Should().BeFalse(
+            "catalog metadata describes permissions but never enforces them");
+    }
 
     [Fact]
     public void EveryControllerActionThatEnqueuesAJob_CarriesQueueWriteOrStrongerPermission()
@@ -110,12 +163,7 @@ public sealed class QueueEnqueuePermissionArchitectureTests
 
                 actionsReachingTarget++;
 
-                if (Allowlist.Contains(displayName))
-                {
-                    continue;
-                }
-
-                if (!HasQueueWriteOrStrongerPermission(action, controllerType))
+                if (!HasEffectiveQueueAuthorization(action, controllerType))
                 {
                     offenders.Add(displayName);
                 }
@@ -136,11 +184,43 @@ public sealed class QueueEnqueuePermissionArchitectureTests
         offenders.Should().BeEmpty(
             "issue #1666 requires every controller action that transitively calls " +
             "IJobQueueService.AddJobToQueueAsync to carry a queue:write-or-stronger " +
-            "[RequirePermission] gate — enqueuing a print job with no permission check is " +
+            "[RequirePermission] gate without [AllowAnonymous] — enqueuing a print job with no permission check is " +
             "exactly the vulnerability this issue fixed. Add [RequirePermission(queue:write)] " +
             "(or queue:admin) to the offending action(s), or add a documented, reasoned entry " +
             $"to {nameof(Allowlist)} if a genuine exception applies. Offenders: " +
             string.Join(", ", offenders));
+    }
+
+    private static bool HasEffectiveQueueAuthorization(MethodInfo action, Type controllerType)
+    {
+        if (action.IsDefined(typeof(AllowAnonymousAttribute), inherit: true) ||
+            controllerType.IsDefined(typeof(AllowAnonymousAttribute), inherit: true))
+        {
+            return false;
+        }
+
+        return Allowlist.Contains($"{controllerType.FullName}.{action.Name}") ||
+            HasQueueWriteOrStrongerPermission(action, controllerType);
+    }
+
+    private sealed class AnonymousActionController : ControllerBase
+    {
+        [AllowAnonymous]
+        [RequirePermission("queue", "write")]
+        public OkResult Enqueue() => Ok();
+    }
+
+    [AllowAnonymous]
+    private sealed class AnonymousController : ControllerBase
+    {
+        [RequirePermission("queue", "write")]
+        public OkResult Enqueue() => Ok();
+    }
+
+    private sealed class CatalogOnlyController : ControllerBase
+    {
+        [PermissionCatalog(PrintFarmerPermissions.Queue.Write)]
+        public OkResult Enqueue() => Ok();
     }
 
     private static bool HasQueueWriteOrStrongerPermission(MethodInfo action, Type controllerType)
