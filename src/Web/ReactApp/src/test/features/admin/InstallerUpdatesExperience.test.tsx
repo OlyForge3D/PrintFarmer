@@ -606,7 +606,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBe('stable:1.2.4');
   });
 
-  it('allows retry after authorization fails before execute dispatch', async () => {
+  it('blocks retry after authorization reports an unsupported host', async () => {
     const authorize = vi.fn()
       .mockRejectedValueOnce({ statusCode: 503, message: 'Authorization unavailable.' })
       .mockResolvedValueOnce({
@@ -637,9 +637,9 @@ describe('InstallerUpdatesExperience', () => {
     const action = screen.getByRole('button', { name: 'Authorize and update' });
     await user.click(action);
     expect(await screen.findByText('The host update subsystem is unavailable on this host. No update was started.')).toBeVisible();
-    await user.click(action);
-    await waitFor(() => expect(execute).toHaveBeenCalledWith('auth-2'));
-    expect(authorize).toHaveBeenCalledTimes(2);
+    expect(action).toHaveAttribute('aria-disabled', 'true');
+    expect(execute).not.toHaveBeenCalled();
+    expect(authorize).toHaveBeenCalledTimes(1);
   });
 
   it('does not reconcile a 503 execute failure or show stale progress', async () => {
@@ -677,6 +677,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(await screen.findByText('The host update subsystem is unavailable on this host. No update was started.')).toBeVisible();
     expect(status).not.toHaveBeenCalled();
     expect(screen.queryByRole('list', { name: 'Host update progress' })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Authorize and update' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('executes when release-id persistence is unavailable', async () => {

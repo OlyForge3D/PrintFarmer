@@ -63,6 +63,64 @@ describe("ApiClient", () => {
   });
 
   describe("host updates", () => {
+    const status = {
+      releaseId: "release/1",
+      currentState: "Applying",
+      activities: [],
+    };
+
+    it("wires authorization requests and propagates the response", async () => {
+      const data = { authorizationId: "auth-1", releaseId: "release/1" };
+      const postMock = vi.fn().mockResolvedValue({ data });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.authorizeHostUpdate({ expectedPolicyRevision: 3 })).resolves.toEqual(data);
+      expect(postMock).toHaveBeenCalledWith("/admin/host-updates/authorizations", { expectedPolicyRevision: 3 });
+    });
+
+    it("encodes release IDs and rejects malformed status bodies", async () => {
+      const getMock = vi.fn()
+        .mockResolvedValueOnce({ data: status })
+        .mockResolvedValueOnce({ data: { currentState: "Applying" } });
+      (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
+
+      await expect(apiClient.getHostUpdateStatus("release/1?x=1")).resolves.toEqual(status);
+      expect(getMock).toHaveBeenNthCalledWith(1, "/admin/host-updates/release%2F1%3Fx%3D1/status");
+      await expect(apiClient.getHostUpdateStatus("bad")).rejects.toMatchObject({
+        message: "The host update status response was invalid.",
+      });
+    });
+
+    it("encodes recovery routes, supports both request bodies, and rejects malformed outcomes", async () => {
+      const postMock = vi.fn()
+        .mockResolvedValueOnce({ data: { outcome: "NeedsOperator", detail: "manual action" } })
+        .mockResolvedValueOnce({ data: { outcome: "FenceReleasePending", detail: "pending" } })
+        .mockResolvedValueOnce({ data: { outcome: "Unknown", detail: "bad" } });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.recoverHostUpdate("release/1", "request-1")).resolves.toEqual({
+        outcome: "NeedsOperator",
+        detail: "manual action",
+      });
+      await expect(apiClient.recoverHostUpdate("release/1")).resolves.toEqual({
+        outcome: "FenceReleasePending",
+        detail: "pending",
+      });
+      expect(postMock).toHaveBeenNthCalledWith(
+        1,
+        "/admin/host-updates/release%2F1/recover",
+        { requestId: "request-1" },
+      );
+      expect(postMock).toHaveBeenNthCalledWith(
+        2,
+        "/admin/host-updates/release%2F1/recover",
+        {},
+      );
+      await expect(apiClient.recoverHostUpdate("release/1")).rejects.toMatchObject({
+        message: "The host update recovery response was invalid.",
+      });
+    });
+
     it("accepts recovery-required responses from execute", async () => {
       const data = {
           releaseId: "release-1",

@@ -339,6 +339,7 @@ export function InstallerUpdatesExperience({
   const [manualUpdateError, setManualUpdateError] = useState<string | null>(null);
   const [manualUpdateStatus, setManualUpdateStatus] = useState<HostUpdateStatusResponse | null>(null);
   const [manualUpdateRecovery, setManualUpdateRecovery] = useState<HostUpdateRecoveryResult | null>(null);
+  const [hostUpdateUnsupported, setHostUpdateUnsupported] = useState(false);
   const [manualUpdateReleaseId, setManualUpdateReleaseId] = useState<string | null>(readManualUpdateReleaseId);
   const initialManualUpdateReleaseId = useRef(manualUpdateReleaseId);
   const [manualUpdateAttempted, setManualUpdateAttempted] = useState(false);
@@ -356,6 +357,10 @@ export function InstallerUpdatesExperience({
   // unrelated later settings arrival with coincidentally equal content is
   // still processed normally.
   const pendingLocalReconciliationRef = useRef<UpdateChannelSettings | null>(null);
+
+  useEffect(() => {
+    setHostUpdateUnsupported(false);
+  }, [inventory]);
 
   useEffect(() => {
     if (!updateChannelSettings) return;
@@ -520,6 +525,7 @@ export function InstallerUpdatesExperience({
     readiness?.state === "Eligible" &&
     inventory?.eligibility === "Eligible" &&
     !blocked &&
+    !hostUpdateUnsupported &&
     onAuthorizeHostUpdate != null &&
     onExecuteHostUpdate != null;
 
@@ -561,7 +567,16 @@ export function InstallerUpdatesExperience({
       }
       setManualUpdateOpen(true);
     } catch (error) {
+      if (isApiError(error) && error.statusCode === 503) {
+        setHostUpdateUnsupported(true);
+        setManualUpdateAttempted(false);
+        manualUpdateDispatchLock.current = false;
+        setManualUpdateError("The host update subsystem is unavailable on this host. No update was started.");
+        setManualUpdateOpen(true);
+        return;
+      }
       if (executeDispatched && isApiError(error) && error.statusCode === 503) {
+        setHostUpdateUnsupported(true);
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
         setManualUpdateAttempted(false);
@@ -646,6 +661,11 @@ export function InstallerUpdatesExperience({
     try {
       const recovery = await onRecoverHostUpdate(manualUpdateStatus.releaseId);
       setManualUpdateRecovery(recovery);
+      if (recovery.outcome === "FenceReleasePending") {
+        setManualUpdateError(
+          "Recovery is waiting for the host fence to be released. Refresh status before retrying.",
+        );
+      }
       if (onGetHostUpdateStatus) {
         const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
         setManualUpdateStatus(status);
@@ -790,7 +810,9 @@ export function InstallerUpdatesExperience({
               variant="primary"
               disabled={!manualUpdateAvailable || manualUpdateBusy}
               explainedDisabled={!manualUpdateAvailable || manualUpdateBusy}
-              title={!manualUpdateAvailable
+              title={hostUpdateUnsupported
+                ? "Host update execution is unavailable on this host until fresh host inventory is loaded."
+                : !manualUpdateAvailable
                 ? MANUAL_DISABLED_REASON
                 : manualUpdateBusy
                   ? "An update operation is already in progress."
@@ -1023,7 +1045,9 @@ export function InstallerUpdatesExperience({
                 loading={manualUpdateBusy}
                 disabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
                 explainedDisabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
-                title={!manualUpdateAvailable
+                title={hostUpdateUnsupported
+                  ? "Host update execution is unavailable on this host until fresh host inventory is loaded."
+                  : !manualUpdateAvailable
                   ? MANUAL_DISABLED_REASON
                   : manualUpdateBusy
                     ? "An update operation is already in progress."

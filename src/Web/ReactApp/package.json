@@ -31,7 +31,6 @@
     "test:e2e:emulator": "playwright test e2e/emulator/",
     "test:e2e:moonraker": "playwright test e2e/emulator/ --grep Moonraker --workers=1",
     "test:e2e:monolith-smoke": "playwright test e2e/monolith-smoke/ --project=chromium --workers=1",
-    "typecheck:host-update": "tsc -p tsconfig.host-update-contract.json",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
     "test:e2e:list": "playwright test --list",
     "test:e2e:update-snapshots": "playwright test --update-snapshots",

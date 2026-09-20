@@ -166,6 +166,36 @@ import {
   UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
 
+const HOST_UPDATE_STATES = new Set([
+  "Accepted",
+  "Preflight",
+  "Draining",
+  "Fenced",
+  "BackedUp",
+  "Migrating",
+  "Applying",
+  "Verifying",
+  "Completed",
+  "RecoveryRequired",
+]);
+
+export function isHostUpdateStatusResponse(value: unknown): value is HostUpdateStatusResponse {
+  return typeof value === "object" &&
+    value !== null &&
+    typeof (value as { releaseId?: unknown }).releaseId === "string" &&
+    HOST_UPDATE_STATES.has((value as { currentState?: unknown }).currentState as string) &&
+    Array.isArray((value as { activities?: unknown }).activities);
+}
+
+export function isHostUpdateRecoveryResult(value: unknown): value is HostUpdateRecoveryResult {
+  return typeof value === "object" &&
+    value !== null &&
+    ["RolledBack", "NeedsOperator", "FenceReleasePending"].includes(
+      (value as { outcome?: unknown }).outcome as string,
+    ) &&
+    typeof (value as { detail?: unknown }).detail === "string";
+}
+
 type HistoryJobWire = Omit<
   HistoryJob,
   'jobId' | 'endTime' | 'filamentUsed' | 'printDuration' | 'startTime' | 'totalDuration' | 'auxiliaryData' | 'thumbnailUrl'
@@ -515,14 +545,16 @@ export class ApiClient {
         data: response.data,
       };
     }
-    if (
-      response.status === 409 &&
-      (typeof response.data?.currentState !== "string" ||
-        !Array.isArray(response.data?.activities) ||
-        typeof response.data?.releaseId !== "string")
-    ) {
+    if (response.status === 409 && !isHostUpdateStatusResponse(response.data)) {
       throw {
         message: "The host update authorization was rejected.",
+        statusCode: response.status,
+        data: response.data,
+      };
+    }
+    if (!isHostUpdateStatusResponse(response.data)) {
+      throw {
+        message: "The host update status response was invalid.",
         statusCode: response.status,
         data: response.data,
       };
@@ -534,6 +566,13 @@ export class ApiClient {
     const response = await this.client.get<HostUpdateStatusResponse>(
       `/admin/host-updates/${encodeURIComponent(releaseId)}/status`,
     );
+    if (!isHostUpdateStatusResponse(response.data)) {
+      throw {
+        message: "The host update status response was invalid.",
+        statusCode: response.status,
+        data: response.data,
+      };
+    }
     return response.data;
   }
 
@@ -545,6 +584,13 @@ export class ApiClient {
       `/admin/host-updates/${encodeURIComponent(releaseId)}/recover`,
       requestId ? { requestId } : {},
     );
+    if (!isHostUpdateRecoveryResult(response.data)) {
+      throw {
+        message: "The host update recovery response was invalid.",
+        statusCode: response.status,
+        data: response.data,
+      };
+    }
     return response.data;
   }
 
