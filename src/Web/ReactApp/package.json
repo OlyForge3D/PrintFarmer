@@ -72,7 +72,7 @@
     "jspdf": "^4.2.0",
     "jspdf-autotable": "^5.0.8",
     "jszip": "^3.10.1",
-    "lucide-react": "1.34.0",
+    "lucide-react": "1.47.0",
     "postcss": "^8.5.23",
     "prop-types": "^15.8.1",
     "qrcode": "^1.5.4",
