@@ -766,6 +766,49 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
+    public async Task CheckAsync_DuplicateAndCaseVariantConfiguredWriters_ReportEachOrdinalNameOnceInFirstOccurrenceOrder()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames =
+                [
+                    "deployment-writer",
+                    "deployment-writer",
+                    "DEPLOYMENT-WRITER",
+                ],
+            };
+            IFenceableWriter[] registeredWriters = CodeOwnedRequiredFencedWriterNames
+                .Select(name => new FakeFenceableWriter(name))
+                .ToArray();
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                registeredWriters,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be("insufficient_fenced_writers:deployment-writer,DEPLOYMENT-WRITER");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CheckAsync_RootDirectoryNotConfiguredAndJournalUnavailable_ReportsUnavailableWithReasons()
     {
         var provider = new HostUpdateExecutionAvailabilityProvider(

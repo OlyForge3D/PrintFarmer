@@ -72,16 +72,28 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         "queue-reconciliation",
     ];
 
+    /// <summary>
+    /// Removes non-names and exact duplicates while preserving first-occurrence order.
+    /// </summary>
+    /// <remarks>
+    /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
+    /// runtime availability depend on case variants remaining distinct.
+    /// </remarks>
     internal static ImmutableArray<string> NormalizeConfiguredRequiredFencedWriterNames(
         string[]? configuredWriterNames) =>
         [.. (configuredWriterNames ?? [])
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.Ordinal)];
 
+    /// <summary>Determines whether <paramref name="candidateName"/> is present in <paramref name="writerNames"/>.</summary>
+    /// <remarks>
+    /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
+    /// effective-set construction depend on case variants remaining distinct.
+    /// </remarks>
     internal static bool ContainsConfiguredRequiredFencedWriterName(
-        ImmutableArray<string> configuredWriterNames,
-        string requiredWriterName) =>
-        configuredWriterNames.Contains(requiredWriterName, StringComparer.Ordinal);
+        ImmutableArray<string> writerNames,
+        string candidateName) =>
+        writerNames.Contains(candidateName, StringComparer.Ordinal);
 
     private static ImmutableArray<string> GetEffectiveRequiredFencedWriterNames(
         string[]? configuredWriterNames)
