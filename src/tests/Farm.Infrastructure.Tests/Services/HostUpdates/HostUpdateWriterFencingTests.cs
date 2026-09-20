@@ -46,11 +46,20 @@ public class HostUpdateWriterFencingTests : IDisposable
     /// <summary>Counts how many times a fresh scope was actually opened, without changing behavior.</summary>
     private sealed class CountingScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
     {
-        public int ScopesOpened { get; private set; }
+        private int _scopesOpened;
+
+        public TaskCompletionSource FirstScopeOpened { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public int ScopesOpened => Volatile.Read(ref _scopesOpened);
 
         public IServiceScope CreateScope()
         {
-            ScopesOpened++;
+            if (Interlocked.Increment(ref _scopesOpened) == 1)
+            {
+                FirstScopeOpened.TrySetResult();
+            }
+
             return inner.CreateScope();
         }
     }
@@ -61,6 +70,15 @@ public class HostUpdateWriterFencingTests : IDisposable
         _ = services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(_connection));
         ServiceProvider sp = services.BuildServiceProvider();
         return new CountingScopeFactory(sp.GetRequiredService<IServiceScopeFactory>());
+    }
+
+    private static async Task WaitForPauseAcknowledgementAsync(IHostUpdateWriterActivityFlag fence)
+    {
+        using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
+        while (!await fence.IsPausedAsync(timeout.Token))
+        {
+            await Task.Delay(TimeSpan.FromMilliseconds(25), timeout.Token);
+        }
     }
 
     [Fact]
@@ -74,12 +92,10 @@ public class HostUpdateWriterFencingTests : IDisposable
             scopeFactory,
             NullLogger<PowerReadingPruneService>.Instance,
             fence);
-
         await sut.StartAsync(CancellationToken.None);
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        await WaitForPauseAcknowledgementAsync(fence);
         await sut.StopAsync(CancellationToken.None);
 
-        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
         scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
     }
 
@@ -95,7 +111,7 @@ public class HostUpdateWriterFencingTests : IDisposable
             fence);
 
         await sut.StartAsync(CancellationToken.None);
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await sut.StopAsync(CancellationToken.None);
 
         scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
@@ -114,12 +130,10 @@ public class HostUpdateWriterFencingTests : IDisposable
             Options.Create(settings),
             NullLogger<QueueRetentionPruneService>.Instance,
             fence);
-
         await sut.StartAsync(CancellationToken.None);
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        await WaitForPauseAcknowledgementAsync(fence);
         await sut.StopAsync(CancellationToken.None);
 
-        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
         scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
     }
 
@@ -137,7 +151,7 @@ public class HostUpdateWriterFencingTests : IDisposable
             fence);
 
         await sut.StartAsync(CancellationToken.None);
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await sut.StopAsync(CancellationToken.None);
 
         scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");

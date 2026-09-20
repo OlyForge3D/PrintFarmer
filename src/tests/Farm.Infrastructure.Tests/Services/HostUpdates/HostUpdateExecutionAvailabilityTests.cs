@@ -624,9 +624,11 @@ public class HostUpdateExecutionAvailabilityTests
     {
         var holder = new HostUpdateExecutionAvailabilityHolder();
         var probeCount = 0;
+        var firstProbe = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var provider = new DelegateAvailabilityProvider(() =>
         {
             probeCount++;
+            firstProbe.TrySetResult();
             return HostUpdateExecutionAvailability.Available(DateTimeOffset.UtcNow);
         });
         var service = new HostUpdateExecutionAvailabilityHostedService(
@@ -637,7 +639,7 @@ public class HostUpdateExecutionAvailabilityTests
 
         using var cts = new CancellationTokenSource();
         await service.StartAsync(cts.Token);
-        await Task.Delay(50);
+        await firstProbe.Task.WaitAsync(TimeSpan.FromSeconds(10));
         await service.StopAsync(CancellationToken.None);
 
         probeCount.Should().BeGreaterThanOrEqualTo(1);
