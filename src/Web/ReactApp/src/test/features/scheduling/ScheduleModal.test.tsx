@@ -2,6 +2,7 @@ import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { PrintJobPriority } from '@/types/api';
 
 // Mock the API hooks
 const mockScheduleJob = vi.fn();
@@ -53,7 +54,7 @@ const mockJobs: QueuedPrintJobWithFileMetaDto[] = [
       name: 'Benchy',
       gcodeFileId: 'file-1',
       status: 'Queued',
-      priority: 0,
+      priority: PrintJobPriority.Normal,
       queuePosition: 1,
       createdAtUtc: '2025-01-01T00:00:00Z',
       updatedAtUtc: '2025-01-01T00:00:00Z',
@@ -71,7 +72,7 @@ const mockJobs: QueuedPrintJobWithFileMetaDto[] = [
       name: 'Calibration Cube',
       gcodeFileId: 'file-2',
       status: 'Assigned',
-      priority: 0,
+      priority: PrintJobPriority.Normal,
       queuePosition: 2,
       createdAtUtc: '2025-01-01T00:00:00Z',
       updatedAtUtc: '2025-01-01T00:00:00Z',
@@ -88,7 +89,7 @@ const mockJobs: QueuedPrintJobWithFileMetaDto[] = [
       name: 'Already Printing',
       gcodeFileId: 'file-3',
       status: 'Printing',
-      priority: 0,
+      priority: PrintJobPriority.Normal,
       queuePosition: 3,
       createdAtUtc: '2025-01-01T00:00:00Z',
       updatedAtUtc: '2025-01-01T00:00:00Z',
@@ -156,7 +157,7 @@ describe('ScheduleModal', () => {
           name: 'Done Job',
           gcodeFileId: 'file-x',
           status: 'Completed',
-          priority: 0,
+          priority: PrintJobPriority.Normal,
           queuePosition: 0,
           createdAtUtc: '2025-01-01T00:00:00Z',
           updatedAtUtc: '2025-01-01T00:00:00Z',

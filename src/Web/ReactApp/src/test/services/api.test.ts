@@ -506,7 +506,7 @@ describe("ApiClient", () => {
 
       await apiClient.updatePrinter(
         "printer-1",
-        { name: "Reviewed" },
+        { name: "Reviewed", backend: PrinterBackend.Unknown },
         "printer-v1"
       );
       await apiClient.setPrinterMaintenance(

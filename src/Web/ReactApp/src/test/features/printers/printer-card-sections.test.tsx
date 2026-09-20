@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import { PrinterBackend } from '@/types/api';
 import type { Printer, PrinterBackendCapabilitiesDto } from '@/types/api';
 
 // Mock the hooks and services
@@ -133,27 +134,35 @@ describe('DetailedPrinterCard Decomposition', () => {
     apiKey: null,
     cameraUrl: null,
     thumbnailUrl: null,
-    progress: null,
-    printTime: null,
-    estimatedTimeRemaining: null,
-    currentFileName: null,
+    progress: undefined,
+    printTime: undefined,
+    estimatedTimeRemaining: undefined,
+    currentFileName: undefined,
     isPrinting: false,
     isPaused: false,
     manufacturer: null,
     model: null,
     locationId: null,
     spoolId: null,
-    spoolInfo: null,
+    spoolInfo: undefined,
   };
 
   const mockCapabilities: PrinterBackendCapabilitiesDto = {
+    printerId: 'printer-1',
+    printerName: 'Test Printer',
+    backend: PrinterBackend.Moonraker,
+    supportsCamera: true,
+    supportsFileDownload: true,
+    supportsFileList: true,
+    supportsFileUpload: true,
+    supportsStartPrint: true,
+    supportsControlOperations: true,
+    supportsFileMetadata: true,
+    supportsPrinterInformation: true,
     supportsTemperatureControl: true,
     supportsMovement: true,
     supportsFilamentControl: true,
-    supportsPrintControl: true,
-    supportsFileOperations: true,
     supportsHistory: true,
-    supportsCameraUrl: true,
     supportsObjectExclusion: false,
   };
 

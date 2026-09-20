@@ -35,8 +35,8 @@ vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
 
 const mockComputeMaterialCostPerGram = vi.fn();
 const mockComputeMaterialCost = vi.fn();
-const mockFormatPrintTime = vi.fn(() => '1h 0m');
-const mockFormatFilamentUsed = vi.fn(() => '50.0g');
+const mockFormatPrintTime = vi.fn((...args: unknown[]) => '1h 0m');
+const mockFormatFilamentUsed = vi.fn((...args: unknown[]) => '50.0g');
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
@@ -64,11 +64,11 @@ function createWrapper() {
 const completedProgress: SliceJobProgressState = {
   status: 'Completed',
   progressPercent: 100,
-  progressMessage: undefined,
+  progressMessage: null,
   filamentUsedGrams: 50,
   estimatedPrintTimeSeconds: 3600,
   artifactsRoute: '/api/artifacts/job/job-1',
-  error: undefined,
+  error: null,
   isConnected: true,
 };
 
