@@ -52,6 +52,16 @@ public sealed class OpenApiAuthorizationTests : IAsyncLifetime, IDisposable
         _ = protectedOperation.GetProperty("responses")
             .TryGetProperty("403", out _).Should().BeTrue();
 
+        JsonElement uploadOperation = root.GetProperty("paths")
+            .GetProperty("/api/files/local")
+            .GetProperty("post");
+        _ = uploadOperation.GetProperty("security")[0]
+            .TryGetProperty("Bearer", out _).Should().BeTrue();
+        _ = uploadOperation.GetProperty("responses")
+            .TryGetProperty("401", out _).Should().BeTrue();
+        _ = uploadOperation.GetProperty("responses")
+            .TryGetProperty("403", out _).Should().BeTrue();
+
         JsonElement publicOperation = root.GetProperty("paths")
             .GetProperty("/api/system/capabilities")
             .GetProperty("get");

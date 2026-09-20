@@ -3,8 +3,10 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -21,7 +23,7 @@ namespace Farm.Web.Api.Tests.Security;
 /// </summary>
 /// <remarks>
 /// The endpoint is decorated with
-/// <c>[Authorize(AuthenticationSchemes = "Bearer,OctoPrintApiKey")]</c>, which names explicit
+/// <c>[Authorize(Policy = OctoPrintUploadPolicy.Name)]</c>, whose policy names explicit
 /// schemes and therefore bypasses <c>TestAuthHandler</c>'s <c>X-Test-*</c> header shortcut
 /// entirely (that shortcut only applies when the host's <c>DefaultAuthenticateScheme</c> is
 /// consulted). These tests use a real JWT (test 1, minted directly via
@@ -43,9 +45,55 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
 
     public Task DisposeAsync() => Task.CompletedTask;
 
-    [Fact]
-    public async Task Upload_UserWithNoQueuePermission_Returns403AndCreatesNoPrintJob()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_OptionalAnonymous_PersistsFileAndOnlyRequestedPrintJob(bool print)
     {
+        await SetApiKeyRequirementAsync(false);
+        RestrictedPrinterFixture fixture = await SeedRestrictedPrinterFixtureAsync();
+        using HttpClient client = _factory.CreateClient();
+        using var form = new MultipartFormDataContent();
+        using var fileContent = new ByteArrayContent(Encoding.UTF8.GetBytes(MinimalGcodeContent()));
+        fileContent.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+        form.Add(fileContent, "file", "anonymous-upload-test.gcode");
+        form.Add(new StringContent(print ? "true" : "false"), "print");
+
+        using HttpResponseMessage response = await client.PostAsync(
+            $"/api/files/local?printerId={fixture.RestrictedPrinterId}", form);
+
+        string responseBody = await response.Content.ReadAsStringAsync();
+        response.StatusCode.Should().Be(
+            print ? HttpStatusCode.Accepted : HttpStatusCode.OK,
+            $"explicit trusted-network mode permits credential-free uploads. Response body: {responseBody}");
+        using JsonDocument body = JsonDocument.Parse(responseBody);
+        Guid fileId = Guid.Parse(body.RootElement.GetProperty("file").GetProperty("id").GetString()!);
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.GcodeFiles.AnyAsync(file => file.Id == fileId)).Should().BeTrue();
+
+        if (print)
+        {
+            body.RootElement.GetProperty("status").GetString().Should().Be("Queued");
+            Guid jobId = body.RootElement.GetProperty("jobId").GetGuid();
+            PrintJob job = await db.PrintJobs.SingleAsync(job => job.Id == jobId);
+            job.GcodeFileId.Should().Be(fileId);
+            job.AssignedPrinterId.Should().Be(fixture.RestrictedPrinterId);
+            job.CreatorSubject.Should().BeNull("only configured anonymous uploads use the trusted queue caller");
+        }
+        else
+        {
+            body.RootElement.TryGetProperty("jobId", out _).Should().BeFalse();
+            (await db.PrintJobs.CountAsync()).Should().Be(0);
+        }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_UserWithNoQueuePermission_Returns403AndCreatesNoPrintJob(bool requireApiKey)
+    {
+        await SetApiKeyRequirementAsync(requireApiKey);
         using HttpClient client = await _factory.CreateAuthenticatedClientAsync(
             $"no-perm-{Guid.NewGuid():N}",
             $"no-perm-{Guid.NewGuid():N}@example.test",
@@ -61,19 +109,23 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
 
         response.StatusCode.Should().Be(
             HttpStatusCode.Forbidden,
-            "a caller with no queue:* permission must be denied by [RequirePermission] before the " +
+            "a caller with no queue:* permission must be denied by the upload permission policy before the " +
             "action body (and therefore any enqueue) ever runs — see issue #1666");
 
         await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        (await db.GcodeFiles.CountAsync()).Should().Be(0, "permission checks must precede file persistence");
         (await db.PrintJobs.CountAsync()).Should().Be(
             0,
             "no PrintJob row should ever be created for a request denied at the permission gate");
     }
 
-    [Fact]
-    public async Task Upload_ApiKeyUserBarredFromTargetPrinterGroup_Returns403AndCreatesNoPrintJob()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_ApiKeyUserBarredFromTargetPrinterGroup_Returns403AndCreatesNoPrintJob(bool requireApiKey)
     {
+        await SetApiKeyRequirementAsync(requireApiKey);
         RestrictedPrinterFixture fixture = await SeedRestrictedPrinterFixtureAsync();
         using HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", fixture.RawApiKey);
@@ -100,9 +152,12 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
             .Should().Be(0, "no PrintJob row should ever be created against the barred printer");
     }
 
-    [Fact]
-    public async Task Upload_ApiKeyUserWithGroupAccess_SucceedsAndQueuesToThatPrinter()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Upload_ApiKeyUserWithGroupAccess_SucceedsAndQueuesToThatPrinter(bool requireApiKey)
     {
+        await SetApiKeyRequirementAsync(requireApiKey);
         RestrictedPrinterFixture fixture = await SeedRestrictedPrinterFixtureAsync(grantCallerAccess: true);
         using HttpClient client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Api-Key", fixture.RawApiKey);
@@ -127,6 +182,15 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
         (await db.PrintJobs.CountAsync(job => job.AssignedPrinterId == fixture.RestrictedPrinterId))
             .Should().Be(1, "the legitimate upload+print flow must still create exactly one PrintJob");
+        (await db.PrintJobs.SingleAsync(job => job.AssignedPrinterId == fixture.RestrictedPrinterId))
+            .CreatorSubject.Should().Be(fixture.UserId.ToString(), "authenticated users must never become trusted null callers");
+    }
+
+    private async Task SetApiKeyRequirementAsync(bool required)
+    {
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        scope.ServiceProvider.GetRequiredService<ISettingsService>()
+            .Save(new OctoPrintSettings { RequireApiKey = required });
     }
 
     private static string MinimalGcodeContent() =>
@@ -248,7 +312,7 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
 
         await db.SaveChangesAsync();
 
-        return new RestrictedPrinterFixture(restrictedPrinter.Id, rawKey);
+        return new RestrictedPrinterFixture(restrictedPrinter.Id, rawKey, callerUser.Id);
     }
 
     private static async Task<Resource> GetOrCreateResourceAsync(AppDbContext db, string name)
@@ -298,5 +362,5 @@ public sealed class OctoPrintUploadAuthorizationTests : IClassFixture<CustomWebA
     private static string ComputeSha256Hash(string rawData) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(rawData)));
 
-    private sealed record RestrictedPrinterFixture(Guid RestrictedPrinterId, string RawApiKey);
+    private sealed record RestrictedPrinterFixture(Guid RestrictedPrinterId, string RawApiKey, Guid UserId);
 }
