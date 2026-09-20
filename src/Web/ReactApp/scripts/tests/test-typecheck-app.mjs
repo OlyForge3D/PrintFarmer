@@ -298,8 +298,20 @@ test("fails missing, malformed, and non-object baselines", () => {
         applicationNoCheckFileCount: 0,
       },
     }).message,
-    /minimumAppFileCount/,
+    /minimumAppFileCount must be a positive integer\./,
   );
+  for (const minimumAppFileCount of [0, -1]) {
+    assert.equal(
+      evaluateGate({
+        baseline: {
+          applicationDiagnosticCount: 1,
+          applicationNoCheckFileCount: 0,
+          minimumAppFileCount,
+        },
+      }).message,
+      "Invalid application type-check baseline: minimumAppFileCount must be a positive integer.",
+    );
+  }
   assert.match(
     evaluateGate({
       baseline: { applicationDiagnosticCount: 1.5, applicationNoCheckFileCount: 0 },
