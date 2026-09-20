@@ -72,6 +72,32 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         "queue-reconciliation",
     ];
 
+    internal static ImmutableArray<string> NormalizeConfiguredRequiredFencedWriterNames(
+        string[]? configuredWriterNames) =>
+        [.. (configuredWriterNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)];
+
+    internal static bool ContainsConfiguredRequiredFencedWriterName(
+        ImmutableArray<string> configuredWriterNames,
+        string requiredWriterName) =>
+        configuredWriterNames.Contains(requiredWriterName, StringComparer.Ordinal);
+
+    private static ImmutableArray<string> GetEffectiveRequiredFencedWriterNames(
+        string[]? configuredWriterNames)
+    {
+        ImmutableArray<string> normalizedConfiguredWriterNames =
+            NormalizeConfiguredRequiredFencedWriterNames(configuredWriterNames);
+        return
+        [
+            .. CodeOwnedRequiredFencedWriterNames,
+            .. normalizedConfiguredWriterNames.Where(
+                name => !ContainsConfiguredRequiredFencedWriterName(
+                    CodeOwnedRequiredFencedWriterNames,
+                    name)),
+        ];
+    }
+
     public async Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken)
     {
         var reasons = new List<string>();
@@ -155,10 +181,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         }
 
         var fencedNames = new HashSet<string>(fenceableWriters.Select(w => w.Name), StringComparer.Ordinal);
-        string[] missingWriters = CodeOwnedRequiredFencedWriterNames
-            .Concat(options.RequiredFencedWriterNames ?? [])
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .Distinct(StringComparer.Ordinal)
+        string[] missingWriters = GetEffectiveRequiredFencedWriterNames(options.RequiredFencedWriterNames)
             .Where(name => !fencedNames.Contains(name))
             .ToArray();
         if (missingWriters.Length > 0)

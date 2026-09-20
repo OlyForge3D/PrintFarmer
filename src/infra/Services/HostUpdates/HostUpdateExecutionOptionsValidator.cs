@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using System.Collections.Immutable;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -31,11 +32,13 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
         ArgumentNullException.ThrowIfNull(options);
 
         var failures = new List<string>();
-        var configuredFencedWriterNames = new HashSet<string>(
-            options.RequiredFencedWriterNames?.Where(name => !string.IsNullOrWhiteSpace(name)) ?? [],
-            StringComparer.Ordinal);
+        ImmutableArray<string> configuredFencedWriterNames =
+            HostUpdateExecutionAvailabilityProvider.NormalizeConfiguredRequiredFencedWriterNames(
+                options.RequiredFencedWriterNames);
         string[] missingCodeOwnedWriterNames = HostUpdateExecutionAvailabilityProvider.CodeOwnedRequiredFencedWriterNames
-            .Where(name => !configuredFencedWriterNames.Contains(name))
+            .Where(name => !HostUpdateExecutionAvailabilityProvider.ContainsConfiguredRequiredFencedWriterName(
+                configuredFencedWriterNames,
+                name))
             .ToArray();
         if (missingCodeOwnedWriterNames.Length > 0)
         {

@@ -132,6 +132,41 @@ public class HostUpdateExecutionOptionsValidatorTests
     }
 
     [Fact]
+    public void Validate_NullRequiredFencedWriterNames_FailsWithExactCodeOwnedSet()
+    {
+        HostUpdateExecutionOptions options = ValidOptions(
+            Path.Combine(
+                Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+                "printfarmer-host-updates-test-root"));
+        options.RequiredFencedWriterNames = null!;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + string.Join(',', CodeOwnedRequiredFencedWriterNames)
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_CaseOnlyRequiredFencedWriterName_DoesNotSatisfyCanonicalName()
+    {
+        string[] caseVariantSet =
+        [
+            "API-ADMISSION",
+            .. CodeOwnedRequiredFencedWriterNames[1..],
+        ];
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(caseVariantSet);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: api-admission.");
+    }
+
+    [Fact]
     public void Validate_MissingRootDirectoryWithNarrowedFencedWriterNames_StillFails()
     {
         HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(
