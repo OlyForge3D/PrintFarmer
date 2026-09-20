@@ -158,6 +158,8 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
 public static class HostUpdateSchedulingAvailability
 {
     public const string ExecutorNotProvisionedReason = "automatic_scheduler_executor_not_provisioned";
+    public const string ExecutorAvailabilityUnknownReason = "automatic_scheduler_executor_availability_unknown";
+    public const string ExecutorReasonMissingReason = "automatic_scheduler_executor_reason_missing";
     public const string ProtectedReplayAnchorReason = "protected_replay_anchor_unavailable";
     public const string PolicyMutationReason = "policy_mutation_facility_unavailable";
     public const string AdmissionFenceReason = "host_update_recovery_unavailable";
@@ -186,7 +188,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
             List<string> holderReasons = [];
             if (!holderPolicyResult.Available)
             {
-                holderReasons.Add(holderPolicyResult.Error ?? "host_update_policy_unavailable");
+                AddReason(holderReasons, holderPolicyResult.Error ?? "host_update_policy_unavailable");
             }
 
             AddUnavailable(holderReasons, replayAnchor, HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason);
@@ -194,31 +196,32 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
             HostUpdateAdmissionFenceStatus? holderAdmission = admissionFence?.GetStatus();
             if (holderAdmission?.BlocksAdmission == true)
             {
-                holderReasons.Add(string.IsNullOrWhiteSpace(holderAdmission.Reason) ? HostUpdateSchedulingAvailability.AdmissionFenceReason : holderAdmission.Reason);
+                AddReason(holderReasons, string.IsNullOrWhiteSpace(holderAdmission.Reason) ? HostUpdateSchedulingAvailability.AdmissionFenceReason : holderAdmission.Reason);
             }
 
             string? holderExecutorReason = executor switch
             {
                 IHostUpdateAvailability { IsAvailable: false } holderExecutorAvailability =>
-                    holderExecutorAvailability.UnavailableReason,
+                    NormalizeUnavailableReason(holderExecutorAvailability.UnavailableReason),
                 IHostUpdateAvailability { IsAvailable: true } => null,
-                _ => HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason
+                null => HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason,
+                _ => HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason
             };
             bool hasAttempt = current.LastAttemptAt is not null;
             bool dependencyBlocked = holderReasons.Count > 0;
             if (hasAttempt && (!dependencyBlocked || current.Reason is not HostUpdateSchedulerReason.Disabled))
             {
-                holderReasons.Add(current.Reason.ToString());
+                AddReason(holderReasons, current.Reason.ToString());
             }
 
             if (holderExecutorReason is not null)
             {
-                holderReasons.Add(holderExecutorReason);
+                AddReason(holderReasons, holderExecutorReason);
             }
 
             if (holderReasons.Count == 0)
             {
-                holderReasons.Add(current.Reason.ToString());
+                AddReason(holderReasons, current.Reason.ToString());
             }
 
             return new HostUpdateSchedulingStatusDto
@@ -253,7 +256,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
                         : HostUpdateExecutorState.Unavailable,
                     Reason = holderExecutorReason,
                 },
-                Reasons = holderReasons.Distinct(StringComparer.Ordinal).ToArray(),
+                Reasons = holderReasons.ToArray(),
             };
         }
 
@@ -263,7 +266,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
         List<string> reasons = [];
         if (!policyResult.Available)
         {
-            reasons.Add(policyResult.Error ?? "host_update_policy_unavailable");
+            AddReason(reasons, policyResult.Error ?? "host_update_policy_unavailable");
         }
 
         AddUnavailable(reasons, replayAnchor, HostUpdateSchedulingAvailability.ProtectedReplayAnchorReason);
@@ -271,16 +274,27 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
         HostUpdateAdmissionFenceStatus? admission = admissionFence?.GetStatus();
         if (admission?.BlocksAdmission == true)
         {
-            reasons.Add(string.IsNullOrWhiteSpace(admission.Reason) ? HostUpdateSchedulingAvailability.AdmissionFenceReason : admission.Reason);
+            AddReason(reasons, string.IsNullOrWhiteSpace(admission.Reason) ? HostUpdateSchedulingAvailability.AdmissionFenceReason : admission.Reason);
         }
 
-        string executorReason = executor is IHostUpdateAvailability { IsAvailable: false } executorAvailability
-            ? executorAvailability.UnavailableReason
-            : HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason;
+        string executorReason = executor switch
+        {
+            IHostUpdateAvailability { IsAvailable: false } executorAvailability =>
+                NormalizeUnavailableReason(executorAvailability.UnavailableReason),
+            IHostUpdateAvailability { IsAvailable: true } =>
+                HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason,
+            null => HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason,
+            _ => HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason
+        };
         AddUnavailable(reasons, executor, executorReason);
+        if (executor is not null and not IHostUpdateAvailability)
+        {
+            AddReason(reasons, executorReason);
+        }
+
         if (reasons.Count == 0)
         {
-            reasons.Add("scheduler_not_started");
+            AddReason(reasons, "scheduler_not_started");
         }
 
         return new HostUpdateSchedulingStatusDto
@@ -293,7 +307,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
             Backoff = new HostUpdateBackoffDto { State = HostUpdateBackoffState.Unknown, ConsecutiveFailures = 0, Reasons = ["scheduler_not_started"] },
             KillSwitch = new HostUpdateKillSwitchDto { Enabled = policy.KillSwitch, Reason = policy.KillSwitch ? "configured" : null },
             Executor = new HostUpdateExecutorDto { State = HostUpdateExecutorState.Unavailable, Reason = executorReason },
-            Reasons = reasons.Distinct(StringComparer.Ordinal).ToArray(),
+            Reasons = reasons.ToArray(),
         };
     }
 
@@ -301,11 +315,24 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
     {
         if (service is IHostUpdateAvailability { IsAvailable: false } availability)
         {
-            reasons.Add(availability.UnavailableReason);
+            AddReason(reasons, string.IsNullOrWhiteSpace(availability.UnavailableReason) ? fallback : availability.UnavailableReason);
         }
         else if (service is null)
         {
-            reasons.Add(fallback);
+            AddReason(reasons, fallback);
+        }
+    }
+
+    private static string NormalizeUnavailableReason(string? reason) =>
+        string.IsNullOrWhiteSpace(reason)
+            ? HostUpdateSchedulingAvailability.ExecutorReasonMissingReason
+            : reason;
+
+    private static void AddReason(List<string> reasons, string reason)
+    {
+        if (!reasons.Contains(reason, StringComparer.Ordinal))
+        {
+            reasons.Add(reason);
         }
     }
 }

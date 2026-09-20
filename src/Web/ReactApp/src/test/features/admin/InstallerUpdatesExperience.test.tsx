@@ -542,7 +542,7 @@ describe('InstallerUpdatesExperience', () => {
       resolveStatus = resolve;
     }));
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
-    render(<TestInstallerUpdatesExperience
+    const mounted = render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -559,7 +559,17 @@ describe('InstallerUpdatesExperience', () => {
     const update = screen.getByRole('button', { name: 'Update now' });
     expect(update).not.toHaveAttribute('aria-busy', 'true');
     expect(update).not.toHaveAttribute('aria-disabled', 'true');
-    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBe('stable:1.2.5');
+    mounted.unmount();
+    status.mockResolvedValue({ releaseId: 'stable:1.2.5', currentState: 'Applying', activities: [] });
+    render(<TestInstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={status}
+      onAuthorizeHostUpdate={vi.fn()}
+      onExecuteHostUpdate={vi.fn()}
+    />);
+    expect(await screen.findByText('Applying')).toBeVisible();
+    expect(status).toHaveBeenCalledWith('stable:1.2.5');
   });
 
   it('allows a second direct update after the first one completes', async () => {
