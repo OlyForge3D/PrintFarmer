@@ -991,7 +991,7 @@ export function InstallerUpdatesExperience({
             <Alert type="warning" title="Update channel settings unavailable">
               The authoritative UpdateChannel settings could not be loaded. The selector shows the stable default until settings load successfully.
               {onRetryUpdateChannel && (
-                <Button className="mt-2" type="button" variant="secondary" disabled={retryingUpdateChannel} loading={retryingUpdateChannel} onClick={() => { void retryUpdateChannel(); }}>
+                <Button className="mt-2" type="button" variant="secondary" disabled={retryingUpdateChannel || savingChannel} loading={retryingUpdateChannel} onClick={() => { void retryUpdateChannel(); }}>
                   Retry UpdateChannel settings
                 </Button>
               )}
@@ -1001,7 +1001,7 @@ export function InstallerUpdatesExperience({
             <Alert type="warning" title="Update channel save outcome unknown">
               A fresh authoritative confirmation is required before the update channel can be changed again.
               {onRetryUpdateChannel && (
-                <Button className="mt-2" type="button" variant="secondary" disabled={retryingUpdateChannel} loading={retryingUpdateChannel} onClick={() => { void retryUpdateChannel(); }}>
+                <Button className="mt-2" type="button" variant="secondary" disabled={retryingUpdateChannel || savingChannel} loading={retryingUpdateChannel} onClick={() => { void retryUpdateChannel(); }}>
                   Retry UpdateChannel settings
                 </Button>
               )}
