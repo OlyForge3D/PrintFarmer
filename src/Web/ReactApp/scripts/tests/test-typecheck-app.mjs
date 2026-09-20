@@ -6,7 +6,12 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
-import { clampedOverride, countNoCheckFiles, evaluate } from "../typecheck-app-core.mjs";
+import {
+  clampedOverride,
+  countApplicationFiles,
+  countNoCheckFiles,
+  evaluate,
+} from "../typecheck-app-core.mjs";
 
 const scriptsDirectory = path.resolve(
   path.dirname(fileURLToPath(import.meta.url)),
@@ -14,7 +19,11 @@ const scriptsDirectory = path.resolve(
 );
 const projectDirectory = path.resolve(scriptsDirectory, "..");
 
-const baseline = { applicationDiagnosticCount: 1, applicationNoCheckFileCount: 0 };
+const baseline = {
+  applicationDiagnosticCount: 1,
+  applicationNoCheckFileCount: 0,
+  minimumAppFileCount: 1,
+};
 const fileDiagnostic =
   "src/services/example.ts(1,1): error TS2322: Type error.";
 
@@ -104,11 +113,61 @@ test("fails above and below the exact diagnostic baseline", () => {
   );
 });
 
-test("fails an unsuccessful project-file listing (R2)", () => {
-  const result = evaluateGate({
-    listFilesResult: { status: 2, signal: null, error: undefined },
-  });
-  assert.match(result.message, /could not list its project files/);
+test("fails an unsuccessful project-file listing before consuming its output (R2)", () => {
+  for (const listFilesResult of [
+    { status: 2, signal: null, error: undefined },
+    { status: null, signal: "SIGKILL", error: undefined },
+    { status: null, signal: null, error: new Error("list failed") },
+  ]) {
+    const result = evaluateGate({
+      listFilesResult,
+      listFilesOutput: "src/services/example.ts",
+    });
+    assert.match(result.message, /could not list its project files/);
+  }
+});
+
+test("fails when a counted application file is removed from the project", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-file-floor-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src/services"), {
+      recursive: true,
+    });
+    const firstFile = path.join(fixtureDirectory, "src/services/first.ts");
+    const secondFile = path.join(fixtureDirectory, "src/services/second.ts");
+    await writeFile(firstFile, "export const first = 1;\n");
+    await writeFile(secondFile, "export const second = 2;\n");
+
+    const listedFiles = "src/services/first.ts\nsrc/services/second.ts";
+    const common = {
+      baseline: { ...baseline, minimumAppFileCount: 2 },
+      compilerResult: { status: 0, signal: null, error: undefined },
+      listFilesResult: { status: 0, signal: null, error: undefined },
+      output: fileDiagnostic,
+      directory: fixtureDirectory,
+    };
+
+    assert.equal(countApplicationFiles(listedFiles, fixtureDirectory), 2);
+    assert.equal(
+      evaluate({ ...common, listFilesOutput: listedFiles }).ok,
+      true,
+    );
+
+    await rm(secondFile);
+    const remainingFile = "src/services/first.ts";
+    assert.equal(countApplicationFiles(remainingFile, fixtureDirectory), 1);
+    const result = evaluate({ ...common, listFilesOutput: remainingFile });
+    assert.equal(result.ok, false);
+    assert.match(
+      result.message,
+      /found 1 application file\(s\); expected at least 2\. Regenerate minimumAppFileCount/,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("fails above and below the exact @ts-nocheck file count (R2)", async () => {
@@ -232,6 +291,27 @@ test("fails missing, malformed, and non-object baselines", () => {
     evaluateGate({ baseline: { applicationDiagnosticCount: 1 } }).message,
     /applicationNoCheckFileCount/,
   );
+  assert.match(
+    evaluateGate({
+      baseline: {
+        applicationDiagnosticCount: 1,
+        applicationNoCheckFileCount: 0,
+      },
+    }).message,
+    /minimumAppFileCount must be a positive integer\./,
+  );
+  for (const minimumAppFileCount of [0, -1]) {
+    assert.equal(
+      evaluateGate({
+        baseline: {
+          applicationDiagnosticCount: 1,
+          applicationNoCheckFileCount: 0,
+          minimumAppFileCount,
+        },
+      }).message,
+      "Invalid application type-check baseline: minimumAppFileCount must be a positive integer.",
+    );
+  }
   assert.match(
     evaluateGate({
       baseline: { applicationDiagnosticCount: 1.5, applicationNoCheckFileCount: 0 },
