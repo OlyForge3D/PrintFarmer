@@ -312,7 +312,7 @@ public sealed class SignedUpdateInfrastructureTests
         string firstJson = JsonSerializer.Serialize(first, JsonOptions);
         string latestJson = JsonSerializer.Serialize(latest, JsonOptions);
         string[] drafts = Enumerable.Range(1, 99).Select(index =>
-            $$"""{"id":{{index}},"tagName":"v99.0.0","draft":true,"prerelease":false,"assets":[]}""").ToArray();
+            $$"""{"id":{{index}},"tag_name":"v99.0.0","draft":true,"prerelease":false,"assets":[]}""").ToArray();
         string pageOne = "[" + string.Join(',', drafts.Append(ReleaseJson(100, "v1.2.3", false, false, true))) + "]";
         string pageTwo = "[" + string.Join(',', new[]
         {
@@ -334,6 +334,48 @@ public sealed class SignedUpdateInfrastructureTests
             ["https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"],
             verifier.Identities);
         Assert.Equal(new[] { 1, 2 }, handler.ReleasePages);
+    }
+
+    [Fact]
+    public async Task Discovery_StableTagWithPrereleaseMetadata_IsRejected()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
+        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        ReleaseHandler handler = new(
+            new Dictionary<int, string>
+            {
+                [1] = "[" + ReleaseJson(1, "v1.2.3", false, true, true) + "]",
+            },
+            new Dictionary<long, byte[]> { [11] = manifestBytes });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            verifier).DiscoverAsync("stable", default);
+
+        Assert.Null(result);
+        Assert.Empty(verifier.Identities);
+    }
+
+    [Fact]
+    public async Task Discovery_InsiderTagWithoutPrereleaseMetadata_IsRejected()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3-insider.4", "insider", "development");
+        byte[] manifestBytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        ReleaseHandler handler = new(
+            new Dictionary<int, string>
+            {
+                [1] = "[" + ReleaseJson(1, "v1.2.3-insider.4", false, false, true) + "]",
+            },
+            new Dictionary<long, byte[]> { [11] = manifestBytes });
+        RecordingVerifier verifier = new(_ => true);
+
+        VerifiedSignedUpdateRelease? result = await new GitHubSignedReleaseDiscovery(
+            new HttpClient(handler),
+            verifier).DiscoverAsync("insider", default);
+
+        Assert.Null(result);
+        Assert.Empty(verifier.Identities);
     }
 
     [Fact]
@@ -720,7 +762,7 @@ public sealed class SignedUpdateInfrastructureTests
             {
                 string releaseJson = JsonSerializer.Serialize(new[]
                 {
-                    new { id = 1L, tagName = "v1.2.3", draft = false, prerelease = false, assets = new[]
+                    new { id = 1L, tag_name = "v1.2.3", draft = false, prerelease = false, assets = new[]
                     {
                         new { id = 11L, name = "update-manifest.json", browserDownloadUrl = "http://169.254.169.254/latest/meta-data" },
                         new { id = 12L, name = "update-manifest.sigstore.json", browserDownloadUrl = "https://attacker.invalid/bundle" },
@@ -741,7 +783,7 @@ public sealed class SignedUpdateInfrastructureTests
         string assetJson = assets
             ? $"[{{\"id\":{id}1,\"name\":\"update-manifest.json\",\"browserDownloadUrl\":\"http://169.254.169.254/manifest-{id}\"}},{{\"id\":{id}2,\"name\":\"update-manifest.sigstore.json\",\"browserDownloadUrl\":\"https://attacker.invalid/bundle-{id}\"}}]"
             : "[]";
-        return $"{{\"id\":{id},\"tagName\":\"{tag}\",\"draft\":{draft.ToString().ToLowerInvariant()},\"prerelease\":{prerelease.ToString().ToLowerInvariant()},\"assets\":{assetJson}}}";
+        return $"{{\"id\":{id},\"tag_name\":\"{tag}\",\"draft\":{draft.ToString().ToLowerInvariant()},\"prerelease\":{prerelease.ToString().ToLowerInvariant()},\"assets\":{assetJson}}}";
     }
 
     private sealed class ReleaseHandler(Dictionary<int, string> releasePages, Dictionary<long, byte[]> assets) : HttpMessageHandler

@@ -50,7 +50,8 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     IReadOnlyList<IHostUpdateBackupTarget> backupTargets,
     IReadOnlyList<IFenceableWriter> fenceableWriters,
     IHostUpdateProcessRunner processRunner,
-    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore) : IHostUpdateExecutionAvailabilityProvider
+    IHostUpdateRecoveryOutcomeStore recoveryOutcomeStore,
+    IHostUpdateExecutableResolver executableResolver) : IHostUpdateExecutionAvailabilityProvider
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
@@ -131,16 +132,72 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
+        var requiredTools = new HashSet<string>(StringComparer.Ordinal)
+        {
+            "docker",
+        };
+        foreach (IHostUpdateMigrationTarget target in migrationTargets)
+        {
+            string providerName;
+            try
+            {
+                providerName = await target.GetProviderNameAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                reasons.Add($"database_provider_inspection_failed:{target.ContextName}:{exception.GetType().Name}");
+                continue;
+            }
+
+            switch (providerName)
+            {
+                case "Microsoft.EntityFrameworkCore.Sqlite":
+                    requiredTools.Add("sqlite3");
+                    break;
+                case "Npgsql.EntityFrameworkCore.PostgreSQL":
+                    requiredTools.Add("pg_dump");
+                    requiredTools.Add("pg_restore");
+                    break;
+                case "Microsoft.EntityFrameworkCore.SqlServer":
+                    requiredTools.Add("sqlcmd");
+                    break;
+                case "":
+                    reasons.Add($"database_provider_not_configured:{target.ContextName}");
+                    break;
+                default:
+                    reasons.Add($"database_provider_tooling_unsupported:{target.ContextName}:{providerName}");
+                    break;
+            }
+        }
+
+        foreach (string toolName in requiredTools)
+        {
+            if (!options.HostExecutablePaths.TryGetValue(toolName, out string? configuredPath) ||
+                string.IsNullOrWhiteSpace(configuredPath) ||
+                !Path.IsPathRooted(configuredPath))
+            {
+                reasons.Add($"host_executable_not_configured:{toolName}");
+            }
+        }
+
         try
         {
             HostUpdateProcessResult result = await processRunner.RunAsync(
-                "docker",
+                executableResolver.Resolve("docker"),
                 ["version", "--format", "{{.Server.Version}}"],
                 TimeSpan.FromSeconds(options.ProcessDefaultTimeoutSeconds),
                 cancellationToken).ConfigureAwait(false);
             if (!result.Succeeded)
             {
                 reasons.Add("docker_runtime_unavailable");
+            }
+        }
+        catch (InvalidOperationException exception) when (exception.Message.StartsWith("host_update_executable_", StringComparison.Ordinal))
+        {
+            const string dockerNotConfiguredReason = "host_executable_not_configured:docker";
+            if (!reasons.Contains(dockerNotConfiguredReason, StringComparer.Ordinal))
+            {
+                reasons.Add(dockerNotConfiguredReason);
             }
         }
         catch (Exception exception) when (exception is not OperationCanceledException)

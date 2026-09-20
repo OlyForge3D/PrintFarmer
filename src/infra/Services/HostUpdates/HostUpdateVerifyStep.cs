@@ -126,6 +126,7 @@ public sealed class AggregateHostUpdateHealthCheck(string name, HttpClient clien
 public sealed class DigestHostUpdateHealthCheck(
     string name,
     IHostUpdateProcessRunner processRunner,
+    IHostUpdateExecutableResolver executableResolver,
     string containerName,
     string expectedDigest) : IHostUpdateHealthCheck
 {
@@ -134,7 +135,7 @@ public sealed class DigestHostUpdateHealthCheck(
     public async Task<bool> IsHealthyAsync(CancellationToken cancellationToken)
     {
         HostUpdateProcessResult containerInspect = await processRunner.RunAsync(
-            "docker",
+            executableResolver.Resolve("docker"),
             ["container", "inspect", "--format", "{{.Image}}", containerName],
             TimeSpan.FromSeconds(15),
             cancellationToken).ConfigureAwait(false);
@@ -150,7 +151,7 @@ public sealed class DigestHostUpdateHealthCheck(
         }
 
         HostUpdateProcessResult imageInspect = await processRunner.RunAsync(
-            "docker",
+            executableResolver.Resolve("docker"),
             ["image", "inspect", "--format", "{{index .RepoDigests 0}}", imageRef],
             TimeSpan.FromSeconds(15),
             cancellationToken).ConfigureAwait(false);
