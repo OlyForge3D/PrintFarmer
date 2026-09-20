@@ -2,6 +2,7 @@ import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/commo
 import { Modal } from "@/common/components/modals/Modal";
 import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
 import { getErrorMessage, isApiError } from "@/common/utils/apiErrors";
+import type { HostUpdateExecutionResult } from "@/services/api";
 import type {
   HostUpdateManualAuthorizationResponse,
   HostUpdateRecoveryResult,
@@ -24,7 +25,8 @@ const MANUAL_UPDATE_RELEASE_KEY = "printfarmer.manual-host-update.release-id";
 
 function readManualUpdateReleaseId() {
   try {
-    return window.localStorage.getItem(MANUAL_UPDATE_RELEASE_KEY);
+    const releaseId = window.localStorage.getItem(MANUAL_UPDATE_RELEASE_KEY);
+    return releaseId && releaseId.trim().length > 0 ? releaseId : null;
   } catch {
     return null;
   }
@@ -71,8 +73,8 @@ export interface InstallerUpdatesExperienceProps {
   onRetryUpdateChannel?: () => Promise<UpdateChannelSettings>;
   onSaveUpdateChannel?: (settings: UpdateChannelSettings) => Promise<UpdateChannelSettings>;
   onAuthorizeHostUpdate?: () => Promise<HostUpdateManualAuthorizationResponse>;
-  onExecuteHostUpdate?: (authorizationId: string) => Promise<HostUpdateStatusResponse>;
-  onGetHostUpdateStatus?: (releaseId: string) => Promise<HostUpdateStatusResponse>;
+  onExecuteHostUpdate?: (authorizationId: string) => Promise<HostUpdateExecutionResult>;
+  onGetHostUpdateStatus: (releaseId: string) => Promise<HostUpdateStatusResponse>;
   onRecoverHostUpdate?: (releaseId: string, requestId?: string) => Promise<HostUpdateRecoveryResult>;
 }
 
@@ -334,7 +336,7 @@ export function InstallerUpdatesExperience({
   const [retryingUpdateChannel, setRetryingUpdateChannel] = useState(false);
   const [manualUpdateOpen, setManualUpdateOpen] = useState(false);
   const [manualUpdateBusy, setManualUpdateBusy] = useState(
-    () => readManualUpdateReleaseId() != null && onGetHostUpdateStatus != null,
+    () => readManualUpdateReleaseId() != null,
   );
   const [manualUpdateError, setManualUpdateError] = useState<string | null>(null);
   const [manualUpdateStatus, setManualUpdateStatus] = useState<HostUpdateStatusResponse | null>(null);
@@ -387,11 +389,16 @@ export function InstallerUpdatesExperience({
 
   useEffect(() => {
     const releaseId = initialManualUpdateReleaseId.current;
-    if (!releaseId || !onGetHostUpdateStatus || rehydrationAttempted.current) return;
+    if (rehydrationAttempted.current) return;
+    if (!releaseId) {
+      clearManualUpdateReleaseId();
+      setManualUpdateBusy(false);
+      return;
+    }
     rehydrationAttempted.current = true;
     let active = true;
     void onGetHostUpdateStatus(releaseId).then((status) => {
-      if (!active) return;
+      if (!active || readManualUpdateReleaseId() !== releaseId) return;
       setManualUpdateStatus(status);
       setManualUpdateOpen(true);
       setManualUpdateBusy(false);
@@ -400,7 +407,7 @@ export function InstallerUpdatesExperience({
         setManualUpdateReleaseId(null);
       }
     }).catch((error) => {
-      if (!active) return;
+      if (!active || readManualUpdateReleaseId() !== releaseId) return;
       if (isApiError(error) && error.statusCode === 404) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
@@ -557,8 +564,18 @@ export function InstallerUpdatesExperience({
       writeManualUpdateReleaseId(releaseId);
       setManualUpdateAttempted(true);
       executeDispatched = true;
-      const status = await onExecuteHostUpdate(authorization.authorizationId);
+      const execution = await onExecuteHostUpdate(authorization.authorizationId);
+      const status = "kind" in execution && execution.kind === "conflict"
+        ? execution.status
+        : execution;
       setManualUpdateStatus(status);
+      if (status.releaseId !== releaseId) {
+        setManualUpdateReleaseId(status.releaseId);
+        writeManualUpdateReleaseId(status.releaseId);
+      }
+      if ("kind" in execution && execution.kind === "conflict") {
+        setManualUpdateError("Another host update is already in progress.");
+      }
       if (isTerminalForRetry(status)) {
         if (isTerminalForReleaseIdentity(status)) {
           clearManualUpdateReleaseId();
@@ -585,7 +602,7 @@ export function InstallerUpdatesExperience({
         setManualUpdateOpen(true);
         return;
       }
-      if (executeDispatched && releaseId && onGetHostUpdateStatus) {
+      if (executeDispatched && releaseId) {
         try {
           const status = await onGetHostUpdateStatus(releaseId);
           setManualUpdateStatus(status);
@@ -632,7 +649,9 @@ export function InstallerUpdatesExperience({
   };
 
   const refreshManualUpdateStatus = async () => {
-    if (!manualUpdateStatus || !onGetHostUpdateStatus || manualUpdateBusy) return;
+    if (!manualUpdateStatus || manualUpdateBusy) return;
+    if (manualUpdateDispatchLock.current) return;
+    manualUpdateDispatchLock.current = true;
     setManualUpdateBusy(true);
     setManualUpdateError(null);
     try {
@@ -652,12 +671,14 @@ export function InstallerUpdatesExperience({
     } catch (error) {
       setManualUpdateError(getErrorMessage(error, "Update status could not be loaded."));
     } finally {
+      manualUpdateDispatchLock.current = false;
       setManualUpdateBusy(false);
     }
   };
 
   const recoverManualUpdate = async () => {
-    if (!manualUpdateStatus || !onRecoverHostUpdate || manualUpdateBusy) return;
+    if (!manualUpdateStatus || !onRecoverHostUpdate || manualUpdateBusy || manualUpdateDispatchLock.current) return;
+    manualUpdateDispatchLock.current = true;
     setManualUpdateBusy(true);
     setManualUpdateError(null);
     try {
@@ -669,32 +690,23 @@ export function InstallerUpdatesExperience({
           "Recovery is waiting for the host fence to be released. Refresh status before retrying.",
         );
       }
-      if (onGetHostUpdateStatus) {
-        const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
-        setManualUpdateStatus(status);
-        if (status.currentState !== "RecoveryRequired") {
-          setManualUpdateFencePending(false);
+      const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
+      setManualUpdateStatus(status);
+      if (status.currentState !== "RecoveryRequired") {
+        setManualUpdateFencePending(false);
+      }
+      if (isTerminalForRetry(status)) {
+        if (isTerminalForReleaseIdentity(status)) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
         }
-        if (isTerminalForRetry(status)) {
-          if (isTerminalForReleaseIdentity(status)) {
-            clearManualUpdateReleaseId();
-            setManualUpdateReleaseId(null);
-          }
-          setManualUpdateAttempted(false);
-          manualUpdateDispatchLock.current = false;
-        }
-      } else if (recovery.outcome === "RolledBack") {
-        clearManualUpdateReleaseId();
-        setManualUpdateReleaseId(null);
-        setManualUpdateAttempted(false);
-        manualUpdateDispatchLock.current = false;
-      } else if (recovery.outcome === "NeedsOperator") {
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
     } catch (error) {
       setManualUpdateError(getErrorMessage(error, "Recovery could not be completed."));
     } finally {
+      manualUpdateDispatchLock.current = false;
       setManualUpdateBusy(false);
     }
   };
@@ -1123,7 +1135,7 @@ export function InstallerUpdatesExperience({
                 The host rolled back the update. No new installation is active.
               </Alert>
             )}
-            {onGetHostUpdateStatus && manualUpdateStatus.currentState !== "Completed" && (
+            {manualUpdateStatus.currentState !== "Completed" && (
               <Button
                 type="button"
                 variant="secondary"

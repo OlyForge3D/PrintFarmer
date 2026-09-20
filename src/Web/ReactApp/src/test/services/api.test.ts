@@ -163,7 +163,10 @@ describe("ApiClient", () => {
       const postMock = vi.fn().mockResolvedValue(response);
       (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
 
-      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual(response.data);
+      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual({
+        kind: "conflict",
+        status: response.data,
+      });
       expect(postMock).toHaveBeenCalledWith(
         "/admin/host-updates/execute",
         { authorizationId: "auth-1" },
@@ -175,6 +178,21 @@ describe("ApiClient", () => {
       expect(config.validateStatus(500)).toBe(false);
     });
 
+    it("returns a typed conflict when execute reports an existing update", async () => {
+      const status = {
+        releaseId: "stable:1.2.4",
+        currentState: "Applying",
+        activities: [],
+      } satisfies import("@/types/api").HostUpdateStatusResponse;
+      const postMock = vi.fn().mockResolvedValue({ status: 409, data: status });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual({
+        kind: "conflict",
+        status,
+      });
+    });
+
     it("rejects non-status conflict bodies instead of returning a success-shaped response", async () => {
       const postMock = vi.fn().mockResolvedValue({
         status: 409,
@@ -184,7 +202,7 @@ describe("ApiClient", () => {
 
       await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).rejects.toMatchObject({
         statusCode: 409,
-        message: "The host update authorization was rejected.",
+        message: "The host update status response was invalid.",
         data: { code: "request_not_authorized" },
       });
     });

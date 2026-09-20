@@ -182,6 +182,10 @@ const HOST_UPDATE_STATES = [
 
 const HOST_UPDATE_STATE_SET = new Set<HostUpdateExecutionState>(HOST_UPDATE_STATES);
 
+export type HostUpdateExecutionResult =
+  | HostUpdateStatusResponse
+  | { kind: "conflict"; status: HostUpdateStatusResponse };
+
 export function isHostUpdateManualAuthorizationResponse(
   value: unknown,
 ): value is HostUpdateManualAuthorizationResponse {
@@ -553,7 +557,7 @@ export class ApiClient {
 
   async executeHostUpdate(
     intent: HostUpdateManualAuthorizationIntent = {},
-  ): Promise<HostUpdateStatusResponse> {
+  ): Promise<HostUpdateExecutionResult> {
     const response = await this.client.post<HostUpdateStatusResponse>(
       "/admin/host-updates/execute",
       intent,
@@ -569,13 +573,6 @@ export class ApiClient {
         data: response.data,
       };
     }
-    if (response.status === 409 && !isHostUpdateStatusResponse(response.data)) {
-      throw {
-        message: "The host update authorization was rejected.",
-        statusCode: response.status,
-        data: response.data,
-      };
-    }
     if (!isHostUpdateStatusResponse(response.data)) {
       throw {
         message: "The host update status response was invalid.",
@@ -583,7 +580,9 @@ export class ApiClient {
         data: response.data,
       };
     }
-    return response.data;
+    return response.status === 409
+      ? { kind: "conflict", status: response.data }
+      : response.data;
   }
 
   async getHostUpdateStatus(releaseId: string): Promise<HostUpdateStatusResponse> {

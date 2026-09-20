@@ -323,6 +323,53 @@ describe('InstallerUpdatesExperience', () => {
     expect(status).toHaveBeenCalledWith('stale-release');
   });
 
+  it('self-heals an empty persisted release id without leaving the update control busy', async () => {
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', '');
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={vi.fn()}
+      onAuthorizeHostUpdate={vi.fn()}
+      onExecuteHostUpdate={vi.fn()}
+    />);
+
+    const update = screen.getByRole('button', { name: 'Update now' });
+    expect(update).not.toHaveAttribute('aria-disabled', 'true');
+    expect(update).not.toHaveAttribute('aria-busy', 'true');
+    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBeNull();
+  });
+
+  it('serializes rapid recovery events before the busy state commits', async () => {
+    let resolveRecovery!: (value: { outcome: 'NeedsOperator'; detail: string }) => void;
+    const recover = vi.fn().mockImplementation(() => new Promise((resolve) => {
+      resolveRecovery = resolve;
+    }));
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [],
+    });
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={status}
+      onRecoverHostUpdate={recover}
+    />);
+
+    await screen.findByRole('button', { name: 'Recover update' });
+    const action = screen.getByRole('button', { name: 'Recover update' });
+    act(() => {
+      fireEvent.click(action);
+      fireEvent.click(action);
+    });
+    expect(recover).toHaveBeenCalledOnce();
+
+    await act(async () => {
+      resolveRecovery({ outcome: 'NeedsOperator', detail: 'manual_intervention_required' });
+    });
+  });
+
   it('reports a rolled-back terminal activity instead of update success', async () => {
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
     const status = vi.fn().mockResolvedValue({
@@ -336,7 +383,7 @@ describe('InstallerUpdatesExperience', () => {
         recordedAt: '2026-09-19T19:01:00Z',
       }],
     });
-    render(<InstallerUpdatesExperience
+    const mounted = render(<InstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -344,6 +391,18 @@ describe('InstallerUpdatesExperience', () => {
 
     expect(await screen.findByText('Host update rolled back')).toBeVisible();
     expect(screen.queryByText('Host update completed')).not.toBeInTheDocument();
+    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBeNull();
+    status.mockClear();
+    mounted.unmount();
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onGetHostUpdateStatus={status}
+      onAuthorizeHostUpdate={vi.fn()}
+      onExecuteHostUpdate={vi.fn()}
+    />);
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Update now' })).not.toHaveAttribute('aria-disabled', 'true'));
+    expect(status).not.toHaveBeenCalled();
   });
 
   it('uses the terminal activity when a later retry completes successfully', async () => {
@@ -466,6 +525,43 @@ describe('InstallerUpdatesExperience', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it('reports an existing update when execute returns a status conflict', async () => {
+    const authorize = vi.fn().mockResolvedValue({
+      authorizationId: 'auth-1',
+      releaseId: 'stable:1.2.4',
+      sequence: 4,
+      channel: 'stable',
+      candidateFingerprint: 'candidate',
+      policyRevision: 1,
+      policyFingerprint: 'policy',
+      expiresAt: '2026-09-19T20:00:00Z',
+    });
+    const execute = vi.fn().mockResolvedValue({
+      kind: 'conflict',
+      status: {
+        releaseId: 'stable:1.2.5',
+        currentState: 'Applying',
+        activities: [],
+      },
+    });
+    const user = userEvent.setup();
+
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={authorize}
+      onExecuteHostUpdate={execute}
+      onGetHostUpdateStatus={vi.fn()}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+
+    expect(await screen.findByText('Another host update is already in progress.')).toBeVisible();
+    expect(screen.getByText('Applying')).toBeVisible();
+    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBe('stable:1.2.5');
+  });
+
   it('releases a rejected execute after a non-terminal status recheck', async () => {
     const authorize = vi.fn()
       .mockResolvedValueOnce({
@@ -552,7 +648,11 @@ describe('InstallerUpdatesExperience', () => {
     expect(await screen.findByText('Authorization required.')).toBeVisible();
     await user.click(screen.getByRole('button', { name: 'Close' }));
     await user.click(screen.getByRole('button', { name: 'Update now' }));
-    expect(screen.getByRole('button', { name: 'Authorize and update' })).toBeVisible();
+    const retry = screen.getByRole('button', { name: 'Authorize and update' });
+    expect(retry).not.toHaveAttribute('aria-disabled', 'true');
+    await user.click(retry);
+    await waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
+    expect(execute).toHaveBeenCalledTimes(2);
   });
 
   it('allows a retry after recovery terminates with NeedsOperator', async () => {
