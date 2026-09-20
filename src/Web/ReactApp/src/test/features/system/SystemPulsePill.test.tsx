@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { SystemPulsePill } from '@/features/system/components/SystemPulsePill';
-import type { SystemInfo } from '@/types/api';
+import { SystemServiceHealth, type SystemInfo } from '@/types/api';
 import { inventory } from '@/test/features/system/serviceInventoryFixture';
 
 vi.mock('@tanstack/react-query', () => ({
@@ -45,12 +45,12 @@ const systemInfo: SystemInfo = {
     {
       name: 'Farm API',
       version: '10.0.0',
-      health: 'Healthy',
+      health: SystemServiceHealth.Healthy,
     },
     {
       name: 'Slicer Host',
       version: '10.0.0',
-      health: 'Critical',
+      health: SystemServiceHealth.Critical,
     },
   ],
   database: {
