@@ -15,6 +15,10 @@ interface InstallerPagePropsSnapshot {
   updateChannelIsError?: boolean;
   onRetryUpdateChannel?: () => Promise<UpdateChannelSettings>;
   onSaveUpdateChannel?: (settings: UpdateChannelSettings) => Promise<UpdateChannelSettings>;
+  onAuthorizeHostUpdate?: () => Promise<unknown>;
+  onExecuteHostUpdate?: (authorizationId: string) => Promise<unknown>;
+  onGetHostUpdateStatus?: (releaseId: string) => Promise<unknown>;
+  onRecoverHostUpdate?: (releaseId: string, requestId?: string) => Promise<unknown>;
 }
 
 const {
@@ -101,6 +105,12 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
     await screen.findByTestId('installer-updates');
     expect(getSystemInfo).toHaveBeenCalledOnce();
     expect(getUpdateChannelSettings).toHaveBeenCalledOnce();
+    const initialCallbacks = {
+      authorize: installerPropsRef.current?.onAuthorizeHostUpdate,
+      execute: installerPropsRef.current?.onExecuteHostUpdate,
+      status: installerPropsRef.current?.onGetHostUpdateStatus,
+      recover: installerPropsRef.current?.onRecoverHostUpdate,
+    };
 
     await act(async () => { window.dispatchEvent(new Event('online')); });
     await waitFor(() => expect(getSystemInfo).toHaveBeenCalledTimes(2));
@@ -108,6 +118,10 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
     await act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)); });
     expect(getSystemInfo).toHaveBeenCalledTimes(2);
     expect(getUpdateChannelSettings).toHaveBeenCalledOnce();
+    expect(installerPropsRef.current?.onAuthorizeHostUpdate).toBe(initialCallbacks.authorize);
+    expect(installerPropsRef.current?.onExecuteHostUpdate).toBe(initialCallbacks.execute);
+    expect(installerPropsRef.current?.onGetHostUpdateStatus).toBe(initialCallbacks.status);
+    expect(installerPropsRef.current?.onRecoverHostUpdate).toBe(initialCallbacks.recover);
   });
 
   it('shows an explicit unknown state for an initially offline paused query', async () => {

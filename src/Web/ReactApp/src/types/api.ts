@@ -4979,6 +4979,74 @@ export interface UpdateChannelSettings {
   insiderAcknowledged: boolean;
 }
 
+export interface HostUpdateManualAuthorizationIntent {
+  authorizationId?: string | null;
+  expectedPolicyRevision?: number | null;
+  expectedPolicyFingerprint?: string | null;
+}
+
+export interface HostUpdateManualAuthorizationResponse {
+  authorizationId: string;
+  releaseId: string;
+  sequence: number;
+  channel: string;
+  candidateFingerprint: string;
+  policyRevision: number;
+  policyFingerprint: string;
+  expiresAt: string;
+}
+
+export type HostUpdateExecutionState =
+  | 'Accepted'
+  | 'Preflight'
+  | 'Draining'
+  | 'Fenced'
+  | 'BackedUp'
+  | 'Migrating'
+  | 'Applying'
+  | 'Verifying'
+  | 'Completed'
+  | 'RecoveryRequired';
+
+export interface HostUpdateExecutionActivity {
+  activityId: string;
+  releaseId: string;
+  state: HostUpdateExecutionState;
+  phase: string;
+  recordedAt: string;
+  requestFingerprint?: string | null;
+  requestBindingHash?: string | null;
+  requestBinding?: HostUpdateExecutionRequest | null;
+}
+
+export interface HostUpdateExecutionRequest {
+  releaseId: string;
+  authenticatedSequence: number;
+  manifestDigest: string;
+  sourceCommit: string;
+  channel: "Stable" | "Insider";
+  targets: Array<{ serviceId: string; platform: string; childDigest: string }>;
+  requestId: string;
+  trustRoot: string;
+  policyRevision: number;
+  policyFingerprint: string;
+  hostPlatform: string;
+  authorizationKind: "Manual" | "StandingPolicy";
+}
+
+export interface HostUpdateStatusResponse {
+  releaseId: string;
+  currentState: HostUpdateExecutionState;
+  activities: HostUpdateExecutionActivity[];
+}
+
+export type HostUpdateRecoveryOutcome = 'RolledBack' | 'NeedsOperator' | 'FenceReleasePending';
+
+export interface HostUpdateRecoveryResult {
+  outcome: HostUpdateRecoveryOutcome;
+  detail: string;
+}
+
 export type UpdateSchedulingBackoffState = 'Unknown' | 'None' | 'Waiting';
 
 export interface UpdateSchedulingBackoff {
