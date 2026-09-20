@@ -24,6 +24,7 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
     // This is deliberately capped because the adapter is scoped per scheduler tick; a future
     // lifetime change must not turn cancellation requests into unbounded retained state.
     private readonly ConcurrentDictionary<string, string> _preArmed = new(StringComparer.Ordinal);
+    private bool _preArmOverflowed;
     private int _disposed;
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
@@ -62,6 +63,12 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
             {
                 safeCancellation.Dispose();
                 return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
+            }
+
+            if (_preArmOverflowed)
+            {
+                safeCancellation.Dispose();
+                return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "prearmed_cancellation_capacity_exceeded");
             }
 
             if (!_activeRequests.TryAdd(request.RequestId, operation))
@@ -156,6 +163,7 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
 
             if (_preArmed.Count >= MaxPreArmedRequests && !_preArmed.ContainsKey(signal.RequestId))
             {
+                _preArmOverflowed = true;
                 _logger.LogWarning("host_update_prearmed_cancellation_capacity_reached");
                 return;
             }

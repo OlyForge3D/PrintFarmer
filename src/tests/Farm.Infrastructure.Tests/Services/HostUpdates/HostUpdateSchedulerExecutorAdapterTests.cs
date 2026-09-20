@@ -102,6 +102,27 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
         Assert.Equal("canceled_at_safe_checkpoint", response.Reason);
     }
 
+    [Fact]
+    public async Task PreArmCancellation_OverflowFailsClosed()
+    {
+        CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
+
+        for (int i = 0; i < 16; i++)
+        {
+            adapter.PreArmCancellation(new HostUpdateCancellationSignal($"request-{i}", $"operation-{i}"));
+        }
+
+        adapter.PreArmCancellation(new HostUpdateCancellationSignal("request-overflow", "operation-overflow"));
+        HostUpdateExecutorResponse response = await adapter.ExecuteAsync(
+            Request() with { RequestId = "request-overflow", OperationToken = "operation-overflow" },
+            default);
+
+        Assert.Equal(HostUpdateExecutorResult.Refused, response.Result);
+        Assert.Equal("prearmed_cancellation_capacity_exceeded", response.Reason);
+        Assert.Empty(executor.Requests);
+    }
+
     private sealed class CapturingExecutor(HostUpdateExecutionResult result) : IHostUpdateExecutor
     {
         public List<HostUpdateExecutionRequest> Requests { get; } = [];

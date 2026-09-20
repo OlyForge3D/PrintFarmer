@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Settings;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
@@ -10,20 +11,23 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 public sealed class HostUpdateSchedulerTests
 {
     [Fact]
-    public void InstallationSeededJitter_DiffersByInstallationAndIsDeterministic()
+    public void InstallationSeededJitter_PersistsIdentityAndIsDeterministic()
     {
         string firstRoot = TempRoot();
         string secondRoot = TempRoot();
         try
         {
-            InstallationSeededHostUpdateJitter first = new(HostUpdateInstallationIdentity.GetOrCreate(firstRoot));
-            InstallationSeededHostUpdateJitter second = new(HostUpdateInstallationIdentity.GetOrCreate(secondRoot));
+            string firstIdentity = HostUpdateInstallationIdentity.GetOrCreate(firstRoot);
+            string secondIdentity = HostUpdateInstallationIdentity.GetOrCreate(secondRoot);
+            InstallationSeededHostUpdateJitter first = new(firstIdentity);
+            InstallationSeededHostUpdateJitter second = new(secondIdentity);
 
             Assert.Equal(first.For("candidate", 2), first.For("candidate", 2));
-            Assert.NotEqual(first.For("candidate", 2), second.For("candidate", 2));
-            Assert.Equal(
-                HostUpdateInstallationIdentity.GetOrCreate(firstRoot),
-                HostUpdateInstallationIdentity.GetOrCreate(firstRoot));
+            Assert.NotEqual(firstIdentity, secondIdentity);
+            Assert.Equal(firstIdentity, HostUpdateInstallationIdentity.GetOrCreate(firstRoot));
+            Assert.Equal(secondIdentity, HostUpdateInstallationIdentity.GetOrCreate(secondRoot));
+            Assert.Equal(new InstallationSeededHostUpdateJitter("fixed-installation").For("candidate", 2),
+                new InstallationSeededHostUpdateJitter("fixed-installation").For("candidate", 2));
         }
         finally
         {
@@ -35,23 +39,29 @@ public sealed class HostUpdateSchedulerTests
     [Fact]
     public async Task CancellationBridge_UsesPreArmForActiveSchedulerGeneration()
     {
-        BlockingExecutor executor = new();
+        CancellationAwareHostExecutor hostExecutor = new();
+        HostUpdateSchedulerExecutorAdapter adapter = new(hostExecutor, "linux-amd64");
         HostUpdateSchedulerCancellationBridge bridge = new();
-        HostUpdateScheduler scheduler = Create(
+        HostUpdateScheduler? scheduler = null;
+        using ServiceProvider services = new ServiceCollection()
+            .AddScoped<IHostUpdateSchedulerExecutor>(_ =>
+            {
+                Assert.NotNull(scheduler);
+                Assert.Equal(HostUpdateCancellationResult.Signaled, scheduler!.SignalSafeCheckpointCancellationAsync().GetAwaiter().GetResult());
+                return adapter;
+            })
+            .BuildServiceProvider();
+        scheduler = Create(
             new HostUpdateSchedulerSettings(AutoEnabled: true),
-            Candidate(),
-            executor,
-            cancellationBridge: bridge);
+            Candidate() with { SourceCommit = new string('a', 40), ManifestDigest = "sha256:" + new string('b', 64) },
+            replay: null,
+            cancellationBridge: bridge,
+            scopeFactory: services.GetRequiredService<IServiceScopeFactory>());
 
-        Task<HostUpdateSchedulerStatus> tick = scheduler.TickAsync();
-        await executor.Started.Task;
+        HostUpdateSchedulerStatus status = await scheduler.TickAsync();
 
-        Assert.Equal(HostUpdateCancellationResult.Signaled, await scheduler.SignalSafeCheckpointCancellationAsync());
-        Assert.Equal(1, executor.PreArmCount);
-        Assert.Equal(0, executor.SignalCount);
-
-        executor.Release.SetResult();
-        await tick;
+        Assert.NotEqual(HostUpdateSchedulerReason.Admitted, status.Reason);
+        Assert.True(hostExecutor.CancellationRequested, status.Reason.ToString());
     }
     [Fact]
     public async Task TickAsync_DefaultSettings_DoNotExecute()
@@ -791,8 +801,8 @@ public sealed class HostUpdateSchedulerTests
     }
     private static VerifiedHostUpdateCandidate Candidate(string channel = UpdateChannelSettings.StableChannel) => new("release-1", "commit-1", 1, "sha256:manifest", channel, true, true, true, true, true, true, new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
 
-    private static HostUpdateScheduler Create(HostUpdateSchedulerSettings? settings = null, VerifiedHostUpdateCandidate? candidate = null, FakeExecutor? executor = null, IHostUpdateReplayStore? replay = null, HostUpdateSchedulerCancellationBridge? cancellationBridge = null) =>
-        new(new Settings(settings ?? new()), new Cache(candidate), replay ?? new MemoryReplayStore(), new AlwaysAdvancePolicyFence(), executor ?? new FakeExecutor(), new FixedClock(), new ZeroHostUpdateJitter(), cancellationBridge: cancellationBridge);
+    private static HostUpdateScheduler Create(HostUpdateSchedulerSettings? settings = null, VerifiedHostUpdateCandidate? candidate = null, IHostUpdateSchedulerExecutor? executor = null, IHostUpdateReplayStore? replay = null, HostUpdateSchedulerCancellationBridge? cancellationBridge = null, IServiceScopeFactory? scopeFactory = null) =>
+        new(new Settings(settings ?? new()), new Cache(candidate), replay ?? new MemoryReplayStore(), new AlwaysAdvancePolicyFence(), executor ?? (scopeFactory is null ? new FakeExecutor() : null), new FixedClock(), new ZeroHostUpdateJitter(), scopeFactory: scopeFactory, cancellationBridge: cancellationBridge);
 
     private sealed class Settings(HostUpdateSchedulerSettings value) : IHostUpdateSchedulerSettings { public HostUpdateSchedulerSettings Current { get; } = value; }
 
@@ -831,6 +841,26 @@ public sealed class HostUpdateSchedulerTests
         public int CancellationCallCount { get; private set; }
         public virtual Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct) { Requests.Add(request); return Task.FromResult(Response); }
         public virtual Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct) { CancelledSignal = signal; CancellationCallCount++; SignalCount++; return Task.CompletedTask; }
+    }
+
+    private sealed class CancellationAwareHostExecutor : IHostUpdateExecutor
+    {
+        public bool CancellationRequested { get; private set; }
+
+        public async Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationRequested = true;
+                throw;
+            }
+
+            return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
+        }
     }
 
     private sealed class BlockingExecutor : FakeExecutor

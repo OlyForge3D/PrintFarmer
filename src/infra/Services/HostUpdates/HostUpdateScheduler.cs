@@ -1249,6 +1249,8 @@ public sealed class HostUpdateScheduler(
             if (!await _tickGate.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false))
             {
                 _logger.LogWarning("host_update_scheduler_shutdown_wait_timeout");
+                // Do not dispose the semaphore while a tick may still be releasing it. The
+                // scheduler is shutting down and the process will reclaim this bounded handle.
                 return;
             }
             if (Interlocked.Exchange(ref _tickGateDisposed, 1) == 0)
