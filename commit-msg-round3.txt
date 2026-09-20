@@ -1,0 +1,79 @@
+fix(queue): stop CompletedAtUtc leak and fix backoff-delay cancellation escape
+
+Panel round 3 raised a "Critical" (Bishop) claiming the refactored
+claimCommitted branch in PersistDeadlineCancellationWithinDeadlineAsync no
+longer sets evt.FailureCode = UnknownOutcomeFailureCode, allegedly letting
+RecoverStaleLeasesAsync misclassify a claim-committed row as an ordinary
+crashed lease and double-start a printer.
+
+CORRECTION (verified at HEAD 06e0995ace before this commit): that specific
+claim is factually wrong. `git show 06e0995ace:.../BackendStartCommandConsumerService.cs`
+and `git grep -n UnknownOutcomeFailureCode` both confirm
+`evt.FailureCode = UnknownOutcomeFailureCode;` is present, unchanged, in the
+claimCommitted branch. The RecoverStaleLeasesAsync exclusion
+(`e.FailureCode != UnknownOutcomeFailureCode`) therefore still correctly
+excludes these rows from stale-lease recovery; the described double-start
+mechanism does not exist at this head.
+
+What IS real: the claimCommitted branch's `db.Entry(evt).ReloadAsync(...)`
+was genuinely dropped versus base (origin/development @ c58150d882). Its
+actual, verified consequence is narrower than "double-start": the caller
+(the OperationCanceledException handler in ProcessPendingCommandsAsync)
+mutates evt.CompletedAtUtc in-memory when it takes the dead-letter path
+(AttemptCount >= MaxAttempts) BEFORE calling this method. If the claim is
+then found to have actually committed, the claimCommitted branch explicitly
+resets Status/FailureCode/LastError/RetryAfterUtc but never touched
+CompletedAtUtc, so the caller's stale dead-letter timestamp survived onto a
+row left Processing/unknown-outcome. Checked both plausible downstream
+consumers of a leaked CompletedAtUtc: RecoverStaleLeasesAsync gates on
+FailureCode (unaffected, see above) and QueueRetentionPruneService.PruneOutboxAsync
+gates on Status IN (Published, DeadLettered) -- a Processing row never
+matches that filter either. So this is a genuine data-integrity/audit-
+correctness defect (a non-terminal row incorrectly shows a completion
+timestamp), not a double-start or premature-pruning hazard. Fixed by
+explicitly setting evt.CompletedAtUtc = null in the claimCommitted branch,
+rather than reintroducing ReloadAsync (which would add a redundant DB
+round-trip on concurrency retries where evt was already just reloaded via
+db.QueueDispatchOutbox.SingleAsync after ChangeTracker.Clear()).
+
+Separately, Bishop's Major finding (OperationCanceledException catch scope)
+is confirmed and fixed. The concurrency-retry backoff `await Task.Delay(...,
+persistenceDeadline.Token)` sat directly inside `catch (DbUpdateConcurrencyException
+ex) when (concurrencyAttempt < maxConcurrencyAttempts)`, a sibling of
+`catch (OperationCanceledException) when (persistenceTimeout.IsCancellationRequested
+&& ...)` on the same try. C# does not let a catch block's own exception be
+handled by another catch clause of the same try, so a persistence-deadline
+timeout firing during that backoff delay was unhandled and propagated out of
+PersistDeadlineCancellationWithinDeadlineAsync entirely. Traced the full
+propagation path: it is not caught by ProcessSingleCommandAsync's caller-side
+catch (guarded on the unrelated iterationToken/timeout CTS, not
+persistenceTimeout), so it reaches ExecuteAsync's unqualified
+catch (OperationCanceledException) { break; } -- silently and permanently
+terminating the entire BackendStartCommandConsumerService processing loop on
+what should be a benign, per-event 4-second timeout. Fixed by wrapping the
+backoff Task.Delay in its own try/catch using the same guard/action as the
+existing timeout catch, so a persistence-deadline cancellation during
+backoff now correctly returns false instead of escaping.
+
+Tests added (Farm.Infrastructure.Tests/Services/Queue/
+BackendStartCommandConsumerServiceTests.cs), both empirically confirmed to
+fail when the corresponding fix is reverted and pass when restored:
+
+- PersistDeadlineCancellationWithinDeadlineAsync_ClaimCommittedAfterCallerPreSetCompletedAtUtc_ClearsCompletedAtUtc
+  binds to the evt.CompletedAtUtc = null; line added to the claimCommitted
+  branch. Reverting it: persisted.CompletedAtUtc.Should().BeNull() fails,
+  reporting the stale caller-set anchor timestamp instead.
+
+- PersistDeadlineCancellationWithinDeadlineAsync_PersistenceDeadlineElapsesDuringConcurrencyBackoff_ReturnsFalseInsteadOfThrowing
+  binds to the new try/catch around the backoff Task.Delay. Uses a fake
+  TimeProvider whose CreateTimer fires any >=1s real-timer request after
+  ~20ms while leaving the <1s backoff delay unscaled, deterministically
+  reproducing the deadline-elapses-during-backoff race. Reverting the fix:
+  the test fails with an escaped TaskCanceledException instead of the method
+  returning false (confirmed empirically).
+
+Build: 0 errors, 0 warnings.
+Tests (Queue-filtered, Farm.Infrastructure.Tests): 200 passed, 2 failed
+(PostgreSQL/SqlServer provider-calibration tests requiring
+PFARM_TEST_POSTGRES_CONN / PFARM_TEST_SQLSERVER_CONN; environmental, not a
+regression from this change -- same 2 failures as the prior round).

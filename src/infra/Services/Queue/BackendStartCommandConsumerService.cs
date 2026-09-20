@@ -517,6 +517,14 @@ public sealed class BackendStartCommandConsumerService(
                     evt.LastError =
                         "Iteration deadline reached after dispatch claim acquisition; reconciliation is required.";
                     evt.RetryAfterUtc = null;
+
+                    // The caller (the OperationCanceledException handler above) may have
+                    // already set evt.CompletedAtUtc when it took the dead-letter path
+                    // (AttemptCount >= MaxAttempts) before this method discovered the
+                    // claim actually committed. A committed claim means the outcome is
+                    // UNKNOWN and pending reconciliation, not complete, so any such
+                    // caller-set completion timestamp must not leak onto this row.
+                    evt.CompletedAtUtc = null;
                 }
                 else if (command is not null)
                 {
@@ -556,10 +564,34 @@ public sealed class BackendStartCommandConsumerService(
                     evt.Id,
                     concurrencyAttempt,
                     maxConcurrencyAttempts);
-                await Task.Delay(
-                    TimeSpan.FromMilliseconds(100 * concurrencyAttempt),
-                    _timeProvider,
-                    persistenceDeadline.Token);
+
+                // This delay must not let a persistence-deadline cancellation escape.
+                // A cancellation thrown here occurs INSIDE this catch clause, so the
+                // sibling `catch (OperationCanceledException)` below (attached to the
+                // same enclosing try) can never observe it -- C# does not let a catch
+                // block handle an exception raised by another catch block of the same
+                // try. Without this local try/catch, a persistence deadline that
+                // elapses during backoff propagates out of this method entirely and
+                // is caught only by ExecuteAsync's unqualified
+                // `catch (OperationCanceledException) { break; }`, which permanently
+                // stops the whole consumer loop instead of returning false for this
+                // one event as intended.
+                try
+                {
+                    await Task.Delay(
+                        TimeSpan.FromMilliseconds(100 * concurrencyAttempt),
+                        _timeProvider,
+                        persistenceDeadline.Token);
+                }
+                catch (OperationCanceledException) when (
+                    persistenceTimeout.IsCancellationRequested &&
+                    !stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(
+                        "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId} during concurrency backoff; stale-lease recovery remains authoritative",
+                        evt.Id);
+                    return false;
+                }
             }
             catch (DbUpdateConcurrencyException ex)
             {

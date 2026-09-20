@@ -186,6 +186,120 @@ public sealed class BackendStartCommandConsumerServiceTests
             "Pre-dispatch iteration deadline reached the maximum attempt count.");
     }
 
+    // ------------------------------------------------------------------
+    // CompletedAtUtc leak on the claim-committed path
+    // (BackendStartCommandConsumerService.cs claimCommitted branch, PR #2877 panel
+    // round 3, Bishop's Critical -- the FailureCode part of that claim does not hold
+    // at this head, see the commit message, but the underlying ReloadAsync removal
+    // does leak CompletedAtUtc onto a Processing/unknown-outcome row.)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task PersistDeadlineCancellationWithinDeadlineAsync_ClaimCommittedAfterCallerPreSetCompletedAtUtc_ClearsCompletedAtUtc()
+    {
+        // Reproduces the race: the caller (the OperationCanceledException handler) took
+        // the dead-letter path and set evt.CompletedAtUtc BEFORE discovering the
+        // dispatch claim actually committed. A committed claim means the outcome is
+        // UNKNOWN and pending reconciliation, not complete, so that stale timestamp
+        // must not survive onto the persisted row.
+        DateTime anchor = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
+        var clock = new FixedTimeProvider(anchor);
+        await using TestHarness harness = await TestHarness.CreateAsync(clock);
+
+        Guid eventId = await harness.SeedOutboxEventAsync(status: QueueOutboxEventStatus.Processing);
+        await harness.SeedBedClearCommandAsync(eventId, BedClearCommandStatus.Claimed);
+
+        await using AsyncServiceScope scope = harness.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        QueueDispatchOutbox evt = await db.QueueDispatchOutbox.SingleAsync(e => e.Id == eventId);
+
+        evt.Status = QueueOutboxEventStatus.DeadLettered;
+        evt.LastError = "Pre-dispatch iteration deadline reached the maximum attempt count.";
+        evt.CompletedAtUtc = anchor;
+        evt.RetryAfterUtc = null;
+
+        bool claimCommitted = await harness.Service.PersistDeadlineCancellationWithinDeadlineAsync(
+            db,
+            evt,
+            BedClearCommandStatus.Rejected,
+            CancellationToken.None);
+
+        claimCommitted.Should().BeTrue();
+
+        QueueDispatchOutbox persisted = await harness.GetOutboxEventAsync(eventId);
+        persisted.Status.Should().Be(QueueOutboxEventStatus.Processing);
+        persisted.FailureCode.Should().Be("backend_outcome_unknown");
+
+        // The load-bearing assertion: before the fix, the claimCommitted branch never
+        // touched CompletedAtUtc, so the caller's stale dead-letter timestamp survived
+        // onto a row that is actually left Processing/unknown-outcome. If
+        // `evt.CompletedAtUtc = null;` is removed from that branch, this fails:
+        // CompletedAtUtc stays == anchor instead of null.
+        persisted.CompletedAtUtc.Should().BeNull();
+    }
+
+    // ------------------------------------------------------------------
+    // OperationCanceledException escaping the concurrency-retry backoff delay
+    // (BackendStartCommandConsumerService.cs concurrency-retry catch block,
+    // PR #2877 panel round 3, Bishop's Major finding.)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task PersistDeadlineCancellationWithinDeadlineAsync_PersistenceDeadlineElapsesDuringConcurrencyBackoff_ReturnsFalseInsteadOfThrowing()
+    {
+        // OutcomePersistenceDeadline is 4 seconds in production. This fake TimeProvider
+        // fires that CancellationTokenSource's underlying timer after ~20ms of real
+        // time instead, while leaving the concurrency-retry backoff delay (100ms on
+        // attempt 1) unscaled -- so the persistence deadline reliably elapses WHILE the
+        // backoff Task.Delay is still in progress, reproducing the exact race Bishop
+        // flagged: a cancellation raised inside the `catch (DbUpdateConcurrencyException
+        // ...)` block cannot be observed by the sibling `catch (OperationCanceledException
+        // ...)` of the same try, because C# does not let a catch block handle an
+        // exception raised by another catch block of the same try.
+        var clock = new DeadlineDuringBackoffTimeProvider();
+        await using TestHarness harness = await TestHarness.CreateAsync(clock);
+
+        Guid eventId = await harness.SeedOutboxEventAsync(status: QueueOutboxEventStatus.Processing);
+        await harness.SeedBedClearCommandAsync(eventId, BedClearCommandStatus.Pending);
+
+        await using AsyncServiceScope scope = harness.CreateScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        QueueDispatchOutbox evt = await db.QueueDispatchOutbox.SingleAsync(e => e.Id == eventId);
+
+        evt.Status = QueueOutboxEventStatus.DeadLettered;
+        evt.LastError = "Pre-dispatch iteration deadline reached the maximum attempt count.";
+        evt.CompletedAtUtc = DateTime.UtcNow;
+        evt.RetryAfterUtc = null;
+
+        // Force a genuine DbUpdateConcurrencyException on the first SaveChangesAsync so
+        // the method enters the concurrency-retry catch block and its backoff delay.
+        await harness.BumpOutboxRevisionDirectlyAsync(eventId);
+
+        bool claimCommitted = false;
+        Exception? escaped = null;
+        try
+        {
+            claimCommitted = await harness.Service.PersistDeadlineCancellationWithinDeadlineAsync(
+                db,
+                evt,
+                BedClearCommandStatus.Rejected,
+                CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            escaped = ex;
+        }
+
+        // The load-bearing assertion: before the fix, the cancellation raised by
+        // Task.Delay during backoff is unhandled inside the outer catch clause and
+        // propagates out of this call as an OperationCanceledException/
+        // TaskCanceledException instead of the method returning false.
+        escaped.Should().BeNull(
+            "a persistence-deadline timeout during concurrency backoff must be handled " +
+            "internally and return false, not propagate out of the method");
+        claimCommitted.Should().BeFalse();
+    }
+
     private sealed class TestHarness : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -351,6 +465,34 @@ public sealed class BackendStartCommandConsumerServiceTests
         {
             _utcNow += delta;
             _timestamp += delta.Ticks;
+        }
+    }
+
+    /// <summary>
+    /// A <see cref="TimeProvider"/> whose <see cref="GetUtcNow"/>/<see cref="GetTimestamp"/>
+    /// delegate to the real system clock (so ordinary timestamp reads elsewhere in the
+    /// method are unaffected), but whose <see cref="CreateTimer"/> fires any real-timer
+    /// request of one second or more almost immediately. This is used to reliably force
+    /// the <c>OutcomePersistenceDeadline</c> (4 seconds in production)
+    /// <see cref="CancellationTokenSource"/> to elapse in ~20ms of real test time, while
+    /// leaving the much shorter concurrency-retry backoff delay (100-300ms) unscaled --
+    /// reproducing the race where the persistence deadline fires WHILE that backoff
+    /// delay is still in progress.
+    /// </summary>
+    private sealed class DeadlineDuringBackoffTimeProvider : TimeProvider
+    {
+        public override DateTimeOffset GetUtcNow() => System.GetUtcNow();
+
+        public override long GetTimestamp() => System.GetTimestamp();
+
+        public override long TimestampFrequency => System.TimestampFrequency;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            TimeSpan effectiveDueTime = dueTime >= TimeSpan.FromSeconds(1)
+                ? TimeSpan.FromMilliseconds(20)
+                : dueTime;
+            return System.CreateTimer(callback, state, effectiveDueTime, period);
         }
     }
 }
