@@ -34,15 +34,21 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class BackendStartCommandConsumerService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackendStartCommandConsumerService> logger,
-    BackendStartCommandConsumerFenceFlag? hostUpdateFence = null) : BackgroundService
+    BackendStartCommandConsumerFenceFlag? hostUpdateFence = null,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(15);
+    private static readonly TimeSpan MinimumDispatchWindow = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan IterationDeadline = TimeSpan.FromSeconds(50);
+    internal static readonly TimeSpan OutcomePersistenceDeadline = TimeSpan.FromSeconds(4);
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
         PropertyNameCaseInsensitive = true,
     };
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     private const int MaxAttempts = 10;
     private const string CommandEventType = BedClearAcknowledgementService.BackendStartCommandEventType;
@@ -161,28 +167,57 @@ public sealed class BackendStartCommandConsumerService(
 
     internal async Task ProcessPendingCommandsAsync(CancellationToken ct)
     {
-        await RecoverStaleLeasesAsync(ct);
-        await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
-        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        long iterationStarted = _timeProvider.GetTimestamp();
+        using var timeout = new CancellationTokenSource(IterationDeadline, _timeProvider);
+        using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
 
-        DateTime now = DateTime.UtcNow;
-        List<QueueDispatchOutbox> pending = await db.QueueDispatchOutbox
-            .Where(e =>
-                e.EventType == CommandEventType &&
-                e.Status == QueueOutboxEventStatus.Pending &&
-                (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
-            .OrderBy(e => e.Sequence)
-            .Take(10)
-            .ToListAsync(ct);
-
-        if (pending.Count == 0)
+        try
         {
-            return;
+            await RecoverStaleLeasesAsync(deadline.Token);
+            await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
+            AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+
+            DateTime now = DateTime.UtcNow;
+            List<QueueDispatchOutbox> pending = await db.QueueDispatchOutbox
+                .Where(e =>
+                    e.EventType == CommandEventType &&
+                    e.Status == QueueOutboxEventStatus.Pending &&
+                    (e.RetryAfterUtc == null || e.RetryAfterUtc <= now))
+                .OrderBy(e => e.Sequence)
+                .Take(10)
+                .ToListAsync(deadline.Token);
+
+            if (pending.Count == 0)
+            {
+                return;
+            }
+
+            foreach (QueueDispatchOutbox evt in pending)
+            {
+                TimeSpan remaining =
+                    IterationDeadline - _timeProvider.GetElapsedTime(iterationStarted);
+                if (remaining < MinimumDispatchWindow || timeout.IsCancellationRequested)
+                {
+                    logger.LogInformation(
+                        "[BackendStartConsumer] Iteration deadline window exhausted; deferring {Count} command(s)",
+                        pending.Count - pending.IndexOf(evt));
+                    break;
+                }
+
+                await ProcessSingleCommandAsync(
+                    scope,
+                    db,
+                    evt,
+                    deadline.Token,
+                    ct);
+            }
         }
-
-        foreach (QueueDispatchOutbox evt in pending)
+        catch (OperationCanceledException) when (
+            timeout.IsCancellationRequested &&
+            !ct.IsCancellationRequested)
         {
-            await ProcessSingleCommandAsync(scope, db, evt, ct);
+            logger.LogInformation(
+                "[BackendStartConsumer] Iteration deadline reached during command dispatch; remaining commands deferred");
         }
     }
 
@@ -190,7 +225,8 @@ public sealed class BackendStartCommandConsumerService(
         AsyncServiceScope scope,
         AppDbContext db,
         QueueDispatchOutbox evt,
-        CancellationToken ct)
+        CancellationToken iterationToken,
+        CancellationToken stoppingToken)
     {
         // ===================================================================
         // Step 1: Deserialize payload. Dead-letter on corrupt payload.
@@ -212,8 +248,8 @@ public sealed class BackendStartCommandConsumerService(
             evt.LastError = $"Invalid payload JSON: {jsonEx.Message}"[..Math.Min(jsonEx.Message.Length + 24, 2047)];
             evt.CompletedAtUtc = DateTime.UtcNow;
             await SetBedClearCommandStatusAsync(
-                db, evt.Id, BedClearCommandStatus.Rejected, ct);
-            await db.SaveChangesAsync(ct);
+                db, evt.Id, BedClearCommandStatus.Rejected, iterationToken);
+            await db.SaveChangesAsync(iterationToken);
             return;
         }
 
@@ -228,11 +264,11 @@ public sealed class BackendStartCommandConsumerService(
                 "(jobId, actorSubject, acknowledgementKey).";
             evt.CompletedAtUtc = DateTime.UtcNow;
             await SetBedClearCommandStatusAsync(
-                db, evt.Id, BedClearCommandStatus.Rejected, ct);
+                db, evt.Id, BedClearCommandStatus.Rejected, iterationToken);
             logger.LogError(
                 "[BackendStartConsumer] Event {EventId} has incomplete payload — dead-lettered",
                 evt.Id);
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(iterationToken);
             return;
         }
 
@@ -249,7 +285,7 @@ public sealed class BackendStartCommandConsumerService(
 
         try
         {
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesAsync(iterationToken);
         }
         catch (DbUpdateConcurrencyException)
         {
@@ -279,9 +315,30 @@ public sealed class BackendStartCommandConsumerService(
                 payload.JobId.ToString(),
                 payload.ActorSubject,
                 payload.AcknowledgementKey,
-                ct);
+                iterationToken);
 
-            await ApplyOutcomeAsync(evt.Id, payload.JobId, outcome, ct);
+            using var outcomeTimeout = new CancellationTokenSource(
+                OutcomePersistenceDeadline,
+                _timeProvider);
+            using var outcomeDeadline = CancellationTokenSource.CreateLinkedTokenSource(
+                stoppingToken,
+                outcomeTimeout.Token);
+            try
+            {
+                await ApplyOutcomeAsync(
+                    evt.Id,
+                    payload.JobId,
+                    outcome,
+                    outcomeDeadline.Token);
+            }
+            catch (OperationCanceledException) when (
+                outcomeTimeout.IsCancellationRequested &&
+                !stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    "[BackendStartConsumer] Outcome persistence deadline reached for EventId={EventId}; durable attempt reconciliation remains authoritative",
+                    evt.Id);
+            }
         }
         catch (OperationCanceledException)
         {
@@ -306,7 +363,7 @@ public sealed class BackendStartCommandConsumerService(
                 evt.Id,
                 payload.JobId,
                 BackendStartOutcome.Unknown(ex.Message, attemptId: null),
-                ct);
+                iterationToken);
         }
     }
 

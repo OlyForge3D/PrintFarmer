@@ -5258,6 +5258,256 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_SlowDispatchesReachDeadline_DefersRemainingCommands()
+    {
+        IReadOnlyList<(Guid EventId, Guid JobId)> commands =
+            await SeedBackendStartCommandsAsync(3);
+        var clock = new ManualTimeProvider();
+        var dispatched = new List<Guid>();
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobWithAckAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string jobId, string _, string _, CancellationToken _) =>
+            {
+                dispatched.Add(Guid.Parse(jobId));
+                clock.Advance(TimeSpan.FromSeconds(46));
+                return Task.FromResult(BackendStartOutcome.Accepted(Guid.NewGuid()));
+            });
+
+        await using ServiceProvider provider = CreateBackendStartConsumerProvider(
+            management.Object);
+        var consumer = new BackendStartCommandConsumerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            timeProvider: clock);
+
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+
+        dispatched.Should().Equal(commands.Take(1).Select(command => command.JobId));
+        await using AppDbContext verify = CreateContext();
+        List<QueueOutboxEventStatus> statuses = await verify.QueueDispatchOutbox
+            .Where(command => commands.Select(candidate => candidate.EventId).Contains(command.Id))
+            .OrderBy(command => command.Sequence)
+            .Select(command => command.Status)
+            .ToListAsync();
+        statuses.Should().Equal(
+            QueueOutboxEventStatus.Published,
+            QueueOutboxEventStatus.Pending,
+            QueueOutboxEventStatus.Pending);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_DeferredCommands_NextIterationDispatchesInOrderOnce()
+    {
+        IReadOnlyList<(Guid EventId, Guid JobId)> commands =
+            await SeedBackendStartCommandsAsync(4);
+        var clock = new ManualTimeProvider();
+        var dispatched = new List<Guid>();
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobWithAckAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string jobId, string _, string _, CancellationToken _) =>
+            {
+                dispatched.Add(Guid.Parse(jobId));
+                clock.Advance(TimeSpan.FromSeconds(46));
+                return Task.FromResult(BackendStartOutcome.Accepted(Guid.NewGuid()));
+            });
+
+        await using ServiceProvider provider = CreateBackendStartConsumerProvider(
+            management.Object);
+        var consumer = new BackendStartCommandConsumerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            timeProvider: clock);
+
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        dispatched.Should().Equal(commands.Take(1).Select(command => command.JobId));
+
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+
+        dispatched.Should().Equal(commands.Select(command => command.JobId));
+        dispatched.Should().OnlyHaveUniqueItems();
+        await using AppDbContext verify = CreateContext();
+        List<QueueOutboxEventStatus> statuses = await verify.QueueDispatchOutbox
+            .Where(command => commands.Select(candidate => candidate.EventId).Contains(command.Id))
+            .OrderBy(command => command.Sequence)
+            .Select(command => command.Status)
+            .ToListAsync();
+        statuses.Should().OnlyContain(status => status == QueueOutboxEventStatus.Published);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_InFlightDispatch_DeadlineCancelsBelowFenceBudget()
+    {
+        _ = await SeedBackendStartCommandsAsync(2);
+        var clock = new ManualTimeProvider();
+        bool deadlineCancellationObserved = false;
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobWithAckAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string _, string _, string _, CancellationToken ct) =>
+            {
+                clock.Advance(BackendStartCommandConsumerService.IterationDeadline);
+                deadlineCancellationObserved = ct.IsCancellationRequested;
+                return Task.FromCanceled<BackendStartOutcome>(ct);
+            });
+
+        await using ServiceProvider provider = CreateBackendStartConsumerProvider(
+            management.Object);
+        var consumer = new BackendStartCommandConsumerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            timeProvider: clock);
+
+        long started = clock.GetTimestamp();
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        TimeSpan elapsed = clock.GetElapsedTime(started);
+
+        deadlineCancellationObserved.Should().BeTrue();
+        elapsed.Should().Be(BackendStartCommandConsumerService.IterationDeadline);
+        (
+            BackendStartCommandConsumerService.IterationDeadline +
+            TimeSpan.FromSeconds(4) +
+            BackendStartCommandConsumerService.OutcomePersistenceDeadline)
+            .Should().BeLessThan(TimeSpan.FromSeconds(60));
+        management.Verify(service => service.DispatchJobWithAckAsync(
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<string>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task DispatchJobWithAckAsync_DeadlineCancellation_CapsOutcomeReconciliation()
+    {
+        string storageRoot = Path.Join(
+            AppContext.BaseDirectory,
+            $"queue-deadline-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(Path.Join(storageRoot, "gcode"));
+        try
+        {
+            Fixture fixture;
+            await using (AppDbContext seed = CreateContext())
+            {
+                fixture = await SeedCalibrationAsync(seed, withAck: true);
+                GcodeFile gcode = await seed.GcodeFiles.SingleAsync(
+                    file => file.Id == fixture.GcodeId);
+                await File.WriteAllBytesAsync(
+                    Path.Join(storageRoot, "gcode", gcode.FileName),
+                    AuthoritativeGcodeBytes);
+            }
+
+            var clock = new ManualTimeProvider();
+            Guid attemptId = Guid.NewGuid();
+            var attempt = new QueueDispatchAttempt
+            {
+                Id = attemptId,
+                PrintJobId = fixture.JobId,
+                PrinterId = fixture.PrinterId,
+                AttemptNumber = 1,
+                ActorSubject = "deadline-test",
+                StartPathKind = "BedClear",
+                BackendFileName = "calibration.gcode",
+                ClaimedAtUtc = DateTime.UtcNow,
+            };
+            var claim = new Mock<IDispatchClaimService>();
+            claim.Setup(service => service.AcquireClaimAsync(
+                    It.IsAny<DispatchClaimRequest>(),
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(DispatchClaimResult.Ok(attempt));
+            claim.Setup(service => service.RecordBackendCallStartedAsync(
+                    attemptId,
+                    It.IsAny<CancellationToken>()))
+                .ReturnsAsync(true);
+            bool cleanupCancellationObserved = false;
+            claim.Setup(service => service.RecordDispatchExceptionAsync(
+                    attemptId,
+                    "dispatch_cancelled",
+                    It.IsAny<CancellationToken>()))
+                .Returns((Guid _, string _, CancellationToken ct) =>
+                {
+                    clock.Advance(TimeSpan.FromSeconds(4));
+                    cleanupCancellationObserved = ct.IsCancellationRequested;
+                    return Task.FromCanceled<DispatchExceptionDisposition>(ct);
+                });
+            var printers = new Mock<IPrintersService>();
+            bool dispatchCancellationObserved = false;
+            printers.Setup(service => service.UploadAndStartPrintAsync(
+                    fixture.PrinterId,
+                    attempt.BackendFileName,
+                    It.IsAny<Stream>(),
+                    It.IsAny<IProgress<UploadAndPrintStage>?>(),
+                    It.IsAny<CancellationToken>()))
+                .Returns((
+                    Guid _,
+                    string _,
+                    Stream _,
+                    IProgress<UploadAndPrintStage>? _,
+                    CancellationToken ct) =>
+                {
+                    clock.Advance(BackendStartCommandConsumerService.IterationDeadline);
+                    dispatchCancellationObserved = ct.IsCancellationRequested;
+                    return Task.FromCanceled<UploadAndPrintResult>(ct);
+                });
+            var storage = new Mock<IStoragePathService>();
+            storage.Setup(service => service.GetGcodeStorageDirectory())
+                .Returns(storageRoot);
+            await using AppDbContext managementContext = CreateContext();
+            var management = new PrintJobManagementService(
+                new EfPrintJobManagementRepository(managementContext),
+                NullLogger<PrintJobManagementService>.Instance,
+                printers.Object,
+                storage.Object,
+                CreateHubContext(),
+                Mock.Of<IStoredFileOperationsService>(),
+                Mock.Of<IPrinterStatusCacheReader>(),
+                dispatchClaimService: claim.Object,
+                appDbContext: managementContext,
+                outboxSequenceAllocator: new DbOutboxSequenceAllocator(),
+                timeProvider: clock);
+            using var dispatchTimeout = new CancellationTokenSource(
+                BackendStartCommandConsumerService.IterationDeadline,
+                clock);
+
+            long started = clock.GetTimestamp();
+            BackendStartOutcome outcome = await management.DispatchJobWithAckAsync(
+                fixture.JobId.ToString(),
+                "deadline-test",
+                fixture.AckKey,
+                dispatchTimeout.Token);
+
+            dispatchCancellationObserved.Should().BeTrue();
+            cleanupCancellationObserved.Should().BeTrue();
+            outcome.Status.Should().Be(BackendStartStatus.Unknown);
+            clock.GetElapsedTime(started).Should().Be(
+                BackendStartCommandConsumerService.IterationDeadline +
+                TimeSpan.FromSeconds(4));
+        }
+        finally
+        {
+            if (Directory.Exists(storageRoot))
+            {
+                Directory.Delete(storageRoot, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
     public async Task BackendStartConsumer_TerminalRejection_RejectsCommandReplayRecord()
     {
         Fixture fixture;
@@ -6527,6 +6777,135 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         var ctx = new AppDbContext(opts);
         ctx.Database.ExecuteSqlRaw("PRAGMA foreign_keys = OFF;");
         return ctx;
+    }
+
+    private ServiceProvider CreateBackendStartConsumerProvider(
+        IPrintJobManagementService management) =>
+        new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString,
+                sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .AddSingleton(management)
+            .BuildServiceProvider();
+
+    private async Task<IReadOnlyList<(Guid EventId, Guid JobId)>>
+        SeedBackendStartCommandsAsync(int count)
+    {
+        await using AppDbContext db = CreateContext();
+        await db.Database.MigrateAsync();
+        await using var transaction = await db.Database.BeginTransactionAsync();
+        var commands = new List<(Guid EventId, Guid JobId)>(count);
+        var sequenceAllocator = new DbOutboxSequenceAllocator();
+
+        for (int index = 0; index < count; index++)
+        {
+            Guid eventId = Guid.NewGuid();
+            Guid jobId = Guid.NewGuid();
+            commands.Add((eventId, jobId));
+            db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+            {
+                Id = eventId,
+                Sequence = await sequenceAllocator.AllocateAsync(db),
+                AggregateType = nameof(PrintJob),
+                AggregateId = jobId,
+                EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
+                SchemaVersion = "1",
+                PayloadJson = JsonSerializer.Serialize(new
+                {
+                    jobId,
+                    printerId = Guid.NewGuid(),
+                    actorSubject = "deadline-test",
+                    acknowledgementKey = $"deadline-{index}",
+                }),
+                Status = QueueOutboxEventStatus.Pending,
+                CreatedAtUtc = DateTime.UtcNow,
+            });
+        }
+
+        await db.SaveChangesAsync();
+        await transaction.CommitAsync();
+        return commands;
+    }
+
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private readonly List<ManualTimer> _timers = [];
+        private DateTimeOffset _utcNow =
+            new(2026, 9, 20, 12, 0, 0, TimeSpan.Zero);
+        private long _timestamp;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public override long GetTimestamp() => _timestamp;
+
+        public override ITimer CreateTimer(
+            TimerCallback callback,
+            object? state,
+            TimeSpan dueTime,
+            TimeSpan period)
+        {
+            var timer = new ManualTimer(this, callback, state);
+            _timers.Add(timer);
+            _ = timer.Change(dueTime, period);
+            return timer;
+        }
+
+        public void Advance(TimeSpan elapsed)
+        {
+            _utcNow += elapsed;
+            _timestamp = checked(_timestamp + elapsed.Ticks);
+            foreach (ManualTimer timer in _timers.ToArray())
+            {
+                timer.FireIfDue(_timestamp);
+            }
+        }
+
+        private void Remove(ManualTimer timer) => _timers.Remove(timer);
+
+        private sealed class ManualTimer(
+            ManualTimeProvider owner,
+            TimerCallback callback,
+            object? state) : ITimer
+        {
+            private long? _dueTimestamp;
+            private TimeSpan _period = Timeout.InfiniteTimeSpan;
+
+            public bool Change(TimeSpan dueTime, TimeSpan period)
+            {
+                _dueTimestamp = dueTime == Timeout.InfiniteTimeSpan
+                    ? null
+                    : checked(owner._timestamp + dueTime.Ticks);
+                _period = period;
+                return true;
+            }
+
+            public void Dispose()
+            {
+                _dueTimestamp = null;
+                owner.Remove(this);
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+
+            public void FireIfDue(long timestamp)
+            {
+                if (_dueTimestamp is not long dueTimestamp || timestamp < dueTimestamp)
+                {
+                    return;
+                }
+
+                _dueTimestamp = _period == Timeout.InfiniteTimeSpan
+                    ? null
+                    : checked(timestamp + _period.Ticks);
+                callback(state);
+            }
+        }
     }
 
     private sealed class ThrowOnceConcurrencySaveInterceptor
