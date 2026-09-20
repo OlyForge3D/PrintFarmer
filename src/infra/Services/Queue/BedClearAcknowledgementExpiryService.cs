@@ -4,6 +4,7 @@
 
 using System.Diagnostics;
 using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -18,7 +19,8 @@ namespace Farm.Infrastructure.Services.Queue;
 public sealed class BedClearAcknowledgementExpiryService(
     IServiceScopeFactory scopeFactory,
     ILogger<BedClearAcknowledgementExpiryService> logger,
-    BedClearAcknowledgementExpiryMetrics metrics) : BackgroundService
+    BedClearAcknowledgementExpiryMetrics metrics,
+    BedClearAcknowledgementExpiryFenceFlag? hostUpdateFence = null) : BackgroundService
 {
     private static readonly TimeSpan ScanInterval = TimeSpan.FromSeconds(15);
 
@@ -28,6 +30,14 @@ public sealed class BedClearAcknowledgementExpiryService(
         {
             try
             {
+                if (hostUpdateFence is not null &&
+                    await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+                {
+                    await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(ScanInterval, stoppingToken).ConfigureAwait(false);
+                    continue;
+                }
+
                 await ScanAsync(stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)

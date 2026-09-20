@@ -180,4 +180,72 @@ public class HostUpdateWriterFencingTests : IDisposable
 
         scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
     }
+
+    [Fact]
+    public async Task BackendStartCommandConsumerService_WhilePauseRequested_AcknowledgesOnceWithoutOpeningScope()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var fence = new BackendStartCommandConsumerFenceFlag();
+        await fence.RequestPauseAsync(CancellationToken.None);
+
+        var sut = new BackendStartCommandConsumerService(
+            scopeFactory,
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            fence);
+        await sut.StartAsync(CancellationToken.None);
+        await WaitForPauseAcknowledgementsAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            expectedAcknowledgements: 1);
+        await sut.StopAsync(CancellationToken.None);
+
+        fence.AcknowledgementCount.Should().Be(1);
+        scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
+    }
+
+    [Fact]
+    public async Task BackendControlCommandConsumerService_WhilePauseRequested_AcknowledgesOnceWithoutOpeningScope()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var fence = new BackendControlCommandConsumerFenceFlag();
+        await fence.RequestPauseAsync(CancellationToken.None);
+
+        var sut = new BackendControlCommandConsumerService(
+            scopeFactory,
+            NullLogger<BackendControlCommandConsumerService>.Instance,
+            fence);
+        await sut.StartAsync(CancellationToken.None);
+        await WaitForPauseAcknowledgementsAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            expectedAcknowledgements: 1);
+        await sut.StopAsync(CancellationToken.None);
+
+        fence.AcknowledgementCount.Should().Be(1);
+        scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
+    }
+
+    [Fact]
+    public async Task BedClearAcknowledgementExpiryService_WhilePauseRequested_AcknowledgesOnceWithoutOpeningScope()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var fence = new BedClearAcknowledgementExpiryFenceFlag();
+        await fence.RequestPauseAsync(CancellationToken.None);
+        using var metrics = new BedClearAcknowledgementExpiryMetrics();
+
+        var sut = new BedClearAcknowledgementExpiryService(
+            scopeFactory,
+            NullLogger<BedClearAcknowledgementExpiryService>.Instance,
+            metrics,
+            fence);
+        await sut.StartAsync(CancellationToken.None);
+        await WaitForPauseAcknowledgementsAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            expectedAcknowledgements: 1);
+        await sut.StopAsync(CancellationToken.None);
+
+        fence.AcknowledgementCount.Should().Be(1);
+        scopeFactory.ScopesOpened.Should().Be(0, "the scanner must not delegate writes while paused");
+    }
 }
