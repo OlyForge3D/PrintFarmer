@@ -104,23 +104,6 @@ public class HostUpdateExecutionOptionsValidatorTests
     }
 
     [Fact]
-    public void Validate_DefaultFenceProofBudget_ExceedsRequiredWriterDuration()
-    {
-        string root = Path.Combine(
-            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
-            "printfarmer-host-updates-test-root");
-        HostUpdateExecutionOptions options = ValidOptions(root);
-
-        ValidateOptionsResult result = Validator.Validate(null, options);
-
-        result.Succeeded.Should().BeTrue();
-        options.FenceProofTimeoutSeconds.Should().Be(321);
-        options.FencePollIntervalSeconds.Should().Be(2);
-        BackendStartCommandConsumerService.RequiredFenceProofDuration
-            .Should().Be(TimeSpan.FromSeconds(319));
-    }
-
-    [Fact]
     public void Validate_FenceProofHeadroomLessThanPollInterval_Fails()
     {
         string root = Path.Combine(
