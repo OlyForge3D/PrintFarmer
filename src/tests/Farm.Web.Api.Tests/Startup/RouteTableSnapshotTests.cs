@@ -154,6 +154,30 @@ public sealed class RouteTableSnapshotTests
                 "GetServer must remain bound to its OctoPrint API-key authorization filter");
     }
 
+    [Fact]
+    public void AssertSnapshotMatches_ReportsDeepDifferenceAndLengthMismatch()
+    {
+        string[] expected = Enumerable.Range(0, 881)
+            .Select(index => $"route-{index}")
+            .ToArray();
+        string[] actual = expected.ToArray();
+        actual[640] = "route-640-regressed";
+
+        Action assertDeepDifference = () => AssertSnapshotMatches(actual, expected);
+
+        string deepDifferenceMessage = assertDeepDifference.Should().Throw<Xunit.Sdk.XunitException>()
+            .Which.Message;
+        deepDifferenceMessage.Should().Contain("index 640");
+        deepDifferenceMessage.Should().Contain("Expected: route-640");
+        deepDifferenceMessage.Should().Contain("Actual:   route-640-regressed");
+
+        Action assertLengthDifference = () => AssertSnapshotMatches(expected[..^1], expected);
+
+        string lengthDifferenceMessage = assertLengthDifference.Should().Throw<Xunit.Sdk.XunitException>()
+            .Which.Message;
+        lengthDifferenceMessage.Should().Contain("expected 881 routes but found 880");
+    }
+
     /// <summary>
     /// Builds the sorted, checked-in-snapshot line format: one line per runtime controller
     /// endpoint, each listing every HTTP verb it accepts, its attribute-route template,
@@ -266,7 +290,10 @@ public sealed class RouteTableSnapshotTests
     {
         actual.Length.Should().Be(
             expected.Length,
-            "the route snapshot must contain the same number of ordered controller-action routes");
+            "the route snapshot must contain the same number of ordered controller-action routes " +
+            "(expected {0} routes but found {1})",
+            expected.Length,
+            actual.Length);
 
         int firstDifference = Enumerable.Range(0, expected.Length)
             .FirstOrDefault(index => !string.Equals(actual[index], expected[index], StringComparison.Ordinal), -1);
