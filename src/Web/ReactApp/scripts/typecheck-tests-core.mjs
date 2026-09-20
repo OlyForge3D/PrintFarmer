@@ -15,6 +15,21 @@ import { isAbsolute, relative, resolve } from "node:path";
 // actually still type-checked.
 const TS_NOCHECK_PATTERN = /^[ \t]*\/\/+[ \t]*@ts-nocheck\b/m;
 
+// Bounds an env-var-supplied override for a spawnSync limit so the seam can
+// only ever tighten the default (shorten the timeout or reduce buffer
+// capacity), never lengthen, enlarge, or disable it. Invalid, non-finite,
+// and oversize values must silently fall back to the default.
+export function clampedOverride(envValue, defaultValue) {
+  const parsed = Number(envValue);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= defaultValue
+    ? parsed
+    : defaultValue;
+}
+
+export function formatSinkOutput(stdout, stderr) {
+  return `${stdout ?? ""}${stderr ?? ""}`;
+}
+
 export function classifyDiagnostics(output, directory) {
   const lines = output.split(/\r?\n/).filter(Boolean);
   const fileDiagnostics = lines
@@ -178,6 +193,14 @@ export function evaluate({
     };
   }
 
+  if (compilerResult.error?.code === "ETIMEDOUT") {
+    return {
+      ok: false,
+      message: "TypeScript test compiler timed out and was killed.",
+      showListFilesOutput: false,
+    };
+  }
+
   if (
     compilerResult.error ||
     compilerResult.signal ||
@@ -216,6 +239,14 @@ export function evaluate({
       message:
         "TypeScript test compiler exited nonzero without file diagnostics.",
       showListFilesOutput: false,
+    };
+  }
+
+  if (listFilesResult.error?.code === "ETIMEDOUT") {
+    return {
+      ok: false,
+      message: "TypeScript test compiler timed out and was killed.",
+      showListFilesOutput: true,
     };
   }
 

@@ -1,4 +1,5 @@
 ﻿using System.Collections.Immutable;
+using Farm.Infrastructure.Services.Queue;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -51,6 +52,23 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
         if (string.IsNullOrWhiteSpace(options.RootDirectory))
         {
             return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+        }
+
+        if (TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds) <=
+            BackendStartCommandConsumerService.RequiredFenceProofDuration)
+        {
+            failures.Add(
+                $"HostUpdateExecution:FenceProofTimeoutSeconds must be greater than " +
+                $"{BackendStartCommandConsumerService.RequiredFenceProofDuration.TotalSeconds} seconds " +
+                "to cover the backend-start writer deadline and acknowledgement margin.");
+        }
+        else if (TimeSpan.FromSeconds(
+                     options.FenceProofTimeoutSeconds - options.FencePollIntervalSeconds) <
+                 BackendStartCommandConsumerService.RequiredFenceProofDuration)
+        {
+            failures.Add(
+                "HostUpdateExecution:FenceProofTimeoutSeconds must exceed the required " +
+                $"writer duration by at least FencePollIntervalSeconds ({options.FencePollIntervalSeconds} seconds).");
         }
 
         string root = options.RootDirectory;

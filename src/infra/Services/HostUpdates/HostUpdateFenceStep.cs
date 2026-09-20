@@ -60,14 +60,7 @@ public sealed class HostUpdateFenceCoordinator(
         DateTimeOffset deadline = _timeProvider.GetUtcNow() + proofTimeout;
         while (true)
         {
-            var unproven = new List<string>();
-            foreach (IFenceableWriter writer in writers)
-            {
-                if (!await writer.IsQuiescedAsync(cancellationToken).ConfigureAwait(false))
-                {
-                    unproven.Add(writer.Name);
-                }
-            }
+            List<string> unproven = await GetUnprovenWritersAsync(cancellationToken).ConfigureAwait(false);
 
             if (unproven.Count == 0)
             {
@@ -76,6 +69,8 @@ public sealed class HostUpdateFenceCoordinator(
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
+                // The deadline decision uses the completed probe; no later observation can
+                // retroactively prove the writer within the bounded proof window.
                 _logger?.LogWarning(
                     "host_update_writer_fence_rejected release_id={ReleaseId} writers={WriterNames}",
                     request.ReleaseId,
@@ -85,6 +80,20 @@ public sealed class HostUpdateFenceCoordinator(
 
             await Task.Delay(pollInterval, cancellationToken).ConfigureAwait(false);
         }
+    }
+
+    private async Task<List<string>> GetUnprovenWritersAsync(CancellationToken cancellationToken)
+    {
+        var unproven = new List<string>();
+        foreach (IFenceableWriter writer in writers)
+        {
+            if (!await writer.IsQuiescedAsync(cancellationToken).ConfigureAwait(false))
+            {
+                unproven.Add(writer.Name);
+            }
+        }
+
+        return unproven;
     }
 
     public async Task ReleaseAsync(CancellationToken cancellationToken)

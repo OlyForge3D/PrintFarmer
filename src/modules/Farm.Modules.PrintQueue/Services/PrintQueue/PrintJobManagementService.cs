@@ -53,7 +53,8 @@ public class PrintJobManagementService(
     AppDbContext? appDbContext = null,
     IDbOutboxSequenceAllocator? outboxSequenceAllocator = null,
     IQueuePositionAllocator? queuePositionAllocator = null,
-    IQueueResourceAuthorizationService? resourceAuthorization = null) : IPrintJobManagementService
+    IQueueResourceAuthorizationService? resourceAuthorization = null,
+    TimeProvider? timeProvider = null) : IPrintJobManagementService
 {
     private const string DispatchArtifactUnavailable =
         "The G-code artifact is unavailable for dispatch.";
@@ -86,6 +87,8 @@ public class PrintJobManagementService(
     private readonly IQueuePositionAllocator? _queuePositionAllocator = queuePositionAllocator;
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization =
         resourceAuthorization;
+
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     private const int QueuePlanningMaxJobs = 5000;
     private const int DefaultEstimatedPrintMinutes = 90;
@@ -2075,9 +2078,24 @@ public class PrintJobManagementService(
                         jobId);
                 }
 
-                _ = await _dispatchClaimService.RecordPostAcceptCompletedAsync(
-                    attemptId,
-                    CancellationToken.None);
+                using (var cleanupTimeout = new CancellationTokenSource(
+                           BackendStartCommandConsumerService.CancellationCleanupDeadline,
+                           _timeProvider))
+                {
+                    try
+                    {
+                        _ = await _dispatchClaimService.RecordPostAcceptCompletedAsync(
+                            attemptId,
+                            cleanupTimeout.Token);
+                    }
+                    catch (OperationCanceledException) when (
+                        cleanupTimeout.IsCancellationRequested)
+                    {
+                        _logger.LogWarning(
+                            "DispatchJobWithAckAsync: Post-accept cleanup deadline reached for attempt {AttemptId}",
+                            attemptId);
+                    }
+                }
 
                 _logger.LogInformation(
                     "DispatchJobWithAckAsync: Job {JobId} successfully started on printer {PrinterId}",
@@ -2138,20 +2156,50 @@ public class PrintJobManagementService(
         }
         catch (OperationCanceledException)
         {
-            DispatchExceptionDisposition disposition =
-                await _dispatchClaimService.RecordDispatchExceptionAsync(
-                    attemptId,
-                    "dispatch_cancelled",
-                    CancellationToken.None);
-            return MapDispatchException(disposition, attemptId);
+            using var cleanupTimeout = new CancellationTokenSource(
+                BackendStartCommandConsumerService.CancellationCleanupDeadline,
+                _timeProvider);
+            try
+            {
+                DispatchExceptionDisposition disposition =
+                    await _dispatchClaimService.RecordDispatchExceptionAsync(
+                        attemptId,
+                        "dispatch_cancelled",
+                        cleanupTimeout.Token);
+                return MapDispatchException(disposition, attemptId);
+            }
+            catch (OperationCanceledException) when (cleanupTimeout.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "DispatchJobWithAckAsync: Cancellation cleanup deadline reached for attempt {AttemptId}; stale-attempt reconciliation remains authoritative",
+                    attemptId);
+                return BackendStartOutcome.Unknown(
+                    "The backend outcome could not be determined; reconciliation is required.",
+                    attemptId);
+            }
         }
         catch (Exception ex)
         {
-            DispatchExceptionDisposition disposition =
-                await _dispatchClaimService.RecordDispatchExceptionAsync(
+            using var cleanupTimeout = new CancellationTokenSource(
+                BackendStartCommandConsumerService.CancellationCleanupDeadline,
+                _timeProvider);
+            DispatchExceptionDisposition disposition;
+            try
+            {
+                disposition = await _dispatchClaimService.RecordDispatchExceptionAsync(
                     attemptId,
                     "dispatch_exception",
-                    CancellationToken.None);
+                    cleanupTimeout.Token);
+            }
+            catch (OperationCanceledException) when (cleanupTimeout.IsCancellationRequested)
+            {
+                _logger.LogWarning(
+                    "DispatchJobWithAckAsync: Exception cleanup deadline reached for attempt {AttemptId}; stale-attempt reconciliation remains authoritative",
+                    attemptId);
+                return BackendStartOutcome.Unknown(
+                    "The backend outcome could not be determined; reconciliation is required.",
+                    attemptId);
+            }
 
             _logger.LogError(
                 ex,
