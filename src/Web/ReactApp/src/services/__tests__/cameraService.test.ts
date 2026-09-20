@@ -1,10 +1,49 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { cameraService } from '../cameraService';
-import { apiClient } from '../api';
-import type { CameraDto, CreateCameraDto, UpdateCameraDto, DisplayCameraDto } from '@/types/api';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { cameraService } from "../cameraService";
+import { apiClient } from "../api";
+import { CameraHealthStatus, CameraSource, CameraType } from "@/types/api";
+import type {
+  CameraDto,
+  CreateCameraDto,
+  UpdateCameraDto,
+  DisplayCameraDto,
+} from "@/types/api";
+
+function createCamera(overrides: Partial<CameraDto> = {}): CameraDto {
+  return {
+    id: "1",
+    name: "Camera 1",
+    streamUrl: "http://cam1.local",
+    isEnabled: true,
+    sortOrder: 0,
+    createdAt: "2024-01-01T00:00:00Z",
+    isStandalone: true,
+    source: CameraSource.Standalone,
+    cameraType: CameraType.General,
+    healthStatus: CameraHealthStatus.Unknown,
+    ...overrides,
+  };
+}
+
+function createDisplayCamera(
+  overrides: Partial<DisplayCameraDto> = {},
+): DisplayCameraDto {
+  return {
+    id: "1",
+    name: "Camera 1",
+    streamUrl: "http://cam1.local",
+    isEnabled: true,
+    sortOrder: 0,
+    isStandalone: true,
+    source: CameraSource.Standalone,
+    cameraType: CameraType.General,
+    healthStatus: CameraHealthStatus.Unknown,
+    ...overrides,
+  };
+}
 
 // Mock the api client
-vi.mock('../api', () => ({
+vi.mock("../api", () => ({
   apiClient: {
     getAllCameras: vi.fn(),
     getEnabledCameras: vi.fn(),
@@ -14,22 +53,29 @@ vi.mock('../api', () => ({
     updateCamera: vi.fn(),
     deleteCamera: vi.fn(),
     toggleCamera: vi.fn(),
-  }
+  },
 }));
 
-describe('cameraService', () => {
+describe("cameraService", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  describe('getAllCameras', () => {
-    it('should get all cameras', async () => {
+  describe("getAllCameras", () => {
+    it("should get all cameras", async () => {
       const mockCameras: CameraDto[] = [
-        { id: '1', name: 'Camera 1', streamUrl: 'http://cam1.local', isEnabled: true },
-        { id: '2', name: 'Camera 2', streamUrl: 'http://cam2.local', isEnabled: false },
+        createCamera(),
+        createCamera({
+          id: "2",
+          name: "Camera 2",
+          streamUrl: "http://cam2.local",
+          isEnabled: false,
+        }),
       ];
 
-      vi.mocked(apiClient.getAllCameras).mockResolvedValue(mockCameras as never);
+      vi.mocked(apiClient.getAllCameras).mockResolvedValue(
+        mockCameras as never,
+      );
 
       const result = await cameraService.getAllCameras();
 
@@ -38,13 +84,13 @@ describe('cameraService', () => {
     });
   });
 
-  describe('getEnabledCameras', () => {
-    it('should get only enabled cameras', async () => {
-      const mockCameras: CameraDto[] = [
-        { id: '1', name: 'Camera 1', streamUrl: 'http://cam1.local', isEnabled: true },
-      ];
+  describe("getEnabledCameras", () => {
+    it("should get only enabled cameras", async () => {
+      const mockCameras: CameraDto[] = [createCamera()];
 
-      vi.mocked(apiClient.getEnabledCameras).mockResolvedValue(mockCameras as never);
+      vi.mocked(apiClient.getEnabledCameras).mockResolvedValue(
+        mockCameras as never,
+      );
 
       const result = await cameraService.getEnabledCameras();
 
@@ -53,13 +99,13 @@ describe('cameraService', () => {
     });
   });
 
-  describe('getDisplayCameras', () => {
-    it('should get display cameras', async () => {
-      const mockDisplayCameras: DisplayCameraDto[] = [
-        { id: '1', name: 'Camera 1', streamUrl: 'http://cam1.local', type: 'webcam' },
-      ];
+  describe("getDisplayCameras", () => {
+    it("should get display cameras", async () => {
+      const mockDisplayCameras: DisplayCameraDto[] = [createDisplayCamera()];
 
-      vi.mocked(apiClient.getDisplayCameras).mockResolvedValue(mockDisplayCameras as never);
+      vi.mocked(apiClient.getDisplayCameras).mockResolvedValue(
+        mockDisplayCameras as never,
+      );
 
       const result = await cameraService.getDisplayCameras();
 
@@ -68,38 +114,32 @@ describe('cameraService', () => {
     });
   });
 
-  describe('getCameraById', () => {
-    it('should get a camera by ID', async () => {
-      const mockCamera: CameraDto = {
-        id: '1',
-        name: 'Camera 1',
-        streamUrl: 'http://cam1.local',
-        isEnabled: true
-      };
+  describe("getCameraById", () => {
+    it("should get a camera by ID", async () => {
+      const mockCamera = createCamera();
 
       vi.mocked(apiClient.getCameraById).mockResolvedValue(mockCamera as never);
 
-      const result = await cameraService.getCameraById('1');
+      const result = await cameraService.getCameraById("1");
 
       expect(result).toEqual(mockCamera);
-      expect(apiClient.getCameraById).toHaveBeenCalledWith('1');
+      expect(apiClient.getCameraById).toHaveBeenCalledWith("1");
     });
   });
 
-  describe('createCamera', () => {
-    it('should create a new camera', async () => {
+  describe("createCamera", () => {
+    it("should create a new camera", async () => {
       const request: CreateCameraDto = {
-        name: 'New Camera',
-        streamUrl: 'http://newcam.local',
-        isEnabled: true
+        name: "New Camera",
+        streamUrl: "http://newcam.local",
+        isEnabled: true,
       };
 
-      const mockCreatedCamera: CameraDto = {
-        id: '3',
-        ...request
-      };
+      const mockCreatedCamera = createCamera({ id: "3", ...request });
 
-      vi.mocked(apiClient.createCamera).mockResolvedValue(mockCreatedCamera as never);
+      vi.mocked(apiClient.createCamera).mockResolvedValue(
+        mockCreatedCamera as never,
+      );
 
       const result = await cameraService.createCamera(request);
 
@@ -108,70 +148,60 @@ describe('cameraService', () => {
     });
   });
 
-  describe('updateCamera', () => {
-    it('should update an existing camera', async () => {
+  describe("updateCamera", () => {
+    it("should update an existing camera", async () => {
       const request: UpdateCameraDto = {
-        name: 'Updated Camera',
-        isEnabled: false
+        name: "Updated Camera",
+        isEnabled: false,
       };
 
-      const mockUpdatedCamera: CameraDto = {
-        id: '1',
-        name: 'Updated Camera',
-        streamUrl: 'http://cam1.local',
-        isEnabled: false
-      };
+      const mockUpdatedCamera = createCamera({
+        name: "Updated Camera",
+        isEnabled: false,
+      });
 
-      vi.mocked(apiClient.updateCamera).mockResolvedValue(mockUpdatedCamera as never);
+      vi.mocked(apiClient.updateCamera).mockResolvedValue(
+        mockUpdatedCamera as never,
+      );
 
-      const result = await cameraService.updateCamera('1', request);
+      const result = await cameraService.updateCamera("1", request);
 
       expect(result).toEqual(mockUpdatedCamera);
-      expect(apiClient.updateCamera).toHaveBeenCalledWith('1', request);
+      expect(apiClient.updateCamera).toHaveBeenCalledWith("1", request);
     });
   });
 
-  describe('deleteCamera', () => {
-    it('should delete a camera', async () => {
+  describe("deleteCamera", () => {
+    it("should delete a camera", async () => {
       vi.mocked(apiClient.deleteCamera).mockResolvedValue(undefined as never);
 
-      await cameraService.deleteCamera('1');
+      await cameraService.deleteCamera("1");
 
-      expect(apiClient.deleteCamera).toHaveBeenCalledWith('1');
+      expect(apiClient.deleteCamera).toHaveBeenCalledWith("1");
     });
   });
 
-  describe('toggleCamera', () => {
-    it('should enable a camera', async () => {
-      const mockCamera: CameraDto = {
-        id: '1',
-        name: 'Camera 1',
-        streamUrl: 'http://cam1.local',
-        isEnabled: true
-      };
+  describe("toggleCamera", () => {
+    it("should enable a camera", async () => {
+      const mockCamera = createCamera();
 
       vi.mocked(apiClient.toggleCamera).mockResolvedValue(mockCamera as never);
 
-      const result = await cameraService.toggleCamera('1', true);
+      const result = await cameraService.toggleCamera("1", true);
 
       expect(result).toEqual(mockCamera);
-      expect(apiClient.toggleCamera).toHaveBeenCalledWith('1', true);
+      expect(apiClient.toggleCamera).toHaveBeenCalledWith("1", true);
     });
 
-    it('should disable a camera', async () => {
-      const mockCamera: CameraDto = {
-        id: '1',
-        name: 'Camera 1',
-        streamUrl: 'http://cam1.local',
-        isEnabled: false
-      };
+    it("should disable a camera", async () => {
+      const mockCamera = createCamera({ isEnabled: false });
 
       vi.mocked(apiClient.toggleCamera).mockResolvedValue(mockCamera as never);
 
-      const result = await cameraService.toggleCamera('1', false);
+      const result = await cameraService.toggleCamera("1", false);
 
       expect(result).toEqual(mockCamera);
-      expect(apiClient.toggleCamera).toHaveBeenCalledWith('1', false);
+      expect(apiClient.toggleCamera).toHaveBeenCalledWith("1", false);
     });
   });
 });
