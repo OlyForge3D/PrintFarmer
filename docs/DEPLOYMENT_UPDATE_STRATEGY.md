@@ -137,9 +137,10 @@ Inventory reports this condition as
 `SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
 `facility_unavailable:*` evidence. The former is manual-only while verified
 signed release evidence is unavailable; repaired binding metadata can establish
-that evidence without a manual reinstall. The latter identifies code-owned
-host-update facilities that may clear when their implementations land. Neither
-condition authorizes execution, and both remain fail-closed.
+that evidence without a manual reinstall. The latter identifies actionable deployment
+evidence: an explicit `RequiredUnavailableFacilities` override or an unverified SQL Server
+visible-backup-path mapping. Neither condition authorizes execution, and both remain
+fail-closed until the deployment issue is resolved.
 
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;

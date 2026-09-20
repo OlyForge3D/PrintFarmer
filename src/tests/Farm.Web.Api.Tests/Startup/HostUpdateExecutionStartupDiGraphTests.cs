@@ -61,7 +61,7 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
     }
 
     [Fact]
-    public void AddHostUpdateExecution_RegistersQueueReconciliationFence()
+    public void AddHostUpdateExecution_RegistersEveryRequiredFence()
     {
         string root = CreateValidRoot();
         try
@@ -76,7 +76,10 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
 
             Assert.NotNull(provider.GetRequiredService<QueueReconciliationFenceFlag>());
             IReadOnlyList<IFenceableWriter> writers = provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>();
-            Assert.Contains(writers, writer => writer.Name == "queue-reconciliation");
+            foreach (string requiredWriterName in new HostUpdateExecutionOptions().RequiredFencedWriterNames)
+            {
+                Assert.Contains(writers, writer => writer.Name == requiredWriterName);
+            }
         }
         finally
         {

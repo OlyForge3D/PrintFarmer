@@ -252,11 +252,10 @@ public class HostUpdateWriterFencingTests : IDisposable
         {
             if (started)
             {
-                using var cancellation = new CancellationTokenSource(
-                    stopTimeout ?? TimeSpan.FromSeconds(10));
                 try
                 {
-                    await service.StopAsync(cancellation.Token);
+                    await service.StopAsync(CancellationToken.None)
+                        .WaitAsync(stopTimeout ?? TimeSpan.FromSeconds(10));
                 }
                 catch (Exception exception)
                 {
@@ -308,6 +307,25 @@ public class HostUpdateWriterFencingTests : IDisposable
 
         failure.Message.Should().Be("original assertion");
         failure.Data.Contains("HostedServiceCleanupFailure").Should().BeTrue();
+        service.Disposed.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task RunHostedServiceAsync_BackgroundServiceIgnoresCancellation_ReportsCleanupTimeout()
+    {
+        var service = new IgnoringCancellationBackgroundService();
+
+        Xunit.Sdk.XunitException failure = await Assert.ThrowsAsync<Xunit.Sdk.XunitException>(
+            () => RunHostedServiceAsync(
+                service,
+                () =>
+                {
+                    service.WaitUntilStarted(TimeSpan.FromSeconds(1)).Should().BeTrue();
+                    return Task.CompletedTask;
+                },
+                TimeSpan.FromMilliseconds(50)));
+
+        failure.Message.Should().Contain("cleanup did not complete within");
         service.Disposed.Should().BeTrue();
     }
 
@@ -949,5 +967,28 @@ public class HostUpdateWriterFencingTests : IDisposable
             Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
 
         public void Dispose() => Disposed = true;
+    }
+
+    private sealed class IgnoringCancellationBackgroundService : BackgroundService
+    {
+        private readonly ManualResetEventSlim started = new();
+        private readonly SemaphoreSlim release = new(0, 1);
+
+        public bool WaitUntilStarted(TimeSpan timeout) => started.Wait(timeout);
+
+        public bool Disposed { get; private set; }
+
+        protected override Task ExecuteAsync(CancellationToken stoppingToken)
+        {
+            started.Set();
+            return release.WaitAsync();
+        }
+
+        public override void Dispose()
+        {
+            Disposed = true;
+            release.Release();
+            base.Dispose();
+        }
     }
 }

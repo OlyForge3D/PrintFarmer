@@ -111,10 +111,11 @@ public interface IHostUpdateFenceCoordinator
 /// explicitly consults <see cref="IHostUpdateAdmissionGate.IsClosedAsync"/> before admitting new
 /// work. Current consumers cover queue submission, manual dispatch, batch dispatch,
 /// auto-dispatch ready acknowledgement, the auto-dispatch background loop, slicer job enqueue/claim,
-/// and webhook delivery. Remaining producer gaps are explicit code-owned unavailable facilities in
-/// <c>docs/HOST_UPDATE_EXECUTOR.md</c>. Closing the gate without every real call site wired does
-/// not, by itself, guarantee no new write starts; this class only proves the gate itself flipped,
-/// not that every producer honors it.
+/// and webhook delivery. No producer gaps remain code-owned; availability fails closed when any
+/// name in <see cref="HostUpdateExecutionOptions.RequiredFencedWriterNames"/> lacks a registered
+/// writer. Closing the gate without every real call site wired does not, by itself, guarantee no
+/// new write starts; this class only proves the gate itself flipped, not that every producer honors
+/// it.
 /// </summary>
 public sealed class AdmissionFenceableWriter(IHostUpdateAdmissionGate admissionGate) : IFenceableWriter
 {
