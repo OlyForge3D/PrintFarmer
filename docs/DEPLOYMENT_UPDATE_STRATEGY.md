@@ -195,9 +195,10 @@ evidence was complete.
 The `Eligible`, `Blocked`, `Unknown`, and `NotManaged` readiness lifecycle is a
 pure evidence evaluation. `Eligible` requires a complete signature-verified
 release and fresh, complete compatible observations for every required service,
-including platform, migration head, and worker requirements. Until release
-distribution supplies a verified target, an evaluator returns `NotManaged`; the
-live API does not currently emit readiness and does not offer or install software.
+including platform, migration head, and worker requirements. While release
+distribution has not supplied a verified target, the evaluator remains in the
+manual-only / non-managed evidence state; the live API does not currently emit
+readiness and does not offer or install software.
 
 Deliver **read-only installed-version inventory first**, followed by compatible
 release alerts. Make an **operator-approved, host-run updater** the first
@@ -227,7 +228,7 @@ bundle. The following claims remain intentionally separate:
 | GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. The prerelease-metadata rejection path is not represented by the current fixtures. | Covered by focused tests; prerelease mismatch evidence remains pending |
 | Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
 | Legacy installation transition | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. The supported transition is a one-time manual installation of a current signed release, followed by inventory refresh; no protected bootstrap or operator assertion is supported. | Manual operator action required |
-| Apply and recovery | `CodeOwnedUnavailableFacilities` is empty. Production availability now closes on concrete runtime evidence, including missing fenced writers, unverified SQL Server backup-path mapping, unsupported provider tooling, missing audited `HostExecutablePaths`, or an unreachable Docker runtime. `RequiredUnavailableFacilities` remains an explicit operator override. Separately, unsigned legacy installs remain `NotManaged` until a current signed release is manually installed and verified. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Runtime prerequisites implemented; live execution and recovery evidence pending |
+| Apply and recovery | There is no code-owned blanket unavailability list; production availability closes on concrete runtime evidence, including missing fenced writers, unverified SQL Server backup-path mapping, unsupported provider tooling, missing audited `HostExecutablePaths`, or an unreachable Docker runtime. `RequiredUnavailableFacilities` remains an explicit operator override. Separately, unsigned legacy installs remain `NotManaged` while signed-release identity evidence is unavailable; a current signed release clears the manual-only reason but does not itself create an `Eligible` evaluator state. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Runtime prerequisites implemented; live execution and recovery evidence pending |
 | Automatic policy and UI execution | As of `ce8f4c182`, Update Now and automatic controls render disabled with no execute callback wired (`InstallerUpdatesExperience.tsx`); no live execution has been demonstrated end-to-end. | Blocked |
 
 Do not describe insider.4 publication as an end-to-end update acceptance run.
@@ -338,8 +339,9 @@ scheduler permission — see `docs/HOST_UPDATE_EXECUTOR.md` for the full adapter
 the `HostUpdateExecutionOptions` root-directory contract, and the availability-probing
 contract a scheduler must poll before ever invoking the executor. The production
 executor keeps availability closed for explicit operator-configured
-`RequiredUnavailableFacilities`; the code-owned blanket list is empty, so built-in
-readiness is determined by concrete runtime probes and required writer coverage.
+`RequiredUnavailableFacilities`; there is no code-owned blanket unavailability list,
+so built-in readiness is determined by concrete runtime probes and required writer
+coverage.
 Bridge/webhook delivery is
 fenced, and migration/apply crash uncertainty is reconciled only from concrete
 provider/container evidence after a `:before` marker without the matching `:after`
