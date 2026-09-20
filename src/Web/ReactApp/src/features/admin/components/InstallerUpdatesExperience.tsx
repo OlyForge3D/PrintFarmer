@@ -418,7 +418,7 @@ export function InstallerUpdatesExperience({
     : [];
   const readinessHops = Array.isArray(readiness?.hops) ? readiness.hops : [];
   const unsignedLegacyInstallation = eligibilityReasons.includes(
-    "UnsignedLegacyInstallationManualOnly",
+    "SignedReleaseEvidenceUnavailableManualOnly",
   );
 
   return (
@@ -441,10 +441,10 @@ export function InstallerUpdatesExperience({
       >
         {unsignedLegacyInstallation && (
           <>
-            This unsigned legacy installation cannot establish managed
-            eligibility. Install a current signed release manually once;
-            subsequent managed eligibility requires the signed release evidence
-            and never an operator assertion.
+            This installation cannot present verified signed release evidence and
+            cannot establish managed eligibility. Verify the inventory adapter's
+            evidence or install a current signed release manually once;
+            subsequent managed eligibility never accepts operator assertion.
           </>
         )}
         {blocked && (

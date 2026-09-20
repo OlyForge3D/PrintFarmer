@@ -118,7 +118,7 @@ describe('InstallerUpdatesExperience', () => {
   it('distinguishes unsigned legacy installations from executor facility blockers and gives the manual path', () => {
     render(<InstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
-      eligibilityReasons: ['UnsignedLegacyInstallationManualOnly', 'ReadOnlyInventory'],
+      eligibilityReasons: ['SignedReleaseEvidenceUnavailableManualOnly', 'ReadOnlyInventory'],
       compatibilityState: 'Compatible',
     })} observation="connected" />);
 
@@ -152,7 +152,7 @@ describe('InstallerUpdatesExperience', () => {
     render(<InstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
       eligibilityReasons: [
-        'UnsignedLegacyInstallationManualOnly',
+        'SignedReleaseEvidenceUnavailableManualOnly',
         'ReadOnlyInventory',
       ],
       compatibilityState: 'Compatible',
@@ -163,10 +163,11 @@ describe('InstallerUpdatesExperience', () => {
       },
     })} observation="connected" />);
 
-    expect(screen.getByText('Manual signed install required')).toBeVisible();
-    expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
-    expect(screen.getByText(/cannot present verified signed release evidence/)).toBeVisible();
-    expect(screen.getByText(/The observed installation is blocked/)).toBeVisible();
+    const availability = screen.getByText('Read-only release availability').parentElement?.parentElement;
+    expect(availability).not.toBeNull();
+    expect(availability).toHaveTextContent(/This installation cannot present verified signed release evidence/);
+    expect(availability).toHaveTextContent(/install a current signed release manually once/);
+    expect(availability).toHaveTextContent(/The observed installation is blocked/);
   });
 
   it('renders every observed replica and marks conflicting identities without proposing a target', async () => {

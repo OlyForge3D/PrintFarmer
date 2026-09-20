@@ -51,7 +51,7 @@ public sealed class ServiceInventoryTests
 
         result.Eligibility.Should().Be(InventoryEligibility.NotManaged);
         result.EligibilityReasons.Should().Equal(
-            "UnsignedLegacyInstallationManualOnly",
+            "SignedReleaseEvidenceUnavailableManualOnly",
             "ManagedEligibilityNotEstablished",
             "ReadOnlyInventory");
     }
@@ -81,7 +81,7 @@ public sealed class ServiceInventoryTests
 
         result.Eligibility.Should().Be(InventoryEligibility.Blocked);
         result.EligibilityReasons.Should().Equal(
-            "UnsignedLegacyInstallationManualOnly",
+            "SignedReleaseEvidenceUnavailableManualOnly",
             "MixedApplicationReleases",
             "ReadOnlyInventory");
     }
@@ -222,7 +222,19 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.ObservedChannel);
         Assert.Equal(InventoryCompatibilityState.Unknown, result.CompatibilityState);
         Assert.Equal(InventoryEligibility.NotManaged, result.Eligibility);
-        Assert.Contains("UnsignedLegacyInstallationManualOnly", result.EligibilityReasons);
+        Assert.Contains("SignedReleaseEvidenceUnavailableManualOnly", result.EligibilityReasons);
+    }
+
+    [Fact]
+    public void Evaluate_BindingMetadataRepairRemovesManualOnlyEvidenceMarker()
+    {
+        ServiceReplicaObservationDto incomplete = Verified("a") with { VerificationSource = null };
+        ServiceInventoryDto before = Evaluate([incomplete]);
+        before.EligibilityReasons.Should().Contain("SignedReleaseEvidenceUnavailableManualOnly");
+
+        ServiceInventoryDto after = Evaluate([Verified("a")]);
+        after.EligibilityReasons.Should().NotContain("SignedReleaseEvidenceUnavailableManualOnly");
+        after.Eligibility.Should().Be(InventoryEligibility.NotManaged);
     }
 
     [Fact]

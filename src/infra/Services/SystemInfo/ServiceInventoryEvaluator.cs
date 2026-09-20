@@ -33,8 +33,8 @@ public static partial class ServiceInventoryEvaluator
             || channelState == InventoryChannelState.Mismatch;
         string[] eligibilityReasons = unsignedLegacyInstallation
             ? blocked
-                ? ["UnsignedLegacyInstallationManualOnly", ..reasons, "ReadOnlyInventory"]
-                : ["UnsignedLegacyInstallationManualOnly", "ManagedEligibilityNotEstablished", "ReadOnlyInventory"]
+                ? ["SignedReleaseEvidenceUnavailableManualOnly", ..reasons, "ReadOnlyInventory"]
+                : ["SignedReleaseEvidenceUnavailableManualOnly", "ManagedEligibilityNotEstablished", "ReadOnlyInventory"]
             : blocked
                 ? [..reasons, "ReadOnlyInventory"]
                 : ["ManagedEligibilityNotEstablished", "ReadOnlyInventory"];

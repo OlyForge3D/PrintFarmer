@@ -130,11 +130,12 @@ fix does not change an unsigned installation's trust state, and downgrade is
 not a recovery path.
 
 Inventory reports this condition as
-`UnsignedLegacyInstallationManualOnly`, separately from executor
-`facility_unavailable:*` evidence. The former is a permanent property of the
-installation until a manual signed install replaces it; the latter identifies
-code-owned host-update facilities that may clear when their implementations
-land. Neither condition authorizes execution, and both remain fail-closed.
+`SignedReleaseEvidenceUnavailableManualOnly`, separately from executor
+`facility_unavailable:*` evidence. The former is manual-only while verified
+signed release evidence is unavailable; repaired binding metadata can establish
+that evidence without a manual reinstall. The latter identifies code-owned
+host-update facilities that may clear when their implementations land. Neither
+condition authorizes execution, and both remain fail-closed.
 
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
