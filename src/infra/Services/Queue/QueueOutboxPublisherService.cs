@@ -97,8 +97,28 @@ public sealed class QueueOutboxPublisherService(
                 logger.LogError(ex, "[OutboxPublisher] Error processing outbox events");
             }
 
-            await Task.Delay(PollInterval, stoppingToken);
+            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+            }
         }
+    }
+
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + PollInterval;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (hostUpdateFence is not null &&
+                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     internal async Task RecoverStaleLeasesAsync(CancellationToken ct)
