@@ -37,7 +37,11 @@ function isAppSourceFile(path, directory) {
   return (
     !isAbsolute(normalized) &&
     !normalized.startsWith("../") &&
-    !normalized.startsWith("node_modules/") &&
+    // split(...).includes(...) rather than startsWith("node_modules/"):
+    // the latter is root-anchored, so a nested node_modules
+    // (src/**/node_modules/**, e.g. a vendored/copied dependency) would
+    // still be scanned. Matching any path segment closes that gap.
+    !normalized.split("/").includes("node_modules") &&
     normalized.startsWith("src/")
   );
 }
@@ -52,8 +56,12 @@ function isAppSourceFile(path, directory) {
 // baseline and the gate would otherwise pass silently, with no baseline edit
 // and no signal to reviewers. Gating this count separately closes that
 // silent path.
+//
+// Returns both the count and the matched, project-relative paths (deduped by
+// realpath, same as the count) so a gate failure can name the offending
+// files instead of only reporting a number a reviewer has to hunt for.
 export function countNoCheckFiles(listFilesOutput, directory) {
-  const seen = new Set();
+  const seen = new Map();
 
   for (const path of listFilesOutput.split(/\r?\n/)) {
     if (!path || !isAppSourceFile(path, directory)) {
@@ -65,10 +73,13 @@ export function countNoCheckFiles(listFilesOutput, directory) {
       continue;
     }
 
-    seen.add(toRealPath(absolute));
+    const real = toRealPath(absolute);
+    if (!seen.has(real)) {
+      seen.set(real, relative(directory, absolute).replaceAll("\\", "/"));
+    }
   }
 
-  return seen.size;
+  return { count: seen.size, paths: [...seen.values()].sort() };
 }
 
 export function validateBaseline(baseline) {
@@ -157,7 +168,7 @@ export function evaluate({
     };
   }
 
-  const noCheckFileCount = countNoCheckFiles(listFilesOutput, directory);
+  const noCheck = countNoCheckFiles(listFilesOutput, directory);
   // Collect every gate failure before returning (#2811 item 1 lesson,
   // applied here too) so an edit that trips both the diagnostic count and the
   // @ts-nocheck count in the same run reports as one failure, not two
@@ -174,13 +185,19 @@ export function evaluate({
     );
   }
 
-  if (noCheckFileCount !== baseline.applicationNoCheckFileCount) {
+  if (noCheck.count !== baseline.applicationNoCheckFileCount) {
     const direction =
-      noCheckFileCount > baseline.applicationNoCheckFileCount
+      noCheck.count > baseline.applicationNoCheckFileCount
         ? "A new or newly-@ts-nocheck'd application file was added; remove the directive instead of raising this count."
         : "The exact count is stale; regenerate applicationNoCheckFileCount in scripts/app-typecheck-baseline.json in the same commit.";
+    // Name the offending files (sorted, project-relative) rather than
+    // leaving a reviewer to hunt for them from a bare count.
+    const pathList =
+      noCheck.paths.length > 0
+        ? `\n  ${noCheck.paths.join("\n  ")}`
+        : "";
     failures.push(
-      `Application type-check found ${noCheckFileCount} @ts-nocheck file(s) under src/; expected exact count ${baseline.applicationNoCheckFileCount}. ${direction}`,
+      `Application type-check found ${noCheck.count} @ts-nocheck file(s) under src/; expected exact count ${baseline.applicationNoCheckFileCount}. ${direction}${pathList}`,
     );
   }
 
@@ -193,6 +210,6 @@ export function evaluate({
 
   return {
     ok: true,
-    message: `Application type-check passed with ${diagnostics.fileDiagnostics.length}/${baseline.applicationDiagnosticCount} baseline diagnostic(s) (exact count, not diagnostic identity) and ${noCheckFileCount}/${baseline.applicationNoCheckFileCount} @ts-nocheck file(s). See #2820 to drive the diagnostic count to zero.`,
+    message: `Application type-check passed with ${diagnostics.fileDiagnostics.length}/${baseline.applicationDiagnosticCount} baseline diagnostic(s) (exact count, not diagnostic identity) and ${noCheck.count}/${baseline.applicationNoCheckFileCount} @ts-nocheck file(s). See #2820 to drive the diagnostic count to zero.`,
   };
 }

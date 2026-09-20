@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -135,6 +136,9 @@ test("fails above and below the exact @ts-nocheck file count (R2)", async () => 
       above.message,
       /found 1 @ts-nocheck file\(s\) under src\/; expected exact count 0\. A new or newly-@ts-nocheck'd application file was added/,
     );
+    // The failure must name the offending file, not just a bare count
+    // (Bishop, non-blocking review item).
+    assert.match(above.message, /src\/services\/nocheck\.ts/);
 
     const below = evaluate({
       baseline: { ...baseline, applicationNoCheckFileCount: 1 },
@@ -156,7 +160,43 @@ test("fails above and below the exact @ts-nocheck file count (R2)", async () => 
 test("countNoCheckFiles ignores files outside src/ and under node_modules/ (R2)", () => {
   const listing =
     "src/services/example.ts\nnode_modules/@types/x/index.d.ts\n../outside.ts";
-  assert.equal(countNoCheckFiles(listing, projectDirectory), 0);
+  assert.deepEqual(countNoCheckFiles(listing, projectDirectory), {
+    count: 0,
+    paths: [],
+  });
+});
+
+test("isAppSourceFile ignores a nested node_modules under src/, not only a root-level one (Bishop, non-blocking)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-nested-nm-"),
+  );
+
+  try {
+    // startsWith("node_modules/") is root-anchored and would still scan
+    // src/**/node_modules/**, e.g. a vendored/copied dependency directory.
+    // The file below genuinely carries @ts-nocheck, so if the segment-based
+    // exclusion (split("/").includes("node_modules")) were reverted to the
+    // old root-anchored check, this nested file would wrongly be counted.
+    await mkdir(
+      path.join(fixtureDirectory, "src/vendor/node_modules/@types/x"),
+      { recursive: true },
+    );
+    await writeFile(
+      path.join(
+        fixtureDirectory,
+        "src/vendor/node_modules/@types/x/index.d.ts",
+      ),
+      "// @ts-nocheck\nexport const a: number = 1;\n",
+    );
+
+    const result = countNoCheckFiles(
+      "src/vendor/node_modules/@types/x/index.d.ts",
+      fixtureDirectory,
+    );
+    assert.deepEqual(result, { count: 0, paths: [] });
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("reports the diagnostic-count and @ts-nocheck-count failures together, not sequentially (R2, mirrors #2811 item 1)", () => {
@@ -254,4 +294,32 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }
+});
+
+test("typecheck-app-core.mjs imports its @ts-nocheck detection from typecheck-tests-core.mjs and defines no local copy (R9, architectural pin for R2)", () => {
+  // R2's entire anti-drift argument is "one scanner, shared by both gates."
+  // A behavioral test cannot see the difference between importing the
+  // shared helper and pasting an equivalent regex locally -- both would pass
+  // every other test in this file. Only a source-text assertion pins the
+  // single-scanner invariant itself.
+  const source = readFileSync(
+    path.join(scriptsDirectory, "typecheck-app-core.mjs"),
+    "utf8",
+  );
+
+  assert.match(
+    source,
+    /import\s*\{[^}]*\bhasTsNoCheckDirective\b[^}]*\}\s*from\s*["']\.\/typecheck-tests-core\.mjs["']/,
+  );
+  assert.match(
+    source,
+    /import\s*\{[^}]*\btoRealPath\b[^}]*\}\s*from\s*["']\.\/typecheck-tests-core\.mjs["']/,
+  );
+  // No local re-declaration of the nocheck pattern -- a duplicate regex,
+  // even one that behaves identically today, is exactly the drift risk R2
+  // closed by sharing the detector. Match on regex-literal / function
+  // declarations rather than the bare string "@ts-nocheck" (which
+  // legitimately appears in this file's own comments and messages).
+  assert.doesNotMatch(source, /const\s+\w*NO_?CHECK\w*\s*=\s*\//i);
+  assert.doesNotMatch(source, /function\s+hasTsNoCheckDirective/);
 });

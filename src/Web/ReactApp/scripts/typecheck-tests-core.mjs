@@ -81,13 +81,22 @@ export function hasTsNoCheckDirective(absolutePath) {
 // Exported for reuse by scripts/typecheck-app-core.mjs (#2811 item 5 / R2:
 // the application ratchet must detect the same evasion, not a second
 // hand-rolled regex that can drift from this one).
-export function toRealPath(absolutePath) {
-  // realpathSync.native calls the OS syscall directly and resolves the true
+//
+// `platform` and `realpathImpl` are injectable seams (R8): the win32
+// casefold contract -- "prefer .native, then casefold the result on win32" --
+// must be exercisable deterministically on any host OS, not only pinned by a
+// real-filesystem test that CI (ubuntu-latest/macos-latest only, no Windows
+// runner) never executes. Defaults preserve production behavior exactly.
+export function toRealPath(
+  absolutePath,
+  { platform = process.platform, realpathImpl = realpathSync } = {},
+) {
+  // realpathImpl.native calls the OS syscall directly and resolves the true
   // on-disk casing on case-insensitive filesystems (verified on Windows:
   // realpathSync alone kept two differently-cased paths to the same file
   // distinct, while realpathSync.native collapsed them to one canonical
   // string). Fall back to the JS implementation when .native is unavailable.
-  const resolveRealPath = realpathSync.native ?? realpathSync;
+  const resolveRealPath = realpathImpl.native ?? realpathImpl;
   let real;
   try {
     real = resolveRealPath(absolutePath);
@@ -98,7 +107,7 @@ export function toRealPath(absolutePath) {
   // relying solely on .native's canonicalization, since filesystem behavior
   // (NTFS vs. exFAT, network shares, etc.) can vary. POSIX filesystems are
   // case-sensitive by design, so casefolding there would be incorrect.
-  return process.platform === "win32" ? real.toLowerCase() : real;
+  return platform === "win32" ? real.toLowerCase() : real;
 }
 
 export function countTestFiles(listFilesOutput, directory) {
@@ -268,7 +277,11 @@ export function isTestFile(path, directory) {
   return (
     !isAbsolute(normalized) &&
     !normalized.startsWith("../") &&
-    !normalized.startsWith("node_modules/") &&
+    // split(...).includes(...) rather than startsWith("node_modules/"):
+    // the latter is root-anchored, so a nested node_modules
+    // (src/**/node_modules/**, e.g. a vendored/copied dependency) would
+    // still be scanned. Matching any path segment closes that gap.
+    !normalized.split("/").includes("node_modules") &&
     (normalized.startsWith("src/test/") ||
       normalized.includes("/__tests__/") ||
       /\.test\.(?:ts|tsx)$/.test(normalized))

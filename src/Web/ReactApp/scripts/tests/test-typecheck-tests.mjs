@@ -282,12 +282,74 @@ test("toRealPath collapses two casings of the same real file into one entry on W
     const differentCasePath = path.join(fixtureDirectory, "casetest.test.ts");
 
     // NTFS is case-insensitive by default, so both casings resolve to the
-    // same on-disk file; toRealPath must fold them to one Set entry.
+    // same on-disk file; toRealPath must fold them to one Set entry. This is
+    // genuine real-filesystem evidence, but it only ever runs on a win32
+    // host (CI here is ubuntu-latest/macos-latest only, never Windows), so
+    // it must not be the only pin -- see the two injected-seam tests below,
+    // which exercise the same contract deterministically on every platform.
     const seen = new Set([toRealPath(actualPath), toRealPath(differentCasePath)]);
     assert.equal(seen.size, 1);
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }
+});
+
+// R8: CI here (ubuntu-latest / macos-latest only, verified against
+// ci.yml -- no Windows runner) never exercises win32 codepaths, so the
+// win32-only test above never runs there and a revert of the
+// `realpathSync.native ?? realpathSync` preference or the win32 casefold
+// would still pass every check GitHub enforces. These two tests inject the
+// platform string and the realpath implementation so the contract is pinned
+// on any host, not only a developer's Windows machine.
+test("toRealPath prefers realpathSync.native over the plain fallback when both are present (#2811 hardening, R3/R8)", () => {
+  let nativeCalls = 0;
+  let fallbackCalls = 0;
+  function fakeRealpathImpl(inputPath) {
+    fallbackCalls += 1;
+    return inputPath;
+  }
+  fakeRealpathImpl.native = (inputPath) => {
+    nativeCalls += 1;
+    return inputPath;
+  };
+
+  toRealPath("/some/path", { platform: "linux", realpathImpl: fakeRealpathImpl });
+
+  assert.equal(nativeCalls, 1);
+  assert.equal(fallbackCalls, 0);
+});
+
+test("toRealPath folds casing on a simulated win32 platform regardless of the host OS (#2811 hardening, R3/R8)", () => {
+  // Simulates the exact failure mode observed on a real Windows box: the
+  // resolver (standing in for realpathSync.native) resolves the path but
+  // does not itself normalize casing -- that must come from toRealPath's own
+  // win32 casefold step, not be assumed to happen inside the realpath call.
+  function fakeRealpathImpl(inputPath) {
+    return inputPath;
+  }
+
+  const upper = toRealPath("C:\\Repo\\CaseTest.ts", {
+    platform: "win32",
+    realpathImpl: fakeRealpathImpl,
+  });
+  const lower = toRealPath("C:\\Repo\\casetest.ts", {
+    platform: "win32",
+    realpathImpl: fakeRealpathImpl,
+  });
+
+  assert.equal(upper, lower);
+
+  // Same resolver, but on a non-win32 platform: casing must NOT be folded,
+  // since POSIX filesystems are case-sensitive by design.
+  const posixUpper = toRealPath("/repo/CaseTest.ts", {
+    platform: "linux",
+    realpathImpl: fakeRealpathImpl,
+  });
+  const posixLower = toRealPath("/repo/casetest.ts", {
+    platform: "linux",
+    realpathImpl: fakeRealpathImpl,
+  });
+  assert.notEqual(posixUpper, posixLower);
 });
 
 test("fails missing, malformed, and non-object baselines", () => {
@@ -322,6 +384,17 @@ test("classifies project-relative and absolute test paths while excluding depend
   );
   assert.equal(
     isTestFile("node_modules/@types/c/__tests__/d.d.ts", packageDirectory),
+    false,
+  );
+  assert.equal(
+    // Nested node_modules (src/**/node_modules/**, e.g. a vendored/copied
+    // dependency): startsWith("node_modules/") is root-anchored and would
+    // miss this; split("/").includes("node_modules") catches it (Bishop,
+    // non-blocking).
+    isTestFile(
+      "src/vendor/node_modules/@types/c/__tests__/d.d.ts",
+      packageDirectory,
+    ),
     false,
   );
   assert.equal(isTestFile("../../outside.test.ts", packageDirectory), false);
@@ -376,6 +449,21 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
 
     assert.notEqual(result.status, 0);
     assert.match(output, /TypeScript test compiler/);
+    // R7 (mirrors R5): process.kill(pid, "SIGKILL") does not behave
+    // identically across platforms -- on POSIX the process dies with
+    // signal:"SIGKILL", status:null (the signal-death branch); on Windows,
+    // Node emulates it via TerminateProcess and reports status:1,
+    // signal:null instead (the status-fallback branch). Both messages
+    // happen to share the "TypeScript test compiler" prefix, so asserting
+    // only that substring passes regardless of which branch actually ran.
+    // Assert the branch-distinguishing text so the test pins the
+    // platform-specific path it is actually expected to take, rather than
+    // passing by coincidence.
+    if (process.platform === "win32") {
+      assert.match(output, /exited unexpectedly with status/);
+    } else {
+      assert.match(output, /did not complete successfully/);
+    }
     assert.doesNotMatch(output, /typecheck-tests\.mjs:\d+/);
     assert.doesNotMatch(output, /Test type-check passed/);
     assert.doesNotMatch(output, /baseline is stale/);
