@@ -204,13 +204,12 @@ Draft status does not waive checks on existing links. Use
 unmarked epics, flat-graph opt-out, first-wave declaration, and verifier.
 The verifier supplies issue-level feedback, not a PR merge gate.
 
-## Pre-PR Review Gate
+## Readiness and Merge Review Gate
 
-**Every change MUST receive the risk-based review defined below before any PR is opened.**
-Standard and documentation-only changes require one qualified non-author reviewer using a
-different model family from the implementation agent. High-risk changes require Bishop, Hicks,
-and Vasquez to review the branch together and deliver a consensus verdict. Do not open a PR
-until the required review approves.
+**Draft PRs may open early; review gates readiness and merge, not PR creation.**
+Before marking ready or merging, satisfy [Risk-Based Review Scope](#risk-based-review-scope),
+required CI, and verified current-head evidence. The historical status context
+`squad/pre-pr-verdict` remains unchanged for branch-protection compatibility.
 
 ### Scope: the gate applies to `squad`-labelled PRs only
 
@@ -260,7 +259,7 @@ Note the bare `squad` label is the scope marker. A `squad:{member}` label is an
 branch with `git push -u origin <branch>`, and push again after each meaningful
 chunk of work. Do not wait for review approval to push. **Pushing is not merging**:
 it does not open or authorize a PR, request review, apply labels, authorize a
-merge, or bypass the pre-PR review gate.
+merge, or bypass the readiness/merge review gate.
 
 A session's worktree is destroyed when it is archived. Before ending a session or
 archiving it, verify every intended commit is reachable from the remote branch
@@ -271,26 +270,27 @@ evidence"; rebases and force-pushes still supersede recorded reviews.
 
 Flow:
 
-1. Commit code to a feature branch, then push the branch for recovery. **Do not open
-   the PR yet**; the review gate below must still pass before PR creation.
+1. Commit code to a feature branch, then push the branch for recovery. A draft PR
+   may open immediately with the `squad` label and `Closes #N` references.
 2. Classify the change using the risk-based review scope below. For a standard change,
    dispatch one qualified, non-author reviewer using a different model family from the
-   implementation agent. For a high-risk change, request review from Bishop, Hicks, and
-   Vasquez (mention all three).
+   implementation agent. For a high-risk change, select two of Bishop, Hicks, and
+   Vasquez with distinct primary lenses as defined below.
 3. The required reviewer or panel examines the branch. Agent review is self-attested,
    not independent approval.
-4. If consensus is APPROVE, proceed to step 5. If REJECT or BLOCK, fix the code on the
+4. If the required reviews approve without unresolved dissent, proceed to step 5.
+   If REJECT or BLOCK, fix the code on the
    branch and re-request — subject to § "Post-Rejection Revision Ownership" below, which
    governs whether the original author may make that fix themselves.
-5. Once APPROVED, open the PR — see § "PR creation: tool preference" immediately below
-   for exactly how, and apply the `squad` label as part of that step (required — see
-   § "Scope" above).
-6. After the PR exists, each required reviewer records their review as a PR comment in the
+5. Open a PR if none exists — see § "PR creation: tool preference" immediately below.
+   Keep it draft until review, required CI, and current-head evidence pass.
+6. Each required reviewer records their review as a PR comment in the
    canonical format below. The `squad-review-verdict.yml` workflow re-evaluates
-   automatically on every comment, review, and push.
+   automatically on every comment, review, and push. Verify before marking ready
+   and again before merge; merge with `--match-head-commit <reviewedHeadSha>`.
 
-This is a hard gate enforced by team policy. The required risk-based review record gates the
-PR creation step itself.
+An authenticated exact-head owner override can authorize readiness/merge without
+the review quorum; it does not waive required CI or erase dissent.
 
 ### PR creation: tool preference
 
@@ -371,6 +371,10 @@ the entire original change set again.
   the previous `Squad-Head-SHA` (or the pre-PR review output); do not invent a new
   verdict field. A reviewer who missed a round uses their own last reviewed SHA,
   not another reviewer's newer baseline.
+- **Continuation first:** resume the same reviewer session when it supports
+  follow-up. Otherwise supply its compact immutable checkpoint, not the entire
+  transcript or repeated full personas/checklists. A one-shot reviewer receives
+  a new task with that checkpoint and the applicable read-only contract.
 - Inspect `git diff <last-reviewed-sha> <new-head-sha>` (two endpoint trees, not
   a merge-base/three-dot diff), plus enough surrounding code, callers, and tests
   to assess the correction and regressions it introduces. Account for **every**
@@ -392,17 +396,60 @@ Reviewer count is determined from the full PR change by
 The pure-sync carry-forward exception is separate and unchanged. Owner approval
 precedence is defined in [Repository verdict evidence](#repository-verdict-evidence).
 
+### Findings and Reviewer Checkpoints
+
+The coordinator maintains one deduplicated finding ledger in the issue/PR thread.
+Assign a stable ID (for example `R2886-01`) to each distinct failure scenario;
+reuse that ID across reviewers and rounds. Each entry contains severity
+(Critical/Major/Minor/Nit), evidence/location, failure scenario, fix owner,
+closure criteria, status (open/fixed/verified/overridden), and the reviewer
+responsible for verifying closure. Merge duplicates by linking IDs, not by
+discarding evidence. Style-only nits do not block.
+
+After each round, append a compact immutable per-reviewer checkpoint after the
+canonical verdict in ordinary prose: reviewer and primary lens; reviewed full
+SHA and comparison baseline; inspected scope; unresolved finding IDs with their
+failure scenarios and closure criteria; finding dispositions and evidence;
+relevant test evidence; remaining risks; and continuation/session handle when
+available. Store it in the issue/PR thread (pre-PR output may be attached there).
+Never edit a prior checkpoint to advance its baseline; append a new one. The
+coordinator copies all unresolved findings into every follow-on packet.
+
+A checkpoint is handoff context, not merge evidence. Every follow-on reviewer
+still accounts for the complete per-reviewer prior-SHA -> new-head delta and
+issues fresh current-head evidence. If a replacement cannot recover its
+predecessor's checkpoint/commits, report the blocker and recover them first.
+An owner override marks dissent overridden, never verified or withdrawn; retain
+the original finding, rejecting reviewer, and authorization SHA in the ledger.
+
 ### Risk-Based Review Scope
 
 **This section is the canonical definition of reviewer count. Every other mention of reviewer
 count in this repository must link here rather than restate it, so the definition cannot drift.**
 
-**Standard and documentation-only changes require ONE reviewer. High-risk changes require the
-three-reviewer panel.** Standard review must be performed by a qualified non-author reviewer
+**Standard and documentation-only changes require ONE reviewer. High-risk changes require TWO
+qualified reviewers from Bishop, Hicks, and Vasquez, with distinct primary lenses.**
+Standard review must be performed by a qualified non-author reviewer
 using a model from a different family than the implementation agent. Model diversity is a
 dispatch requirement, not GitHub-verdict evidence: canonical records do not contain a
 trustworthy model attestation. This changes reviewer **count**, not review **rigour** — a single
 reviewer still performs a real review and can still REJECT.
+
+**High-risk routing:** choose the two lenses most relevant to the full change:
+Bishop owns integration/architecture (boundaries, persistence, cross-layer fit);
+Hicks owns behavior/contracts/tests (observable behavior, compatibility, regression
+evidence); Vasquez owns trust/failure/concurrency (authorization, fail-closed paths,
+races and recovery). Each reviewer covers the complete assigned diff, emphasizing
+their lens without ignoring critical findings outside it. Do not dispatch all three
+for routine work or repeat identical reconnaissance.
+
+Invoke the third reviewer only for disagreement, a critical finding, or unresolved
+cross-domain risk. Record the escalation reason and adjudication in the ledger.
+Escalation is process-level, not a new label or verdict field. The machine gate
+accepts any two eligible panel approvals and **no accepted current-head rejection**,
+including a rejection from the third reviewer or another qualified roster member.
+Two or three approvals never erase active dissent: the rejecting reviewer must
+update their verdict after closure, or the owner must explicitly override.
 
 **Definition (allowlist).** A change is documentation-only when **every** changed path is prose,
 unless a high-risk condition below applies:
@@ -420,7 +467,7 @@ directory-wide allowlists from these examples. Mixed code/documentation changes 
 review only when every non-prose path is one of those exact paths. Any unrecognized non-prose
 path is high-risk.
 
-**High-risk scope — always requires the full panel.** This includes authentication,
+**High-risk scope — always requires the elevated quorum.** This includes authentication,
 authorization, identity, permissions or roles; security/privacy; EF migrations and persistent
 data schema; deployment, Docker, Compose and infrastructure; CI/workflows and release scripts;
 public API or serialization contracts; and all Squad/Ralph/governance or agent-instruction
@@ -428,9 +475,9 @@ changes. This includes the API wire models
 `mobile/PrintFarmer/Models/FarmShape.swift` and
 `src/Web/ReactApp/src/types/api.ts`; and security, threat-model, licensing, notice, copying,
 code-of-conduct, or published API-contract prose. Dependency manifests and lockfiles are also
-high-risk. If a
-required panel member authored a high-risk PR, block it rather than substituting another roster
-member.
+high-risk. The existing conservative author guard remains: if any of the three
+eligible panel members authored a high-risk PR, block agent-only approval rather
+than substituting another roster member; an exact-head owner override is available.
 
 **Be conservative — when in doubt, use the high-risk panel.**
 
@@ -452,8 +499,8 @@ following **always** take the full gate, even when the only change is markdown:
 Whether a given edit moves an agent's safety boundary cannot be judged from the path, so a
 single review record must never be able to rewrite these. Prose is matched by extension
 (`.md`, `.markdown`, `.rst`, `.adoc`, `.txt`), so binary or image assets under `docs/`
-correctly take the full gate. If a change is misclassified as full-gate, the cost is two extra
-review records; the reverse would be a real review gap.
+correctly take the full gate. If a change is misclassified as full-gate, the cost is one extra
+review record; the reverse would be a real review gap.
 
 This list is exported from the module as `fullGatePrefixes` / `fullGateFiles`, and a test
 asserts that this section enumerates exactly it — the code and this documentation drifted apart
@@ -605,6 +652,12 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
   administrator authority, including the repository owner; no text-declared
   identity or bot allowlist grants it. Owner approvals never carry across a head
   change. Forks still accept only native administrator review, not comments.
+  Owner status includes `dissent=N; short=N`: accepted agent rejections and
+  missing approvals for the quorum. The workflow audit retains reviewer names
+  and panel members without approval; the verifier preserves both counts.
+  The authorizing login is never listed as a self-attested review record.
+  These bounded counts keep the status within GitHub's 140-character limit;
+  full findings remain in the ledger. Legacy owner statuses remain recognizable.
 
 **What this record genuinely buys you**, despite being self-attested:
 
@@ -624,7 +677,7 @@ takes exactly one of six forms:
 | `success` | `NOT_APPLICABLE @ <sha12>: not a squad PR (no 'squad' label)` | `NOT_APPLICABLE` (exit 4) |
 | `success` | `REVIEWED (self-attested) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
 | `success` | `REVIEWED (self-attested, carried across sync) @ <sha12> by <agents>` | `REVIEWED` (exit 0) |
-| `success` | `APPROVE (owner) @ <sha12> by <login>` | `APPROVED` (exit 0) |
+| `success` | `APPROVE (owner) @ <sha12> by <login>; dissent=N; short=N` | `APPROVED` (exit 0) |
 | `failure` | `REQUEST_CHANGES @ <sha12> by <reviewer>` | `CHANGES_REQUESTED` (exit 2) |
 | `failure` | `BLOCKED @ <sha12>: <reason>` | `MISSING` (exit 3) |
 
@@ -645,7 +698,7 @@ verifier preserves that reason verbatim, because the subcases differ materially:
 | `no review recorded for <sha12>` | Nothing was posted for this head. |
 | `no authenticated review for <sha12> (N unauthenticated)` | Records exist, but their authors could not be authenticated with repository write access. **Security-relevant — do not read this as "nobody reviewed".** |
 | `fork PR needs a repository administrator` | Fork PR; agent records are not read at all. |
-| `have <n>/<required>[, missing <agents>][ (stale at <agent>@<sha12>, …)]` | Too few accepted records for this change's scope. `missing` lists expected panel members with no record; the `stale at` clause lists reviewers whose only record names a superseded head. Both clauses are omitted when they do not apply, so a docs-only PR reads e.g. `have 0/1 (stale at dallas@<sha12>)` and a code PR reads e.g. `have 1/3, missing hicks+vasquez`. |
+| `have <n>/<required>[, choose <agents>][ (stale at <agent>@<sha12>, …)]` | Too few accepted approvals. `choose` lists remaining eligible panel members, not individually required reviewers. For example, `have 1/2, choose hicks+vasquez` needs either approval. `stale at` names superseded records. |
 | `reviewer <agent> is the PR author` | The only record came from the authoring agent. |
 
 A session reading the failure therefore knows what to do instead of parking indefinitely.
