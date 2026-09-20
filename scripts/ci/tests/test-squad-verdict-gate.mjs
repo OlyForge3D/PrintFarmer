@@ -286,13 +286,71 @@ test('accepts a single eligible approval for a standard code change', () => {
   );
 });
 
-test('requires the full panel for a high-risk change', () => {
+test('requires two panel approvals for a high-risk change', () => {
   const result = gate({
     changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
     comments: [comment('bishop', 'APPROVE')],
   });
   assert.equal(result.state, 'failure');
-  assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
+  assert.match(result.description, /have 1\/2, choose hicks\+vasquez/);
+});
+
+test('any two distinct eligible panel approvals satisfy high-risk review', () => {
+  for (const pair of [['bishop', 'hicks'], ['bishop', 'vasquez'], ['hicks', 'vasquez']]) {
+    const result = gate({
+      changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+      comments: pair.map((member) => comment(member, 'APPROVE')),
+    });
+    assert.equal(result.passed, true, pair.join('+'));
+    assert.equal(result.requiredCount, 2);
+    assert.deepEqual(result.approvals, pair);
+    assert.deepEqual(result.requiredMembers, ['bishop', 'hicks', 'vasquez']);
+  }
+});
+
+test('duplicates, outsiders, non-panel members, stale and unauthenticated records cannot fill the quorum', () => {
+  for (const extra of [
+    comment('bishop', 'APPROVE'),
+    comment('dallas', 'APPROVE'),
+    comment('nostromo', 'APPROVE'),
+    comment('hicks', 'APPROVE', staleSha),
+    comment('hicks', 'APPROVE', headSha, { squadWriteAccess: false }),
+  ]) {
+    const result = gate({
+      changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+      comments: [comment('bishop', 'APPROVE'), extra],
+    });
+    assert.equal(result.passed, false);
+    assert.deepEqual(result.approvals, ['bishop']);
+  }
+});
+
+test('a third or other roster reviewer rejection blocks the pair until that reviewer clears it', () => {
+  for (const rejector of ['vasquez', 'dallas']) {
+    const comments = [
+      comment('bishop', 'APPROVE'),
+      comment('hicks', 'APPROVE'),
+      comment(rejector, 'REQUEST_CHANGES'),
+    ];
+    const input = { changedPaths: ['scripts/ci/squad-verdict-gate.mjs'], comments };
+    assert.equal(gate(input).passed, false);
+    comments.push(comment(rejector, 'APPROVE', headSha, {
+      updated_at: '2026-08-08T02:00:00Z',
+    }));
+    assert.equal(gate(input).passed, true);
+  }
+});
+
+test('a proven pure-sync pair counts but its carried rejection still blocks', () => {
+  const input = {
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    comments: [comment('bishop', 'APPROVE', staleSha), comment('hicks', 'APPROVE')],
+    carriedShas: new Set([staleSha]),
+  };
+  assert.equal(gate(input).passed, true);
+  assert.deepEqual(gate(input).carried, ['bishop']);
+  input.comments.push(comment('vasquez', 'REQUEST_CHANGES', staleSha));
+  assert.equal(gate(input).passed, false);
 });
 
 test('rejects verdicts pinned to a stale SHA', () => {
@@ -583,7 +641,7 @@ test('a single approval does not satisfy a high-risk code change', () => {
     comments: [comment('bishop', 'APPROVE')],
   });
   assert.equal(result.state, 'failure');
-  assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
+  assert.match(result.description, /have 1\/2, choose hicks\+vasquez/);
 });
 
 test('a single approval satisfies a documentation-only change', () => {
@@ -816,7 +874,8 @@ test('a newer owner comment clears a native rejection from the shared owner acco
   });
   assert.equal(result.state, 'success');
   assert.equal(result.override, 'owner-comment');
-  assert.equal(result.description, `APPROVE (owner) @ ${headSha.slice(0, 12)} by jpapiez`);
+  assert.equal(result.description, `APPROVE (owner) @ ${headSha.slice(0, 12)} by jpapiez; dissent=1; short=2`);
+  assert.deepEqual(result.dissent, ['vasquez']);
 });
 
 test('a current native owner approval wins over agent rejection and missing panel records', () => {
@@ -829,6 +888,50 @@ test('a current native owner approval wins over agent rejection and missing pane
   });
   assert.equal(result.state, 'success');
   assert.equal(result.override, 'github-review');
+  assert.deepEqual(result.approvals, []);
+  assert.deepEqual(result.dissent, ['hicks']);
+  assert.equal(result.missingApprovals, 2);
+  assert.ok(result.notes.some((note) => note.includes('Dissent preserved: hicks')));
+  assert.ok(result.notes.some((note) => note.includes('bishop, hicks, vasquez')));
+});
+
+test('owner audit counts only eligible records and fits the status limit for a maximal login', () => {
+  const login = 'a'.repeat(39);
+  const result = gate({
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    reviews: [{ state: 'APPROVED', commitId: headSha, login, isAdmin: true }],
+    comments: [
+      comment('bishop', 'APPROVE'),
+      comment('hicks', 'REQUEST_CHANGES'),
+      comment('vasquez', 'REQUEST_CHANGES'),
+      comment('dallas', 'APPROVE'),
+      comment('nostromo', 'REQUEST_CHANGES'),
+      comment('parker', 'REQUEST_CHANGES'),
+      comment('old-reviewer', 'REQUEST_CHANGES', staleSha),
+    ],
+  });
+  assert.equal(result.passed, true);
+  assert.deepEqual(result.approvals, ['bishop']);
+  assert.deepEqual(result.dissent, ['hicks', 'vasquez']);
+  assert.equal(result.missingApprovals, 1);
+  assert.match(result.description, /; dissent=2; short=1$/);
+  assert.ok(result.description.length <= 140);
+});
+
+test('owner authorization with the full quorum preserves dissent without a shortfall', () => {
+  const result = gate({
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    comments: [
+      comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true }),
+      comment('bishop', 'APPROVE'),
+      comment('hicks', 'APPROVE'),
+      comment('vasquez', 'REQUEST_CHANGES'),
+    ],
+  });
+  assert.equal(result.passed, true);
+  assert.equal(result.missingApprovals, 0);
+  assert.match(result.description, /; dissent=1; short=0$/);
+  assert.deepEqual(result.approvals, ['bishop', 'hicks']);
 });
 
 test('current admin approval wins over another account rejection in either channel', () => {
@@ -847,7 +950,7 @@ test('current admin approval wins over another account rejection in either chann
         [comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true })],
     });
     assert.equal(result.state, 'success');
-    assert.match(result.description, /^APPROVE \(owner\).*by jpapiez$/);
+    assert.match(result.description, /^APPROVE \(owner\).*by jpapiez; dissent=0; short=1$/);
   }
 });
 
@@ -1120,7 +1223,7 @@ test('unauthenticated or agent-named comments cannot enter the owner timeline', 
   }
 });
 
-test('delta-only panel rereview still requires fresh verdicts from every reviewer at the new head', () => {
+test('delta-only panel rereview requires a fresh quorum at the new head', () => {
   const previousRound = ['bishop', 'hicks', 'vasquez'].map((member) =>
     comment(member, member === 'hicks' ? 'REQUEST_CHANGES' : 'APPROVE', staleSha));
   const revisionRound = ['bishop', 'hicks', 'vasquez'].map((member) => {
@@ -1129,14 +1232,14 @@ test('delta-only panel rereview still requires fresh verdicts from every reviewe
     return record;
   });
   const input = { changedPaths: ['scripts/ci/squad-verdict-gate.mjs'] };
-  for (const freshCount of [0, 1, 2]) {
+  for (const freshCount of [0, 1]) {
     const result = gate({
       ...input, comments: [...previousRound, ...revisionRound.slice(0, freshCount)],
     });
     assert.equal(result.passed, false);
     assert.deepEqual(result.requiredMembers, ['bishop', 'hicks', 'vasquez']);
   }
-  const result = gate({ ...input, comments: [...previousRound, ...revisionRound] });
+  const result = gate({ ...input, comments: [...previousRound, ...revisionRound.slice(0, 2)] });
   assert.equal(result.passed, true);
   assert.match(result.description, /^REVIEWED \(self-attested\)/);
   assert.deepEqual(result.carried, []);

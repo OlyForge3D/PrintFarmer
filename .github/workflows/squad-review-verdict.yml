@@ -1,6 +1,7 @@
 name: Record squad review (self-attested)
 
-# Squad pre-PR review RECORD.
+# Squad readiness/merge review RECORD. Draft PRs may open before review.
+# Keep the historical status context for branch-protection compatibility.
 #
 # ⚠️ READ THIS BEFORE TRUSTING THE `squad/pre-pr-verdict` STATUS.
 #
@@ -653,7 +654,10 @@ jobs:
                   : 'BLOCKED'],
                 ['Reason', result.reason],
                 ['Self-attested review records', result.approvals.join(', ') || '(none)'],
-                ['Expected reviewers', result.requiredMembers.join(', ') || 'n/a'],
+                ['Eligible panel', result.requiredMembers.join(', ') || 'n/a'],
+                ['Required approvals', String(result.requiredCount ?? 'see reason')],
+                ['Preserved dissent', result.dissent?.join(', ') || '(none)'],
+                ['Missing approvals', String(result.missingApprovals ?? 'see reason')],
                 ['Stale records', result.stale
                   .map((r) => `${r.reviewer} @ ${r.headSha}`).join(', ') || '(none)'],
               ]);
