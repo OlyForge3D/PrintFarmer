@@ -54,7 +54,6 @@ export function SchemaCategoryPanel({
               disabled={disabled}
               isModified={hasChanges?.(field.key) ?? false}
               onReset={onReset ? () => onReset(field.key) : undefined}
-              originalValue={getOriginalValue?.(field.key)}
             />
           ))}
         </SettingSection>
@@ -82,7 +81,6 @@ export function SchemaCategoryPanel({
                   disabled={disabled}
                   isModified={hasChanges?.(field.key) ?? false}
                   onReset={onReset ? () => onReset(field.key) : undefined}
-                  originalValue={getOriginalValue?.(field.key)}
                 />
               ))}
             </SettingSection>
