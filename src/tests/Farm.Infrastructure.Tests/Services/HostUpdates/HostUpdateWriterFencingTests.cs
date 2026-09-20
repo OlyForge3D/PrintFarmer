@@ -10,6 +10,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -266,23 +267,22 @@ public class HostUpdateWriterFencingTests : IDisposable
     [Fact]
     public async Task QueueReconciliationService_TwoPauseEpochsWithoutObservedResume_AcknowledgesBoth()
     {
-        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        await DisableForeignKeysAsync();
+        await SeedStaleAttemptsWithMatchingDispatchStateAsync(2);
+
         var fence = new QueueReconciliationFenceFlag();
+        var epochController = new TwoEpochPauseInterceptor(fence);
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory(epochController);
         var service = new QueueReconciliationService(
             scopeFactory,
-            NullLogger<QueueReconciliationService>.Instance,
+            epochController,
             fence);
 
         await service.StartAsync(CancellationToken.None);
-        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await fence.RequestPauseAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 1);
-
-        await fence.ResumeAsync(CancellationToken.None);
-        await fence.RequestPauseAsync(CancellationToken.None);
         await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
         await service.StopAsync(CancellationToken.None);
 
+        epochController.EpochFlips.Should().Be(1);
         fence.AcknowledgementCount.Should().Be(2);
         (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
     }
@@ -439,6 +439,64 @@ public class HostUpdateWriterFencingTests : IDisposable
             if (IsEnabled &&
                 command.CommandText.Contains("PrinterDispatchStates", StringComparison.Ordinal) &&
                 Interlocked.Exchange(ref _pauseRequested, 1) == 0)
+            {
+                await fence.RequestPauseAsync(cancellationToken);
+            }
+
+            return result;
+        }
+    }
+
+    private sealed class TwoEpochPauseInterceptor(QueueReconciliationFenceFlag fence)
+        : DbCommandInterceptor, ILogger<QueueReconciliationService>
+    {
+        private int _firstPauseRequested;
+        private int _epochFlips;
+
+        public int EpochFlips => Volatile.Read(ref _epochFlips);
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(
+            LogLevel logLevel,
+            EventId eventId,
+            TState state,
+            Exception? exception,
+            Func<TState, Exception?, string> formatter)
+        {
+            if (logLevel == LogLevel.Warning &&
+                formatter(state, exception).Contains(
+                    "reason=pause_observed_after_attempt",
+                    StringComparison.Ordinal) &&
+                Interlocked.Exchange(ref _epochFlips, 1) == 0)
+            {
+                Task resume = fence.ResumeAsync(CancellationToken.None);
+                if (!resume.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException(
+                        "The in-memory test fence must transition epochs synchronously.");
+                }
+
+                Task request = fence.RequestPauseAsync(CancellationToken.None);
+                if (!request.IsCompletedSuccessfully)
+                {
+                    throw new InvalidOperationException(
+                        "The in-memory test fence must transition epochs synchronously.");
+                }
+            }
+        }
+
+        public override async ValueTask<DbDataReader> ReaderExecutedAsync(
+            DbCommand command,
+            CommandExecutedEventData eventData,
+            DbDataReader result,
+            CancellationToken cancellationToken = default)
+        {
+            if (command.CommandText.Contains("PrinterDispatchStates", StringComparison.Ordinal) &&
+                Interlocked.Exchange(ref _firstPauseRequested, 1) == 0)
             {
                 await fence.RequestPauseAsync(cancellationToken);
             }

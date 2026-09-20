@@ -177,8 +177,8 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
 
     public Task RequestPauseAsync(CancellationToken cancellationToken)
     {
-        _pauseRequested = true;
         _acknowledged = false;
+        _pauseRequested = true;
         return Task.CompletedTask;
     }
 
