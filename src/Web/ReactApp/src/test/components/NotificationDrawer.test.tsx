@@ -97,17 +97,17 @@ describe("NotificationDrawer", () => {
     notificationHooks.useMarkNotificationAsRead.mockReturnValue({
       mutateAsync: mockMarkAsRead,
       isPending: false,
-    } as ReturnType<typeof useMarkNotificationAsRead>);
+    });
 
     notificationHooks.useMarkAllNotificationsAsRead.mockReturnValue({
       mutateAsync: mockMarkAllAsRead,
       isPending: false,
-    } as ReturnType<typeof useMarkAllNotificationsAsRead>);
+    });
 
     notificationHooks.useDeleteNotification.mockReturnValue({
       mutateAsync: mockDelete,
       isPending: false,
-    } as ReturnType<typeof useDeleteNotification>);
+    });
   });
 
   it("does not render when closed", () => {

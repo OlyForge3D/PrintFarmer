@@ -62,7 +62,77 @@ vi.mock('@/features/scheduling/components/ScheduleModal', () => ({
 // Dynamic import after mocks
 const { useScheduledJobs, usePauseSchedule, useResumeSchedule, useCancelSchedule } = await import('@/common/hooks/useApi');
 
-function queryResult<T>(data: T): UseQueryResult<T, ApiError> {
+function queryResult<T>(
+  data: T,
+  options: {
+    isLoading?: boolean;
+    error?: ApiError | null;
+  } = {},
+): UseQueryResult<T, ApiError> {
+  const isLoading = options.isLoading ?? false;
+  const error = options.error ?? null;
+  const isError = error !== null;
+
+  if (isLoading) {
+    return {
+      data: undefined,
+      dataUpdatedAt: 0,
+      error: null,
+      errorUpdatedAt: 0,
+      failureCount: 0,
+      failureReason: null,
+      errorUpdateCount: 0,
+      isError: false,
+      isFetched: false,
+      isFetchedAfterMount: false,
+      isFetching: true,
+      isLoading: true,
+      isPending: true,
+      isInitialLoading: true,
+      isPaused: false,
+      isPlaceholderData: false,
+      isLoadingError: false,
+      isRefetchError: false,
+      isRefetching: false,
+      isStale: false,
+      isSuccess: false,
+      isEnabled: true,
+      refetch: vi.fn(),
+      status: 'pending',
+      fetchStatus: 'fetching',
+    };
+  }
+
+  if (isError) {
+    return {
+      data: undefined,
+      dataUpdatedAt: 0,
+      error,
+      errorUpdatedAt: 0,
+      failureCount: 1,
+      failureReason: error,
+      errorUpdateCount: 1,
+      isError: true,
+      isFetched: true,
+      isFetchedAfterMount: true,
+      isFetching: false,
+      isLoading: false,
+      isPending: false,
+      isInitialLoading: false,
+      isPaused: false,
+      isPlaceholderData: false,
+      isLoadingError: true,
+      isRefetchError: false,
+      isRefetching: false,
+      isStale: false,
+      isSuccess: false,
+      isEnabled: true,
+      refetch: vi.fn(),
+      status: 'error',
+      fetchStatus: 'idle',
+    };
+  }
+
   return {
     data,
     dataUpdatedAt: 0,
@@ -132,27 +202,54 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 describe('SchedulingPage', () => {
   const mockJobs = [
     {
+      id: 'schedule-1',
       jobId: 'job-1',
       jobName: 'Daily Print Job',
       printerName: 'Printer 1',
       scheduledTime: '2025-01-15T10:00:00Z',
       recurrence: 'daily',
+      scheduledStartTimeUtc: '2025-01-15T10:00:00Z',
+      scheduledLocalTime: '2025-01-15T10:00:00',
+      timeZone: 'UTC',
+      recurrencePattern: 'Daily' as const,
+      recurrenceInterval: 1,
+      isActive: true,
+      isPaused: false,
+      requiresOperatorReauthorization: false,
       status: 'active' as const,
     },
     {
+      id: 'schedule-2',
       jobId: 'job-2',
       jobName: 'Weekly Maintenance',
       printerName: 'Printer 2',
       scheduledTime: '2025-01-20T14:00:00Z',
       recurrence: 'weekly',
+      scheduledStartTimeUtc: '2025-01-20T14:00:00Z',
+      scheduledLocalTime: '2025-01-20T14:00:00',
+      timeZone: 'UTC',
+      recurrencePattern: 'Weekly' as const,
+      recurrenceInterval: 1,
+      isActive: false,
+      isPaused: true,
+      requiresOperatorReauthorization: false,
       status: 'paused' as const,
     },
     {
+      id: 'schedule-3',
       jobId: 'job-3',
       jobName: 'One-time Job',
       printerName: 'Printer 1',
       scheduledTime: '2025-01-25T08:00:00Z',
       recurrence: null,
+      scheduledStartTimeUtc: '2025-01-25T08:00:00Z',
+      scheduledLocalTime: '2025-01-25T08:00:00',
+      timeZone: 'UTC',
+      recurrencePattern: null,
+      recurrenceInterval: 0,
+      isActive: true,
+      isPaused: false,
+      requiresOperatorReauthorization: false,
       status: 'active' as const,
     },
   ];
@@ -185,7 +282,9 @@ describe('SchedulingPage', () => {
   });
 
   it('shows loading spinner while data is fetching', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue(queryResult([]));
+    vi.mocked(useScheduledJobs).mockReturnValue(
+      queryResult([], { isLoading: true }),
+    );
 
     render(
       <TestWrapper>
@@ -273,7 +372,7 @@ describe('SchedulingPage', () => {
     const jobsWithVariousStatuses = [
       { ...mockJobs[0], status: 'active' as const },
       { ...mockJobs[1], status: 'paused' as const },
-      { ...mockJobs[2], jobId: 'job-4', status: 'cancelled' as const },
+      { ...mockJobs[2], jobId: 'job-4', status: 'reauthorizationRequired' as const },
       { ...mockJobs[0], jobId: 'job-5', status: 'completed' as const },
     ];
 
@@ -287,12 +386,19 @@ describe('SchedulingPage', () => {
 
     expect(screen.getByText('active')).toBeInTheDocument();
     expect(screen.getByText('paused')).toBeInTheDocument();
-    expect(screen.getByText('cancelled')).toBeInTheDocument();
+    expect(screen.getByText('reauthorizationRequired')).toBeInTheDocument();
     expect(screen.getByText('completed')).toBeInTheDocument();
   });
 
   it('shows error message when data fails to load', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue(queryResult([]));
+    vi.mocked(useScheduledJobs).mockReturnValue(
+      queryResult([], {
+        error: {
+          message: 'The scheduling service is unavailable',
+          statusCode: 503,
+        },
+      }),
+    );
 
     render(
       <TestWrapper>
