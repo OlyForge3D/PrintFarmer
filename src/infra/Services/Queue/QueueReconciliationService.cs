@@ -51,8 +51,8 @@ public sealed class QueueReconciliationService(
                 if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                    logger.LogWarning(
-                        "queue_reconciliation_writer_fence_rejected reason=durable_fence_closed_or_unreadable");
+                    logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_reconciliation");
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -68,7 +68,7 @@ public sealed class QueueReconciliationService(
                 logger.LogError(ex, "[Reconciliation] Error during reconciliation scan");
             }
 
-            await Task.Delay(ReconciliationInterval, stoppingToken);
+            await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false);
         }
 
         logger.LogInformation("[Reconciliation] Queue reconciliation service stopped");
@@ -79,8 +79,7 @@ public sealed class QueueReconciliationService(
         if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
         {
             await hostUpdateFence.AcknowledgePausedAsync(ct);
-            logger.LogWarning(
-                "queue_reconciliation_writer_fence_rejected reason=durable_fence_closed_or_unreadable");
+            logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_reconciliation");
             return;
         }
 
@@ -173,9 +172,31 @@ public sealed class QueueReconciliationService(
         foreach (QueueDispatchAttempt attempt in toReconcile)
         {
             await ReconcileSingleAttemptAsync(db, printersSvc, sequenceAllocator, attempt, ct);
+            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
+            {
+                await hostUpdateFence.AcknowledgePausedAsync(ct);
+                logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_after_attempt");
+                break;
+            }
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    private async Task WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + ReconciliationInterval;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+                logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_during_interval");
+                return;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
     }
 
     private static async Task<bool> RecoverNullAttemptCommandsAsync(
@@ -312,6 +333,13 @@ public sealed class QueueReconciliationService(
             logger.LogDebug(
                 "[Reconciliation] Attempt {AttemptId} has an outstanding physical control; lease retained",
                 attempt.Id);
+            return;
+        }
+
+        if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(ct))
+        {
+            await hostUpdateFence.AcknowledgePausedAsync(ct);
+            logger.LogWarning("queue_reconciliation_writer_fence_rejected reason=pause_observed_before_write");
             return;
         }
 

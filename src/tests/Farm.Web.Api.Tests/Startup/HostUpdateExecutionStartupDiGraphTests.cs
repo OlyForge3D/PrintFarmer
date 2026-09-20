@@ -69,6 +69,8 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             using ServiceProvider provider = services.BuildServiceProvider();
 
             Assert.NotNull(provider.GetRequiredService<QueueReconciliationFenceFlag>());
+            IReadOnlyList<IFenceableWriter> writers = provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>();
+            Assert.Contains(writers, writer => writer.Name == "queue-reconciliation");
         }
         finally
         {

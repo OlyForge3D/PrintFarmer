@@ -235,4 +235,24 @@ public class HostUpdateWriterFencingTests : IDisposable
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task QueueReconciliationService_PauseDuringInterval_AcknowledgesWithinFenceWindow()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var fence = new QueueReconciliationFenceFlag();
+        var service = new QueueReconciliationService(
+            scopeFactory,
+            NullLogger<QueueReconciliationService>.Instance,
+            fence);
+
+        await service.StartAsync(CancellationToken.None);
+        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await fence.RequestPauseAsync(CancellationToken.None);
+
+        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 1);
+        await service.StopAsync(CancellationToken.None);
+
+        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+    }
 }

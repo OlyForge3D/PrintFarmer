@@ -315,4 +315,6 @@ public sealed class QueueReconciliationFenceFlag(IHostUpdateAdmissionGate? durab
     public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
 
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
 }

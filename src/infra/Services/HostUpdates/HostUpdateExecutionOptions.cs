@@ -128,6 +128,7 @@ public sealed class HostUpdateExecutionOptions
         "queue-retention-prune",
         "auto-dispatch",
         "webhook-delivery",
+        "queue-reconciliation",
     ];
 
     /// <summary>
