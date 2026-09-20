@@ -404,6 +404,42 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
+    public async Task CheckAsync_RequiredUnavailableFacilities_NormalizeWhitespaceDuplicatesAndCaseVariants_ExactOrder()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
+            options.RequiredUnavailableFacilities = [" ", "facility-a", "facility-a", "FACILITY-A"];
+            ConfigureExecutablePaths(options, root, "docker", "pg_dump", "pg_restore");
+
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget("Npgsql.EntityFrameworkCore.PostgreSQL")],
+                [new FakeBackupTarget()],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().ContainInOrder(
+                "facility_unavailable:facility-a",
+                "facility_unavailable:FACILITY-A");
+            result.Reasons.Should().HaveCount(2);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CheckAsync_DockerResolverReportsMissingConfiguration_ReportsSingleReason()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
