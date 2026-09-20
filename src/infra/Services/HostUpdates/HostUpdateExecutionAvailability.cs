@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -57,7 +58,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
 
     private static readonly string[] CodeOwnedUnavailableFacilities = [];
 
-    internal static readonly string[] CodeOwnedRequiredFencedWriterNames =
+    internal static readonly ImmutableArray<string> CodeOwnedRequiredFencedWriterNames =
     [
         "api-admission",
         "queue-outbox-publisher",

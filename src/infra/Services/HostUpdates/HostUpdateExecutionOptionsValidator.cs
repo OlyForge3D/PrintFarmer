@@ -18,9 +18,10 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// validator skips deployment-specific checks -- the executor's own
 /// <see cref="HostUpdateExecutionAvailabilityProvider"/> reports
 /// <c>root_directory_not_configured</c> as a runtime-queryable <c>Unavailable</c> reason rather
-/// than crashing the process. The code-owned fenced-writer minimum is always validated because
-/// configuration must never weaken that safety boundary. Once an operator explicitly configures
-/// a <c>RootDirectory</c> (opting into the feature for that deployment), every remaining check
+/// than crashing the process. The code-owned fenced-writer minimum is always validated so a
+/// narrowed configuration is visible as a startup error even though the runtime union already
+/// prevents it from weakening the safety boundary. Once an operator explicitly configures a
+/// <c>RootDirectory</c> (opting into the feature for that deployment), every remaining check
 /// below also runs and fails process start fast on a genuine misconfiguration.
 /// </remarks>
 public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostUpdateExecutionOptions>

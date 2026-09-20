@@ -117,11 +117,41 @@ public class HostUpdateExecutionOptionsValidatorTests
     }
 
     [Fact]
-    public void Validate_ConfiguredSupersetRequiredFencedWriterNames_SucceedsWithExactConfiguredSet()
+    public void Validate_ConfiguredSetMissingExactlyOneRequiredFencedWriter_FailsWithExactMissingName()
+    {
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(
+            CodeOwnedRequiredFencedWriterNames[..^1]);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + CodeOwnedRequiredFencedWriterNames[^1]
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_MissingRootDirectoryWithNarrowedFencedWriterNames_StillFails()
+    {
+        HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(
+            CodeOwnedRequiredFencedWriterNames[..^2]);
+        options.RootDirectory = string.Empty;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Be(
+            "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+            + string.Join(',', CodeOwnedRequiredFencedWriterNames[^2..])
+            + ".");
+    }
+
+    [Fact]
+    public void Validate_ConfiguredSupersetRequiredFencedWriterNames_Succeeds()
     {
         string[] superset = [.. CodeOwnedRequiredFencedWriterNames, "deployment-specific-writer"];
         HostUpdateExecutionOptions options = BindRequiredFencedWriterNames(superset);
-        options.RequiredFencedWriterNames.Should().Equal(superset);
 
         ValidateOptionsResult result = Validator.Validate(null, options);
 
