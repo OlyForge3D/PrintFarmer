@@ -30,6 +30,7 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.ObservedChannel);
         Assert.Null(result.TargetChannel);
         Assert.Equal(InventoryEligibility.NotManaged, result.Eligibility);
+        Assert.Contains("ManagedEligibilityNotEstablished", result.EligibilityReasons);
         Assert.Equal(InventoryCompatibilityState.Unknown, result.CompatibilityState);
     }
 
@@ -347,6 +348,27 @@ public sealed class ServiceInventoryTests
             Services =
             [
                 Release(null).Services.Single() with { PlatformDigest = signedDigest },
+            ],
+        };
+
+        ReleaseReadinessDto result = ReleaseReadinessEvaluator.Evaluate(inventory, release, Now);
+
+        Assert.Equal(InventoryEligibility.Eligible, result.State);
+        Assert.Empty(result.Reasons);
+        Assert.Equal(["InventoryRead", "SignedReleaseEvidence", "FreshHostEvidence", "TargetCompatibility"], result.Hops);
+    }
+
+    [Fact]
+    public void Readiness_ValidButDifferentIndexDigest_IsEligibleForUpdate()
+    {
+        string observedDigest = "sha256:" + new string('c', 64);
+        string signedDigest = "sha256:" + new string('d', 64);
+        ServiceInventoryDto inventory = Evaluate([Verified("a") with { IndexDigest = observedDigest }]);
+        VerifiedReleaseEvidenceDto release = Release(null) with
+        {
+            Services =
+            [
+                Release(null).Services.Single() with { IndexDigest = signedDigest },
             ],
         };
 
