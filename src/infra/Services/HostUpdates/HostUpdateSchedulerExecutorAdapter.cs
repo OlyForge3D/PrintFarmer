@@ -1,4 +1,6 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -9,11 +11,18 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// </summary>
 public sealed class HostUpdateSchedulerExecutorAdapter(
     IHostUpdateExecutor executor,
-    string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable, IAsyncDisposable
+    string hostPlatform,
+    ILogger<HostUpdateSchedulerExecutorAdapter>? logger = null) : IHostUpdateSchedulerExecutor, IDisposable, IAsyncDisposable
 {
+    private const int MaxPreArmedRequests = 16;
+    private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(5);
+    private readonly ILogger<HostUpdateSchedulerExecutorAdapter> _logger = logger ?? NullLogger<HostUpdateSchedulerExecutorAdapter>.Instance;
     private readonly ConcurrentDictionary<string, ActiveOperation> _activeRequests = new(StringComparer.Ordinal);
     private readonly object _lifecycleGate = new();
     private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // This is deliberately capped because the adapter is scoped per scheduler tick; a future
+    // lifetime change must not turn cancellation requests into unbounded retained state.
     private readonly ConcurrentDictionary<string, string> _preArmed = new(StringComparer.Ordinal);
     private int _disposed;
 
@@ -136,14 +145,23 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
             return;
         }
 
-        if (_activeRequests.TryGetValue(signal.RequestId, out ActiveOperation? operation) &&
-            string.Equals(operation.OperationToken, signal.OperationToken, StringComparison.Ordinal))
+        lock (_lifecycleGate)
         {
-            operation.Cancellation.Cancel();
-            return;
-        }
+            if (_activeRequests.TryGetValue(signal.RequestId, out ActiveOperation? operation) &&
+                string.Equals(operation.OperationToken, signal.OperationToken, StringComparison.Ordinal))
+            {
+                operation.Cancellation.Cancel();
+                return;
+            }
 
-        _preArmed[signal.RequestId] = signal.OperationToken;
+            if (_preArmed.Count >= MaxPreArmedRequests && !_preArmed.ContainsKey(signal.RequestId))
+            {
+                _logger.LogWarning("host_update_prearmed_cancellation_capacity_reached");
+                return;
+            }
+
+            _preArmed[signal.RequestId] = signal.OperationToken;
+        }
     }
 
 #pragma warning disable VSTHRD002
@@ -188,7 +206,11 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
         try
         {
 #pragma warning disable VSTHRD003
-            await Task.WhenAll(operations.Select(operation => operation.Completion.Task)).ConfigureAwait(false);
+            Task drain = Task.WhenAll(operations.Select(operation => operation.Completion.Task));
+            if (await Task.WhenAny(drain, Task.Delay(DisposeDrainTimeout)).ConfigureAwait(false) != drain)
+            {
+                _logger.LogWarning("host_update_executor_shutdown_drain_timed_out");
+            }
 #pragma warning restore VSTHRD003
 
             if (cancellationErrors.Count > 0)

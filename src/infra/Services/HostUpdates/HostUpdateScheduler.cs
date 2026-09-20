@@ -1065,8 +1065,11 @@ public sealed class HostUpdateScheduler(
                 IHostUpdateSchedulerExecutor executionAdapter = _directExecutor ?? executionScope?.ServiceProvider.GetRequiredService<IHostUpdateSchedulerExecutor>()
                     ?? throw new InvalidOperationException("host_update_scheduler_executor_scope_unavailable");
                 using IDisposable? cancellationRegistration = _cancellationBridge?.Register(
-                    cancellationToken => executionAdapter.SignalSafeCheckpointCancellationAsync(
-                        new HostUpdateCancellationSignal(request.RequestId, operationToken), cancellationToken));
+                    cancellationToken =>
+                    {
+                        executionAdapter.PreArmCancellation(new HostUpdateCancellationSignal(request.RequestId, operationToken));
+                        return Task.CompletedTask;
+                    });
                 HostUpdateCancellationSignal? pending = _cancellationBridge?.ConsumePending();
                 if (pending is not null && pending == new HostUpdateCancellationSignal(request.RequestId, operationToken))
                 {
@@ -1173,7 +1176,7 @@ public sealed class HostUpdateScheduler(
         {
             if (_directExecutor is not null)
             {
-                await _directExecutor.SignalSafeCheckpointCancellationAsync(signal, ct).ConfigureAwait(false);
+                _directExecutor.PreArmCancellation(signal);
             }
             else if (_cancellationBridge is not null)
             {

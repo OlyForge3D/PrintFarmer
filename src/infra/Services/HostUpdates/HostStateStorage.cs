@@ -2,6 +2,7 @@
 using System.ComponentModel.DataAnnotations;
 using System.Runtime.InteropServices;
 using System.Security;
+using System.Security.Cryptography;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -69,6 +70,37 @@ public sealed class HostStatePath
 
         HostStateFileSecurity.ValidateExistingPathComponents(path);
         return path;
+    }
+}
+
+public static class HostUpdateInstallationIdentity
+{
+    private const string FileName = "installation.id";
+    private static readonly object Gate = new();
+
+    public static string GetOrCreate(string? hostStateRoot)
+    {
+        string root = string.IsNullOrWhiteSpace(hostStateRoot)
+            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrintFarmer")
+            : hostStateRoot;
+        Directory.CreateDirectory(root);
+        string path = Path.Combine(root, FileName);
+
+        lock (Gate)
+        {
+            if (File.Exists(path))
+            {
+                string existing = File.ReadAllText(path).Trim();
+                if (!string.IsNullOrWhiteSpace(existing))
+                {
+                    return existing;
+                }
+            }
+
+            string identity = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
+            File.WriteAllText(path, identity);
+            return identity;
+        }
     }
 }
 
