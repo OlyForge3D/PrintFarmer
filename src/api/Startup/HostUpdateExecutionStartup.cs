@@ -111,6 +111,9 @@ public static class HostUpdateExecutionStartup
         services.AddSingleton<IHostUpdateWriterActivityFlag, InMemoryHostUpdateWriterActivityFlag>();
         services.AddSingleton<PowerReadingPruneFenceFlag>();
         services.AddSingleton<QueueRetentionPruneFenceFlag>();
+        services.AddSingleton<BackendStartCommandConsumerFenceFlag>();
+        services.AddSingleton<BackendControlCommandConsumerFenceFlag>();
+        services.AddSingleton<BedClearAcknowledgementExpiryFenceFlag>();
         services.AddSingleton<AutoDispatchFenceFlag>();
         services.AddSingleton<WebhookDeliveryFenceFlag>();
         services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp =>
@@ -119,6 +122,9 @@ public static class HostUpdateExecutionStartup
             new BackgroundWriterFenceableWriter("queue-outbox-publisher", sp.GetRequiredService<IHostUpdateWriterActivityFlag>()),
             new BackgroundWriterFenceableWriter("power-reading-prune", sp.GetRequiredService<PowerReadingPruneFenceFlag>()),
             new BackgroundWriterFenceableWriter("queue-retention-prune", sp.GetRequiredService<QueueRetentionPruneFenceFlag>()),
+            new BackgroundWriterFenceableWriter("backend-start-command-consumer", sp.GetRequiredService<BackendStartCommandConsumerFenceFlag>()),
+            new BackgroundWriterFenceableWriter("backend-control-command-consumer", sp.GetRequiredService<BackendControlCommandConsumerFenceFlag>()),
+            new BackgroundWriterFenceableWriter("bed-clear-acknowledgement-expiry", sp.GetRequiredService<BedClearAcknowledgementExpiryFenceFlag>()),
             new BackgroundWriterFenceableWriter("auto-dispatch", sp.GetRequiredService<AutoDispatchFenceFlag>()),
             new BackgroundWriterFenceableWriter("webhook-delivery", sp.GetRequiredService<WebhookDeliveryFenceFlag>()),
         ]);

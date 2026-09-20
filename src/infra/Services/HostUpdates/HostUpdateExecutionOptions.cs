@@ -128,6 +128,9 @@ public sealed class HostUpdateExecutionOptions
         "queue-outbox-publisher",
         "power-reading-prune",
         "queue-retention-prune",
+        "backend-start-command-consumer",
+        "backend-control-command-consumer",
+        "bed-clear-acknowledgement-expiry",
         "auto-dispatch",
         "webhook-delivery",
     ];
