@@ -21,7 +21,7 @@ describe("test type-check lifecycle", () => {
     );
     // Pinned directly (not only transitively through the composite
     // pretest:coverage string above) so gutting ci:typecheck-tests to a
-    // no-op, or detaching it from the real test-typecheck.mjs script, can't
+    // no-op, or detaching it from the real typecheck-tests.mjs script, can't
     // leave every assertion in this file green.
     expect(packageJson.scripts["ci:typecheck-tests"]).toBe(
       "node --test ./scripts/tests/test-typecheck-tests.mjs && npm run typecheck:test",

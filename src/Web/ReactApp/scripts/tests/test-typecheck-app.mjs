@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
-import { cp, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -376,14 +376,22 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
       path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
       JSON.stringify(baseline),
     );
+    const invocationLogPath = path.join(
+      fixtureDirectory,
+      "invocation-count.log",
+    );
     // Never exits on its own -- without a spawnSync `timeout` option, this
     // would hang the CLI (and therefore the CI job / Docker build) forever.
     // TYPECHECK_APP_TIMEOUT_MS overrides the 120s production default so this
     // test does not itself take two minutes; production always uses the
-    // default, unoverridden value.
+    // default, unoverridden value. It also durably records each time it is
+    // invoked (one line per spawn, appended synchronously before hanging)
+    // so the assertions below can bind the compilerAlreadyFatal short-circuit
+    // directly -- see the invocation-count assertion for why elapsed-time
+    // alone cannot do this.
     await writeFile(
       path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
-      "setInterval(() => {}, 1000);",
+      `require("node:fs").appendFileSync(${JSON.stringify(invocationLogPath)}, "invoked\\n");\nsetInterval(() => {}, 1000);`,
     );
 
     const start = Date.now();
@@ -421,21 +429,34 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
     assert.notEqual(result.status, 0);
     assert.match(output, /TypeScript application compiler timed out and was killed/);
     assert.doesNotMatch(output, /Application type-check passed/);
-    // The hung tsc must actually be killed near the overridden 300ms bound,
-    // not merely reported as timed out while the process (and the wrapping
-    // CLI's wait on it) continues indefinitely in the background. This bound
-    // must sit well BELOW the 10s outer watchdog above -- otherwise the
-    // preceding assertion (the watchdog did not fire) already proves this
-    // one true, making it vacuous. Since typecheck-app.mjs short-circuits
-    // the second (--listFilesOnly) spawnSync once the first compiler call is
-    // already fatal (a hung/timed-out compiler is exactly that case), a hung
-    // compiler now burns the 300ms override only once, not twice; 5s leaves
-    // generous CI scheduling slack over that ~300ms while still genuinely
-    // binding the override (a regression back to two sequential spawns, or
-    // one at ~9s, would still dodge the 10s watchdog but trip this).
+    // Binds the compilerAlreadyFatal short-circuit directly, rather than via
+    // elapsed time: a hung/timed-out first compiler spawn is exactly the
+    // fatal case typecheck-app.mjs's compilerAlreadyFatal check exists to
+    // catch, so the second (--listFilesOnly) spawnSync must never run. If it
+    // did, the same hung stub would be invoked and killed a second time,
+    // appending a second "invoked" line. Reverting the short-circuit makes
+    // this fail deterministically, independent of machine speed -- unlike an
+    // elapsed-time bound, which a slow/loaded CI runner could still satisfy
+    // even with the duplicate spawn (a fixed ~600ms real cost from two
+    // sequential 300ms overrides is well within typical scheduling jitter).
+    const invocationLines = (await readFile(invocationLogPath, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0);
+    assert.equal(
+      invocationLines.length,
+      1,
+      `expected exactly 1 tsc invocation (the second, --listFilesOnly spawn ` +
+        `must be short-circuited once the first spawn is already fatal), ` +
+        `but observed ${invocationLines.length}`,
+    );
+    // Elapsed time remains a secondary, looser guard: it does not bind the
+    // duplicate-spawn regression above (both an honest single spawn and a
+    // reverted double spawn of a 300ms override comfortably clear 5s), but it
+    // still catches an unrelated regression that let the production timeout
+    // itself grow far past its override, e.g. to several seconds.
     assert.ok(
       elapsedMs < 5_000,
-      `expected the CLI to return well under 5s once the compiler timeout fired once (not twice); took ${elapsedMs}ms`,
+      `expected the CLI to return well under 5s once the compiler timeout fired; took ${elapsedMs}ms`,
     );
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
