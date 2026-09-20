@@ -125,18 +125,22 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByText(/cannot establish managed eligibility/)).toBeVisible();
     expect(screen.getByText('Manual signed install required')).toBeVisible();
     expect(screen.getByText(/manually install a current signed release/)).toBeVisible();
-    expect(screen.queryByText(/facility_unavailable:/)).not.toBeInTheDocument();
   });
 
   it('does not show the legacy manual path for facility-only blockers', () => {
     render(<InstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
-      eligibilityReasons: [
-        'facility_unavailable:target_image_migration_runner_unavailable',
-        'facility_unavailable:queue_reconciliation_writer_fence_unavailable',
-        'facility_unavailable:sql_server_visible_backup_path_mapping_unverified',
-      ],
+      eligibilityReasons: ['ManagedEligibilityNotEstablished', 'ReadOnlyInventory'],
       compatibilityState: 'Compatible',
+      readiness: {
+        state: 'Blocked',
+        reasons: [
+          'facility_unavailable:target_image_migration_runner_unavailable',
+          'facility_unavailable:queue_reconciliation_writer_fence_unavailable',
+          'facility_unavailable:sql_server_visible_backup_path_mapping_unverified',
+        ],
+        hops: [],
+      },
     })} observation="connected" />);
 
     expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
@@ -149,15 +153,20 @@ describe('InstallerUpdatesExperience', () => {
       eligibility: 'NotManaged',
       eligibilityReasons: [
         'UnsignedLegacyInstallationManualOnly',
-        'facility_unavailable:target_image_migration_runner_unavailable',
         'ReadOnlyInventory',
       ],
       compatibilityState: 'Compatible',
+      readiness: {
+        state: 'Blocked',
+        reasons: ['facility_unavailable:target_image_migration_runner_unavailable'],
+        hops: [],
+      },
     })} observation="connected" />);
 
     expect(screen.getByText('Manual signed install required')).toBeVisible();
     expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
     expect(screen.getByText(/cannot present verified signed release evidence/)).toBeVisible();
+    expect(screen.getByText(/The observed installation is blocked/)).toBeVisible();
   });
 
   it('renders every observed replica and marks conflicting identities without proposing a target', async () => {

@@ -31,6 +31,13 @@ public static partial class ServiceInventoryEvaluator
             : InventoryChannelState.Observed;
         bool blocked = compatibility is InventoryCompatibilityState.MixedChannel or InventoryCompatibilityState.MixedRelease or InventoryCompatibilityState.Incompatible
             || channelState == InventoryChannelState.Mismatch;
+        string[] eligibilityReasons = unsignedLegacyInstallation
+            ? blocked
+                ? ["UnsignedLegacyInstallationManualOnly", ..reasons, "ReadOnlyInventory"]
+                : ["UnsignedLegacyInstallationManualOnly", "ManagedEligibilityNotEstablished", "ReadOnlyInventory"]
+            : blocked
+                ? [..reasons, "ReadOnlyInventory"]
+                : ["ManagedEligibilityNotEstablished", "ReadOnlyInventory"];
         return new ServiceInventoryDto
         {
             SelectedChannel = selection,
@@ -41,11 +48,7 @@ public static partial class ServiceInventoryEvaluator
             CompatibilityState = compatibility,
             CompatibilityReasons = reasons,
             Eligibility = blocked ? InventoryEligibility.Blocked : InventoryEligibility.NotManaged,
-            EligibilityReasons = blocked
-                ? [.. reasons, "ReadOnlyInventory"]
-                : unsignedLegacyInstallation
-                    ? ["UnsignedLegacyInstallationManualOnly", "ReadOnlyInventory"]
-                    : ["ManagedEligibilityNotEstablished", "ReadOnlyInventory"],
+            EligibilityReasons = eligibilityReasons,
             Services = replicas.Select(row => row with
             {
                 CompatibilityState = row.ObservationState == InventoryObservationState.NotInstalled ? InventoryCompatibilityState.Unknown : compatibility,
@@ -54,15 +57,12 @@ public static partial class ServiceInventoryEvaluator
         };
     }
 
-    // Deliberately limited to self-report-shaped legacy evidence; non-self-report
-    // adapters may carry a digest even when signed identity evidence is absent.
+    // Deliberately keys on the absence of bound signed identity, not on digest
+    // metadata: untrusted adapters may report a digest without authorization.
     private static bool IsUnsignedLegacyInstallation(ServiceReplicaObservationDto row) =>
         row.ObservationState is InventoryObservationState.Observed or InventoryObservationState.Stale
         && row.ApplicationVersion is not null
-        && row.Identity is null
-        && row.ManifestDigest is null
-        && row.VerificationSource is null
-        && row.VerifiedAt is null;
+        && row.Identity is null;
 
     // Source adapters retain original timestamps; reading an old snapshot cannot make it fresh.
     private static ServiceReplicaObservationDto Normalize(ServiceReplicaObservationDto row, string selection, DateTimeOffset now)

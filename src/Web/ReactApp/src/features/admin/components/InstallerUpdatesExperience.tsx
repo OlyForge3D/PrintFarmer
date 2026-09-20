@@ -439,11 +439,23 @@ export function InstallerUpdatesExperience({
         type={blocked || unsignedLegacyInstallation ? "error" : "info"}
         title="Read-only release availability"
       >
-        {unsignedLegacyInstallation
-          ? "This unsigned legacy installation cannot establish managed eligibility. Install a current signed release manually once; subsequent managed eligibility requires the signed release evidence and never an operator assertion."
-          : blocked
-          ? "The observed installation is blocked. Wait, fix forward, or use the documented restore path; downgrade is not offered as a bypass."
-          : "Availability is read-only until trusted host evidence and the constrained executor are accepted. Missing evidence is not treated as installable."}
+        {unsignedLegacyInstallation && (
+          <>
+            This unsigned legacy installation cannot establish managed
+            eligibility. Install a current signed release manually once;
+            subsequent managed eligibility requires the signed release evidence
+            and never an operator assertion.
+          </>
+        )}
+        {blocked && (
+          <>
+            {unsignedLegacyInstallation && " "}
+            The observed installation is blocked. Wait, fix forward, or use the
+            documented restore path; downgrade is not offered as a bypass.
+          </>
+        )}
+        {!unsignedLegacyInstallation && !blocked &&
+          "Availability is read-only until trusted host evidence and the constrained executor are accepted. Missing evidence is not treated as installable."}
       </Alert>
       {insider && (
         <Alert type="warning" title="Insider channel">

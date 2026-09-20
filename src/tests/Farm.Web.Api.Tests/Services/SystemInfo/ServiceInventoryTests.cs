@@ -52,6 +52,37 @@ public sealed class ServiceInventoryTests
         result.Eligibility.Should().Be(InventoryEligibility.NotManaged);
         result.EligibilityReasons.Should().Equal(
             "UnsignedLegacyInstallationManualOnly",
+            "ManagedEligibilityNotEstablished",
+            "ReadOnlyInventory");
+    }
+
+    [Fact]
+    public void Evaluate_MixedUnsignedReleases_PreservesLegacyAndCompatibilityReasons()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            new()
+            {
+                ServiceId = "api",
+                ApplicationVersion = "0.2.3-insider.2",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+            new()
+            {
+                ServiceId = "worker",
+                ApplicationVersion = "0.2.3-insider.1",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+        ]);
+
+        result.Eligibility.Should().Be(InventoryEligibility.Blocked);
+        result.EligibilityReasons.Should().Equal(
+            "UnsignedLegacyInstallationManualOnly",
+            "MixedApplicationReleases",
             "ReadOnlyInventory");
     }
 
@@ -190,6 +221,8 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.Services[0].Identity);
         Assert.Null(result.ObservedChannel);
         Assert.Equal(InventoryCompatibilityState.Unknown, result.CompatibilityState);
+        Assert.Equal(InventoryEligibility.NotManaged, result.Eligibility);
+        Assert.Contains("UnsignedLegacyInstallationManualOnly", result.EligibilityReasons);
     }
 
     [Fact]
