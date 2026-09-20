@@ -7,8 +7,10 @@ using Farm.Infrastructure.Services.Electricity;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Services.SignalR;
 using Farm.Infrastructure.Tests.Builders;
 using FluentAssertions;
+using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
@@ -17,6 +19,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Moq;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
@@ -827,6 +830,51 @@ public class HostUpdateWriterFencingTests : IDisposable
             fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
             scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
                 "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+        });
+    }
+
+    [Fact]
+    public async Task QueueOutboxPublisherService_PauseDuringInterval_AcknowledgesBeforePollInterval()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        var fence = new InMemoryHostUpdateWriterActivityFlag();
+        var sut = new QueueOutboxPublisherService(
+            scopeFactory,
+            hub.Object,
+            NullLogger<QueueOutboxPublisherService>.Instance,
+            membershipNotifier: null,
+            hostUpdateFence: fence);
+
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            // The first unpaused pass opens three scopes: the pre-loop stale-lease recovery,
+            // then the loop's own stale-lease recovery and pending-events processing.
+            await WaitForScopeDisposalsAsync(scopeFactory, 3, TimeSpan.FromSeconds(10));
+            int scopesBeforePause = scopeFactory.ScopesOpened;
+            await fence.RequestPauseAsync(CancellationToken.None);
+            await WaitForIntervalBoundaryAcknowledgementAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                TimeSpan.FromSeconds(2));
+
+            fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
+            scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
+                "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+
+            // Both the top-of-loop paused branch and the interval-boundary wait re-check the
+            // fence every ~250 ms rather than busy-spinning. Sampling the acknowledgement count
+            // again after roughly 1 s (~4 iterations at the 250 ms cadence) and asserting it stays
+            // under a small, generous ceiling — not an exact count, which would be flaky under CI
+            // scheduling jitter — proves the paused loop is still throttled by its own delay and
+            // has not regressed into a tight spin that racks up acknowledgements far faster than
+            // the 250 ms cadence would allow.
+            int acknowledgementsAfterFirst = fence.AcknowledgementCount;
+            await Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
+            int additionalAcknowledgements = fence.AcknowledgementCount - acknowledgementsAfterFirst;
+            additionalAcknowledgements.Should().BeLessThan(20,
+                "the paused loop must keep re-checking on its ~250 ms cadence, not busy-spin " +
+                "without a delay between acknowledgements");
         });
     }
 
