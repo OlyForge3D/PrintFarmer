@@ -146,6 +146,7 @@ public class NfcTagService(
             binding.SpoolName = request.SpoolName;
             binding.PrinterId = request.PrinterId;
             binding.TrayId = request.TrayId;
+            binding.SpoolLastSeenAt = request.ReadAt ?? binding.SpoolLastSeenAt;
             binding.UpdatedAt = DateTime.UtcNow;
 
             if (request.PrinterId.HasValue)
@@ -189,6 +190,7 @@ public class NfcTagService(
         existing.SpoolName = request.SpoolName;
         existing.PrinterId = request.PrinterId;
         existing.TrayId = request.TrayId;
+        existing.SpoolLastSeenAt = request.ReadAt ?? existing.SpoolLastSeenAt;
         existing.UpdatedAt = DateTime.UtcNow;
         await fallbackDb.SaveChangesAsync(ct);
 

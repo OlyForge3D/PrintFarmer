@@ -74,6 +74,27 @@ public class NfcTagServiceConcurrencyTests : IDisposable
     }
 
     [Fact]
+    public async Task LinkTagAsync_WithReadAt_PersistsScanTimestamp()
+    {
+        DateTime readAt = new(2026, 9, 20, 18, 30, 0, DateTimeKind.Utc);
+        await using var db = new AppDbContext(_options);
+        var service = CreateService(db);
+
+        NfcTagBindingDto result = await service.LinkTagAsync(new LinkNfcTagRequest
+        {
+            TagUid = "READ-AT-TEST",
+            SpoolId = 42,
+            ReadAt = readAt
+        }, CancellationToken.None);
+
+        result.SpoolLastSeenAt.Should().Be(readAt);
+
+        await using var verifyDb = new AppDbContext(_options);
+        NfcTagBinding persisted = await verifyDb.NfcTagBindings.SingleAsync(b => b.TagUid == "READ-AT-TEST");
+        persisted.SpoolLastSeenAt.Should().Be(readAt);
+    }
+
+    [Fact]
     public async Task LinkTagAsync_ConcurrentCalls_SameTagUid_ProducesExactlyOneBinding()
     {
         const string tagUid = "AA:BB:CC:DD";
