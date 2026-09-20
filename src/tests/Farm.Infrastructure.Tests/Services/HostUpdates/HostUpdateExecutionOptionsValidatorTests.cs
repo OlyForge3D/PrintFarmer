@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Options;
@@ -83,6 +84,90 @@ public class HostUpdateExecutionOptionsValidatorTests
         ValidateOptionsResult result = Validator.Validate(null, new HostUpdateExecutionOptions { RootDirectory = string.Empty });
 
         result.Succeeded.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(319)]
+    public void Validate_MissingRootDirectory_IgnoresFenceProofBudget(
+        int fenceProofTimeoutSeconds)
+    {
+        var options = new HostUpdateExecutionOptions
+        {
+            RootDirectory = string.Empty,
+            FenceProofTimeoutSeconds = fenceProofTimeoutSeconds,
+        };
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_DefaultFenceProofBudget_ExceedsRequiredWriterDuration()
+    {
+        string root = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+            "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Succeeded.Should().BeTrue();
+        options.FenceProofTimeoutSeconds.Should().Be(321);
+        options.FencePollIntervalSeconds.Should().Be(2);
+        BackendStartCommandConsumerService.RequiredFenceProofDuration
+            .Should().Be(TimeSpan.FromSeconds(319));
+    }
+
+    [Fact]
+    public void Validate_FenceProofHeadroomLessThanPollInterval_Fails()
+    {
+        string root = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+            "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.FenceProofTimeoutSeconds = 320;
+        options.FencePollIntervalSeconds = 2;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain(
+            "must exceed the required writer duration by at least FencePollIntervalSeconds (2 seconds)");
+    }
+
+    [Fact]
+    public void Validate_FenceProofHeadroomEqualToPollInterval_Succeeds()
+    {
+        string root = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+            "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.FenceProofTimeoutSeconds = 322;
+        options.FencePollIntervalSeconds = 3;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Succeeded.Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(319)]
+    public void Validate_FenceProofBudgetNotGreaterThanRequiredWriterDuration_Fails(
+        int fenceProofTimeoutSeconds)
+    {
+        string root = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+            "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.FenceProofTimeoutSeconds = fenceProofTimeoutSeconds;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("must be greater than 319 seconds");
     }
 
     [Fact]
