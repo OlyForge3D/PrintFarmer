@@ -235,7 +235,7 @@ test("countTestFiles excludes a test file carrying @ts-nocheck from the floor ac
       ],
     ];
 
-    for (const [name, content, mustExclude] of cases) {
+    for (const [name, content] of cases) {
       await writeFile(
         path.join(fixtureDirectory, "src/test", `${name}.test.ts`),
         content,
