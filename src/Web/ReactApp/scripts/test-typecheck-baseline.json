@@ -1,0 +1,5 @@
+{
+  "_comment": "testDiagnosticCount is an exact snapshot of measured direct test diagnostics; update it deliberately in the same change that moves the count. minimumTestFileCount is a lower bound set to the measured test file count.",
+  "testDiagnosticCount": 226,
+  "minimumTestFileCount": 542
+}

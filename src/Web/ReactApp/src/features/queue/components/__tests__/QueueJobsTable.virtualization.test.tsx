@@ -43,16 +43,25 @@ interface MockVirtualizerOptions {
 vi.mock("@tanstack/react-virtual", () => ({
   defaultRangeExtractor: (range: MockRange) => {
     const indexes = [];
-    for (let index = range.startIndex; index <= range.endIndex; index++) indexes.push(index);
+    for (let index = range.startIndex; index <= range.endIndex; index++)
+      indexes.push(index);
     return indexes;
   },
   useVirtualizer: (options: MockVirtualizerOptions) => {
     capturedGetItemKey = options.getItemKey;
     const clampedEnd = Math.min(windowEnd, options.count - 1);
-    const range: MockRange = { startIndex: windowStart, endIndex: clampedEnd, overscan: options.overscan, count: options.count };
+    const range: MockRange = {
+      startIndex: windowStart,
+      endIndex: clampedEnd,
+      overscan: options.overscan,
+      count: options.count,
+    };
     const indexes = options.rangeExtractor
       ? options.rangeExtractor(range)
-      : Array.from({ length: clampedEnd - windowStart + 1 }, (_, i) => windowStart + i);
+      : Array.from(
+          { length: clampedEnd - windowStart + 1 },
+          (_, i) => windowStart + i,
+        );
     const items = indexes.map((index) => ({
       index,
       key: options.getItemKey ? options.getItemKey(index) : `row-${index}`,
@@ -93,28 +102,41 @@ vi.mock("@/services/api", () => ({
 
 vi.mock("@/features/filament-coverage/hooks", () => ({
   useFleetFilamentCoverage: () => mockGetCoverage(),
-  usePrinterFilamentCoverage: vi.fn(() => ({ data: null, isLoading: false, isError: false })),
+  usePrinterFilamentCoverage: vi.fn(() => ({
+    data: null,
+    isLoading: false,
+    isError: false,
+  })),
   __resetFilamentCoverageSubscriptionForTests: vi.fn(),
 }));
 
 function render(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: {
-      queries: { retry: false, refetchInterval: false, refetchOnWindowFocus: false, gcTime: 0 },
+      queries: {
+        retry: false,
+        refetchInterval: false,
+        refetchOnWindowFocus: false,
+        gcTime: 0,
+      },
     },
   });
-  return rtlRender(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
+  return rtlRender(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+  );
 }
 
 function createJobs(count: number): QueuedPrintJobWithFileMetaDto[] {
   return Array.from({ length: count }, (_, index) => {
     const id = `job-${index}`;
     return {
-      id,
       job: {
         id,
         name: `print-${index}`,
         gcodeFileId: `file-${index}`,
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
         status: "Queued" as const,
         priority: PrintJobPriority.Normal,
         queuePosition: index,
@@ -161,7 +183,9 @@ describe("QueueJobsTable virtualization", () => {
 
     // Non-virtualized path doesn't need explicit aria-rowcount — every row is
     // already in the DOM, so native table row counting is accurate.
-    expect(container.querySelector("table")).not.toHaveAttribute("aria-rowcount");
+    expect(container.querySelector("table")).not.toHaveAttribute(
+      "aria-rowcount",
+    );
   });
 
   it("windows rows above the threshold: only the virtualized range is mounted, with spacer rows", () => {
@@ -174,19 +198,31 @@ describe("QueueJobsTable virtualization", () => {
 
     // Only the mocked window (indices 5-8 => 4 jobs) has its row group mounted.
     const bodies = Array.from(container.querySelectorAll("tbody"));
-    const visibleBodies = bodies.filter((tbody) => !tbody.hasAttribute("aria-hidden"));
+    const visibleBodies = bodies.filter(
+      (tbody) => !tbody.hasAttribute("aria-hidden"),
+    );
     expect(visibleBodies).toHaveLength(4);
     expect(screen.getByText(jobs[5].gcodeFile!.fileName)).toBeInTheDocument();
     expect(screen.getByText(jobs[8].gcodeFile!.fileName)).toBeInTheDocument();
-    expect(screen.queryByText(jobs[0].gcodeFile!.fileName)).not.toBeInTheDocument();
-    expect(screen.queryByText(jobs[totalJobs - 1].gcodeFile!.fileName)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(jobs[0].gcodeFile!.fileName),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(jobs[totalJobs - 1].gcodeFile!.fileName),
+    ).not.toBeInTheDocument();
 
     // Top + bottom spacer <tbody> blocks represent the scrolled-out rows.
-    const hiddenBodies = bodies.filter((tbody) => tbody.hasAttribute("aria-hidden"));
+    const hiddenBodies = bodies.filter((tbody) =>
+      tbody.hasAttribute("aria-hidden"),
+    );
     expect(hiddenBodies).toHaveLength(2);
     const [topSpacer, bottomSpacer] = hiddenBodies;
-    const topHeight = parseFloat((topSpacer.querySelector("td") as HTMLElement).style.height);
-    const bottomHeight = parseFloat((bottomSpacer.querySelector("td") as HTMLElement).style.height);
+    const topHeight = parseFloat(
+      (topSpacer.querySelector("td") as HTMLElement).style.height,
+    );
+    const bottomHeight = parseFloat(
+      (bottomSpacer.querySelector("td") as HTMLElement).style.height,
+    );
     expect(topHeight).toBeCloseTo(5 * ROW_HEIGHT, 0);
     expect(bottomHeight).toBeCloseTo((totalJobs - 9) * ROW_HEIGHT, 0);
 
@@ -197,7 +233,10 @@ describe("QueueJobsTable virtualization", () => {
     const headerRow = container.querySelector("thead tr") as HTMLElement;
     expect(headerRow).toHaveAttribute("aria-rowindex", "1");
     const firstVisiblePrimaryRow = visibleBodies[0].querySelectorAll("tr")[0];
-    expect(firstVisiblePrimaryRow).toHaveAttribute("aria-rowindex", String(5 * 2 + 2));
+    expect(firstVisiblePrimaryRow).toHaveAttribute(
+      "aria-rowindex",
+      String(5 * 2 + 2),
+    );
   });
 
   it("row click on a windowed-in row still opens JobDetailsModal via onEdit", () => {
@@ -206,7 +245,9 @@ describe("QueueJobsTable virtualization", () => {
     const onEdit = vi.fn();
     const jobs = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 30);
 
-    const { container } = render(<QueueJobsTable jobs={jobs} onEdit={onEdit} />);
+    const { container } = render(
+      <QueueJobsTable jobs={jobs} onEdit={onEdit} />,
+    );
 
     const visibleBody = Array.from(container.querySelectorAll("tbody")).find(
       (tbody) => !tbody.hasAttribute("aria-hidden"),
@@ -222,7 +263,9 @@ describe("QueueJobsTable virtualization", () => {
     const onEdit = vi.fn();
     const jobs = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 30);
 
-    const { container } = render(<QueueJobsTable jobs={jobs} onEdit={onEdit} />);
+    const { container } = render(
+      <QueueJobsTable jobs={jobs} onEdit={onEdit} />,
+    );
 
     const visibleBody = Array.from(container.querySelectorAll("tbody")).find(
       (tbody) => !tbody.hasAttribute("aria-hidden"),
@@ -240,7 +283,9 @@ describe("QueueJobsTable virtualization", () => {
 
     const { container, rerender } = render(<QueueJobsTable jobs={jobs} />);
 
-    const rowFive = container.querySelector('[data-job-id="job-5"]') as HTMLElement;
+    const rowFive = container.querySelector(
+      '[data-job-id="job-5"]',
+    ) as HTMLElement;
     expect(rowFive).toBeInTheDocument();
     fireEvent.focus(rowFive);
 
@@ -257,7 +302,9 @@ describe("QueueJobsTable virtualization", () => {
 
     // The focused row must still be in the DOM (force-included by the
     // rangeExtractor) so focus never silently falls back to <body>.
-    expect(container.querySelector('[data-job-id="job-5"]')).toBeInTheDocument();
+    expect(
+      container.querySelector('[data-job-id="job-5"]'),
+    ).toBeInTheDocument();
     expect(screen.getByText(jobs[5].gcodeFile!.fileName)).toBeInTheDocument();
     // The new windowed range (20-23) is also mounted alongside it.
     expect(screen.getByText(jobs[20].gcodeFile!.fileName)).toBeInTheDocument();
@@ -265,9 +312,13 @@ describe("QueueJobsTable virtualization", () => {
     // into nothing; a dedicated middle spacer must occupy that gap in
     // addition to the top (rows 0-4) and bottom (rows 24-49) spacers,
     // otherwise the table's total height/scroll math would be wrong.
-    const hiddenBodies = Array.from(container.querySelectorAll("tbody[aria-hidden]"));
+    const hiddenBodies = Array.from(
+      container.querySelectorAll("tbody[aria-hidden]"),
+    );
     expect(hiddenBodies).toHaveLength(3);
-    const heights = hiddenBodies.map((tbody) => parseFloat((tbody.querySelector("td") as HTMLElement).style.height));
+    const heights = hiddenBodies.map((tbody) =>
+      parseFloat((tbody.querySelector("td") as HTMLElement).style.height),
+    );
     expect(heights[0]).toBeCloseTo(5 * ROW_HEIGHT, 0); // rows 0-4, before the focused row
     expect(heights[1]).toBeCloseTo(14 * ROW_HEIGHT, 0); // rows 6-19, the gap the focused row creates
     expect(heights[2]).toBeCloseTo(26 * ROW_HEIGHT, 0); // rows 24-49, after the window
@@ -289,7 +340,6 @@ describe("QueueJobsTable virtualization", () => {
     // newly queued job) while the windowed range (indices 0-2) is unchanged.
     const insertedJob: QueuedPrintJobWithFileMetaDto = {
       ...jobs[0],
-      id: "job-inserted",
       job: { ...jobs[0].job, id: "job-inserted" },
       gcodeFile: { ...jobs[0].gcodeFile!, fileName: "inserted.gcode" },
     };
@@ -309,7 +359,11 @@ describe("QueueJobsTable virtualization", () => {
 
     // Reorder (swap indices 0 and 1) — e.g. a priority change re-sorting the
     // queue. The item key at each index must follow the job, not the slot.
-    const reordered = [jobsAfterInsert[1], jobsAfterInsert[0], ...jobsAfterInsert.slice(2)];
+    const reordered = [
+      jobsAfterInsert[1],
+      jobsAfterInsert[0],
+      ...jobsAfterInsert.slice(2),
+    ];
     rerender(
       <QueryClientProvider client={new QueryClient()}>
         <QueueJobsTable jobs={reordered} />
@@ -330,19 +384,22 @@ describe("QueueJobsTable virtualization", () => {
     );
 
     expect(capturedGetItemKey!(0)).toBe(afterRemoval[0].job.id);
-    expect(screen.getByText(afterRemoval[0].gcodeFile!.fileName)).toBeInTheDocument();
+    expect(
+      screen.getByText(afterRemoval[0].gcodeFile!.fileName),
+    ).toBeInTheDocument();
   });
 
   it("re-renders correctly when the filtered jobs list identity changes", () => {
     windowStart = 0;
     windowEnd = 3;
     const jobsA = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 30);
-    const jobsB = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 5).map((job, index) => ({
-      ...job,
-      id: `filtered-${index}`,
-      job: { ...job.job, id: `filtered-${index}` },
-      gcodeFile: { ...job.gcodeFile!, fileName: `filtered-${index}.gcode` },
-    }));
+    const jobsB = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 5).map(
+      (job, index) => ({
+        ...job,
+        job: { ...job.job, id: `filtered-${index}` },
+        gcodeFile: { ...job.gcodeFile!, fileName: `filtered-${index}.gcode` },
+      }),
+    );
 
     const { rerender, container } = rtlRender(
       <QueryClientProvider client={new QueryClient()}>
@@ -357,8 +414,13 @@ describe("QueueJobsTable virtualization", () => {
       </QueryClientProvider>,
     );
 
-    expect(screen.queryByText(jobsA[0].gcodeFile!.fileName)).not.toBeInTheDocument();
+    expect(
+      screen.queryByText(jobsA[0].gcodeFile!.fileName),
+    ).not.toBeInTheDocument();
     const table = container.querySelector("table") as HTMLElement;
-    expect(table).toHaveAttribute("aria-rowcount", String(1 + jobsB.length * 2));
+    expect(table).toHaveAttribute(
+      "aria-rowcount",
+      String(1 + jobsB.length * 2),
+    );
   });
 });
