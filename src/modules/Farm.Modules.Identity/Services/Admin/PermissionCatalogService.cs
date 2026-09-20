@@ -10,9 +10,9 @@ namespace Farm.Modules.Identity.Services.Admin;
 
 /// <summary>
 /// Derives the permission catalog by walking <see cref="EndpointDataSource"/> for
-/// <see cref="RequirePermissionAttribute"/> metadata — the same source the OpenAPI
-/// authorization transformer (<c>AuthorizationOpenApiTransformers.cs</c>) reads from
-/// to annotate secured operations. Resource/action display metadata is joined from the
+/// <see cref="IPermissionMetadata"/> declarations, including permissions enforced through
+/// a separate endpoint policy rather than <see cref="RequirePermissionAttribute"/>.
+/// Resource/action display metadata is joined from the
 /// seeded <see cref="Resource"/>/<see cref="UserAction"/> catalog tables.
 /// </summary>
 public sealed class PermissionCatalogService : IPermissionCatalogService
@@ -30,15 +30,15 @@ public sealed class PermissionCatalogService : IPermissionCatalogService
     {
         DateTime generatedAt = DateTime.UtcNow;
 
-        // permission (resource:action) -> ordered, deduplicated routes gating it.
+        // permission (resource:action) -> ordered, deduplicated routes declaring it.
         var routesByPermission = new Dictionary<string, List<PermissionRouteDto>>(StringComparer.Ordinal);
         var seenRoutesByPermission = new Dictionary<string, HashSet<(string Method, string Template)>>(StringComparer.Ordinal);
-        var attributesByPermission = new Dictionary<string, RequirePermissionAttribute>(StringComparer.Ordinal);
+        var attributesByPermission = new Dictionary<string, IPermissionMetadata>(StringComparer.Ordinal);
 
         foreach (RouteEndpoint endpoint in _endpointDataSource.Endpoints.OfType<RouteEndpoint>())
         {
-            IReadOnlyList<RequirePermissionAttribute> permissionAttributes =
-                endpoint.Metadata.GetOrderedMetadata<RequirePermissionAttribute>();
+            IReadOnlyList<IPermissionMetadata> permissionAttributes =
+                endpoint.Metadata.GetOrderedMetadata<IPermissionMetadata>();
             if (permissionAttributes.Count == 0)
             {
                 continue;
@@ -52,7 +52,7 @@ public sealed class PermissionCatalogService : IPermissionCatalogService
                 methods = ["ANY"];
             }
 
-            foreach (RequirePermissionAttribute attribute in permissionAttributes)
+            foreach (IPermissionMetadata attribute in permissionAttributes)
             {
                 attributesByPermission.TryAdd(attribute.Permission, attribute);
 
@@ -124,7 +124,7 @@ public sealed class PermissionCatalogService : IPermissionCatalogService
     }
 
     private static PermissionCatalogEntryDto BuildEntry(
-        RequirePermissionAttribute attribute,
+        IPermissionMetadata attribute,
         List<PermissionRouteDto> routes,
         Dictionary<string, UserAction> actionsByName)
     {
@@ -142,12 +142,12 @@ public sealed class PermissionCatalogService : IPermissionCatalogService
     }
 
     private async Task<List<OrphanedPermissionEntryDto>> BuildOrphanedEntriesAsync(
-        IReadOnlyCollection<string> enforcedPermissions,
+        IReadOnlyCollection<string> declaredPermissions,
         Dictionary<string, Resource> resourcesByName,
         Dictionary<string, UserAction> actionsByName,
         CancellationToken cancellationToken)
     {
-        var enforced = new HashSet<string>(enforcedPermissions, StringComparer.Ordinal);
+        var declared = new HashSet<string>(declaredPermissions, StringComparer.Ordinal);
 
         List<(string ResourceName, string ActionName)> grantedPairs = await _context.RolePermissions
             .AsNoTracking()
@@ -158,7 +158,7 @@ public sealed class PermissionCatalogService : IPermissionCatalogService
             .ConfigureAwait(false);
 
         return grantedPairs
-            .Where(pair => !enforced.Contains($"{pair.ResourceName}:{pair.ActionName}"))
+            .Where(pair => !declared.Contains($"{pair.ResourceName}:{pair.ActionName}"))
             .OrderBy(pair => pair.ResourceName, StringComparer.Ordinal)
             .ThenBy(pair => pair.ActionName, StringComparer.Ordinal)
             .Select(pair =>
