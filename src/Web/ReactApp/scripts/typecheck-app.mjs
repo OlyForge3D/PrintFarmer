@@ -88,7 +88,8 @@ const evaluation = evaluate({
 
 if (!evaluation.ok) {
   console.error(evaluation.message);
-  if (evaluation.showListFilesOutput) {
+  if (evaluation.showListFilesOutput && listFilesOutput.trim()) {
+    process.stdout.write("tsc --listFilesOnly output:\n");
     process.stdout.write(listFilesOutput);
   }
   process.exitCode = 1;

@@ -124,6 +124,9 @@ test("fails an unsuccessful project-file listing before consuming its output (R2
       listFilesOutput: "src/services/example.ts",
     });
     assert.match(result.message, /could not list its project files/);
+    // A failed listing is printed for diagnosis but never counted, preserving
+    // R2's decisional invariant against misleading file-floor failures.
+    assert.equal(result.showListFilesOutput, true);
   }
 });
 
@@ -141,6 +144,37 @@ test("does not request list-file output for an unrelated diagnostic failure", ()
   });
   assert.equal(result.ok, false);
   assert.equal(result.showListFilesOutput, false);
+});
+
+test("returns a boolean list-file output contract for every evaluation path", () => {
+  const timeoutError = Object.assign(new Error("spawnSync tsc ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+  const scenarios = [
+    {},
+    { baseline: null },
+    {
+      compilerResult: { status: null, signal: "SIGKILL", error: undefined },
+    },
+    { compilerResult: { status: null, signal: null, error: timeoutError } },
+    { output: "error TS18003: No inputs were found in config file." },
+    {
+      compilerResult: { status: 1, signal: null, error: undefined },
+      output: "",
+    },
+    { output: "" },
+    {
+      listFilesResult: { status: 2, signal: null, error: undefined },
+    },
+    { baseline: { ...baseline, minimumAppFileCount: 2 } },
+    {
+      output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+    },
+  ];
+
+  for (const overrides of scenarios) {
+    assert.equal(typeof evaluateGate(overrides).showListFilesOutput, "boolean");
+  }
 });
 
 test("fails when a counted application file is removed from the project", async () => {
@@ -441,6 +475,63 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
     }
     assert.doesNotMatch(output, /typecheck-app\.mjs:\d+/);
     assert.doesNotMatch(output, /Application type-check passed/);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CLI prints nonempty list-file output when the application file floor fails", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-list-output-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app-core.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
+      JSON.stringify({ ...baseline, minimumAppFileCount: 2 }),
+    );
+    const listedPath = "src/services/known.ts";
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        'const listedPath = "src/services/known.ts";',
+        'if (process.argv.includes("--listFilesOnly")) {',
+        "  process.stdout.write(`${listedPath}\\n`);",
+        "} else {",
+        '  process.stdout.write("src/services/example.ts(1,1): error TS2322: Type error.\\n");',
+        "}",
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-app.mjs")],
+      { encoding: "utf8" },
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      /TypeScript application compiler found 1 application file\(s\); expected at least 2/,
+    );
+    assert.match(result.stdout, /tsc --listFilesOnly output:\n/);
+    assert.match(result.stdout, new RegExp(listedPath.replace("/", "\\/")));
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }
