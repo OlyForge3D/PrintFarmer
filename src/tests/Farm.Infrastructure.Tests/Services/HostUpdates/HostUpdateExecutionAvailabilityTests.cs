@@ -99,6 +99,25 @@ public class HostUpdateExecutionAvailabilityTests
             Task.FromResult(verificationEvidence);
     }
 
+    /// <summary>
+    /// Proves <see cref="HostUpdateExecutionAvailabilityProvider.CheckAsync"/> itself -- not just
+    /// <c>HostUpdateDatabaseBackupTargetFactory</c> -- fails closed when a server-side backup
+    /// target's verification throws instead of returning evidence, wrapping the exception into
+    /// the same <c>facility_unavailable:...:probe_exception:&lt;type&gt;</c> reason string used
+    /// for a returned-evidence failure.
+    /// </summary>
+    private sealed class ThrowingServerSideBackupTarget : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
+    {
+        public string Name => "throwing-sql-server";
+
+        public bool IsExternallyOwned => false;
+
+        public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("simulated verification failure");
+    }
+
     private sealed class FakeProcessRunner(bool dockerAvailable) : IHostUpdateProcessRunner
     {
         public Task<HostUpdateProcessResult> RunAsync(
@@ -266,6 +285,41 @@ public class HostUpdateExecutionAvailabilityTests
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().Contain(
                 "facility_unavailable:sql_server_visible_backup_path_mapping_unverified:probe_file_not_visible_from_printfarmer");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServerSideBackupTargetVerificationThrows_SurfacesFacilityWithExceptionTypeEvidence()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new ThrowingServerSideBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+
+            // Assert the complete reason string, not merely a "facility_unavailable:..." prefix:
+            // a prefix match would also pass for the returned-evidence branch (covered by the
+            // test above), which does not exercise CheckAsync's catch (Exception) wrapping at
+            // all. Only the full string proves the exception path specifically was taken.
+            result.Reasons.Should().Contain(
+                "facility_unavailable:sql_server_visible_backup_path_mapping_unverified:probe_exception:InvalidOperationException");
         }
         finally
         {

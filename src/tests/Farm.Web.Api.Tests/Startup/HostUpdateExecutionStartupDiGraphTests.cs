@@ -1,6 +1,8 @@
 ﻿using System.Collections.Generic;
+using System.Linq;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Web.Api.Startup;
+using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Xunit;
@@ -179,7 +181,13 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
 
         IReadOnlyList<IHostUpdateBackupTarget> targets = scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>();
 
+        // Assert.Contains(targets, t => t.Name == "database") alone would also pass for a
+        // provider whose backup target never implements visible-backup-path-mapping
+        // verification at all. Binding IHostUpdateServerSideBackupTarget here proves the SQL
+        // Server registration actually exposes issue #2788's verification capability, not merely
+        // some backup target named "database".
         Assert.Contains(targets, t => t.Name == "database");
+        targets.Single(t => t.Name == "database").Should().BeAssignableTo<IHostUpdateServerSideBackupTarget>();
     }
 
     [Fact]

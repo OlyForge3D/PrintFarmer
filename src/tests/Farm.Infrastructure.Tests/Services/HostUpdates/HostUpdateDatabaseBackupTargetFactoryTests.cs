@@ -494,6 +494,8 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
     {
         public IReadOnlyList<string>? LastArguments { get; private set; }
 
+        public int CallCount { get; private set; }
+
         public Task<HostUpdateProcessResult> RunAsync(
             string fileName,
             IReadOnlyList<string> arguments,
@@ -501,6 +503,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             CancellationToken cancellationToken,
             IReadOnlyDictionary<string, string>? environment = null)
         {
+            CallCount++;
             LastArguments = arguments;
             if (succeeds)
             {
@@ -536,8 +539,9 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-shared-").FullName;
         try
         {
+            var runner = new ServerSideWritingProcessRunner(succeeds: true);
             IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
-                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true), TestExecutableResolver,
+                "database", SqlServerConfig(), runner, TestExecutableResolver,
                 TimeSpan.FromSeconds(30), isExternallyOwned: false,
                 backupRootDirectory: backupRootDirectory);
 
@@ -545,6 +549,18 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
 
             evidence.Should().BeNull();
             Directory.GetFiles(backupRootDirectory).Should().BeEmpty("the probe file must be cleaned up after a successful verification");
+
+            // A stubbed-success runner that never actually writes anything would also leave the
+            // directory empty and return null evidence -- so the two assertions above alone do not
+            // prove a real write happened. Assert the engine was actually invoked exactly once
+            // with a genuine BACKUP DATABASE [master] command targeting the probe path under the
+            // configured backup root, using WITH INIT, COPY_ONLY (the same real-backup command
+            // shape production code issues), so this test cannot pass vacuously.
+            runner.CallCount.Should().Be(1, "the probe must invoke sqlcmd exactly once per verification, not zero times or repeatedly");
+            string probeQuery = runner.LastArguments!.Single(a => a.Contains("BACKUP DATABASE", StringComparison.Ordinal));
+            probeQuery.Should().Contain("BACKUP DATABASE [master] TO DISK");
+            probeQuery.Should().Contain(backupRootDirectory);
+            probeQuery.Should().Contain("WITH INIT, COPY_ONLY");
         }
         finally
         {
@@ -621,6 +637,37 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         finally
         {
             Directory.Delete(backupRootDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_BackupRootParentIsAFile_FailsClosedWithDirectoryCreationEvidence()
+    {
+        // Directory.CreateDirectory(backupRootDirectory) throws when a path segment above it
+        // already exists as a file rather than a directory -- reproducing a misconfigured
+        // RootDirectory that collides with an existing file. This must fail closed with the
+        // dedicated probe_directory_creation_failed evidence (distinguishable from every other
+        // evidence string), not silently proceed or report a different failure mode.
+        string parentDirectory = Directory.CreateTempSubdirectory("hu-mapping-dircreate-").FullName;
+        string fileBlockingCreation = Path.Combine(parentDirectory, "not-a-directory");
+        await File.WriteAllTextAsync(fileBlockingCreation, "this is a file, not a directory");
+        string backupRootDirectory = Path.Combine(fileBlockingCreation, "backups");
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().Be(
+                "probe_directory_creation_failed:IOException",
+                "a backup root whose parent path is occupied by a file must fail closed with directory-creation evidence, not a different code path's evidence");
+        }
+        finally
+        {
+            Directory.Delete(parentDirectory, recursive: true);
         }
     }
 
