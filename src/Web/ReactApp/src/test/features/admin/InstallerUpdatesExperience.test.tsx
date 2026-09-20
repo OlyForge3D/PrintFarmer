@@ -538,6 +538,7 @@ describe('InstallerUpdatesExperience', () => {
     const update = screen.getByRole('button', { name: 'Update now' });
     expect(update).not.toHaveAttribute('aria-busy', 'true');
     expect(update).not.toHaveAttribute('aria-disabled', 'true');
+    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBe('stable:1.2.5');
   });
 
   it('allows a second direct update after the first one completes', async () => {
