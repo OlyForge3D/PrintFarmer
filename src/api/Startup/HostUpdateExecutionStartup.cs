@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Startup;
@@ -21,6 +22,7 @@ public static class HostUpdateExecutionStartup
 
     public static IServiceCollection AddHostUpdateExecution(this IServiceCollection services, IConfiguration configuration)
     {
+        services.TryAddSingleton<IHostUpdateAutomationPolicyRepository, UnavailableHostUpdateAutomationPolicyRepository>();
         services.AddOptions<HostUpdateExecutionOptions>()
             .Bind(configuration.GetSection(HostUpdateExecutionOptions.SectionName))
             .ValidateOnStart();

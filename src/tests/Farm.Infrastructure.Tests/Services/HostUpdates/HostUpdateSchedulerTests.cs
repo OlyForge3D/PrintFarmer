@@ -3,12 +3,149 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Settings;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 public sealed class HostUpdateSchedulerTests
 {
+    [Fact]
+    public void InstallationIdentity_PersistsAndJitterIsDeterministic()
+    {
+        string firstRoot = TempRoot();
+        string secondRoot = TempRoot();
+        try
+        {
+            string firstIdentity = HostUpdateInstallationIdentity.GetOrCreate(firstRoot);
+            string secondIdentity = HostUpdateInstallationIdentity.GetOrCreate(secondRoot);
+            Assert.NotEqual(firstIdentity, secondIdentity);
+            Assert.Equal(firstIdentity, HostUpdateInstallationIdentity.GetOrCreate(firstRoot));
+            Assert.Equal(secondIdentity, HostUpdateInstallationIdentity.GetOrCreate(secondRoot));
+            Assert.Equal(new InstallationSeededHostUpdateJitter("fixed-installation").For("candidate", 2),
+                new InstallationSeededHostUpdateJitter("fixed-installation").For("candidate", 2));
+        }
+        finally
+        {
+            Directory.Delete(firstRoot, recursive: true);
+            Directory.Delete(secondRoot, recursive: true);
+        }
+    }
+
+    [Fact]
+    public void InstallationSeededJitter_DispersesFixedInstallations()
+    {
+        InstallationSeededHostUpdateJitter first = new("installation-a");
+        InstallationSeededHostUpdateJitter second = new("installation-b");
+
+        Assert.NotEqual(first.For("candidate", 2), second.For("candidate", 2));
+    }
+
+    [Fact]
+    public async Task CancellationBridge_UsesPreArmForActiveSchedulerGeneration()
+    {
+        CancellationAwareHostExecutor hostExecutor = new();
+        HostUpdateSchedulerExecutorAdapter adapter = new(hostExecutor, "linux-amd64");
+        HostUpdateSchedulerCancellationBridge bridge = new();
+        HostUpdateScheduler? scheduler = null;
+        using ServiceProvider services = new ServiceCollection()
+            .AddScoped<IHostUpdateSchedulerExecutor>(_ =>
+            {
+                Assert.NotNull(scheduler);
+                Assert.Equal(HostUpdateCancellationResult.Signaled, scheduler!.SignalSafeCheckpointCancellationAsync().GetAwaiter().GetResult());
+                return adapter;
+            })
+            .BuildServiceProvider();
+        scheduler = Create(
+            new HostUpdateSchedulerSettings(AutoEnabled: true),
+            Candidate() with { SourceCommit = new string('a', 40), ManifestDigest = "sha256:" + new string('b', 64) },
+            replay: null,
+            cancellationBridge: bridge,
+            scopeFactory: services.GetRequiredService<IServiceScopeFactory>());
+
+        HostUpdateSchedulerStatus status = await scheduler.TickAsync();
+
+        Assert.NotEqual(HostUpdateSchedulerReason.Admitted, status.Reason);
+        Assert.True(hostExecutor.CancellationRequested, status.Reason.ToString());
+    }
+
+    [Fact]
+    public async Task TickAsync_ScopedExecutorIsDisposedAfterSuccess()
+    {
+        using ServiceProvider services = new ServiceCollection()
+            .AddScoped<IHostUpdateSchedulerExecutor, FakeExecutor>()
+            .BuildServiceProvider();
+        RecordingScopeFactory scopes = new(services.GetRequiredService<IServiceScopeFactory>());
+        HostUpdateScheduler scheduler = Create(
+            new HostUpdateSchedulerSettings(true),
+            Candidate(),
+            executor: null,
+            scopeFactory: scopes);
+
+        HostUpdateSchedulerStatus status = await scheduler.TickAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.Admitted, status.Reason);
+        Assert.Equal(1, scopes.Created);
+        Assert.Equal(1, scopes.Disposed);
+    }
+
+    [Fact]
+    public async Task TickAsync_ScopedExecutorIsDisposedAfterExecutorFailure()
+    {
+        using ServiceProvider services = new ServiceCollection()
+            .AddScoped<IHostUpdateSchedulerExecutor>(_ => new ThrowingExecutor())
+            .BuildServiceProvider();
+        RecordingScopeFactory scopes = new(services.GetRequiredService<IServiceScopeFactory>());
+        HostUpdateScheduler scheduler = Create(
+            new HostUpdateSchedulerSettings(true),
+            Candidate(),
+            executor: null,
+            scopeFactory: scopes);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scheduler.TickAsync());
+
+        Assert.Equal(1, scopes.Created);
+        Assert.Equal(1, scopes.Disposed);
+    }
+
+    [Fact]
+    public async Task TickAsync_OrdersReserveExecuteAdmitOnSuccess()
+    {
+        RecordingReplayStore replay = new();
+        RecordingExecutor executor = new(replay.Events);
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, replay);
+
+        await scheduler.TickAsync();
+
+        Assert.Equal(["Reserve", "Execute", "Admit"], replay.Events);
+    }
+
+    [Theory]
+    [InlineData(HostUpdateExecutorResult.Refused)]
+    [InlineData(HostUpdateExecutorResult.Failed)]
+    [InlineData(HostUpdateExecutorResult.RecoveryRequired)]
+    public async Task TickAsync_DoesNotAdmitNonSuccessfulExecution(HostUpdateExecutorResult result)
+    {
+        RecordingReplayStore replay = new();
+        RecordingExecutor executor = new(replay.Events) { Response = new(result, "not admitted") };
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, replay);
+
+        await scheduler.TickAsync();
+
+        Assert.Equal(["Reserve", "Execute"], replay.Events);
+    }
+
+    [Fact]
+    public async Task TickAsync_DoesNotAdmitWhenExecutionThrows()
+    {
+        RecordingReplayStore replay = new();
+        RecordingExecutor executor = new(replay.Events) { Throw = true };
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, replay);
+
+        await Assert.ThrowsAsync<InvalidOperationException>(() => scheduler.TickAsync());
+
+        Assert.Equal(["Reserve", "Execute"], replay.Events);
+    }
     [Fact]
     public async Task TickAsync_DefaultSettings_DoNotExecute()
     {
@@ -133,7 +270,9 @@ public sealed class HostUpdateSchedulerTests
         Assert.Equal(HostUpdateReplayDisposition.Accepted, reservation.Disposition);
         Assert.False(reservation.Reused);
         Assert.Equal(HostUpdateReplayDisposition.Accepted, lower.Disposition);
+        Assert.False(lower.Reused);
         Assert.Equal(HostUpdateReplayDisposition.Accepted, final.Disposition);
+        Assert.False(final.Reused);
     }
 
     [Fact]
@@ -181,7 +320,7 @@ public sealed class HostUpdateSchedulerTests
     public async Task TickAsync_ConcurrentCalls_DoNotOverlap()
     {
         BlockingExecutor executor = new();
-        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor);
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, disposalWaitTimeout: TimeSpan.FromMilliseconds(1));
         Task<HostUpdateSchedulerStatus> first = scheduler.TickAsync();
         await executor.Started.Task;
         HostUpdateSchedulerStatus second = await scheduler.TickAsync();
@@ -207,6 +346,37 @@ public sealed class HostUpdateSchedulerTests
         await tick;
         await disposal;
         Assert.Equal(HostUpdateSchedulerReason.HostShutdown, (await scheduler.TickAsync()).Reason);
+    }
+
+    [Fact]
+    public async Task DisposeAsync_PreArmsDirectExecutorCancellation()
+    {
+        BlockingExecutor executor = new();
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, disposalWaitTimeout: TimeSpan.FromMilliseconds(1));
+        Task tick = scheduler.TickAsync();
+        await executor.Started.Task;
+
+        await scheduler.DisposeAsync();
+
+        Assert.Equal(1, executor.PreArmCount);
+        Assert.Equal(0, executor.CancellationCallCount);
+        executor.Release.TrySetResult();
+        await tick;
+    }
+
+    [Fact]
+    public async Task DisposeAsync_TimeoutSignalsCompletionAndBlocksLaterTicks()
+    {
+        BlockingExecutor executor = new();
+        HostUpdateScheduler scheduler = Create(new HostUpdateSchedulerSettings(true), Candidate(), executor, disposalWaitTimeout: TimeSpan.FromMilliseconds(1));
+        Task tick = scheduler.TickAsync();
+        await executor.Started.Task;
+
+        await scheduler.DisposeAsync();
+
+        Assert.Equal(HostUpdateSchedulerReason.HostShutdown, (await scheduler.TickAsync()).Reason);
+        executor.Release.TrySetResult();
+        await tick;
     }
 
     [Fact]
@@ -252,7 +422,8 @@ public sealed class HostUpdateSchedulerTests
         await tick;
 
         Assert.Equal(activeRequestId, executor.CancelledRequestId);
-        Assert.Equal(1, executor.CancellationCallCount);
+        Assert.Equal(1, executor.PreArmCount);
+        Assert.Equal(0, executor.CancellationCallCount);
 
         // The signal is pinned to the exact execution generation, not just the request ID.
         HostUpdateExecutorRequest executed = Assert.Single(executor.Requests);
@@ -320,8 +491,7 @@ public sealed class HostUpdateSchedulerTests
 
         clock.UtcNow = first.NextPollAt!.Value.AddSeconds(-1);
         HostUpdateSchedulerStatus early = await scheduler.TickAsync();
-        Assert.Equal(HostUpdateSchedulerReason.TooEarly, early.Reason);
-        Assert.Equal(first, early with { Reason = first.Reason });
+        Assert.Equal(first, early);
 
         clock.UtcNow = first.NextPollAt!.Value;
         HostUpdateSchedulerStatus exact = await scheduler.TickAsync();
@@ -747,8 +917,8 @@ public sealed class HostUpdateSchedulerTests
     }
     private static VerifiedHostUpdateCandidate Candidate(string channel = UpdateChannelSettings.StableChannel) => new("release-1", "commit-1", 1, "sha256:manifest", channel, true, true, true, true, true, true, new("sha256:" + new string('a', 64), "sha256:" + new string('b', 64), "sha256:" + new string('c', 64), "sha256:" + new string('d', 64), "sha256:" + new string('e', 64), "sha256:" + new string('f', 64)));
 
-    private static HostUpdateScheduler Create(HostUpdateSchedulerSettings? settings = null, VerifiedHostUpdateCandidate? candidate = null, FakeExecutor? executor = null, IHostUpdateReplayStore? replay = null) =>
-        new(new Settings(settings ?? new()), new Cache(candidate), replay ?? new MemoryReplayStore(), new AlwaysAdvancePolicyFence(), executor ?? new FakeExecutor(), new FixedClock(), new ZeroHostUpdateJitter());
+    private static HostUpdateScheduler Create(HostUpdateSchedulerSettings? settings = null, VerifiedHostUpdateCandidate? candidate = null, IHostUpdateSchedulerExecutor? executor = null, IHostUpdateReplayStore? replay = null, HostUpdateSchedulerCancellationBridge? cancellationBridge = null, IServiceScopeFactory? scopeFactory = null, TimeSpan? disposalWaitTimeout = null) =>
+        new(new Settings(settings ?? new()), new Cache(candidate), replay ?? new MemoryReplayStore(), new AlwaysAdvancePolicyFence(), executor ?? (scopeFactory is null ? new FakeExecutor() : null), new FixedClock(), new ZeroHostUpdateJitter(), scopeFactory: scopeFactory, cancellationBridge: cancellationBridge, disposalWaitTimeout: disposalWaitTimeout);
 
     private sealed class Settings(HostUpdateSchedulerSettings value) : IHostUpdateSchedulerSettings { public HostUpdateSchedulerSettings Current { get; } = value; }
 
@@ -777,13 +947,110 @@ public sealed class HostUpdateSchedulerTests
 
     private class FakeExecutor : IHostUpdateSchedulerExecutor
     {
+        public int PreArmCount { get; private set; }
+        public int SignalCount { get; private set; }
+        public virtual void PreArmCancellation(HostUpdateCancellationSignal signal) { CancelledSignal = signal; PreArmCount++; }
         public List<HostUpdateExecutorRequest> Requests { get; } = [];
         public HostUpdateExecutorResponse Response { get; set; } = new(HostUpdateExecutorResult.Accepted);
         public string? CancelledRequestId => CancelledSignal?.RequestId;
         public HostUpdateCancellationSignal? CancelledSignal { get; private set; }
         public int CancellationCallCount { get; private set; }
         public virtual Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct) { Requests.Add(request); return Task.FromResult(Response); }
-        public virtual Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct) { CancelledSignal = signal; CancellationCallCount++; return Task.CompletedTask; }
+        public virtual Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct) { CancelledSignal = signal; CancellationCallCount++; SignalCount++; return Task.CompletedTask; }
+    }
+
+    private sealed class CancellationAwareHostExecutor : IHostUpdateExecutor
+    {
+        public bool CancellationRequested { get; private set; }
+
+        public async Task<HostUpdateExecutionResult> ExecuteAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken = default)
+        {
+            try
+            {
+                await Task.Delay(TimeSpan.FromSeconds(5), cancellationToken);
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                CancellationRequested = true;
+                throw;
+            }
+
+            return new HostUpdateExecutionResult(request.ReleaseId, HostUpdateExecutionState.Completed, null, []);
+        }
+    }
+
+    private sealed class RecordingScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
+    {
+        public int Created { get; private set; }
+        public int Disposed { get; private set; }
+
+        public IServiceScope CreateScope()
+        {
+            Created++;
+            return new RecordingScope(inner.CreateScope(), () => Disposed++);
+        }
+    }
+
+    private sealed class RecordingScope(IServiceScope inner, Action onDispose) : IServiceScope
+    {
+        public IServiceProvider ServiceProvider => inner.ServiceProvider;
+
+        public void Dispose()
+        {
+            inner.Dispose();
+            onDispose();
+        }
+    }
+
+    private sealed class ThrowingExecutor : FakeExecutor
+    {
+        public override Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct) =>
+            throw new InvalidOperationException("executor failed");
+    }
+
+    private sealed class RecordingExecutor(List<string> events) : IHostUpdateSchedulerExecutor
+    {
+        public HostUpdateExecutorResponse Response { get; set; } = new(HostUpdateExecutorResult.Accepted);
+        public bool Throw { get; set; }
+
+        public void PreArmCancellation(HostUpdateCancellationSignal signal) { }
+
+        public Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct) =>
+            Task.CompletedTask;
+
+        public Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
+        {
+            events.Add("Execute");
+            if (Throw)
+            {
+                throw new InvalidOperationException("executor failed");
+            }
+
+            return Task.FromResult(Response);
+        }
+    }
+
+    private sealed class RecordingReplayStore : IHostUpdateReplayStore
+    {
+        public List<string> Events { get; } = [];
+
+        public Task<HostUpdateReplayDecision> DecideAsync(
+            VerifiedHostUpdateCandidate candidate,
+            HostUpdateReplayIntent intent,
+            CancellationToken ct)
+        {
+            string name = intent switch
+            {
+                HostUpdateReplayIntent.Reserve => "Reserve",
+                HostUpdateReplayIntent.Admit => "Admit",
+                _ => "Reject"
+            };
+            Events.Add(name);
+            return Task.FromResult(new HostUpdateReplayDecision(
+                HostUpdateReplayDisposition.Accepted,
+                "recording-decision",
+                false));
+        }
     }
 
     private sealed class BlockingExecutor : FakeExecutor
