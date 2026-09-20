@@ -34,6 +34,31 @@ public interface IHostUpdateBackupTarget
     Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken);
 }
 
+/// <summary>
+/// Implemented by a backup target whose write is actually performed by a separate server
+/// process's own engine, rather than by the client process invoking the backup command
+/// (issue #2788). SQL Server's <c>BACKUP DATABASE ... TO DISK</c> is the motivating case:
+/// <c>sqlcmd</c> merely sends the T-SQL statement over the wire, but the SQL Server engine
+/// itself -- typically running in its own container, with its own filesystem view -- performs
+/// the actual write. A successfully *executed* backup command therefore proves nothing about
+/// whether PrintFarmer can ever read the resulting file back for verification or restore; only
+/// an explicit round-trip probe does. This is distinct from <c>sqlite3</c> (runs in-process/
+/// same container) and <c>pg_dump</c> (a client tool that itself writes the dump file locally),
+/// neither of which has this failure mode.
+/// </summary>
+public interface IHostUpdateServerSideBackupTarget
+{
+    /// <summary>
+    /// Performs a real, lightweight round-trip probe: instructs the server engine to write a
+    /// small marker file at the deployment's configured server-visible path, then confirms
+    /// PrintFarmer can read that same physical file back at its own configured, mapped path.
+    /// Returns <see langword="null"/> when the mapping is verified; otherwise returns an
+    /// explicit, fail-closed evidence suffix (never assumes success from configuration
+    /// presence alone, and never assumes a default path when unconfigured).
+    /// </summary>
+    Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken);
+}
+
 /// <summary>One file recorded, checksummed, in a completed backup manifest.</summary>
 public sealed record HostUpdateBackupManifestFile(string RelativePath, string Sha256, long Length);
 

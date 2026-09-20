@@ -111,6 +111,11 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
             failures.Add("HostUpdateExecution:ComposeProjectName is required.");
         }
 
+        if (!string.IsNullOrWhiteSpace(options.SqlServerVisibleBackupDirectory) && !Path.IsPathRooted(options.SqlServerVisibleBackupDirectory))
+        {
+            failures.Add("HostUpdateExecution:SqlServerVisibleBackupDirectory must be an absolute path.");
+        }
+
         return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
     }
 

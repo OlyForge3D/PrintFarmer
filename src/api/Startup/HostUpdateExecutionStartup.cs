@@ -217,7 +217,9 @@ public static class HostUpdateExecutionStartup
                 sp.GetRequiredService<IHostUpdateProcessRunner>(),
                 sp.GetRequiredService<IHostUpdateExecutableResolver>(),
                 TimeSpan.FromSeconds(options.BackupTimeoutSeconds),
-                options.DatabaseExternallyOwned);
+                options.DatabaseExternallyOwned,
+                options.BackupRootDirectory,
+                options.SqlServerVisibleBackupDirectory);
         });
 
         // Bishop/Hicks review (issue #2663): do NOT register IEnumerable<IHostUpdateBackupTarget>

@@ -80,6 +80,25 @@ public class HostUpdateExecutionAvailabilityTests
         public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) => Task.CompletedTask;
     }
 
+    /// <summary>
+    /// Stub SQL Server backup target for availability-provider-level coverage of issue #2788:
+    /// proves <see cref="HostUpdateExecutionAvailabilityProvider.CheckAsync"/> itself surfaces or
+    /// suppresses the facility based on <see cref="IHostUpdateServerSideBackupTarget.VerifyVisibleBackupPathMappingAsync"/>,
+    /// independent of the real <c>SqlServerProcessDatabaseBackupTarget</c> round-trip mechanics
+    /// covered by <c>HostUpdateDatabaseBackupTargetFactoryTests</c>.
+    /// </summary>
+    private sealed class StubServerSideBackupTarget(string? verificationEvidence) : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
+    {
+        public string Name => "stub-sql-server";
+
+        public bool IsExternallyOwned => false;
+
+        public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(verificationEvidence);
+    }
+
     private sealed class FakeProcessRunner(bool dockerAvailable) : IHostUpdateProcessRunner
     {
         public Task<HostUpdateProcessResult> RunAsync(
@@ -176,7 +195,7 @@ public class HostUpdateExecutionAvailabilityTests
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
-            result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
+            result.Reasons.Should().NotContain(r => r.StartsWith("facility_unavailable:sql_server_visible_backup_path_mapping_unverified", StringComparison.Ordinal));
             result.Reasons.Should().Contain("host_executable_not_configured:docker");
             result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
         }
@@ -216,8 +235,65 @@ public class HostUpdateExecutionAvailabilityTests
             [
                 "facility_unavailable:target_image_migration_runner_unavailable",
                 "facility_unavailable:queue_reconciliation_writer_fence_unavailable",
-                "facility_unavailable:sql_server_visible_backup_path_mapping_unverified",
             ]);
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServerSideBackupTargetVerificationFails_SurfacesFacilityWithEvidence()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new StubServerSideBackupTarget("probe_file_not_visible_from_printfarmer")],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().Contain(
+                "facility_unavailable:sql_server_visible_backup_path_mapping_unverified:probe_file_not_visible_from_printfarmer");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServerSideBackupTargetVerificationSucceeds_DoesNotSurfaceFacility()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new StubServerSideBackupTarget(verificationEvidence: null)],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Should().NotContain(r => r.StartsWith("facility_unavailable:sql_server_visible_backup_path_mapping_unverified", StringComparison.Ordinal));
         }
         finally
         {

@@ -343,6 +343,18 @@ sqlcmd -S "$SQLSERVER_HOST" -Q \
   "BACKUP DATABASE [printfarmer] TO DISK = N'/var/opt/mssql/backup/printfarmer.bak' WITH COPY_ONLY"
 ```
 
+For the host-update executor's automated pre-update backups, a SQL Server
+deployment must additionally bind-mount a **shared volume** between the
+`sqlserver` container and the PrintFarmer container: `BACKUP DATABASE` writes
+from the SQL Server container's own filesystem view, not PrintFarmer's, so
+`HostUpdateExecution__BackupRootDirectory` and
+`HostUpdateExecution__SqlServerVisibleBackupDirectory` must be two absolute
+paths into the same physical volume (one path as PrintFarmer sees it, one as
+the SQL Server container sees it). The executor verifies this mapping with a
+real round-trip probe before trusting it — see "SQL Server visible backup-path
+mapping" in [`HOST_UPDATE_EXECUTOR.md`](./HOST_UPDATE_EXECUTOR.md) for the
+required configuration and failure modes.
+
 Previously supported SQLite databases created with `EnsureCreated` and without
 migration history are adopted only when the complete relational fingerprint
 matches the current model. Validation covers table and column names, store
