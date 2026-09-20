@@ -963,7 +963,8 @@ Proposed check policy, subject to approval:
   signed channel-local sequence for anti-replay, not a replacement comparator.
   Tags are discovery hints, never equality/provenance proof.
   Pins block execution and label a newer candidate as policy-held. Channel
-  changes never silently downgrade; custom/unrecognized builds are `NotManaged`.
+  changes never silently downgrade; custom/unrecognized builds are `NotManaged` (or
+  `Blocked`, if blocking compatibility or channel evidence is also present).
   Cache, dismissal and in-flight results are keyed by installation policy
   revision and channel; durable replay state is independently keyed by enrolled
   trust root and channel as above. A late response from the previous selection
