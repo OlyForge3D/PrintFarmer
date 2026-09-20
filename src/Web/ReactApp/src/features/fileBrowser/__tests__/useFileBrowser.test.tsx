@@ -38,7 +38,6 @@ describe('useFileBrowser', () => {
       fileName: item.name,
       isDirectory: false,
     }),
-    canDelete: true,
     canDownload: true,
     onDelete: vi.fn(),
     onDownload: vi.fn(),
@@ -73,3 +72,6 @@ describe('useFileBrowser', () => {
     expect(result.current.selectedIds).toEqual(['1']);
   });
 });
+
+
+

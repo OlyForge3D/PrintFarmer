@@ -15,10 +15,7 @@ import type { PrinterFilamentCoverage } from "../types";
 // Mock the hook so we can drive isLoading / isError / data independently
 // ---------------------------------------------------------------------------
 
-const mockUsePrinterCoverageFromFleet = vi.fn<
-  [],
-  Partial<UseQueryResult<PrinterFilamentCoverage | null>>
->();
+const mockUsePrinterCoverageFromFleet = vi.fn<() => Partial<UseQueryResult<PrinterFilamentCoverage | null>>>();
 
 vi.mock("../hooks", () => ({
   usePrinterCoverageFromFleet: () => mockUsePrinterCoverageFromFleet(),
@@ -200,3 +197,6 @@ describe("FilamentCoverageBreakdown", () => {
     expect(badges.some((el) => /Filament unknown/i.test(el.textContent ?? ""))).toBe(true);
   });
 });
+
+
+

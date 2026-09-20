@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { useDirtyState } from '../useDirtyState';
 
 interface Sample {
+  [key: string]: unknown;
   name: string;
   count: number;
   tags: string[];
@@ -109,7 +110,7 @@ describe('useDirtyState — beforeunload guard', () => {
   });
 
   const beforeunloadCalls = (spy: ReturnType<typeof vi.spyOn>) =>
-    spy.mock.calls.filter(c => c[0] === 'beforeunload');
+    spy.mock.calls.filter((c: unknown[]) => c[0] === 'beforeunload');
 
   it('does not install listener while clean (guardUnload=true)', () => {
     renderHook(() => useDirtyState(initial));
@@ -237,3 +238,5 @@ describe('acceptKeys — settling a partial save (Hicks #2)', () => {
     expect(result.current.changedKeys).toEqual(['a']);
   });
 });
+
+

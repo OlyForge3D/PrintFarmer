@@ -50,11 +50,13 @@ function render(ui: ReactElement) {
 
 describe("QueueJobsTable Component", () => {
   const createMockJob = (overrides?: Partial<QueuedPrintJobWithFileMetaDto>): QueuedPrintJobWithFileMetaDto => ({
-    id: "job-1",
     job: {
       id: "job-1",
       name: "test-print",
       gcodeFileId: "file-1",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
       status: "Queued",
       priority: PrintJobPriority.Low,
       queuePosition: 1,
@@ -65,6 +67,7 @@ describe("QueueJobsTable Component", () => {
     },
     gcodeFile: {
       id: "file-1",
+      name: "test-print.gcode",
       fileName: "test-print.gcode",
       fileSizeBytes: 1024,
       materialType: "PLA",
@@ -82,12 +85,14 @@ describe("QueueJobsTable Component", () => {
 
   const mockJobs: QueuedPrintJobWithFileMetaDto[] = [
     createMockJob({
-      id: "job-1",
       job: {
         id: "job-1",
         name: "test-print",
         gcodeFileId: "file-1",
-        status: "Queued",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -98,6 +103,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-1",
+      name: "test-print.gcode",
         fileName: "test-print.gcode",
         fileSizeBytes: 1024,
         materialType: "PLA",
@@ -105,12 +111,14 @@ describe("QueueJobsTable Component", () => {
       },
     }),
     createMockJob({
-      id: "job-2",
       job: {
         id: "job-2",
         name: "another-print",
         gcodeFileId: "file-2",
-        status: "Printing",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Printing",
         priority: PrintJobPriority.Normal,
         queuePosition: 0,
         createdAtUtc: new Date().toISOString(),
@@ -121,6 +129,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-2",
+      name: "another-print.gcode",
         fileName: "another-print.gcode",
         fileSizeBytes: 2048,
         materialType: "PETG",
@@ -201,12 +210,14 @@ describe("QueueJobsTable Component", () => {
     };
 
     const dueSoonJob = createMockJob({
-      id: "job-due-soon",
       job: {
         id: "job-due-soon",
         name: "due-soon-print",
         gcodeFileId: "file-3",
-        status: "Queued",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 2,
         createdAtUtc: new Date().toISOString(),
@@ -371,12 +382,14 @@ describe("QueueJobsTable Component", () => {
     // Externally-started print: gcodeFile has no thumbnailUrl, but the printer
     // reports one live over SignalR.
     const externalJob = createMockJob({
-      id: "ext-1",
       job: {
         id: "ext-1",
         name: "external-print",
         gcodeFileId: "",
-        status: "Printing",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Printing",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -386,6 +399,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-ext",
+      name: "file-ext",
         fileName: "external-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -420,9 +434,9 @@ describe("QueueJobsTable Component", () => {
     };
 
     const job = createMockJob({
-      id: "job-thumb",
       gcodeFile: {
         id: "file-thumb",
+      name: "file-thumb",
         fileName: "has-thumb.gcode",
         fileSizeBytes: 1024,
         thumbnailUrl: "http://server/gcode-thumb.png",
@@ -461,12 +475,14 @@ describe("QueueJobsTable Component", () => {
     // DIFFERENT job. The live thumbnail belongs to the printing job, not this
     // queued one — it must not leak onto the queued row.
     const queuedJob = createMockJob({
-      id: "queued-1",
       job: {
         id: "queued-1",
         name: "waiting-print",
         gcodeFileId: "",
-        status: "Queued",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -475,6 +491,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-queued",
+      name: "file-queued",
         fileName: "waiting-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -511,12 +528,14 @@ describe("QueueJobsTable Component", () => {
     // must omit gcodeFile.thumbnailUrl entirely (not point at a 404), and the
     // row must fall back to the placeholder rather than an <img> tag.
     const jobWithoutThumbnail = createMockJob({
-      id: "no-thumb-1",
       job: {
         id: "no-thumb-1",
         name: "no-thumbnail-print",
         gcodeFileId: "file-no-thumb",
-        status: "Queued",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -525,6 +544,7 @@ describe("QueueJobsTable Component", () => {
       },
       gcodeFile: {
         id: "file-no-thumb",
+      name: "file-no-thumb",
         fileName: "no-thumbnail-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -593,11 +613,13 @@ describe("QueueJobsTable Component", () => {
 
 describe("QueueJobsTable — filament coverage badge", () => {
   const jobWithPrinter = {
-    id: "badge-job",
     job: {
       id: "badge-job",
       name: "badge-test-print",
       gcodeFileId: "f-badge",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
       status: "Queued" as const,
       priority: PrintJobPriority.Low,
       queuePosition: 1,
@@ -608,6 +630,7 @@ describe("QueueJobsTable — filament coverage badge", () => {
     },
     gcodeFile: {
       id: "f-badge",
+      name: "f-badge",
       fileName: "badge-test.gcode",
       fileSizeBytes: 512,
       createdAtUtc: new Date().toISOString(),
@@ -704,3 +727,7 @@ describe("QueueJobsTable — filament coverage badge", () => {
     );
   });
 });
+
+
+
+

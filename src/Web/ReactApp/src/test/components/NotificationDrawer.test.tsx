@@ -46,6 +46,7 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 const mockNotifications: NotificationDto[] = [
   {
     id: '1',
+    userId: 'user-1',
     subject: 'Job completed',
     body: 'Print job "test-model.gcode" completed successfully',
     type: NotificationType.JobCompleted,
@@ -55,6 +56,7 @@ const mockNotifications: NotificationDto[] = [
   },
   {
     id: '2',
+    userId: 'user-1',
     subject: 'Job failed',
     body: 'Print job "failed-model.gcode" failed',
     type: NotificationType.JobFailed,
@@ -64,12 +66,13 @@ const mockNotifications: NotificationDto[] = [
   },
   {
     id: '3',
+    userId: 'user-1',
     subject: 'System alert',
     body: 'Low filament warning',
     type: NotificationType.SystemAlert,
     isRead: false,
     createdAt: new Date('2024-01-15T08:00:00Z').toISOString(),
-    jobId: null,
+    jobId: undefined,
   },
 ];
 
@@ -366,3 +369,4 @@ describe('NotificationDrawer', () => {
     expect(screen.getByText('🔔')).toBeInTheDocument(); // SystemAlert
   });
 });
+

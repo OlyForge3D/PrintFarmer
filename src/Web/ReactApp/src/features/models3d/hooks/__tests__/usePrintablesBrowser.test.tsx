@@ -59,7 +59,6 @@ describe('usePrintablesBrowser', () => {
           id: 'col-1',
           name: 'Favorites',
           modelCount: 1,
-          likesCount: 0,
           thumbnailUrls: [],
         },
       ],
@@ -134,3 +133,4 @@ describe('usePrintablesBrowser', () => {
     });
   });
 });
+

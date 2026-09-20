@@ -152,6 +152,8 @@ const printer: Printer = {
   modelName: 'MK4',
   backend: PrinterBackend.PrusaLink,
   isOnline: true,
+  backendUrl: 'http://printer.local',
+  isReachable: true,
   isEnabled: true,
   state: 'Idle',
   hotendTemp: 25,
@@ -594,3 +596,4 @@ describe('PrinterDetailsSidebar', () => {
     });
   });
 });
+

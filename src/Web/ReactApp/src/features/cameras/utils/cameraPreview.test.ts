@@ -27,7 +27,7 @@ describe('cameraPreview', () => {
   it('leaves public direct snapshot URLs in direct-browser mode', () => {
     const contract = {
       accessMode: CameraAccessMode.SnapshotOnly,
-      streamFormat: CameraStreamFormat.Jpeg,
+      streamFormat: CameraStreamFormat.Mjpeg,
       snapshotStrategy: CameraSnapshotStrategy.DirectUrl,
       snapshotUrl: 'http://camera.local/snapshot.jpg',
     };
@@ -36,3 +36,4 @@ describe('cameraPreview', () => {
     expect(isUnsupportedCameraPreview(contract)).toBe(false);
   });
 });
+

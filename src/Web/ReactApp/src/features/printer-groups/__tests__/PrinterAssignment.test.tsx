@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { PrinterGroupPrinter } from '@/types/api';
+import { PrinterBackend, type PrinterGroupPrinter } from '@/types/api';
 
 const { mockToast, mockAssignPrinterToGroup, mockRemovePrinterFromGroup } = vi.hoisted(() => ({
   mockToast: { success: vi.fn(), error: vi.fn() },
@@ -20,9 +20,9 @@ vi.mock('@/services/api', () => ({
 }));
 
 const mockAllPrinters = [
-  { id: 'p1', name: 'Printer One', backend: 'Moonraker' },
-  { id: 'p2', name: 'Printer Two', backend: 'PrusaLink' },
-  { id: 'p3', name: 'Printer Three', backend: 'Moonraker' },
+  { id: 'p1', name: 'Printer One', backend: PrinterBackend.Moonraker },
+  { id: 'p2', name: 'Printer Two', backend: PrinterBackend.PrusaLink },
+  { id: 'p3', name: 'Printer Three', backend: PrinterBackend.Moonraker },
 ];
 
 vi.mock('@/common/hooks/useApi', () => ({
@@ -60,7 +60,7 @@ const createQueryClient = () =>
   new QueryClient({ defaultOptions: { queries: { retry: false }, mutations: { retry: false } } });
 
 const assignedPrinters: PrinterGroupPrinter[] = [
-  { id: 'p1', name: 'Printer One', backend: 1, isAvailable: true, inMaintenance: false },
+  { id: 'p1', name: 'Printer One', backend: PrinterBackend.Moonraker, isAvailable: true, inMaintenance: false },
 ];
 
 describe('PrinterAssignment', () => {
@@ -115,7 +115,7 @@ describe('PrinterAssignment', () => {
     const allAssigned: PrinterGroupPrinter[] = mockAllPrinters.map((p) => ({
       id: p.id,
       name: p.name,
-      backend: 1,
+      backend: PrinterBackend.Moonraker,
       isAvailable: true,
       inMaintenance: false,
     }));
@@ -203,7 +203,7 @@ describe('PrinterAssignment', () => {
   it('renders maintenance badge for printer in maintenance', () => {
     renderAssignment({
       assignedPrinters: [
-        { id: 'p1', name: 'Printer One', backend: 1, isAvailable: true, inMaintenance: true },
+        { id: 'p1', name: 'Printer One', backend: PrinterBackend.Moonraker, isAvailable: true, inMaintenance: true },
       ],
     });
     expect(screen.getByText('Maintenance')).toBeInTheDocument();
@@ -212,7 +212,7 @@ describe('PrinterAssignment', () => {
   it('renders offline badge for unavailable printer', () => {
     renderAssignment({
       assignedPrinters: [
-        { id: 'p1', name: 'Printer One', backend: 1, isAvailable: false, inMaintenance: false },
+        { id: 'p1', name: 'Printer One', backend: PrinterBackend.Moonraker, isAvailable: false, inMaintenance: false },
       ],
     });
     expect(screen.getByText('Offline')).toBeInTheDocument();
@@ -221,7 +221,7 @@ describe('PrinterAssignment', () => {
   it('does not show offline badge for printer in maintenance', () => {
     renderAssignment({
       assignedPrinters: [
-        { id: 'p1', name: 'Printer One', backend: 1, isAvailable: false, inMaintenance: true },
+        { id: 'p1', name: 'Printer One', backend: PrinterBackend.Moonraker, isAvailable: false, inMaintenance: true },
       ],
     });
     expect(screen.getByText('Maintenance')).toBeInTheDocument();
@@ -230,10 +230,11 @@ describe('PrinterAssignment', () => {
 
   it('renders remove button for each assigned printer', () => {
     const twoPrinters: PrinterGroupPrinter[] = [
-      { id: 'p1', name: 'Printer One', backend: 1, isAvailable: true, inMaintenance: false },
-      { id: 'p3', name: 'Printer Three', backend: 1, isAvailable: true, inMaintenance: false },
+      { id: 'p1', name: 'Printer One', backend: PrinterBackend.Moonraker, isAvailable: true, inMaintenance: false },
+      { id: 'p3', name: 'Printer Three', backend: PrinterBackend.Moonraker, isAvailable: true, inMaintenance: false },
     ];
     renderAssignment({ assignedPrinters: twoPrinters });
     expect(screen.getAllByText('Remove')).toHaveLength(2);
   });
 });
+

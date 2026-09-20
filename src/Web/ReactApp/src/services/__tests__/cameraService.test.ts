@@ -1,7 +1,39 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { cameraService } from '../cameraService';
 import { apiClient } from '../api';
+import { CameraHealthStatus, CameraSource, CameraType } from '@/types/api';
 import type { CameraDto, CreateCameraDto, UpdateCameraDto, DisplayCameraDto } from '@/types/api';
+
+function createCamera(overrides: Partial<CameraDto> = {}): CameraDto {
+  return {
+    id: '1',
+    name: 'Camera 1',
+    streamUrl: 'http://cam1.local',
+    isEnabled: true,
+    sortOrder: 0,
+    createdAt: '2024-01-01T00:00:00Z',
+    isStandalone: true,
+    source: CameraSource.Standalone,
+    cameraType: CameraType.General,
+    healthStatus: CameraHealthStatus.Unknown,
+    ...overrides,
+  };
+}
+
+function createDisplayCamera(overrides: Partial<DisplayCameraDto> = {}): DisplayCameraDto {
+  return {
+    id: '1',
+    name: 'Camera 1',
+    streamUrl: 'http://cam1.local',
+    isEnabled: true,
+    sortOrder: 0,
+    isStandalone: true,
+    source: CameraSource.Standalone,
+    cameraType: CameraType.General,
+    healthStatus: CameraHealthStatus.Unknown,
+    ...overrides,
+  };
+}
 
 // Mock the api client
 vi.mock('../api', () => ({
@@ -25,8 +57,8 @@ describe('cameraService', () => {
   describe('getAllCameras', () => {
     it('should get all cameras', async () => {
       const mockCameras: CameraDto[] = [
-        { id: '1', name: 'Camera 1', streamUrl: 'http://cam1.local', isEnabled: true },
-        { id: '2', name: 'Camera 2', streamUrl: 'http://cam2.local', isEnabled: false },
+        createCamera(),
+        createCamera({ id: '2', name: 'Camera 2', streamUrl: 'http://cam2.local', isEnabled: false }),
       ];
 
       vi.mocked(apiClient.getAllCameras).mockResolvedValue(mockCameras as never);
@@ -41,7 +73,7 @@ describe('cameraService', () => {
   describe('getEnabledCameras', () => {
     it('should get only enabled cameras', async () => {
       const mockCameras: CameraDto[] = [
-        { id: '1', name: 'Camera 1', streamUrl: 'http://cam1.local', isEnabled: true },
+        createCamera(),
       ];
 
       vi.mocked(apiClient.getEnabledCameras).mockResolvedValue(mockCameras as never);
@@ -56,7 +88,7 @@ describe('cameraService', () => {
   describe('getDisplayCameras', () => {
     it('should get display cameras', async () => {
       const mockDisplayCameras: DisplayCameraDto[] = [
-        { id: '1', name: 'Camera 1', streamUrl: 'http://cam1.local', type: 'webcam' },
+        createDisplayCamera(),
       ];
 
       vi.mocked(apiClient.getDisplayCameras).mockResolvedValue(mockDisplayCameras as never);
@@ -70,12 +102,7 @@ describe('cameraService', () => {
 
   describe('getCameraById', () => {
     it('should get a camera by ID', async () => {
-      const mockCamera: CameraDto = {
-        id: '1',
-        name: 'Camera 1',
-        streamUrl: 'http://cam1.local',
-        isEnabled: true
-      };
+      const mockCamera = createCamera();
 
       vi.mocked(apiClient.getCameraById).mockResolvedValue(mockCamera as never);
 
@@ -94,10 +121,7 @@ describe('cameraService', () => {
         isEnabled: true
       };
 
-      const mockCreatedCamera: CameraDto = {
-        id: '3',
-        ...request
-      };
+      const mockCreatedCamera = createCamera({ id: '3', ...request });
 
       vi.mocked(apiClient.createCamera).mockResolvedValue(mockCreatedCamera as never);
 
@@ -115,12 +139,10 @@ describe('cameraService', () => {
         isEnabled: false
       };
 
-      const mockUpdatedCamera: CameraDto = {
-        id: '1',
+      const mockUpdatedCamera = createCamera({
         name: 'Updated Camera',
-        streamUrl: 'http://cam1.local',
-        isEnabled: false
-      };
+        isEnabled: false,
+      });
 
       vi.mocked(apiClient.updateCamera).mockResolvedValue(mockUpdatedCamera as never);
 
@@ -143,12 +165,7 @@ describe('cameraService', () => {
 
   describe('toggleCamera', () => {
     it('should enable a camera', async () => {
-      const mockCamera: CameraDto = {
-        id: '1',
-        name: 'Camera 1',
-        streamUrl: 'http://cam1.local',
-        isEnabled: true
-      };
+      const mockCamera = createCamera();
 
       vi.mocked(apiClient.toggleCamera).mockResolvedValue(mockCamera as never);
 
@@ -159,12 +176,7 @@ describe('cameraService', () => {
     });
 
     it('should disable a camera', async () => {
-      const mockCamera: CameraDto = {
-        id: '1',
-        name: 'Camera 1',
-        streamUrl: 'http://cam1.local',
-        isEnabled: false
-      };
+      const mockCamera = createCamera({ isEnabled: false });
 
       vi.mocked(apiClient.toggleCamera).mockResolvedValue(mockCamera as never);
 

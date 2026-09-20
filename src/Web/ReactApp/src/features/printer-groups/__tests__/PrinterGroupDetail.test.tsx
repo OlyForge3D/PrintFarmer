@@ -3,7 +3,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { PrinterGroupDetail as PrinterGroupDetailType } from '@/types/api';
+import { PrinterBackend, type PrinterGroupDetail as PrinterGroupDetailType } from '@/types/api';
 
 const { mockGetPrinterGroup } = vi.hoisted(() => ({
   mockGetPrinterGroup: vi.fn(),
@@ -76,7 +76,7 @@ const mockGroupDetail: PrinterGroupDetailType = {
   createdDate: '2025-01-01T00:00:00Z',
   updatedDate: '2025-01-02T00:00:00Z',
   printers: [
-    { id: 'p1', name: 'Printer 1', backend: 1, isAvailable: true, inMaintenance: false },
+    { id: 'p1', name: 'Printer 1', backend: PrinterBackend.Moonraker, isAvailable: true, inMaintenance: false },
   ],
 };
 
@@ -140,8 +140,8 @@ describe('PrinterGroupDetail', () => {
     mockGetPrinterGroup.mockResolvedValue({
       ...mockGroupDetail,
       printers: [
-        { id: 'p1', name: 'P1', backend: 1, isAvailable: true, inMaintenance: false },
-        { id: 'p2', name: 'P2', backend: 1, isAvailable: true, inMaintenance: false },
+        { id: 'p1', name: 'P1', backend: PrinterBackend.Moonraker, isAvailable: true, inMaintenance: false },
+        { id: 'p2', name: 'P2', backend: PrinterBackend.Moonraker, isAvailable: true, inMaintenance: false },
       ],
     });
     renderDetail();
@@ -199,3 +199,4 @@ describe('PrinterGroupDetail', () => {
     expect(screen.queryByText('A test group')).not.toBeInTheDocument();
   });
 });
+

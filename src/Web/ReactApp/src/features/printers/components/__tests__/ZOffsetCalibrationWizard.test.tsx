@@ -3,7 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ZOffsetCalibrationWizard } from '@/features/printers/components/ZOffsetCalibrationWizard';
-import type { CommandResult, Printer } from '@/types/api';
+import { PrinterBackend, type CommandResult, type Printer } from '@/types/api';
 
 const mockHomePrinter = vi.fn();
 const mockMovePrinterTo = vi.fn();
@@ -36,8 +36,8 @@ vi.mock('@/common/components/modals/Modal', () => ({
 function createTestPrinter(overrides: Partial<Printer> = {}): Printer {
   return {
     id: 'calibration-printer', name: 'Test Printer',
-    backend: 'Moonraker' as Printer['backend'], isOnline: true, isEnabled: true,
-    inMaintenance: false, state: 'Idle', rowVersion: 'printer-v1',
+    backend: PrinterBackend.Moonraker, isOnline: true, isEnabled: true,
+    inMaintenance: false, backendUrl: 'http://printer.local', isReachable: true, state: 'Idle', rowVersion: 'printer-v1',
     ...overrides,
   };
 }
@@ -153,3 +153,4 @@ describe('ZOffsetCalibrationWizard direct commands', () => {
     ));
   });
 });
+

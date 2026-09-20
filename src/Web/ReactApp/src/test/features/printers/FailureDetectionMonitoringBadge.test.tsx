@@ -42,12 +42,12 @@ describe('FailureDetectionMonitoringBadge', () => {
       printerId: 'printer-1',
       printerName: 'Voron 2.4',
       state: 'monitoring',
-      reason: null,
+      reason: undefined,
       isPrinting: true,
       detectionSource: 'global',
       lastOutcome: 'clean',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
     const recentEvents = [
@@ -89,7 +89,7 @@ describe('FailureDetectionMonitoringBadge', () => {
       detectionSource: 'global',
       lastOutcome: 'error',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -107,12 +107,12 @@ describe('FailureDetectionMonitoringBadge', () => {
       printerId: 'printer-1',
       printerName: 'Prusa MK4',
       state: 'monitoring',
-      reason: null,
+      reason: undefined,
       isPrinting: true,
       detectionSource: 'global',
       lastOutcome: 'clean',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -319,8 +319,8 @@ describe('FailureDetectionMonitoringBadge', () => {
       state: 'checking',
       isPrinting: false,
       detectionSource: 'global',
-      lastOutcome: null,
-      lastAnalyzedAt: null,
+      lastOutcome: undefined,
+      lastAnalyzedAt: undefined,
     };
 
     render(<FailureDetectionMonitoringBadge enabled={true} status={status} />);
@@ -348,7 +348,7 @@ describe('FailureDetectionMonitoringBadge', () => {
       isPrinting: false, // stale — DTO hasn't polled yet since print started
       detectionSource: 'global',
       lastOutcome: 'none',
-      lastAnalyzedAt: null,
+      lastAnalyzedAt: undefined,
     };
 
     render(
@@ -406,3 +406,4 @@ describe('FailureDetectionMonitoringBadge', () => {
     expect(button).toHaveAttribute('title', expect.stringContaining('Guarding'));
   });
 });
+

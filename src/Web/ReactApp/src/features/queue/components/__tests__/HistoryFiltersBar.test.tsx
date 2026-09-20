@@ -99,3 +99,4 @@ describe("ModelFiltersBar accessibility", () => {
     expect(onStatusChange).toHaveBeenCalledWith(["queued", "paused", "printing"]);
   });
 });
+

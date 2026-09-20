@@ -20,7 +20,7 @@ vi.mock('@/common/hooks/useApi', () => ({
 }));
 
 function makeEvent(tagUid: string, printerId = 'printer-1'): NfcTagUnknownEvent {
-  return { tagUid, printerId };
+  return { tagUid, printerId, readAt: '2026-01-01T00:00:00Z' };
 }
 
 describe('NfcBindingModal', () => {
@@ -87,3 +87,6 @@ describe('NfcBindingModal', () => {
     expect(spoolAfter).toHaveValue('');
   });
 });
+
+
+

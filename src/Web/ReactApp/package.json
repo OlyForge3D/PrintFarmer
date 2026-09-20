@@ -13,7 +13,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "vite build",
+    "build": "npm run typecheck:test && vite build",
     "lint": "eslint .",
     "lint:inventory-inert-state": "node ./eslint-rules/inventory-inert-state-variants.js",
     "check:empty-attrs": "node ./scripts/check-empty-attrs.cjs",
@@ -32,6 +32,7 @@
     "test:e2e:moonraker": "playwright test e2e/emulator/ --grep Moonraker --workers=1",
     "test:e2e:monolith-smoke": "playwright test e2e/monolith-smoke/ --project=chromium --workers=1",
     "typecheck:e2e": "tsc -p tsconfig.e2e.json --noEmit",
+    "typecheck:test": "node ./scripts/typecheck-tests.mjs",
     "test:e2e:list": "playwright test --list",
     "test:e2e:update-snapshots": "playwright test --update-snapshots",
     "icons": "dotnet run --project ../../tools/IconGen/IconGen.csproj"

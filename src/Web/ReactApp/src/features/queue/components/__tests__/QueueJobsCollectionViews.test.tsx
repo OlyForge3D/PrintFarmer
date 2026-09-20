@@ -8,11 +8,13 @@ import { PrintJobPriority } from "@/types/api";
 
 function createMockJob(overrides?: Partial<QueuedPrintJobWithFileMetaDto>): QueuedPrintJobWithFileMetaDto {
   return {
-    id: "job-1",
     job: {
       id: "job-1",
       name: "benchy-print",
       gcodeFileId: "file-1",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
       status: "Queued",
       priority: PrintJobPriority.Low,
       queuePosition: 1,
@@ -27,6 +29,7 @@ function createMockJob(overrides?: Partial<QueuedPrintJobWithFileMetaDto>): Queu
     },
     gcodeFile: {
       id: "file-1",
+      name: "benchy.gcode",
       fileName: "benchy.gcode",
       fileSizeBytes: 2048,
       materialType: "PLA",
@@ -86,7 +89,10 @@ describe("Queue view mode + collection renderers", () => {
         id: "job-1",
         name: "external-print",
         gcodeFileId: "",
-        status: "Printing",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Printing",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -95,6 +101,7 @@ describe("Queue view mode + collection renderers", () => {
       },
       gcodeFile: {
         id: "file-1",
+      name: "file-1",
         fileName: "external-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -114,7 +121,10 @@ describe("Queue view mode + collection renderers", () => {
         id: "job-1",
         name: "waiting-print",
         gcodeFileId: "",
-        status: "Queued",
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -123,6 +133,7 @@ describe("Queue view mode + collection renderers", () => {
       },
       gcodeFile: {
         id: "file-1",
+      name: "file-1",
         fileName: "waiting-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -136,3 +147,9 @@ describe("Queue view mode + collection renderers", () => {
     expect(container.querySelector('img[src="http://printer/other-job.png"]')).not.toBeInTheDocument();
   });
 });
+
+
+
+
+
+

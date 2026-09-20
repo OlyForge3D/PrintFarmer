@@ -7,9 +7,11 @@ describe('useSlicer', () => {
   it('should return slicer context value', () => {
     const mockContextValue: SlicerContextValue = {
       isSlicerAvailable: true,
+      settingEnabled: true,
+      hasWorkers: true,
+      isLoading: false,
       workerCount: 2,
-      activeJobs: 1,
-      queuedJobs: 0
+      refreshWorkers: vi.fn().mockResolvedValue(undefined)
     };
 
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -37,9 +39,11 @@ describe('useSlicer', () => {
   it('should return isSlicerAvailable as false when slicer is unavailable', () => {
     const mockContextValue: SlicerContextValue = {
       isSlicerAvailable: false,
+      settingEnabled: true,
+      hasWorkers: true,
+      isLoading: false,
       workerCount: 0,
-      activeJobs: 0,
-      queuedJobs: 5
+      refreshWorkers: vi.fn().mockResolvedValue(undefined)
     };
 
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -52,15 +56,17 @@ describe('useSlicer', () => {
 
     expect(result.current.isSlicerAvailable).toBe(false);
     expect(result.current.workerCount).toBe(0);
-    expect(result.current.queuedJobs).toBe(5);
+    expect(result.current.workerCount).toBe(0);
   });
 
   it('should return correct worker count', () => {
     const mockContextValue: SlicerContextValue = {
       isSlicerAvailable: true,
+      settingEnabled: true,
+      hasWorkers: true,
+      isLoading: false,
       workerCount: 4,
-      activeJobs: 2,
-      queuedJobs: 1
+      refreshWorkers: vi.fn().mockResolvedValue(undefined)
     };
 
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -74,12 +80,14 @@ describe('useSlicer', () => {
     expect(result.current.workerCount).toBe(4);
   });
 
-  it('should handle zero active and queued jobs', () => {
+  it('should return the current worker state', () => {
     const mockContextValue: SlicerContextValue = {
       isSlicerAvailable: true,
+      settingEnabled: true,
+      hasWorkers: true,
+      isLoading: false,
       workerCount: 2,
-      activeJobs: 0,
-      queuedJobs: 0
+      refreshWorkers: vi.fn().mockResolvedValue(undefined)
     };
 
     const wrapper = ({ children }: { children: React.ReactNode }) => (
@@ -90,7 +98,7 @@ describe('useSlicer', () => {
 
     const { result } = renderHook(() => useSlicer(), { wrapper });
 
-    expect(result.current.activeJobs).toBe(0);
-    expect(result.current.queuedJobs).toBe(0);
+    expect(result.current.workerCount).toBe(2);
   });
 });
+

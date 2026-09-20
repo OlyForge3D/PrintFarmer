@@ -26,7 +26,7 @@ describe('failureDetectionStatus utilities', () => {
         detectionSource: 'global',
         lastOutcome: 'error',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -43,7 +43,7 @@ describe('failureDetectionStatus utilities', () => {
         detectionSource: 'global',
         lastOutcome: 'error',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -189,8 +189,8 @@ describe('failureDetectionStatus utilities', () => {
           isPrinting: false,
           detectionSource: 'none',
           lastOutcome: 'none',
-          lastAnalyzedAt: null,
-          lastConfidence: null,
+          lastAnalyzedAt: undefined,
+          lastConfidence: undefined,
           lastAutoPaused: false,
         };
 
@@ -199,14 +199,16 @@ describe('failureDetectionStatus utilities', () => {
 
       it('returns reason for misconfigured state', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'misconfigured',
           reason: 'No enabled camera snapshot URL is configured.',
           isPrinting: false,
           detectionSource: 'none',
           lastOutcome: 'none',
-          lastAnalyzedAt: null,
-          lastConfidence: null,
-          lastAutoPaused: false,
+          lastAnalyzedAt: undefined,
+          lastConfidence: undefined,
+          lastAutoPaused: false,
         };
 
         expect(getFailureDetectionDetail(status, true)).toBe(
@@ -224,7 +226,7 @@ describe('failureDetectionStatus utilities', () => {
           detectionSource: 'global',
           lastOutcome: 'error',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
-          lastConfidence: null,
+          lastConfidence: undefined,
           lastAutoPaused: false,
         };
 
@@ -243,7 +245,7 @@ describe('failureDetectionStatus utilities', () => {
           detectionSource: 'global',
           lastOutcome: 'error',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
-          lastConfidence: null,
+          lastConfidence: undefined,
           lastAutoPaused: false,
         };
 
@@ -256,14 +258,16 @@ describe('failureDetectionStatus utilities', () => {
     describe('when state is monitoring', () => {
       it('returns reason when lastAnalyzedAt is null', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
           detectionSource: 'global',
           lastOutcome: 'none',
-          lastAnalyzedAt: null,
-          lastConfidence: null,
-          lastAutoPaused: false,
+          lastAnalyzedAt: undefined,
+          lastConfidence: undefined,
+          lastAutoPaused: false,
         };
 
         expect(getFailureDetectionDetail(status, true)).toBe(
@@ -273,14 +277,16 @@ describe('failureDetectionStatus utilities', () => {
 
       it('includes scan time for healthy outcome', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
           detectionSource: 'global',
           lastOutcome: 'healthy',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
-          lastConfidence: null,
-          lastAutoPaused: false,
+          lastConfidence: undefined,
+          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -289,6 +295,8 @@ describe('failureDetectionStatus utilities', () => {
 
       it('includes confidence percentage for failure outcome', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
@@ -296,7 +304,7 @@ describe('failureDetectionStatus utilities', () => {
           lastOutcome: 'failure',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
           lastConfidence: 0.87,
-          lastAutoPaused: false,
+          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -305,6 +313,8 @@ describe('failureDetectionStatus utilities', () => {
 
       it('includes auto-pause indicator when printer was paused', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
@@ -312,7 +322,7 @@ describe('failureDetectionStatus utilities', () => {
           lastOutcome: 'failure',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
           lastConfidence: 0.92,
-          lastAutoPaused: true,
+          lastAutoPaused: true,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -321,14 +331,16 @@ describe('failureDetectionStatus utilities', () => {
 
       it('omits confidence when null for failure outcome', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
           detectionSource: 'global',
           lastOutcome: 'failure',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
-          lastConfidence: null,
-          lastAutoPaused: false,
+          lastConfidence: undefined,
+          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -338,14 +350,16 @@ describe('failureDetectionStatus utilities', () => {
 
       it('returns attention message for error outcome during monitoring', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
           detectionSource: 'global',
           lastOutcome: 'error',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
-          lastConfidence: null,
-          lastAutoPaused: false,
+          lastConfidence: undefined,
+          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -354,14 +368,16 @@ describe('failureDetectionStatus utilities', () => {
 
       it('returns actively watching message for unknown outcome', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
           detectionSource: 'global',
           lastOutcome: 'unknown',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
-          lastConfidence: null,
-          lastAutoPaused: false,
+          lastConfidence: undefined,
+          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -370,14 +386,16 @@ describe('failureDetectionStatus utilities', () => {
 
       it('returns actively watching message for none outcome', () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: 'printer-1',
+          printerName: 'Voron 2.4',
           state: 'monitoring',
           reason: 'Monitoring via global Obico ML settings.',
           isPrinting: true,
           detectionSource: 'global',
           lastOutcome: 'none',
           lastAnalyzedAt: '2026-01-15T10:30:00Z',
-          lastConfidence: null,
-          lastAutoPaused: false,
+          lastConfidence: undefined,
+          lastAutoPaused: false,
         };
 
         const detail = getFailureDetectionDetail(status, true);
@@ -396,8 +414,8 @@ describe('failureDetectionStatus utilities', () => {
         isPrinting: false,
         detectionSource: 'none',
         lastOutcome: 'none',
-        lastAnalyzedAt: null,
-        lastConfidence: null,
+        lastAnalyzedAt: undefined,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -417,7 +435,7 @@ describe('failureDetectionStatus utilities', () => {
         detectionSource: 'global',
         lastOutcome: 'error',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -437,7 +455,7 @@ describe('failureDetectionStatus utilities', () => {
         detectionSource: 'global',
         lastOutcome: 'error',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -457,7 +475,7 @@ describe('failureDetectionStatus utilities', () => {
         detectionSource: 'global',
         lastOutcome: 'error',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -477,7 +495,7 @@ describe('failureDetectionStatus utilities', () => {
         detectionSource: 'global',
         lastOutcome: 'error',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -499,7 +517,7 @@ describe('failureDetectionStatus utilities', () => {
         detectionSource: 'global',
         lastOutcome: 'healthy',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
       };
 
@@ -507,3 +525,5 @@ describe('failureDetectionStatus utilities', () => {
     });
   });
 });
+
+

@@ -82,7 +82,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: (...args: unknown[]
 
 const printer: Printer = {
   id: 'motion-fixture', name: 'Motion fixture', backend: PrinterBackend.Moonraker,
-  isOnline: true, isEnabled: true, state: 'Idle', homedAxes: 'xyz',
+  isOnline: true, backendUrl: 'http://printer.local', isReachable: true, isEnabled: true, state: 'Idle', homedAxes: 'xyz',
   x: 100, y: 110, z: 5, hotendTemp: 25, bedTemp: 23,
 };
 const capabilities = {
@@ -219,3 +219,4 @@ it('sends one direct absolute command from sidebar Enter', async () => {
   await act(async () => fireEvent.keyDown(screen.getByLabelText('Y absolute target'), { key: 'Enter' }));
   expect(mockExecute).toHaveBeenCalledExactlyOnceWith({ kind: 'MoveTo', x: 120, y: 130, z: 15 });
 });
+

@@ -86,8 +86,8 @@ describe('FailureDetectionMonitoringOverlay', () => {
       isPrinting: false,
       detectionSource: 'none',
       lastOutcome: 'none',
-      lastAnalyzedAt: null,
-      lastConfidence: null,
+      lastAnalyzedAt: undefined,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -107,7 +107,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
       detectionSource: 'global',
       lastOutcome: 'error',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -130,7 +130,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
       detectionSource: 'global',
       lastOutcome: 'error',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -149,8 +149,8 @@ describe('FailureDetectionMonitoringOverlay', () => {
       isPrinting: false,
       detectionSource: 'none',
       lastOutcome: 'none',
-      lastAnalyzedAt: null,
-      lastConfidence: null,
+      lastAnalyzedAt: undefined,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -180,7 +180,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
       detectionSource: 'global',
       lastOutcome: 'healthy',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -223,7 +223,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
         snapshotUrl: null,
         lastAnalyzedAt: '2026-03-25T12:00:05Z',
         lastOutcome: 'error',
-        lastConfidence: null,
+        lastConfidence: undefined,
         lastAutoPaused: false,
         lastFailureDetectedAt: null,
       }],
@@ -272,7 +272,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
       snapshotUrl: 'http://127.0.0.1:8080/webcam/?action=snapshot',
       lastOutcome: 'error',
       lastAnalyzedAt: '2026-03-25T12:00:05Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -306,7 +306,7 @@ describe('FailureDetectionMonitoringOverlay', () => {
       snapshotUrl: 'http://printer.local/webcam/?action=snapshot',
       lastOutcome: 'error',
       lastAnalyzedAt: '2026-03-25T12:00:05Z',
-      lastConfidence: null,
+      lastConfidence: undefined,
       lastAutoPaused: false,
     };
 
@@ -323,3 +323,4 @@ describe('FailureDetectionMonitoringOverlay', () => {
     ).toBeInTheDocument();
   });
 });
+

@@ -115,7 +115,10 @@ function createJobs(count: number): QueuedPrintJobWithFileMetaDto[] {
         id,
         name: `print-${index}`,
         gcodeFileId: `file-${index}`,
-        status: "Queued" as const,
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
+      status: "Queued" as const,
         priority: PrintJobPriority.Normal,
         queuePosition: index,
         createdAtUtc: new Date().toISOString(),
@@ -289,7 +292,6 @@ describe("QueueJobsTable virtualization", () => {
     // newly queued job) while the windowed range (indices 0-2) is unchanged.
     const insertedJob: QueuedPrintJobWithFileMetaDto = {
       ...jobs[0],
-      id: "job-inserted",
       job: { ...jobs[0].job, id: "job-inserted" },
       gcodeFile: { ...jobs[0].gcodeFile!, fileName: "inserted.gcode" },
     };
@@ -339,7 +341,6 @@ describe("QueueJobsTable virtualization", () => {
     const jobsA = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 30);
     const jobsB = createJobs(QUEUE_TABLE_VIRTUALIZATION_THRESHOLD + 5).map((job, index) => ({
       ...job,
-      id: `filtered-${index}`,
       job: { ...job.job, id: `filtered-${index}` },
       gcodeFile: { ...job.gcodeFile!, fileName: `filtered-${index}.gcode` },
     }));
@@ -362,3 +363,10 @@ describe("QueueJobsTable virtualization", () => {
     expect(table).toHaveAttribute("aria-rowcount", String(1 + jobsB.length * 2));
   });
 });
+
+
+
+
+
+
+

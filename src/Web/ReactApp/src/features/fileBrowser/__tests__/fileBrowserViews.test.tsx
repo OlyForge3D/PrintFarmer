@@ -21,7 +21,7 @@ function mockMatchMedia(matches: boolean) {
 }
 
 const files: FileItem[] = [
-  { id: '1', path: '/file.gcode', fileName: 'file.gcode', isDirectory: false, size: 1024 },
+  { id: '1', path: '/file.gcode', fileName: 'file.gcode', isDirectory: false, fileSize: 1024 },
   { id: '2', path: '/dir', fileName: 'dir', isDirectory: true },
 ];
 
@@ -212,3 +212,4 @@ describe('ExplorerView mobile layout (issue #1688)', () => {
     ).toBeInTheDocument();
   });
 });
+

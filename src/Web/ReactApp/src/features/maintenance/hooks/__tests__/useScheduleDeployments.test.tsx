@@ -134,7 +134,7 @@ describe('useScheduleDeployments — cross-invalidation of upcoming-maintenance 
     await act(async () => {
       await result.current.mutateAsync({
         id: 'sched-1',
-        data: { intervalValue: 60, isActive: true, notes: 'tuned' },
+        data: { isActive: true, notes: 'tuned' },
       });
     });
 
@@ -184,3 +184,4 @@ describe('useScheduleDeployments — cross-invalidation of upcoming-maintenance 
     ).toBe(true);
   });
 });
+

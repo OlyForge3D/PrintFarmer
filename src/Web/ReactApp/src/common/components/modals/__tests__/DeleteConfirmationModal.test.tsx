@@ -9,6 +9,8 @@ const mockPrinter: Printer = {
   manufacturerName: 'Prusa',
   modelName: 'i3 MK3S+',
   ipAddress: '192.168.1.100',
+  backendUrl: 'http://192.168.1.100',
+  isReachable: true,
   backend: 'Moonraker' as never,
   isOnline: true,
 };
@@ -194,3 +196,4 @@ describe('DeleteConfirmationModal', () => {
     expect(modal).toBeInTheDocument();
   });
 });
+
