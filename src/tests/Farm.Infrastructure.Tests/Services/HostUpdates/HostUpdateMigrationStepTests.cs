@@ -21,5 +21,4 @@ public sealed class HostUpdateMigrationStepTests
         await Assert.ThrowsAsync<HostUpdateTargetImageMigrationRunnerUnavailableException>(
             () => target.MigrateAsync(CancellationToken.None));
     }
-
 }

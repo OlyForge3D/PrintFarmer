@@ -177,7 +177,7 @@ bundle. The following claims remain intentionally separate:
 | GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. The prerelease-metadata rejection path is not represented by the current fixtures. | Covered by focused tests; prerelease mismatch evidence remains pending |
 | Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
 | Installed-host bootstrap | An authenticated insider.2 lab still reports `NotManaged` / `ManagedEligibilityNotEstablished`; that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. | Blocked |
-| Apply and recovery | Production execution is blocked by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`): target-image migration runner, queue-reconciliation writer fencing, and SQL Server visible backup-path mapping. It is also blocked when audited `HostExecutablePaths` are missing (`host_executable_not_configured:<tool>`). Separately, unsigned legacy installs remain `NotManaged` until protected bootstrap/trusted state is established. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code/configuration; live evidence pending after implementation |
+| Apply and recovery | Production execution is blocked by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`). It is also blocked when audited `HostExecutablePaths` are missing (`host_executable_not_configured:<tool>`). Separately, unsigned legacy installs remain `NotManaged` until protected bootstrap/trusted state is established. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Blocked by code/configuration; live evidence pending after implementation |
 | Automatic policy and UI execution | As of `ce8f4c182`, Update Now and automatic controls render disabled with no execute callback wired (`InstallerUpdatesExperience.tsx`); no live execution has been demonstrated end-to-end. | Blocked |
 
 Do not describe insider.4 publication as an end-to-end update acceptance run.
@@ -265,7 +265,7 @@ backup (`HostUpdateBackupCoordinator` plus provider-native
 `HostUpdateDatabaseBackupTargetFactory` and `DirectoryCopyBackupTarget`, failing
 closed for externally-owned databases and unexpectedly missing required owned
 directories), migration (`HostUpdateMigrationCoordinator` with
-`DbContextMigrationTarget<T>` explicitly throws through the
+`DbContextMigrationTarget<T>`, which explicitly throws through the
 `HostUpdateMigrationStep.cs` implementation until a target-image/dedicated
 migration runner exists; the current/old API assembly's
 `ProviderAwareMigrationRunner` is not used for forward updates), apply
@@ -287,9 +287,7 @@ the `HostUpdateExecutionOptions` root-directory contract, and the availability-p
 contract a scheduler must poll before ever invoking the executor. The production
 executor keeps availability closed for explicit operator-configured
 `RequiredUnavailableFacilities` and also reports every entry in
-`CodeOwnedUnavailableFacilities` (`target_image_migration_runner_unavailable`,
-`queue_reconciliation_writer_fence_unavailable`, and
-`sql_server_visible_backup_path_mapping_unverified`). Bridge/webhook delivery is
+`CodeOwnedUnavailableFacilities`. Bridge/webhook delivery is
 fenced, and migration/apply crash uncertainty is reconciled only from concrete
 provider/container evidence after a `:before` marker without the matching `:after`
 marker.
