@@ -145,7 +145,7 @@ cd ../worktrees/{issue-number}
 branch with `git push -u origin <branch>`, and push again after each meaningful
 chunk of work. Do not wait for review approval to push. **Pushing is not merging**:
 it does not open or authorize a PR, request review, apply labels, authorize a
-merge, or bypass the pre-PR review gate.
+merge, or bypass the readiness/merge review gate.
 
 A session's worktree is destroyed when it is archived. Before ending a session or
 archiving it, verify every intended commit is reachable from the remote branch
@@ -182,20 +182,20 @@ git push -u origin squad/{issue-number}-{slug}
 
 ### 4. PR Creation
 
-**Trigger:** Implementation is complete and the branch has approval under
-`.github/copilot-instructions.md` § "Pre-PR Review Gate".
+**Trigger:** A meaningful branch commit is published. Draft PRs may open before
+review under [Readiness and Merge Review Gate](../../.github/copilot-instructions.md#readiness-and-merge-review-gate).
 
 **Actions:**
-1. Open PR from feature branch to base branch
+1. Open a draft PR from feature branch to base branch
 2. Reference issue in PR description
-3. Apply labels if needed
+3. Apply the `squad` label
 4. Transition issue to `needsReview` state
 
 **PR creation commands:**
 
 **GitHub:**
 ```bash
-gh pr create --title "{title}" \
+gh pr create --draft --title "{title}" \
   --body "Closes #{issue-number}\n\n{description}" \
   --head squad/{issue-number}-{slug} \
   --base main
@@ -252,25 +252,31 @@ git commit -m "fix: address review feedback"
 git push
 ```
 
-**Re-request review (GitHub):**
+**Follow-on review:** use [Delta-Only Panel Rereview](../../.github/copilot-instructions.md#delta-only-panel-rereview)
+and immutable per-reviewer checkpoints. Request reviewers without marking the
+PR ready prematurely.
+
+**Mark ready only after required review, CI, and current-head evidence pass:**
 ```bash
 gh pr ready {pr-number}
 ```
 
 ### 6. PR Merge
 
-**Trigger:** PR is approved and CI passes.
+**Trigger:** PR is non-draft, required CI passes, and current-head review evidence
+or authenticated owner authorization is verified. Follow
+[Risk-Based Review Scope](../../.github/copilot-instructions.md#risk-based-review-scope).
 
 **Merge strategies:**
 
 **GitHub (merge commit):**
 ```bash
-gh pr merge {pr-number} --merge --delete-branch
+gh pr merge {pr-number} --match-head-commit {reviewedHeadSha} --merge --delete-branch
 ```
 
 **GitHub (squash):**
 ```bash
-gh pr merge {pr-number} --squash --delete-branch
+gh pr merge {pr-number} --match-head-commit {reviewedHeadSha} --squash --delete-branch
 ```
 
 **Azure DevOps:**
@@ -330,18 +336,18 @@ Push early and often: run `git push -u origin squad/{issue-number}-{slug}` after
 the first meaningful commit and push again after each meaningful chunk of work.
 Do not wait for review approval to push. Pushing is not merging and does not open
 or authorize a PR, request review, apply labels, authorize a merge, or bypass the
-pre-PR review gate. Rebases and force-pushes remain subject to the review-SHA rules
+readiness/merge review gate. Rebases and force-pushes remain subject to the review-SHA rules
 in `.github/copilot-instructions.md` § "Repository verdict evidence".
 
 **After completing work:**
 1. Commit any remaining work with a message referencing the issue number
 2. Push branch and verify every intended commit is reachable from the remote
    branch before ending the session or archival
-3. Obtain approval under `.github/copilot-instructions.md` § "Pre-PR Review Gate"
-   before opening a PR; publication alone does not satisfy this gate
-4. Open PR using:
+3. Draft PR creation may precede review; before readiness/merge satisfy
+   `.github/copilot-instructions.md` § "Readiness and Merge Review Gate"
+4. Open a draft PR using:
    ```
-   gh pr create --title "{title}" --body "Closes #{number}\n\n{description}" --head squad/{issue-number}-{slug} --base {base-branch}
+   gh pr create --draft --label squad --title "{title}" --body "Closes #{number}\n\n{description}" --head squad/{issue-number}-{slug} --base {base-branch}
    ```
 5. Report PR URL and remote branch/ref to coordinator
 ```
@@ -365,12 +371,13 @@ See `.squad/templates/ralph-reference.md` for Ralph's full lifecycle.
 
 ## PR Review Handling
 
-### Automated Approval (CI-only projects)
+### Automated Merge
 
-If the project has no human reviewers configured:
+No human-review assignment does not waive the squad review gate:
 1. PR opens
 2. CI runs
-3. If CI passes, Ralph auto-merges
+3. After risk-based review, verified current-head evidence, required CI, and
+   non-draft/squad scope checks pass, Ralph merges with `--match-head-commit`
 4. Issue closes
 
 ### Human Review Required
@@ -386,15 +393,17 @@ If the project requires human approval:
 
 If the issue was assigned to a squad member and they authored the PR:
 1. Another squad member reviews (conflict of interest avoidance)
-2. Original author is locked out from re-working rejected code (rejection lockout)
+2. Original author self-revises by default; only explicit reviewer-invoked lockout
+   changes revision ownership under
+   [Post-Rejection Revision Ownership](../../.github/copilot-instructions.md#post-rejection-revision-ownership)
 3. Reviewer can approve edits or reject outright
 
 ## Common Issue Lifecycle Patterns
 
-### Pattern 1: Quick Fix (Single Agent, No Review)
+### Pattern 1: Quick Fix (Risk-Routed Review)
 ```
 Issue created → Assigned to agent → Branch created → Code fixed → 
-PR opened → CI passes → Auto-merged → Issue closed
+Draft PR opened → Required review + CI + current-head evidence → Ready → Merged → Issue closed
 ```
 
 ### Pattern 2: Feature Development (Human Review)
