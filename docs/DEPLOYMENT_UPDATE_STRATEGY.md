@@ -159,8 +159,9 @@ The unsigned legacy installation condition is reported as
 identity evidence is unavailable. If the installation is signed but the binding metadata is
 missing or invalid (for example a null `VerificationSource`, wrong branch/tag/channel,
 unpeeled SHA, self-report, or incorrect canonical version), repairing that metadata can clear
-the manual-only marker without a reinstall; the evaluator remains `NotManaged` (or `Blocked`, if blocking compatibility or channel evidence is also present)
-even after the marker is cleared. The latter identifies actionable deployment evidence: an explicit
+the manual-only marker without a reinstall. Clearing the marker does not establish managed
+eligibility; absent blocking compatibility or channel evidence, the evaluator remains
+`NotManaged`. The latter identifies actionable deployment evidence: an explicit
 `RequiredUnavailableFacilities` override or an unverified SQL Server visible-backup-path
 mapping. Clearing executor facility blockers establishes host execution capability only; it
 does not satisfy or bypass trust-state verification. A genuinely unsigned installation that
