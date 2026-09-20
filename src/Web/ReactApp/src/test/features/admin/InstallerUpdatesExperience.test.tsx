@@ -1254,6 +1254,130 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByRole('status', { name: 'Update channel save status' })).toHaveTextContent('Update channel saved.');
   });
 
+  it('serializes synchronous duplicate channel saves', async () => {
+    const resolveSave: Array<(settings: { channel: 'stable'; insiderAcknowledged: false }) => void> = [];
+    const save = vi.fn(() => new Promise<{ channel: 'stable'; insiderAcknowledged: false }>((resolve) => {
+      resolveSave.push(resolve);
+    }));
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+
+    const saveButton = screen.getByRole('button', { name: 'Save update channel' });
+    act(() => {
+      fireEvent.click(saveButton);
+      fireEvent.click(saveButton);
+    });
+
+    expect(save).toHaveBeenCalledOnce();
+    resolveSave[0]({ channel: 'stable', insiderAcknowledged: false });
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Update channel save status' })).toHaveTextContent('Update channel saved.'));
+
+    fireEvent.click(saveButton);
+    expect(save).toHaveBeenCalledTimes(2);
+    resolveSave[1]({ channel: 'stable', insiderAcknowledged: false });
+    await waitFor(() => expect(screen.getByRole('status', { name: 'Update channel save status' })).toHaveTextContent('Update channel saved.'));
+  });
+
+  it('releases the channel save mutex after a rejected save', async () => {
+    const rejectSave: Array<(error: unknown) => void> = [];
+    const save = vi.fn(() => new Promise<{ channel: 'stable'; insiderAcknowledged: false }>((_resolve, reject) => {
+      rejectSave.push(reject);
+    }));
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+
+    const saveButton = screen.getByRole('button', { name: 'Save update channel' });
+    fireEvent.click(saveButton);
+    expect(save).toHaveBeenCalledOnce();
+    rejectSave[0](new UpdateChannelSaveRejectedError({ channel: 'stable', insiderAcknowledged: false }));
+    await waitFor(() => expect(screen.getByRole('alert')).toHaveTextContent(/was not saved/));
+
+    fireEvent.click(saveButton);
+    expect(save).toHaveBeenCalledTimes(2);
+  });
+
+  it('disables UpdateChannel retry while a save is in flight', async () => {
+    let resolveSave: ((settings: { channel: 'stable'; insiderAcknowledged: false }) => void) | undefined;
+    const save = vi.fn(() => new Promise<{ channel: 'stable'; insiderAcknowledged: false }>((resolve) => {
+      resolveSave = resolve;
+    }));
+    const retry = vi.fn().mockResolvedValue({ channel: 'stable', insiderAcknowledged: false });
+    const { rerender } = render(<TestInstallerUpdatesExperience
+      inventory={inventory()}
+      observation="connected"
+      updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }}
+      onSaveUpdateChannel={save}
+      onRetryUpdateChannel={retry}
+    />);
+
+    await act(async () => {
+      fireEvent.click(screen.getByRole('button', { name: 'Save update channel' }));
+      rerender(<TestInstallerUpdatesExperience
+        inventory={inventory()}
+        observation="connected"
+        updateChannelIsError
+        updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }}
+        onSaveUpdateChannel={save}
+        onRetryUpdateChannel={retry}
+      />);
+    });
+
+    expect(screen.getByRole('button', { name: 'Retry UpdateChannel settings' })).toBeDisabled();
+    await act(async () => {
+      resolveSave?.({ channel: 'stable', insiderAcknowledged: false });
+    });
+  });
+
+  it('serializes synchronous duplicate UpdateChannel retries', async () => {
+    const resolveRetry: Array<(settings: { channel: 'stable'; insiderAcknowledged: false }) => void> = [];
+    const retry = vi.fn(() => new Promise<{ channel: 'stable'; insiderAcknowledged: false }>((resolve) => {
+      resolveRetry.push(resolve);
+    }));
+    render(<TestInstallerUpdatesExperience
+      inventory={inventory()}
+      observation="connected"
+      updateChannelIsError
+      onRetryUpdateChannel={retry}
+      updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }}
+    />);
+
+    const retryButton = screen.getByRole('button', { name: 'Retry UpdateChannel settings' });
+    act(() => {
+      fireEvent.click(retryButton);
+      fireEvent.click(retryButton);
+    });
+
+    expect(retry).toHaveBeenCalledOnce();
+    resolveRetry[0]({ channel: 'stable', insiderAcknowledged: false });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry UpdateChannel settings' })).not.toBeDisabled());
+
+    fireEvent.click(retryButton);
+    expect(retry).toHaveBeenCalledTimes(2);
+    resolveRetry[1]({ channel: 'stable', insiderAcknowledged: false });
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Retry UpdateChannel settings' })).not.toBeDisabled());
+  });
+
+  it('releases the UpdateChannel retry mutex after a rejected retry', async () => {
+    const rejectRetry: Array<(error: unknown) => void> = [];
+    const retry = vi.fn(() => new Promise<{ channel: 'stable'; insiderAcknowledged: false }>((_resolve, reject) => {
+      rejectRetry.push(reject);
+    }));
+    render(<TestInstallerUpdatesExperience
+      inventory={inventory()}
+      observation="connected"
+      updateChannelIsError
+      onRetryUpdateChannel={retry}
+      updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }}
+    />);
+
+    const retryButton = screen.getByRole('button', { name: 'Retry UpdateChannel settings' });
+    fireEvent.click(retryButton);
+    expect(retry).toHaveBeenCalledOnce();
+    rejectRetry[0](new Error('retry failed'));
+    await waitFor(() => expect(retryButton).not.toBeDisabled());
+
+    fireEvent.click(retryButton);
+    expect(retry).toHaveBeenCalledTimes(2);
+  });
+
   it('requires explicit acknowledgement before saving Insider', async () => {
     const user = userEvent.setup();
     const save = vi.fn().mockResolvedValue({ channel: 'insider', insiderAcknowledged: true });

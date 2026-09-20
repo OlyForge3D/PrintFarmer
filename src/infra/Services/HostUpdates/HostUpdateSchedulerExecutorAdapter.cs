@@ -1,19 +1,30 @@
-﻿using System.Collections.Concurrent;
+using System.Collections.Concurrent;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
-/// Bridges the scheduler's immutable, policy-bound request to Dallas's execution engine without
+/// Bridges the scheduler's immutable, policy-bound request to the host execution engine without
 /// discarding any authenticated release binding. Manual execution remains on <see cref="IHostUpdateExecutor"/>
 /// and is not authorized by this adapter.
 /// </summary>
-public sealed class DallasHostUpdateSchedulerExecutor(
+public sealed class HostUpdateSchedulerExecutorAdapter(
     IHostUpdateExecutor executor,
-    string hostPlatform) : IHostUpdateSchedulerExecutor, IDisposable, IAsyncDisposable
+    string hostPlatform,
+    ILogger<HostUpdateSchedulerExecutorAdapter>? logger = null) : IHostUpdateSchedulerExecutor, IDisposable, IAsyncDisposable
 {
+    private const int MaxPreArmedRequests = 16;
+    private static readonly TimeSpan DisposeDrainTimeout = TimeSpan.FromSeconds(5);
+    private readonly ILogger<HostUpdateSchedulerExecutorAdapter> _logger = logger ?? NullLogger<HostUpdateSchedulerExecutorAdapter>.Instance;
     private readonly ConcurrentDictionary<string, ActiveOperation> _activeRequests = new(StringComparer.Ordinal);
     private readonly object _lifecycleGate = new();
     private readonly TaskCompletionSource _disposeCompletion = new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+    // This is deliberately capped because the adapter is scoped per scheduler tick; a future
+    // lifetime change must not turn cancellation requests into unbounded retained state.
+    private readonly ConcurrentDictionary<string, string> _preArmed = new(StringComparer.Ordinal);
+    private bool _preArmOverflowed;
     private int _disposed;
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
@@ -54,10 +65,24 @@ public sealed class DallasHostUpdateSchedulerExecutor(
                 return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
             }
 
+            if (_preArmOverflowed)
+            {
+                safeCancellation.Dispose();
+                return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "prearmed_cancellation_capacity_exceeded");
+            }
+
             if (!_activeRequests.TryAdd(request.RequestId, operation))
             {
                 safeCancellation.Dispose();
                 return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
+            }
+
+            if (_preArmed.TryRemove(request.RequestId, out string? token) &&
+                string.Equals(token, request.OperationToken, StringComparison.Ordinal))
+            {
+#pragma warning disable CA1849 // Pre-arm runs under the lifecycle lock and must synchronously publish cancellation before execution starts.
+                safeCancellation.Cancel();
+#pragma warning restore CA1849
             }
         }
 
@@ -119,6 +144,34 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         }
     }
 
+    public void PreArmCancellation(HostUpdateCancellationSignal signal)
+    {
+        ArgumentNullException.ThrowIfNull(signal);
+        if (string.IsNullOrWhiteSpace(signal.RequestId) || string.IsNullOrWhiteSpace(signal.OperationToken))
+        {
+            return;
+        }
+
+        lock (_lifecycleGate)
+        {
+            if (_activeRequests.TryGetValue(signal.RequestId, out ActiveOperation? operation) &&
+                string.Equals(operation.OperationToken, signal.OperationToken, StringComparison.Ordinal))
+            {
+                operation.Cancellation.Cancel();
+                return;
+            }
+
+            if (_preArmed.Count >= MaxPreArmedRequests && !_preArmed.ContainsKey(signal.RequestId))
+            {
+                _preArmOverflowed = true;
+                _logger.LogWarning("host_update_prearmed_cancellation_capacity_reached");
+                return;
+            }
+
+            _preArmed[signal.RequestId] = signal.OperationToken;
+        }
+    }
+
 #pragma warning disable VSTHRD002
     public void Dispose() => DisposeAsync().AsTask().GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
@@ -161,7 +214,11 @@ public sealed class DallasHostUpdateSchedulerExecutor(
         try
         {
 #pragma warning disable VSTHRD003
-            await Task.WhenAll(operations.Select(operation => operation.Completion.Task)).ConfigureAwait(false);
+            Task drain = Task.WhenAll(operations.Select(operation => operation.Completion.Task));
+            if (await Task.WhenAny(drain, Task.Delay(DisposeDrainTimeout)).ConfigureAwait(false) != drain)
+            {
+                _logger.LogWarning("host_update_executor_shutdown_drain_timed_out");
+            }
 #pragma warning restore VSTHRD003
 
             if (cancellationErrors.Count > 0)
