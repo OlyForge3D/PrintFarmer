@@ -93,10 +93,10 @@ name: Record squad review (self-attested)
 # OWNER OVERRIDE: on an in-scope PR a repository administrator satisfies the gate
 # unconditionally, either by approving through GitHub's native review UI at the
 # current head, or by posting a record whose `Squad-Reviewer` is their own GitHub
-# login. Only each administrator's MOST RECENT decisive review at that head
-# counts (APPROVED / CHANGES_REQUESTED / DISMISSED; COMMENTED is not decisive),
-# so a later change request outranks an earlier approval on the same commit. The
-# owner is never locked out of their own repository.
+# login. Cross-channel recency and approval precedence are defined in
+# .github/copilot-instructions.md § "Repository verdict evidence"; agent verdicts
+# cannot veto a current owner approval. Follow-on panel dispatch scope is defined
+# there in § "Delta-Only Panel Rereview"; fresh verdicts still name the live head.
 #
 # The override does not apply to an out-of-scope PR, and does not need to: it
 # exists to clear a BLOCKED status, and an unlabelled PR has no such status to

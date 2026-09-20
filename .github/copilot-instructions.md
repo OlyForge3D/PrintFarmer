@@ -359,6 +359,39 @@ Once invoked, the following apply to that artifact:
 See `.github/skills/reviewer-protocol/SKILL.md` for the Coordinator-facing mechanics,
 examples, and anti-patterns that operationalize these rules once lockout is invoked.
 
+### Delta-Only Panel Rereview
+
+This is the canonical scope for follow-on panel rounds after REQUEST_CHANGES or
+BLOCK, both before PR creation and on an open PR. The initial round reviews the
+full proposed change. Subsequent rounds review **only the revision delta**, not
+the entire original change set again.
+
+- Dispatch each reviewer with their last reviewed/rejected full head SHA, the
+  new full head SHA, prior findings, and the author's correction summary. Reuse
+  the previous `Squad-Head-SHA` (or the pre-PR review output); do not invent a new
+  verdict field. A reviewer who missed a round uses their own last reviewed SHA,
+  not another reviewer's newer baseline.
+- Inspect `git diff <last-reviewed-sha> <new-head-sha>` (two endpoint trees, not
+  a merge-base/three-dot diff), plus enough surrounding code, callers, and tests
+  to assess the correction and regressions it introduces. Account for **every**
+  change in that range, including incidental edits, reverts, conflict resolutions,
+  and rewritten history; do not limit the diff to the author's claimed fixes.
+  Do not reopen unchanged portions of the original change as a new full review.
+- Preserve unresolved prior findings until the correction addresses them. A
+  replacement reviewer uses the prior review and its baseline as handoff context.
+  If that evidence or either commit is unavailable, report the missing baseline
+  and recover it before proceeding; do not silently substitute a full rereview
+  or an empty diff.
+- Each required reviewer posts a fresh verdict with `Squad-Head-SHA` equal to the
+  **new current head**, describing the compared SHAs and finding dispositions in
+  ordinary prose after the canonical record. A delta-only review is still a
+  current-head verdict, not permission to reuse a stale approval.
+
+Reviewer count is determined from the full PR change by
+[Risk-Based Review Scope](#risk-based-review-scope), never from the smaller delta.
+The pure-sync carry-forward exception is separate and unchanged. Owner approval
+precedence is defined in [Repository verdict evidence](#repository-verdict-evidence).
+
 ### Risk-Based Review Scope
 
 **This section is the canonical definition of reviewer count. Every other mention of reviewer
@@ -543,10 +576,21 @@ Squad-Head-SHA: 0123456789abcdef0123456789abcdef01234567
   PR**, either by
   approving through GitHub's native review UI at the current head, or by posting
   a record whose `Squad-Reviewer` is their own GitHub login. The owner
-  is never locked out. Only each administrator's **most recent decisive** review
-  at that head counts (`APPROVED` / `CHANGES_REQUESTED` / `DISMISSED`;
-  `COMMENTED` is not decisive), so a later change request outranks an earlier
-  approval on the same commit and vice versa.
+  is never locked out by agent REQUEST_CHANGES or BLOCKED decisions.
+  For each API-authenticated administrator, use their **most recent decisive
+  action across native reviews and explicit own-login comments** at the current
+  head. Native `APPROVED` / `CHANGES_REQUESTED` / `DISMISSED` are decisive;
+  `COMMENTED` and agent-named records are not owner decisions. Compare native
+  submission times and comment update times, using IDs only within the same
+  resource; a cross-resource timestamp tie cannot clear a rejection or dismissal.
+  A later own-login approval clears that account's earlier native rejection,
+  and a later rejection or dismissal revokes its earlier approval across either
+  channel. Any remaining current administrator approval wins over agent decisions,
+  missing panel records, and other accounts' rejections, yielding
+  `APPROVE (owner)` / verifier `APPROVED` (exit 0). This retains the existing
+  administrator authority, including the repository owner; no text-declared
+  identity or bot allowlist grants it. Owner approvals never carry across a head
+  change. Forks still accept only native administrator review, not comments.
 
 **What this record genuinely buys you**, despite being self-attested:
 
@@ -692,8 +736,9 @@ unproven grounds.
 
 Outside this one exemption, any head movement supersedes the recorded review. This
 rule applies equally to `REVIEWED`, `APPROVED` and `REQUEST_CHANGES`, including
-rebases and force pushes. The panel must review the new head and record fresh
-reviews naming it.
+rebases and force pushes. The panel records fresh reviews naming the new head;
+follow-on corrections use [Delta-Only Panel Rereview](#delta-only-panel-rereview),
+not a repeated review of the entire original change set.
 
 Missing, invalid, or superseded squad evidence never becomes a review record.
 After verification, merge with
