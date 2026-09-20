@@ -24,7 +24,8 @@ public sealed class DispatchClaimService(
     IPrinterTelemetryFreshnessPolicy telemetryFreshnessPolicy,
     IStoredGcodeIntegrityVerifier? integrityVerifier = null,
     IQueueResourceAuthorizationService? resourceAuthorization = null,
-    ISpoolmanService? spoolmanService = null) : IDispatchClaimService
+    ISpoolmanService? spoolmanService = null,
+    TimeProvider? timeProvider = null) : IDispatchClaimService
 {
     private static readonly HashSet<string> ExplicitIdleStates = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -48,6 +49,7 @@ public sealed class DispatchClaimService(
         resourceAuthorization;
 
     private readonly ISpoolmanService? _spoolmanService = spoolmanService;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc />
     public async Task<DispatchClaimResult> AcquireClaimAsync(
@@ -371,7 +373,7 @@ public sealed class DispatchClaimService(
             .Where(a => a.PrintJobId == request.JobId)
             .CountAsync(ct) + 1;
 
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         PrintJobStatus previousStatus = job.Status;
 
         Guid attemptId = Guid.NewGuid();
@@ -549,7 +551,8 @@ public sealed class DispatchClaimService(
                     ct,
                     bedClearState: "Consumed",
                     bedClearCommandId: bedClearCommand.Id,
-                    bedClearExpiresAtUtc: bedClearCommand.ExpiresAtUtc);
+                    bedClearExpiresAtUtc: bedClearCommand.ExpiresAtUtc,
+                    timeProvider: _timeProvider);
             }
 
             _ = await _db.SaveChangesAsync(ct);
@@ -722,7 +725,7 @@ public sealed class DispatchClaimService(
 
         DateTime? observedAt = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
         bool isFresh = observedAt.HasValue &&
-                       (DateTime.UtcNow - observedAt.Value) <= telemetryFreshnessLimit;
+                       (_timeProvider.GetUtcNow().UtcDateTime - observedAt.Value) <= telemetryFreshnessLimit;
         if (!isFresh)
         {
             string staleMsg =
@@ -748,7 +751,7 @@ public sealed class DispatchClaimService(
                 busyDetail);
         }
 
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         int attemptNumber = await _db.QueueDispatchAttempts
             .Where(a => a.PrinterId == request.PrinterId && a.PrintJobId == null)
             .CountAsync(ct) + 1;
@@ -865,8 +868,8 @@ public sealed class DispatchClaimService(
         }
 
         attempt.BackendCallPhase = DispatchBackendCallPhase.BackendCall;
-        attempt.BackendCallStartedAtUtc = DateTime.UtcNow;
-        attempt.UpdatedAtUtc = DateTime.UtcNow;
+        attempt.BackendCallStartedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+        attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         activeState.PhysicalControlCommandId = attempt.Id;
         activeState.PhysicalControlAttemptId = attempt.Id;
         activeState.PhysicalControlOperation = "start";
@@ -908,6 +911,7 @@ public sealed class DispatchClaimService(
                     MaxConcurrencyAttempts);
                 await Task.Delay(
                     TimeSpan.FromMilliseconds(100 * concurrencyAttempt),
+                    _timeProvider,
                     ct);
             }
             catch (DbUpdateConcurrencyException ex)
@@ -962,7 +966,7 @@ public sealed class DispatchClaimService(
 
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
         PendingControlIntent? pendingIntent =
             await LoadPendingTerminalControlIntentAsync(attempt, ct);
 
@@ -1112,7 +1116,8 @@ public sealed class DispatchClaimService(
                 aggregateRowVersion: attempt.PrintJob?.RowVersion,
                 failureCode: lifecycleFailureCode,
                 payloadJson: lifecyclePayload,
-                ct);
+                ct,
+                timeProvider: _timeProvider);
         }
 
         _ = await _db.SaveChangesAsync(ct);
@@ -1159,7 +1164,7 @@ public sealed class DispatchClaimService(
 
         await using QueueOutboxTransactionScope transaction =
             await QueueOutboxTransactionScope.BeginAsync(_db, ct);
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = _timeProvider.GetUtcNow().UtcDateTime;
 
         attempt.Outcome = DispatchAttemptOutcome.Accepted;
         attempt.BackendAcceptedAtUtc = nowUtc;
@@ -1248,7 +1253,8 @@ public sealed class DispatchClaimService(
                     startPathKind = attempt.StartPathKind,
                     backendAcceptedAtUtc = attempt.BackendAcceptedAtUtc,
                 }),
-                ct);
+                ct,
+                timeProvider: _timeProvider);
         }
 
         _ = await _db.SaveChangesAsync(ct);
@@ -1301,7 +1307,7 @@ public sealed class DispatchClaimService(
         attempt.IsRetryable = false;
         attempt.RequiresReconciliation = true;
         attempt.BackendCallPhase = DispatchBackendCallPhase.AwaitingReconciliation;
-        attempt.UpdatedAtUtc = DateTime.UtcNow;
+        attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         if (dispatchState.PhysicalControlCommandId == attemptId)
         {
             dispatchState.PhysicalControlRequiresReconciliation = true;
@@ -1312,7 +1318,7 @@ public sealed class DispatchClaimService(
         if (unknownCommand is not null)
         {
             unknownCommand.Status = BedClearCommandStatus.Unknown;
-            unknownCommand.UpdatedAtUtc = DateTime.UtcNow;
+            unknownCommand.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         }
 
         _ = QueueAuditWriter.Add(
@@ -1354,7 +1360,8 @@ public sealed class DispatchClaimService(
                     startPathKind = attempt.StartPathKind,
                     requiresReconciliation = true,
                 }),
-                ct);
+                ct,
+                timeProvider: _timeProvider);
         }
 
         _ = await _db.SaveChangesAsync(ct);
@@ -1438,7 +1445,7 @@ public sealed class DispatchClaimService(
         }
 
         attempt.BackendCallPhase = DispatchBackendCallPhase.PostAccept;
-        attempt.UpdatedAtUtc = DateTime.UtcNow;
+        attempt.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
         await _db.SaveChangesAsync(ct);
         return true;
     }
@@ -1625,7 +1632,7 @@ public sealed class DispatchClaimService(
             "Filament calibration dispatch is temporarily unavailable pending #1984; see issue #1990.");
     }
 
-    private static DispatchClaimResult? EvaluateTelemetryGates(
+    private DispatchClaimResult? EvaluateTelemetryGates(
         PrinterStatusSnapshot? snapshot,
         Guid printerId,
         TimeSpan telemetryFreshnessLimit)
@@ -1643,7 +1650,7 @@ public sealed class DispatchClaimService(
         // stopped reporting must not be treated as idle.
         DateTime? observedAt = snapshot.ObservedAtUtc ?? snapshot.LastSeenAtUtc;
         bool isFresh = observedAt.HasValue &&
-                       (DateTime.UtcNow - observedAt.Value) <= telemetryFreshnessLimit;
+                       (_timeProvider.GetUtcNow().UtcDateTime - observedAt.Value) <= telemetryFreshnessLimit;
 
         if (!isFresh)
         {
@@ -1742,7 +1749,7 @@ public sealed class DispatchClaimService(
         }
 
         if (dispatchState.AcknowledgementExpiresAtUtc.HasValue &&
-            dispatchState.AcknowledgementExpiresAtUtc < DateTime.UtcNow)
+            dispatchState.AcknowledgementExpiresAtUtc < _timeProvider.GetUtcNow().UtcDateTime)
         {
             return (
                 DispatchClaimResult.Fail(
@@ -1815,7 +1822,7 @@ public sealed class DispatchClaimService(
         if (command is null ||
             command.JobId != job.Id ||
             command.Status != BedClearCommandStatus.Pending ||
-            command.ExpiresAtUtc <= DateTime.UtcNow ||
+            command.ExpiresAtUtc <= _timeProvider.GetUtcNow().UtcDateTime ||
             command.QueueRevision != dispatchState.QueueRevision ||
             command.PrinterConfigRevision != printer.ConfigurationRevision)
         {
@@ -2092,9 +2099,10 @@ public sealed class DispatchClaimService(
         Guid? bedClearCommandId = null,
         DateTime? bedClearExpiresAtUtc = null,
         bool? failureRetryable = null,
-        bool? failureRequiresReconciliation = null)
+        bool? failureRequiresReconciliation = null,
+        TimeProvider? timeProvider = null)
     {
-        DateTime nowUtc = DateTime.UtcNow;
+        DateTime nowUtc = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime;
         PrintJob? job = db.PrintJobs.Local.FirstOrDefault(candidate => candidate.Id == aggregateId)
             ?? await db.PrintJobs
                 .AsNoTracking()

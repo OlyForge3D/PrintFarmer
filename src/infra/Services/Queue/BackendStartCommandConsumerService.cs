@@ -91,7 +91,10 @@ public sealed class BackendStartCommandConsumerService(
                     await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(
+                        TimeSpan.FromMilliseconds(250),
+                        _timeProvider,
+                        stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -126,7 +129,10 @@ public sealed class BackendStartCommandConsumerService(
                 return true;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(250),
+                _timeProvider,
+                stoppingToken).ConfigureAwait(false);
         }
 
         return false;
@@ -461,46 +467,94 @@ public sealed class BackendStartCommandConsumerService(
         BedClearCommandStatus commandStatus,
         CancellationToken stoppingToken)
     {
+        const int maxConcurrencyAttempts = 3;
+        QueueDispatchOutbox originalEvent = evt;
         using var persistenceTimeout = new CancellationTokenSource(
             OutcomePersistenceDeadline,
             _timeProvider);
         using var persistenceDeadline = CancellationTokenSource.CreateLinkedTokenSource(
             stoppingToken,
             persistenceTimeout.Token);
-        try
+        for (int concurrencyAttempt = 1;
+             concurrencyAttempt <= maxConcurrencyAttempts;
+             concurrencyAttempt++)
         {
-            BedClearCommandRecord? command = await db.BedClearCommandRecords
-                .FirstOrDefaultAsync(
-                    candidate => candidate.OutboxEventId == evt.Id,
-                    persistenceDeadline.Token);
-            bool claimCommitted = command?.Status == BedClearCommandStatus.Claimed;
-            if (claimCommitted)
+            try
             {
-                await db.Entry(evt).ReloadAsync(persistenceDeadline.Token);
-                evt.Status = QueueOutboxEventStatus.Processing;
-                evt.FailureCode = UnknownOutcomeFailureCode;
-                evt.LastError =
-                    "Iteration deadline reached after dispatch claim acquisition; reconciliation is required.";
-                evt.RetryAfterUtc = null;
-            }
-            else if (command is not null)
-            {
-                command.Status = commandStatus;
-                command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
-            }
+                if (concurrencyAttempt > 1)
+                {
+                    db.ChangeTracker.Clear();
+                    evt = await db.QueueDispatchOutbox
+                        .SingleAsync(candidate => candidate.Id == evt.Id, persistenceDeadline.Token);
+                }
 
-            await db.SaveChangesAsync(persistenceDeadline.Token);
-            return claimCommitted;
+                BedClearCommandRecord? command = await db.BedClearCommandRecords
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.OutboxEventId == evt.Id,
+                        persistenceDeadline.Token);
+                bool claimCommitted = command?.Status == BedClearCommandStatus.Claimed;
+                if (claimCommitted)
+                {
+                    evt.Status = QueueOutboxEventStatus.Processing;
+                    evt.FailureCode = UnknownOutcomeFailureCode;
+                    evt.LastError =
+                        "Iteration deadline reached after dispatch claim acquisition; reconciliation is required.";
+                    evt.RetryAfterUtc = null;
+                }
+                else if (command is not null)
+                {
+                    command.Status = commandStatus;
+                    command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                }
+
+                await db.SaveChangesAsync(persistenceDeadline.Token);
+                if (!ReferenceEquals(evt, originalEvent))
+                {
+                    originalEvent.Status = evt.Status;
+                    originalEvent.FailureCode = evt.FailureCode;
+                    originalEvent.LastError = evt.LastError;
+                    originalEvent.RetryAfterUtc = evt.RetryAfterUtc;
+                    originalEvent.CompletedAtUtc = evt.CompletedAtUtc;
+                }
+
+                return claimCommitted;
+            }
+            catch (DbUpdateConcurrencyException ex)
+                when (concurrencyAttempt < maxConcurrencyAttempts)
+            {
+                logger.LogWarning(
+                    ex,
+                    "[BackendStartConsumer] Concurrency conflict persisting deadline disposition for EventId={EventId}; reloading and retrying ({Attempt}/{MaxAttempts})",
+                    evt.Id,
+                    concurrencyAttempt,
+                    maxConcurrencyAttempts);
+                await Task.Delay(
+                    TimeSpan.FromMilliseconds(100 * concurrencyAttempt),
+                    _timeProvider,
+                    persistenceDeadline.Token);
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                logger.LogError(
+                    ex,
+                    "[BackendStartConsumer] Deadline disposition for EventId={EventId} could not be persisted after {MaxAttempts} concurrency attempts",
+                    evt.Id,
+                    maxConcurrencyAttempts);
+                throw;
+            }
+            catch (OperationCanceledException) when (
+                persistenceTimeout.IsCancellationRequested &&
+                !stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
+                    evt.Id);
+                return false;
+            }
         }
-        catch (OperationCanceledException) when (
-            persistenceTimeout.IsCancellationRequested &&
-            !stoppingToken.IsCancellationRequested)
-        {
-            logger.LogWarning(
-                "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
-                evt.Id);
-            return false;
-        }
+
+        throw new InvalidOperationException(
+            "Deadline disposition concurrency retry loop terminated unexpectedly.");
     }
 
     /// <summary>

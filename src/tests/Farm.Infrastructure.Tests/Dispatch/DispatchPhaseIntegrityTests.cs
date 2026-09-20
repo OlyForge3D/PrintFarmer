@@ -18,6 +18,8 @@ public sealed class DispatchPhaseIntegrityTests
     [Fact]
     public async Task DispatchExceptions_AreClassifiedByDurablePhaseAndRedacted()
     {
+        DateTime expectedNow = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
+        FakeTimeProvider clock = new(expectedNow);
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         DbContextOptions<AppDbContext> options =
@@ -36,15 +38,16 @@ public sealed class DispatchPhaseIntegrityTests
                     printerId,
                     IsOnline: true,
                     State: "idle"),
-                DateTime.UtcNow.AddSeconds(-1),
-                DateTime.UtcNow.AddSeconds(-1),
+                expectedNow.AddSeconds(-1),
+                expectedNow.AddSeconds(-1),
                 "test"));
         var service = new DispatchClaimService(
             db,
             snapshots.Object,
             new DbOutboxSequenceAllocator(),
             NullLogger<DispatchClaimService>.Instance,
-            DispatchTestDoubles.TelemetryFreshnessPolicy());
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
+            timeProvider: clock);
 
         DispatchClaimResult preClaim = await service.AcquireClaimAsync(
             Request(preCall));
@@ -103,6 +106,9 @@ public sealed class DispatchPhaseIntegrityTests
         acceptedAttempt.Outcome.Should().Be(DispatchAttemptOutcome.Accepted);
         acceptedAttempt.BackendCallPhase.Should().Be(
             DispatchBackendCallPhase.PostAccept);
+        preAttempt.ClaimedAtUtc.Should().Be(expectedNow);
+        backendAttempt.BackendCallStartedAtUtc.Should().Be(expectedNow);
+        backendAttempt.UpdatedAtUtc.Should().Be(expectedNow);
         new[]
         {
             preAttempt.ErrorDetail,
@@ -127,7 +133,7 @@ public sealed class DispatchPhaseIntegrityTests
         AppDbContext db,
         string suffix)
     {
-        DateTime now = DateTime.UtcNow;
+        DateTime now = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
         var manufacturer = new Manufacturer
         {
             Id = Guid.NewGuid(),
@@ -194,4 +200,11 @@ public sealed class DispatchPhaseIntegrityTests
     }
 
     private sealed record ProviderFixture(Guid PrinterId, Guid JobId);
+
+    private sealed class FakeTimeProvider(DateTime utcNow) : TimeProvider
+    {
+        private readonly DateTimeOffset _utcNow = new(utcNow, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+    }
 }
