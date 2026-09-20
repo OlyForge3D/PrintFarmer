@@ -15,17 +15,13 @@ public sealed class HostUpdateMigrationCoordinator(IReadOnlyList<IHostUpdateMigr
     public async Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(request);
-        var pendingTargets = new List<IHostUpdateMigrationTarget>();
         foreach (IHostUpdateMigrationTarget target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            if (await target.HasPendingMigrationsAsync(request, cancellationToken).ConfigureAwait(false))
-            {
-                pendingTargets.Add(target);
-            }
+            _ = await target.HasPendingMigrationsAsync(request, cancellationToken).ConfigureAwait(false);
         }
 
-        foreach (IHostUpdateMigrationTarget target in pendingTargets)
+        foreach (IHostUpdateMigrationTarget target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
             _ = await target.MigrateAsync(request, cancellationToken).ConfigureAwait(false);

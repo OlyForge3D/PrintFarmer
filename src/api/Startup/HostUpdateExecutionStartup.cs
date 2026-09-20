@@ -198,7 +198,7 @@ public static class HostUpdateExecutionStartup
                     mapping => new HostUpdateApplyServiceMapping(mapping.ServiceId, mapping.ComposeServiceName, mapping.ImageEnvironmentVariable, mapping.ImageRepository),
                     StringComparer.Ordinal),
                 () => CreateMigrationEnvironment(sp.GetRequiredService<IConfiguration>()),
-                options.ComposeProjectName + "_printfarmer-network",
+                options.ComposeProjectName + "-network",
                 TimeSpan.FromSeconds(options.MigrationTimeoutSeconds));
         });
         services.AddScoped<IHostUpdateMigrationTarget>(sp => new TargetImageMigrationTarget<AppDbContext>(

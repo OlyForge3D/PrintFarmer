@@ -117,6 +117,12 @@ public sealed class HostUpdateTargetImageMigrationRunner(
             throw new HostUpdateTargetImageMigrationException($"target_image_migration_target_missing:{contextName}");
         }
 
+        string dockerPlatform = target.Platform switch
+        {
+            "linux-amd64" => "linux/amd64",
+            "linux-arm64" => "linux/arm64",
+            _ => throw new HostUpdateTargetImageMigrationException($"target_image_migration_platform_unsupported:{contextName}:{target.Platform}"),
+        };
         string image = $"{mapping.ImageRepository}@{target.ChildDigest}";
         IReadOnlyDictionary<string, string> migrationEnvironment;
         try
@@ -129,7 +135,7 @@ public sealed class HostUpdateTargetImageMigrationRunner(
             throw new HostUpdateTargetImageMigrationException(exception.Message);
         }
 
-        var pullArguments = new List<string> { "image", "pull", "--platform", target.Platform, image };
+        var pullArguments = new List<string> { "image", "pull", "--platform", dockerPlatform, image };
         HostUpdateProcessResult pullResult = await processRunner.RunAsync(
             executableResolver.Resolve("docker"),
             pullArguments,
@@ -142,12 +148,13 @@ public sealed class HostUpdateTargetImageMigrationRunner(
 
         var arguments = new List<string>
         {
-            "run", "--rm", "--pull", "never", "--platform", target.Platform,
+            "run", "--rm", "--pull", "never", "--platform", dockerPlatform,
             "--network", composeNetwork,
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--user", "appuser", "--read-only",
             "--entrypoint", "dotnet",
         };
-        foreach (string environmentName in migrationEnvironment.Keys)
+        foreach (string environmentName in migrationEnvironment.Keys.OrderBy(name => name, StringComparer.Ordinal))
         {
             arguments.Add("--env");
             arguments.Add(environmentName);

@@ -174,7 +174,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
             result.Reasons.Should().Contain("host_executable_not_configured:docker");
@@ -214,7 +213,6 @@ public class HostUpdateExecutionAvailabilityTests
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().BeEquivalentTo(
             [
-                "facility_unavailable:target_image_migration_runner_unavailable",
                 "facility_unavailable:queue_reconciliation_writer_fence_unavailable",
                 "facility_unavailable:sql_server_visible_backup_path_mapping_unverified",
             ]);
@@ -391,7 +389,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().Contain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
             result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal)).Should().Contain("webhook-delivery");
         }
@@ -559,7 +556,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
         }
         finally
         {
@@ -779,7 +775,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().NotContain(r => r.StartsWith("restart_reconciliation_pending", StringComparison.Ordinal));
         }
         finally
@@ -820,7 +815,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             admission.QuiesceCallCount.Should().Be(0);
         }
         finally

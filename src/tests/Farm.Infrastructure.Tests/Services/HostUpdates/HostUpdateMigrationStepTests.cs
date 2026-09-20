@@ -25,14 +25,15 @@ public sealed class HostUpdateMigrationStepTests
         pending.Should().BeTrue();
         processRunner.Calls.Should().HaveCount(2);
         processRunner.Calls[0].Arguments.Should().Equal(
-            "image", "pull", "--platform", "linux-amd64",
+            "image", "pull", "--platform", "linux/amd64",
             $"ghcr.io/olyforge3d/printfarmer-{serviceId}@sha256:{new string('a', 64)}");
         processRunner.Calls[1].Arguments.Should().ContainInOrder(
-            "run", "--rm", "--pull", "never", "--platform", "linux-amd64",
-            "--network", "printfarmer_printfarmer-network",
+            "run", "--rm", "--pull", "never", "--platform", "linux/amd64",
+            "--network", "printfarmer-network",
             "--cap-drop", "ALL", "--security-opt", "no-new-privileges",
+            "--user", "appuser", "--read-only",
             "--entrypoint", "dotnet",
-            "--env", "DB_PROVIDER", "--env", "ConnectionStrings__Default",
+            "--env", "ConnectionStrings__Default", "--env", "DB_PROVIDER",
             $"ghcr.io/olyforge3d/printfarmer-{serviceId}@sha256:{new string('a', 64)}",
             assembly, "--host-update-migration", contextName, "probe", providerName);
         processRunner.Calls[1].Environment.Should().ContainKey("ConnectionStrings__Default");
@@ -66,6 +67,19 @@ public sealed class HostUpdateMigrationStepTests
 
         first.MigrateCalls.Should().Be(0);
         second.MigrateCalls.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task RunAsync_NoPendingMigrations_StillValidatesEveryTargetInTargetImage()
+    {
+        var first = new ProbeTarget("AppDbContext", null, pending: false);
+        var second = new ProbeTarget("SlicerDbContext", null, pending: false);
+        var coordinator = new HostUpdateMigrationCoordinator([first, second]);
+
+        await coordinator.RunAsync(CreateRequest(), CancellationToken.None);
+
+        first.MigrateCalls.Should().Be(1);
+        second.MigrateCalls.Should().Be(1);
     }
 
     [Fact]
@@ -106,6 +120,24 @@ public sealed class HostUpdateMigrationStepTests
     }
 
     [Fact]
+    public async Task MigrateAsync_TargetImageExecutionFailure_ReportsTargetDiagnostic()
+    {
+        var processRunner = new RecordingProcessRunner(
+            new HostUpdateProcessResult(0, string.Empty, string.Empty),
+            new HostUpdateProcessResult(17, string.Empty, "HOST_UPDATE_MIGRATION_ERROR:AppDbContext:schema_validation_failed"));
+        var runner = CreateRunner(processRunner);
+
+        Func<Task> act = () => runner.MigrateAsync(
+            CreateRequest(),
+            "AppDbContext",
+            _ => Task.FromResult("Npgsql.EntityFrameworkCore.PostgreSQL"),
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<HostUpdateTargetImageMigrationException>()
+            .WithMessage("target_image_migration_execution_failed:AppDbContext:exit=17:HOST_UPDATE_MIGRATION_ERROR:AppDbContext:schema_validation_failed");
+    }
+
+    [Fact]
     public async Task HasPendingMigrationsAsync_DuplicateTargetMarkers_FailsClosed()
     {
         var processRunner = new RecordingProcessRunner(new HostUpdateProcessResult(
@@ -139,7 +171,7 @@ public sealed class HostUpdateMigrationStepTests
                 ["ConnectionStrings__Default"] = "Host=postgres",
                 ["Jwt__Key"] = "test-secret",
             },
-            "printfarmer_printfarmer-network",
+            "printfarmer-network",
             TimeSpan.FromSeconds(30));
 
     private static HostUpdateExecutionRequest CreateRequest() =>
@@ -161,18 +193,18 @@ public sealed class HostUpdateMigrationStepTests
 
     private sealed record ProcessCall(IReadOnlyList<string> Arguments, IReadOnlyDictionary<string, string> Environment);
 
-    private sealed class RecordingProcessRunner(HostUpdateProcessResult result) : IHostUpdateProcessRunner
+    private sealed class RecordingProcessRunner(params HostUpdateProcessResult[] results) : IHostUpdateProcessRunner
     {
         public List<ProcessCall> Calls { get; } = [];
 
         public Task<HostUpdateProcessResult> RunAsync(string fileName, IReadOnlyList<string> arguments, TimeSpan timeout, CancellationToken cancellationToken, IReadOnlyDictionary<string, string>? environment = null)
         {
             Calls.Add(new ProcessCall(arguments, environment ?? new Dictionary<string, string>()));
-            return Task.FromResult(result);
+            return Task.FromResult(results[Math.Min(Calls.Count - 1, results.Length - 1)]);
         }
     }
 
-    private sealed class ProbeTarget(string contextName, Exception? probeException) : IHostUpdateMigrationTarget
+    private sealed class ProbeTarget(string contextName, Exception? probeException, bool pending = true) : IHostUpdateMigrationTarget
     {
         public int MigrateCalls { get; private set; }
 
@@ -187,7 +219,7 @@ public sealed class HostUpdateMigrationStepTests
                 throw probeException;
             }
 
-            return Task.FromResult(true);
+            return Task.FromResult(pending);
         }
 
         public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken)
