@@ -3,14 +3,14 @@ import { act, renderHook } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { usePageTour } from '@/common/hooks/usePageTour';
 
-const { destroyMock, driveMock, driverMock } = vi.hoisted(() => {
+const { driveMock, driverMock } = vi.hoisted(() => {
   const destroyMock = vi.fn();
   const driveMock = vi.fn();
   const driverMock = vi.fn(() => ({
     drive: driveMock,
     destroy: destroyMock,
   }));
-  return { destroyMock, driveMock, driverMock };
+  return { driveMock, driverMock };
 });
 
 vi.mock('driver.js', () => ({
