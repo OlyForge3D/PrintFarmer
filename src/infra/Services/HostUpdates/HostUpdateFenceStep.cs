@@ -169,8 +169,11 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
     private volatile bool _acknowledged;
     private int _acknowledgementCount;
 
-    /// <summary>Test-only observation seam, gated by InternalsVisibleTo; fence decisions do not consult it.</summary>
+    /// <summary>Lifetime acknowledgement count for tests; fence decisions do not consult it.</summary>
     internal int AcknowledgementCount => Volatile.Read(ref _acknowledgementCount);
+
+    /// <summary>Whether the writer acknowledged the current pause epoch.</summary>
+    internal bool IsAcknowledged => _acknowledged;
 
     public Task RequestPauseAsync(CancellationToken cancellationToken)
     {
@@ -189,7 +192,6 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
     {
         _pauseRequested = false;
         _acknowledged = false;
-        _ = Interlocked.Exchange(ref _acknowledgementCount, 0);
         if (durableFence is not null)
         {
             await durableFence.OpenAsync(cancellationToken).ConfigureAwait(false);
@@ -317,4 +319,6 @@ public sealed class QueueReconciliationFenceFlag(IHostUpdateAdmissionGate? durab
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
 
     internal int AcknowledgementCount => _inner.AcknowledgementCount;
+
+    internal bool IsAcknowledged => _inner.IsAcknowledged;
 }

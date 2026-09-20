@@ -264,10 +264,34 @@ public class HostUpdateWriterFencingTests : IDisposable
     }
 
     [Fact]
+    public async Task QueueReconciliationService_TwoPauseEpochsWithoutObservedResume_AcknowledgesBoth()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var fence = new QueueReconciliationFenceFlag();
+        var service = new QueueReconciliationService(
+            scopeFactory,
+            NullLogger<QueueReconciliationService>.Instance,
+            fence);
+
+        await service.StartAsync(CancellationToken.None);
+        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        await fence.RequestPauseAsync(CancellationToken.None);
+        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 1);
+
+        await fence.ResumeAsync(CancellationToken.None);
+        await fence.RequestPauseAsync(CancellationToken.None);
+        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
+        await service.StopAsync(CancellationToken.None);
+
+        fence.AcknowledgementCount.Should().Be(2);
+        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+    }
+
+    [Fact]
     public async Task QueueReconciliationService_PauseAfterAttempt_SavesBeforeAcknowledging()
     {
         await DisableForeignKeysAsync();
-        await SeedStaleAttemptsAsync(2);
+        await SeedStaleAttemptsWithMatchingDispatchStateAsync(2);
 
         var fence = new QueueReconciliationFenceFlag();
         var saveObserver = new FenceAwareSaveChangesInterceptor(fence);
@@ -348,21 +372,31 @@ public class HostUpdateWriterFencingTests : IDisposable
         await command.ExecuteNonQueryAsync();
     }
 
-    private async Task SeedStaleAttemptsAsync(int count)
+    private async Task SeedStaleAttemptsWithMatchingDispatchStateAsync(int count)
     {
         await using AppDbContext seed = new(
             new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options);
-        seed.QueueDispatchAttempts.AddRange(
-            Enumerable.Range(0, count).Select(_ => new QueueDispatchAttempt
+        foreach (int _ in Enumerable.Range(0, count))
+        {
+            Guid attemptId = Guid.NewGuid();
+            Guid printerId = Guid.NewGuid();
+            seed.QueueDispatchAttempts.Add(new QueueDispatchAttempt
             {
-                Id = Guid.NewGuid(),
-                PrinterId = Guid.NewGuid(),
+                Id = attemptId,
+                PrinterId = printerId,
                 ActorSubject = "host-update-fence-test",
                 StartPathKind = "Manual",
                 ClaimedAtUtc = DateTime.UtcNow.AddMinutes(-15),
                 Outcome = DispatchAttemptOutcome.InProgress,
                 UpdatedAtUtc = DateTime.UtcNow.AddMinutes(-15),
-            }));
+            });
+            seed.PrinterDispatchStates.Add(new PrinterDispatchState
+            {
+                PrinterId = printerId,
+                ActiveDispatchAttemptId = attemptId,
+            });
+        }
+
         await seed.SaveChangesAsync();
     }
 
