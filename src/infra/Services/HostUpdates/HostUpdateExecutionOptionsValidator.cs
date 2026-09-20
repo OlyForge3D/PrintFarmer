@@ -29,21 +29,21 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds) <=
-            BackendStartCommandConsumerService.RequiredFenceProofDuration)
-        {
-            return ValidateOptionsResult.Fail(
-                $"HostUpdateExecution:FenceProofTimeoutSeconds must be greater than " +
-                $"{BackendStartCommandConsumerService.RequiredFenceProofDuration.TotalSeconds} seconds " +
-                "to cover the backend-start writer deadline and acknowledgement margin.");
-        }
-
         if (string.IsNullOrWhiteSpace(options.RootDirectory))
         {
             return ValidateOptionsResult.Success;
         }
 
         var failures = new List<string>();
+
+        if (TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds) <=
+            BackendStartCommandConsumerService.RequiredFenceProofDuration)
+        {
+            failures.Add(
+                $"HostUpdateExecution:FenceProofTimeoutSeconds must be greater than " +
+                $"{BackendStartCommandConsumerService.RequiredFenceProofDuration.TotalSeconds} seconds " +
+                "to cover the backend-start writer deadline and acknowledgement margin.");
+        }
 
         string root = options.RootDirectory;
         if (!Path.IsPathRooted(root))

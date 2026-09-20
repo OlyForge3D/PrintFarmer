@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
+using Farm.Infrastructure.Settings;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -40,9 +41,16 @@ public sealed class BackendStartCommandConsumerService(
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(15);
-    private static readonly TimeSpan MinimumDispatchWindow = TimeSpan.FromSeconds(5);
 
-    public static readonly TimeSpan IterationDeadline = TimeSpan.FromSeconds(50);
+    public static readonly TimeSpan BackendDispatchDeadline =
+        new BackendTimeoutSettings().FileUploadTimeout;
+
+    public static readonly TimeSpan DispatchCompletionMargin = TimeSpan.FromSeconds(1);
+
+    public static readonly TimeSpan MinimumDispatchWindow =
+        BackendDispatchDeadline + DispatchCompletionMargin;
+
+    public static readonly TimeSpan IterationDeadline = TimeSpan.FromSeconds(310);
 
     public static readonly TimeSpan CancellationCleanupDeadline = TimeSpan.FromSeconds(4);
 
@@ -183,6 +191,8 @@ public sealed class BackendStartCommandConsumerService(
 
     internal async Task ProcessPendingCommandsAsync(CancellationToken ct)
     {
+        // Capture the start before arming the timer. This guarantees elapsed time is never
+        // shorter than the CTS lifetime, so the remaining-window guard cannot miss expiry.
         long iterationStarted = _timeProvider.GetTimestamp();
         using var timeout = new CancellationTokenSource(IterationDeadline, _timeProvider);
         using var deadline = CancellationTokenSource.CreateLinkedTokenSource(ct, timeout.Token);
@@ -193,7 +203,7 @@ public sealed class BackendStartCommandConsumerService(
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            DateTime now = DateTime.UtcNow;
+            DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
             List<QueueDispatchOutbox> pending = await db.QueueDispatchOutbox
                 .Where(e =>
                     e.EventType == CommandEventType &&
@@ -319,10 +329,10 @@ public sealed class BackendStartCommandConsumerService(
             payload.ActorSubject);
 
         // ===================================================================
-        // Step 3: Awaited backend execution (NOT fire-and-forget).
-        // The event remains in Processing until success/failure is recorded.
-        // A crash here leaves the event in Processing; RecoverStaleLeasesAsync
-        // resets it to Pending on the next process start.
+        // Step 3: Awaited backend execution (NOT fire-and-forget). Cancellation that escapes
+        // DispatchJobWithAckAsync occurs before its dispatch claim is acquired and is safe to
+        // retry. At/after-claim cancellation is converted by that service to Unknown so it
+        // remains leased for reconciliation and cannot double-start a printer.
         // ===================================================================
         try
         {
@@ -343,15 +353,42 @@ public sealed class BackendStartCommandConsumerService(
             iterationToken.IsCancellationRequested &&
             !stoppingToken.IsCancellationRequested)
         {
-            evt.Status = QueueOutboxEventStatus.Pending;
-            evt.LastError =
-                "Iteration deadline reached before backend execution completed; command rearmed.";
-            evt.RetryAfterUtc = null;
-            await PersistRearmedCommandWithinDeadlineAsync(db, evt.Id, stoppingToken);
-            logger.LogInformation(
-                "[BackendStartConsumer] Iteration deadline reached for EventId={EventId}; command rearmed for the next iteration, with stale-lease fallback after {StaleLeaseAge}",
+            BedClearCommandStatus commandStatus;
+            if (evt.AttemptCount >= MaxAttempts)
+            {
+                evt.Status = QueueOutboxEventStatus.DeadLettered;
+                evt.LastError =
+                    "Pre-dispatch iteration deadline reached the maximum attempt count.";
+                evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+                evt.RetryAfterUtc = null;
+                commandStatus = BedClearCommandStatus.Rejected;
+                logger.LogError(
+                    "[BackendStartConsumer] Pre-dispatch deadline dead-lettered EventId={EventId} after {AttemptCount} attempts",
+                    evt.Id,
+                    evt.AttemptCount);
+            }
+            else
+            {
+                double backoffSeconds =
+                    RetryBackoffBase.TotalSeconds * Math.Pow(2, evt.AttemptCount - 1);
+                evt.Status = QueueOutboxEventStatus.Pending;
+                evt.LastError =
+                    "Iteration deadline reached before dispatch claim acquisition; command rearmed.";
+                evt.RetryAfterUtc =
+                    _timeProvider.GetUtcNow().UtcDateTime +
+                    TimeSpan.FromSeconds(backoffSeconds);
+                commandStatus = BedClearCommandStatus.Pending;
+                logger.LogInformation(
+                    "[BackendStartConsumer] Pre-dispatch iteration deadline reached for EventId={EventId}; retry scheduled at {RetryAfterUtc}",
+                    evt.Id,
+                    evt.RetryAfterUtc);
+            }
+
+            await PersistPreDispatchCancellationWithinDeadlineAsync(
+                db,
                 evt.Id,
-                StaleLeaseAge);
+                commandStatus,
+                stoppingToken);
             throw;
         }
         catch (OperationCanceledException)
@@ -406,9 +443,10 @@ public sealed class BackendStartCommandConsumerService(
         }
     }
 
-    private async Task PersistRearmedCommandWithinDeadlineAsync(
+    private async Task PersistPreDispatchCancellationWithinDeadlineAsync(
         AppDbContext db,
         Guid eventId,
+        BedClearCommandStatus commandStatus,
         CancellationToken stoppingToken)
     {
         using var persistenceTimeout = new CancellationTokenSource(
@@ -419,6 +457,11 @@ public sealed class BackendStartCommandConsumerService(
             persistenceTimeout.Token);
         try
         {
+            await SetBedClearCommandStatusAsync(
+                db,
+                eventId,
+                commandStatus,
+                persistenceDeadline.Token);
             await db.SaveChangesAsync(persistenceDeadline.Token);
         }
         catch (OperationCanceledException) when (
@@ -426,7 +469,7 @@ public sealed class BackendStartCommandConsumerService(
             !stoppingToken.IsCancellationRequested)
         {
             logger.LogWarning(
-                "[BackendStartConsumer] Deadline rearm persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
+                "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
                 eventId);
         }
     }

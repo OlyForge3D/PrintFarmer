@@ -65,9 +65,6 @@ public class PrintJobManagementService(
     private const string DispatchUnexpectedFailure =
         "The job could not be dispatched.";
 
-    public static readonly TimeSpan CancellationCleanupDeadline =
-        BackendStartCommandConsumerService.CancellationCleanupDeadline;
-
     private readonly IPrintJobManagementRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly ILogger<PrintJobManagementService> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IPrintersService _printersService = printersService ?? throw new ArgumentNullException(nameof(printersService));
@@ -2082,7 +2079,7 @@ public class PrintJobManagementService(
                 }
 
                 using (var cleanupTimeout = new CancellationTokenSource(
-                           CancellationCleanupDeadline,
+                           BackendStartCommandConsumerService.CancellationCleanupDeadline,
                            _timeProvider))
                 {
                     try
@@ -2160,7 +2157,7 @@ public class PrintJobManagementService(
         catch (OperationCanceledException)
         {
             using var cleanupTimeout = new CancellationTokenSource(
-                CancellationCleanupDeadline,
+                BackendStartCommandConsumerService.CancellationCleanupDeadline,
                 _timeProvider);
             try
             {
@@ -2184,7 +2181,7 @@ public class PrintJobManagementService(
         catch (Exception ex)
         {
             using var cleanupTimeout = new CancellationTokenSource(
-                CancellationCleanupDeadline,
+                BackendStartCommandConsumerService.CancellationCleanupDeadline,
                 _timeProvider);
             DispatchExceptionDisposition disposition;
             try

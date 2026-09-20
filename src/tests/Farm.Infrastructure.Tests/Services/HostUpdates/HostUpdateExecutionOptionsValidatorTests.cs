@@ -44,23 +44,10 @@ public class HostUpdateExecutionOptionsValidatorTests
         result.Succeeded.Should().BeTrue();
     }
 
-    [Fact]
-    public void Validate_DefaultFenceProofBudget_ExceedsRequiredWriterDuration()
-    {
-        var options = new HostUpdateExecutionOptions { RootDirectory = string.Empty };
-
-        ValidateOptionsResult result = Validator.Validate(null, options);
-
-        result.Succeeded.Should().BeTrue();
-        TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds)
-            .Should().BeGreaterThan(
-                BackendStartCommandConsumerService.RequiredFenceProofDuration);
-    }
-
     [Theory]
     [InlineData(5)]
-    [InlineData(59)]
-    public void Validate_FenceProofBudgetNotGreaterThanRequiredWriterDuration_Fails(
+    [InlineData(319)]
+    public void Validate_MissingRootDirectory_IgnoresFenceProofBudget(
         int fenceProofTimeoutSeconds)
     {
         var options = new HostUpdateExecutionOptions
@@ -71,8 +58,41 @@ public class HostUpdateExecutionOptionsValidatorTests
 
         ValidateOptionsResult result = Validator.Validate(null, options);
 
+        result.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_DefaultFenceProofBudget_ExceedsRequiredWriterDuration()
+    {
+        string root = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+            "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Succeeded.Should().BeTrue();
+        options.FenceProofTimeoutSeconds.Should().Be(320);
+        BackendStartCommandConsumerService.RequiredFenceProofDuration
+            .Should().Be(TimeSpan.FromSeconds(319));
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(319)]
+    public void Validate_FenceProofBudgetNotGreaterThanRequiredWriterDuration_Fails(
+        int fenceProofTimeoutSeconds)
+    {
+        string root = Path.Combine(
+            Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\",
+            "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.FenceProofTimeoutSeconds = fenceProofTimeoutSeconds;
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
         result.Failed.Should().BeTrue();
-        result.FailureMessage.Should().Contain("must be greater than 59 seconds");
+        result.FailureMessage.Should().Contain("must be greater than 319 seconds");
     }
 
     [Fact]

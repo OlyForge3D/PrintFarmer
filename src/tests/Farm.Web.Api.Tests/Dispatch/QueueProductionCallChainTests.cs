@@ -46,6 +46,7 @@ using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Xunit;
@@ -5274,7 +5275,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .Returns((string jobId, string _, string _, CancellationToken _) =>
             {
                 dispatched.Add(Guid.Parse(jobId));
-                clock.Advance(TimeSpan.FromSeconds(46));
+                clock.Advance(
+                    BackendStartCommandConsumerService.IterationDeadline -
+                    BackendStartCommandConsumerService.MinimumDispatchWindow +
+                    TimeSpan.FromSeconds(1));
                 return Task.FromResult(BackendStartOutcome.Accepted(Guid.NewGuid()));
             });
 
@@ -5308,18 +5312,27 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             await SeedBackendStartCommandsAsync(2);
         var clock = new ManualTimeProvider();
         var dispatched = new List<Guid>();
+        bool secondDispatchCancelled = true;
         var management = new Mock<IPrintJobManagementService>();
         management.Setup(service => service.DispatchJobWithAckAsync(
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<string>(),
                 It.IsAny<CancellationToken>()))
-            .Returns((string jobId, string _, string _, CancellationToken _) =>
+            .Returns((string jobId, string _, string _, CancellationToken ct) =>
             {
                 dispatched.Add(Guid.Parse(jobId));
                 if (dispatched.Count == 1)
                 {
-                    clock.Advance(TimeSpan.FromSeconds(45));
+                    clock.Advance(
+                        BackendStartCommandConsumerService.IterationDeadline -
+                        BackendStartCommandConsumerService.MinimumDispatchWindow);
+                }
+                else
+                {
+                    clock.Advance(
+                        BackendStartCommandConsumerService.BackendDispatchDeadline);
+                    secondDispatchCancelled = ct.IsCancellationRequested;
                 }
 
                 return Task.FromResult(BackendStartOutcome.Accepted(Guid.NewGuid()));
@@ -5335,6 +5348,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
 
         dispatched.Should().Equal(commands.Select(command => command.JobId));
+        secondDispatchCancelled.Should().BeFalse();
+        await using AppDbContext verify = CreateContext();
+        (await verify.QueueDispatchOutbox
+                .Where(command =>
+                    commands.Select(candidate => candidate.EventId).Contains(command.Id))
+                .Select(command => command.Status)
+                .ToListAsync())
+            .Should().OnlyContain(status => status == QueueOutboxEventStatus.Published);
     }
 
     [Fact]
@@ -5354,7 +5375,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .Returns((string jobId, string _, string _, CancellationToken _) =>
             {
                 dispatched.Add(Guid.Parse(jobId));
-                clock.Advance(TimeSpan.FromSeconds(46));
+                clock.Advance(
+                    BackendStartCommandConsumerService.IterationDeadline -
+                    BackendStartCommandConsumerService.MinimumDispatchWindow +
+                    TimeSpan.FromSeconds(1));
                 return Task.FromResult(BackendStartOutcome.Accepted(Guid.NewGuid()));
             });
 
@@ -5385,7 +5409,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task BackendStartConsumer_InFlightDispatch_DeadlineCancelsBelowFenceBudget()
+    public async Task BackendStartConsumer_PreDispatchDeadline_RearmsWithBackoffBelowFenceBudget()
     {
         _ = await SeedBackendStartCommandsAsync(2);
         var clock = new ManualTimeProvider();
@@ -5417,33 +5441,145 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         deadlineCancellationObserved.Should().BeTrue();
         elapsed.Should().Be(BackendStartCommandConsumerService.IterationDeadline);
         BackendStartCommandConsumerService.IterationDeadline
-            .Should().Be(TimeSpan.FromSeconds(50));
-        PrintJobManagementService.CancellationCleanupDeadline
+            .Should().Be(TimeSpan.FromSeconds(310));
+        BackendStartCommandConsumerService.BackendDispatchDeadline
+            .Should().Be(TimeSpan.FromSeconds(300));
+        BackendStartCommandConsumerService.MinimumDispatchWindow
+            .Should().Be(TimeSpan.FromSeconds(301));
+        BackendStartCommandConsumerService.CancellationCleanupDeadline
             .Should().Be(TimeSpan.FromSeconds(4));
         BackendStartCommandConsumerService.OutcomePersistenceDeadline
             .Should().Be(TimeSpan.FromSeconds(4));
         BackendStartCommandConsumerService.FenceAcknowledgementMargin
             .Should().Be(TimeSpan.FromSeconds(1));
         BackendStartCommandConsumerService.RequiredFenceProofDuration
-            .Should().Be(
-                BackendStartCommandConsumerService.IterationDeadline +
-                PrintJobManagementService.CancellationCleanupDeadline +
-                BackendStartCommandConsumerService.OutcomePersistenceDeadline +
-                BackendStartCommandConsumerService.FenceAcknowledgementMargin);
-        TimeSpan.FromSeconds(
-                new HostUpdateExecutionOptions().FenceProofTimeoutSeconds)
-            .Should().BeGreaterThan(
-                BackendStartCommandConsumerService.RequiredFenceProofDuration);
+            .Should().Be(TimeSpan.FromSeconds(319));
+        new HostUpdateExecutionOptions().FenceProofTimeoutSeconds.Should().Be(320);
         management.Verify(service => service.DispatchJobWithAckAsync(
             It.IsAny<string>(),
             It.IsAny<string>(),
             It.IsAny<string>(),
             It.IsAny<CancellationToken>()), Times.Once);
         await using AppDbContext verify = CreateContext();
-        (await verify.QueueDispatchOutbox
-                .OrderBy(command => command.Sequence)
-                .FirstAsync())
-            .Status.Should().Be(QueueOutboxEventStatus.Pending);
+        QueueDispatchOutbox command = await verify.QueueDispatchOutbox
+            .OrderBy(candidate => candidate.Sequence)
+            .FirstAsync();
+        command.Status.Should().Be(QueueOutboxEventStatus.Pending);
+        command.RetryAfterUtc.Should().NotBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_RepeatedPreDispatchDeadlines_DoNotStarveAndDeadLetterAtCeiling()
+    {
+        IReadOnlyList<(Guid EventId, Guid JobId)> commands =
+            await SeedBackendStartCommandsAsync(2);
+        var clock = new ManualTimeProvider();
+        var dispatched = new List<Guid>();
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobWithAckAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string jobId, string _, string _, CancellationToken ct) =>
+            {
+                Guid parsedJobId = Guid.Parse(jobId);
+                dispatched.Add(parsedJobId);
+                if (parsedJobId == commands[0].JobId)
+                {
+                    clock.Advance(BackendStartCommandConsumerService.IterationDeadline);
+                    return Task.FromCanceled<BackendStartOutcome>(ct);
+                }
+
+                return Task.FromResult(BackendStartOutcome.Accepted(Guid.NewGuid()));
+            });
+
+        await using ServiceProvider provider = CreateBackendStartConsumerProvider(
+            management.Object);
+        var consumer = new BackendStartCommandConsumerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            timeProvider: clock);
+
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        for (int attempt = 2; attempt <= 10; attempt++)
+        {
+            clock.Advance(TimeSpan.FromDays(1));
+            await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        }
+
+        dispatched.Count(jobId => jobId == commands[0].JobId).Should().Be(10);
+        dispatched.Count(jobId => jobId == commands[1].JobId).Should().Be(1);
+        await using AppDbContext verify = CreateContext();
+        List<QueueDispatchOutbox> rows = await verify.QueueDispatchOutbox
+            .Where(command =>
+                commands.Select(candidate => candidate.EventId).Contains(command.Id))
+            .OrderBy(command => command.Sequence)
+            .ToListAsync();
+        rows[0].Status.Should().Be(QueueOutboxEventStatus.DeadLettered);
+        rows[0].AttemptCount.Should().Be(10);
+        rows[0].RetryAfterUtc.Should().BeNull();
+        rows[1].Status.Should().Be(QueueOutboxEventStatus.Published);
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_ShutdownCancellation_LeavesCommandProcessing()
+    {
+        IReadOnlyList<(Guid EventId, Guid JobId)> commands =
+            await SeedBackendStartCommandsAsync(1);
+        await AssertShutdownCancellationThrowsAsync();
+
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox command = await verify.QueueDispatchOutbox
+            .SingleAsync(candidate => candidate.Id == commands[0].EventId);
+        command.Status.Should().Be(QueueOutboxEventStatus.Processing);
+        command.FailureCode.Should().BeNull();
+    }
+
+    private async Task AssertShutdownCancellationThrowsAsync()
+    {
+        using var stopping = new CancellationTokenSource();
+        var management = new Mock<IPrintJobManagementService>();
+        var logger = new Mock<ILogger<BackendStartCommandConsumerService>>();
+        management.Setup(service => service.DispatchJobWithAckAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Callback(stopping.Cancel)
+            .ThrowsAsync(new OperationCanceledException());
+
+        await using ServiceProvider provider = CreateBackendStartConsumerProvider(
+            management.Object);
+        var consumer = new BackendStartCommandConsumerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            logger.Object);
+
+        OperationCanceledException? thrown = null;
+        try
+        {
+            await consumer.ProcessPendingCommandsAsync(stopping.Token);
+        }
+        catch (OperationCanceledException ex)
+        {
+            thrown = ex;
+        }
+
+        thrown.Should().NotBeNull();
+        logger.Verify(
+            candidate => candidate.Log(
+                LogLevel.Information,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) =>
+                    state.ToString()!.Contains(
+                        "Execution cancelled (shutdown)",
+                        StringComparison.Ordinal)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     [Fact]
@@ -5524,7 +5660,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
     [Fact]
     [Trait("Category", "DbHeavy")]
-    public async Task DispatchJobWithAckAsync_DeadlineCancellation_CapsOutcomeReconciliation()
+    public async Task BackendStartConsumer_RealManagementDeadlineAfterClaim_PersistsUnknown()
     {
         string storageRoot = Path.Join(
             AppContext.BaseDirectory,
@@ -5616,25 +5752,29 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 appDbContext: managementContext,
                 outboxSequenceAllocator: new DbOutboxSequenceAllocator(),
                 timeProvider: clock);
-            using var dispatchTimeout = new CancellationTokenSource(
-                BackendStartCommandConsumerService.IterationDeadline,
-                clock);
-
+            await using ServiceProvider provider = CreateBackendStartConsumerProvider(
+                management);
+            var consumer = new BackendStartCommandConsumerService(
+                provider.GetRequiredService<IServiceScopeFactory>(),
+                NullLogger<BackendStartCommandConsumerService>.Instance,
+                timeProvider: clock);
             long started = clock.GetTimestamp();
-            BackendStartOutcome outcome = await management.DispatchJobWithAckAsync(
-                fixture.JobId.ToString(),
-                "deadline-test",
-                fixture.AckKey,
-                dispatchTimeout.Token);
+            await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
 
             dispatchCancellationObserved.Should().BeTrue();
             cleanupInitiallyCancelled.Should().BeFalse();
             cleanupCancelledOneTickBeforeDeadline.Should().BeFalse();
             cleanupCancelledAtDeadline.Should().BeTrue();
-            outcome.Status.Should().Be(BackendStartStatus.Unknown);
             clock.GetElapsedTime(started).Should().Be(
                 BackendStartCommandConsumerService.IterationDeadline +
                 TimeSpan.FromSeconds(4));
+            await using AppDbContext verify = CreateContext();
+            QueueDispatchOutbox command = await verify.QueueDispatchOutbox.SingleAsync(
+                evt => evt.EventType ==
+                    BedClearAcknowledgementService.BackendStartCommandEventType);
+            command.Status.Should().Be(QueueOutboxEventStatus.Processing);
+            command.FailureCode.Should().Be("backend_outcome_unknown");
+            command.RetryAfterUtc.Should().BeNull();
         }
         finally
         {
