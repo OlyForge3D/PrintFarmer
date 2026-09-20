@@ -138,7 +138,17 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         };
         foreach (IHostUpdateMigrationTarget target in migrationTargets)
         {
-            string providerName = await target.GetProviderNameAsync(cancellationToken).ConfigureAwait(false);
+            string providerName;
+            try
+            {
+                providerName = await target.GetProviderNameAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                reasons.Add($"database_provider_inspection_failed:{target.ContextName}:{exception.GetType().Name}");
+                continue;
+            }
+
             switch (providerName)
             {
                 case "Microsoft.EntityFrameworkCore.Sqlite":
