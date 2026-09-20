@@ -25,9 +25,18 @@ public class HostUpdateExecutionOptionsDefaultsTests
     [Fact]
     public void BackendStartFenceDeadlineAddends_AreExpected()
     {
+        BackendStartCommandConsumerService.IterationDeadline
+            .Should().Be(TimeSpan.FromSeconds(310));
         BackendStartCommandConsumerService.CancellationCleanupDeadline
+            .Should().Be(TimeSpan.FromSeconds(4));
+        BackendStartCommandConsumerService.OutcomePersistenceDeadline
             .Should().Be(TimeSpan.FromSeconds(4));
         BackendStartCommandConsumerService.FenceAcknowledgementMargin
             .Should().Be(TimeSpan.FromSeconds(1));
+        (BackendStartCommandConsumerService.IterationDeadline
+         + BackendStartCommandConsumerService.CancellationCleanupDeadline
+         + BackendStartCommandConsumerService.OutcomePersistenceDeadline
+         + BackendStartCommandConsumerService.FenceAcknowledgementMargin)
+            .Should().Be(BackendStartCommandConsumerService.RequiredFenceProofDuration);
     }
 }
