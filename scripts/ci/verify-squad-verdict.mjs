@@ -122,7 +122,8 @@ function parseDisplayTitle(displayTitle) {
 //               its base branch is proven byte-for-byte unchanged since then
 //               (a pure base-branch sync merge), so the record was carried
 //               forward rather than re-earned (issue #1633, "Option A")
-//   success  `APPROVE (owner) @ <sha12> by <login>`           -> owner authorised
+//   success  `APPROVE (owner) @ <sha12> by <login>; dissent=N; short=N`
+//            -> owner authorised; agent dissent and quorum shortfall preserved
 //   success  `NOT_APPLICABLE @ <sha12>: <reason>`             -> out of gate scope
 //   failure  `REQUEST_CHANGES @ <sha12> by <reviewer>`        -> findings raised
 //   failure  `BLOCKED @ <sha12>: <reason>`                    -> nothing recorded
@@ -164,9 +165,16 @@ function parseStatusDescription(status, statusSha) {
       return { verdict: 'NOT_APPLICABLE', reviewers: '', detail: notApplicable[1] };
     }
     const owner = new RegExp(
-      `^APPROVE \\(owner\\) @ ${shortSha} by (\\S.*)$`,
+      `^APPROVE \\(owner\\) @ ${shortSha} by ([A-Za-z0-9-]+)(?:; dissent=(\\d+); short=(\\d+))?$`,
     ).exec(description);
-    return owner ? { verdict: 'APPROVE', reviewers: owner[1] } : undefined;
+    return owner ? {
+      verdict: 'APPROVE',
+      reviewers: owner[1],
+      ...(owner[2] !== undefined ? {
+        dissentCount: Number(owner[2]),
+        missingApprovals: Number(owner[3]),
+      } : {}),
+    } : undefined;
   }
   if (status.state === 'failure') {
     const rejected =
@@ -346,13 +354,22 @@ export function verifySquadVerdict({ pull, status, run }) {
       ? 'Verified SHA-pinned self-attested squad review record, carried ' +
         'forward across a pure base sync (not independent review).'
       : 'Verified SHA-pinned self-attested squad review record (not independent review).')
-    : 'Verified SHA-pinned squad record.';
+    : classification === 'APPROVED'
+      ? 'Verified exact-head owner authorization, not agent review.' +
+        (outcome.dissentCount !== undefined
+          ? ` Preserved dissent: ${outcome.dissentCount}; missing approvals: ${outcome.missingApprovals}.`
+          : '')
+      : 'Verified SHA-pinned squad record.';
   return result(classification, reason, {
     verdict: outcome.verdict,
     reviewedHeadSha: statusSha,
     actor: outcome.reviewers,
     workflowRunUrl: run.html_url,
     ...(classification === 'REVIEWED' ? { carriedAcrossSync } : {}),
+    ...(classification === 'APPROVED' && outcome.dissentCount !== undefined ? {
+      dissentCount: outcome.dissentCount,
+      missingApprovals: outcome.missingApprovals,
+    } : {}),
   });
 }
 

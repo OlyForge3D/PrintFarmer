@@ -286,13 +286,71 @@ test('accepts a single eligible approval for a standard code change', () => {
   );
 });
 
-test('requires the full panel for a high-risk change', () => {
+test('requires two panel approvals for a high-risk change', () => {
   const result = gate({
     changedPaths: ['src/migrations/Farm.Migrations.PostgreSQL/Migrations/AddRole.cs'],
     comments: [comment('bishop', 'APPROVE')],
   });
   assert.equal(result.state, 'failure');
-  assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
+  assert.match(result.description, /have 1\/2, choose hicks\+vasquez/);
+});
+
+test('any two distinct eligible panel approvals satisfy high-risk review', () => {
+  for (const pair of [['bishop', 'hicks'], ['bishop', 'vasquez'], ['hicks', 'vasquez']]) {
+    const result = gate({
+      changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+      comments: pair.map((member) => comment(member, 'APPROVE')),
+    });
+    assert.equal(result.passed, true, pair.join('+'));
+    assert.equal(result.requiredCount, 2);
+    assert.deepEqual(result.approvals, pair);
+    assert.deepEqual(result.requiredMembers, ['bishop', 'hicks', 'vasquez']);
+  }
+});
+
+test('duplicates, outsiders, non-panel members, stale and unauthenticated records cannot fill the quorum', () => {
+  for (const extra of [
+    comment('bishop', 'APPROVE'),
+    comment('dallas', 'APPROVE'),
+    comment('nostromo', 'APPROVE'),
+    comment('hicks', 'APPROVE', staleSha),
+    comment('hicks', 'APPROVE', headSha, { squadWriteAccess: false }),
+  ]) {
+    const result = gate({
+      changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+      comments: [comment('bishop', 'APPROVE'), extra],
+    });
+    assert.equal(result.passed, false);
+    assert.deepEqual(result.approvals, ['bishop']);
+  }
+});
+
+test('a third or other roster reviewer rejection blocks the pair until that reviewer clears it', () => {
+  for (const rejector of ['vasquez', 'dallas']) {
+    const comments = [
+      comment('bishop', 'APPROVE'),
+      comment('hicks', 'APPROVE'),
+      comment(rejector, 'REQUEST_CHANGES'),
+    ];
+    const input = { changedPaths: ['scripts/ci/squad-verdict-gate.mjs'], comments };
+    assert.equal(gate(input).passed, false);
+    comments.push(comment(rejector, 'APPROVE', headSha, {
+      updated_at: '2026-08-08T02:00:00Z',
+    }));
+    assert.equal(gate(input).passed, true);
+  }
+});
+
+test('a proven pure-sync pair counts but its carried rejection still blocks', () => {
+  const input = {
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    comments: [comment('bishop', 'APPROVE', staleSha), comment('hicks', 'APPROVE')],
+    carriedShas: new Set([staleSha]),
+  };
+  assert.equal(gate(input).passed, true);
+  assert.deepEqual(gate(input).carried, ['bishop']);
+  input.comments.push(comment('vasquez', 'REQUEST_CHANGES', staleSha));
+  assert.equal(gate(input).passed, false);
 });
 
 test('rejects verdicts pinned to a stale SHA', () => {
@@ -583,7 +641,7 @@ test('a single approval does not satisfy a high-risk code change', () => {
     comments: [comment('bishop', 'APPROVE')],
   });
   assert.equal(result.state, 'failure');
-  assert.match(result.description, /have 1\/3, missing hicks\+vasquez/);
+  assert.match(result.description, /have 1\/2, choose hicks\+vasquez/);
 });
 
 test('a single approval satisfies a documentation-only change', () => {
@@ -797,6 +855,394 @@ test('the owner can also block through the same override path', () => {
   assert.equal(result.state, 'failure');
   assert.equal(result.override, 'owner-comment');
   assert.match(result.description, /^REQUEST_CHANGES @ /);
+});
+
+test('a newer owner comment clears a native rejection from the shared owner account', () => {
+  const result = gate({
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    authorMembers: new Set(['bishop']),
+    reviews: [{
+      id: 1, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'JPapiez',
+      isAdmin: true, submittedAt: '2026-08-08T00:00:00Z',
+    }],
+    comments: [
+      comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true }),
+      comment('vasquez', 'REQUEST_CHANGES', headSha, {
+        updated_at: '2026-08-08T03:00:00Z',
+      }),
+    ],
+  });
+  assert.equal(result.state, 'success');
+  assert.equal(result.override, 'owner-comment');
+  assert.equal(result.description, `APPROVE (owner) @ ${headSha.slice(0, 12)} by jpapiez; dissent=1; short=2`);
+  assert.deepEqual(result.dissent, ['vasquez']);
+});
+
+test('a current native owner approval wins over agent rejection and missing panel records', () => {
+  const result = gate({
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    reviews: [{
+      state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+    }],
+    comments: [comment('hicks', 'REQUEST_CHANGES')],
+  });
+  assert.equal(result.state, 'success');
+  assert.equal(result.override, 'github-review');
+  assert.deepEqual(result.approvals, []);
+  assert.deepEqual(result.dissent, ['hicks']);
+  assert.equal(result.missingApprovals, 2);
+  assert.ok(result.notes.some((note) => note.includes('Dissent preserved: hicks')));
+  assert.ok(result.notes.some((note) => note.includes('bishop, hicks, vasquez')));
+});
+
+test('owner audit counts only eligible records and fits the status limit for a maximal login', () => {
+  const login = 'a'.repeat(39);
+  const result = gate({
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    reviews: [{ state: 'APPROVED', commitId: headSha, login, isAdmin: true }],
+    comments: [
+      comment('bishop', 'APPROVE'),
+      comment('hicks', 'REQUEST_CHANGES'),
+      comment('vasquez', 'REQUEST_CHANGES'),
+      comment('dallas', 'APPROVE'),
+      comment('nostromo', 'REQUEST_CHANGES'),
+      comment('parker', 'REQUEST_CHANGES'),
+      comment('old-reviewer', 'REQUEST_CHANGES', staleSha),
+    ],
+  });
+  assert.equal(result.passed, true);
+  assert.deepEqual(result.approvals, ['bishop']);
+  assert.deepEqual(result.dissent, ['hicks', 'vasquez']);
+  assert.equal(result.missingApprovals, 1);
+  assert.match(result.description, /; dissent=2; short=1$/);
+  assert.ok(result.description.length <= 140);
+});
+
+test('owner authorization with the full quorum preserves dissent without a shortfall', () => {
+  const result = gate({
+    changedPaths: ['scripts/ci/squad-verdict-gate.mjs'],
+    comments: [
+      comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true }),
+      comment('bishop', 'APPROVE'),
+      comment('hicks', 'APPROVE'),
+      comment('vasquez', 'REQUEST_CHANGES'),
+    ],
+  });
+  assert.equal(result.passed, true);
+  assert.equal(result.missingApprovals, 0);
+  assert.match(result.description, /; dissent=1; short=0$/);
+  assert.deepEqual(result.approvals, ['bishop', 'hicks']);
+});
+
+test('current admin approval wins over another account rejection in either channel', () => {
+  for (const nativeApproval of [true, false]) {
+    const result = gate({
+      reviews: [
+        {
+          state: 'CHANGES_REQUESTED', commitId: headSha, login: 'other-admin',
+          isAdmin: true, submittedAt: '2026-08-08T03:00:00Z',
+        },
+        ...(nativeApproval ? [{
+          state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+        }] : []),
+      ],
+      comments: nativeApproval ? [] :
+        [comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true })],
+    });
+    assert.equal(result.state, 'success');
+    assert.match(result.description, /^APPROVE \(owner\).*by jpapiez; dissent=0; short=1$/);
+  }
+});
+
+test('later native rejection or dismissal revokes the same owner comment approval', () => {
+  for (const state of ['CHANGES_REQUESTED', 'DISMISSED']) {
+    const result = gate({
+      comments: [comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true })],
+      reviews: [{
+        id: 1, state, commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T02:00:00Z',
+        dismissedAt: state === 'DISMISSED' ? '2026-08-08T03:00:00Z' : undefined,
+      }],
+    });
+    assert.equal(result.passed, false, state);
+    assert.doesNotMatch(result.description, /^APPROVE/, state);
+  }
+});
+
+test('workflow uses dismissal events, not original submission, for owner chronology', async () => {
+  const workflow = yaml.load(await readFile(
+    path.join(repositoryRoot, '.github', 'workflows', 'squad-review-verdict.yml'), 'utf8',
+  ));
+  const script = workflow.jobs.record.steps.find((step) => step.with?.script).with.script;
+  const start = script.indexOf('const decisiveReviewStates =');
+  const end = script.indexOf('\nif (isFork)', start);
+  assert.ok(start >= 0 && end > start);
+  const loadReviews = new Function(
+    'github', 'core', 'isAdmin', 'headSha',
+    `const owner = 'OlyForge3D', repo = 'PrintFarmer', prNumber = 2883;
+     ${script.slice(start, end)}
+     return loadReviews();`,
+  );
+  const dismissedReview = {
+    id: 10, state: 'DISMISSED', commit_id: headSha, user: { login: 'jpapiez' },
+    submitted_at: '2026-08-08T01:00:00Z',
+  };
+  const dismissal = {
+    event: 'review_dismissed', created_at: '2026-08-08T03:00:00Z',
+    dismissed_review: { review_id: '10' },
+  };
+  const listReviews = Symbol('listReviews');
+  const listEvents = Symbol('listEvents');
+  const warnings = [];
+  async function collect(events, raw = [dismissedReview]) {
+    return loadReviews({
+      rest: { pulls: { listReviews }, issues: { listEvents } },
+      paginate: async (endpoint, params) => {
+        assert.equal(params.owner, 'OlyForge3D');
+        assert.equal(params.repo, 'PrintFarmer');
+        assert.equal(params.per_page, 100);
+        if (endpoint === listReviews) {
+          assert.equal(params.pull_number, 2883);
+          return raw;
+        }
+        assert.equal(endpoint, listEvents);
+        assert.equal(params.issue_number, 2883);
+        if (events instanceof Error) throw events;
+        return events;
+      },
+    }, { warning: (message) => warnings.push(message) },
+    async (login) => login === 'jpapiez', headSha);
+  }
+  function approvalAt(updated_at) {
+    return comment('jpapiez', 'APPROVE', headSha, {
+      squadAdminOverride: true, updated_at,
+    });
+  }
+  const reviews = await collect([dismissal]);
+  assert.equal(reviews[0].submittedAt, dismissedReview.submitted_at);
+  assert.equal(reviews[0].dismissedAt, dismissal.created_at);
+  // T1 submission < T2 comment < T3 dismissal, despite submitted_at remaining T1.
+  for (const time of ['2026-08-08T02:00:00Z', dismissal.created_at]) {
+    assert.equal(gate({ reviews, comments: [approvalAt(time)] }).passed, false);
+  }
+  assert.equal(gate({
+    reviews, comments: [approvalAt('2026-08-08T04:00:00Z')],
+  }).override, 'owner-comment');
+
+  for (const events of [
+    [],
+    [{ ...dismissal, event: 'reviewed' }],
+    [{ ...dismissal, dismissed_review: { review_id: 11 } }],
+    [{ ...dismissal, created_at: undefined }],
+    [{ ...dismissal, created_at: 'invalid' }],
+    [{ ...dismissal, created_at: '2026-08-08T00:00:00Z' }],
+    [dismissal, { ...dismissal, created_at: '2026-08-08T05:00:00Z' }],
+    new Error('event lookup failed'),
+  ]) {
+    const unresolved = await collect(events, [
+      dismissedReview,
+      {
+        ...dismissedReview, id: 20, state: 'APPROVED',
+        submitted_at: '2026-08-08T04:00:00Z',
+      },
+    ]);
+    const result = gate({
+      reviews: unresolved, comments: [approvalAt('2026-08-08T05:00:00Z')],
+    });
+    assert.equal(result.passed, false);
+    assert.ok(result.notes.some((note) => note.includes('unproven timing')));
+    assert.equal(gate({
+      reviews: unresolved,
+      comments: [
+        approvalAt('2026-08-08T05:00:00Z'),
+        comment('other-admin', 'APPROVE', headSha, {
+          user: { login: 'other-admin' }, squadAdminOverride: true,
+        }),
+      ],
+    }).passed, true, 'uncertainty only suppresses the affected account');
+  }
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0], /event lookup failed.*fail closed/);
+});
+
+test('dismissal chronology supersedes review IDs and tied approvals in native-only evaluations', () => {
+  const dismissed = {
+    id: 1, state: 'DISMISSED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+    submittedAt: '2026-08-08T01:00:00Z', dismissedAt: '2026-08-08T03:00:00Z',
+  };
+  for (const time of ['2026-08-08T02:00:00Z', dismissed.dismissedAt]) {
+    const approval = { ...dismissed, id: 999, state: 'APPROVED', submittedAt: time };
+    for (const reviews of [[dismissed, approval], [approval, dismissed]]) {
+      assert.equal(gate({ reviews }).passed, false);
+    }
+  }
+  assert.equal(gate({
+    reviews: [dismissed, {
+      ...dismissed, id: 999, state: 'APPROVED', submittedAt: '2026-08-08T04:00:00Z',
+    }],
+  }).override, 'github-review');
+});
+
+test('unproven dismissals still require the same head and authenticated account', () => {
+  const dismissal = {
+    state: 'DISMISSED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+    submittedAt: '2026-08-08T00:00:00Z',
+  };
+  const comments = [comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true })];
+  for (const review of [
+    { ...dismissal, commitId: staleSha },
+    { ...dismissal, isAdmin: false },
+    { ...dismissal, login: 'other-admin' },
+  ]) {
+    assert.equal(gate({ comments, reviews: [review] }).passed, true);
+  }
+  const result = gate({ comments, reviews: [dismissal] });
+  assert.equal(result.passed, false);
+  assert.ok(result.notes.some((note) => note.includes('unproven timing')));
+});
+
+test('a later native owner approval clears their earlier comment rejection', () => {
+  const result = gate({
+    comments: [comment('jpapiez', 'REQUEST_CHANGES', headSha, { squadAdminOverride: true })],
+    reviews: [{
+      state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+      submittedAt: '2026-08-08T02:00:00Z',
+    }],
+  });
+  assert.equal(result.passed, true);
+  assert.equal(result.override, 'github-review');
+});
+
+test('a later explicit owner comment revokes or replaces their native approval', () => {
+  for (const verdict of ['APPROVE', 'REQUEST_CHANGES']) {
+    const result = gate({
+      reviews: [{
+        state: 'APPROVED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T00:00:00Z',
+      }],
+      comments: [comment('jpapiez', verdict, headSha, { squadAdminOverride: true })],
+    });
+    assert.equal(result.override, 'owner-comment');
+    assert.equal(result.passed, verdict === 'APPROVE');
+  }
+});
+
+test('owner decision ordering is independent of comment input order', () => {
+  const older = comment('jpapiez', 'REQUEST_CHANGES', headSha, {
+    id: 1, squadAdminOverride: true,
+  });
+  const newer = comment('jpapiez', 'APPROVE', headSha, {
+    id: 2, squadAdminOverride: true,
+  });
+  for (const comments of [[older, newer], [newer, older]]) {
+    assert.equal(gate({ comments }).passed, true);
+  }
+});
+
+test('cross-channel timestamp ties cannot clear an owner rejection', () => {
+  for (const nativeApproves of [true, false]) {
+    const result = gate({
+      reviews: [{
+        id: 999, state: nativeApproves ? 'APPROVED' : 'CHANGES_REQUESTED',
+        commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T01:00:00Z',
+      }],
+      comments: [comment('jpapiez', nativeApproves ? 'REQUEST_CHANGES' : 'APPROVE',
+        headSha, { id: 1000, squadAdminOverride: true })],
+    });
+    assert.equal(result.passed, false);
+    assert.match(result.description, /^REQUEST_CHANGES/);
+  }
+});
+
+test('comment ID ordering cannot erase a tied native rejection through an intermediate comment', () => {
+  const comments = [
+    comment('jpapiez', 'REQUEST_CHANGES', headSha, { id: 1, squadAdminOverride: true }),
+    comment('jpapiez', 'APPROVE', headSha, { id: 2, squadAdminOverride: true }),
+  ];
+  for (const ordered of [comments, [...comments].reverse()]) {
+    const result = gate({
+      reviews: [{
+        id: 100, state: 'CHANGES_REQUESTED', commitId: headSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-08T01:00:00Z',
+      }],
+      comments: ordered,
+    });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('a revoked owner comment cannot fall back to an agent record for a rostered login', () => {
+  const result = gate({
+    changedPaths: ['docs/ARCHITECTURE.md'],
+    roster: new Set([...roster, 'jpapiez']),
+    comments: [comment('jpapiez', 'APPROVE', headSha, { squadAdminOverride: true })],
+    reviews: [{
+      state: 'DISMISSED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+      submittedAt: '2026-08-08T02:00:00Z',
+      dismissedAt: '2026-08-08T03:00:00Z',
+    }],
+  });
+  assert.equal(result.passed, false);
+  assert.match(result.description, /^BLOCKED/);
+});
+
+test('stale owner approvals cannot clear a current rejection, even across a proven sync', () => {
+  const owner = comment('jpapiez', 'APPROVE', staleSha, { squadAdminOverride: true });
+  const result = gate({
+    carriedShas: new Set([staleSha]),
+    comments: [owner],
+    reviews: [{
+      state: 'CHANGES_REQUESTED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+    }],
+  });
+  assert.equal(result.passed, false);
+  const collected = collectVerdicts([owner], headSha, { carriedShas: new Set([staleSha]) });
+  assert.equal(collected.current.size, 0);
+  assert.equal(collected.stale.length, 1);
+});
+
+test('unauthenticated or agent-named comments cannot enter the owner timeline', () => {
+  for (const owner of [
+    comment('jpapiez', 'APPROVE', headSha, {
+      squadAdminOverride: true, squadWriteAccess: false,
+    }),
+    comment('jpapiez', 'APPROVE', headSha, {
+      squadAdminOverride: true, user: { login: 'stranger' },
+    }),
+    comment('bishop', 'APPROVE', headSha, { squadAdminOverride: true }),
+  ]) {
+    const result = gate({
+      comments: [owner],
+      reviews: [{
+        state: 'CHANGES_REQUESTED', commitId: headSha, login: 'jpapiez', isAdmin: true,
+        submittedAt: '2026-08-08T00:00:00Z',
+      }],
+    });
+    assert.equal(result.passed, false);
+  }
+});
+
+test('delta-only panel rereview requires a fresh quorum at the new head', () => {
+  const previousRound = ['bishop', 'hicks', 'vasquez'].map((member) =>
+    comment(member, member === 'hicks' ? 'REQUEST_CHANGES' : 'APPROVE', staleSha));
+  const revisionRound = ['bishop', 'hicks', 'vasquez'].map((member) => {
+    const record = comment(member, 'APPROVE');
+    record.body += `\n\nReviewed revision delta ${staleSha} to ${headSha}; prior findings resolved.`;
+    return record;
+  });
+  const input = { changedPaths: ['scripts/ci/squad-verdict-gate.mjs'] };
+  for (const freshCount of [0, 1]) {
+    const result = gate({
+      ...input, comments: [...previousRound, ...revisionRound.slice(0, freshCount)],
+    });
+    assert.equal(result.passed, false);
+    assert.deepEqual(result.requiredMembers, ['bishop', 'hicks', 'vasquez']);
+  }
+  const result = gate({ ...input, comments: [...previousRound, ...revisionRound.slice(0, 2)] });
+  assert.equal(result.passed, true);
+  assert.match(result.description, /^REVIEWED \(self-attested\)/);
+  assert.deepEqual(result.carried, []);
 });
 
 test('unresolved head SHA fails closed', () => {
@@ -1087,6 +1533,12 @@ test('workflow keeps its default-branch, SHA-binding and least-privilege control
   assert.match(workflow, /gate\.hasWriteAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /gate\.hasAdminAccess\(await permissionOf\(login\)\)/);
   assert.match(workflow, /squadWriteAccess: await canWrite\(login\)/);
+  assert.match(workflow, /shape\.reviewer === gate\.normalizeMember\(login\)/);
+  assert.match(workflow, /await isAdmin\(login\)/);
+  assert.match(workflow, /comment\.squadAdminOverride = true/);
+  assert.match(workflow, /commitId: review\.commit_id/);
+  assert.match(workflow, /submittedAt: review\.submitted_at/);
+  assert.match(workflow, /login: review\.user\?\.login/);
   // Fork PRs must never accept an agent record, but an administrator's native
   // approval is still evaluated in code rather than deferred to prose.
   assert.match(workflow, /fork PR needs a repository administrator/);

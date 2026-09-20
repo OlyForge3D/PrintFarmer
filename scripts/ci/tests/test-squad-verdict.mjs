@@ -203,6 +203,28 @@ test('an owner authorisation is classified apart from a self-attested record', (
   assert.match(selfAttested.reason, /self-attested.*not independent review/);
 });
 
+test('owner authorization preserves dissent and quorum shortfall without changing the actor', () => {
+  const evidence = fixture();
+  evidence.status.description = `APPROVE (owner) @ ${shortSha} by jpapiez; dissent=2; short=1`;
+  const verdict = verifySquadVerdict(evidence);
+  assert.equal(verdict.classification, 'APPROVED');
+  assert.equal(verdict.actor, 'jpapiez');
+  assert.equal(verdict.dissentCount, 2);
+  assert.equal(verdict.missingApprovals, 1);
+  assert.match(verdict.reason, /owner authorization, not agent review/);
+  assert.match(verdict.reason, /Preserved dissent: 2; missing approvals: 1/);
+  evidence.pull.head.sha = movedHeadSha;
+  assert.equal(verifySquadVerdict(evidence).classification, 'SUPERSEDED');
+});
+
+test('owner status audit suffix fails closed if partial or malformed', () => {
+  for (const suffix of ['; dissent=1', '; dissent=x; short=2', '; dissent=1; short=-1', '; extra=2']) {
+    const evidence = fixture();
+    evidence.status.description = `APPROVE (owner) @ ${shortSha} by jpapiez${suffix}`;
+    assert.equal(verifySquadVerdict(evidence).classification, 'INVALID', suffix);
+  }
+});
+
 test('rejects a status not created by GitHub Actions', () => {
   const evidence = fixture();
   evidence.status.creator.login = 'pr-author';
@@ -442,6 +464,38 @@ test('every description evaluateGate can emit round-trips through the verifier',
         state: 'APPROVED', commitId: reviewedHeadSha, login: 'jpapiez', isAdmin: true,
       }],
     }, 'APPROVED'],
+    ['owner comment overrides earlier native and newer agent rejections', {
+      changedPaths: codePaths,
+      reviews: [{
+        state: 'CHANGES_REQUESTED', commitId: reviewedHeadSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-07T00:00:00Z',
+      }],
+      comments: [
+        record('jpapiez', 'APPROVE', reviewedHeadSha, {
+          squadAdminOverride: true, updated_at: '2026-08-07T01:00:00Z',
+        }),
+        record('hicks', 'REQUEST_CHANGES', reviewedHeadSha, {
+          updated_at: '2026-08-07T02:00:00Z',
+        }),
+      ],
+    }, 'APPROVED'],
+    ['new owner rejection revokes earlier native approval', {
+      changedPaths: codePaths,
+      reviews: [{
+        state: 'APPROVED', commitId: reviewedHeadSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-07T00:00:00Z',
+      }],
+      comments: [record('jpapiez', 'REQUEST_CHANGES', reviewedHeadSha, {
+        squadAdminOverride: true, updated_at: '2026-08-07T01:00:00Z',
+      })],
+    }, 'CHANGES_REQUESTED'],
+    ['fresh delta reviews replace a rejected prior round without carrying evidence', {
+      changedPaths: codePaths,
+      comments: [
+        ...panel.map((m) => record(m, 'REQUEST_CHANGES', movedHeadSha)),
+        ...panel.map((m) => record(m, 'APPROVE')),
+      ],
+    }, 'REVIEWED'],
   ];
 
   for (const [name, input, expected] of scenarios) {

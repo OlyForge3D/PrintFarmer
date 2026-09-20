@@ -11,21 +11,24 @@ vi.mock("date-fns", () => ({
   formatDistanceToNow: () => "5 minutes ago",
 }));
 
-// Mock the API hooks
-vi.mock("@/common/hooks/useNotificationsList", () => ({
-  useNotifications: vi.fn(),
-  useMarkNotificationAsRead: vi.fn(),
-  useMarkAllNotificationsAsRead: vi.fn(),
-  useDeleteNotification: vi.fn(),
+type NotificationsResult = {
+  data: NotificationDto[];
+  refetch: () => unknown;
+};
+
+type MutationResult<TVariables> = {
+  mutateAsync: (variables: TVariables) => Promise<void>;
+  isPending: boolean;
+};
+
+const notificationHooks = vi.hoisted(() => ({
+  useNotifications: vi.fn<() => NotificationsResult>(),
+  useMarkNotificationAsRead: vi.fn<() => MutationResult<string>>(),
+  useMarkAllNotificationsAsRead: vi.fn<() => MutationResult<string[]>>(),
+  useDeleteNotification: vi.fn<() => MutationResult<string>>(),
 }));
 
-// Dynamic import after mocks
-const {
-  useNotifications,
-  useMarkNotificationAsRead,
-  useMarkAllNotificationsAsRead,
-  useDeleteNotification,
-} = await import("@/common/hooks/useNotificationsList");
+vi.mock("@/common/hooks/useNotificationsList", () => notificationHooks);
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -86,22 +89,22 @@ describe("NotificationDrawer", () => {
     mockMarkAllAsRead.mockResolvedValue(undefined);
     mockDelete.mockResolvedValue(undefined);
 
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: [],
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
-    vi.mocked(useMarkNotificationAsRead).mockReturnValue({
+    notificationHooks.useMarkNotificationAsRead.mockReturnValue({
       mutateAsync: mockMarkAsRead,
       isPending: false,
     } as ReturnType<typeof useMarkNotificationAsRead>);
 
-    vi.mocked(useMarkAllNotificationsAsRead).mockReturnValue({
+    notificationHooks.useMarkAllNotificationsAsRead.mockReturnValue({
       mutateAsync: mockMarkAllAsRead,
       isPending: false,
     } as ReturnType<typeof useMarkAllNotificationsAsRead>);
 
-    vi.mocked(useDeleteNotification).mockReturnValue({
+    notificationHooks.useDeleteNotification.mockReturnValue({
       mutateAsync: mockDelete,
       isPending: false,
     } as ReturnType<typeof useDeleteNotification>);
@@ -120,10 +123,10 @@ describe("NotificationDrawer", () => {
   });
 
   it("renders empty state when no notifications", () => {
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: [],
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -139,10 +142,10 @@ describe("NotificationDrawer", () => {
   });
 
   it("renders notification list with unread and read notifications", () => {
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: mockNotifications,
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -160,10 +163,10 @@ describe("NotificationDrawer", () => {
   });
 
   it('shows "Mark all as read" button when there are unread notifications', () => {
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: mockNotifications,
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -181,10 +184,10 @@ describe("NotificationDrawer", () => {
       ...n,
       isRead: true,
     }));
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: allReadNotifications,
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -199,10 +202,10 @@ describe("NotificationDrawer", () => {
 
   it("marks individual notification as read when clicked", async () => {
     const user = userEvent.setup();
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: mockNotifications,
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -221,10 +224,10 @@ describe("NotificationDrawer", () => {
 
   it("does not mark already read notification when clicked", async () => {
     const user = userEvent.setup();
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: mockNotifications,
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -243,10 +246,10 @@ describe("NotificationDrawer", () => {
 
   it("marks all notifications as read when button clicked", async () => {
     const user = userEvent.setup();
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: mockNotifications,
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -266,10 +269,10 @@ describe("NotificationDrawer", () => {
 
   it("deletes notification when delete button clicked", async () => {
     const user = userEvent.setup();
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: [mockNotifications[0]],
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -289,10 +292,10 @@ describe("NotificationDrawer", () => {
   it("closes drawer when backdrop is clicked", async () => {
     const user = userEvent.setup();
     const mockOnClose = vi.fn();
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: [],
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -313,10 +316,10 @@ describe("NotificationDrawer", () => {
   it("closes drawer when close button clicked", async () => {
     const user = userEvent.setup();
     const mockOnClose = vi.fn();
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: [],
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
@@ -361,10 +364,10 @@ describe("NotificationDrawer", () => {
       { ...mockNotifications[0], id: "9", type: NotificationType.SystemAlert },
     ];
 
-    vi.mocked(useNotifications).mockReturnValue({
+    notificationHooks.useNotifications.mockReturnValue({
       data: typeNotifications,
       refetch: mockRefetch,
-    } as ReturnType<typeof useNotifications>);
+    });
 
     render(
       <TestWrapper>
