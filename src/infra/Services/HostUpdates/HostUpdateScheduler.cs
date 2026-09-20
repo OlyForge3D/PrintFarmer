@@ -210,6 +210,11 @@ public interface IHostUpdateSchedulerExecutor
     Task SignalSafeCheckpointCancellationAsync(HostUpdateCancellationSignal signal, CancellationToken ct);
 }
 
+public interface IHostUpdateSchedulerCancellation
+{
+    Task<HostUpdateCancellationResult> SignalSafeCheckpointCancellationAsync(CancellationToken ct = default);
+}
+
 public sealed class HostUpdateSchedulerCancellationBridge
 {
     private readonly object _gate = new();
@@ -839,7 +844,8 @@ public sealed class HostUpdateScheduler(
     ILogger<HostUpdateScheduler>? logger = null,
     IHostUpdateAdmissionFence? admissionFence = null,
     IServiceScopeFactory? scopeFactory = null,
-    HostUpdateSchedulerCancellationBridge? cancellationBridge = null) : IDisposable, IAsyncDisposable
+    HostUpdateSchedulerCancellationBridge? cancellationBridge = null,
+    TimeSpan? disposalWaitTimeout = null) : IDisposable, IAsyncDisposable, IHostUpdateSchedulerCancellation
 {
     private static readonly TimeSpan MaxJitter = TimeSpan.FromMinutes(5);
 
@@ -847,6 +853,7 @@ public sealed class HostUpdateScheduler(
     private readonly IHostUpdateAdmissionFence _admissionFence = admissionFence ?? new InactiveHostUpdateAdmissionFence();
     private readonly IServiceScopeFactory? _scopeFactory = scopeFactory;
     private readonly HostUpdateSchedulerCancellationBridge? _cancellationBridge = cancellationBridge;
+    private readonly TimeSpan _disposalWaitTimeout = disposalWaitTimeout ?? TimeSpan.FromSeconds(30);
     private readonly IHostUpdateSchedulerExecutor? _directExecutor = executor;
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private HostUpdateSchedulerStatus _status = new(false, false, false, UpdateChannelSettings.StableChannel, 0, null, null, 0, HostUpdateSchedulerReason.Disabled);
@@ -1233,7 +1240,7 @@ public sealed class HostUpdateScheduler(
                 {
                     if (_directExecutor is not null)
                     {
-                        await _directExecutor.SignalSafeCheckpointCancellationAsync(signal, CancellationToken.None).ConfigureAwait(false);
+                        _directExecutor.PreArmCancellation(signal);
                     }
                     else if (_cancellationBridge is not null)
                     {
@@ -1246,7 +1253,7 @@ public sealed class HostUpdateScheduler(
                 }
             }
 
-            if (!await _tickGate.WaitAsync(TimeSpan.FromSeconds(30)).ConfigureAwait(false))
+            if (!await _tickGate.WaitAsync(_disposalWaitTimeout).ConfigureAwait(false))
             {
                 _logger.LogWarning("host_update_scheduler_shutdown_wait_timeout");
                 // Do not dispose the semaphore while a tick may still be releasing it. The

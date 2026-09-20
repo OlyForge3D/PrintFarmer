@@ -80,28 +80,47 @@ public static class HostUpdateInstallationIdentity
 
     public static string GetOrCreate(string? hostStateRoot)
     {
-        string root = string.IsNullOrWhiteSpace(hostStateRoot)
-            ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "PrintFarmer")
-            : hostStateRoot;
+        if (string.IsNullOrWhiteSpace(hostStateRoot))
+        {
+            // Unprovisioned hosts must not write outside the validated host-state root.
+            return CreateIdentity();
+        }
+
+        string root = Path.GetFullPath(hostStateRoot);
+        HostStateFileSecurity.ValidateExistingPathComponents(root);
         Directory.CreateDirectory(root);
+        HostStateFileSecurity.ValidateExistingPathComponents(root);
         string path = Path.Combine(root, FileName);
 
         lock (Gate)
         {
-            if (File.Exists(path))
+            try
             {
-                string existing = File.ReadAllText(path).Trim();
-                if (!string.IsNullOrWhiteSpace(existing))
+                HostStateFileSecurity.RejectReparseTarget(path);
+                if (File.Exists(path))
                 {
-                    return existing;
+                    HostStateFileSecurity.RejectReparseTarget(path);
+                    string existing = File.ReadAllText(path).Trim();
+                    if (!string.IsNullOrWhiteSpace(existing))
+                    {
+                        return existing;
+                    }
                 }
-            }
 
-            string identity = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
-            File.WriteAllText(path, identity);
-            return identity;
+                string identity = CreateIdentity();
+                HostStateFileSecurity.RejectReparseTarget(path);
+                File.WriteAllText(path, identity);
+                return identity;
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                return CreateIdentity();
+            }
         }
     }
+
+    private static string CreateIdentity() =>
+        Convert.ToHexString(RandomNumberGenerator.GetBytes(16)).ToLowerInvariant();
 }
 
 public static class HostStateFileSecurity

@@ -28,7 +28,7 @@ public sealed class HostUpdateAutomationPolicyControllerTests
         repository.Setup(value => value.ReplaceAsync(It.IsAny<HostUpdateAutomationPolicy>(), 0, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HostUpdatePolicyReadResult(false, new HostUpdateAutomationPolicy(), "host_update_policy_invalid"));
 
-        HostUpdateAutomationPolicyController controller = new(repository.Object, null!);
+        HostUpdateAutomationPolicyController controller = new(repository.Object, Mock.Of<IHostUpdateSchedulerCancellation>());
         ActionResult<HostUpdateAutomationPolicy> result = await controller.ReplaceAsync(
             new HostUpdateAutomationPolicyRequest(0, true, false, "bogus", false, 3600, null, 0, 24),
             CancellationToken.None);
@@ -47,7 +47,7 @@ public sealed class HostUpdateAutomationPolicyControllerTests
         repository.Setup(value => value.ReplaceAsync(It.IsAny<HostUpdateAutomationPolicy>(), 0, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HostUpdatePolicyReadResult(false, new HostUpdateAutomationPolicy(), error));
 
-        HostUpdateAutomationPolicyController controller = new(repository.Object, null!);
+        HostUpdateAutomationPolicyController controller = new(repository.Object, Mock.Of<IHostUpdateSchedulerCancellation>());
         ActionResult<HostUpdateAutomationPolicy> result = await controller.ReplaceAsync(
             new HostUpdateAutomationPolicyRequest(0, true, false, "stable", false, 3600, null, 0, 24),
             CancellationToken.None);
@@ -65,7 +65,7 @@ public sealed class HostUpdateAutomationPolicyControllerTests
         repository.Setup(value => value.ReplaceAsync(It.IsAny<HostUpdateAutomationPolicy>(), 3, It.IsAny<CancellationToken>()))
             .ReturnsAsync(new HostUpdatePolicyReadResult(false, current, "host_update_policy_revision_conflict"));
 
-        HostUpdateAutomationPolicyController controller = new(repository.Object, null!);
+        HostUpdateAutomationPolicyController controller = new(repository.Object, Mock.Of<IHostUpdateSchedulerCancellation>());
         ActionResult<HostUpdateAutomationPolicy> result = await controller.ReplaceAsync(
             new HostUpdateAutomationPolicyRequest(3, true, false, "stable", false, 3600, null, 0, 24),
             CancellationToken.None);
@@ -73,5 +73,29 @@ public sealed class HostUpdateAutomationPolicyControllerTests
         ConflictObjectResult conflict = Assert.IsType<ConflictObjectResult>(result.Result);
         Assert.Equal(409, conflict.StatusCode);
         repository.VerifyAll();
+    }
+
+    [Theory]
+    [InlineData(HostUpdateCancellationResult.NoActiveExecution, 409)]
+    [InlineData(HostUpdateCancellationResult.Signaled, 202)]
+    [InlineData(HostUpdateCancellationResult.AlreadySignaled, 202)]
+    public async Task CancelMapsSchedulerResultAndInvokesScheduler(HostUpdateCancellationResult result, int expectedStatus)
+    {
+        Mock<IHostUpdateAutomationPolicyRepository> repository = new();
+        Mock<IHostUpdateSchedulerCancellation> scheduler = new();
+        scheduler.Setup(value => value.SignalSafeCheckpointCancellationAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(result);
+        HostUpdateAutomationPolicyController controller = new(repository.Object, scheduler.Object);
+
+        IActionResult response = await controller.CancelAsync(CancellationToken.None);
+
+        int actualStatus = response switch
+        {
+            ObjectResult objectResult => objectResult.StatusCode ?? 200,
+            StatusCodeResult statusCodeResult => statusCodeResult.StatusCode,
+            _ => 200,
+        };
+        Assert.Equal(expectedStatus, actualStatus);
+        scheduler.Verify(value => value.SignalSafeCheckpointCancellationAsync(It.IsAny<CancellationToken>()), Times.Once);
     }
 }

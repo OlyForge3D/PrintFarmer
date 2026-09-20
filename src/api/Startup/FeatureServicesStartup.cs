@@ -418,6 +418,8 @@ public static class FeatureServicesStartup
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionFence>(),
                 sp.GetRequiredService<IServiceScopeFactory>(),
                 sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerCancellationBridge>()));
+        services.AddSingleton<Farm.Infrastructure.Services.HostUpdates.IHostUpdateSchedulerCancellation>(sp =>
+            sp.GetRequiredService<Farm.Infrastructure.Services.HostUpdates.HostUpdateScheduler>());
         if (hostStateEnabled)
         {
             services.AddHostedService<Farm.Infrastructure.Services.HostUpdates.HostUpdateSchedulerHostedService>();

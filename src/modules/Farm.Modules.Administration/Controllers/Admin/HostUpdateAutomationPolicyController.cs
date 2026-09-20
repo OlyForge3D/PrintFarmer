@@ -23,7 +23,7 @@ public sealed record HostUpdateAutomationPolicyRequest(
 [Tags("Admin - Host Updates")]
 public sealed class HostUpdateAutomationPolicyController(
     IHostUpdateAutomationPolicyRepository repository,
-    HostUpdateScheduler scheduler) : ControllerBase
+    IHostUpdateSchedulerCancellation scheduler) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(HostUpdateAutomationPolicy), StatusCodes.Status200OK)]

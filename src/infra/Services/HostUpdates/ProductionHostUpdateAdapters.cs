@@ -180,7 +180,9 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
         {
             HostUpdateSchedulerStatus current = schedulerStatus.Current;
             HostUpdatePolicyReadResult holderPolicyResult = policyRepository?.Read() ?? new(true, new HostUpdateAutomationPolicy(), null);
-            HostUpdateAutomationPolicy holderPolicy = holderPolicyResult.Policy;
+            HostUpdateAutomationPolicy holderPolicy = holderPolicyResult.Available
+                ? holderPolicyResult.Policy
+                : new HostUpdateAutomationPolicy();
             List<string> holderReasons = [];
             if (!holderPolicyResult.Available)
             {
@@ -207,6 +209,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
                 holderReasons.Add(current.Reason.ToString());
             }
 
+            holderReasons.Add(holderExecutorReason);
             if (holderReasons.Count == 0)
             {
                 holderReasons.Add(current.Reason.ToString());
