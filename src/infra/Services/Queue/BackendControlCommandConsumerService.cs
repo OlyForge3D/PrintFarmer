@@ -45,7 +45,7 @@ public sealed class BackendControlCommandConsumerService(
                     await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(PollInterval, stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -61,8 +61,28 @@ public sealed class BackendControlCommandConsumerService(
                 logger.LogError(exception, "Backend control command scan failed.");
             }
 
-            await Task.Delay(PollInterval, stoppingToken);
+            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+            }
         }
+    }
+
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + PollInterval;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (hostUpdateFence is not null &&
+                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     internal async Task RecoverStaleLeasesAsync(CancellationToken ct)

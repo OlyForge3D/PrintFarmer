@@ -1,7 +1,10 @@
 ﻿using Farm.Infrastructure.Data;
+using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Electricity;
 using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
+using Farm.Infrastructure.Tests.Builders;
 using FluentAssertions;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
@@ -67,10 +70,35 @@ public class HostUpdateWriterFencingTests : IDisposable
         }
     }
 
+    private sealed class BedClearAcknowledgementSpy : IBedClearAcknowledgementService
+    {
+        public int InvalidationCount { get; private set; }
+
+        public Task<AcknowledgeBedClearResult> AcknowledgeAsync(
+            AcknowledgeBedClearRequest request,
+            CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
+        public Task InvalidateStaleAcknowledgementsAsync(Guid printerId, CancellationToken ct = default)
+        {
+            InvalidationCount++;
+            return Task.CompletedTask;
+        }
+    }
+
     private CountingScopeFactory BuildCountingScopeFactory()
     {
         ServiceCollection services = new();
         _ = services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(_connection));
+        ServiceProvider sp = services.BuildServiceProvider();
+        return new CountingScopeFactory(sp.GetRequiredService<IServiceScopeFactory>());
+    }
+
+    private CountingScopeFactory BuildCountingScopeFactory(BedClearAcknowledgementSpy spy)
+    {
+        ServiceCollection services = new();
+        _ = services.AddDbContext<AppDbContext>(builder => builder.UseSqlite(_connection));
+        _ = services.AddScoped<IBedClearAcknowledgementService>(_ => spy);
         ServiceProvider sp = services.BuildServiceProvider();
         return new CountingScopeFactory(sp.GetRequiredService<IServiceScopeFactory>());
     }
@@ -182,7 +210,7 @@ public class HostUpdateWriterFencingTests : IDisposable
     }
 
     [Fact]
-    public async Task BackendStartCommandConsumerService_WhilePauseRequested_AcknowledgesOnceWithoutOpeningScope()
+    public async Task BackendStartCommandConsumerService_WhilePauseRequested_AcknowledgesWithoutOpeningScope()
     {
         CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
         var fence = new BackendStartCommandConsumerFenceFlag();
@@ -196,15 +224,15 @@ public class HostUpdateWriterFencingTests : IDisposable
         await WaitForPauseAcknowledgementsAsync(
             fence,
             () => fence.AcknowledgementCount,
-            expectedAcknowledgements: 1);
+            expectedAcknowledgements: AcknowledgementsPerPausedIteration);
         await sut.StopAsync(CancellationToken.None);
 
-        fence.AcknowledgementCount.Should().Be(1);
+        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
         scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
     }
 
     [Fact]
-    public async Task BackendControlCommandConsumerService_WhilePauseRequested_AcknowledgesOnceWithoutOpeningScope()
+    public async Task BackendControlCommandConsumerService_WhilePauseRequested_AcknowledgesWithoutOpeningScope()
     {
         CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
         var fence = new BackendControlCommandConsumerFenceFlag();
@@ -218,17 +246,56 @@ public class HostUpdateWriterFencingTests : IDisposable
         await WaitForPauseAcknowledgementsAsync(
             fence,
             () => fence.AcknowledgementCount,
-            expectedAcknowledgements: 1);
+            expectedAcknowledgements: AcknowledgementsPerPausedIteration);
         await sut.StopAsync(CancellationToken.None);
 
-        fence.AcknowledgementCount.Should().Be(1);
+        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
         scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
     }
 
     [Fact]
-    public async Task BedClearAcknowledgementExpiryService_WhilePauseRequested_AcknowledgesOnceWithoutOpeningScope()
+    public async Task BedClearAcknowledgementExpiryService_WhilePauseRequested_DoesNotDelegateWrites()
     {
-        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var spy = new BedClearAcknowledgementSpy();
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory(spy);
+        using (AppDbContext seedDb = new(
+                   new DbContextOptionsBuilder<AppDbContext>().UseSqlite(_connection).Options))
+        {
+            Guid manufacturerId = Guid.NewGuid();
+            Guid modelId = Guid.NewGuid();
+            seedDb.Manufacturers.Add(new Manufacturer { Id = manufacturerId, Name = "Test manufacturer" });
+            seedDb.PrinterModels.Add(new PrinterModel
+            {
+                Id = modelId,
+                Name = "Test model",
+                ManufacturerId = manufacturerId,
+            });
+            Printer printer = new PrinterBuilder()
+                .WithId(Guid.NewGuid())
+                .WithName("Test printer")
+                .WithServerUrl("http://192.168.1.2")
+                .Build();
+            printer.ManufacturerId = manufacturerId;
+            printer.ModelId = modelId;
+            printer.DispatchState = new PrinterDispatchState
+            {
+                PrinterId = printer.Id,
+                AcknowledgedJobId = Guid.NewGuid(),
+                AcknowledgedAtUtc = DateTime.UtcNow,
+            };
+            seedDb.Printers.Add(printer);
+            await seedDb.SaveChangesAsync();
+        }
+
+        using var positiveMetrics = new BedClearAcknowledgementExpiryMetrics();
+        var unpausedSut = new BedClearAcknowledgementExpiryService(
+            scopeFactory,
+            NullLogger<BedClearAcknowledgementExpiryService>.Instance,
+            positiveMetrics,
+            new BedClearAcknowledgementExpiryFenceFlag());
+        await unpausedSut.ScanAsync(CancellationToken.None);
+        spy.InvalidationCount.Should().Be(1, "the positive control must reach the delegated acknowledgement writer");
+
         var fence = new BedClearAcknowledgementExpiryFenceFlag();
         await fence.RequestPauseAsync(CancellationToken.None);
         using var metrics = new BedClearAcknowledgementExpiryMetrics();
@@ -242,10 +309,11 @@ public class HostUpdateWriterFencingTests : IDisposable
         await WaitForPauseAcknowledgementsAsync(
             fence,
             () => fence.AcknowledgementCount,
-            expectedAcknowledgements: 1);
+            expectedAcknowledgements: AcknowledgementsPerPausedIteration);
         await sut.StopAsync(CancellationToken.None);
 
-        fence.AcknowledgementCount.Should().Be(1);
-        scopeFactory.ScopesOpened.Should().Be(0, "the scanner must not delegate writes while paused");
+        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
+        spy.InvalidationCount.Should().Be(1, "the paused scanner must not delegate acknowledgement writes");
+        scopeFactory.ScopesOpened.Should().Be(1, "the positive control opens the only scanner scope; the paused scanner must not open another");
     }
 }

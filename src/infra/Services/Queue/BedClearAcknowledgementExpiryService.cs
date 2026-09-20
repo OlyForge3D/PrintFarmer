@@ -34,7 +34,7 @@ public sealed class BedClearAcknowledgementExpiryService(
                     await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(ScanInterval, stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -51,8 +51,28 @@ public sealed class BedClearAcknowledgementExpiryService(
                     "Bed-clear acknowledgement lifecycle scan failed.");
             }
 
-            await Task.Delay(ScanInterval, stoppingToken);
+            if (await WaitForIntervalOrPauseAsync(stoppingToken).ConfigureAwait(false))
+            {
+                await hostUpdateFence!.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
+            }
         }
+    }
+
+    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    {
+        DateTimeOffset until = DateTimeOffset.UtcNow + ScanInterval;
+        while (DateTimeOffset.UtcNow < until)
+        {
+            if (hostUpdateFence is not null &&
+                await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
+            {
+                return true;
+            }
+
+            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+        }
+
+        return false;
     }
 
     internal async Task ScanAsync(CancellationToken ct)

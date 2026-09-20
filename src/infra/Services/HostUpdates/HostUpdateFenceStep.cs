@@ -123,11 +123,13 @@ public sealed class BackgroundWriterFenceableWriter(string name, IHostUpdateWrit
 {
     public string Name { get; } = name;
 
-    public Task QuiesceAsync(CancellationToken cancellationToken) => flag.RequestPauseAsync(cancellationToken);
+    internal IHostUpdateWriterActivityFlag ActivityFlag { get; } = flag;
 
-    public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => flag.IsPausedAsync(cancellationToken);
+    public Task QuiesceAsync(CancellationToken cancellationToken) => ActivityFlag.RequestPauseAsync(cancellationToken);
 
-    public Task ResumeAsync(CancellationToken cancellationToken) => flag.ResumeAsync(cancellationToken);
+    public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => ActivityFlag.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => ActivityFlag.ResumeAsync(cancellationToken);
 }
 
 /// <summary>

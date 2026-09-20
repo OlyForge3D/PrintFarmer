@@ -1,10 +1,12 @@
 ﻿using System.Collections.Generic;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Infrastructure.Services.Queue;
 using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Startup;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Startup;
@@ -283,6 +285,67 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             }
         }
     }
+
+    [Fact]
+    public void AddHostUpdateExecution_HostedQueueWritersReceiveTheirRegisteredFenceFlags()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+            services.AddSingleton<BedClearAcknowledgementExpiryMetrics>();
+            services.AddHostedService<BackendStartCommandConsumerService>();
+            services.AddHostedService<BackendControlCommandConsumerService>();
+            services.AddHostedService<BedClearAcknowledgementExpiryService>();
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            IReadOnlyList<IFenceableWriter> writers =
+                provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>();
+            IReadOnlyList<IHostedService> hostedServices = provider.GetServices<IHostedService>().ToList();
+
+            AssertWriterUsesFlag<BackendStartCommandConsumerService, BackendStartCommandConsumerFenceFlag>(
+                provider, writers, hostedServices);
+            AssertWriterUsesFlag<BackendControlCommandConsumerService, BackendControlCommandConsumerFenceFlag>(
+                provider, writers, hostedServices);
+            AssertWriterUsesFlag<BedClearAcknowledgementExpiryService, BedClearAcknowledgementExpiryFenceFlag>(
+                provider, writers, hostedServices);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    private static void AssertWriterUsesFlag<TWriter, TFlag>(
+        ServiceProvider provider,
+        IReadOnlyList<IFenceableWriter> writers,
+        IReadOnlyList<IHostedService> hostedServices)
+        where TWriter : class, IHostedService
+        where TFlag : class, IHostUpdateWriterActivityFlag
+    {
+        TFlag flag = provider.GetRequiredService<TFlag>();
+        BackgroundWriterFenceableWriter fenceWriter = Assert.Single(
+            writers.OfType<BackgroundWriterFenceableWriter>(),
+            writer => writer.ActivityFlag is TFlag);
+        TWriter hostedWriter = Assert.Single(hostedServices.OfType<TWriter>());
+
+        Assert.Same(flag, fenceWriter.ActivityFlag);
+        Assert.Same(flag, GetInjectedFenceFlag(hostedWriter));
+    }
+
+    private static IHostUpdateWriterActivityFlag? GetInjectedFenceFlag(IHostedService service) =>
+        service.GetType()
+            .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Select(field => field.GetValue(service))
+            .OfType<IHostUpdateWriterActivityFlag>()
+            .SingleOrDefault();
 
     private sealed class NoopHostUpdateExecutionSteps : IHostUpdateExecutionSteps
     {
