@@ -15,6 +15,7 @@ import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  clampedOverride,
   classifyDiagnostics,
   countTestFiles,
   evaluate,
@@ -79,7 +80,7 @@ test("binds the listFiles ETIMEDOUT guard and preserves the list-file output fla
     code: "ETIMEDOUT",
   });
   const result = evaluateGate({
-    listFilesResult: { status: null, signal: null, error: timeoutError },
+    listFilesResult: { status: null, signal: "SIGTERM", error: timeoutError },
     compilerResult: { status: 0, signal: null, error: undefined },
   });
   assert.equal(result.ok, false);
@@ -87,10 +88,164 @@ test("binds the listFiles ETIMEDOUT guard and preserves the list-file output fla
   assert.equal(result.showListFilesOutput, true);
 });
 
-test("null stdout/stderr never stringify to the literal string \"null\"", () => {
-  const output = `${null ?? ""}${null ?? ""}`;
-  assert.equal(output, "");
-  assert.doesNotMatch(output, /null/);
+test("clampedOverride only accepts shrink-only values and defaults invalid bounds", () => {
+  const defaultValue = 120_000;
+  const cases = [
+    [undefined, defaultValue],
+    ["", defaultValue],
+    ["0", defaultValue],
+    ["-1", defaultValue],
+    ["NaN", defaultValue],
+    ["abc", defaultValue],
+    ["300", 300],
+    ["120000", defaultValue],
+    ["120001", defaultValue],
+    ["1e21", defaultValue],
+    ["1.5", defaultValue],
+    ["119999", 119_999],
+  ];
+
+  for (const [value, expected] of cases) {
+    assert.equal(
+      clampedOverride(value, defaultValue),
+      expected,
+      `clampedOverride(${String(value)}, ${defaultValue}) should be ${expected}`,
+    );
+  }
+});
+
+test("null stdout/stderr is sanitized at the real CLI output sinks", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-null-sinks-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests.mjs"),
+    );
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/test-typecheck-baseline.json"),
+      JSON.stringify(baseline),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        'const fs = require("node:fs");',
+        'const args = process.argv.slice(2);',
+        'if (args.includes("--listFilesOnly")) {',
+        '  fs.writeFileSync(process.env.SINK_LOG_PATH, "src/test/example.test.ts\\n");',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '  setInterval(() => {}, 1000);',
+        '} else {',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '}',
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-tests.mjs")],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TYPECHECK_TEST_TIMEOUT_MS: "50",
+          SINK_LOG_PATH: path.join(fixtureDirectory, "tx.log"),
+        },
+        timeout: 10_000,
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.doesNotMatch(output, /null/);
+    assert.match(output, /TypeScript test compiler timed out and was killed/);
+    assert.doesNotMatch(output, /undefined/);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+// Real CLI wiring: the first compiler run passes, then the listFiles pass hangs
+// under --listFilesOnly. This binds the `showListFilesOutput` flag to the actual
+// script path rather than a hand-built object.
+test("CLI binds listFiles ETIMEDOUT to the real output sink and showListFilesOutput flag", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-tests-listfiles-timeout-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests.mjs"),
+    );
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/test-typecheck-baseline.json"),
+      JSON.stringify(baseline),
+    );
+    const invocationLogPath = path.join(
+      fixtureDirectory,
+      "invocation-count.log",
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        'const fs = require("node:fs");',
+        'const args = process.argv.slice(2);',
+        'const log = process.env.INVOCATION_LOG_PATH;',
+        'fs.appendFileSync(log, args.includes("--listFilesOnly") ? "listFiles\\n" : "compiler\\n");',
+        'if (args.includes("--listFilesOnly")) {',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '  setInterval(() => {}, 1000);',
+        '} else {',
+        '  process.stdout.write("src/test/example.test.ts\\n");',
+        '}',
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-tests.mjs")],
+      {
+        encoding: "utf8",
+        env: {
+          ...process.env,
+          TYPECHECK_TEST_TIMEOUT_MS: "300",
+          INVOCATION_LOG_PATH: invocationLogPath,
+        },
+        timeout: 10_000,
+      },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.match(output, /timed out/);
+    assert.match(output, /src\/test\/example\.test\.ts/);
+
+    const invocationLines = (await readFile(invocationLogPath, "utf8"))
+      .split("\n")
+      .filter((line) => line.length > 0);
+    assert.equal(invocationLines.length, 2);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
 });
 
 test("fails global compiler diagnostics before the nonzero-file fallback", () => {

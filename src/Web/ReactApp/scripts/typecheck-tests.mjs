@@ -57,11 +57,11 @@ const compilerAlreadyFatal =
 
 const listFilesResult = compilerAlreadyFatal
   // This synthetic object is unreachable by construction: compilerAlreadyFatal
-  // is only true when the first compiler spawn already failed fatally, so a
-  // future edit that lets it reach here would incorrectly blame the second
-  // listFilesOnly pass for a compiler failure. Keeping the synthetic status as
-  // null makes that misattribution fail closed to the "did not complete"
-  // path rather than the list-files pass.
+  // is only true when the first compiler spawn already failed fatally. In a
+  // future edit that lets it reach here, the fallback would surface via the
+  // list-files warning ("could not list its project files.") rather than the
+  // fatal "did not complete" path, because the listFiles pass is evaluated
+  // after the compiler-level exit checks above.
   ? { error: undefined, signal: null, status: null, stdout: "", stderr: "" }
   : spawnSync(
       process.execPath,
