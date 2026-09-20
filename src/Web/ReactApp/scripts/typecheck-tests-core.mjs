@@ -15,6 +15,16 @@ import { isAbsolute, relative, resolve } from "node:path";
 // actually still type-checked.
 const TS_NOCHECK_PATTERN = /^[ \t]*\/\/+[ \t]*@ts-nocheck\b/m;
 
+// Bounds an env-var-supplied override for a spawnSync limit so the seam can
+// only ever shorten the default, never lengthen or disable it. Invalid,
+// non-finite, and oversize values must silently fall back to the default.
+export function clampedOverride(envValue, defaultValue) {
+  const parsed = Number(envValue);
+  return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= defaultValue
+    ? parsed
+    : defaultValue;
+}
+
 export function classifyDiagnostics(output, directory) {
   const lines = output.split(/\r?\n/).filter(Boolean);
   const fileDiagnostics = lines
