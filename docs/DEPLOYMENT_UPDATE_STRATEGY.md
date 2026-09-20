@@ -159,8 +159,8 @@ The unsigned legacy installation condition is reported as
 identity evidence is unavailable. If the installation is signed but the binding metadata is
 missing or invalid (for example a null `VerificationSource`, wrong branch/tag/channel,
 unpeeled SHA, self-report, or incorrect canonical version), repairing that metadata can clear
-the manual-only marker without a reinstall; the evaluator remains `NotManaged` even after the
-marker is cleared. The latter identifies actionable deployment evidence: an explicit
+the manual-only marker without a reinstall; the evaluator remains `NotManaged` (or `Blocked`, if blocking compatibility or channel evidence is also present)
+even after the marker is cleared. The latter identifies actionable deployment evidence: an explicit
 `RequiredUnavailableFacilities` override or an unverified SQL Server visible-backup-path
 mapping. Clearing executor facility blockers establishes host execution capability only; it
 does not satisfy or bypass trust-state verification. A genuinely unsigned installation that
@@ -237,7 +237,7 @@ bundle. The following claims remain intentionally separate:
 | GitHub discovery and signed wire contract | `SignedUpdateInfrastructureTests` cover pagination, draft filtering, exact channel/tag/workflow identity, immutable manifest bytes, malformed candidates, and bounded asset URLs. The prerelease-metadata rejection path is not represented by the current fixtures. | Covered by focused tests; prerelease mismatch evidence remains pending |
 | Publication | Release run `35456221950` published insider.4 after signing and verification. | Proven for that release |
 | Legacy installation transition | An authenticated insider.2 lab still reports the `NotManaged` state with the `ManagedEligibilityNotEstablished` reason (the state and reason are independent — a `NotManaged` result carries this reason only when no blocking evidence is also present); that deployed host predates the `GET /api/settings/UpdateChannel` endpoint now present in the current code. The supported transition is a one-time manual installation of a current signed release, followed by inventory refresh; no protected bootstrap or operator assertion is supported. | Manual operator action required |
-| Apply and recovery | There is no code-owned blanket unavailability list; production availability closes on concrete runtime evidence, including missing fenced writers, unverified SQL Server backup-path mapping, unsupported provider tooling, missing audited `HostExecutablePaths`, or an unreachable Docker runtime. `RequiredUnavailableFacilities` remains an explicit operator override. Separately, unsigned legacy installs remain `NotManaged` while signed-release identity evidence is unavailable; a current signed release clears the manual-only reason but does not itself create an `Eligible` evaluator state. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Runtime prerequisites implemented; live execution and recovery evidence pending |
+| Apply and recovery | There is no code-owned blanket unavailability list; production availability closes on concrete runtime evidence, including missing fenced writers, unverified SQL Server backup-path mapping, unsupported provider tooling, missing audited `HostExecutablePaths`, or an unreachable Docker runtime. `RequiredUnavailableFacilities` remains an explicit operator override. Separately, unsigned legacy installs remain `NotManaged` (or `Blocked`, if blocking compatibility or channel evidence is also present) while signed-release identity evidence is unavailable; a current signed release clears the manual-only reason but does not itself create an `Eligible` evaluator state. Interrupted-update recovery is covered by unit tests but has no live signed-release evidence. | Runtime prerequisites implemented; live execution and recovery evidence pending |
 | Automatic policy and UI execution | As of `ce8f4c182`, Update Now and automatic controls render disabled with no execute callback wired (`InstallerUpdatesExperience.tsx`); no live execution has been demonstrated end-to-end. | Blocked |
 
 Do not describe insider.4 publication as an end-to-end update acceptance run.
@@ -963,7 +963,8 @@ Proposed check policy, subject to approval:
   signed channel-local sequence for anti-replay, not a replacement comparator.
   Tags are discovery hints, never equality/provenance proof.
   Pins block execution and label a newer candidate as policy-held. Channel
-  changes never silently downgrade; custom/unrecognized builds are `NotManaged`.
+  changes never silently downgrade; custom/unrecognized builds are `NotManaged` (or
+  `Blocked`, if blocking compatibility or channel evidence is also present).
   Cache, dismissal and in-flight results are keyed by installation policy
   revision and channel; durable replay state is independently keyed by enrolled
   trust root and channel as above. A late response from the previous selection
