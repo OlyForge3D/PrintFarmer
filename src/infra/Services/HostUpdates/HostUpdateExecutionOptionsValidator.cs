@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using System.Collections.Immutable;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -15,12 +16,14 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// a value for it today, so requiring it unconditionally crashed every host on startup the moment
 /// <c>AddHostUpdateExecution</c> is registered (which happens unconditionally from
 /// <c>FeatureServicesStartup</c>). When <c>RootDirectory</c> is not configured at all, this
-/// validator succeeds without checking any other host-update-execution option -- the executor's
-/// own <see cref="HostUpdateExecutionAvailabilityProvider"/> is the correct place to report
-/// <c>root_directory_not_configured</c> as a runtime-queryable <c>Unavailable</c> reason, not a
-/// process crash. Once an operator explicitly configures a <c>RootDirectory</c> (opting into the
-/// feature for that deployment), every check below still runs and still fails process start fast
-/// on a genuine misconfiguration.
+/// validator skips deployment-specific checks -- the executor's own
+/// <see cref="HostUpdateExecutionAvailabilityProvider"/> reports
+/// <c>root_directory_not_configured</c> as a runtime-queryable <c>Unavailable</c> reason rather
+/// than crashing the process. The code-owned fenced-writer minimum is always validated so a
+/// narrowed configuration is visible as a startup error even though the runtime union already
+/// prevents it from weakening the safety boundary. Once an operator explicitly configures a
+/// <c>RootDirectory</c> (opting into the feature for that deployment), every remaining check
+/// below also runs and fails process start fast on a genuine misconfiguration.
 /// </remarks>
 public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostUpdateExecutionOptions>
 {
@@ -28,12 +31,27 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (string.IsNullOrWhiteSpace(options.RootDirectory))
+        var failures = new List<string>();
+        ImmutableArray<string> configuredFencedWriterNames =
+            HostUpdateExecutionAvailabilityProvider.NormalizeConfiguredRequiredFencedWriterNames(
+                options.RequiredFencedWriterNames);
+        string[] missingCodeOwnedWriterNames = HostUpdateExecutionAvailabilityProvider.CodeOwnedRequiredFencedWriterNames
+            .Where(name => !HostUpdateExecutionAvailabilityProvider.ContainsConfiguredRequiredFencedWriterName(
+                configuredFencedWriterNames,
+                name))
+            .ToArray();
+        if (missingCodeOwnedWriterNames.Length > 0)
         {
-            return ValidateOptionsResult.Success;
+            failures.Add(
+                "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+                + string.Join(',', missingCodeOwnedWriterNames)
+                + ".");
         }
 
-        var failures = new List<string>();
+        if (string.IsNullOrWhiteSpace(options.RootDirectory))
+        {
+            return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+        }
 
         string root = options.RootDirectory;
         if (!Path.IsPathRooted(root))
@@ -96,6 +114,7 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
         CheckPositive(options.FenceProofTimeoutSeconds, "FenceProofTimeoutSeconds", failures);
         CheckPositive(options.FencePollIntervalSeconds, "FencePollIntervalSeconds", failures);
         CheckPositive(options.BackupTimeoutSeconds, "BackupTimeoutSeconds", failures);
+        CheckPositive(options.MigrationTimeoutSeconds, "MigrationTimeoutSeconds", failures);
         CheckPositive(options.VerifyTimeoutSeconds, "VerifyTimeoutSeconds", failures);
         CheckPositive(options.VerifyPollIntervalSeconds, "VerifyPollIntervalSeconds", failures);
         CheckPositive(options.ApplyTimeoutSeconds, "ApplyTimeoutSeconds", failures);

@@ -1,8 +1,14 @@
-﻿using System.Collections.Generic;
+using System.Collections.Generic;
+using System.Linq;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Infrastructure.Services.Queue;
+using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Startup;
+using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Xunit;
 
 namespace Farm.Web.Api.Tests.Startup;
@@ -52,6 +58,36 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
         }
 
         return Path.Combine(localData, "pf-hostupdate-di-graph-" + Guid.NewGuid().ToString("N"));
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_RegistersEveryRequiredFence()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+
+            Assert.NotNull(provider.GetRequiredService<QueueReconciliationFenceFlag>());
+            IReadOnlyList<IFenceableWriter> writers = provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>();
+            foreach (string requiredWriterName in new HostUpdateExecutionOptions().RequiredFencedWriterNames)
+            {
+                Assert.Contains(writers, writer => writer.Name == requiredWriterName);
+            }
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
     }
 
     [Fact]
@@ -144,6 +180,50 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
         }
     }
 
+    /// <summary>
+    /// Bishop review (issue #2788): the <c>IHostUpdateBackupTarget</c> factory delegate was
+    /// briefly (and accidentally, mid-redesign) evaluating <c>options.BackupRootDirectory</c>
+    /// unconditionally for every database provider before passing it to
+    /// <see cref="HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget"/>.
+    /// <c>BackupRootDirectory</c> throws <c>root_directory_not_configured</c> when
+    /// <c>RootDirectory</c> is unset, so that regression would crash resolution of
+    /// <see cref="IReadOnlyList{T}"/> of <see cref="IHostUpdateBackupTarget"/> -- and therefore
+    /// <c>HostUpdateExecutionAvailabilityProvider.CheckAsync</c>'s unconditional
+    /// <c>backupTargets.Count</c> check -- for a SQL Server deployment in the executor's normal
+    /// default-off state (root unconfigured), instead of resolving cleanly and reporting
+    /// <c>backup_root_directory_not_configured</c> only when the mapping is actually verified.
+    /// This proves the DI graph resolves without throwing in exactly that state.
+    /// </summary>
+    [Fact]
+    public void AddHostUpdateExecution_ResolvingSqlServerBackupTargetsWithUnconfiguredRoot_DoesNotThrow()
+    {
+        ServiceCollection services = new();
+        services.AddLogging();
+        var values = new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = string.Empty,
+            ["DB_PROVIDER"] = "sqlserver",
+            ["ConnectionStrings:Default"] = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=fixture-not-a-real-credential;TrustServerCertificate=True",
+            ["HostUpdateExecution:HostExecutablePaths:sqlcmd"] = Path.Combine(AppContext.BaseDirectory, "sqlcmd.exe"),
+        };
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        services.AddSingleton(configuration);
+        services.AddHostUpdateExecution(configuration);
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        using IServiceScope scope = provider.CreateScope();
+
+        IReadOnlyList<IHostUpdateBackupTarget> targets = scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>();
+
+        // Assert.Contains(targets, t => t.Name == "database") alone would also pass for a
+        // provider whose backup target never implements visible-backup-path-mapping
+        // verification at all. Binding IHostUpdateServerSideBackupTarget here proves the SQL
+        // Server registration actually exposes issue #2788's verification capability, not merely
+        // some backup target named "database".
+        Assert.Contains(targets, t => t.Name == "database");
+        targets.Single(t => t.Name == "database").Should().BeAssignableTo<IHostUpdateServerSideBackupTarget>();
+    }
+
     [Fact]
     public void AddHostUpdateExecution_ResolvesOnlyConstrainedProcessRunner()
     {
@@ -162,6 +242,39 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
                 provider.GetRequiredService<IHostUpdateProcessRunner>());
             Assert.Throws<InvalidOperationException>(() =>
                 provider.GetRequiredService<DefaultHostUpdateProcessRunner>());
+        }
+
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_ResolvesBothTargetImageMigrationTargets()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            using IServiceScope scope = provider.CreateScope();
+
+            IReadOnlyList<IHostUpdateMigrationTarget> targets =
+                scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateMigrationTarget>>();
+
+            Assert.Collection(
+                targets,
+                target => Assert.IsType<TargetImageMigrationTarget<AppDbContext>>(target),
+                target => Assert.IsType<TargetImageMigrationTarget<SlicerDbContext>>(target));
         }
         finally
         {
@@ -248,6 +361,67 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
             }
         }
     }
+
+    [Fact]
+    public void AddHostUpdateExecution_HostedQueueWritersReceiveTheirRegisteredFenceFlags()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+            services.AddSingleton<BedClearAcknowledgementExpiryMetrics>();
+            services.AddHostedService<BackendStartCommandConsumerService>();
+            services.AddHostedService<BackendControlCommandConsumerService>();
+            services.AddHostedService<BedClearAcknowledgementExpiryService>();
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            IReadOnlyList<IFenceableWriter> writers =
+                provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>();
+            IReadOnlyList<IHostedService> hostedServices = provider.GetServices<IHostedService>().ToList();
+
+            AssertWriterUsesFlag<BackendStartCommandConsumerService, BackendStartCommandConsumerFenceFlag>(
+                provider, writers, hostedServices);
+            AssertWriterUsesFlag<BackendControlCommandConsumerService, BackendControlCommandConsumerFenceFlag>(
+                provider, writers, hostedServices);
+            AssertWriterUsesFlag<BedClearAcknowledgementExpiryService, BedClearAcknowledgementExpiryFenceFlag>(
+                provider, writers, hostedServices);
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    private static void AssertWriterUsesFlag<TWriter, TFlag>(
+        ServiceProvider provider,
+        IReadOnlyList<IFenceableWriter> writers,
+        IReadOnlyList<IHostedService> hostedServices)
+        where TWriter : class, IHostedService
+        where TFlag : class, IHostUpdateWriterActivityFlag
+    {
+        TFlag flag = provider.GetRequiredService<TFlag>();
+        BackgroundWriterFenceableWriter fenceWriter = Assert.Single(
+            writers.OfType<BackgroundWriterFenceableWriter>(),
+            writer => writer.ActivityFlag is TFlag);
+        TWriter hostedWriter = Assert.Single(hostedServices.OfType<TWriter>());
+
+        Assert.Same(flag, fenceWriter.ActivityFlag);
+        Assert.Same(flag, GetInjectedFenceFlag(hostedWriter));
+    }
+
+    private static IHostUpdateWriterActivityFlag? GetInjectedFenceFlag(IHostedService service) =>
+        service.GetType()
+            .GetFields(System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic)
+            .Select(field => field.GetValue(service))
+            .OfType<IHostUpdateWriterActivityFlag>()
+            .SingleOrDefault();
 
     private sealed class NoopHostUpdateExecutionSteps : IHostUpdateExecutionSteps
     {

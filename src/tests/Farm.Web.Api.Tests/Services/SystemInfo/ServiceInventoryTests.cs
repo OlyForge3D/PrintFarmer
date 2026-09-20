@@ -35,6 +35,58 @@ public sealed class ServiceInventoryTests
     }
 
     [Fact]
+    public void Evaluate_UnsignedVersionedInstallation_IsDistinctlyManualOnly()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            new()
+            {
+                ServiceId = "api",
+                ApplicationVersion = "0.2.3-insider.2",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+        ]);
+
+        result.Eligibility.Should().Be(InventoryEligibility.NotManaged);
+        result.EligibilityReasons.Should().Equal(
+            "SignedReleaseEvidenceUnavailableManualOnly",
+            "ManagedEligibilityNotEstablished",
+            "ReadOnlyInventory");
+    }
+
+    [Fact]
+    public void Evaluate_MixedUnsignedReleases_PreservesLegacyAndCompatibilityReasons()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            new()
+            {
+                ServiceId = "api",
+                ApplicationVersion = "0.2.3-insider.2",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+            new()
+            {
+                ServiceId = "worker",
+                ApplicationVersion = "0.2.3-insider.1",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+        ]);
+
+        result.Eligibility.Should().Be(InventoryEligibility.Blocked);
+        result.EligibilityReasons.Should().Equal(
+            "SignedReleaseEvidenceUnavailableManualOnly",
+            "MixedApplicationReleases",
+            "ReadOnlyInventory");
+    }
+
+    [Fact]
     public void Evaluate_ExplicitInsider_DoesNotRelabelLegacyBuild()
     {
         ServiceInventoryDto result = Evaluate([new() { ApplicationVersion = "1.2.3-daily.7" }], "insider");
@@ -169,6 +221,20 @@ public sealed class ServiceInventoryTests
         Assert.Null(result.Services[0].Identity);
         Assert.Null(result.ObservedChannel);
         Assert.Equal(InventoryCompatibilityState.Unknown, result.CompatibilityState);
+        Assert.Equal(InventoryEligibility.NotManaged, result.Eligibility);
+        Assert.Contains("SignedReleaseEvidenceUnavailableManualOnly", result.EligibilityReasons);
+    }
+
+    [Fact]
+    public void Evaluate_BindingMetadataRepairRemovesManualOnlyEvidenceMarker()
+    {
+        ServiceReplicaObservationDto incomplete = Verified("a") with { VerificationSource = null };
+        ServiceInventoryDto before = Evaluate([incomplete]);
+        before.EligibilityReasons.Should().Contain("SignedReleaseEvidenceUnavailableManualOnly");
+
+        ServiceInventoryDto after = Evaluate([Verified("a")]);
+        after.EligibilityReasons.Should().NotContain("SignedReleaseEvidenceUnavailableManualOnly");
+        after.Eligibility.Should().Be(InventoryEligibility.NotManaged);
     }
 
     [Fact]

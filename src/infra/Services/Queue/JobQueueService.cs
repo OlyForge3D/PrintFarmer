@@ -280,6 +280,7 @@ public class JobQueueService : IJobQueueService
             // and then waits for active work to finish naturally -- if new submissions kept
             // being admitted here, the drain would never observe true quiescence. Fail closed
             // rather than silently admitting a new job while the host is being updated.
+            _logger.LogWarning("queue_writer_rejected_host_update_fence");
             throw new Farm.Infrastructure.Services.HostUpdates.HostUpdateAdmissionClosedException();
         }
 

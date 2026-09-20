@@ -147,6 +147,17 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
     [Fact]
     public async Task GetInfo_Admin_ReportsAutomaticUpdateSchedulingFromTheRegisteredProvider()
     {
+        _factory.Services.GetRequiredService<HostUpdateSchedulerStatusHolder>().Update(new HostUpdateSchedulerStatus(
+            Enabled: false,
+            EffectiveEnabled: false,
+            KillSwitch: false,
+            Channel: "stable",
+            PolicyRevision: 0,
+            LastAttemptAt: null,
+            NextPollAt: null,
+            ConsecutiveFailures: 0,
+            Reason: HostUpdateSchedulerReason.Disabled));
+
         HttpResponseMessage response = await _adminClient!.GetAsync("/api/system/info");
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
@@ -159,13 +170,14 @@ public class SystemInfoIntegrationTests : IClassFixture<SystemInfoIntegrationTes
         dto.UpdateScheduling.EffectiveEnabled.Should().BeFalse();
         dto.UpdateScheduling.EffectiveChannel.Should().BeNull();
         dto.UpdateScheduling.Executor.State.Should().Be(HostUpdateExecutorState.Unavailable);
-        dto.UpdateScheduling.Executor.Reason.Should().Be(HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason);
+        dto.UpdateScheduling.Executor.Reason.Should().Be(HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason);
         dto.UpdateScheduling.Backoff.State.Should().Be(HostUpdateBackoffState.Unknown);
         dto.UpdateScheduling.Reasons.Should().Equal(
             "host_update_policy_repository_not_available",
             "host_update_replay_anchor_not_available",
             "host_update_replay_store_not_available",
-            HostUpdateSchedulingAvailability.AdmissionFenceReason);
+            HostUpdateSchedulingAvailability.AdmissionFenceReason,
+            HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason);
         dto.UpdateScheduling.KillSwitch.Enabled.Should().BeFalse();
     }
 

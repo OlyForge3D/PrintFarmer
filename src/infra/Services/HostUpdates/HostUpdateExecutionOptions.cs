@@ -56,7 +56,6 @@ public sealed class HostUpdateExecutionOptions
     [
         "Npgsql.EntityFrameworkCore.PostgreSQL",
         "Microsoft.EntityFrameworkCore.SqlServer",
-        "Microsoft.EntityFrameworkCore.Sqlite",
     ];
 
     /// <summary>Bounded wait for active prints/pending outbox commands to finish naturally during drain.</summary>
@@ -71,6 +70,9 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>Timeout for each provider-native backup/restore tool invocation.</summary>
     public int BackupTimeoutSeconds { get; set; } = 900;
+
+    /// <summary>Timeout for each digest-pinned target-image migration command.</summary>
+    public int MigrationTimeoutSeconds { get; set; } = 900;
 
     /// <summary>Bounded wait for every readiness/digest health check to report healthy.</summary>
     public int VerifyTimeoutSeconds { get; set; } = 300;
@@ -114,21 +116,15 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>
     /// Writer names (matching <see cref="IFenceableWriter.Name"/>) that must all be present in
-    /// the registered fence coordinator before the executor is considered available. Backfills
-    /// coverage over time as more background writers are fenced (issue #2663); an entry here
-    /// with no corresponding registered <see cref="IFenceableWriter"/> makes the executor
-    /// explicitly <see cref="HostUpdateExecutionAvailabilityState.Unavailable"/> rather than
-    /// silently proceeding to fence only whatever happens to be registered.
+    /// the registered fence coordinator before the executor is considered available. The
+    /// code-owned baseline cannot be removed by configuration; configured entries may only add
+    /// deployment-specific writers. Any required name with no corresponding registered
+    /// <see cref="IFenceableWriter"/> makes the executor explicitly
+    /// <see cref="HostUpdateExecutionAvailabilityState.Unavailable"/> rather than silently
+    /// proceeding to fence only whatever happens to be registered.
     /// </summary>
     public string[] RequiredFencedWriterNames { get; set; } =
-    [
-        "api-admission",
-        "queue-outbox-publisher",
-        "power-reading-prune",
-        "queue-retention-prune",
-        "auto-dispatch",
-        "webhook-delivery",
-    ];
+        [.. HostUpdateExecutionAvailabilityProvider.CodeOwnedRequiredFencedWriterNames];
 
     /// <summary>
     /// Application-owned directories to back up (name to absolute path), matching this host's

@@ -26,8 +26,9 @@ public static class CliCommandExtensions
         bool headlessCreateAdmin = rawArgs.Contains("--create-admin", StringComparer.OrdinalIgnoreCase);
         bool headlessListUsers = rawArgs.Contains("--list-users", StringComparer.OrdinalIgnoreCase);
         bool provisionHostUpdates = rawArgs.Contains("--provision-host-updates", StringComparer.OrdinalIgnoreCase);
+        bool hostUpdateMigration = rawArgs.Contains("--host-update-migration", StringComparer.Ordinal);
 
-        if (!headlessCreateAdmin && !headlessListUsers && !provisionHostUpdates)
+        if (!headlessCreateAdmin && !headlessListUsers && !provisionHostUpdates && !hostUpdateMigration)
         {
             return false; // No CLI command, continue with normal startup
         }
@@ -49,6 +50,12 @@ public static class CliCommandExtensions
         if (provisionHostUpdates)
         {
             await ProvisionHostUpdatesAsync(app, scope.ServiceProvider, logger);
+            return true;
+        }
+
+        if (hostUpdateMigration)
+        {
+            await RunHostUpdateMigrationAsync(rawArgs, scope.ServiceProvider);
             return true;
         }
 
@@ -131,6 +138,64 @@ public static class CliCommandExtensions
 
         // All CLI code paths return above; no further action required here.
         // Method intentionally falls through when a CLI command was handled.
+    }
+
+    private static async Task RunHostUpdateMigrationAsync(List<string> rawArgs, IServiceProvider services)
+    {
+        int commandIndex = rawArgs.IndexOf("--host-update-migration");
+        if (commandIndex < 0 || rawArgs.Count != commandIndex + 4 ||
+            !string.Equals(rawArgs[commandIndex + 1], "AppDbContext", StringComparison.Ordinal))
+        {
+            Environment.ExitCode = 1;
+            await Console.Error.WriteLineAsync("HOST_UPDATE_MIGRATION_ERROR:AppDbContext:command_invalid");
+            return;
+        }
+
+        string operation = rawArgs[commandIndex + 2];
+        string expectedProvider = rawArgs[commandIndex + 3];
+        AppDbContext context = services.GetRequiredService<AppDbContext>();
+        string provider = context.Database.ProviderName ?? string.Empty;
+        if (provider is not "Npgsql.EntityFrameworkCore.PostgreSQL" and not "Microsoft.EntityFrameworkCore.SqlServer" ||
+            !string.Equals(provider, expectedProvider, StringComparison.Ordinal))
+        {
+            Environment.ExitCode = 1;
+            await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:AppDbContext:provider_unsupported:{provider}");
+            return;
+        }
+
+        try
+        {
+            bool pending = (await context.Database.GetPendingMigrationsAsync()).Any();
+            if (string.Equals(operation, "probe", StringComparison.Ordinal))
+            {
+                await Console.Out.WriteLineAsync($"HOST_UPDATE_MIGRATION_PENDING:AppDbContext:{(pending ? 1 : 0)}");
+                return;
+            }
+
+            if (!string.Equals(operation, "apply", StringComparison.Ordinal))
+            {
+                Environment.ExitCode = 1;
+                await Console.Error.WriteLineAsync("HOST_UPDATE_MIGRATION_ERROR:AppDbContext:operation_invalid");
+                return;
+            }
+
+            DatabaseMigrationResult result = await ProviderAwareMigrationRunner.MigrateAsync(
+                context,
+                DatabaseMigrationTarget.Core,
+                services.GetRequiredService<ILogger<AppDbContext>>(),
+                CancellationToken.None);
+            await Console.Out.WriteLineAsync($"HOST_UPDATE_MIGRATION_APPLIED:AppDbContext:{string.Join(',', result.AppliedMigrations)}");
+        }
+        catch (DatabaseMigrationContractException exception)
+        {
+            Environment.ExitCode = 1;
+            await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:AppDbContext:{exception.Code}");
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            Environment.ExitCode = 1;
+            await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:AppDbContext:{exception.GetType().Name}");
+        }
     }
 
     private static async Task ProvisionHostUpdatesAsync(WebApplication app, IServiceProvider services, ILogger? logger)

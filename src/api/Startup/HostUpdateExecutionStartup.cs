@@ -3,6 +3,7 @@ using Farm.Infrastructure.Data.Migrations;
 using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Slicer.Module.Data;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Options;
 
 namespace Farm.Web.Api.Startup;
@@ -21,6 +22,7 @@ public static class HostUpdateExecutionStartup
 
     public static IServiceCollection AddHostUpdateExecution(this IServiceCollection services, IConfiguration configuration)
     {
+        services.TryAddSingleton<IHostUpdateAutomationPolicyRepository, UnavailableHostUpdateAutomationPolicyRepository>();
         services.AddOptions<HostUpdateExecutionOptions>()
             .Bind(configuration.GetSection(HostUpdateExecutionOptions.SectionName))
             .ValidateOnStart();
@@ -109,16 +111,25 @@ public static class HostUpdateExecutionStartup
         services.AddSingleton<IHostUpdateWriterActivityFlag, InMemoryHostUpdateWriterActivityFlag>();
         services.AddSingleton<PowerReadingPruneFenceFlag>();
         services.AddSingleton<QueueRetentionPruneFenceFlag>();
+        services.AddSingleton<BackendStartCommandConsumerFenceFlag>();
+        services.AddSingleton<BackendControlCommandConsumerFenceFlag>();
+        services.AddSingleton<BedClearAcknowledgementExpiryFenceFlag>();
         services.AddSingleton<AutoDispatchFenceFlag>();
         services.AddSingleton<WebhookDeliveryFenceFlag>();
+        services.AddSingleton<QueueReconciliationFenceFlag>(sp =>
+            new QueueReconciliationFenceFlag(sp.GetRequiredService<IHostUpdateAdmissionGate>()));
         services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp =>
         [
             new AdmissionFenceableWriter(sp.GetRequiredService<IHostUpdateAdmissionGate>()),
             new BackgroundWriterFenceableWriter("queue-outbox-publisher", sp.GetRequiredService<IHostUpdateWriterActivityFlag>()),
             new BackgroundWriterFenceableWriter("power-reading-prune", sp.GetRequiredService<PowerReadingPruneFenceFlag>()),
             new BackgroundWriterFenceableWriter("queue-retention-prune", sp.GetRequiredService<QueueRetentionPruneFenceFlag>()),
+            new BackgroundWriterFenceableWriter("backend-start-command-consumer", sp.GetRequiredService<BackendStartCommandConsumerFenceFlag>()),
+            new BackgroundWriterFenceableWriter("backend-control-command-consumer", sp.GetRequiredService<BackendControlCommandConsumerFenceFlag>()),
+            new BackgroundWriterFenceableWriter("bed-clear-acknowledgement-expiry", sp.GetRequiredService<BedClearAcknowledgementExpiryFenceFlag>()),
             new BackgroundWriterFenceableWriter("auto-dispatch", sp.GetRequiredService<AutoDispatchFenceFlag>()),
             new BackgroundWriterFenceableWriter("webhook-delivery", sp.GetRequiredService<WebhookDeliveryFenceFlag>()),
+            new BackgroundWriterFenceableWriter("queue-reconciliation", sp.GetRequiredService<QueueReconciliationFenceFlag>()),
         ]);
         services.AddSingleton<IHostUpdateFenceCoordinator>(sp =>
         {
@@ -126,7 +137,8 @@ public static class HostUpdateExecutionStartup
             return new HostUpdateFenceCoordinator(
                 sp.GetRequiredService<IReadOnlyList<IFenceableWriter>>(),
                 TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds),
-                TimeSpan.FromSeconds(options.FencePollIntervalSeconds));
+                TimeSpan.FromSeconds(options.FencePollIntervalSeconds),
+                logger: sp.GetRequiredService<ILogger<HostUpdateFenceCoordinator>>());
         });
 
         AddBackupAndMigration(services);
@@ -185,19 +197,31 @@ public static class HostUpdateExecutionStartup
 
     private static void AddBackupAndMigration(IServiceCollection services)
     {
-        services.AddScoped<IHostUpdateMigrationTarget>(sp => new DbContextMigrationTarget<AppDbContext>(
+        services.AddScoped<HostUpdateTargetImageMigrationRunner>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new HostUpdateTargetImageMigrationRunner(
+                sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
+                options.ServiceMappings.ToDictionary(
+                    mapping => mapping.ServiceId,
+                    mapping => new HostUpdateApplyServiceMapping(mapping.ServiceId, mapping.ComposeServiceName, mapping.ImageEnvironmentVariable, mapping.ImageRepository),
+                    StringComparer.Ordinal),
+                () => CreateMigrationEnvironment(sp.GetRequiredService<IConfiguration>()),
+                options.ComposeProjectName + "-network",
+                TimeSpan.FromSeconds(options.MigrationTimeoutSeconds));
+        });
+        services.AddScoped<IHostUpdateMigrationTarget>(sp => new TargetImageMigrationTarget<AppDbContext>(
             "AppDbContext",
-            DatabaseMigrationTarget.Core,
             () => sp.GetRequiredService<AppDbContext>(),
-            sp.GetRequiredService<ILogger<AppDbContext>>()));
+            sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>()));
         services.AddScoped<IHostUpdateMigrationTarget>(sp =>
         {
             SlicerDbContext? slicerDb = sp.GetService<SlicerDbContext>();
-            return new DbContextMigrationTarget<SlicerDbContext>(
+            return new TargetImageMigrationTarget<SlicerDbContext>(
                 "SlicerDbContext",
-                DatabaseMigrationTarget.Slicer,
                 () => slicerDb ?? throw new InvalidOperationException("slicer_db_context_not_registered"),
-                sp.GetRequiredService<ILogger<SlicerDbContext>>());
+                sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>());
         });
         services.AddScoped<IReadOnlyList<IHostUpdateMigrationTarget>>(sp => [.. sp.GetServices<IHostUpdateMigrationTarget>()]);
         services.AddScoped<HostUpdateMigrationCoordinator>(sp =>
@@ -209,13 +233,24 @@ public static class HostUpdateExecutionStartup
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>());
+
+            // BackupRootDirectory throws root_directory_not_configured when RootDirectory is
+            // unset (the executor's normal default-off state). Do not let that exception
+            // propagate out of DI resolution here -- it would crash any scoped resolution of
+            // IHostUpdateBackupTarget (e.g. HostUpdateExecutionAvailabilityProvider.CheckAsync's
+            // unconditional backupTargets.Count check) instead of the intended graceful
+            // fail-closed reporting. An unset root passes an empty directory through, which the
+            // #2788 mapping verification already reports as backup_root_directory_not_configured.
+            string backupRootDirectory = string.IsNullOrWhiteSpace(options.RootDirectory) ? string.Empty : options.BackupRootDirectory;
+
             return HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
                 "database",
                 dbConfig,
                 sp.GetRequiredService<IHostUpdateProcessRunner>(),
                 sp.GetRequiredService<IHostUpdateExecutableResolver>(),
                 TimeSpan.FromSeconds(options.BackupTimeoutSeconds),
-                options.DatabaseExternallyOwned);
+                options.DatabaseExternallyOwned,
+                backupRootDirectory);
         });
 
         // Bishop/Hicks review (issue #2663): do NOT register IEnumerable<IHostUpdateBackupTarget>
@@ -242,6 +277,34 @@ public static class HostUpdateExecutionStartup
                 ? new UnconfiguredHostUpdateBackupCoordinator()
                 : new HostUpdateBackupCoordinator(sp.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>(), options.BackupRootDirectory);
         });
+    }
+
+    private static Dictionary<string, string> CreateMigrationEnvironment(IConfiguration configuration)
+    {
+        (string ConfigurationKey, string EnvironmentKey)[] requiredKeys =
+        [
+            ("DB_PROVIDER", "DB_PROVIDER"),
+            ("ConnectionStrings:Default", "ConnectionStrings__Default"),
+            ("Jwt:Key", "Jwt__Key"),
+            ("Jwt:Issuer", "Jwt__Issuer"),
+            ("Jwt:Audience", "Jwt__Audience"),
+        ];
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string configurationKey, string environmentKey) in requiredKeys)
+        {
+            string? value = configuration[configurationKey];
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException($"target_image_migration_configuration_missing:{configurationKey}");
+            }
+
+            environment[environmentKey] = value;
+        }
+
+#pragma warning disable S5443 // The target image receives a private tmpfs at /tmp.
+        environment["DATAPROTECTION_KEYS_PATH"] = "/tmp/dp-keys";
+#pragma warning restore S5443
+        return environment;
     }
 
     private static void AddApplyAndVerify(IServiceCollection services)

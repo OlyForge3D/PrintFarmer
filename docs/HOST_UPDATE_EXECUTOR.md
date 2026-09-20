@@ -61,7 +61,7 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
 |---|---|---|
 | Preflight | `HostUpdatePreflightCheck` | Revalidates installed version/digests, provider allowlist, disk free space, and every configured migration target's provider name before anything else runs. |
 | Drain | `HostUpdateDrainCoordinator` | Closes the admission gate to new submissions/scheduling, then bounded-polls every registered `IActiveWorkObservationPort`: `AppDbContext` active prints/pending outbox work plus `SlicerDbContext` active processing leases. In-flight slicer lease progress/completion/failure remains allowed so already claimed work can finish naturally; new enqueue/claim is blocked. Times out closed and never blind-cancels physical work. |
-| Fence | `HostUpdateFenceCoordinator` | Proves every registered `IFenceableWriter` (the admission gate; the queue-outbox publisher, `PowerReadingPruneService`, and `QueueRetentionPruneService` via their own independent `IHostUpdateWriterActivityFlag`-derived instances) has actually quiesced before backup — bounded-polled, not assumed. The executor's availability provider also fails closed (`insufficient_fenced_writers:<names>`) if `HostUpdateExecutionOptions.RequiredFencedWriterNames` names a writer with no registered `IFenceableWriter`. |
+| Fence | `HostUpdateFenceCoordinator` | Proves each writer required by `HostUpdateExecutionOptions.RequiredFencedWriterNames` (`api-admission`, `queue-outbox-publisher`, `power-reading-prune`, `queue-retention-prune`, `backend-start-command-consumer`, `backend-control-command-consumer`, `bed-clear-acknowledgement-expiry`, `auto-dispatch`, `webhook-delivery`, and `queue-reconciliation`) has actually quiesced before backup — bounded-polled, not assumed. `queue-outbox-publisher`, `power-reading-prune`, `queue-retention-prune`, the two backend-command consumers, `bed-clear-acknowledgement-expiry`, and `queue-reconciliation` re-check for a requested pause every 250 ms while idle between passes. For those loop-shaped writers, acknowledgement follows completion of the preceding iteration and is bounded by `max(in-flight iteration, <=250 ms)`: an in-flight publish batch, including sequential SignalR dispatch, must finish first and is not bounded by 250 ms. `auto-dispatch` is channel-triggered with a 30 s durable fallback scan and acknowledges only after `TrackedWorkerCount` reaches zero; `webhook-delivery` checks between deliveries, with a 500 ms idle delay and a 1 s paused delay. The API admission writer is gate-shaped: once Drain closes the gate, its quiescence check directly returns `IsClosedAsync`; Drain, rather than that acknowledgement, establishes active-work quiescence. The executor's availability provider also fails closed (`insufficient_fenced_writers:<names>`) if `HostUpdateExecutionOptions.RequiredFencedWriterNames` names a writer with no registered `IFenceableWriter`. |
 | Backup | `HostUpdateBackupCoordinator` + `HostUpdateDatabaseBackupTargetFactory` + `DirectoryCopyBackupTarget` | Coordinated, checksummed backup of the database (via the host's own `sqlite3`/`pg_dump`/`sqlcmd` tooling — never a duplicate ad-hoc dump, and never invoked through a shell string) plus every owned directory. An externally-owned database (`DatabaseExternallyOwned = true`) always fails closed rather than silently skipping. |
 | Migration | `HostUpdateMigrationCoordinator` + `DbContextMigrationTarget<AppDbContext>`/`<SlicerDbContext>` | Intentionally unavailable for production execution until a target-image/dedicated migration runner exists. `DbContextMigrationTarget<T>` explicitly throws through the `HostUpdateMigrationStep.cs` implementation; the current/old API assembly's `ProviderAwareMigrationRunner` is not an approved forward-update path. |
 | Apply | `HostUpdateImageApplier` | Stages each immutable `repository@sha256` image first with `docker image pull` (`--platform` on forward execution), then applies via the existing compose templates and `docker compose up -d --no-build --pull never`, using an explicit process argument list — never shell interpolation, never a mutable tag. Production DI wraps this runner in `ConstrainedHostUpdateProcessRunner`, which permits only the audited tool names (with explicit `.exe` support) and accepts rooted paths only from trusted host tool directories; unrelated names and untrusted rooted paths are rejected before launch. If staging any image fails, compose mutation is not attempted. |
@@ -80,7 +80,7 @@ previous run's state) and then periodically rechecks, publishing every result in
 `HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
-`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, a code-owned `facility_unavailable:...`, or `host_executable_not_configured:<tool>`) so an operator is never left guessing. In the current production code, availability is unconditionally closed by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`). It is also closed when a required audited host tool path is not configured (`host_executable_not_configured:<tool>`). Separately, unsigned legacy installs remain blocked by the `NotManaged` / `ManagedEligibilityNotEstablished` inventory state until protected bootstrap and trusted state are established. These are unimplemented or unconfigured fail-closed mechanisms, not missing acceptance evidence; they must be addressed before this executor can report production `Available`.
+`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:<name>[,<name>...]`, `facility_unavailable:sql_server_visible_backup_path_mapping_unverified:<evidence>`, `database_provider_tooling_unsupported:<context>:<provider>`, or `host_executable_not_configured:<tool>`) so an operator is never left guessing. The code-owned blanket list is now empty; availability closes on this concrete runtime evidence instead. `RequiredUnavailableFacilities` remains an explicit operator override for a deployment-specific prerequisite that must keep execution closed. Separately, installations without verified signed release evidence remain manual-only and fail closed in the `NotManaged` / `ManagedEligibilityNotEstablished` inventory state. No trust bootstrap is planned or supported: the supported transition is one manual installation of a current signed release followed by inventory refresh, after which normal signed discovery can establish managed eligibility.
 
 The process boundary is production-ready independently of those facilities:
 `ConfiguredHostUpdateExecutableResolver` requires an explicit absolute path for each audited native
@@ -88,8 +88,8 @@ tool, and `ConstrainedHostUpdateProcessRunner` rejects bare names, rejects ambie
 allows only the audited tools, and accepts rooted paths only when explicitly configured or in fixed
 system directories. It still delegates through the existing no-shell `ArgumentList` runner. It does
 not bootstrap an updater, make unsigned legacy releases eligible, or change the manual authorization
-boundary. A future trusted bootstrap implementation must be selected by the release/operator owners
-before any of the remaining availability blockers are removed.
+boundary. No protected bootstrap or operator assertion is supported; signed verification remains required before
+managed eligibility can be established.
 
 ## DI wiring
 
@@ -174,7 +174,7 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   verifier's container-name resolution independently throws (`service_mapping_missing:<serviceId>`)
   rather than silently falling back to a guessed container name if it is ever reached without that
   earlier guard having run.
-- Six writer paths are concretely fenced today: the durable admission gate, the queue outbox publisher, `PowerReadingPruneService`, `QueueRetentionPruneService`, `AutoDispatchBackgroundService`, and outbound `WebhookService` delivery. The webhook fence pauses the bridge before dequeuing new delivery work, so no external HTTP delivery or webhook delivery-log write starts inside the backup/migration/apply critical section. Other background schedulers/bridges/API replicas/workers still need `IFenceableWriter` implementations registered as they are identified; adding a required writer name with no registration keeps availability closed.
+- The required fenced-writer set is `HostUpdateExecutionOptions.RequiredFencedWriterNames`: `api-admission`, `queue-outbox-publisher`, `power-reading-prune`, `queue-retention-prune`, `backend-start-command-consumer`, `backend-control-command-consumer`, `bed-clear-acknowledgement-expiry`, `auto-dispatch`, `webhook-delivery`, and `queue-reconciliation`. The webhook fence pauses the bridge before dequeuing new delivery work, so no external HTTP delivery or webhook delivery-log write starts inside the backup/migration/apply critical section. Adding a required writer name with no registration keeps availability closed.
   `AutoDispatchBackgroundService` -- the loop that physically starts new printer-dispatch
   workers -- now consults its own dedicated `AutoDispatchFenceFlag` at the top of each trigger
   iteration: while paused it skips starting a new dispatch worker entirely (relying on the
@@ -192,6 +192,53 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   restore enters `SINGLE_USER WITH ROLLBACK IMMEDIATE` and uses a TRY/CATCH path that attempts `MULTI_USER` before rethrowing. The interpolated T-SQL identifier/literal (`[database]` / `N'path'`) and the interpolated sqlite3 `.backup`/`.restore` literal path are also escaped (doubled `]`/`'` respectively, the standard T-SQL/sqlite3
   convention) so a database name or backup-root path containing one of those characters cannot
   terminate the literal early and inject additional dot-command/T-SQL text into the same batch.
+- **SQL Server visible backup-path mapping is now verified with a real round trip, not assumed.**
+  SQL Server writes backups from the *server process's* filesystem view, not the client's, so the
+  path PrintFarmer hands to `BACKUP DATABASE` must resolve to the same physical location PrintFarmer
+  can later read back for verification and restore. This requires a **shared bind mount**: the
+  directory PrintFarmer derives as `BackupRootDirectory` (`{RootDirectory}/backups` — configure the
+  root via `HostUpdateExecution__RootDirectory`; `BackupRootDirectory` itself is a computed
+  read-only value and is **not** independently configurable) must be mounted into the SQL Server
+  container at the identical path — for example a Docker named volume or bind mount attached to
+  both the `api`/host-update-executor container and the `sqlserver` container, each mounting it at,
+  say, `/data/backups`, with `HostUpdateExecution__RootDirectory=/data` configured on the API side
+  so `BackupRootDirectory` resolves to `/data/backups`. There is deliberately no separate "SQL
+  Server side" directory setting: `HostUpdateBackupCoordinator` already hands this same
+  `BackupRootDirectory`-derived directory straight to `BACKUP DATABASE` for every real backup with
+  no translation step, so verifying any other path would not prove what production backups actually
+  depend on. The SQL Server login used for the connection also needs `BACKUP DATABASE` permission
+  on `master` (e.g. `sysadmin` or `db_backupoperator` in `master`) for the probe itself to succeed —
+  a login scoped only to the `db_owner` role on the PrintFarmer application database is not
+  sufficient, even though it may be adequate for real per-database backups. Before every
+  backup/migration execution, `HostUpdateExecutionAvailabilityProvider.CheckAsync` asks the
+  configured backup target to prove the mapping:
+  `SqlServerProcessDatabaseBackupTarget.VerifyVisibleBackupPathMappingAsync` first lazily creates
+  `BackupRootDirectory` if it does not yet exist (failing closed if it cannot, so a
+  freshly-provisioned host with `RootDirectory` set but no `backups` subdirectory yet does not
+  report a false negative), then removes any
+  stale probe file already visible to PrintFarmer at that path (failing closed if it cannot, so a
+  leftover file from an earlier check can never be mistaken for a fresh round trip), then runs a
+  real `BACKUP DATABASE [master] TO DISK` probe through the same `sqlcmd` path as production
+  backups, writing a small, fixed-name probe file into `BackupRootDirectory` (reused, not
+  regenerated, on every check so a persistently broken mapping cannot accumulate probe files on the
+  SQL Server volume — each check simply overwrites the same file via `WITH INIT`), then opens and
+  reads a byte back from the identical probe file from PrintFarmer's own filesystem view (not
+  merely a directory-listing/metadata check) to confirm it is actually readable, and best-effort
+  deletes it afterward. The probe itself is capped at a short, fixed timeout (independent of the full
+  `BackupTimeoutSeconds` used for real backups) so a hung or unreachable SQL Server cannot block
+  every ~5-minute availability check for as long as a real backup would be allowed to run. A
+  configuration-presence check alone is explicitly not sufficient and is not what this does — an
+  absent, misconfigured (missing or relative), or unreadable-back mapping is reported as
+  `facility_unavailable:sql_server_visible_backup_path_mapping_unverified:<evidence>` (e.g.
+  `backup_root_directory_not_configured`, `backup_root_directory_not_absolute`,
+  `probe_directory_creation_failed:<exception-type>`,
+  `probe_stale_file_removal_failed:<exception-type>`, `probe_backup_invocation_failed:<exception-type>`,
+  `probe_backup_command_failed:<exit-code>`, `probe_file_not_visible_from_printfarmer`) and closes
+  availability for the whole executor until it is verified. This
+  verification is resolved lazily (only when the availability probe or a real backup actually
+  runs), so a deployment that only uses PostgreSQL or SQLite never touches SQL Server-specific
+  resolution at all. See `HostUpdateDatabaseBackupTargetFactoryTests` for the fail-closed and
+  successful round-trip regression coverage.
 - Recovery's `NeedsOperator`/`RolledBack` outcome is now durably persisted by
   `FileHostUpdateRecoveryOutcomeStore` (one JSON file per release, atomic write-then-rename) as
   part of `RecoverAsync` itself — including when recovery is cancelled mid-flight — so the outcome

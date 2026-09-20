@@ -58,8 +58,16 @@ describe('ServiceVersionsTable', () => {
     expect(within(assets).getByText(/e{40}/)).toBeVisible();
     expect(within(assets).getByText('Frontend/API build mismatch — refresh required')).toBeVisible();
     expect(screen.getByText('Incompatible: CachedFrontendMismatch')).toBeVisible();
-    expect(screen.getByText('Blocked: CachedFrontendMismatch, ReadOnlyInventory')).toBeVisible();
+    expect(screen.getByText('Blocked: CachedFrontendMismatch, ManagedEligibilityNotEstablished, ReadOnlyInventory')).toBeVisible();
     expect(within(assets).getByText(/Compatibility is not established by refresh alone/)).toBeVisible();
+  });
+
+  it('preserves manual-only evidence when frontend/API skew is present', () => {
+    buildInfo.commit = 'e'.repeat(40);
+    render(<ServiceVersionsTable inventory={inventory({
+      eligibilityReasons: ['SignedReleaseEvidenceUnavailableManualOnly', 'ReadOnlyInventory'],
+    })} />);
+    expect(screen.getByText('Blocked: CachedFrontendMismatch, SignedReleaseEvidenceUnavailableManualOnly, ReadOnlyInventory')).toBeVisible();
   });
 
   it('displays its own canonical asset record rather than copying API version', () => {

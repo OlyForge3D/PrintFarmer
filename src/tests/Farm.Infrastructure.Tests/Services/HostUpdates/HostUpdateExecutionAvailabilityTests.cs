@@ -13,6 +13,20 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateExecutionAvailabilityTests
 {
+    private static readonly string[] CodeOwnedRequiredFencedWriterNames =
+    [
+        "api-admission",
+        "queue-outbox-publisher",
+        "power-reading-prune",
+        "queue-retention-prune",
+        "backend-start-command-consumer",
+        "backend-control-command-consumer",
+        "bed-clear-acknowledgement-expiry",
+        "auto-dispatch",
+        "webhook-delivery",
+        "queue-reconciliation",
+    ];
+
     private sealed class FakeJournal : IHostUpdateExecutionJournal
     {
         public bool ThrowOnRead { get; set; }
@@ -52,9 +66,9 @@ public class HostUpdateExecutionAvailabilityTests
 
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult(providerName);
 
-        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(false);
 
-        public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) =>
+        public Task<DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new DatabaseMigrationResult(false, []));
     }
 
@@ -65,9 +79,9 @@ public class HostUpdateExecutionAvailabilityTests
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) =>
             throw new InvalidOperationException("slicer_db_context_not_registered");
 
-        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(false);
 
-        public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) =>
+        public Task<DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new DatabaseMigrationResult(false, []));
     }
 
@@ -78,6 +92,44 @@ public class HostUpdateExecutionAvailabilityTests
         public bool IsExternallyOwned => false;
 
         public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) => Task.CompletedTask;
+    }
+
+    /// <summary>
+    /// Stub SQL Server backup target for availability-provider-level coverage of issue #2788:
+    /// proves <see cref="HostUpdateExecutionAvailabilityProvider.CheckAsync"/> itself surfaces or
+    /// suppresses the facility based on <see cref="IHostUpdateServerSideBackupTarget.VerifyVisibleBackupPathMappingAsync"/>,
+    /// independent of the real <c>SqlServerProcessDatabaseBackupTarget</c> round-trip mechanics
+    /// covered by <c>HostUpdateDatabaseBackupTargetFactoryTests</c>.
+    /// </summary>
+    private sealed class StubServerSideBackupTarget(string? verificationEvidence) : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
+    {
+        public string Name => "stub-sql-server";
+
+        public bool IsExternallyOwned => false;
+
+        public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(verificationEvidence);
+    }
+
+    /// <summary>
+    /// Proves <see cref="HostUpdateExecutionAvailabilityProvider.CheckAsync"/> itself -- not just
+    /// <c>HostUpdateDatabaseBackupTargetFactory</c> -- fails closed when a server-side backup
+    /// target's verification throws instead of returning evidence, wrapping the exception into
+    /// the same <c>facility_unavailable:...:probe_exception:&lt;type&gt;</c> reason string used
+    /// for a returned-evidence failure.
+    /// </summary>
+    private sealed class ThrowingServerSideBackupTarget : IHostUpdateBackupTarget, IHostUpdateServerSideBackupTarget
+    {
+        public string Name => "throwing-sql-server";
+
+        public bool IsExternallyOwned => false;
+
+        public Task BackupAsync(string destinationDirectory, CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task<string?> VerifyVisibleBackupPathMappingAsync(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("simulated verification failure");
     }
 
     private sealed class FakeProcessRunner(bool dockerAvailable) : IHostUpdateProcessRunner
@@ -154,7 +206,7 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
-    public async Task CheckAsync_KnownPhysicalGapsRemain_ReportsCodeOwnedUnavailableFacilities()
+    public async Task CheckAsync_UnconfiguredDockerAndUnsupportedProvider_ReportsConcreteReasons()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -166,7 +218,7 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
-                [],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
                 new TestExecutableResolver());
@@ -174,11 +226,11 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
-            result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
-            result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
-            result.Reasons.Should().Contain("host_executable_not_configured:docker");
-            result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
+            result.Reasons.Should().BeEquivalentTo(
+            [
+                "host_executable_not_configured:docker",
+                "database_provider_tooling_unsupported:Fake:Microsoft.EntityFrameworkCore.Sqlite",
+            ]);
         }
         finally
         {
@@ -187,10 +239,9 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Theory]
-    [InlineData("Microsoft.EntityFrameworkCore.Sqlite", "sqlite3")]
     [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", "pg_dump", "pg_restore")]
     [InlineData("Microsoft.EntityFrameworkCore.SqlServer", "sqlcmd")]
-    public async Task CheckAsync_SingleConfiguredProvider_LeavesOnlyCodeOwnedFacilities(string providerName, params string[] providerTools)
+    public async Task CheckAsync_SingleConfiguredProvider_IsAvailable(string providerName, params string[] providerTools)
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -204,6 +255,74 @@ public class HostUpdateExecutionAvailabilityTests
                 new FakeJournal(),
                 [new FakeMigrationTarget(providerName)],
                 [new FakeBackupTarget()],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.Reasons.Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_DefaultRequiredWritersAllPresent_IsAvailable()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = new()
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredUnavailableFacilities = [],
+            };
+            ConfigureExecutablePaths(options, root, "docker", "pg_dump", "pg_restore");
+            FakeFenceableWriter[] writers = options.RequiredFencedWriterNames
+                .Select(name => new FakeFenceableWriter(name))
+                .ToArray();
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget("Npgsql.EntityFrameworkCore.PostgreSQL")],
+                [new FakeBackupTarget()],
+                writers,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.Reasons.Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServerSideBackupTargetVerificationFails_SurfacesFacilityWithEvidence()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new StubServerSideBackupTarget("probe_file_not_visible_from_printfarmer")],
                 [],
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
@@ -212,12 +331,71 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().BeEquivalentTo(
-            [
-                "facility_unavailable:target_image_migration_runner_unavailable",
-                "facility_unavailable:queue_reconciliation_writer_fence_unavailable",
-                "facility_unavailable:sql_server_visible_backup_path_mapping_unverified",
-            ]);
+            result.Reasons.Should().Contain(
+                "facility_unavailable:sql_server_visible_backup_path_mapping_unverified:probe_file_not_visible_from_printfarmer");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServerSideBackupTargetVerificationThrows_SurfacesFacilityWithExceptionTypeEvidence()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new ThrowingServerSideBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+
+            // Assert the complete reason string, not merely a "facility_unavailable:..." prefix:
+            // a prefix match would also pass for the returned-evidence branch (covered by the
+            // test above), which does not exercise CheckAsync's catch (Exception) wrapping at
+            // all. Only the full string proves the exception path specifically was taken.
+            result.Reasons.Should().Contain(
+                "facility_unavailable:sql_server_visible_backup_path_mapping_unverified:probe_exception:InvalidOperationException");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ServerSideBackupTargetVerificationSucceeds_DoesNotSurfaceFacility()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new StubServerSideBackupTarget(verificationEvidence: null)],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Should().NotContain(r => r.StartsWith("facility_unavailable:sql_server_visible_backup_path_mapping_unverified", StringComparison.Ordinal));
         }
         finally
         {
@@ -256,7 +434,6 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Theory]
-    [InlineData("Microsoft.EntityFrameworkCore.Sqlite", "sqlite3", "")]
     [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", "pg_restore", "pg_dump")]
     [InlineData("Microsoft.EntityFrameworkCore.SqlServer", "sqlcmd", "")]
     public async Task CheckAsync_ActiveProviderToolMissing_ReportsToolNotConfigured(
@@ -357,7 +534,7 @@ public class HostUpdateExecutionAvailabilityTests
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().Contain("database_provider_inspection_failed:UnavailableSlicer:InvalidOperationException");
-            result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
+            result.Reasons.Should().Contain("database_provider_tooling_unsupported:Fake:Microsoft.EntityFrameworkCore.Sqlite");
         }
         finally
         {
@@ -366,7 +543,7 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
-    public async Task CheckAsync_DefaultRequiredFencedWriters_ReportUnavailableWhenWriterCoverageMissing()
+    public async Task CheckAsync_ConfiguredEmptyRequiredFencedWriters_ReportsExactCodeOwnedMissingSet()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
@@ -377,6 +554,7 @@ public class HostUpdateExecutionAvailabilityTests
             {
                 RootDirectory = root,
                 ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [],
             };
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 options,
@@ -391,15 +569,245 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
-            result.Reasons.Should().Contain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
-            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal)).Should().Contain("webhook-delivery");
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
         }
         finally
         {
             Directory.Delete(root, recursive: true);
         }
     }
+
+    [Fact]
+    public async Task CheckAsync_ConfiguredPartialRequiredFencedWriters_ReportsExactCodeOwnedMissingSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = CodeOwnedRequiredFencedWriterNames[..^2],
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_ConfiguredSupersetRequiredFencedWriters_ReportsExactCodeOwnedThenAdditionalSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            string[] configuredSuperset =
+            [
+                .. CodeOwnedRequiredFencedWriterNames.Reverse(),
+                "deployment-specific-writer",
+            ];
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = configuredSuperset,
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be(
+                    $"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)},deployment-specific-writer");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_NullConfiguredRequiredFencedWriters_ReportsExactCodeOwnedMissingSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = null!,
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_WhitespaceConfiguredRequiredFencedWriters_DropsWhitespaceFromExactMissingSet()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [" ", "\t"],
+            };
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [],
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be($"insufficient_fenced_writers:{string.Join(',', CodeOwnedRequiredFencedWriterNames)}");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_CaseOnlyConfiguredRequiredFencedWriter_DoesNotSatisfyCanonicalName()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            const string caseVariant = "API-ADMISSION";
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames = [caseVariant],
+            };
+            IFenceableWriter[] registeredWriters =
+            [
+                new FakeFenceableWriter(caseVariant),
+                .. CodeOwnedRequiredFencedWriterNames[1..].Select(name => new FakeFenceableWriter(name)),
+            ];
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                registeredWriters,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be("insufficient_fenced_writers:api-admission");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task CheckAsync_DuplicateAndCaseVariantConfiguredWriters_ReportEachOrdinalNameOnceInFirstOccurrenceOrder()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var options = new HostUpdateExecutionOptions
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredFencedWriterNames =
+                [
+                    "deployment-writer",
+                    "deployment-writer",
+                    "DEPLOYMENT-WRITER",
+                ],
+            };
+            IFenceableWriter[] registeredWriters = CodeOwnedRequiredFencedWriterNames
+                .Select(name => new FakeFenceableWriter(name))
+                .ToArray();
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                registeredWriters,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal))
+                .Should().Be("insufficient_fenced_writers:deployment-writer,DEPLOYMENT-WRITER");
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task CheckAsync_RootDirectoryNotConfiguredAndJournalUnavailable_ReportsUnavailableWithReasons()
     {
@@ -544,22 +952,21 @@ public class HostUpdateExecutionAvailabilityTests
         try
         {
             HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
-            options.RequiredFencedWriterNames = ["api-admission", "queue-outbox-publisher"];
+            options.RequiredFencedWriterNames = [.. CodeOwnedRequiredFencedWriterNames, "deployment-specific-writer"];
 
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 options,
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
-                [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
+                options.RequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
                 new TestExecutableResolver());
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
+            result.Reasons.Should().NotContain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
         }
         finally
         {
@@ -576,14 +983,14 @@ public class HostUpdateExecutionAvailabilityTests
         try
         {
             HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
-            options.RequiredFencedWriterNames = ["api-admission", "queue-outbox-publisher", "history-seeding"];
+            options.RequiredFencedWriterNames = [.. CodeOwnedRequiredFencedWriterNames, "history-seeding"];
 
             var provider = new HostUpdateExecutionAvailabilityProvider(
                 options,
                 new FakeJournal(),
                 [new FakeMigrationTarget()],
                 [new FakeBackupTarget()],
-                [new FakeFenceableWriter("api-admission"), new FakeFenceableWriter("queue-outbox-publisher")],
+                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
                 new FakeProcessRunner(dockerAvailable: true),
                 new FakeRecoveryOutcomeStore(),
                 new TestExecutableResolver());
@@ -624,9 +1031,11 @@ public class HostUpdateExecutionAvailabilityTests
     {
         var holder = new HostUpdateExecutionAvailabilityHolder();
         var probeCount = 0;
+        var firstProbe = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var provider = new DelegateAvailabilityProvider(() =>
         {
             probeCount++;
+            firstProbe.TrySetResult();
             return HostUpdateExecutionAvailability.Available(DateTimeOffset.UtcNow);
         });
         var service = new HostUpdateExecutionAvailabilityHostedService(
@@ -637,7 +1046,8 @@ public class HostUpdateExecutionAvailabilityTests
 
         using var cts = new CancellationTokenSource();
         await service.StartAsync(cts.Token);
-        await Task.Delay(50);
+        await firstProbe.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        // StopAsync joins the hosted loop, ordering the holder assertion after the probe publishes.
         await service.StopAsync(CancellationToken.None);
 
         probeCount.Should().BeGreaterThanOrEqualTo(1);
@@ -776,7 +1186,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().NotContain(r => r.StartsWith("restart_reconciliation_pending", StringComparison.Ordinal));
         }
         finally
@@ -799,7 +1208,8 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionResult execution = await new HostUpdateExecutor(
                 new NoopExecutionSteps(),
                 journal,
-                NoopHostUpdateExecutionLock.Instance).ExecuteAsync(request);
+                NoopHostUpdateExecutionLock.Instance,
+                automationPolicyRepository: new InlinePolicyRepository()).ExecuteAsync(request);
             execution.State.Should().Be(HostUpdateExecutionState.Completed);
             var admission = new FakeFenceableWriter("api-admission");
 
@@ -816,7 +1226,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             admission.QuiesceCallCount.Should().Be(0);
         }
         finally
@@ -843,7 +1252,7 @@ public class HostUpdateExecutionAvailabilityTests
         RequestId = "request-5",
         TrustRoot = "root-1",
         PolicyRevision = 1,
-        PolicyFingerprint = "policy-1",
+        PolicyFingerprint = HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(new HostUpdateAutomationPolicy(Enabled: true, Revision: 1)).Fingerprint,
         HostPlatform = "linux-amd64",
     };
 
@@ -856,6 +1265,16 @@ public class HostUpdateExecutionAvailabilityTests
         public Task MigrateAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
         public Task ApplyAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
         public Task VerifyAsync(HostUpdateExecutionRequest request, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class InlinePolicyRepository : IHostUpdateAutomationPolicyRepository
+    {
+        private static readonly HostUpdateAutomationPolicy Policy = new(Enabled: true, Revision: 1);
+
+        public HostUpdatePolicyReadResult Read() => new(true, Policy, null);
+
+        public Task<HostUpdatePolicyReadResult> ReplaceAsync(HostUpdateAutomationPolicy replacement, long expectedRevision, CancellationToken ct) =>
+            Task.FromResult(new HostUpdatePolicyReadResult(true, replacement, null));
     }
 
     private sealed class DelegateAvailabilityProvider(Func<HostUpdateExecutionAvailability> compute) : IHostUpdateExecutionAvailabilityProvider

@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.HostUpdates;
+﻿using Microsoft.Extensions.Logging;
+
+namespace Farm.Infrastructure.Services.HostUpdates;
 
 #pragma warning disable CA1032 // These internal fault-code exceptions are only ever constructed with a code; standard constructors are not used.
 /// <summary>Thrown when one or more writers could not be proven fenced within the bounded timeout.</summary>
@@ -37,9 +39,11 @@ public sealed class HostUpdateFenceCoordinator(
     IReadOnlyList<IFenceableWriter> writers,
     TimeSpan proofTimeout,
     TimeSpan pollInterval,
-    TimeProvider? timeProvider = null) : IHostUpdateFenceCoordinator
+    TimeProvider? timeProvider = null,
+    ILogger<HostUpdateFenceCoordinator>? logger = null) : IHostUpdateFenceCoordinator
 {
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly ILogger<HostUpdateFenceCoordinator>? _logger = logger;
 
     public async Task RunAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
     {
@@ -47,6 +51,10 @@ public sealed class HostUpdateFenceCoordinator(
         foreach (IFenceableWriter writer in writers)
         {
             await writer.QuiesceAsync(cancellationToken).ConfigureAwait(false);
+            _logger?.LogInformation(
+                "host_update_writer_fence_acquired writer={WriterName} release_id={ReleaseId}",
+                writer.Name,
+                request.ReleaseId);
         }
 
         DateTimeOffset deadline = _timeProvider.GetUtcNow() + proofTimeout;
@@ -68,6 +76,10 @@ public sealed class HostUpdateFenceCoordinator(
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
+                _logger?.LogWarning(
+                    "host_update_writer_fence_rejected release_id={ReleaseId} writers={WriterNames}",
+                    request.ReleaseId,
+                    string.Join(',', unproven));
                 throw new HostUpdateFenceProofFailedException(unproven);
             }
 
@@ -80,6 +92,7 @@ public sealed class HostUpdateFenceCoordinator(
         foreach (IFenceableWriter writer in writers)
         {
             await writer.ResumeAsync(cancellationToken).ConfigureAwait(false);
+            _logger?.LogInformation("host_update_writer_fence_released writer={WriterName}", writer.Name);
         }
     }
 }
@@ -98,10 +111,11 @@ public interface IHostUpdateFenceCoordinator
 /// explicitly consults <see cref="IHostUpdateAdmissionGate.IsClosedAsync"/> before admitting new
 /// work. Current consumers cover queue submission, manual dispatch, batch dispatch,
 /// auto-dispatch ready acknowledgement, the auto-dispatch background loop, slicer job enqueue/claim,
-/// and webhook delivery. Remaining producer gaps are explicit code-owned unavailable facilities in
-/// <c>docs/HOST_UPDATE_EXECUTOR.md</c>. Closing the gate without every real call site wired does
-/// not, by itself, guarantee no new write starts; this class only proves the gate itself flipped,
-/// not that every producer honors it.
+/// and webhook delivery. No producer gaps remain code-owned; availability fails closed when any
+/// name in <see cref="HostUpdateExecutionOptions.RequiredFencedWriterNames"/> lacks a registered
+/// writer. Closing the gate without every real call site wired does not, by itself, guarantee no
+/// new write starts; this class only proves the gate itself flipped, not that every producer honors
+/// it.
 /// </summary>
 public sealed class AdmissionFenceableWriter(IHostUpdateAdmissionGate admissionGate) : IFenceableWriter
 {
@@ -123,11 +137,13 @@ public sealed class BackgroundWriterFenceableWriter(string name, IHostUpdateWrit
 {
     public string Name { get; } = name;
 
-    public Task QuiesceAsync(CancellationToken cancellationToken) => flag.RequestPauseAsync(cancellationToken);
+    internal IHostUpdateWriterActivityFlag ActivityFlag { get; } = flag;
 
-    public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => flag.IsPausedAsync(cancellationToken);
+    public Task QuiesceAsync(CancellationToken cancellationToken) => ActivityFlag.RequestPauseAsync(cancellationToken);
 
-    public Task ResumeAsync(CancellationToken cancellationToken) => flag.ResumeAsync(cancellationToken);
+    public Task<bool> IsQuiescedAsync(CancellationToken cancellationToken) => ActivityFlag.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => ActivityFlag.ResumeAsync(cancellationToken);
 }
 
 /// <summary>
@@ -154,11 +170,18 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
 {
     private volatile bool _pauseRequested;
     private volatile bool _acknowledged;
+    private int _acknowledgementCount;
+
+    /// <summary>Lifetime acknowledgement count for tests; fence decisions do not consult it.</summary>
+    internal int AcknowledgementCount => Volatile.Read(ref _acknowledgementCount);
+
+    /// <summary>Whether the writer acknowledged the current pause epoch.</summary>
+    internal bool IsAcknowledged => _acknowledged;
 
     public Task RequestPauseAsync(CancellationToken cancellationToken)
     {
-        _pauseRequested = true;
         _acknowledged = false;
+        _pauseRequested = true;
         return Task.CompletedTask;
     }
 
@@ -183,6 +206,7 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
         if (await IsPauseRequestedAsync(cancellationToken).ConfigureAwait(false))
         {
             _acknowledged = true;
+            _ = Interlocked.Increment(ref _acknowledgementCount);
         }
     }
 }
@@ -207,6 +231,8 @@ public sealed class PowerReadingPruneFenceFlag(IHostUpdateAdmissionGate? durable
     public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
 
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
 }
 
 /// <summary>
@@ -227,6 +253,65 @@ public sealed class QueueRetentionPruneFenceFlag(IHostUpdateAdmissionGate? durab
     public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
 
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
+}
+
+/// <summary>Dedicated fence flag for the durable backend-start command consumer.</summary>
+public sealed class BackendStartCommandConsumerFenceFlag(IHostUpdateAdmissionGate? durableFence = null)
+    : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
+}
+
+/// <summary>Dedicated fence flag for the durable backend-control command consumer.</summary>
+public sealed class BackendControlCommandConsumerFenceFlag(IHostUpdateAdmissionGate? durableFence = null)
+    : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
+}
+
+/// <summary>Dedicated fence flag for the bed-clear acknowledgement expiry scanner.</summary>
+public sealed class BedClearAcknowledgementExpiryFenceFlag(IHostUpdateAdmissionGate? durableFence = null)
+    : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
 }
 
 /// <summary>
@@ -272,4 +357,28 @@ public sealed class WebhookDeliveryFenceFlag(IHostUpdateAdmissionGate? durableFe
     public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
 
     public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+}
+
+/// <summary>
+/// Durable-backed fence for queue reconciliation. The concrete type keeps this writer's
+/// acknowledgement state independent from other background writers while the shared admission
+/// marker makes a closed fence visible to a process that starts after the update began.
+/// </summary>
+public sealed class QueueReconciliationFenceFlag(IHostUpdateAdmissionGate? durableFence = null) : IHostUpdateWriterActivityFlag
+{
+    private readonly InMemoryHostUpdateWriterActivityFlag _inner = new(durableFence);
+
+    public Task RequestPauseAsync(CancellationToken cancellationToken) => _inner.RequestPauseAsync(cancellationToken);
+
+    public Task<bool> IsPauseRequestedAsync(CancellationToken cancellationToken) => _inner.IsPauseRequestedAsync(cancellationToken);
+
+    public Task<bool> IsPausedAsync(CancellationToken cancellationToken) => _inner.IsPausedAsync(cancellationToken);
+
+    public Task ResumeAsync(CancellationToken cancellationToken) => _inner.ResumeAsync(cancellationToken);
+
+    public Task AcknowledgePausedAsync(CancellationToken cancellationToken) => _inner.AcknowledgePausedAsync(cancellationToken);
+
+    internal int AcknowledgementCount => _inner.AcknowledgementCount;
+
+    internal bool IsAcknowledged => _inner.IsAcknowledged;
 }

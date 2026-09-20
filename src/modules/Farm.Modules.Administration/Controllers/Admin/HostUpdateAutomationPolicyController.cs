@@ -21,7 +21,9 @@ public sealed record HostUpdateAutomationPolicyRequest(
 [Route("api/admin/host-updates/automation-policy")]
 [RequirePermission("system_settings", "admin")]
 [Tags("Admin - Host Updates")]
-public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPolicyRepository repository) : ControllerBase
+public sealed class HostUpdateAutomationPolicyController(
+    IHostUpdateAutomationPolicyRepository repository,
+    IHostUpdateSchedulerCancellation scheduler) : ControllerBase
 {
     [HttpGet]
     [ProducesResponseType(typeof(HostUpdateAutomationPolicy), StatusCodes.Status200OK)]
@@ -74,6 +76,20 @@ public sealed class HostUpdateAutomationPolicyController(IHostUpdateAutomationPo
         }
 
         return Ok(result.Policy);
+    }
+
+    [HttpPost("cancel")]
+    [ProducesResponseType(StatusCodes.Status202Accepted)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<IActionResult> CancelAsync(CancellationToken ct)
+    {
+        HostUpdateCancellationResult result = await scheduler.SignalSafeCheckpointCancellationAsync(ct).ConfigureAwait(false);
+        if (result == HostUpdateCancellationResult.NoActiveExecution)
+        {
+            return Conflict(new { code = "no_active_automatic_update" });
+        }
+
+        return Accepted();
     }
 
     private ObjectResult AvailabilityProblem(string reason) => Problem(
