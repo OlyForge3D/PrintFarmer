@@ -111,7 +111,7 @@ jobs:
           registry: ghcr.io
           username: ${{ vars.RELEASE_REGISTRY_USER }}
           password: ${{ secrets.RELEASE_REGISTRY_TOKEN }}
-      - uses: anchore/sbom-action/download-syft@006b7ce8314066bdf1765b4500370d40fa6917a3  # v0.24.2
+      - uses: anchore/sbom-action/download-syft@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26  # v0.24.2
       - name: Build and verify all six images by digest
         env:
           GH_TOKEN: ${{ github.token }}
