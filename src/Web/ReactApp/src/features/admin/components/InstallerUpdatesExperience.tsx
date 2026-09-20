@@ -575,6 +575,15 @@ export function InstallerUpdatesExperience({
           const status = await onGetHostUpdateStatus(releaseId);
           setManualUpdateStatus(status);
           setManualUpdateOpen(true);
+          const definitiveRejection = isApiError(error) && [400, 409, 422].includes(error.statusCode);
+          if (definitiveRejection) {
+            clearManualUpdateReleaseId();
+            setManualUpdateReleaseId(null);
+            setManualUpdateAttempted(false);
+            manualUpdateDispatchLock.current = false;
+            setManualUpdateError(getErrorMessage(error, "The host update was rejected before it could start."));
+            return;
+          }
           if (isTerminalForRetry(status)) {
             if (isTerminalForReleaseIdentity(status)) {
               clearManualUpdateReleaseId();
@@ -791,7 +800,7 @@ export function InstallerUpdatesExperience({
               onClick={() => {
                 setManualUpdateError(null);
                 setManualUpdateRecovery(null);
-                if (manualUpdateStatus && isTerminalForReleaseIdentity(manualUpdateStatus)) {
+                if (manualUpdateStatus && (isTerminalForReleaseIdentity(manualUpdateStatus) || manualUpdateError)) {
                   clearManualUpdateReleaseId();
                   setManualUpdateReleaseId(null);
                   setManualUpdateStatus(null);

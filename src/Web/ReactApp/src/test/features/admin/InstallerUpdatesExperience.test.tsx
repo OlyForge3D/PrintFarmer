@@ -464,6 +464,66 @@ describe('InstallerUpdatesExperience', () => {
     expect(execute).toHaveBeenCalledTimes(2);
   });
 
+  it('releases a rejected execute after a non-terminal status recheck', async () => {
+    const authorize = vi.fn()
+      .mockResolvedValueOnce({
+        authorizationId: 'auth-1',
+        releaseId: 'stable:1.2.4',
+        sequence: 4,
+        channel: 'stable',
+        candidateFingerprint: 'candidate',
+        policyRevision: 1,
+        policyFingerprint: 'policy',
+        expiresAt: '2026-09-19T20:00:00Z',
+      })
+      .mockResolvedValueOnce({
+        authorizationId: 'auth-2',
+        releaseId: 'stable:1.2.5',
+        sequence: 5,
+        channel: 'stable',
+        candidateFingerprint: 'candidate-2',
+        policyRevision: 1,
+        policyFingerprint: 'policy',
+        expiresAt: '2026-09-19T20:00:00Z',
+      });
+    const execute = vi.fn()
+      .mockRejectedValueOnce({
+        statusCode: 409,
+        message: 'The host update authorization was rejected.',
+        data: { code: 'request_not_authorized' },
+      })
+      .mockResolvedValueOnce({
+        releaseId: 'stable:1.2.5',
+        currentState: 'Completed',
+        activities: [],
+      });
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'Applying',
+      activities: [],
+    });
+    const user = userEvent.setup();
+
+    render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onAuthorizeHostUpdate={authorize}
+      onExecuteHostUpdate={execute}
+      onGetHostUpdateStatus={status}
+    />);
+
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('The host update authorization was rejected.');
+    expect(status).toHaveBeenCalledWith('stable:1.2.4');
+
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    await user.click(screen.getByRole('button', { name: 'Update now' }));
+    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
+    await waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
+    expect(execute).toHaveBeenCalledTimes(2);
+  });
+
   it('allows a retry after recovery terminates with NeedsOperator', async () => {
     const authorize = vi.fn().mockResolvedValue({
       authorizationId: 'auth-1',
