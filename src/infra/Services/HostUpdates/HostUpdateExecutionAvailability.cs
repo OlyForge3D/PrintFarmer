@@ -188,7 +188,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
-        foreach (string unavailableFacility in (options.RequiredUnavailableFacilities ?? [])
+        foreach (string unavailableFacility in options.RequiredUnavailableFacilities
             .Where(name => !string.IsNullOrWhiteSpace(name))
             .Distinct(StringComparer.Ordinal))
         {

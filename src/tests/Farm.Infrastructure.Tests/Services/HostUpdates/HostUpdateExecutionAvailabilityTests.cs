@@ -463,40 +463,8 @@ public class HostUpdateExecutionAvailabilityTests
 
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
-            result.Reasons.Should().ContainSingle("facility_unavailable:facility-a");
-        }
-        finally
-        {
-            Directory.Delete(root, recursive: true);
-        }
-    }
-
-    [Fact]
-    public async Task CheckAsync_RequiredUnavailableFacilities_NullArrayIsTreatedAsEmpty()
-    {
-        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
-        string composeFile = Path.Combine(root, "compose.yml");
-        await File.WriteAllTextAsync(composeFile, "services: {}");
-        try
-        {
-            HostUpdateExecutionOptions options = ValidOptions(root, composeFile);
-            options.RequiredUnavailableFacilities = null!;
-            ConfigureExecutablePaths(options, root, "docker", "pg_dump", "pg_restore");
-
-            var provider = new HostUpdateExecutionAvailabilityProvider(
-                options,
-                new FakeJournal(),
-                [new FakeMigrationTarget("Npgsql.EntityFrameworkCore.PostgreSQL")],
-                [new FakeBackupTarget()],
-                CodeOwnedRequiredFencedWriterNames.Select(name => new FakeFenceableWriter(name)).ToArray(),
-                new FakeProcessRunner(dockerAvailable: true),
-                new FakeRecoveryOutcomeStore(),
-                new TestExecutableResolver());
-
-            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
-
-            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
-            result.Reasons.Should().BeEmpty();
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
+            result.Reasons.Should().ContainSingle(r => r == "facility_unavailable:facility-a");
         }
         finally
         {

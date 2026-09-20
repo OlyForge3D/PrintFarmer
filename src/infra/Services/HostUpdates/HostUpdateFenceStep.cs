@@ -69,6 +69,8 @@ public sealed class HostUpdateFenceCoordinator(
 
             if (_timeProvider.GetUtcNow() >= deadline)
             {
+                // The deadline decision uses the completed probe; no later observation can
+                // retroactively prove the writer within the bounded proof window.
                 _logger?.LogWarning(
                     "host_update_writer_fence_rejected release_id={ReleaseId} writers={WriterNames}",
                     request.ReleaseId,
