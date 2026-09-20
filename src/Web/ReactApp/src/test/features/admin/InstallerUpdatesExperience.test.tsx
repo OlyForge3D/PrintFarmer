@@ -22,6 +22,7 @@ describe('InstallerUpdatesExperience', () => {
     await user.click(update);
     expect(screen.getByText(/runtime execution contract/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Save automatic update policy' })).toHaveAttribute('aria-disabled', 'true');
+    expect(screen.getByText(/Availability is read-only until trusted host evidence/)).toBeVisible();
   });
 
   it('confirms, reports progress, and offers recovery for a manual update', async () => {
@@ -1102,10 +1103,11 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByText(/cannot establish managed eligibility/)).toBeVisible();
     expect(screen.getByText('Manual signed install required')).toBeVisible();
     expect(screen.getByText(/manually install a current signed release/)).toBeVisible();
+    expect(screen.getByRole('alert')).toBeVisible();
   });
 
   it('does not show the legacy manual path for facility-only blockers', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({
+    const { rerender } = render(<InstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
       eligibilityReasons: ['ManagedEligibilityNotEstablished', 'ReadOnlyInventory'],
       compatibilityState: 'Compatible',
@@ -1123,6 +1125,13 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
     expect(screen.queryByText('Manual signed install required')).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot establish managed eligibility/)).not.toBeInTheDocument();
+
+    rerender(<InstallerUpdatesExperience inventory={inventory({
+      eligibility: 'NotManaged',
+      eligibilityReasons: ['SignedReleaseEvidenceUnavailableManualOnly', 'ReadOnlyInventory'],
+      compatibilityState: 'Compatible',
+    })} observation="connected" />);
+    expect(screen.getByText('Manual signed install required')).toBeVisible();
   });
 
   it('keeps mixed legacy and facility evidence visible as distinct categories', () => {
@@ -1140,11 +1149,12 @@ describe('InstallerUpdatesExperience', () => {
       },
     })} observation="connected" />);
 
-    const availability = screen.getByText('Read-only release availability').parentElement?.parentElement;
+    const availability = screen.getByText('Read-only release availability').closest('[role="alert"]');
     expect(availability).not.toBeNull();
     expect(availability).toHaveTextContent(/This installation cannot present verified signed release evidence/);
     expect(availability).toHaveTextContent(/install a current signed release manually once/);
     expect(availability).toHaveTextContent(/The observed installation is blocked/);
+    expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
   });
 
   it('renders every observed replica and marks conflicting identities without proposing a target', async () => {
