@@ -306,7 +306,7 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
     // overwrites the same single probe file instead of accumulating a new one on the SQL
     // Server volume each time the mapping is broken and PrintFarmer cannot see (and so cannot
     // clean up) the file it just asked the engine to write.
-    private const string ProbeFileName = "printfarmer-mapping-probe.bak";
+    internal const string ProbeFileName = "printfarmer-mapping-probe.bak";
 
     // The probe backs up only [master] with COPY_ONLY -- a tiny, fixed-size operation -- so it
     // should never need anywhere near the full configured BackupTimeoutSeconds (which may be
@@ -324,9 +324,10 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
     /// <summary>
     /// Instructs the SQL Server engine itself to write a small, disposable probe file (a
     /// <c>BACKUP DATABASE [master]</c> -- the same statement shape and code path real backups
-    /// use) into the configured <c>backupRootDirectory</c>'s value -- the exact same directory
-    /// <see cref="HostUpdateBackupCoordinator"/> passes to every real backup target's
-    /// <c>BackupAsync</c> -- then confirms PrintFarmer can read that exact physical file back
+    /// use) into the configured <c>backupRootDirectory</c>'s value -- the same
+    /// <see cref="HostUpdateExecutionOptions.BackupRootDirectory"/> every real backup destination
+    /// is created under (see <see cref="HostUpdateBackupCoordinator"/>) -- then confirms
+    /// PrintFarmer can read that exact physical file back
     /// from that same directory. Deliberately does not accept a separately configured
     /// "SQL Server side" directory: production backups never translate the destination path, so
     /// verifying anything other than the literal directory real backups use would not prove the
@@ -349,6 +350,41 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
 
         string probePath = Path.Combine(backupRootDirectory, ProbeFileName);
         TimeSpan probeTimeout = timeout < MaxProbeTimeout ? timeout : MaxProbeTimeout;
+
+        // Ensure the directory exists from PrintFarmer's own side before asking the engine to
+        // write into it. On a freshly configured host, RootDirectory may exist while its
+        // "backups" subdirectory has not yet been created (real backups create it lazily too),
+        // which would otherwise make BACKUP DATABASE fail with an OS-level "path not found"
+        // error indistinguishable from a genuinely broken mapping.
+        try
+        {
+            Directory.CreateDirectory(backupRootDirectory);
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"probe_directory_creation_failed:{exception.GetType().Name}";
+        }
+
+        // Remove any pre-existing probe file from PrintFarmer's own view before asking the
+        // engine to write a fresh one. Without this, a stale file left behind by an earlier
+        // successful verification (e.g. because the best-effort cleanup below failed) could
+        // still be sitting at probePath if the mapping is later broken -- and the read-back
+        // check further down would then observe that stale file and report the mapping
+        // verified even though the engine's write never reached PrintFarmer's filesystem at
+        // all. Failing closed here (rather than proceeding with an indeterminate starting
+        // state) is required so a positive verification always reflects this specific
+        // invocation's round trip, not a leftover from a previous one.
+        try
+        {
+            if (File.Exists(probePath))
+            {
+                File.Delete(probePath);
+            }
+        }
+        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+        {
+            return $"probe_stale_file_removal_failed:{exception.GetType().Name}";
+        }
 
         HostUpdateProcessResult result;
         try
@@ -377,8 +413,21 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
 
         try
         {
-            var probeFileInfo = new FileInfo(probePath);
-            if (!probeFileInfo.Exists || probeFileInfo.Length == 0)
+            // Actually open and read the file rather than only checking FileInfo metadata:
+            // proving PrintFarmer can read real bytes back is what the mapping needs to
+            // guarantee (verification/restore later reads this same directory), not merely
+            // that a directory-listing sees an entry.
+            byte[] probeBytes;
+            try
+            {
+                probeBytes = await File.ReadAllBytesAsync(probePath, cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
+            {
+                return "probe_file_not_visible_from_printfarmer";
+            }
+
+            if (probeBytes.Length == 0)
             {
                 return "probe_file_not_visible_from_printfarmer";
             }

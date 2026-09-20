@@ -50,6 +50,22 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         }
     }
 
+    /// <summary>
+    /// Simulates the process runner itself throwing (e.g. the OS refusing to start the
+    /// executable) rather than sqlcmd running and returning a nonzero exit code -- a distinct
+    /// failure mode from <see cref="ServerSideWritingProcessRunner"/>'s <c>succeeds: false</c>.
+    /// </summary>
+    private sealed class ThrowingProcessRunner : IHostUpdateProcessRunner
+    {
+        public Task<HostUpdateProcessResult> RunAsync(
+            string fileName,
+            IReadOnlyList<string> arguments,
+            TimeSpan timeout,
+            CancellationToken cancellationToken,
+            IReadOnlyDictionary<string, string>? environment = null) =>
+            throw new InvalidOperationException("simulated process start failure");
+    }
+
     [Fact]
     public async Task CreateBackupTarget_ExternallyOwned_ReturnsFailClosedTarget()
     {
@@ -582,6 +598,92 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         finally
         {
             Directory.Delete(backupRootDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_ProcessRunnerThrows_FailsClosedWithExceptionTypeEvidence()
+    {
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-throw-").FullName;
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ThrowingProcessRunner(), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().Be(
+                "probe_backup_invocation_failed:InvalidOperationException",
+                "a thrown exception from starting the process is a distinct failure mode from sqlcmd running and reporting a nonzero exit code");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_RepeatedChecksAgainstBrokenMapping_ReuseSingleProbeFileWithoutAccumulating()
+    {
+        // Reproduces the availability hosted service re-checking a persistently broken mapping
+        // every ~5 minutes: the fixed probe filename must be overwritten in place on the SQL
+        // Server volume, not accumulate a new file per check.
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-repeat-client-").FullName;
+        string serverPhysicalStorage = Directory.CreateTempSubdirectory("hu-mapping-repeat-server-").FullName;
+        try
+        {
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true, serverPhysicalStorage), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+            var serverSideTarget = (IHostUpdateServerSideBackupTarget)target;
+
+            await serverSideTarget.VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+            await serverSideTarget.VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+            await serverSideTarget.VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            Directory.GetFiles(serverPhysicalStorage).Should().ContainSingle(
+                "a fixed, reused probe filename must overwrite in place on every re-check, never accumulate a new file per invocation");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+            Directory.Delete(serverPhysicalStorage, recursive: true);
+        }
+    }
+
+    [Fact]
+    public async Task VerifyVisibleBackupPathMappingAsync_StalePrintFarmerVisibleProbeFile_DoesNotFalselyVerifyBrokenMapping()
+    {
+        // Simulates a stale probe file left behind at the PrintFarmer-visible path (e.g. from an
+        // earlier successful verification whose best-effort cleanup failed). If the mapping is
+        // then broken, the engine's write is redirected elsewhere -- but without removing the
+        // stale file first, the read-back would observe it and incorrectly report success.
+        string backupRootDirectory = Directory.CreateTempSubdirectory("hu-mapping-stale-client-").FullName;
+        string serverPhysicalStorage = Directory.CreateTempSubdirectory("hu-mapping-stale-server-").FullName;
+        try
+        {
+            File.WriteAllText(
+                Path.Combine(backupRootDirectory, SqlServerProcessDatabaseBackupTarget.ProbeFileName),
+                "stale probe from an earlier check");
+
+            IHostUpdateBackupTarget target = HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget(
+                "database", SqlServerConfig(), new ServerSideWritingProcessRunner(succeeds: true, serverPhysicalStorage), TestExecutableResolver,
+                TimeSpan.FromSeconds(30), isExternallyOwned: false,
+                backupRootDirectory: backupRootDirectory);
+
+            string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
+
+            evidence.Should().Be(
+                "probe_file_not_visible_from_printfarmer",
+                "a stale leftover file must never be mistaken for this invocation's own round trip");
+        }
+        finally
+        {
+            Directory.Delete(backupRootDirectory, recursive: true);
+            Directory.Delete(serverPhysicalStorage, recursive: true);
         }
     }
 

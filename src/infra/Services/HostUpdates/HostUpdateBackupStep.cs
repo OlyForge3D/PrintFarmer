@@ -50,9 +50,11 @@ public interface IHostUpdateServerSideBackupTarget
 {
     /// <summary>
     /// Performs a real, lightweight round-trip probe: instructs the server engine to write a
-    /// small marker file at the deployment's configured server-visible path, then confirms
-    /// PrintFarmer can read that same physical file back at its own configured, mapped path.
-    /// Returns <see langword="null"/> when the mapping is verified; otherwise returns an
+    /// small marker file into the single configured backup directory, then confirms
+    /// PrintFarmer can read that same physical file back from that same directory (there is no
+    /// separate "server-visible" vs. "PrintFarmer-visible" path — production backups use one
+    /// directory, so verification must exercise exactly that one). Returns
+    /// <see langword="null"/> when the mapping is verified; otherwise returns an
     /// explicit, fail-closed evidence suffix (never assumes success from configuration
     /// presence alone, and never assumes a default path when unconfigured).
     /// </summary>

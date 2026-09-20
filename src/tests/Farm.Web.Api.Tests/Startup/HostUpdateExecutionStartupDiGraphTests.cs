@@ -144,6 +144,44 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
         }
     }
 
+    /// <summary>
+    /// Bishop review (issue #2788): the <c>IHostUpdateBackupTarget</c> factory delegate was
+    /// briefly (and accidentally, mid-redesign) evaluating <c>options.BackupRootDirectory</c>
+    /// unconditionally for every database provider before passing it to
+    /// <see cref="HostUpdateDatabaseBackupTargetFactory.CreateBackupTarget"/>.
+    /// <c>BackupRootDirectory</c> throws <c>root_directory_not_configured</c> when
+    /// <c>RootDirectory</c> is unset, so that regression would crash resolution of
+    /// <see cref="IReadOnlyList{T}"/> of <see cref="IHostUpdateBackupTarget"/> -- and therefore
+    /// <c>HostUpdateExecutionAvailabilityProvider.CheckAsync</c>'s unconditional
+    /// <c>backupTargets.Count</c> check -- for a SQL Server deployment in the executor's normal
+    /// default-off state (root unconfigured), instead of resolving cleanly and reporting
+    /// <c>backup_root_directory_not_configured</c> only when the mapping is actually verified.
+    /// This proves the DI graph resolves without throwing in exactly that state.
+    /// </summary>
+    [Fact]
+    public void AddHostUpdateExecution_ResolvingSqlServerBackupTargetsWithUnconfiguredRoot_DoesNotThrow()
+    {
+        ServiceCollection services = new();
+        services.AddLogging();
+        var values = new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = string.Empty,
+            ["DB_PROVIDER"] = "sqlserver",
+            ["ConnectionStrings:Default"] = "Server=sqlhost;Database=printfarmer;User Id=sa;Password=fixture-not-a-real-credential;TrustServerCertificate=True",
+            ["HostUpdateExecution:HostExecutablePaths:sqlcmd"] = Path.Combine(AppContext.BaseDirectory, "sqlcmd.exe"),
+        };
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        services.AddSingleton(configuration);
+        services.AddHostUpdateExecution(configuration);
+
+        using ServiceProvider provider = services.BuildServiceProvider();
+        using IServiceScope scope = provider.CreateScope();
+
+        IReadOnlyList<IHostUpdateBackupTarget> targets = scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>();
+
+        Assert.Contains(targets, t => t.Name == "database");
+    }
+
     [Fact]
     public void AddHostUpdateExecution_ResolvesOnlyConstrainedProcessRunner()
     {
