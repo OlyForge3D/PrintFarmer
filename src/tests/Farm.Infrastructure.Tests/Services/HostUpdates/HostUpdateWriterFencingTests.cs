@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Tests.Builders;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
@@ -57,6 +58,36 @@ public class HostUpdateWriterFencingTests : IDisposable
     {
         _connection.Dispose();
         GC.SuppressFinalize(this);
+    }
+
+    [Fact]
+    public async Task FenceCoordinator_AtDeadline_PerformsFinalQuiescenceProbe()
+    {
+        var writer = new Mock<IFenceableWriter>();
+        writer.SetupGet(candidate => candidate.Name).Returns("deadline-writer");
+        writer.Setup(candidate => candidate.QuiesceAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        writer.SetupSequence(candidate =>
+                candidate.IsQuiescedAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false)
+            .ReturnsAsync(true);
+        var coordinator = new HostUpdateFenceCoordinator(
+            [writer.Object],
+            proofTimeout: TimeSpan.Zero,
+            pollInterval: TimeSpan.FromSeconds(2));
+
+        await coordinator.RunAsync(
+            new HostUpdateExecutionRequest(
+                "release-1",
+                1,
+                "sha256:" + new string('a', 64),
+                new string('b', 40),
+                HostUpdateExecutionChannel.Stable,
+                []),
+            CancellationToken.None);
+
+        writer.Verify(candidate => candidate.IsQuiescedAsync(
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
     }
 
     /// <summary>Counts how many times a fresh scope was actually opened, without changing behavior.</summary>
@@ -745,6 +776,7 @@ public class HostUpdateWriterFencingTests : IDisposable
         var sut = new BackendStartCommandConsumerService(
             scopeFactory,
             NullLogger<BackendStartCommandConsumerService>.Instance,
+            Options.Create(new BackendTimeoutSettings()),
             fence);
         await RunHostedServiceAsync(sut, async () =>
         {
@@ -766,6 +798,7 @@ public class HostUpdateWriterFencingTests : IDisposable
         var sut = new BackendStartCommandConsumerService(
             scopeFactory,
             NullLogger<BackendStartCommandConsumerService>.Instance,
+            Options.Create(new BackendTimeoutSettings()),
             fence);
 
         await RunHostedServiceAsync(sut, async () =>
