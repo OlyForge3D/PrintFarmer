@@ -8,6 +8,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.Queue;
 
@@ -36,7 +37,8 @@ public sealed class BackendStartCommandConsumerService(
     IServiceScopeFactory scopeFactory,
     ILogger<BackendStartCommandConsumerService> logger,
     BackendStartCommandConsumerFenceFlag? hostUpdateFence = null,
-    TimeProvider? timeProvider = null) : BackgroundService
+    TimeProvider? timeProvider = null,
+    IOptions<BackendTimeoutSettings>? backendTimeoutSettings = null) : BackgroundService
 {
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
@@ -70,6 +72,8 @@ public sealed class BackendStartCommandConsumerService(
     };
 
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+    private readonly TimeSpan _minimumDispatchWindow =
+        GetMinimumDispatchWindow(backendTimeoutSettings?.Value ?? new BackendTimeoutSettings());
 
     private const int MaxAttempts = 10;
     private const string CommandEventType = BedClearAcknowledgementService.BackendStartCommandEventType;
@@ -145,7 +149,7 @@ public sealed class BackendStartCommandConsumerService(
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            DateTime staleCutoff = DateTime.UtcNow - StaleLeaseAge;
+            DateTime staleCutoff = _timeProvider.GetUtcNow().UtcDateTime - StaleLeaseAge;
 
             // Rows whose backend outcome is UNKNOWN are deliberately excluded: they may have
             // been delivered, so re-running them could double-start a printer. They stay
@@ -168,7 +172,7 @@ public sealed class BackendStartCommandConsumerService(
                 {
                     evt.Status = QueueOutboxEventStatus.Pending;
                     evt.LastError = "Recovered from stale lease (previous process crash).";
-                    evt.RetryAfterUtc = DateTime.UtcNow + PollInterval;
+                    evt.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime + PollInterval;
 
                     logger.LogWarning(
                         "[BackendStartConsumer] Stale lease recovered: EventId={EventId} Job={JobId} AttemptCount={Count}",
@@ -222,9 +226,9 @@ public sealed class BackendStartCommandConsumerService(
             {
                 TimeSpan remaining =
                     IterationDeadline - _timeProvider.GetElapsedTime(iterationStarted);
-                if (remaining < MinimumDispatchWindow)
+                if (remaining < _minimumDispatchWindow)
                 {
-                    logger.LogInformation(
+                    logger.LogWarning(
                         "[BackendStartConsumer] Iteration deadline window exhausted; deferring {Count} command(s)",
                         pending.Count - pending.IndexOf(evt));
                     break;
@@ -331,8 +335,8 @@ public sealed class BackendStartCommandConsumerService(
         // ===================================================================
         // Step 3: Awaited backend execution (NOT fire-and-forget). Cancellation that escapes
         // DispatchJobWithAckAsync occurs before its dispatch claim is acquired and is safe to
-        // retry. At/after-claim cancellation is converted by that service to Unknown so it
-        // remains leased for reconciliation and cannot double-start a printer.
+        // retry. At/after-claim cancellation is classified by that service; indeterminate
+        // outcomes remain leased as Unknown so they cannot double-start a printer.
         // ===================================================================
         try
         {
@@ -573,7 +577,8 @@ public sealed class BackendStartCommandConsumerService(
                 {
                     double backoffSeconds = RetryBackoffBase.TotalSeconds * Math.Pow(2, row.AttemptCount - 1);
                     row.Status = QueueOutboxEventStatus.Pending;
-                    row.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(backoffSeconds);
+                    row.RetryAfterUtc =
+                        _timeProvider.GetUtcNow().UtcDateTime + TimeSpan.FromSeconds(backoffSeconds);
                     await SetBedClearCommandStatusAsync(
                         outcomeDb, eventId, BedClearCommandStatus.Pending, ct);
                 }
@@ -582,6 +587,24 @@ public sealed class BackendStartCommandConsumerService(
         }
 
         _ = await outcomeDb.SaveChangesAsync(ct);
+    }
+
+    private static TimeSpan GetMinimumDispatchWindow(BackendTimeoutSettings settings)
+    {
+        TimeSpan minimumDispatchWindow = settings.FileUploadTimeout + DispatchCompletionMargin;
+        if (minimumDispatchWindow > IterationDeadline)
+        {
+            throw new OptionsValidationException(
+                nameof(BackendTimeoutSettings),
+                typeof(BackendTimeoutSettings),
+                [
+                    $"{nameof(BackendTimeoutSettings.FileUploadTimeoutSeconds)} plus the " +
+                    $"{DispatchCompletionMargin.TotalSeconds:0}-second dispatch completion margin " +
+                    $"must not exceed the {IterationDeadline.TotalSeconds:0}-second backend-start iteration deadline.",
+                ]);
+        }
+
+        return minimumDispatchWindow;
     }
 
     private static async Task SetBedClearCommandStatusAsync(

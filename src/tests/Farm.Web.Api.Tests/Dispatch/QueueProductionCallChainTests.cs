@@ -48,6 +48,7 @@ using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -739,6 +740,70 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 Directory.Delete(storageRoot, recursive: true);
             }
         }
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_RealManagementDeadlineAtClaim_RearmsWithoutDispatch()
+    {
+        Fixture fixture;
+        await using (AppDbContext seed = CreateContext())
+        {
+            fixture = await SeedCalibrationAsync(seed, withAck: true);
+        }
+
+        var clock = new ManualTimeProvider();
+        bool claimCancellationObserved = false;
+        var claim = new Mock<IDispatchClaimService>();
+        claim.Setup(service => service.AcquireClaimAsync(
+                It.IsAny<DispatchClaimRequest>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((DispatchClaimRequest _, CancellationToken ct) =>
+            {
+                clock.Advance(BackendStartCommandConsumerService.IterationDeadline);
+                claimCancellationObserved = ct.IsCancellationRequested;
+                return Task.FromCanceled<DispatchClaimResult>(ct);
+            });
+        var printers = new Mock<IPrintersService>();
+        await using AppDbContext managementContext = CreateContext();
+        var management = new PrintJobManagementService(
+            new EfPrintJobManagementRepository(managementContext),
+            NullLogger<PrintJobManagementService>.Instance,
+            printers.Object,
+            Mock.Of<IStoragePathService>(),
+            CreateHubContext(),
+            Mock.Of<IStoredFileOperationsService>(),
+            Mock.Of<IPrinterStatusCacheReader>(),
+            dispatchClaimService: claim.Object,
+            appDbContext: managementContext,
+            outboxSequenceAllocator: new DbOutboxSequenceAllocator(),
+            timeProvider: clock);
+        await using ServiceProvider provider = CreateBackendStartConsumerProvider(management);
+        var consumer = new BackendStartCommandConsumerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            timeProvider: clock);
+
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+
+        claimCancellationObserved.Should().BeTrue();
+        claim.Verify(service => service.AcquireClaimAsync(
+            It.IsAny<DispatchClaimRequest>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        printers.VerifyNoOtherCalls();
+        await using AppDbContext verify = CreateContext();
+        (await verify.QueueDispatchAttempts.CountAsync()).Should().Be(0);
+        QueueDispatchOutbox command = await verify.QueueDispatchOutbox.SingleAsync(
+            candidate => candidate.EventType ==
+                BedClearAcknowledgementService.BackendStartCommandEventType);
+        command.Status.Should().Be(QueueOutboxEventStatus.Pending);
+        command.AttemptCount.Should().Be(1);
+        command.RetryAfterUtc.Should().Be(
+            (clock.GetUtcNow() + TimeSpan.FromSeconds(15)).UtcDateTime);
+        BedClearCommandRecord bedClearCommand = await verify.BedClearCommandRecords
+            .SingleAsync(candidate => candidate.OutboxEventId == command.Id);
+        bedClearCommand.Status.Should().Be(BedClearCommandStatus.Pending);
+        fixture.JobId.Should().Be(command.AggregateId);
     }
 
     [Theory]
@@ -5411,8 +5476,13 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     [Trait("Category", "DbHeavy")]
     public async Task BackendStartConsumer_PreDispatchDeadline_RearmsWithBackoffBelowFenceBudget()
     {
-        _ = await SeedBackendStartCommandsAsync(2);
+        IReadOnlyList<(Guid EventId, Guid JobId)> commands =
+            await SeedBackendStartCommandsAsync(2, withBedClearRecords: true);
         var clock = new ManualTimeProvider();
+        DateTime expectedRetryAfter =
+            (clock.GetUtcNow() +
+             BackendStartCommandConsumerService.IterationDeadline +
+             TimeSpan.FromSeconds(15)).UtcDateTime;
         bool deadlineCancellationObserved = false;
         var management = new Mock<IPrintJobManagementService>();
         management.Setup(service => service.DispatchJobWithAckAsync(
@@ -5465,7 +5535,96 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .OrderBy(candidate => candidate.Sequence)
             .FirstAsync();
         command.Status.Should().Be(QueueOutboxEventStatus.Pending);
-        command.RetryAfterUtc.Should().NotBeNull();
+        command.RetryAfterUtc.Should().Be(expectedRetryAfter);
+        BedClearCommandRecord bedClearCommand = await verify.BedClearCommandRecords
+            .SingleAsync(candidate => candidate.OutboxEventId == commands[0].EventId);
+        bedClearCommand.Status.Should().Be(BedClearCommandStatus.Pending);
+    }
+
+    [Fact]
+    public void BackendStartConsumer_ConfiguredUploadTimeoutAboveIterationDeadline_IsRejected()
+    {
+        var options = Options.Create(new BackendTimeoutSettings
+        {
+            FileUploadTimeoutSeconds = 311,
+        });
+
+        Action construct = () => _ = new BackendStartCommandConsumerService(
+            Mock.Of<IServiceScopeFactory>(),
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            backendTimeoutSettings: options);
+
+        construct.Should().Throw<OptionsValidationException>()
+            .WithMessage("*FileUploadTimeoutSeconds*310-second*");
+    }
+
+    [Fact]
+    public void BackendStartConsumer_ConfiguredUploadTimeoutAtExactBoundary_IsAccepted()
+    {
+        var options = Options.Create(new BackendTimeoutSettings
+        {
+            FileUploadTimeoutSeconds = 309,
+        });
+
+        Action construct = () => _ = new BackendStartCommandConsumerService(
+            Mock.Of<IServiceScopeFactory>(),
+            NullLogger<BackendStartCommandConsumerService>.Instance,
+            backendTimeoutSettings: options);
+
+        construct.Should().NotThrow();
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task BackendStartConsumer_ConfiguredUploadTimeoutControlsDispatchAdmission()
+    {
+        IReadOnlyList<(Guid EventId, Guid JobId)> commands =
+            await SeedBackendStartCommandsAsync(2);
+        var clock = new ManualTimeProvider();
+        var dispatched = new List<Guid>();
+        var management = new Mock<IPrintJobManagementService>();
+        management.Setup(service => service.DispatchJobWithAckAsync(
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<string>(),
+                It.IsAny<CancellationToken>()))
+            .Returns((string jobId, string _, string _, CancellationToken _) =>
+            {
+                dispatched.Add(Guid.Parse(jobId));
+                clock.Advance(TimeSpan.FromSeconds(1));
+                return Task.FromResult(BackendStartOutcome.Accepted(Guid.NewGuid()));
+            });
+        await using ServiceProvider provider = CreateBackendStartConsumerProvider(
+            management.Object);
+        var logger = new Mock<ILogger<BackendStartCommandConsumerService>>();
+        var consumer = new BackendStartCommandConsumerService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            logger.Object,
+            timeProvider: clock,
+            backendTimeoutSettings: Options.Create(new BackendTimeoutSettings
+            {
+                FileUploadTimeoutSeconds = 309,
+            }));
+
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+
+        dispatched.Should().Equal(commands[0].JobId);
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchOutbox deferred = await verify.QueueDispatchOutbox
+            .SingleAsync(command => command.Id == commands[1].EventId);
+        deferred.Status.Should().Be(QueueOutboxEventStatus.Pending);
+        deferred.AttemptCount.Should().Be(0);
+        logger.Verify(
+            candidate => candidate.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) =>
+                    state.ToString()!.Contains(
+                        "Iteration deadline window exhausted",
+                        StringComparison.Ordinal)),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
     }
 
     [Fact]
@@ -5473,7 +5632,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     public async Task BackendStartConsumer_RepeatedPreDispatchDeadlines_DoNotStarveAndDeadLetterAtCeiling()
     {
         IReadOnlyList<(Guid EventId, Guid JobId)> commands =
-            await SeedBackendStartCommandsAsync(2);
+            await SeedBackendStartCommandsAsync(2, withBedClearRecords: true);
         var clock = new ManualTimeProvider();
         var dispatched = new List<Guid>();
         var management = new Mock<IPrintJobManagementService>();
@@ -5504,7 +5663,44 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
         await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
-        for (int attempt = 2; attempt <= 10; attempt++)
+        dispatched.Should().Equal(commands[0].JobId, commands[1].JobId);
+        await using (AppDbContext secondIteration = CreateContext())
+        {
+            QueueDispatchOutbox offender = await secondIteration.QueueDispatchOutbox
+                .SingleAsync(command => command.Id == commands[0].EventId);
+            offender.Status.Should().Be(QueueOutboxEventStatus.Pending);
+            offender.AttemptCount.Should().Be(1);
+        }
+
+        DateTime attemptTwoStarted = clock.GetUtcNow().UtcDateTime;
+        clock.Advance(TimeSpan.FromDays(1));
+        attemptTwoStarted += TimeSpan.FromDays(1);
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        await using (AppDbContext attemptTwo = CreateContext())
+        {
+            QueueDispatchOutbox offender = await attemptTwo.QueueDispatchOutbox
+                .SingleAsync(command => command.Id == commands[0].EventId);
+            offender.RetryAfterUtc.Should().Be(
+                attemptTwoStarted +
+                BackendStartCommandConsumerService.IterationDeadline +
+                TimeSpan.FromSeconds(30));
+        }
+
+        DateTime attemptThreeStarted = clock.GetUtcNow().UtcDateTime;
+        clock.Advance(TimeSpan.FromDays(1));
+        attemptThreeStarted += TimeSpan.FromDays(1);
+        await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
+        await using (AppDbContext attemptThree = CreateContext())
+        {
+            QueueDispatchOutbox offender = await attemptThree.QueueDispatchOutbox
+                .SingleAsync(command => command.Id == commands[0].EventId);
+            offender.RetryAfterUtc.Should().Be(
+                attemptThreeStarted +
+                BackendStartCommandConsumerService.IterationDeadline +
+                TimeSpan.FromSeconds(60));
+        }
+
+        for (int attempt = 4; attempt <= 10; attempt++)
         {
             clock.Advance(TimeSpan.FromDays(1));
             await consumer.ProcessPendingCommandsAsync(CancellationToken.None);
@@ -5522,6 +5718,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         rows[0].AttemptCount.Should().Be(10);
         rows[0].RetryAfterUtc.Should().BeNull();
         rows[1].Status.Should().Be(QueueOutboxEventStatus.Published);
+        BedClearCommandRecord bedClearCommand = await verify.BedClearCommandRecords
+            .SingleAsync(candidate => candidate.OutboxEventId == commands[0].EventId);
+        bedClearCommand.Status.Should().Be(BedClearCommandStatus.Rejected);
     }
 
     [Fact]
@@ -7218,7 +7417,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             .BuildServiceProvider();
 
     private async Task<IReadOnlyList<(Guid EventId, Guid JobId)>>
-        SeedBackendStartCommandsAsync(int count)
+        SeedBackendStartCommandsAsync(int count, bool withBedClearRecords = false)
     {
         await using AppDbContext db = CreateContext();
         await db.Database.MigrateAsync();
@@ -7230,6 +7429,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         {
             Guid eventId = Guid.NewGuid();
             Guid jobId = Guid.NewGuid();
+            Guid printerId = Guid.NewGuid();
             commands.Add((eventId, jobId));
             db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
             {
@@ -7242,13 +7442,32 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 PayloadJson = JsonSerializer.Serialize(new
                 {
                     jobId,
-                    printerId = Guid.NewGuid(),
+                    printerId,
                     actorSubject = "deadline-test",
                     acknowledgementKey = $"deadline-{index}",
                 }),
                 Status = QueueOutboxEventStatus.Pending,
                 CreatedAtUtc = DateTime.UtcNow,
             });
+            if (withBedClearRecords)
+            {
+                db.BedClearCommandRecords.Add(new BedClearCommandRecord
+                {
+                    Id = Guid.NewGuid(),
+                    PrinterId = printerId,
+                    JobId = jobId,
+                    IdempotencyKey = $"deadline-{index}",
+                    RequestSha256 = new string('a', 64),
+                    ActorSubject = "deadline-test",
+                    JobRowVersion = [],
+                    DispatchStateRowVersion = [],
+                    Status = BedClearCommandStatus.Pending,
+                    OutboxEventId = eventId,
+                    CreatedAtUtc = DateTime.UtcNow,
+                    UpdatedAtUtc = DateTime.UtcNow,
+                    ExpiresAtUtc = DateTime.UtcNow.AddMinutes(15),
+                });
+            }
         }
 
         await db.SaveChangesAsync();

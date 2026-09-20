@@ -59,6 +59,36 @@ public class HostUpdateWriterFencingTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    [Fact]
+    public async Task FenceCoordinator_AtDeadline_PerformsFinalQuiescenceProbe()
+    {
+        var writer = new Mock<IFenceableWriter>();
+        writer.SetupGet(candidate => candidate.Name).Returns("deadline-writer");
+        writer.Setup(candidate => candidate.QuiesceAsync(It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+        writer.SetupSequence(candidate =>
+                candidate.IsQuiescedAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(false)
+            .ReturnsAsync(true);
+        var coordinator = new HostUpdateFenceCoordinator(
+            [writer.Object],
+            proofTimeout: TimeSpan.Zero,
+            pollInterval: TimeSpan.FromSeconds(2));
+
+        await coordinator.RunAsync(
+            new HostUpdateExecutionRequest(
+                "release-1",
+                1,
+                "sha256:" + new string('a', 64),
+                new string('b', 40),
+                HostUpdateExecutionChannel.Stable,
+                []),
+            CancellationToken.None);
+
+        writer.Verify(candidate => candidate.IsQuiescedAsync(
+            It.IsAny<CancellationToken>()), Times.Exactly(2));
+    }
+
     /// <summary>Counts how many times a fresh scope was actually opened, without changing behavior.</summary>
     private sealed class CountingScopeFactory(IServiceScopeFactory inner) : IServiceScopeFactory
     {
