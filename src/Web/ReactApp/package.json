@@ -14,7 +14,6 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-    "prebuild": "npm run ci:typecheck-app",
     "ci:typecheck-app": "node --test ./scripts/tests/test-typecheck-app.mjs && npm run typecheck:app",
     "ci:typecheck-tests": "node --test ./scripts/tests/test-typecheck-tests.mjs && npm run typecheck:test",
     "lint": "eslint .",
@@ -24,7 +23,7 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "pretest:coverage": "npm run ci:typecheck-tests",
+    "pretest:coverage": "npm run ci:typecheck-tests && npm run ci:typecheck-app",
     "test:coverage": "vitest run --coverage",
     "test:ui": "vitest --ui",
     "test:e2e": "playwright test",

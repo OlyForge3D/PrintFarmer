@@ -30,10 +30,15 @@ export function classifyDiagnostics(output, directory) {
     // Deliberately broad (directory-based): any diagnostic under a test root
     // must be accounted for here, even in a helper/fixture file that does not
     // itself count toward the file-count floor below. A file that escapes
-    // this bucket by moving outside src/test/ and __tests__/ lands in
-    // ordinary application source instead, where `npm run typecheck:app`
-    // (see #2806) picks it up — the two gates are meant to jointly cover all
-    // of src/ with no unowned gap in between.
+    // this bucket by moving outside src/test/ and __tests__/ (and does not
+    // itself end in .test.ts/.test.tsx, which isTestFile also matches
+    // anywhere in src/) lands in ordinary application source instead, where
+    // `npm run typecheck:app` (see #2806) picks it up. This coverage is NOT
+    // total: `src/**/*.spec.*` is excluded by tsconfig.app.json and never
+    // included by tsconfig.test.json, so a `*.spec.ts` file is owned by
+    // neither gate today. That gap is latent (zero such files currently
+    // exist under src/, pinned by the guard test below) and tracked, not
+    // closed here -- do not read this comment as "no gap exists."
     testDiagnostics: fileDiagnostics.filter(({ path }) =>
       isTestFile(path, directory),
     ),

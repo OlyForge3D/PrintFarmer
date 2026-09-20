@@ -120,6 +120,19 @@ export function evaluate({
     };
   }
 
+  // Node's spawnSync sets error.code === "ETIMEDOUT" specifically when the
+  // `timeout` option kills a hung compiler; distinguishing that from an
+  // ordinary crash/signal makes clear this is a bounded timeout, not an
+  // unbounded hang that never resolves, and it must fail the gate exactly
+  // like any other non-completion -- never fall through to a passing
+  // evaluate.
+  if (compilerResult.error?.code === "ETIMEDOUT") {
+    return {
+      ok: false,
+      message: "TypeScript application compiler timed out and was killed.",
+    };
+  }
+
   if (
     compilerResult.error ||
     compilerResult.signal ||

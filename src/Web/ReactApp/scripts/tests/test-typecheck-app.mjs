@@ -45,6 +45,17 @@ test("fails compiler signal death and null status before another guard can match
   assert.match(nullStatus.message, /did not complete/);
 });
 
+test("fails closed on a timed-out compiler with a distinct message (spawnSync timeout hardening)", () => {
+  const timeoutError = Object.assign(new Error("spawnSync tsc ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+  const result = evaluateGate({
+    compilerResult: { status: null, signal: null, error: timeoutError },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /timed out/);
+});
+
 test("fails global compiler diagnostics before the nonzero-file fallback", () => {
   const result = evaluateGate({
     output: "error TS18003: No inputs were found in config file.",
@@ -290,6 +301,132 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
       assert.match(output, /did not complete successfully/);
     }
     assert.doesNotMatch(output, /typecheck-app\.mjs:\d+/);
+    assert.doesNotMatch(output, /Application type-check passed/);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CLI kills a hung compiler via the spawnSync timeout instead of hanging forever", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-timeout-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app-core.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
+      JSON.stringify(baseline),
+    );
+    // Never exits on its own -- without a spawnSync `timeout` option, this
+    // would hang the CLI (and therefore the CI job / Docker build) forever.
+    // TYPECHECK_APP_TIMEOUT_MS overrides the 120s production default so this
+    // test does not itself take two minutes; production always uses the
+    // default, unoverridden value.
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      "setInterval(() => {}, 1000);",
+    );
+
+    const start = Date.now();
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-app.mjs")],
+      {
+        encoding: "utf8",
+        env: { ...process.env, TYPECHECK_APP_TIMEOUT_MS: "300" },
+      },
+    );
+    const elapsedMs = Date.now() - start;
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
+    assert.match(output, /TypeScript application compiler timed out and was killed/);
+    assert.doesNotMatch(output, /Application type-check passed/);
+    // The hung tsc must actually be killed near the overridden 300ms bound,
+    // not merely reported as timed out while the process (and the wrapping
+    // CLI's wait on it) continues indefinitely in the background.
+    assert.ok(
+      elapsedMs < 30_000,
+      `expected the CLI to return well under 30s once the compiler timeout fired; took ${elapsedMs}ms`,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CLI fails closed with a nonzero exit on a malformed baseline JSON instead of silently falling through (blocking item 4)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-malformed-baseline-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-app-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app-core.mjs"),
+    );
+    await cp(
+      path.join(scriptsDirectory, "typecheck-tests-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    // Deliberately truncated/invalid JSON. `JSON.parse(readFileSync(...))`
+    // in typecheck-app.mjs is a bare, unguarded call today -- it fails
+    // closed via an uncaught throw, which is correct but easy to "clean up"
+    // into a `try { ... } catch { return defaultBaseline }` that would fail
+    // OPEN instead. This test never touches evaluate()'s already-parsed
+    // object path; it goes through the real read+parse at the CLI entry
+    // point, which is the only thing that can catch that regression.
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
+      "{ applicationDiagnosticCount: 1, ",
+    );
+    // A tsc stub that exits cleanly with no output is intentional: with the
+    // correct (unguarded) JSON.parse, it must never run at all, because the
+    // parse throws first. The danger case this guards against is a future
+    // `try { ... } catch { return defaultBaseline }` refactor -- if that
+    // regression landed, the CLI would silently fall through to a default
+    // baseline, spawn this well-behaved stub, see zero diagnostics matching
+    // that default, and print a false "passed" with exit 0. A stub that
+    // never terminates (as used in the timeout test above) would instead
+    // make this test indistinguishable from a hang under its own 10s guard
+    // timeout, which cannot tell "correctly failed closed" apart from "our
+    // test's own safety timeout fired" -- so it must exit fast and clean.
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      "process.exit(0);",
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-app.mjs")],
+      { encoding: "utf8", timeout: 10_000 },
+    );
+    const output = `${result.stdout}${result.stderr}`;
+
+    assert.notEqual(result.status, 0);
     assert.doesNotMatch(output, /Application type-check passed/);
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });

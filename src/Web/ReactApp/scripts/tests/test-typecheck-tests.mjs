@@ -8,11 +8,13 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
+import { readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  classifyDiagnostics,
   countTestFiles,
   evaluate,
   hasTsNoCheckDirective,
@@ -136,6 +138,31 @@ test("isCountableTestFile excludes non-test helpers under test roots that isTest
   assert.equal(isTestFile(fixtureUnderTests, packageDirectory), true);
   assert.equal(isCountableTestFile(fixtureUnderTests, packageDirectory), false);
   assert.equal(isCountableTestFile("src/test/a.test.ts", packageDirectory), true);
+});
+
+test("classifyDiagnostics still gates a helper file's diagnostics via the broad isTestFile, not the strict isCountableTestFile (#2811 item 3 unbound classification)", () => {
+  // countTestFiles/isCountableTestFile correctly stop a helper from
+  // satisfying the file-count FLOOR (proven above), but nothing previously
+  // proved classifyDiagnostics still uses the broad isTestFile to bucket
+  // that same helper's DIAGNOSTICS. If classifyDiagnostics's testDiagnostics
+  // filter were silently swapped from isTestFile to isCountableTestFile, a
+  // literal bug in src/test/setup.ts (a non-`.test.ts`-named helper) would
+  // stop being gated by testDiagnosticCount at all -- it would instead fall
+  // into the untracked "imported application diagnostic" bucket, exactly
+  // the silent evasion #2811 item 3/4 exists to close.
+  const helperDiagnostic =
+    "src/test/setup.ts(1,1): error TS2322: Type error.";
+  const classification = classifyDiagnostics(helperDiagnostic, packageDirectory);
+
+  assert.equal(classification.fileDiagnostics.length, 1);
+  assert.equal(classification.testDiagnostics.length, 1);
+  assert.equal(classification.testDiagnostics[0].path, "src/test/setup.ts");
+
+  // End-to-end confirmation through evaluate(): the helper diagnostic alone
+  // must satisfy testDiagnosticCount: 1 exactly as a real *.test.ts
+  // diagnostic would -- it is not silently dropped into an unchecked bucket.
+  const result = evaluateGate({ output: helperDiagnostic });
+  assert.equal(result.ok, true);
 });
 
 test("countTestFiles ignores non-test helper files even though isTestFile still classifies their diagnostics (#2811 items 3-4)", () => {
@@ -410,6 +437,34 @@ test(
     assert.equal(isTestFile("Z:/outside.test.ts", packageDirectory), false);
   },
 );
+
+test("no *.spec.* file exists under src/ -- the gap neither gate covers is pinned to zero, not silently assumed closed (blocking item 5)", () => {
+  // tsconfig.app.json excludes **/*.spec.* (and **/*.spec.e2e.*, a subset of
+  // that pattern) from the application project; tsconfig.test.json's
+  // `include` list never mentions *.spec.* either. A file matching that
+  // name would therefore be compiled by neither `typecheck:app` nor
+  // `typecheck:test` and could ship a type error unchecked. Closing that gap
+  // by wiring *.spec.* into tsconfig.test.json would move
+  // minimumTestFileCount/testDiagnosticCount for a scenario that has never
+  // actually occurred (Bishop confirmed zero such files exist today), so
+  // this pins the latent gap at its current, safe state instead: if anyone
+  // ever adds a *.spec.* file under src/, this test fails immediately and
+  // loudly, rather than the file silently compiling nowhere.
+  const srcDirectory = path.join(packageDirectory, "src");
+  const specFiles = readdirSync(srcDirectory, { recursive: true })
+    .filter((entry) => /\.spec\./.test(path.basename(entry)))
+    .map((entry) => entry.replaceAll("\\", "/"));
+
+  assert.deepEqual(
+    specFiles,
+    [],
+    `found *.spec.* file(s) under src/ that neither typecheck:app nor ` +
+      `typecheck:test compiles: ${specFiles.join(", ")}. Add coverage for ` +
+      `these files (e.g. wire *.spec.* into tsconfig.test.json and ` +
+      `isTestFile, re-baselining testDiagnosticCount/minimumTestFileCount ` +
+      `deliberately) before removing this guard.`,
+  );
+});
 
 test("CLI fails without success or baseline-reduction advice after compiler signal death", async () => {
   const fixtureDirectory = await mkdtemp(

@@ -18,12 +18,28 @@ const tscArguments = [
   "false",
 ];
 
-const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
-const compilerResult = spawnSync(process.execPath, [tscPath, ...tscArguments], {
+// Overridable only for the CLI-level fixture tests below (fake, hung tsc
+// stubs that must be killed quickly instead of the test waiting out the real
+// production timeout); production always uses the defaults. Without a bound,
+// a tsc deadlock or pathological type recursion would hang the compiler
+// indefinitely -- in CI, in Docker image builds, and on every developer
+// machine -- with no signal beyond "the job never finishes."
+const timeoutMs = Number(process.env.TYPECHECK_APP_TIMEOUT_MS) || 120_000;
+const maxBuffer = Number(process.env.TYPECHECK_APP_MAX_BUFFER) || 10 * 1024 * 1024;
+const spawnOptions = {
   cwd: projectDirectory,
   encoding: "utf8",
-});
-const output = `${compilerResult.stdout}${compilerResult.stderr}`;
+  timeout: timeoutMs,
+  maxBuffer,
+};
+
+const baseline = JSON.parse(readFileSync(baselinePath, "utf8"));
+const compilerResult = spawnSync(
+  process.execPath,
+  [tscPath, ...tscArguments],
+  spawnOptions,
+);
+const output = `${compilerResult.stdout ?? ""}${compilerResult.stderr ?? ""}`;
 process.stdout.write(output);
 
 // A second, identical-project pass just to enumerate files, mirroring
@@ -32,12 +48,9 @@ process.stdout.write(output);
 const listFilesResult = spawnSync(
   process.execPath,
   [tscPath, ...tscArguments, "--listFilesOnly"],
-  {
-    cwd: projectDirectory,
-    encoding: "utf8",
-  },
+  spawnOptions,
 );
-const listFilesOutput = `${listFilesResult.stdout}${listFilesResult.stderr}`;
+const listFilesOutput = `${listFilesResult.stdout ?? ""}${listFilesResult.stderr ?? ""}`;
 
 const evaluation = evaluate({
   baseline,
