@@ -15,9 +15,9 @@ public enum HostUpdateExecutorState
 
 /// <summary>
 /// Backoff state reported by the scheduler. <c>None</c> maps to <c>Admitted</c>/<c>Reused</c>
-/// scheduler outcomes, <c>Waiting</c> to <c>TooEarly</c> (next poll not yet due), <c>Due</c> to a
-/// poll interval that has elapsed but has not yet been evaluated by a tick, and <c>Unknown</c> to
-/// the status-provider being unwired.
+/// scheduler outcomes, <c>Waiting</c> to a scheduled backoff window, <c>Due</c> to a poll interval
+/// that has elapsed but has not yet been evaluated by a tick, and <c>Unknown</c> to the
+/// status-provider being unwired.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum HostUpdateBackoffState

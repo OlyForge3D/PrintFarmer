@@ -519,6 +519,7 @@ POST /api/admin/data/import/catalog -> Farm.Modules.Administration::Farm.Modules
 POST /api/admin/data/import/full -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ImportFullBackupAsync
 POST /api/admin/data/seed/reload -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminDataController.ReloadSeedDataAsync
 POST /api/admin/host-updates/authorizations -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.AuthorizeAsync
+POST /api/admin/host-updates/automation-policy/cancel -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateAutomationPolicyController.CancelAsync
 POST /api/admin/host-updates/execute -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.ExecuteAsync
 POST /api/admin/host-updates/{releaseId}/recover -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.HostUpdateController.RecoverAsync
 POST /api/admin/integrations/home-assistant/test -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.Admin.AdminHomeAssistantController.TestConnectionAsync
