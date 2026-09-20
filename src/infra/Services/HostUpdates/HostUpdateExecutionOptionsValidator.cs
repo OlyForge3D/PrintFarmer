@@ -1,4 +1,5 @@
-﻿using Microsoft.Extensions.Options;
+﻿using Farm.Infrastructure.Services.Queue;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
 
@@ -27,6 +28,15 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
     public ValidateOptionsResult Validate(string? name, HostUpdateExecutionOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        if (TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds) <=
+            BackendStartCommandConsumerService.RequiredFenceProofDuration)
+        {
+            return ValidateOptionsResult.Fail(
+                $"HostUpdateExecution:FenceProofTimeoutSeconds must be greater than " +
+                $"{BackendStartCommandConsumerService.RequiredFenceProofDuration.TotalSeconds} seconds " +
+                "to cover the backend-start writer deadline and acknowledgement margin.");
+        }
 
         if (string.IsNullOrWhiteSpace(options.RootDirectory))
         {

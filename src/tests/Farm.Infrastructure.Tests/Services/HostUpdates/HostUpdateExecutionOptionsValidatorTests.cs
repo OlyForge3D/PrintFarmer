@@ -1,4 +1,5 @@
 ﻿using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Infrastructure.Services.Queue;
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -41,6 +42,37 @@ public class HostUpdateExecutionOptionsValidatorTests
         ValidateOptionsResult result = Validator.Validate(null, new HostUpdateExecutionOptions { RootDirectory = string.Empty });
 
         result.Succeeded.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Validate_DefaultFenceProofBudget_ExceedsRequiredWriterDuration()
+    {
+        var options = new HostUpdateExecutionOptions { RootDirectory = string.Empty };
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Succeeded.Should().BeTrue();
+        TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds)
+            .Should().BeGreaterThan(
+                BackendStartCommandConsumerService.RequiredFenceProofDuration);
+    }
+
+    [Theory]
+    [InlineData(5)]
+    [InlineData(59)]
+    public void Validate_FenceProofBudgetNotGreaterThanRequiredWriterDuration_Fails(
+        int fenceProofTimeoutSeconds)
+    {
+        var options = new HostUpdateExecutionOptions
+        {
+            RootDirectory = string.Empty,
+            FenceProofTimeoutSeconds = fenceProofTimeoutSeconds,
+        };
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("must be greater than 59 seconds");
     }
 
     [Fact]

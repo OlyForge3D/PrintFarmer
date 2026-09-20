@@ -41,8 +41,21 @@ public sealed class BackendStartCommandConsumerService(
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(15);
     private static readonly TimeSpan MinimumDispatchWindow = TimeSpan.FromSeconds(5);
-    internal static readonly TimeSpan IterationDeadline = TimeSpan.FromSeconds(50);
-    internal static readonly TimeSpan OutcomePersistenceDeadline = TimeSpan.FromSeconds(4);
+
+    public static readonly TimeSpan IterationDeadline = TimeSpan.FromSeconds(50);
+
+    public static readonly TimeSpan CancellationCleanupDeadline = TimeSpan.FromSeconds(4);
+
+    public static readonly TimeSpan OutcomePersistenceDeadline = TimeSpan.FromSeconds(4);
+
+    public static readonly TimeSpan FenceAcknowledgementMargin = TimeSpan.FromSeconds(1);
+
+    public static readonly TimeSpan RequiredFenceProofDuration =
+        IterationDeadline +
+        CancellationCleanupDeadline +
+        OutcomePersistenceDeadline +
+        FenceAcknowledgementMargin;
+
     private static readonly JsonSerializerOptions PayloadOptions = new()
     {
         PropertyNameCaseInsensitive = true,
@@ -159,6 +172,9 @@ public sealed class BackendStartCommandConsumerService(
                 await db.SaveChangesAsync(ct);
             }
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "[BackendStartConsumer] Error recovering stale leases");
@@ -196,7 +212,7 @@ public sealed class BackendStartCommandConsumerService(
             {
                 TimeSpan remaining =
                     IterationDeadline - _timeProvider.GetElapsedTime(iterationStarted);
-                if (remaining < MinimumDispatchWindow || timeout.IsCancellationRequested)
+                if (remaining < MinimumDispatchWindow)
                 {
                     logger.LogInformation(
                         "[BackendStartConsumer] Iteration deadline window exhausted; deferring {Count} command(s)",
@@ -317,36 +333,33 @@ public sealed class BackendStartCommandConsumerService(
                 payload.AcknowledgementKey,
                 iterationToken);
 
-            using var outcomeTimeout = new CancellationTokenSource(
-                OutcomePersistenceDeadline,
-                _timeProvider);
-            using var outcomeDeadline = CancellationTokenSource.CreateLinkedTokenSource(
-                stoppingToken,
-                outcomeTimeout.Token);
-            try
-            {
-                await ApplyOutcomeAsync(
-                    evt.Id,
-                    payload.JobId,
-                    outcome,
-                    outcomeDeadline.Token);
-            }
-            catch (OperationCanceledException) when (
-                outcomeTimeout.IsCancellationRequested &&
-                !stoppingToken.IsCancellationRequested)
-            {
-                logger.LogWarning(
-                    "[BackendStartConsumer] Outcome persistence deadline reached for EventId={EventId}; durable attempt reconciliation remains authoritative",
-                    evt.Id);
-            }
+            await ApplyOutcomeWithinDeadlineAsync(
+                evt.Id,
+                payload.JobId,
+                outcome,
+                stoppingToken);
+        }
+        catch (OperationCanceledException) when (
+            iterationToken.IsCancellationRequested &&
+            !stoppingToken.IsCancellationRequested)
+        {
+            evt.Status = QueueOutboxEventStatus.Pending;
+            evt.LastError =
+                "Iteration deadline reached before backend execution completed; command rearmed.";
+            evt.RetryAfterUtc = null;
+            await PersistRearmedCommandWithinDeadlineAsync(db, evt.Id, stoppingToken);
+            logger.LogInformation(
+                "[BackendStartConsumer] Iteration deadline reached for EventId={EventId}; command rearmed for the next iteration, with stale-lease fallback after {StaleLeaseAge}",
+                evt.Id,
+                StaleLeaseAge);
+            throw;
         }
         catch (OperationCanceledException)
         {
-            // Shutdown — leave event in Processing for recovery on next start.
             logger.LogInformation(
                 "[BackendStartConsumer] Execution cancelled (shutdown) for EventId={EventId} — will recover on restart",
                 evt.Id);
-            throw; // Propagate cancellation to stop the loop.
+            throw;
         }
         catch (Exception ex)
         {
@@ -359,11 +372,62 @@ public sealed class BackendStartCommandConsumerService(
 
             // An unexpected exception is an UNKNOWN outcome: never mark it Published,
             // never retry blindly. Keep the row leased for the reconciler.
-            await ApplyOutcomeAsync(
+            await ApplyOutcomeWithinDeadlineAsync(
                 evt.Id,
                 payload.JobId,
                 BackendStartOutcome.Unknown(ex.Message, attemptId: null),
-                iterationToken);
+                stoppingToken);
+        }
+    }
+
+    private async Task ApplyOutcomeWithinDeadlineAsync(
+        Guid eventId,
+        Guid jobId,
+        BackendStartOutcome outcome,
+        CancellationToken stoppingToken)
+    {
+        using var outcomeTimeout = new CancellationTokenSource(
+            OutcomePersistenceDeadline,
+            _timeProvider);
+        using var outcomeDeadline = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken,
+            outcomeTimeout.Token);
+        try
+        {
+            await ApplyOutcomeAsync(eventId, jobId, outcome, outcomeDeadline.Token);
+        }
+        catch (OperationCanceledException) when (
+            outcomeTimeout.IsCancellationRequested &&
+            !stoppingToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "[BackendStartConsumer] Outcome persistence deadline reached for EventId={EventId}; durable attempt reconciliation remains authoritative",
+                eventId);
+        }
+    }
+
+    private async Task PersistRearmedCommandWithinDeadlineAsync(
+        AppDbContext db,
+        Guid eventId,
+        CancellationToken stoppingToken)
+    {
+        using var persistenceTimeout = new CancellationTokenSource(
+            OutcomePersistenceDeadline,
+            _timeProvider);
+        using var persistenceDeadline = CancellationTokenSource.CreateLinkedTokenSource(
+            stoppingToken,
+            persistenceTimeout.Token);
+        try
+        {
+            await db.SaveChangesAsync(persistenceDeadline.Token);
+        }
+        catch (OperationCanceledException) when (
+            persistenceTimeout.IsCancellationRequested &&
+            !stoppingToken.IsCancellationRequested)
+        {
+            logger.LogWarning(
+                "[BackendStartConsumer] Deadline rearm persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
+                eventId);
         }
     }
 
