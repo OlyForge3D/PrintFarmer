@@ -94,17 +94,17 @@ describe("NotificationDrawer", () => {
     vi.mocked(useMarkNotificationAsRead).mockReturnValue({
       mutateAsync: mockMarkAsRead,
       isPending: false,
-    } as ReturnType<typeof useNotifications>);
+    } as ReturnType<typeof useMarkNotificationAsRead>);
 
     vi.mocked(useMarkAllNotificationsAsRead).mockReturnValue({
       mutateAsync: mockMarkAllAsRead,
       isPending: false,
-    } as ReturnType<typeof useNotifications>);
+    } as ReturnType<typeof useMarkAllNotificationsAsRead>);
 
     vi.mocked(useDeleteNotification).mockReturnValue({
       mutateAsync: mockDelete,
       isPending: false,
-    } as ReturnType<typeof useNotifications>);
+    } as ReturnType<typeof useDeleteNotification>);
   });
 
   it("does not render when closed", () => {

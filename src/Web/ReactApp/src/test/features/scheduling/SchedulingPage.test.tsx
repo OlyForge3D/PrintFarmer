@@ -3,6 +3,8 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
+import type { UseMutationResult, UseQueryResult } from '@tanstack/react-query';
+import type { ApiError, ScheduledJob } from '@/types/api';
 
 // Mock the API hooks
 vi.mock('@/common/hooks/useApi', () => ({
@@ -60,6 +62,57 @@ vi.mock('@/features/scheduling/components/ScheduleModal', () => ({
 // Dynamic import after mocks
 const { useScheduledJobs, usePauseSchedule, useResumeSchedule, useCancelSchedule } = await import('@/common/hooks/useApi');
 
+function queryResult<T>(data: T): UseQueryResult<T, ApiError> {
+  return {
+    data,
+    dataUpdatedAt: 0,
+    error: null,
+    errorUpdatedAt: 0,
+    failureCount: 0,
+    failureReason: null,
+    errorUpdateCount: 0,
+    isError: false,
+    isFetched: true,
+    isFetchedAfterMount: true,
+    isFetching: false,
+    isLoading: false,
+    isPending: false,
+    isInitialLoading: false,
+    isPaused: false,
+    isPlaceholderData: false,
+    isLoadingError: false,
+    isRefetchError: false,
+    isRefetching: false,
+    isStale: false,
+    isSuccess: true,
+    isEnabled: true,
+    refetch: vi.fn(),
+    status: 'success',
+    fetchStatus: 'idle',
+  };
+}
+
+function mutationResult(): UseMutationResult<void, ApiError, string, unknown> {
+  return {
+    context: undefined,
+    data: undefined,
+    error: null,
+    failureCount: 0,
+    failureReason: null,
+    isError: false,
+    isIdle: true,
+    isPaused: false,
+    isPending: false,
+    isSuccess: false,
+    mutate: vi.fn(),
+    mutateAsync: vi.fn(),
+    reset: vi.fn(),
+    status: 'idle',
+    variables: undefined,
+    submittedAt: 0,
+  };
+}
+
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -104,35 +157,20 @@ describe('SchedulingPage', () => {
     },
   ];
 
-  const mockPauseMutation = {
-    mutate: vi.fn(),
-    isPending: false,
-  };
-
-  const mockResumeMutation = {
-    mutate: vi.fn(),
-    isPending: false,
-  };
-
-  const mockCancelMutation = {
-    mutate: vi.fn(),
-    isPending: false,
-  };
+  const mockPauseMutation = mutationResult();
+  const mockResumeMutation = mutationResult();
+  const mockCancelMutation = mutationResult();
 
   beforeEach(() => {
     vi.clearAllMocks();
     
-    vi.mocked(usePauseSchedule).mockReturnValue(mockPauseMutation as ReturnType<typeof usePauseSchedule>);
-    vi.mocked(useResumeSchedule).mockReturnValue(mockResumeMutation as ReturnType<typeof useResumeSchedule>);
-    vi.mocked(useCancelSchedule).mockReturnValue(mockCancelMutation as ReturnType<typeof useCancelSchedule>);
+    vi.mocked(usePauseSchedule).mockReturnValue(mockPauseMutation);
+    vi.mocked(useResumeSchedule).mockReturnValue(mockResumeMutation);
+    vi.mocked(useCancelSchedule).mockReturnValue(mockCancelMutation);
   });
 
   it('renders page with calendar and scheduled jobs table', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: mockJobs,
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult<ScheduledJob[]>(mockJobs));
 
     render(
       <TestWrapper>
@@ -147,11 +185,7 @@ describe('SchedulingPage', () => {
   });
 
   it('shows loading spinner while data is fetching', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: [],
-      isLoading: true,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult([]));
 
     render(
       <TestWrapper>
@@ -166,11 +200,7 @@ describe('SchedulingPage', () => {
   });
 
   it('shows empty state when no scheduled jobs', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: [],
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult([]));
 
     render(
       <TestWrapper>
@@ -183,11 +213,7 @@ describe('SchedulingPage', () => {
   });
 
   it('displays scheduled jobs as badges on correct calendar dates', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: mockJobs,
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult<ScheduledJob[]>(mockJobs));
 
     render(
       <TestWrapper>
@@ -199,11 +225,7 @@ describe('SchedulingPage', () => {
   });
 
   it('clicking pause button calls pause mutation', async () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: mockJobs,
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult<ScheduledJob[]>(mockJobs));
 
     render(
       <TestWrapper>
@@ -219,11 +241,7 @@ describe('SchedulingPage', () => {
   });
 
   it('clicking resume button calls resume mutation', async () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: mockJobs,
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult<ScheduledJob[]>(mockJobs));
 
     render(
       <TestWrapper>
@@ -238,11 +256,7 @@ describe('SchedulingPage', () => {
   });
 
   it('clicking cancel button calls cancel mutation after confirmation', async () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: mockJobs,
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult<ScheduledJob[]>(mockJobs));
 
     render(
       <TestWrapper>
@@ -263,11 +277,7 @@ describe('SchedulingPage', () => {
       { ...mockJobs[0], jobId: 'job-5', status: 'completed' as const },
     ];
 
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: jobsWithVariousStatuses,
-      isLoading: false,
-      error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult<ScheduledJob[]>(jobsWithVariousStatuses));
 
     render(
       <TestWrapper>
@@ -282,11 +292,7 @@ describe('SchedulingPage', () => {
   });
 
   it('shows error message when data fails to load', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
-      data: [],
-      isLoading: false,
-      error: new Error('Failed to fetch'),
-    } as ReturnType<typeof useScheduledJobs>);
+    vi.mocked(useScheduledJobs).mockReturnValue(queryResult([]));
 
     render(
       <TestWrapper>
