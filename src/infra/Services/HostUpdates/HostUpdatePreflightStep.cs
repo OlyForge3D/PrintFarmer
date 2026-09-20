@@ -188,9 +188,9 @@ public interface IHostUpdateMigrationTarget
 
     Task<string> GetProviderNameAsync(CancellationToken cancellationToken);
 
-    Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken);
+    Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 
-    Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken);
+    Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken);
 
     /// <summary>
     /// A non-secret SHA256 fingerprint of this context's resolved connection string. Used only
@@ -260,7 +260,8 @@ public sealed class HostUpdatePreflightCheck(
                 throw new HostUpdatePreflightFailedException("provider_inspection_failed");
             }
 
-            if (!supportedProviderNames.Contains(provider))
+            if (!supportedProviderNames.Contains(provider) ||
+                !HostUpdateTargetImageMigrationRunner.SupportedProviders.Contains(provider))
             {
                 throw new HostUpdatePreflightFailedException($"unsupported_provider:{provider}");
             }

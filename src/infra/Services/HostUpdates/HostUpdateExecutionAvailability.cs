@@ -57,7 +57,6 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
 
     private static readonly string[] CodeOwnedUnavailableFacilities =
     [
-        "target_image_migration_runner_unavailable",
         "queue_reconciliation_writer_fence_unavailable",
     ];
 
@@ -180,7 +179,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             switch (providerName)
             {
                 case "Microsoft.EntityFrameworkCore.Sqlite":
-                    requiredTools.Add("sqlite3");
+                    reasons.Add($"database_provider_tooling_unsupported:{target.ContextName}:{providerName}");
                     break;
                 case "Npgsql.EntityFrameworkCore.PostgreSQL":
                     requiredTools.Add("pg_dump");
