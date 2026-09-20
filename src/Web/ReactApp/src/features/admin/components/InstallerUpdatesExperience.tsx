@@ -417,6 +417,9 @@ export function InstallerUpdatesExperience({
     ? readiness.reasons
     : [];
   const readinessHops = Array.isArray(readiness?.hops) ? readiness.hops : [];
+  const unsignedLegacyInstallation = eligibilityReasons.includes(
+    "UnsignedLegacyInstallationManualOnly",
+  );
 
   return (
     <div className="space-y-4" data-testid="installer-updates">
@@ -433,10 +436,12 @@ export function InstallerUpdatesExperience({
         </div>
       )}
       <Alert
-        type={blocked ? "error" : "info"}
+        type={blocked || unsignedLegacyInstallation ? "error" : "info"}
         title="Read-only release availability"
       >
-        {blocked
+        {unsignedLegacyInstallation
+          ? "This unsigned legacy installation cannot establish managed eligibility. Install a current signed release manually once; subsequent managed eligibility requires the signed release evidence and never an operator assertion."
+          : blocked
           ? "The observed installation is blocked. Wait, fix forward, or use the documented restore path; downgrade is not offered as a bypass."
           : "Availability is read-only until trusted host evidence and the constrained executor are accepted. Missing evidence is not treated as installable."}
       </Alert>
@@ -518,6 +523,14 @@ export function InstallerUpdatesExperience({
             {inventory?.eligibility ?? UNKNOWN}.{" "}
             {eligibilityReasons.join(", ") || "No reasons reported."}
           </p>
+          {unsignedLegacyInstallation && (
+            <Alert type="warning" title="Manual signed install required">
+              This installation predates signed release evidence. Do not wait for
+              a facility fix or use a downgrade; manually install a current
+              signed release, then refresh inventory to establish managed
+              eligibility.
+            </Alert>
+          )}
           <p>
             Readiness reasons: {readinessReasons.join(", ") || UNKNOWN}.
             Readiness hops: {readinessHops.join(" → ") || UNKNOWN}.

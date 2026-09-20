@@ -34,6 +34,26 @@ public sealed class ServiceInventoryTests
     }
 
     [Fact]
+    public void Evaluate_UnsignedVersionedInstallation_IsDistinctlyManualOnly()
+    {
+        ServiceInventoryDto result = Evaluate(
+        [
+            new()
+            {
+                ServiceId = "api",
+                ApplicationVersion = "0.2.3-insider.2",
+                ObservationState = InventoryObservationState.Observed,
+                ObservedAt = Now,
+                Source = "SelfReport",
+            },
+        ]);
+
+        result.Eligibility.Should().Be(InventoryEligibility.NotManaged);
+        result.EligibilityReasons.Should().Contain("UnsignedLegacyInstallationManualOnly");
+        result.EligibilityReasons.Should().NotContain("ManagedEligibilityNotEstablished");
+    }
+
+    [Fact]
     public void Evaluate_ExplicitInsider_DoesNotRelabelLegacyBuild()
     {
         ServiceInventoryDto result = Evaluate([new() { ApplicationVersion = "1.2.3-daily.7" }], "insider");

@@ -23,6 +23,7 @@ public static partial class ServiceInventoryEvaluator
             InventoryCompatibilityState.Compatible => "SameVerifiedReleaseSet",
             _ => "IncompleteReleaseOrPlatformEvidence",
         }];
+        bool unsignedLegacyInstallation = installed.Any(IsUnsignedLegacyInstallation);
         InventoryChannelState channelState = channels.Length > 1 ? InventoryChannelState.Mixed
             : installed.Any(row => row.ChannelState == InventoryChannelState.Mismatch) ? InventoryChannelState.Mismatch
             : installed.Any(row => row.ObservationState == InventoryObservationState.Stale) ? InventoryChannelState.Stale
@@ -40,7 +41,11 @@ public static partial class ServiceInventoryEvaluator
             CompatibilityState = compatibility,
             CompatibilityReasons = reasons,
             Eligibility = blocked ? InventoryEligibility.Blocked : InventoryEligibility.NotManaged,
-            EligibilityReasons = blocked ? [.. reasons, "ReadOnlyInventory"] : ["ManagedEligibilityNotEstablished", "ReadOnlyInventory"],
+            EligibilityReasons = blocked
+                ? [.. reasons, "ReadOnlyInventory"]
+                : unsignedLegacyInstallation
+                    ? ["UnsignedLegacyInstallationManualOnly", "ReadOnlyInventory"]
+                    : ["ManagedEligibilityNotEstablished", "ReadOnlyInventory"],
             Services = replicas.Select(row => row with
             {
                 CompatibilityState = row.ObservationState == InventoryObservationState.NotInstalled ? InventoryCompatibilityState.Unknown : compatibility,
@@ -48,6 +53,14 @@ public static partial class ServiceInventoryEvaluator
             }).ToArray(),
         };
     }
+
+    private static bool IsUnsignedLegacyInstallation(ServiceReplicaObservationDto row) =>
+        row.ObservationState is InventoryObservationState.Observed or InventoryObservationState.Stale
+        && row.ApplicationVersion is not null
+        && row.Identity is null
+        && row.ManifestDigest is null
+        && row.VerificationSource is null
+        && row.VerifiedAt is null;
 
     // Source adapters retain original timestamps; reading an old snapshot cannot make it fresh.
     private static ServiceReplicaObservationDto Normalize(ServiceReplicaObservationDto row, string selection, DateTimeOffset now)

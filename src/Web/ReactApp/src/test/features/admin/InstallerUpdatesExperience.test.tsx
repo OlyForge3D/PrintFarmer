@@ -115,6 +115,19 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByText(/Host maintenance is required/)).toBeVisible();
   });
 
+  it('distinguishes unsigned legacy installations from executor facility blockers and gives the manual path', () => {
+    render(<InstallerUpdatesExperience inventory={inventory({
+      eligibility: 'NotManaged',
+      eligibilityReasons: ['UnsignedLegacyInstallationManualOnly', 'ReadOnlyInventory'],
+      compatibilityState: 'Compatible',
+    })} observation="connected" />);
+
+    expect(screen.getByText(/cannot establish managed eligibility/)).toBeVisible();
+    expect(screen.getByText('Manual signed install required')).toBeVisible();
+    expect(screen.getByText(/manually install a current signed release/)).toBeVisible();
+    expect(screen.queryByText(/target_image_migration_runner_unavailable/)).not.toBeInTheDocument();
+  });
+
   it('renders every observed replica and marks conflicting identities without proposing a target', async () => {
     render(<InstallerUpdatesExperience inventory={conflictingReplicaInventory()} observation="connected" />);
     expect(screen.getByText(/Conflicting observed deployments/)).toBeVisible();

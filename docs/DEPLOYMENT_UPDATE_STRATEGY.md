@@ -113,6 +113,27 @@ managed-update eligible. A valid signature authenticates the publisher and exact
 manifest bytes; it does not authorize or implement apply, installation,
 active-print handling, staging, recovery, or runtime safety.
 
+### Unsigned legacy installations: permanent manual bootstrap decision
+
+Unsigned legacy installations do not have a trust bootstrap. Operator assertion,
+an unsigned manifest, a mutable image reference, or a matching version string
+cannot establish managed eligibility and must never be treated as a verified
+release. Historical releases are not retroactively signed.
+
+The supported path is deliberately one-time and manual: install a current
+signed release through the documented deployment procedure, then refresh the
+inventory. The signed release manifest and its verified identity can establish
+managed eligibility from that point forward. Waiting for an executor facility
+fix does not change an unsigned installation's trust state, and downgrade is
+not a recovery path.
+
+Inventory reports this condition as
+`UnsignedLegacyInstallationManualOnly`, separately from executor
+`facility_unavailable:*` evidence. The former is a permanent property of the
+installation until a manual signed install replaces it; the latter identifies
+code-owned host-update facilities that may clear when their implementations
+land. Neither condition authorizes execution, and both remain fail-closed.
+
 Before the first stable signed publication, a maintainer must update the live
 `release-stable` environment deployment-branch policy to allow only `main`;
 `release-insider` must allow only `development`. The release tooling queries
