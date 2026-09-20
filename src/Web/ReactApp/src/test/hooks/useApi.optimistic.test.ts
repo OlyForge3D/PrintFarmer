@@ -13,7 +13,14 @@ import {
   useUpdatePrinter,
 } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
-import { PrinterBackend, Printer, QueuedPrintJobWithFileMetaDto } from '@/types/api';
+import {
+  type JobQueuePrintJob,
+  PrintJobPriority,
+  PrintJobStatus,
+  PrinterBackend,
+  type Printer,
+  type QueuedPrintJobWithFileMetaDto,
+} from '@/types/api';
 
 // Utility to create a fresh QueryClient per test
 function createTestClient() {
@@ -234,16 +241,19 @@ describe('optimistic queue print job', () => {
     const wrapper = wrapperFactory(client);
 
     const printerId = 'printer-1';
-    const realJob = {
+    const realJob: JobQueuePrintJob = {
       id: 'job-123',
       printerId,
       gcodeFileId: 'file-9',
       gcodeFileName: 'cube.gcode',
-      status: 0, // Pending
-      priority: 0,
+      status: PrintJobStatus.Queued,
+      priority: PrintJobPriority.Normal,
       queuedAt: new Date(),
       createdAt: new Date(),
-      updatedAt: new Date()
+      updatedAt: new Date(),
+      copies: 1,
+      completedCopies: 0,
+      remainingCopies: 1,
     };
 
     const queueSpy = vi.spyOn(apiClient, 'queuePrintJob').mockImplementation(async () => {
@@ -254,7 +264,11 @@ describe('optimistic queue print job', () => {
     const { result } = renderHook(() => useQueuePrintJob(), { wrapper });
 
     await act(async () => {
-      result.current.mutate({ printerId, gcodeFileId: 'file-9', priority: 0 });
+      result.current.mutate({
+        printerId,
+        gcodeFileId: 'file-9',
+        priority: PrintJobPriority.Normal,
+      });
     });
 
     const printerQueueKey = queryKeys.jobQueue(printerId);
