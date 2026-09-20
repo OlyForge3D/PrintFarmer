@@ -34,4 +34,33 @@ public class BackendTimeoutSettingsTests
 
         settings.FileUploadTimeoutSeconds.Should().Be(347);
     }
+
+    [Fact]
+    public void ShippedAppSettings_BackendTimeouts_AreExpectedProductionTimeouts()
+    {
+        IConfiguration configuration = new ConfigurationBuilder()
+            .AddJsonFile(
+                Path.Combine(FindRepositoryRoot(), "src", "api", "appsettings.json"),
+                optional: false)
+            .Build();
+        IConfigurationSection section = configuration.GetSection("BackendTimeouts");
+
+        section.GetValue<int>("StatusPollTimeoutSeconds").Should().Be(10);
+        section.GetValue<int>("CommandTimeoutSeconds").Should().Be(30);
+        section.GetValue<int>("PrintControlTimeoutSeconds").Should().Be(60);
+        section.GetValue<int>("FileUploadTimeoutSeconds").Should().Be(300);
+        section.GetValue<int>("FileDownloadTimeoutSeconds").Should().Be(900);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        DirectoryInfo? root = new(AppContext.BaseDirectory);
+        while (root is not null && !File.Exists(Path.Combine(root.FullName, "VERSION")))
+        {
+            root = root.Parent;
+        }
+
+        Assert.NotNull(root);
+        return root.FullName;
+    }
 }

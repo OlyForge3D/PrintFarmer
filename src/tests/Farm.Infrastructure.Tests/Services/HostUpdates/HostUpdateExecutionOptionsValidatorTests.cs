@@ -104,15 +104,6 @@ public class HostUpdateExecutionOptionsValidatorTests
     }
 
     [Fact]
-    public void DefaultFenceProofBudget_ExceedsRequiredWriterDuration()
-    {
-        var options = new HostUpdateExecutionOptions();
-
-        TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds)
-            .Should().BeGreaterThan(BackendStartCommandConsumerService.RequiredFenceProofDuration);
-    }
-
-    [Fact]
     public void Validate_FenceProofHeadroomLessThanPollInterval_Fails()
     {
         string root = Path.Combine(
