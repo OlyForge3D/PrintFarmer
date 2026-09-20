@@ -55,10 +55,7 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
-    private static readonly string[] CodeOwnedUnavailableFacilities =
-    [
-        "queue_reconciliation_writer_fence_unavailable",
-    ];
+    private static readonly string[] CodeOwnedUnavailableFacilities = [];
 
     public async Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken)
     {

@@ -80,7 +80,7 @@ previous run's state) and then periodically rechecks, publishing every result in
 `HostUpdateExecutionAvailabilityHolder` that both the admin API and a future #2666 scheduler poll
 without re-running the probe on every read. `Available` carries no reasons; `Unavailable` always
 carries the exact missing mechanism(s) (e.g. `root_directory_unwritable:...`,
-`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:webhook-delivery`, a code-owned `facility_unavailable:...`, or `host_executable_not_configured:<tool>`) so an operator is never left guessing. In the current production code, availability is unconditionally closed by every entry in `CodeOwnedUnavailableFacilities` (`HostUpdateExecutionAvailability.cs`). It is also closed when a required audited host tool path is not configured (`host_executable_not_configured:<tool>`). Separately, installations without verified signed release evidence remain manual-only and fail closed in the `NotManaged` / `ManagedEligibilityNotEstablished` inventory state. No trust bootstrap is planned or supported: the supported transition is one manual installation of a current signed release followed by inventory refresh, after which normal signed discovery can establish managed eligibility. These are unimplemented or unconfigured fail-closed mechanisms, not missing acceptance evidence; they must be addressed before this executor can report production `Available`.
+`compose_file_missing:...`, `docker_runtime_unavailable`, `insufficient_fenced_writers:<name>[,<name>...]`, `facility_unavailable:sql_server_visible_backup_path_mapping_unverified:<evidence>`, `database_provider_tooling_unsupported:<context>:<provider>`, or `host_executable_not_configured:<tool>`) so an operator is never left guessing. The code-owned blanket list is now empty; availability closes on this concrete runtime evidence instead. `RequiredUnavailableFacilities` remains an explicit operator override for a deployment-specific prerequisite that must keep execution closed. Separately, installations without verified signed release evidence remain manual-only and fail closed in the `NotManaged` / `ManagedEligibilityNotEstablished` inventory state. No trust bootstrap is planned or supported: the supported transition is one manual installation of a current signed release followed by inventory refresh, after which normal signed discovery can establish managed eligibility.
 
 The process boundary is production-ready independently of those facilities:
 `ConfiguredHostUpdateExecutableResolver` requires an explicit absolute path for each audited native
@@ -234,7 +234,7 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   `probe_directory_creation_failed:<exception-type>`,
   `probe_stale_file_removal_failed:<exception-type>`, `probe_backup_invocation_failed:<exception-type>`,
   `probe_backup_command_failed:<exit-code>`, `probe_file_not_visible_from_printfarmer`) and closes
-  availability for the whole executor, exactly like the other code-owned facilities. This
+  availability for the whole executor until it is verified. This
   verification is resolved lazily (only when the availability probe or a real backup actually
   runs), so a deployment that only uses PostgreSQL or SQLite never touches SQL Server-specific
   resolution at all. See `HostUpdateDatabaseBackupTargetFactoryTests` for the fail-closed and

@@ -133,6 +133,7 @@ public sealed class HostUpdateExecutionOptions
         "bed-clear-acknowledgement-expiry",
         "auto-dispatch",
         "webhook-delivery",
+        "queue-reconciliation",
     ];
 
     /// <summary>
