@@ -260,7 +260,8 @@ public sealed class HostUpdatePreflightCheck(
                 throw new HostUpdatePreflightFailedException("provider_inspection_failed");
             }
 
-            if (!supportedProviderNames.Contains(provider))
+            if (!supportedProviderNames.Contains(provider) ||
+                !HostUpdateTargetImageMigrationRunner.SupportedProviders.Contains(provider))
             {
                 throw new HostUpdatePreflightFailedException($"unsupported_provider:{provider}");
             }

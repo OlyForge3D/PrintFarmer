@@ -58,14 +58,15 @@ public sealed class HostUpdatePreflightStepTests
 
     private static HostUpdatePreflightCheck CreateCheck(
         IReadOnlyList<IHostUpdateMigrationTarget> migrationTargets,
-        IReadOnlySet<string>? mappedServiceIds = null) => new(
+        IReadOnlySet<string>? mappedServiceIds = null,
+        IReadOnlySet<string>? supportedProviderNames = null) => new(
             new NullInstalledHostStateStore(),
             migrationTargets,
             new AlwaysDockerAvailableProcessRunner(),
             new BareNameResolver(),
             Path.GetTempPath(),
             0,
-            new HashSet<string>(StringComparer.Ordinal) { "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.SqlServer" },
+            supportedProviderNames ?? new HashSet<string>(StringComparer.Ordinal) { "Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.SqlServer" },
             mappedServiceIds);
 
     private sealed class BareNameResolver : IHostUpdateExecutableResolver
@@ -128,6 +129,22 @@ public sealed class HostUpdatePreflightStepTests
     public async Task RunAsync_UnsupportedProvider_FailsClosed()
     {
         HostUpdatePreflightCheck check = CreateCheck([new FakeMigrationTarget("AppDbContext", "Microsoft.EntityFrameworkCore.Sqlite")]);
+
+        Func<Task> act = () => check.RunAsync(Request(SixServiceIds), CancellationToken.None);
+
+        HostUpdatePreflightFailedException exception = (await act.Should().ThrowAsync<HostUpdatePreflightFailedException>()).Which;
+        exception.Code.Should().Be("unsupported_provider:Microsoft.EntityFrameworkCore.Sqlite");
+    }
+
+    [Fact]
+    public async Task RunAsync_SqliteConfiguredAsSupported_StillFailsBeforeDrain()
+    {
+        HostUpdatePreflightCheck check = CreateCheck(
+            [new FakeMigrationTarget("AppDbContext", "Microsoft.EntityFrameworkCore.Sqlite")],
+            supportedProviderNames: new HashSet<string>(StringComparer.Ordinal)
+            {
+                "Microsoft.EntityFrameworkCore.Sqlite",
+            });
 
         Func<Task> act = () => check.RunAsync(Request(SixServiceIds), CancellationToken.None);
 
