@@ -1,7 +1,17 @@
 import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/common/components/ui";
 import { Modal } from "@/common/components/modals/Modal";
 import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
-import type { ServiceInventory, UpdateChannel, UpdateChannelSettings, UpdateSchedulingStatus } from "@/types/api";
+import { getErrorMessage, isApiError } from "@/common/utils/apiErrors";
+import type { HostUpdateExecutionResult } from "@/services/api";
+import type {
+  HostUpdateManualAuthorizationResponse,
+  HostUpdateRecoveryResult,
+  HostUpdateStatusResponse,
+  ServiceInventory,
+  UpdateChannel,
+  UpdateChannelSettings,
+  UpdateSchedulingStatus,
+} from "@/types/api";
 import { useEffect, useRef, useState } from "react";
 
 const INSIDER_WARNING =
@@ -11,6 +21,47 @@ const MANUAL_DISABLED_REASON =
   "Update now is unavailable because the runtime execution contract, including its constrained executor, fresh host evidence, recovery, reauthentication, and request-origin protections, is not available.";
 const AUTO_DISABLED_REASON =
   "Auto-update is off and unavailable because the runtime scheduler, bounded standing-permission, maintenance-window, recovery, and host-policy contract is not available.";
+const MANUAL_UPDATE_RELEASE_KEY = "printfarmer.manual-host-update.release-id";
+
+function readManualUpdateReleaseId() {
+  try {
+    const releaseId = window.localStorage.getItem(MANUAL_UPDATE_RELEASE_KEY);
+    return releaseId && releaseId.trim().length > 0 ? releaseId : null;
+  } catch {
+    return null;
+  }
+}
+
+function writeManualUpdateReleaseId(releaseId: string) {
+  try {
+    window.localStorage.setItem(MANUAL_UPDATE_RELEASE_KEY, releaseId);
+  } catch {
+    // Persistence is best effort; execution must not depend on storage.
+  }
+}
+
+function clearManualUpdateReleaseId() {
+  try {
+    window.localStorage.removeItem(MANUAL_UPDATE_RELEASE_KEY);
+  } catch {
+    // Persistence is best effort.
+  }
+}
+
+function isRolledBackStatus(status: HostUpdateStatusResponse) {
+  const activities = Array.isArray(status.activities) ? status.activities : [];
+  const terminal = activities.at(-1);
+  return status.currentState === "Completed" &&
+    terminal?.phase === "recovery:rolled_back";
+}
+
+function isTerminalForRetry(status: HostUpdateStatusResponse) {
+  return status.currentState === "Completed" || status.currentState === "RecoveryRequired";
+}
+
+function isTerminalForReleaseIdentity(status: HostUpdateStatusResponse) {
+  return status.currentState === "Completed";
+}
 
 export interface InstallerUpdatesExperienceProps {
   inventory: ServiceInventory | null | undefined;
@@ -21,6 +72,10 @@ export interface InstallerUpdatesExperienceProps {
   updateChannelIsError?: boolean;
   onRetryUpdateChannel?: () => Promise<UpdateChannelSettings>;
   onSaveUpdateChannel?: (settings: UpdateChannelSettings) => Promise<UpdateChannelSettings>;
+  onAuthorizeHostUpdate?: () => Promise<HostUpdateManualAuthorizationResponse>;
+  onExecuteHostUpdate?: (authorizationId: string) => Promise<HostUpdateExecutionResult>;
+  onGetHostUpdateStatus: (releaseId: string) => Promise<HostUpdateStatusResponse>;
+  onRecoverHostUpdate?: (releaseId: string, requestId?: string) => Promise<HostUpdateRecoveryResult>;
 }
 
 function text(value: string | null | undefined) {
@@ -257,6 +312,10 @@ export function InstallerUpdatesExperience({
   updateChannelIsError = false,
   onRetryUpdateChannel,
   onSaveUpdateChannel,
+  onAuthorizeHostUpdate,
+  onExecuteHostUpdate,
+  onGetHostUpdateStatus,
+  onRecoverHostUpdate,
 }: InstallerUpdatesExperienceProps) {
   const [channel, setChannel] = useState<UpdateChannel>(updateChannelSettings?.channel ?? "stable");
   const [acknowledgementOpen, setAcknowledgementOpen] = useState(false);
@@ -275,6 +334,20 @@ export function InstallerUpdatesExperience({
   // True only while an explicit GET-only retry (triggered from this
   // component) is in flight, so a double-click cannot fire it twice.
   const [retryingUpdateChannel, setRetryingUpdateChannel] = useState(false);
+  const [manualUpdateOpen, setManualUpdateOpen] = useState(false);
+  const [manualUpdateBusy, setManualUpdateBusy] = useState(
+    () => readManualUpdateReleaseId() != null,
+  );
+  const [manualUpdateError, setManualUpdateError] = useState<string | null>(null);
+  const [manualUpdateStatus, setManualUpdateStatus] = useState<HostUpdateStatusResponse | null>(null);
+  const [manualUpdateRecovery, setManualUpdateRecovery] = useState<HostUpdateRecoveryResult | null>(null);
+  const [hostUpdateUnsupported, setHostUpdateUnsupported] = useState(false);
+  const [manualUpdateFencePending, setManualUpdateFencePending] = useState(false);
+  const [manualUpdateReleaseId, setManualUpdateReleaseId] = useState<string | null>(readManualUpdateReleaseId);
+  const initialManualUpdateReleaseId = useRef(manualUpdateReleaseId);
+  const [manualUpdateAttempted, setManualUpdateAttempted] = useState(false);
+  const manualUpdateDispatchLock = useRef(false);
+  const rehydrationAttempted = useRef(false);
   // Set immediately (synchronously, before any state update) by an
   // operation outcome handler -- save success, confirmed rejection, or
   // GET-only retry -- to the exact settings it just reconciled the UI to.
@@ -287,6 +360,10 @@ export function InstallerUpdatesExperience({
   // unrelated later settings arrival with coincidentally equal content is
   // still processed normally.
   const pendingLocalReconciliationRef = useRef<UpdateChannelSettings | null>(null);
+
+  useEffect(() => {
+    setHostUpdateUnsupported(false);
+  }, [inventory]);
 
   useEffect(() => {
     if (!updateChannelSettings) return;
@@ -309,6 +386,48 @@ export function InstallerUpdatesExperience({
     setSaveOutcomeUnknown(false);
     setChannelError(null);
   }, [updateChannelSettings]);
+
+  useEffect(() => {
+    const releaseId = initialManualUpdateReleaseId.current;
+    if (rehydrationAttempted.current) return;
+    if (!releaseId) {
+      clearManualUpdateReleaseId();
+      setManualUpdateBusy(false);
+      return;
+    }
+    rehydrationAttempted.current = true;
+    let active = true;
+    void onGetHostUpdateStatus(releaseId).then((status) => {
+      if (!active) return;
+      if (readManualUpdateReleaseId() !== releaseId) {
+        setManualUpdateBusy(false);
+        return;
+      }
+      setManualUpdateStatus(status);
+      setManualUpdateOpen(true);
+      setManualUpdateBusy(false);
+      if (isTerminalForReleaseIdentity(status)) {
+        clearManualUpdateReleaseId();
+        setManualUpdateReleaseId(null);
+      }
+    }).catch((error) => {
+      if (!active) return;
+      if (readManualUpdateReleaseId() !== releaseId) {
+        setManualUpdateBusy(false);
+        return;
+      }
+      if (isApiError(error) && error.statusCode === 404) {
+        clearManualUpdateReleaseId();
+        setManualUpdateReleaseId(null);
+        setManualUpdateBusy(false);
+        return;
+      }
+      setManualUpdateError(getErrorMessage(error, "The previous host update status could not be loaded."));
+      setManualUpdateOpen(true);
+      setManualUpdateBusy(false);
+    });
+    return () => { active = false; };
+  }, [onGetHostUpdateStatus]);
 
   const settingsLoaded = updateChannelSettings != null && !updateChannelIsLoading && !updateChannelIsError;
   const channelControlDisabled = savingChannel || !settingsLoaded || !onSaveUpdateChannel || saveOutcomeUnknown || retryingUpdateChannel;
@@ -420,6 +539,186 @@ export function InstallerUpdatesExperience({
   const unsignedLegacyInstallation = eligibilityReasons.includes(
     "SignedReleaseEvidenceUnavailableManualOnly",
   );
+  const manualUpdateAvailable =
+    observation === "connected" &&
+    readiness?.state === "Eligible" &&
+    inventory?.eligibility === "Eligible" &&
+    !blocked &&
+    !hostUpdateUnsupported &&
+    !manualUpdateFencePending &&
+    onAuthorizeHostUpdate != null &&
+    onExecuteHostUpdate != null;
+
+  const authorizeAndExecuteHostUpdate = async () => {
+    if (
+      !onAuthorizeHostUpdate ||
+      !onExecuteHostUpdate ||
+      manualUpdateBusy ||
+      manualUpdateAttempted ||
+      manualUpdateDispatchLock.current
+    ) return;
+    manualUpdateDispatchLock.current = true;
+    setManualUpdateBusy(true);
+    setManualUpdateError(null);
+    setManualUpdateRecovery(null);
+    let releaseId: string | null = null;
+    let executeDispatched = false;
+    try {
+      const authorization = await onAuthorizeHostUpdate();
+      releaseId = authorization.releaseId;
+      if (manualUpdateReleaseId && manualUpdateReleaseId !== releaseId) {
+        setManualUpdateStatus(null);
+        setManualUpdateRecovery(null);
+        clearManualUpdateReleaseId();
+      }
+      setManualUpdateReleaseId(releaseId);
+      writeManualUpdateReleaseId(releaseId);
+      setManualUpdateAttempted(true);
+      executeDispatched = true;
+      const execution = await onExecuteHostUpdate(authorization.authorizationId);
+      const status = "kind" in execution && execution.kind === "conflict"
+        ? execution.status
+        : execution;
+      setManualUpdateStatus(status);
+      if (status.releaseId !== releaseId) {
+        setManualUpdateReleaseId(status.releaseId);
+        writeManualUpdateReleaseId(status.releaseId);
+      }
+      if ("kind" in execution && execution.kind === "conflict") {
+        setManualUpdateError("Another host update is already in progress.");
+      }
+      if (isTerminalForRetry(status)) {
+        if (isTerminalForReleaseIdentity(status)) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
+        }
+        setManualUpdateAttempted(false);
+        manualUpdateDispatchLock.current = false;
+      }
+      setManualUpdateOpen(true);
+    } catch (error) {
+      if (isApiError(error) && error.statusCode === 503) {
+        setHostUpdateUnsupported(true);
+        if (executeDispatched) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
+        }
+        setManualUpdateAttempted(false);
+        manualUpdateDispatchLock.current = false;
+        const detail = typeof error.data === "object" && error.data !== null &&
+          typeof (error.data as { detail?: unknown }).detail === "string"
+          ? (error.data as { detail: string }).detail
+          : "The host update subsystem is unavailable on this host.";
+        setManualUpdateError(`${detail} No update was started.`);
+        setManualUpdateOpen(true);
+        return;
+      }
+      if (executeDispatched && releaseId) {
+        try {
+          const status = await onGetHostUpdateStatus(releaseId);
+          setManualUpdateStatus(status);
+          setManualUpdateOpen(true);
+          const definitiveRejection = isApiError(error) && [400, 401, 403, 409, 422].includes(error.statusCode);
+          if (definitiveRejection) {
+            clearManualUpdateReleaseId();
+            setManualUpdateReleaseId(null);
+            setManualUpdateStatus(null);
+            setManualUpdateAttempted(false);
+            manualUpdateDispatchLock.current = false;
+            setManualUpdateError(getErrorMessage(error, "The host update was rejected before it could start."));
+            return;
+          }
+          if (isTerminalForRetry(status)) {
+            if (isTerminalForReleaseIdentity(status)) {
+              clearManualUpdateReleaseId();
+              setManualUpdateReleaseId(null);
+            }
+            setManualUpdateAttempted(false);
+            manualUpdateDispatchLock.current = false;
+          }
+          return;
+        } catch {
+          // Preserve the original execute error when status cannot yet be read.
+        }
+      }
+      if (!executeDispatched || (isApiError(error) && [400, 401, 403, 409, 422].includes(error.statusCode))) {
+        clearManualUpdateReleaseId();
+        setManualUpdateReleaseId(null);
+        setManualUpdateAttempted(false);
+        manualUpdateDispatchLock.current = false;
+      }
+      setManualUpdateError(isApiError(error) && error.statusCode === 503
+        ? "The host update subsystem is unavailable on this host. No update was started."
+        : getErrorMessage(error, "The host update could not be authorized or started."));
+      setManualUpdateOpen(true);
+    } finally {
+      manualUpdateDispatchLock.current = false;
+      setManualUpdateBusy(false);
+    }
+  };
+
+  const refreshManualUpdateStatus = async () => {
+    if (!manualUpdateStatus || manualUpdateBusy) return;
+    if (manualUpdateDispatchLock.current) return;
+    manualUpdateDispatchLock.current = true;
+    setManualUpdateBusy(true);
+    setManualUpdateError(null);
+    try {
+      const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
+      setManualUpdateStatus(status);
+      if (status.currentState !== "RecoveryRequired") {
+        setManualUpdateFencePending(false);
+      }
+      if (isTerminalForRetry(status)) {
+        if (isTerminalForReleaseIdentity(status)) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
+        }
+        setManualUpdateAttempted(false);
+        manualUpdateDispatchLock.current = false;
+      }
+    } catch (error) {
+      setManualUpdateError(getErrorMessage(error, "Update status could not be loaded."));
+    } finally {
+      manualUpdateDispatchLock.current = false;
+      setManualUpdateBusy(false);
+    }
+  };
+
+  const recoverManualUpdate = async () => {
+    if (!manualUpdateStatus || !onRecoverHostUpdate || manualUpdateBusy || manualUpdateDispatchLock.current) return;
+    manualUpdateDispatchLock.current = true;
+    setManualUpdateBusy(true);
+    setManualUpdateError(null);
+    try {
+      const recovery = await onRecoverHostUpdate(manualUpdateStatus.releaseId);
+      setManualUpdateRecovery(recovery);
+      if (recovery.outcome === "FenceReleasePending") {
+        setManualUpdateFencePending(true);
+        setManualUpdateError(
+          "Recovery is waiting for the host fence to be released. Refresh status before retrying.",
+        );
+      }
+      const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
+      setManualUpdateStatus(status);
+      if (status.currentState !== "RecoveryRequired") {
+        setManualUpdateFencePending(false);
+      }
+      if (isTerminalForRetry(status)) {
+        if (isTerminalForReleaseIdentity(status)) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
+        }
+        setManualUpdateAttempted(false);
+        manualUpdateDispatchLock.current = false;
+      }
+    } catch (error) {
+      setManualUpdateError(getErrorMessage(error, "Recovery could not be completed."));
+    } finally {
+      manualUpdateDispatchLock.current = false;
+      setManualUpdateBusy(false);
+    }
+  };
 
   return (
     <div className="space-y-4" data-testid="installer-updates">
@@ -555,10 +854,31 @@ export function InstallerUpdatesExperience({
             <Button
               type="button"
               variant="primary"
-              disabled
-              explainedDisabled
-              title={MANUAL_DISABLED_REASON}
+              disabled={!manualUpdateAvailable || manualUpdateBusy}
+              explainedDisabled={!manualUpdateAvailable || manualUpdateBusy}
+              title={manualUpdateFencePending
+                ? "Recovery is waiting for the host fence to be released. Refresh update status before retrying."
+                : hostUpdateUnsupported
+                ? "Host update execution is unavailable on this host until fresh host inventory is loaded."
+                : !manualUpdateAvailable
+                ? MANUAL_DISABLED_REASON
+                : manualUpdateBusy
+                  ? "An update operation is already in progress."
+                  : undefined}
               aria-describedby="manual-update-reason"
+              loading={manualUpdateBusy}
+              onClick={() => {
+                setManualUpdateError(null);
+                setManualUpdateRecovery(null);
+                if (manualUpdateStatus && isTerminalForReleaseIdentity(manualUpdateStatus)) {
+                  clearManualUpdateReleaseId();
+                  setManualUpdateReleaseId(null);
+                  setManualUpdateStatus(null);
+                  setManualUpdateAttempted(false);
+                  manualUpdateDispatchLock.current = false;
+                }
+                setManualUpdateOpen(true);
+              }}
             >
               Update now
             </Button>
@@ -577,7 +897,9 @@ export function InstallerUpdatesExperience({
             id="manual-update-reason"
             className="text-sm text-pf-text-secondary"
           >
-            {MANUAL_DISABLED_REASON}
+            {manualUpdateAvailable
+              ? "A verified candidate is ready. Update now will request one-time authorization before execution."
+              : MANUAL_DISABLED_REASON}
           </p>
           <p
             id="later-update-reason"
@@ -747,6 +1069,125 @@ export function InstallerUpdatesExperience({
           />
         </div>
       </Modal>
+      <Modal
+        isOpen={manualUpdateOpen}
+        onClose={() => {
+          if (!manualUpdateBusy) setManualUpdateOpen(false);
+        }}
+        title={manualUpdateStatus ? "Host update progress" : "Confirm host update"}
+        isDisabled={manualUpdateBusy}
+        footer={
+          <div className="flex justify-end gap-2">
+            <Button
+              type="button"
+              variant="secondary"
+              disabled={manualUpdateBusy}
+              onClick={() => setManualUpdateOpen(false)}
+            >
+              Close
+            </Button>
+            {!manualUpdateStatus && (
+              <Button
+                type="button"
+                variant="primary"
+                loading={manualUpdateBusy}
+                disabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
+                explainedDisabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
+                title={manualUpdateFencePending
+                  ? "Recovery is waiting for the host fence to be released. Refresh update status before retrying."
+                  : hostUpdateUnsupported
+                  ? "Host update execution is unavailable on this host until fresh host inventory is loaded."
+                  : !manualUpdateAvailable
+                  ? MANUAL_DISABLED_REASON
+                  : manualUpdateBusy
+                    ? "An update operation is already in progress."
+                    : manualUpdateAttempted
+                      ? "The previous attempt's outcome is unknown — refresh status or reload before retrying."
+                      : undefined}
+                onClick={() => { void authorizeAndExecuteHostUpdate(); }}
+              >
+                Authorize and update
+              </Button>
+            )}
+            {manualUpdateStatus?.currentState === "RecoveryRequired" && onRecoverHostUpdate && (
+              <Button
+                type="button"
+                variant="danger"
+                loading={manualUpdateBusy}
+                disabled={manualUpdateBusy}
+                onClick={() => { void recoverManualUpdate(); }}
+              >
+                Recover update
+              </Button>
+            )}
+          </div>
+        }
+      >
+        {!manualUpdateStatus && !manualUpdateError && (
+          <div className="space-y-3">
+            <p>
+              This will authorize and execute the currently verified release
+              once. The host will perform its safety checks, drain, backup,
+              apply, and verification steps before reporting completion.
+            </p>
+            <Alert type="warning" title="Host interruption expected">
+              Do not close the host or interrupt its power while the operation
+              is in progress. Automatic updates remain disabled.
+            </Alert>
+          </div>
+        )}
+        {manualUpdateError && (
+          <Alert type="error" title="Host update unavailable">
+            {manualUpdateError}
+          </Alert>
+        )}
+        {manualUpdateStatus && (
+          <div className="space-y-3">
+            <p role="status" aria-live="polite">
+              Current state: <strong>{manualUpdateStatus.currentState}</strong>
+              {" "}({manualUpdateStatus.releaseId})
+            </p>
+            <ol className="space-y-2" aria-label="Host update progress">
+              {manualUpdateStatus.activities.map((activity) => (
+                <li key={activity.activityId} className="flex justify-between gap-3">
+                  <span>{activity.phase}</span>
+                  <span>{activity.state} · {formatDateTime(activity.recordedAt, UNKNOWN)}</span>
+                </li>
+              ))}
+            </ol>
+            {manualUpdateStatus.currentState === "Completed" && !isRolledBackStatus(manualUpdateStatus) && (
+              <Alert type="success" title="Host update completed">
+                The host reported a completed update. Refresh the installation
+                observation to reconcile the running services.
+              </Alert>
+            )}
+            {isRolledBackStatus(manualUpdateStatus) && (
+              <Alert type="warning" title="Host update rolled back">
+                The host rolled back the update. No new installation is active.
+              </Alert>
+            )}
+            {manualUpdateStatus.currentState !== "Completed" && (
+              <Button
+                type="button"
+                variant="secondary"
+                loading={manualUpdateBusy}
+                disabled={manualUpdateBusy}
+                onClick={() => { void refreshManualUpdateStatus(); }}
+              >
+                Refresh update status
+              </Button>
+            )}
+          </div>
+        )}
+        {manualUpdateRecovery && (
+          <Alert
+            type={manualUpdateRecovery.outcome === "RolledBack" ? "success" : "warning"}
+            title="Recovery result"
+          >
+            {manualUpdateRecovery.outcome}: {manualUpdateRecovery.detail}
+          </Alert>
+        )}
+      </Modal>
       <Card>
         <Card.Header>
           <h2 className="text-lg font-semibold">
@@ -755,9 +1196,9 @@ export function InstallerUpdatesExperience({
         </Card.Header>
         <Card.Body>
           <p>
-            No durable update operation history is reported by this service
-            inventory. Operation records and recovery results require a separate
-            trusted runtime contract and are not inferred here.
+            Manual operation history appears after an authorized update starts.
+            Automatic updates remain unavailable until their standing-policy
+            contract is enabled for this host.
           </p>
         </Card.Body>
       </Card>

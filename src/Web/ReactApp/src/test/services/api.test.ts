@@ -40,12 +40,14 @@ describe("ApiClient", () => {
       const getMock = vi.fn().mockResolvedValue({
         data: { channel: "insider", insiderAcknowledged: true },
       });
+
       (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
 
       await expect(apiClient.getUpdateChannelSettings()).resolves.toEqual({
         channel: "insider",
         insiderAcknowledged: true,
       });
+
       expect(getMock).toHaveBeenCalledWith("/settings/UpdateChannel");
 
       const postMock = vi.fn().mockResolvedValue({});
@@ -55,6 +57,178 @@ describe("ApiClient", () => {
       expect(postMock).toHaveBeenCalledWith("/settings/UpdateChannel", {
         channel: "stable",
         insiderAcknowledged: false,
+      });
+
+    });
+  });
+
+  describe("host updates", () => {
+    const status = {
+      releaseId: "release/1",
+      currentState: "Applying",
+      activities: [],
+    };
+
+    it("wires authorization requests and propagates the response", async () => {
+      const data = { authorizationId: "auth-1", releaseId: "release/1" };
+      const postMock = vi.fn().mockResolvedValue({ data });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.authorizeHostUpdate({ expectedPolicyRevision: 3 })).resolves.toEqual(data);
+      expect(postMock).toHaveBeenCalledWith("/admin/host-updates/authorizations", { expectedPolicyRevision: 3 });
+    });
+
+    it("rejects malformed authorization responses before execute can use them", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { authorizationId: "", releaseId: "" },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.authorizeHostUpdate()).rejects.toMatchObject({
+        message: "The host update authorization response was invalid.",
+      });
+    });
+
+    it("encodes release IDs and rejects malformed status bodies", async () => {
+      const getMock = vi.fn()
+        .mockResolvedValueOnce({ data: status })
+        .mockResolvedValueOnce({ data: { currentState: "Applying" } });
+      (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
+
+      await expect(apiClient.getHostUpdateStatus("release/1?x=1")).resolves.toEqual(status);
+      expect(getMock).toHaveBeenNthCalledWith(1, "/admin/host-updates/release%2F1%3Fx%3D1/status");
+      await expect(apiClient.getHostUpdateStatus("bad")).rejects.toMatchObject({
+        message: "The host update status response was invalid.",
+      });
+    });
+
+    it("encodes recovery routes, supports both request bodies, and rejects malformed outcomes", async () => {
+      const postMock = vi.fn()
+        .mockResolvedValueOnce({ data: { outcome: "NeedsOperator", detail: "manual action" } })
+        .mockResolvedValueOnce({ data: { outcome: "FenceReleasePending", detail: "pending" } })
+        .mockResolvedValueOnce({ data: { outcome: "Unknown", detail: "bad" } });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.recoverHostUpdate("release/1", "request-1")).resolves.toEqual({
+        outcome: "NeedsOperator",
+        detail: "manual action",
+      });
+      await expect(apiClient.recoverHostUpdate("release/1")).resolves.toEqual({
+        outcome: "FenceReleasePending",
+        detail: "pending",
+      });
+      expect(postMock).toHaveBeenNthCalledWith(
+        1,
+        "/admin/host-updates/release%2F1/recover",
+        { requestId: "request-1" },
+      );
+      expect(postMock).toHaveBeenNthCalledWith(
+        2,
+        "/admin/host-updates/release%2F1/recover",
+        {},
+      );
+      await expect(apiClient.recoverHostUpdate("release/1")).rejects.toMatchObject({
+        message: "The host update recovery response was invalid.",
+      });
+    });
+
+    it("accepts recovery-required responses from execute", async () => {
+      const data = {
+          releaseId: "release-1",
+          currentState: "RecoveryRequired",
+          activities: [{
+            activityId: "activity-1",
+            releaseId: "release-1",
+            state: "RecoveryRequired",
+            phase: "apply",
+            recordedAt: "2026-09-19T19:00:00Z",
+            requestBinding: {
+              releaseId: "release-1",
+              authenticatedSequence: 4,
+              manifestDigest: "manifest",
+              sourceCommit: "commit",
+              channel: "Stable",
+              targets: [],
+              requestId: "request-1",
+              trustRoot: "root",
+              policyRevision: 1,
+              policyFingerprint: "policy",
+              hostPlatform: "linux-amd64",
+              authorizationKind: "Manual",
+            },
+          }],
+      } satisfies import("@/types/api").HostUpdateStatusResponse;
+      const response = { status: 409, data };
+      const postMock = vi.fn().mockResolvedValue(response);
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual({
+        kind: "conflict",
+        status: response.data,
+      });
+      expect(postMock).toHaveBeenCalledWith(
+        "/admin/host-updates/execute",
+        { authorizationId: "auth-1" },
+        { validateStatus: expect.any(Function) },
+      );
+      const config = postMock.mock.calls[0][2] as { validateStatus: (status: number) => boolean };
+      expect(config.validateStatus(409)).toBe(true);
+      expect(config.validateStatus(503)).toBe(true);
+      expect(config.validateStatus(500)).toBe(false);
+    });
+
+    it("returns a typed conflict when execute reports an existing update", async () => {
+      const status = {
+        releaseId: "stable:1.2.4",
+        currentState: "Applying",
+        activities: [],
+      } satisfies import("@/types/api").HostUpdateStatusResponse;
+      const postMock = vi.fn().mockResolvedValue({ status: 409, data: status });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).resolves.toEqual({
+        kind: "conflict",
+        status,
+      });
+    });
+
+    it("rejects non-status conflict bodies instead of returning a success-shaped response", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 409,
+        data: { code: "request_not_authorized" },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate({ authorizationId: "auth-1" })).rejects.toMatchObject({
+        statusCode: 409,
+        message: "The host update status response was invalid.",
+        data: { code: "request_not_authorized" },
+      });
+    });
+
+    it("surfaces unsupported-host responses as an API error", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 503,
+        data: { detail: "Host update execution is unavailable." },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
+        statusCode: 503,
+        message: "Host update execution is unavailable.",
+      });
+    });
+
+    it("rejects malformed successful execute bodies", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { releaseId: "release-1", currentState: "Applying" },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
+        message: "The host update status response was invalid.",
       });
     });
   });
