@@ -1,5 +1,5 @@
 {
-  "_comment": "Keep both exact values in sync with the measured direct test diagnostics and test file count; do not raise testDiagnosticCount to mask new errors.",
+  "_comment": "Keep testDiagnosticCount equal to the measured direct test diagnostic count; set minimumTestFileCount to the measured test file count as a lower bound.",
   "testDiagnosticCount": 227,
-  "minimumTestFileCount": 540
+  "minimumTestFileCount": 541
 }

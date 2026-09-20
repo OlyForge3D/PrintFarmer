@@ -13,7 +13,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "node --test ../../../scripts/ci/tests/test-typecheck-tests.mjs && npm run typecheck:test && vite build",
+    "build": "node --test ./scripts/tests/test-typecheck-tests.mjs && npm run typecheck:test && vite build",
     "lint": "eslint .",
     "lint:inventory-inert-state": "node ./eslint-rules/inventory-inert-state-variants.js",
     "check:empty-attrs": "node ./scripts/check-empty-attrs.cjs",
