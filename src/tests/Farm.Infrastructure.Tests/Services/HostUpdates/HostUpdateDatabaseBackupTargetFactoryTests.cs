@@ -647,7 +647,12 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
         // already exists as a file rather than a directory -- reproducing a misconfigured
         // RootDirectory that collides with an existing file. This must fail closed with the
         // dedicated probe_directory_creation_failed evidence (distinguishable from every other
-        // evidence string), not silently proceed or report a different failure mode.
+        // evidence string), not silently proceed or report a different failure mode. The exact
+        // exception *type* the BCL raises for this shape is platform-dependent
+        // (IOException on Windows, DirectoryNotFoundException on Linux) -- both are caught by
+        // the `is IOException or UnauthorizedAccessException` filter in production code (
+        // DirectoryNotFoundException derives from IOException), so only the evidence-category
+        // prefix is contractual here, not the exception-type suffix.
         string parentDirectory = Directory.CreateTempSubdirectory("hu-mapping-dircreate-").FullName;
         string fileBlockingCreation = Path.Combine(parentDirectory, "not-a-directory");
         await File.WriteAllTextAsync(fileBlockingCreation, "this is a file, not a directory");
@@ -661,9 +666,12 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
 
             string? evidence = await ((IHostUpdateServerSideBackupTarget)target).VerifyVisibleBackupPathMappingAsync(CancellationToken.None);
 
-            evidence.Should().Be(
-                "probe_directory_creation_failed:IOException",
-                "a backup root whose parent path is occupied by a file must fail closed with directory-creation evidence, not a different code path's evidence");
+            evidence.Should().StartWith(
+                "probe_directory_creation_failed:",
+                "a backup root whose parent path is occupied by a file must fail closed with directory-creation evidence, "
+                + "distinguishable from every other evidence string; the exception type suffix is platform-dependent "
+                + "(IOException on Windows, DirectoryNotFoundException on Linux, both caught by the IOException filter) "
+                + "so only the evidence prefix is contractual");
         }
         finally
         {
