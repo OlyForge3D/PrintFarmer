@@ -861,6 +861,20 @@ public class HostUpdateWriterFencingTests : IDisposable
             fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
             scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
                 "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+
+            // Both the top-of-loop paused branch and the interval-boundary wait re-check the
+            // fence every ~250 ms rather than busy-spinning. Sampling the acknowledgement count
+            // again after roughly 1 s (~4 iterations at the 250 ms cadence) and asserting it stays
+            // under a small, generous ceiling — not an exact count, which would be flaky under CI
+            // scheduling jitter — proves the paused loop is still throttled by its own delay and
+            // has not regressed into a tight spin that racks up acknowledgements far faster than
+            // the 250 ms cadence would allow.
+            int acknowledgementsAfterFirst = fence.AcknowledgementCount;
+            await Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
+            int additionalAcknowledgements = fence.AcknowledgementCount - acknowledgementsAfterFirst;
+            additionalAcknowledgements.Should().BeLessThan(20,
+                "the paused loop must keep re-checking on its ~250 ms cadence, not busy-spin " +
+                "without a delay between acknowledgements");
         });
     }
 
