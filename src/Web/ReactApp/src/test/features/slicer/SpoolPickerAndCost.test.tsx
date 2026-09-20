@@ -35,8 +35,8 @@ vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
 
 const mockComputeMaterialCostPerGram = vi.fn();
 const mockComputeMaterialCost = vi.fn();
-const mockFormatPrintTime = vi.fn((...args: unknown[]) => '1h 0m');
-const mockFormatFilamentUsed = vi.fn((...args: unknown[]) => '50.0g');
+const mockFormatPrintTime = vi.fn(() => '1h 0m');
+const mockFormatFilamentUsed = vi.fn(() => '50.0g');
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
