@@ -187,19 +187,31 @@ public static class HostUpdateExecutionStartup
 
     private static void AddBackupAndMigration(IServiceCollection services)
     {
-        services.AddScoped<IHostUpdateMigrationTarget>(sp => new DbContextMigrationTarget<AppDbContext>(
+        services.AddScoped<HostUpdateTargetImageMigrationRunner>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new HostUpdateTargetImageMigrationRunner(
+                sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
+                options.ServiceMappings.ToDictionary(
+                    mapping => mapping.ServiceId,
+                    mapping => new HostUpdateApplyServiceMapping(mapping.ServiceId, mapping.ComposeServiceName, mapping.ImageEnvironmentVariable, mapping.ImageRepository),
+                    StringComparer.Ordinal),
+                () => CreateMigrationEnvironment(sp.GetRequiredService<IConfiguration>()),
+                options.ComposeProjectName + "-network",
+                TimeSpan.FromSeconds(options.MigrationTimeoutSeconds));
+        });
+        services.AddScoped<IHostUpdateMigrationTarget>(sp => new TargetImageMigrationTarget<AppDbContext>(
             "AppDbContext",
-            DatabaseMigrationTarget.Core,
             () => sp.GetRequiredService<AppDbContext>(),
-            sp.GetRequiredService<ILogger<AppDbContext>>()));
+            sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>()));
         services.AddScoped<IHostUpdateMigrationTarget>(sp =>
         {
             SlicerDbContext? slicerDb = sp.GetService<SlicerDbContext>();
-            return new DbContextMigrationTarget<SlicerDbContext>(
+            return new TargetImageMigrationTarget<SlicerDbContext>(
                 "SlicerDbContext",
-                DatabaseMigrationTarget.Slicer,
                 () => slicerDb ?? throw new InvalidOperationException("slicer_db_context_not_registered"),
-                sp.GetRequiredService<ILogger<SlicerDbContext>>());
+                sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>());
         });
         services.AddScoped<IReadOnlyList<IHostUpdateMigrationTarget>>(sp => [.. sp.GetServices<IHostUpdateMigrationTarget>()]);
         services.AddScoped<HostUpdateMigrationCoordinator>(sp =>
@@ -244,6 +256,34 @@ public static class HostUpdateExecutionStartup
                 ? new UnconfiguredHostUpdateBackupCoordinator()
                 : new HostUpdateBackupCoordinator(sp.GetRequiredService<IReadOnlyList<IHostUpdateBackupTarget>>(), options.BackupRootDirectory);
         });
+    }
+
+    private static Dictionary<string, string> CreateMigrationEnvironment(IConfiguration configuration)
+    {
+        (string ConfigurationKey, string EnvironmentKey)[] requiredKeys =
+        [
+            ("DB_PROVIDER", "DB_PROVIDER"),
+            ("ConnectionStrings:Default", "ConnectionStrings__Default"),
+            ("Jwt:Key", "Jwt__Key"),
+            ("Jwt:Issuer", "Jwt__Issuer"),
+            ("Jwt:Audience", "Jwt__Audience"),
+        ];
+        var environment = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach ((string configurationKey, string environmentKey) in requiredKeys)
+        {
+            string? value = configuration[configurationKey];
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                throw new InvalidOperationException($"target_image_migration_configuration_missing:{configurationKey}");
+            }
+
+            environment[environmentKey] = value;
+        }
+
+#pragma warning disable S5443 // The target image receives a private tmpfs at /tmp.
+        environment["DATAPROTECTION_KEYS_PATH"] = "/tmp/dp-keys";
+#pragma warning restore S5443
+        return environment;
     }
 
     private static void AddApplyAndVerify(IServiceCollection services)

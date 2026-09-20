@@ -139,7 +139,7 @@ public sealed class ProductionHostUpdateAdaptersTests
     }
 
     [Fact]
-    public void SchedulerStatusHolder_ReportsAdmittedReasonOnceForAvailableExecutor()
+    public void SchedulerStatusHolder_AvailableExecutorHasNoExecutorReason()
     {
         HostUpdateSchedulerStatusHolder holder = new();
         holder.Update(new HostUpdateSchedulerStatus(
@@ -160,10 +160,65 @@ public sealed class ProductionHostUpdateAdaptersTests
 
         HostUpdateSchedulingStatusDto status = provider.GetStatus();
 
-        Assert.Equal(1, status.Reasons.Count(reason => reason == nameof(HostUpdateSchedulerReason.Admitted)));
+        Assert.Single(status.Reasons, nameof(HostUpdateSchedulerReason.Admitted));
         Assert.DoesNotContain(HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason, status.Reasons);
         Assert.Equal(HostUpdateExecutorState.Available, status.Executor.State);
         Assert.Null(status.Executor.Reason);
+    }
+
+    [Fact]
+    public void SchedulerStatusHolder_ReportsUnknownExecutorShapeWithoutClaimingItIsUnprovisioned()
+    {
+        HostUpdateSchedulerStatusHolder holder = new();
+        holder.Update(new HostUpdateSchedulerStatus(
+            Enabled: true,
+            EffectiveEnabled: true,
+            KillSwitch: false,
+            Channel: "stable",
+            PolicyRevision: 1,
+            LastAttemptAt: null,
+            NextPollAt: null,
+            ConsecutiveFailures: 0,
+            Reason: HostUpdateSchedulerReason.Disabled));
+
+        UnavailableHostUpdateSchedulingStatusProvider provider = new(
+            settings: null!,
+            schedulerStatus: holder,
+            executor: new ExecutorWithoutAvailability());
+
+        HostUpdateSchedulingStatusDto status = provider.GetStatus();
+
+        Assert.Equal(HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason, status.Executor.Reason);
+        Assert.Equal(HostUpdateExecutorState.Unavailable, status.Executor.State);
+        Assert.Contains(HostUpdateSchedulingAvailability.ExecutorAvailabilityUnknownReason, status.Reasons);
+        Assert.DoesNotContain(HostUpdateSchedulingAvailability.ExecutorNotProvisionedReason, status.Reasons);
+    }
+
+    [Fact]
+    public void SchedulerStatusHolder_ReplacesMissingUnavailableExecutorReason()
+    {
+        HostUpdateSchedulerStatusHolder holder = new();
+        holder.Update(new HostUpdateSchedulerStatus(
+            Enabled: true,
+            EffectiveEnabled: true,
+            KillSwitch: false,
+            Channel: "stable",
+            PolicyRevision: 1,
+            LastAttemptAt: null,
+            NextPollAt: null,
+            ConsecutiveFailures: 0,
+            Reason: HostUpdateSchedulerReason.Disabled));
+
+        UnavailableHostUpdateSchedulingStatusProvider provider = new(
+            settings: null!,
+            schedulerStatus: holder,
+            executor: new UnavailableExecutor());
+
+        HostUpdateSchedulingStatusDto status = provider.GetStatus();
+
+        Assert.Equal(HostUpdateSchedulingAvailability.ExecutorReasonMissingReason, status.Executor.Reason);
+        Assert.Contains(HostUpdateSchedulingAvailability.ExecutorReasonMissingReason, status.Reasons);
+        Assert.DoesNotContain(status.Reasons, string.IsNullOrWhiteSpace);
     }
 
     private static VerifiedReleaseEvidenceDto Evidence(long sequence = 42) => new()
@@ -203,6 +258,33 @@ public sealed class ProductionHostUpdateAdaptersTests
             Task.FromResult(new HostUpdateExecutionResult(
                 request.ReleaseId,
                 HostUpdateExecutionState.Completed,
+                null,
+                []));
+    }
+
+    private sealed class UnavailableExecutor : IHostUpdateExecutor, IHostUpdateAvailability
+    {
+        public bool IsAvailable => false;
+        public string UnavailableReason => " ";
+
+        public Task<HostUpdateExecutionResult> ExecuteAsync(
+            HostUpdateExecutionRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new HostUpdateExecutionResult(
+                request.ReleaseId,
+                HostUpdateExecutionState.RecoveryRequired,
+                null,
+                []));
+    }
+
+    private sealed class ExecutorWithoutAvailability : IHostUpdateExecutor
+    {
+        public Task<HostUpdateExecutionResult> ExecuteAsync(
+            HostUpdateExecutionRequest request,
+            CancellationToken cancellationToken = default) =>
+            Task.FromResult(new HostUpdateExecutionResult(
+                request.ReleaseId,
+                HostUpdateExecutionState.RecoveryRequired,
                 null,
                 []));
     }
