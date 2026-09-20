@@ -300,6 +300,102 @@ public sealed class BackendStartCommandConsumerServiceTests
         claimCommitted.Should().BeFalse();
     }
 
+    // ------------------------------------------------------------------
+    // Hosted ExecuteAsync loop end-to-end (PR #2877 panel round, Hicks's finding:
+    // no test supplies a fake TimeProvider to the hosted service and drives its
+    // poll-delay/iteration-deadline loop directly.)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public async Task ExecuteAsync_HostedLoopWithFutureRetryAfter_ProcessesEventAfterPollCycleWithoutRealTimeWaiting()
+    {
+        // Drives the actual hosted BackgroundService loop (ExecuteAsync ->
+        // WaitForIntervalOrPauseAsync's poll/delay cycle -> ProcessPendingCommandsAsync),
+        // not the internal methods directly as every other test in this file does. Every
+        // timer the service schedules -- the 250ms poll-delay ticks inside
+        // WaitForIntervalOrPauseAsync and the 310s IterationDeadline CancellationTokenSource
+        // -- is scaled down 200x in real time by AcceleratedTimeProvider, while GetUtcNow
+        // advances at the same accelerated rate, so the loop's own `while` conditions see
+        // simulated time pass consistently with the timers actually firing.
+        DateTime anchor = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
+        const double accelerationFactor = 200;
+        var clock = new AcceleratedTimeProvider(anchor, accelerationFactor);
+        await using TestHarness harness = await TestHarness.CreateAsync(clock);
+
+        // RetryAfterUtc is 3 simulated seconds in the future: inside the 5-second
+        // PollInterval, but strictly after the very first ProcessPendingCommandsAsync
+        // call (which runs at simulated time ~= anchor). The event is therefore NOT
+        // eligible on the hosted loop's first iteration and can only be picked up after
+        // WaitForIntervalOrPauseAsync's poll/delay cycle has advanced the clock past it.
+        Guid eventId = await harness.SeedOutboxEventAsync(
+            status: QueueOutboxEventStatus.Pending,
+            retryAfterUtc: anchor + TimeSpan.FromSeconds(3));
+
+        harness.PrintJobManagement
+            .Setup(mgmt => mgmt.DispatchJobWithAckAsync(
+                It.IsAny<string>(), It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BackendStartOutcome.Accepted(Guid.NewGuid()));
+
+        var wallClock = System.Diagnostics.Stopwatch.StartNew();
+        await harness.Service.StartAsync(CancellationToken.None);
+        bool published;
+        try
+        {
+            published = await SpinWaitUntilPublishedAsync(harness, eventId, TimeSpan.FromSeconds(5));
+        }
+        finally
+        {
+            await harness.Service.StopAsync(CancellationToken.None);
+        }
+
+        wallClock.Stop();
+
+        // The load-bearing assertion for the hosted-loop requirement: this event is
+        // constructed (via the 3-simulated-second-future RetryAfterUtc above) so that it
+        // can ONLY be published after at least one full pass through
+        // WaitForIntervalOrPauseAsync's poll/delay loop. If PollInterval's delay, or the
+        // `_timeProvider.GetUtcNow() < until` loop condition, were reverted to raw
+        // `Task.Delay`/`DateTime.UtcNow` (i.e. ignoring the injected TimeProvider), this
+        // fake clock could never advance the loop's notion of "now" past RetryAfterUtc,
+        // and the event would still be Pending when the 5-second real-time SpinWait
+        // above times out.
+        published.Should().BeTrue(
+            "the hosted loop must advance past the poll/delay cycle and retry the event " +
+            "once its RetryAfterUtc has elapsed");
+
+        // Second load-bearing assertion: proves the loop advanced via the accelerated
+        // TimeProvider rather than real wall-clock time. Production requires at least one
+        // full 5-second PollInterval wait (RetryAfterUtc is inside that window but after
+        // the first iteration) before this event becomes eligible; observing success in
+        // well under one real second demonstrates the timers were actually driven by the
+        // injected TimeProvider, not the system clock.
+        wallClock.Elapsed.Should().BeLessThan(
+            TimeSpan.FromSeconds(2),
+            "the accelerated TimeProvider must let the hosted loop advance through the " +
+            "poll/delay cycle without the test blocking for real wall-clock time");
+
+        QueueDispatchOutbox persisted = await harness.GetOutboxEventAsync(eventId);
+        persisted.Status.Should().Be(QueueOutboxEventStatus.Published);
+    }
+
+    private static async Task<bool> SpinWaitUntilPublishedAsync(
+        TestHarness harness, Guid eventId, TimeSpan timeout)
+    {
+        var deadline = System.Diagnostics.Stopwatch.StartNew();
+        while (deadline.Elapsed < timeout)
+        {
+            QueueDispatchOutbox row = await harness.GetOutboxEventAsync(eventId);
+            if (row.Status == QueueOutboxEventStatus.Published)
+            {
+                return true;
+            }
+
+            await Task.Delay(10);
+        }
+
+        return false;
+    }
+
     private sealed class TestHarness : IAsyncDisposable
     {
         private readonly SqliteConnection _connection;
@@ -352,7 +448,8 @@ public sealed class BackendStartCommandConsumerServiceTests
         public async Task<Guid> SeedOutboxEventAsync(
             QueueOutboxEventStatus status,
             DateTime? lastAttemptedAtUtc = null,
-            long sequence = 1)
+            long sequence = 1,
+            DateTime? retryAfterUtc = null)
         {
             await using AsyncServiceScope scope = _provider.CreateAsyncScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
@@ -374,6 +471,7 @@ public sealed class BackendStartCommandConsumerServiceTests
                 Status = status,
                 PayloadJson = payloadJson,
                 LastAttemptedAtUtc = lastAttemptedAtUtc,
+                RetryAfterUtc = retryAfterUtc,
                 CreatedAtUtc = DateTime.UtcNow,
             });
             await db.SaveChangesAsync();
@@ -494,5 +592,47 @@ public sealed class BackendStartCommandConsumerServiceTests
                 : dueTime;
             return System.CreateTimer(callback, state, effectiveDueTime, period);
         }
+    }
+
+    /// <summary>
+    /// A <see cref="TimeProvider"/> that reports every wall-clock/monotonic read as if real
+    /// time were flowing <c>accelerationFactor</c> times faster, and scales down every real
+    /// timer/delay it schedules by that same factor. Because <see cref="GetUtcNow"/>,
+    /// <see cref="GetTimestamp"/>, and <see cref="CreateTimer"/> all derive from the same
+    /// underlying real <see cref="System.Diagnostics.Stopwatch"/>, the simulated clock and the
+    /// real timers that drive the hosted loop stay mutually consistent -- unlike firing timers
+    /// instantly regardless of due time, which would let the virtual "now" outrun timers that
+    /// have not actually completed yet. This lets a test drive
+    /// <see cref="BackendStartCommandConsumerService"/>'s full hosted <c>ExecuteAsync</c> loop
+    /// (poll interval, iteration deadline) through multiple simulated seconds in well under a
+    /// second of real test time.
+    /// </summary>
+    private sealed class AcceleratedTimeProvider : TimeProvider
+    {
+        private readonly DateTimeOffset _startUtc;
+        private readonly global::System.Diagnostics.Stopwatch _stopwatch = global::System.Diagnostics.Stopwatch.StartNew();
+        private readonly double _accelerationFactor;
+
+        public AcceleratedTimeProvider(DateTime utcNow, double accelerationFactor)
+        {
+            _startUtc = new DateTimeOffset(utcNow, TimeSpan.Zero);
+            _accelerationFactor = accelerationFactor;
+        }
+
+        private TimeSpan AcceleratedElapsed =>
+            TimeSpan.FromTicks((long)(_stopwatch.Elapsed.Ticks * _accelerationFactor));
+
+        public override DateTimeOffset GetUtcNow() => _startUtc + AcceleratedElapsed;
+
+        public override long GetTimestamp() => AcceleratedElapsed.Ticks;
+
+        public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            return System.CreateTimer(callback, state, ScaleDown(dueTime), ScaleDown(period));
+        }
+
+        private TimeSpan ScaleDown(TimeSpan value) => TimeSpan.FromTicks((long)(value.Ticks / _accelerationFactor));
     }
 }
