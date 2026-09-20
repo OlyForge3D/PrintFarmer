@@ -178,6 +178,14 @@ export function evaluate({
     };
   }
 
+  if (compilerResult.error?.code === "ETIMEDOUT") {
+    return {
+      ok: false,
+      message: "TypeScript test compiler timed out and was killed.",
+      showListFilesOutput: false,
+    };
+  }
+
   if (
     compilerResult.error ||
     compilerResult.signal ||
@@ -216,6 +224,14 @@ export function evaluate({
       message:
         "TypeScript test compiler exited nonzero without file diagnostics.",
       showListFilesOutput: false,
+    };
+  }
+
+  if (listFilesResult.error?.code === "ETIMEDOUT") {
+    return {
+      ok: false,
+      message: "TypeScript test compiler timed out and was killed.",
+      showListFilesOutput: true,
     };
   }
 

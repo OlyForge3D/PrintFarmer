@@ -61,6 +61,17 @@ test("fails compiler signal death and null status before another guard can match
   assert.match(nullStatus.message, /did not complete/);
 });
 
+test("fails closed on a timed-out compiler with a distinct message (spawnSync timeout hardening)", () => {
+  const timeoutError = Object.assign(new Error("spawnSync tsc ETIMEDOUT"), {
+    code: "ETIMEDOUT",
+  });
+  const result = evaluateGate({
+    compilerResult: { status: null, signal: null, error: timeoutError },
+  });
+  assert.equal(result.ok, false);
+  assert.match(result.message, /timed out/);
+});
+
 test("fails global compiler diagnostics before the nonzero-file fallback", () => {
   const result = evaluateGate({
     output: "error TS18003: No inputs were found in config file.",
@@ -483,6 +494,10 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
     await cp(
       path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
       path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
+    );
+    await cp(
+      path.join(packageDirectory, "scripts/typecheck-app-core.mjs"),
+      path.join(fixtureDirectory, "scripts/typecheck-app-core.mjs"),
     );
     await writeFile(
       path.join(fixtureDirectory, "scripts/test-typecheck-baseline.json"),
