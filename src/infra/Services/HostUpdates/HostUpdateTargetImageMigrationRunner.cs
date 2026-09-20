@@ -1,3 +1,4 @@
+using System.Collections.Frozen;
 using Farm.Infrastructure.Data.Migrations;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -30,11 +31,10 @@ public sealed class HostUpdateTargetImageMigrationRunner(
             ["SlicerDbContext"] = "slicer-host",
         };
 
-    public static IReadOnlySet<string> SupportedProviders { get; } = new HashSet<string>(StringComparer.Ordinal)
-    {
-        "Npgsql.EntityFrameworkCore.PostgreSQL",
-        "Microsoft.EntityFrameworkCore.SqlServer",
-    };
+    public static IReadOnlySet<string> SupportedProviders { get; } =
+        FrozenSet.ToFrozenSet(
+            ["Npgsql.EntityFrameworkCore.PostgreSQL", "Microsoft.EntityFrameworkCore.SqlServer"],
+            StringComparer.Ordinal);
 
     public async Task<bool> HasPendingMigrationsAsync(
         HostUpdateExecutionRequest request,

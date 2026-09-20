@@ -6,6 +6,16 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
 public sealed class HostUpdateMigrationStepTests
 {
+    [Fact]
+    public void SupportedProviders_RejectsMutation()
+    {
+        ISet<string> providers = HostUpdateTargetImageMigrationRunner.SupportedProviders.Should().BeAssignableTo<ISet<string>>().Which;
+
+        Action act = () => providers.Add("Microsoft.EntityFrameworkCore.Sqlite");
+
+        act.Should().Throw<NotSupportedException>();
+    }
+
     [Theory]
     [InlineData("AppDbContext", "Npgsql.EntityFrameworkCore.PostgreSQL", "api", "Farm.Web.Api.dll")]
     [InlineData("AppDbContext", "Microsoft.EntityFrameworkCore.SqlServer", "api", "Farm.Web.Api.dll")]
