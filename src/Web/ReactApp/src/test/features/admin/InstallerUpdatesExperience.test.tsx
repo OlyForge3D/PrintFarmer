@@ -2,9 +2,29 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InstallerUpdatesExperience } from '@/features/admin/components/InstallerUpdatesExperience';
+import type { InstallerUpdatesExperienceProps } from '@/features/admin/components/InstallerUpdatesExperience';
 import { UpdateChannelSaveRejectedError } from '@/features/admin/utils/updateChannelSaveErrors';
 import { blockedReadinessInventory, conflictingReplicaInventory, digest, identity, inventory, replica } from '@/test/features/system/serviceInventoryFixture';
 import type { UpdateSchedulingExecutorState } from '@/types/api';
+
+type TestInstallerUpdatesExperienceProps = Omit<
+  InstallerUpdatesExperienceProps,
+  'onGetHostUpdateStatus'
+> & Partial<Pick<InstallerUpdatesExperienceProps, 'onGetHostUpdateStatus'>>;
+
+const defaultGetHostUpdateStatus: InstallerUpdatesExperienceProps['onGetHostUpdateStatus'] = vi.fn().mockRejectedValue({
+  statusCode: 404,
+  message: 'Not found',
+});
+
+function TestInstallerUpdatesExperience(props: TestInstallerUpdatesExperienceProps) {
+  return (
+    <InstallerUpdatesExperience
+      {...props}
+      onGetHostUpdateStatus={props.onGetHostUpdateStatus ?? defaultGetHostUpdateStatus}
+    />
+  );
+}
 
 describe('InstallerUpdatesExperience', () => {
   afterEach(() => {
@@ -14,7 +34,7 @@ describe('InstallerUpdatesExperience', () => {
 
   it('keeps execution inaccessible to view-only users and explains the security prerequisites', async () => {
     const user = userEvent.setup();
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" />);
     const update = screen.getByRole('button', { name: 'Update now' });
     expect(update).toHaveAttribute('aria-disabled', 'true');
     expect(update).not.toHaveAttribute('disabled');
@@ -65,7 +85,7 @@ describe('InstallerUpdatesExperience', () => {
       }],
     });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -104,7 +124,7 @@ describe('InstallerUpdatesExperience', () => {
       onGetHostUpdateStatus: status,
     };
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
-    const firstMount = render(<InstallerUpdatesExperience {...props} />);
+    const firstMount = render(<TestInstallerUpdatesExperience {...props} />);
 
     expect(await screen.findByText('Applying')).toBeVisible();
     expect(status).toHaveBeenCalledWith('stable:1.2.4');
@@ -116,12 +136,12 @@ describe('InstallerUpdatesExperience', () => {
     });
     const { rerender } = firstMount;
     await userEvent.setup().click(screen.getByRole('button', { name: 'Close' }));
-    rerender(<InstallerUpdatesExperience {...props} onGetHostUpdateStatus={freshStatus} />);
+    rerender(<TestInstallerUpdatesExperience {...props} onGetHostUpdateStatus={freshStatus} />);
     expect(screen.queryByRole('heading', { name: 'Host update progress' })).not.toBeInTheDocument();
     expect(freshStatus).not.toHaveBeenCalled();
     firstMount.unmount();
     status.mockClear();
-    render(<InstallerUpdatesExperience {...props} />);
+    render(<TestInstallerUpdatesExperience {...props} />);
     expect(await screen.findByText('Applying')).toBeVisible();
     expect(status).toHaveBeenCalledWith('stable:1.2.4');
   });
@@ -144,7 +164,7 @@ describe('InstallerUpdatesExperience', () => {
       expiresAt: '2026-09-19T20:00:00Z',
     });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -188,7 +208,7 @@ describe('InstallerUpdatesExperience', () => {
       activities: [],
     });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -226,7 +246,7 @@ describe('InstallerUpdatesExperience', () => {
       message: 'The server could not finish the update request.',
     });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -256,7 +276,7 @@ describe('InstallerUpdatesExperience', () => {
       expiresAt: '2026-09-19T20:00:00Z',
     });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -288,7 +308,7 @@ describe('InstallerUpdatesExperience', () => {
       activities: [],
     });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -312,7 +332,7 @@ describe('InstallerUpdatesExperience', () => {
   it('unlocks a stale persisted update after status rehydration returns 404', async () => {
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stale-release');
     const status = vi.fn().mockRejectedValue({ statusCode: 404, message: 'Not found' });
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -326,7 +346,7 @@ describe('InstallerUpdatesExperience', () => {
 
   it('self-heals an empty persisted release id without leaving the update control busy', async () => {
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', '');
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={vi.fn()}
@@ -351,7 +371,7 @@ describe('InstallerUpdatesExperience', () => {
       activities: [],
     });
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -384,7 +404,7 @@ describe('InstallerUpdatesExperience', () => {
         recordedAt: '2026-09-19T19:01:00Z',
       }],
     });
-    const mounted = render(<InstallerUpdatesExperience
+    const mounted = render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -395,7 +415,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBeNull();
     status.mockClear();
     mounted.unmount();
-    const remounted = render(<InstallerUpdatesExperience
+    const remounted = render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -429,7 +449,7 @@ describe('InstallerUpdatesExperience', () => {
         },
       ],
     });
-    const mounted = render(<InstallerUpdatesExperience
+    const mounted = render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -440,7 +460,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBeNull();
     status.mockClear();
     mounted.unmount();
-    const remounted = render(<InstallerUpdatesExperience
+    const remounted = render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -465,7 +485,7 @@ describe('InstallerUpdatesExperience', () => {
       currentState: 'Applying',
       activities: [],
     });
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={vi.fn().mockResolvedValue({ authorizationId: 'auth-1', releaseId: 'stable:1.2.4' })}
@@ -497,7 +517,7 @@ describe('InstallerUpdatesExperience', () => {
       resolveStatus = resolve;
     }));
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -522,7 +542,7 @@ describe('InstallerUpdatesExperience', () => {
       resolveStatus = resolve;
     }));
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onGetHostUpdateStatus={status}
@@ -569,7 +589,7 @@ describe('InstallerUpdatesExperience', () => {
       .mockResolvedValueOnce({ releaseId: 'stable:1.2.5', currentState: 'Completed', activities: [] });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -610,7 +630,7 @@ describe('InstallerUpdatesExperience', () => {
         activities: [],
       });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -651,7 +671,7 @@ describe('InstallerUpdatesExperience', () => {
     });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -708,7 +728,7 @@ describe('InstallerUpdatesExperience', () => {
     });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -741,7 +761,7 @@ describe('InstallerUpdatesExperience', () => {
     const execute = vi.fn().mockRejectedValue({ statusCode, message: 'Authorization required.' });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -788,7 +808,7 @@ describe('InstallerUpdatesExperience', () => {
     });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -832,7 +852,7 @@ describe('InstallerUpdatesExperience', () => {
     });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -868,7 +888,7 @@ describe('InstallerUpdatesExperience', () => {
     const user = userEvent.setup();
 
     window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
-    const mounted = render(<InstallerUpdatesExperience
+    const mounted = render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onExecuteHostUpdate={execute}
@@ -877,7 +897,7 @@ describe('InstallerUpdatesExperience', () => {
     />);
 
     expect(await screen.findByRole('button', { name: 'Recover update' })).toBeVisible();
-    mounted.rerender(<InstallerUpdatesExperience
+    mounted.rerender(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onExecuteHostUpdate={execute}
@@ -909,7 +929,7 @@ describe('InstallerUpdatesExperience', () => {
     });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -946,7 +966,7 @@ describe('InstallerUpdatesExperience', () => {
       activities: [],
     });
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -984,7 +1004,7 @@ describe('InstallerUpdatesExperience', () => {
     });
     const user = userEvent.setup();
 
-    render(<InstallerUpdatesExperience
+    render(<TestInstallerUpdatesExperience
       inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
       observation="connected"
       onAuthorizeHostUpdate={authorize}
@@ -1000,7 +1020,7 @@ describe('InstallerUpdatesExperience', () => {
   it.each(['Eligible', 'Blocked', 'Unknown', 'NotManaged'] as const)(
     'renders %s readiness safely under #2661 semantics',
     (state) => {
-      render(<InstallerUpdatesExperience inventory={inventory({
+      render(<TestInstallerUpdatesExperience inventory={inventory({
         eligibility: state,
         eligibilityReasons: null as unknown as string[],
         readiness: { state, reasons: null as unknown as string[], hops: null as unknown as string[] },
@@ -1011,7 +1031,7 @@ describe('InstallerUpdatesExperience', () => {
   );
 
   it('labels service identities as observed/installed and keeps the target identity unknown', async () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ selectedChannel: 'insider', observedChannel: 'stable', targetChannel: 'stable', eligibility: 'Blocked', compatibilityState: 'MixedChannel', services: [replica({ identity })] })} observation="connected" />);
+    render(<TestInstallerUpdatesExperience inventory={inventory({ selectedChannel: 'insider', observedChannel: 'stable', targetChannel: 'stable', eligibility: 'Blocked', compatibilityState: 'MixedChannel', services: [replica({ identity })] })} observation="connected" />);
     expect(screen.getByText('Insider updates may arrive more frequently and have reduced stability compared with stable releases.')).toBeVisible();
     expect(screen.getByText(/Selected train/).parentElement).toHaveTextContent('insider');
     expect(screen.getByText(/Proposed target train/).parentElement).toHaveTextContent('Unknown - target-release contract unavailable');
@@ -1033,14 +1053,14 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders an unknown connection observation supplied by its page owner', () => {
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="unknown" />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="unknown" />);
     expect(screen.getByRole('status', { name: /Connection observation unknown/ })).toHaveTextContent(/browser is disconnected/);
   });
 
   it('flags like-for-like replicas with the same identity but different deployment digests', async () => {
     const manifestDigest = `sha256:${'c'.repeat(64)}`;
     const platformDigest = `sha256:${'d'.repeat(64)}`;
-    render(<InstallerUpdatesExperience inventory={inventory({ services: [
+    render(<TestInstallerUpdatesExperience inventory={inventory({ services: [
       replica({ identity, source: 'TrustedVerifier', verificationSource: 'local-verifier', verifiedAt: '2026-09-12T12:01:00Z', platform: 'linux/amd64', manifestDigest, platformDigest, indexDigest: `sha256:${'e'.repeat(64)}` }),
       replica({ instanceId: 'replica-b', identity, source: 'TrustedVerifier', verificationSource: 'local-verifier', verifiedAt: '2026-09-12T12:01:00Z', platform: 'linux/amd64', manifestDigest: `sha256:${'f'.repeat(64)}`, platformDigest, indexDigest: `sha256:${'e'.repeat(64)}` }),
     ] })} observation="connected" />);
@@ -1057,7 +1077,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('compares canonical release/source identity across platforms but treats incomplete evidence as not comparable', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ services: [
+    render(<TestInstallerUpdatesExperience inventory={inventory({ services: [
       replica({ identity, platform: 'linux/amd64', manifestDigest: digest, platformDigest: digest, indexDigest: digest }),
       replica({ instanceId: 'replica-b', identity: { ...identity, sourceCommit: 'f'.repeat(40) }, platform: 'linux/arm64', manifestDigest: `sha256:${'d'.repeat(64)}`, platformDigest: `sha256:${'e'.repeat(64)}`, indexDigest: digest }),
       replica({ instanceId: 'replica-c', identity: null, platform: null }),
@@ -1070,14 +1090,14 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('does not render an empty replica observations heading or list', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ services: [] })} observation="connected" />);
+    render(<TestInstallerUpdatesExperience inventory={inventory({ services: [] })} observation="connected" />);
     expect(screen.queryByText('Replica observations')).not.toBeInTheDocument();
     expect(screen.queryByRole('list')).not.toBeInTheDocument();
   });
 
   it('uses named status and explained-disabled controls for keyboard and screen-reader users', async () => {
     const user = userEvent.setup();
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" />);
     await user.tab();
     expect(screen.getByRole('button', { name: 'Update now' })).toHaveFocus();
     expect(screen.queryByRole('status', { name: '' })).not.toBeInTheDocument();
@@ -1088,13 +1108,13 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('presents blocked readiness even when eligibility is NotManaged and compatibility is Compatible', () => {
-    render(<InstallerUpdatesExperience inventory={blockedReadinessInventory()} observation="connected" />);
+    render(<TestInstallerUpdatesExperience inventory={blockedReadinessInventory()} observation="connected" />);
     expect(screen.getByText(/The observed installation is blocked/)).toBeVisible();
     expect(screen.getByText(/Host maintenance is required/)).toBeVisible();
   });
 
   it('distinguishes unsigned legacy installations from executor facility blockers and gives the manual path', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({
+    render(<TestInstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
       eligibilityReasons: ['SignedReleaseEvidenceUnavailableManualOnly', 'ReadOnlyInventory'],
       compatibilityState: 'Compatible',
@@ -1107,7 +1127,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('does not show the legacy manual path for facility-only blockers', () => {
-    const { rerender } = render(<InstallerUpdatesExperience inventory={inventory({
+    const { rerender } = render(<TestInstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
       eligibilityReasons: ['ManagedEligibilityNotEstablished', 'ReadOnlyInventory'],
       compatibilityState: 'Compatible',
@@ -1126,7 +1146,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.queryByText('Manual signed install required')).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot establish managed eligibility/)).not.toBeInTheDocument();
 
-    rerender(<InstallerUpdatesExperience inventory={inventory({
+    rerender(<TestInstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
       eligibilityReasons: ['SignedReleaseEvidenceUnavailableManualOnly', 'ReadOnlyInventory'],
       compatibilityState: 'Compatible',
@@ -1135,7 +1155,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('keeps mixed legacy and facility evidence visible as distinct categories', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({
+    render(<TestInstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
       eligibilityReasons: [
         'SignedReleaseEvidenceUnavailableManualOnly',
@@ -1158,7 +1178,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders every observed replica and marks conflicting identities without proposing a target', async () => {
-    render(<InstallerUpdatesExperience inventory={conflictingReplicaInventory()} observation="connected" />);
+    render(<TestInstallerUpdatesExperience inventory={conflictingReplicaInventory()} observation="connected" />);
     expect(screen.getByText(/Conflicting observed deployments/)).toBeVisible();
     expect(screen.getByText(/Snapshot provenance: Imported/)).toBeVisible();
     expect(screen.getByText(/replica-b.*Stale/)).toBeVisible();
@@ -1174,7 +1194,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('compares canonical evidence across coordinated services', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ services: [
+    render(<TestInstallerUpdatesExperience inventory={inventory({ services: [
       replica({ serviceId: 'api', component: 'api', identity, applicationVersion: '1.2.3', sourceCommit: identity.sourceCommit }),
       replica({ serviceId: 'worker', component: 'worker', identity, applicationVersion: '1.2.4', sourceCommit: identity.sourceCommit }),
     ] })} observation="connected" />);
@@ -1183,7 +1203,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('detects a partial known platform digest divergence', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ services: [
+    render(<TestInstallerUpdatesExperience inventory={inventory({ services: [
       replica({ identity, platform: 'linux/amd64', manifestDigest: digest, platformDigest: null, indexDigest: null }),
       replica({ instanceId: 'replica-b', identity, platform: 'linux/amd64', manifestDigest: `sha256:${'f'.repeat(64)}`, platformDigest: null, indexDigest: null }),
     ] })} observation="connected" />);
@@ -1195,7 +1215,7 @@ describe('InstallerUpdatesExperience', () => {
   it.each(['MixedRelease', 'Incompatible'] as const)(
     'renders authoritative observed compatibility conflict details for %s',
     (compatibilityState) => {
-      render(<InstallerUpdatesExperience inventory={inventory({
+      render(<TestInstallerUpdatesExperience inventory={inventory({
         compatibilityState,
         compatibilityReasons: ['CanonicalReleaseDivergence'],
       })} observation="connected" />);
@@ -1209,7 +1229,7 @@ describe('InstallerUpdatesExperience', () => {
 
   it('keeps draft channel changes out of the observed identity card and top-level warning', async () => {
     const user = userEvent.setup();
-    render(<InstallerUpdatesExperience inventory={inventory({ selectedChannel: 'stable', observedChannel: null, readiness: { state: 'Blocked', reasons: ['Host maintenance is required'], hops: ['host-check'] }, eligibility: 'NotManaged' })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={vi.fn()} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory({ selectedChannel: 'stable', observedChannel: null, readiness: { state: 'Blocked', reasons: ['Host maintenance is required'], hops: ['host-check'] }, eligibility: 'NotManaged' })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={vi.fn()} />);
 
     expect(screen.getByText(/Selected train/).parentElement).toHaveTextContent('stable');
     expect(screen.getByText(/Observed train/).parentElement).toHaveTextContent('Unknown');
@@ -1225,7 +1245,7 @@ describe('InstallerUpdatesExperience', () => {
   it('defaults to stable and saves the complete UpdateChannel group', async () => {
     const user = userEvent.setup();
     const save = vi.fn().mockResolvedValue({ channel: 'stable', insiderAcknowledged: false });
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
 
     expect(screen.getByRole('combobox', { name: 'Release channel' })).toHaveValue('stable');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'stable');
@@ -1237,7 +1257,7 @@ describe('InstallerUpdatesExperience', () => {
   it('requires explicit acknowledgement before saving Insider', async () => {
     const user = userEvent.setup();
     const save = vi.fn().mockResolvedValue({ channel: 'insider', insiderAcknowledged: true });
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
     await user.click(screen.getByRole('button', { name: 'Save update channel' }));
@@ -1252,7 +1272,7 @@ describe('InstallerUpdatesExperience', () => {
     const user = userEvent.setup();
     let confirmSave: ((settings: { channel: 'insider'; insiderAcknowledged: true }) => void) | undefined;
     const save = vi.fn(() => new Promise<{ channel: 'insider'; insiderAcknowledged: true }>((resolve) => { confirmSave = resolve; }));
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
     await user.click(screen.getByRole('button', { name: 'Save update channel' }));
@@ -1270,7 +1290,7 @@ describe('InstallerUpdatesExperience', () => {
   it('keeps the acknowledgement dialog open and reports unknown outcome when save confirmation fails', async () => {
     const user = userEvent.setup();
     const save = vi.fn().mockRejectedValue(new Error('refetch failed'));
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
     await user.click(screen.getByRole('button', { name: 'Save update channel' }));
@@ -1289,7 +1309,7 @@ describe('InstallerUpdatesExperience', () => {
     const save = vi.fn().mockRejectedValue(new Error('refetch failed'));
     const initialSettings = { channel: 'stable' as const, insiderAcknowledged: false };
     const { rerender } = render(
-      <InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={initialSettings} onSaveUpdateChannel={save} />,
+      <TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={initialSettings} onSaveUpdateChannel={save} />,
     );
 
     expect(screen.getByRole('combobox', { name: 'Release channel' })).not.toBeDisabled();
@@ -1305,7 +1325,7 @@ describe('InstallerUpdatesExperience', () => {
     // delivers a new settings object; only then do mutation controls
     // re-enable and the stale error clears.
     rerender(
-      <InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ ...initialSettings }} onSaveUpdateChannel={save} />,
+      <TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ ...initialSettings }} onSaveUpdateChannel={save} />,
     );
 
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Release channel' })).not.toBeDisabled());
@@ -1316,7 +1336,7 @@ describe('InstallerUpdatesExperience', () => {
   it('reconciles the selector to the authoritative channel and reports a truthful rejection, without claiming success, when the refetch disagrees with the request', async () => {
     const user = userEvent.setup();
     const save = vi.fn().mockRejectedValue(new UpdateChannelSaveRejectedError({ channel: 'stable', insiderAcknowledged: false }));
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
     await user.click(screen.getByRole('button', { name: 'Save update channel' }));
@@ -1339,7 +1359,7 @@ describe('InstallerUpdatesExperience', () => {
   it('resets modal-local acknowledgement on cancel and requires a fresh acknowledgement', async () => {
     const user = userEvent.setup();
     const save = vi.fn().mockResolvedValue({ channel: 'insider', insiderAcknowledged: true });
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
     await user.click(screen.getByRole('button', { name: 'Save update channel' }));
@@ -1354,7 +1374,7 @@ describe('InstallerUpdatesExperience', () => {
 
   it('resets modal-local acknowledgement on close and Escape', async () => {
     const user = userEvent.setup();
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={vi.fn()} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={vi.fn()} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
     await user.click(screen.getByRole('button', { name: 'Save update channel' }));
@@ -1370,7 +1390,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('disables channel controls until authoritative settings load and wires errors to the select', () => {
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelIsLoading updateChannelIsError />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelIsLoading updateChannelIsError />);
 
     const select = screen.getByRole('combobox', { name: 'Release channel' });
     expect(select).toHaveValue('stable');
@@ -1384,7 +1404,7 @@ describe('InstallerUpdatesExperience', () => {
   it('keeps manual and automatic controls unavailable after Insider selection and save', async () => {
     const user = userEvent.setup();
     const save = vi.fn().mockResolvedValue({ channel: 'insider', insiderAcknowledged: true });
-    render(<InstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} onSaveUpdateChannel={save} />);
 
     await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'insider');
     await user.click(screen.getByRole('button', { name: 'Save update channel' }));
@@ -1400,7 +1420,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders the canonical scheduler status example without implying installability', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
+    render(<TestInstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: false,
       selectedChannel: 'insider',
@@ -1427,12 +1447,12 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders nullable and executor-unavailable scheduling as unavailable without alarm', () => {
-    const { rerender } = render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: null })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    const { rerender } = render(<TestInstallerUpdatesExperience inventory={inventory({ updateScheduling: null })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Scheduler unavailable')).toBeVisible();
     expect(screen.getByText(/not wired for this host/)).toBeVisible();
 
-    rerender(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
+    rerender(<TestInstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: false,
       effectiveEnabled: false,
       selectedChannel: 'stable',
@@ -1459,7 +1479,7 @@ describe('InstallerUpdatesExperience', () => {
     'Busy',
     'RecoveryRequired',
   ] as const)('keeps Update now/Later/automatic controls unavailable when executor state is %s, including Available and RecoveryRequired', (executorState: UpdateSchedulingExecutorState) => {
-    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
+    render(<TestInstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: true,
       selectedChannel: 'stable',
@@ -1481,7 +1501,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('keeps Update now/Later/automatic controls unavailable when updateScheduling is null regardless of executor state', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: null })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
+    render(<TestInstallerUpdatesExperience inventory={inventory({ updateScheduling: null })} observation="connected" updateChannelSettings={{ channel: 'stable', insiderAcknowledged: false }} />);
 
     expect(screen.getByText('Scheduler unavailable')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Update now' })).toHaveAttribute('aria-disabled', 'true');
@@ -1491,7 +1511,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders Busy executor status as a read-only in-progress report, not permission for another action', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
+    render(<TestInstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: true,
       selectedChannel: 'stable',
@@ -1513,7 +1533,7 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('renders RecoveryRequired executor status without suggesting an unsafe recovery action', () => {
-    render(<InstallerUpdatesExperience inventory={inventory({ updateScheduling: {
+    render(<TestInstallerUpdatesExperience inventory={inventory({ updateScheduling: {
       configuredEnabled: true,
       effectiveEnabled: true,
       selectedChannel: 'stable',
