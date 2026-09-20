@@ -119,6 +119,9 @@ or rejection from a PR that never had squad evidence.
   or GitHub's aggregate `reviewDecision`. Apply the current-state precedence in
   [Repository verdict evidence](copilot-instructions.md#repository-verdict-evidence).
   CI, draft/scope checks, and the exact-head merge guard still apply.
+  Preserve the status's `dissent=N; short=N` counts and linked findings in the
+  handoff; overridden dissent is not resolved review. The workflow audit names
+  the dissenters and panel members without approval.
 - Never infer a review from a free-text PR comment. Only the canonical
   `Squad-Reviewer:` / `Squad-Verdict:` / `Squad-Head-SHA:` block, evaluated by
   `.github/workflows/squad-review-verdict.yml`, produces the trusted
@@ -134,12 +137,13 @@ or rejection from a PR that never had squad evidence.
     merge on it; someone unverifiable tried to assert a review.
   - `fork PR needs a repository administrator` — fork PR, agent records are not
     read at all. Only a real administrator approval can clear it.
-  - `have <n>/<required>[, missing <agents>][ (stale at <agent>@<sha>, ...)]` —
+  - `have <n>/<required>[, choose <agents>][ (stale at <agent>@<sha>, ...)]` —
     too few accepted records for this change's scope. Match this as a **pattern,
-    not a fixed string**: the `missing` and `stale at` clauses each appear only
-    when they apply, so real forms include `have 1/3, missing hicks+vasquez`,
+    not a fixed string**: the `choose` and `stale at` clauses each appear only
+    when they apply, so real forms include `have 1/2, choose hicks+vasquez`,
     `have 0/1 (stale at dallas@<sha>)`, and
-    `have 0/3, missing bishop+hicks+vasquez (stale at bishop@<sha>, ...)`.
+    `have 0/2, choose bishop+hicks+vasquez (stale at bishop@<sha>, ...)`.
+    `choose` lists candidates for the remaining quorum, not mandatory individuals.
     A `stale at` clause means those reviewers reviewed a superseded head.
   - `reviewer <agent> is the PR author` — the only record came from the author.
   Act on the named condition — do not park the PR, and do not route it back to
@@ -155,6 +159,14 @@ or rejection from a PR that never had squad evidence.
   GitHub approval as fallback. Exit `4` is deliberately **not** `0`: it means no
   review was required because the PR is out of scope, which is never the same as
   a review having happened. Do not merge on it.
+
+Draft PRs may open before review. Readiness and merge require CI and verified
+current-head evidence under [Risk-Based Review Scope](copilot-instructions.md#risk-based-review-scope).
+Route distinct primary lenses and invoke the third reviewer only for disagreement,
+a critical finding, or unresolved cross-domain risk. Resume prior reviewer sessions
+when supported; otherwise pass compact immutable checkpoints and the deduplicated
+finding ledger under [Findings and Reviewer Checkpoints](copilot-instructions.md#findings-and-reviewer-checkpoints).
+Do not replace a rejecting reviewer just to obtain an approval.
 
 **Step 3 — Act on highest-priority item:**
 - Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)
