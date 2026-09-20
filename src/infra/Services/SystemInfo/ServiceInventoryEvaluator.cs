@@ -54,6 +54,8 @@ public static partial class ServiceInventoryEvaluator
         };
     }
 
+    // Deliberately limited to self-report-shaped legacy evidence; non-self-report
+    // adapters may carry a digest even when signed identity evidence is absent.
     private static bool IsUnsignedLegacyInstallation(ServiceReplicaObservationDto row) =>
         row.ObservationState is InventoryObservationState.Observed or InventoryObservationState.Stale
         && row.ApplicationVersion is not null

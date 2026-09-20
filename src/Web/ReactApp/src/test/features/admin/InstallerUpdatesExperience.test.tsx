@@ -125,7 +125,39 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByText(/cannot establish managed eligibility/)).toBeVisible();
     expect(screen.getByText('Manual signed install required')).toBeVisible();
     expect(screen.getByText(/manually install a current signed release/)).toBeVisible();
-    expect(screen.queryByText(/target_image_migration_runner_unavailable/)).not.toBeInTheDocument();
+    expect(screen.queryByText(/facility_unavailable:/)).not.toBeInTheDocument();
+  });
+
+  it('does not show the legacy manual path for facility-only blockers', () => {
+    render(<InstallerUpdatesExperience inventory={inventory({
+      eligibility: 'NotManaged',
+      eligibilityReasons: [
+        'facility_unavailable:target_image_migration_runner_unavailable',
+        'facility_unavailable:queue_reconciliation_writer_fence_unavailable',
+        'facility_unavailable:sql_server_visible_backup_path_mapping_unverified',
+      ],
+      compatibilityState: 'Compatible',
+    })} observation="connected" />);
+
+    expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
+    expect(screen.queryByText('Manual signed install required')).not.toBeInTheDocument();
+    expect(screen.queryByText(/cannot establish managed eligibility/)).not.toBeInTheDocument();
+  });
+
+  it('keeps mixed legacy and facility evidence visible as distinct categories', () => {
+    render(<InstallerUpdatesExperience inventory={inventory({
+      eligibility: 'NotManaged',
+      eligibilityReasons: [
+        'UnsignedLegacyInstallationManualOnly',
+        'facility_unavailable:target_image_migration_runner_unavailable',
+        'ReadOnlyInventory',
+      ],
+      compatibilityState: 'Compatible',
+    })} observation="connected" />);
+
+    expect(screen.getByText('Manual signed install required')).toBeVisible();
+    expect(screen.getByText(/facility_unavailable:target_image_migration_runner_unavailable/)).toBeVisible();
+    expect(screen.getByText(/cannot present verified signed release evidence/)).toBeVisible();
   });
 
   it('renders every observed replica and marks conflicting identities without proposing a target', async () => {

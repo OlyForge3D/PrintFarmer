@@ -49,8 +49,9 @@ public sealed class ServiceInventoryTests
         ]);
 
         result.Eligibility.Should().Be(InventoryEligibility.NotManaged);
-        result.EligibilityReasons.Should().Contain("UnsignedLegacyInstallationManualOnly");
-        result.EligibilityReasons.Should().NotContain("ManagedEligibilityNotEstablished");
+        result.EligibilityReasons.Should().Equal(
+            "UnsignedLegacyInstallationManualOnly",
+            "ReadOnlyInventory");
     }
 
     [Fact]

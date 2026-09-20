@@ -525,10 +525,10 @@ export function InstallerUpdatesExperience({
           </p>
           {unsignedLegacyInstallation && (
             <Alert type="warning" title="Manual signed install required">
-              This installation predates signed release evidence. Do not wait for
-              a facility fix or use a downgrade; manually install a current
-              signed release, then refresh inventory to establish managed
-              eligibility.
+              This installation cannot present verified signed release evidence.
+              Do not wait for a facility fix or use a downgrade; manually install
+              a current signed release, then refresh inventory to establish
+              managed eligibility.
             </Alert>
           )}
           <p>
