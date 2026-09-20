@@ -15,6 +15,7 @@ import { slicerService } from '@/services/slicerService';
 import { sliceJobService } from '@/services/sliceJobService';
 import { toast } from 'sonner';
 import { binaryStl, modelTextBuffer, threeMfBuffer } from '@/features/slicer/utils/__tests__/model-response-fixtures';
+import { MotionType, PrinterBackend, type Printer } from '@/types/api';
 
 // Mutable slicer-mode ref so individual describes can opt into Advanced mode.
 // Hoisted because vi.mock factories run before module-body initialization.
@@ -80,9 +81,9 @@ const mockPrinters = [
     manufacturerName: 'Prusa',
     modelId: 'model-1',
     modelName: 'MK4',
-    thumbnailUrl: '/thumb/prusa-mk4.png',
+    backend: PrinterBackend.PrusaLink,
     isOnline: true,
-    motionType: 'CoreXY'
+    motionType: MotionType.Cartesian
   },
   {
     id: 'printer-2',
@@ -91,11 +92,11 @@ const mockPrinters = [
     manufacturerName: 'Bambu Lab',
     modelId: 'model-2',
     modelName: 'X1 Carbon',
-    thumbnailUrl: '/thumb/bambu-x1.png',
+    backend: PrinterBackend.Unknown,
     isOnline: true,
-    motionType: 'CoreXY'
+    motionType: MotionType.CoreXY
   }
-];
+] satisfies Printer[];
 
 const mockPrinterDetails = {
   id: 'printer-1',
@@ -799,10 +800,10 @@ describe('NewSliceJobPage', () => {
       manufacturerName: 'Generic',
       modelId: 'model-3',
       modelName: 'Voron 2.4',
-      thumbnailUrl: '/thumb/voron.png',
+      backend: PrinterBackend.Moonraker,
       isOnline: false,
-      motionType: 'CoreXY',
-    };
+      motionType: MotionType.CoreXY,
+    } satisfies Printer;
 
     it('auto-selects an online printer when the restored selection is offline', async () => {
       localStorage.setItem('sliceJob.selectedPrinterId', offlinePrinter.id);
