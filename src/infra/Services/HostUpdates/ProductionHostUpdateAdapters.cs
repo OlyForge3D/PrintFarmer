@@ -330,6 +330,7 @@ public sealed class UnavailableHostUpdateSchedulingStatusProvider(
 
     private static void AddReason(List<string> reasons, string reason)
     {
+        // Reasons are a user-facing diagnostic set; independent gates may legitimately report the same cause.
         if (!reasons.Contains(reason, StringComparer.Ordinal))
         {
             reasons.Add(reason);
