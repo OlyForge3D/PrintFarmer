@@ -52,9 +52,9 @@ public class HostUpdateExecutionAvailabilityTests
 
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) => Task.FromResult(providerName);
 
-        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(false);
 
-        public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) =>
+        public Task<DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new DatabaseMigrationResult(false, []));
     }
 
@@ -65,9 +65,9 @@ public class HostUpdateExecutionAvailabilityTests
         public Task<string> GetProviderNameAsync(CancellationToken cancellationToken) =>
             throw new InvalidOperationException("slicer_db_context_not_registered");
 
-        public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken) => Task.FromResult(false);
+        public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) => Task.FromResult(false);
 
-        public Task<DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken) =>
+        public Task<DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
             Task.FromResult(new DatabaseMigrationResult(false, []));
     }
 
@@ -174,11 +174,10 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:queue_reconciliation_writer_fence_unavailable");
             result.Reasons.Should().Contain("facility_unavailable:sql_server_visible_backup_path_mapping_unverified");
             result.Reasons.Should().Contain("host_executable_not_configured:docker");
-            result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
+            result.Reasons.Should().Contain("database_provider_tooling_unsupported:Fake:Microsoft.EntityFrameworkCore.Sqlite");
         }
         finally
         {
@@ -187,7 +186,6 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Theory]
-    [InlineData("Microsoft.EntityFrameworkCore.Sqlite", "sqlite3")]
     [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", "pg_dump", "pg_restore")]
     [InlineData("Microsoft.EntityFrameworkCore.SqlServer", "sqlcmd")]
     public async Task CheckAsync_SingleConfiguredProvider_LeavesOnlyCodeOwnedFacilities(string providerName, params string[] providerTools)
@@ -214,7 +212,6 @@ public class HostUpdateExecutionAvailabilityTests
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().BeEquivalentTo(
             [
-                "facility_unavailable:target_image_migration_runner_unavailable",
                 "facility_unavailable:queue_reconciliation_writer_fence_unavailable",
                 "facility_unavailable:sql_server_visible_backup_path_mapping_unverified",
             ]);
@@ -256,7 +253,6 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Theory]
-    [InlineData("Microsoft.EntityFrameworkCore.Sqlite", "sqlite3", "")]
     [InlineData("Npgsql.EntityFrameworkCore.PostgreSQL", "pg_restore", "pg_dump")]
     [InlineData("Microsoft.EntityFrameworkCore.SqlServer", "sqlcmd", "")]
     public async Task CheckAsync_ActiveProviderToolMissing_ReportsToolNotConfigured(
@@ -357,7 +353,7 @@ public class HostUpdateExecutionAvailabilityTests
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
             result.Reasons.Should().Contain("database_provider_inspection_failed:UnavailableSlicer:InvalidOperationException");
-            result.Reasons.Should().Contain("host_executable_not_configured:sqlite3");
+            result.Reasons.Should().Contain("database_provider_tooling_unsupported:Fake:Microsoft.EntityFrameworkCore.Sqlite");
         }
         finally
         {
@@ -391,7 +387,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().Contain(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal));
             result.Reasons.Single(r => r.StartsWith("insufficient_fenced_writers:", StringComparison.Ordinal)).Should().Contain("webhook-delivery");
         }
@@ -559,7 +554,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
         }
         finally
         {
@@ -779,7 +773,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             result.Reasons.Should().NotContain(r => r.StartsWith("restart_reconciliation_pending", StringComparison.Ordinal));
         }
         finally
@@ -820,7 +813,6 @@ public class HostUpdateExecutionAvailabilityTests
             HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
 
             result.State.Should().Be(HostUpdateExecutionAvailabilityState.Unavailable);
-            result.Reasons.Should().Contain("facility_unavailable:target_image_migration_runner_unavailable");
             admission.QuiesceCallCount.Should().Be(0);
         }
         finally

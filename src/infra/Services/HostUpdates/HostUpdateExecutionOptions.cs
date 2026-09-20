@@ -56,7 +56,6 @@ public sealed class HostUpdateExecutionOptions
     [
         "Npgsql.EntityFrameworkCore.PostgreSQL",
         "Microsoft.EntityFrameworkCore.SqlServer",
-        "Microsoft.EntityFrameworkCore.Sqlite",
     ];
 
     /// <summary>Bounded wait for active prints/pending outbox commands to finish naturally during drain.</summary>
@@ -71,6 +70,9 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>Timeout for each provider-native backup/restore tool invocation.</summary>
     public int BackupTimeoutSeconds { get; set; } = 900;
+
+    /// <summary>Timeout for each digest-pinned target-image migration command.</summary>
+    public int MigrationTimeoutSeconds { get; set; } = 900;
 
     /// <summary>Bounded wait for every readiness/digest health check to report healthy.</summary>
     public int VerifyTimeoutSeconds { get; set; } = 300;

@@ -6,10 +6,8 @@ using Microsoft.Extensions.Logging;
 namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
-/// Serializes provider migrations for every registered context under the same execution
-/// ownership (the caller''s process lock), in manifest order. Production execution remains
-/// fail-closed until a target-image migration runner is provisioned; never run contexts
-/// concurrently, so there is never a mixed old/new writer window across contexts.
+/// Serializes target-image migrations under the executor's existing ownership lock. Every target
+/// is queried before any mutation so a target-image probe failure cannot leave a partial update.
 /// </summary>
 public sealed class HostUpdateMigrationCoordinator(IReadOnlyList<IHostUpdateMigrationTarget> targets)
     : IHostUpdateMigrationCoordinator, IHostUpdateMigrationReconciler
@@ -20,7 +18,15 @@ public sealed class HostUpdateMigrationCoordinator(IReadOnlyList<IHostUpdateMigr
         foreach (IHostUpdateMigrationTarget target in targets)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            _ = await target.MigrateAsync(cancellationToken).ConfigureAwait(false);
+
+            // Every probe must succeed before any target-image validation/migration can mutate state.
+            _ = await target.HasPendingMigrationsAsync(request, cancellationToken).ConfigureAwait(false);
+        }
+
+        foreach (IHostUpdateMigrationTarget target in targets)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            _ = await target.MigrateAsync(request, cancellationToken).ConfigureAwait(false);
         }
     }
 
@@ -32,37 +38,18 @@ public sealed class HostUpdateMigrationCoordinator(IReadOnlyList<IHostUpdateMigr
             cancellationToken.ThrowIfCancellationRequested();
             try
             {
-                if (await target.HasPendingMigrationsAsync(cancellationToken).ConfigureAwait(false))
+                if (await target.HasPendingMigrationsAsync(request, cancellationToken).ConfigureAwait(false))
                 {
                     return false;
                 }
             }
-            catch (HostUpdateTargetImageMigrationRunnerUnavailableException)
+            catch (HostUpdateTargetImageMigrationException)
             {
                 return false;
             }
         }
 
         return true;
-    }
-}
-
-/// <summary>Thrown when target-image migration execution has not been provisioned.</summary>
-public sealed class HostUpdateTargetImageMigrationRunnerUnavailableException : InvalidOperationException
-{
-    public HostUpdateTargetImageMigrationRunnerUnavailableException()
-        : base("target_image_migration_runner_unavailable")
-    {
-    }
-
-    public HostUpdateTargetImageMigrationRunnerUnavailableException(string message)
-        : base(message)
-    {
-    }
-
-    public HostUpdateTargetImageMigrationRunnerUnavailableException(string message, Exception innerException)
-        : base(message, innerException)
-    {
     }
 }
 
@@ -79,15 +66,13 @@ public interface IHostUpdateMigrationReconciler
 }
 
 /// <summary>
-/// Adapts a live <see cref="Microsoft.EntityFrameworkCore.DbContext"/> to provider-state inspection only.
-/// Forward migration/reconciliation refuses to use the current process assembly until a target-image
-/// migration runner is available.
+/// Adapts a live context to target-image migration execution. The live context is used only for
+/// provider/connection inspection; migration code always runs in the signed target image.
 /// </summary>
-public sealed class DbContextMigrationTarget<TContext>(
+public sealed class TargetImageMigrationTarget<TContext>(
     string contextName,
-    Farm.Infrastructure.Data.Migrations.DatabaseMigrationTarget migrationTarget,
     Func<TContext> resolveContext,
-    Microsoft.Extensions.Logging.ILogger logger) : IHostUpdateMigrationTarget
+    HostUpdateTargetImageMigrationRunner runner) : IHostUpdateMigrationTarget
     where TContext : Microsoft.EntityFrameworkCore.DbContext
 {
     public string ContextName { get; } = contextName;
@@ -111,15 +96,9 @@ public sealed class DbContextMigrationTarget<TContext>(
         return Task.FromResult(fingerprint);
     }
 
-    public Task<bool> HasPendingMigrationsAsync(CancellationToken cancellationToken)
-    {
-        logger.LogWarning("Host update target-image migration runner is unavailable for {ContextName} ({MigrationTarget}); refusing old-assembly reconciliation.", ContextName, migrationTarget);
-        throw new HostUpdateTargetImageMigrationRunnerUnavailableException();
-    }
+    public Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+        runner.HasPendingMigrationsAsync(request, ContextName, GetProviderNameAsync, cancellationToken);
 
-    public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken)
-    {
-        logger.LogWarning("Host update target-image migration runner is unavailable for {ContextName} ({MigrationTarget}); refusing old-assembly migration.", ContextName, migrationTarget);
-        throw new HostUpdateTargetImageMigrationRunnerUnavailableException();
-    }
+    public Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+        runner.MigrateAsync(request, ContextName, GetProviderNameAsync, cancellationToken);
 }

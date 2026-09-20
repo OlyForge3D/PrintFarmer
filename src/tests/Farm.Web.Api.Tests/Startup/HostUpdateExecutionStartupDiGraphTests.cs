@@ -1,5 +1,7 @@
 ﻿using System.Collections.Generic;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
+using Farm.Slicer.Module.Data;
 using Farm.Web.Api.Startup;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -162,6 +164,39 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
                 provider.GetRequiredService<IHostUpdateProcessRunner>());
             Assert.Throws<InvalidOperationException>(() =>
                 provider.GetRequiredService<DefaultHostUpdateProcessRunner>());
+        }
+
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
+    public void AddHostUpdateExecution_ResolvesBothTargetImageMigrationTargets()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+            using IServiceScope scope = provider.CreateScope();
+
+            IReadOnlyList<IHostUpdateMigrationTarget> targets =
+                scope.ServiceProvider.GetRequiredService<IReadOnlyList<IHostUpdateMigrationTarget>>();
+
+            Assert.Collection(
+                targets,
+                target => Assert.IsType<TargetImageMigrationTarget<AppDbContext>>(target),
+                target => Assert.IsType<TargetImageMigrationTarget<SlicerDbContext>>(target));
         }
         finally
         {
