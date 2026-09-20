@@ -1,5 +1,5 @@
 {
-  "_comment": "Keep this exact baseline in sync with the current direct test-file diagnostics; do not raise it to mask new errors.",
+  "_comment": "Keep both exact values in sync with the measured direct test diagnostics and test file count; do not raise testDiagnosticCount to mask new errors.",
   "testDiagnosticCount": 227,
-  "minimumTestFileCount": 530
+  "minimumTestFileCount": 540
 }
