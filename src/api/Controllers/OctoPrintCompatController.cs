@@ -8,11 +8,11 @@ using Farm.Infrastructure.Security;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.RateLimiting;
 using Farm.Infrastructure.Settings;
-using Farm.Modules.Devices.Authentication;
 using Farm.Modules.Devices.Filters;
 using Farm.Modules.Devices.Services.OctoPrint;
 using Farm.Modules.Gcode.DTOs;
 using Farm.Modules.Gcode.Services.Gcode;
+using Farm.Web.Api.Authorization;
 using Farm.Web.Api.DTOs;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
@@ -53,41 +53,30 @@ public class OctoPrintCompatController : ControllerBase
 #pragma warning disable S6932 // Controller intentionally uses raw request data for OctoPrint API compatibility
     [HttpPost("files/local")]
 
-    // Real authentication is required here (issue #1666): either a JWT Bearer token or a
-    // resolved OctoPrint API key (via OctoPrintApiKeyAuthenticationHandler), so that
-    // [RequirePermission] below runs against a genuine, permission-checkable identity
-    // instead of being skipped entirely by [AllowAnonymous].
-    [Authorize(AuthenticationSchemes = "Bearer," + OctoPrintApiKeyDefaults.AuthenticationScheme)]
-    [RequirePermission(PrintFarmerPermissions.Queue.Write)]
+    [Authorize(Policy = OctoPrintUploadPolicy.Name)]
+    [PermissionCatalog(PrintFarmerPermissions.Queue.Write)]
     [System.Diagnostics.CodeAnalysis.SuppressMessage("Security", "S5693", Justification = "OctoPrint compatibility uploads are explicitly capped at 50 MB.")]
     [RequestSizeLimit(52428800)] // 50 MB default; adjust based on settings
     [RequestFormLimits(MultipartBodyLengthLimit = 52_428_800)]
     public async Task<IActionResult> UploadFileAsync([FromQuery] Guid? printerId)
     {
-        // Resolve and validate the real caller's identity up front, fail closed. Mirrors
-        // JobQueueController.QueueJobAsync's identity-resolution pattern (see issue #1666).
-        string? userIdStr;
-        try
+        // Null is reserved for anonymous access explicitly allowed by the upload policy.
+        // Authenticated callers must retain their real identity for queue resource ACLs.
+        Guid? callerId = null;
+        if (User.Identity?.IsAuthenticated == true)
         {
-            userIdStr = QueueActorIdentity.Resolve(User);
+            try
+            {
+                callerId = Guid.Parse(QueueActorIdentity.Resolve(User));
+            }
+            catch (UnauthorizedAccessException)
+            {
+                _logger.LogWarning("OctoPrint upload denied: unable to resolve user identity from claims");
+                return StatusCode(
+                    StatusCodes.Status403Forbidden,
+                    new { error = "Unable to verify group access — user identity could not be resolved." });
+            }
         }
-        catch (UnauthorizedAccessException)
-        {
-            _logger.LogWarning("OctoPrint upload denied: unable to resolve user identity from claims");
-            return StatusCode(
-                StatusCodes.Status403Forbidden,
-                new { error = "Unable to verify group access — user identity could not be resolved." });
-        }
-
-        if (!Guid.TryParse(userIdStr, out Guid parsedUserId))
-        {
-            _logger.LogWarning("OctoPrint upload denied: unable to resolve user identity from claims (raw value: {UserIdStr})", userIdStr);
-            return StatusCode(
-                StatusCodes.Status403Forbidden,
-                new { error = "Unable to verify group access — user identity could not be resolved." });
-        }
-
-        Guid callerId = parsedUserId;
 
         // OctoPrint API sends 'print' and 'select' as form fields, not query params
         // We need to read form first to get these values
@@ -111,9 +100,6 @@ public class OctoPrintCompatController : ControllerBase
         _logger.LogInformation(
             "OctoPrint upload request: ContentType={ContentType}, ContentLength={ContentLength}, print={Print}, select={Select}, printerId={PrinterId}",
             LogSanitizer.Sanitize(Request.ContentType), Request.ContentLength, print, select, LogSanitizer.Sanitize(printerId?.ToString()));
-
-        // Authentication is handled by [Authorize(AuthenticationSchemes = ...)] and
-        // [RequirePermission] above; callerId was already resolved and fail-closed-checked.
 
         // Rate limiting: key by apiKey if present otherwise by remote IP
         var apiKey = Request.Headers["X-Api-Key"].ToString();
