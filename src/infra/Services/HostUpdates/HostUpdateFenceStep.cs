@@ -156,6 +156,7 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
     private volatile bool _acknowledged;
     private int _acknowledgementCount;
 
+    /// <summary>Test-only observation seam, gated by InternalsVisibleTo; fence decisions do not consult it.</summary>
     internal int AcknowledgementCount => Volatile.Read(ref _acknowledgementCount);
 
     public Task RequestPauseAsync(CancellationToken cancellationToken)
@@ -175,6 +176,7 @@ public sealed class InMemoryHostUpdateWriterActivityFlag(IHostUpdateAdmissionGat
     {
         _pauseRequested = false;
         _acknowledged = false;
+        _ = Interlocked.Exchange(ref _acknowledgementCount, 0);
         if (durableFence is not null)
         {
             await durableFence.OpenAsync(cancellationToken).ConfigureAwait(false);

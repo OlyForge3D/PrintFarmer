@@ -25,6 +25,9 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateWriterFencingTests : IDisposable
 {
+    // Each paused outer-loop iteration acknowledges at its top and interval boundary.
+    private const int AcknowledgementsPerPausedIteration = 2;
+
     private readonly SqliteConnection _connection;
 
     public HostUpdateWriterFencingTests()
@@ -87,8 +90,10 @@ public class HostUpdateWriterFencingTests : IDisposable
         }
         catch (OperationCanceledException) when (timeout.IsCancellationRequested)
         {
+            int observed = acknowledgementCount();
             throw new Xunit.Sdk.XunitException(
-                $"Writer did not acknowledge the pause {expectedAcknowledgements} times within 10 seconds.");
+                $"Writer acknowledged the pause {observed} times, expected {expectedAcknowledgements}; " +
+                $"missing {expectedAcknowledgements - observed} acknowledgement(s) within 10 seconds.");
         }
     }
 
@@ -104,7 +109,10 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<PowerReadingPruneService>.Instance,
             fence);
         await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
+        await WaitForPauseAcknowledgementsAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            AcknowledgementsPerPausedIteration + 1);
         await sut.StopAsync(CancellationToken.None);
 
         (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
@@ -143,7 +151,10 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<QueueRetentionPruneService>.Instance,
             fence);
         await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
+        await WaitForPauseAcknowledgementsAsync(
+            fence,
+            () => fence.AcknowledgementCount,
+            AcknowledgementsPerPausedIteration + 1);
         await sut.StopAsync(CancellationToken.None);
 
         (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
