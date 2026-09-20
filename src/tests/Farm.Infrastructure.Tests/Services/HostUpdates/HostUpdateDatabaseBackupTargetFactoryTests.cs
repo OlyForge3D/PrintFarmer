@@ -49,6 +49,7 @@ public class HostUpdateDatabaseBackupTargetFactoryTests
             return Task.FromResult(new HostUpdateProcessResult(0, string.Empty, string.Empty));
         }
     }
+
     /// <summary>
     /// Simulates the process runner itself throwing (e.g. the OS refusing to start the
     /// executable) rather than sqlcmd running and returning a nonzero exit code -- a distinct

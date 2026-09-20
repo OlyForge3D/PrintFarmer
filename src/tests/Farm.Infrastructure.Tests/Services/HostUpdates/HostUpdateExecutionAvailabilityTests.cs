@@ -258,6 +258,45 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     [Fact]
+    public async Task CheckAsync_DefaultRequiredWritersAllPresent_IsAvailable()
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            HostUpdateExecutionOptions options = new()
+            {
+                RootDirectory = root,
+                ComposeFiles = [composeFile],
+                RequiredUnavailableFacilities = [],
+            };
+            ConfigureExecutablePaths(options, root, "docker", "pg_dump", "pg_restore");
+            FakeFenceableWriter[] writers = options.RequiredFencedWriterNames
+                .Select(name => new FakeFenceableWriter(name))
+                .ToArray();
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                options,
+                new FakeJournal(),
+                [new FakeMigrationTarget("Npgsql.EntityFrameworkCore.PostgreSQL")],
+                [new FakeBackupTarget()],
+                writers,
+                new FakeProcessRunner(dockerAvailable: true),
+                new FakeRecoveryOutcomeStore(),
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            result.State.Should().Be(HostUpdateExecutionAvailabilityState.Available);
+            result.Reasons.Should().BeEmpty();
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
+    [Fact]
     public async Task CheckAsync_ServerSideBackupTargetVerificationFails_SurfacesFacilityWithEvidence()
     {
         string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;

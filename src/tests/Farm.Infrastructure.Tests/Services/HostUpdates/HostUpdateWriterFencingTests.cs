@@ -1,5 +1,6 @@
 ﻿using System.Collections.Concurrent;
 using System.Data.Common;
+using System.Runtime.ExceptionServices;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Domain;
 using Farm.Infrastructure.Services.Electricity;
@@ -12,6 +13,7 @@ using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -228,6 +230,87 @@ public class HostUpdateWriterFencingTests : IDisposable
         }
     }
 
+    private static async Task RunHostedServiceAsync(
+        IHostedService service,
+        Func<Task> testBody,
+        TimeSpan? stopTimeout = null)
+    {
+        Exception? testFailure = null;
+        Exception? cleanupFailure = null;
+        bool started = false;
+        try
+        {
+            await service.StartAsync(CancellationToken.None);
+            started = true;
+            await testBody();
+        }
+        catch (Exception exception)
+        {
+            testFailure = exception;
+        }
+        finally
+        {
+            if (started)
+            {
+                using var cancellation = new CancellationTokenSource(
+                    stopTimeout ?? TimeSpan.FromSeconds(10));
+                try
+                {
+                    await service.StopAsync(cancellation.Token);
+                }
+                catch (Exception exception)
+                {
+                    cleanupFailure = exception;
+                }
+            }
+
+            if (service is IDisposable disposable)
+            {
+                try
+                {
+                    disposable.Dispose();
+                }
+                catch (Exception exception)
+                {
+                    cleanupFailure ??= exception;
+                }
+            }
+        }
+
+        if (testFailure is not null)
+        {
+            if (cleanupFailure is not null)
+            {
+                testFailure.Data["HostedServiceCleanupFailure"] = cleanupFailure.ToString();
+            }
+
+            ExceptionDispatchInfo.Capture(testFailure).Throw();
+        }
+
+        if (cleanupFailure is not null)
+        {
+            throw new Xunit.Sdk.XunitException(
+                $"Hosted service cleanup did not complete within " +
+                $"{stopTimeout ?? TimeSpan.FromSeconds(10)}: {cleanupFailure.Message}");
+        }
+    }
+
+    [Fact]
+    public async Task RunHostedServiceAsync_AssertionAndCleanupTimeout_PreservesAssertionFailure()
+    {
+        var service = new BlockingStopHostedService();
+
+        Xunit.Sdk.XunitException failure = await Assert.ThrowsAsync<Xunit.Sdk.XunitException>(
+            () => RunHostedServiceAsync(
+                service,
+                () => throw new Xunit.Sdk.XunitException("original assertion"),
+                TimeSpan.FromMilliseconds(50)));
+
+        failure.Message.Should().Be("original assertion");
+        failure.Data.Contains("HostedServiceCleanupFailure").Should().BeTrue();
+        service.Disposed.Should().BeTrue();
+    }
+
     [Fact]
     public async Task PowerReadingPruneService_WhilePauseRequested_NeverOpensScope()
     {
@@ -239,15 +322,16 @@ public class HostUpdateWriterFencingTests : IDisposable
             scopeFactory,
             NullLogger<PowerReadingPruneService>.Instance,
             fence);
-        await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            AcknowledgementsPerPausedIteration + 1);
-        await sut.StopAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await WaitForPauseAcknowledgementsAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                AcknowledgementsPerPausedIteration + 1);
 
-        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
-        scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
+        });
     }
 
     [Fact]
@@ -261,11 +345,11 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<PowerReadingPruneService>.Instance,
             fence);
 
-        await sut.StartAsync(CancellationToken.None);
-        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await sut.StopAsync(CancellationToken.None);
-
-        scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
+        });
     }
 
     [Fact]
@@ -281,15 +365,16 @@ public class HostUpdateWriterFencingTests : IDisposable
             Options.Create(settings),
             NullLogger<QueueRetentionPruneService>.Instance,
             fence);
-        await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            AcknowledgementsPerPausedIteration + 1);
-        await sut.StopAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await WaitForPauseAcknowledgementsAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                AcknowledgementsPerPausedIteration + 1);
 
-        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
-        scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
+        });
     }
 
     [Fact]
@@ -305,11 +390,11 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<QueueRetentionPruneService>.Instance,
             fence);
 
-        await sut.StartAsync(CancellationToken.None);
-        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await sut.StopAsync(CancellationToken.None);
-
-        scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
+        });
     }
 
     [Fact]
@@ -377,14 +462,14 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<QueueReconciliationService>.Instance,
             fence);
 
-        await service.StartAsync(CancellationToken.None);
-        await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        await fence.RequestPauseAsync(CancellationToken.None);
+        await RunHostedServiceAsync(service, async () =>
+        {
+            await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            await fence.RequestPauseAsync(CancellationToken.None);
+            await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 1);
 
-        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 1);
-        await service.StopAsync(CancellationToken.None);
-
-        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+        });
     }
 
     [Fact]
@@ -401,13 +486,14 @@ public class HostUpdateWriterFencingTests : IDisposable
             epochController,
             fence);
 
-        await service.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
-        await service.StopAsync(CancellationToken.None);
+        await RunHostedServiceAsync(service, async () =>
+        {
+            await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
 
-        epochController.EpochFlips.Should().Be(1);
-        fence.AcknowledgementCount.Should().Be(2);
-        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            epochController.EpochFlips.Should().Be(1);
+            fence.AcknowledgementCount.Should().Be(2);
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+        });
     }
 
     [Fact]
@@ -639,15 +725,16 @@ public class HostUpdateWriterFencingTests : IDisposable
             scopeFactory,
             NullLogger<BackendStartCommandConsumerService>.Instance,
             fence);
-        await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            expectedAcknowledgements: AcknowledgementsPerPausedIteration);
-        await sut.StopAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await WaitForPauseAcknowledgementsAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                expectedAcknowledgements: AcknowledgementsPerPausedIteration);
 
-        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
-        scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
+            fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
+            scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
+        });
     }
 
     [Fact]
@@ -660,20 +747,20 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<BackendStartCommandConsumerService>.Instance,
             fence);
 
-        await sut.StartAsync(CancellationToken.None);
-        await WaitForScopeDisposalsAsync(scopeFactory, 2, TimeSpan.FromSeconds(10));
-        int scopesBeforePause = scopeFactory.ScopesOpened;
-        await fence.RequestPauseAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await WaitForScopeDisposalsAsync(scopeFactory, 2, TimeSpan.FromSeconds(10));
+            int scopesBeforePause = scopeFactory.ScopesOpened;
+            await fence.RequestPauseAsync(CancellationToken.None);
+            await WaitForIntervalBoundaryAcknowledgementAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                TimeSpan.FromSeconds(2));
 
-        await WaitForIntervalBoundaryAcknowledgementAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            TimeSpan.FromSeconds(2));
-        await sut.StopAsync(CancellationToken.None);
-
-        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
-        scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
-            "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+            fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
+            scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
+                "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+        });
     }
 
     [Fact]
@@ -687,15 +774,16 @@ public class HostUpdateWriterFencingTests : IDisposable
             scopeFactory,
             NullLogger<BackendControlCommandConsumerService>.Instance,
             fence);
-        await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            expectedAcknowledgements: AcknowledgementsPerPausedIteration);
-        await sut.StopAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await WaitForPauseAcknowledgementsAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                expectedAcknowledgements: AcknowledgementsPerPausedIteration);
 
-        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
-        scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
+            fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
+            scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not start queue work while paused");
+        });
     }
 
     [Fact]
@@ -708,20 +796,20 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<BackendControlCommandConsumerService>.Instance,
             fence);
 
-        await sut.StartAsync(CancellationToken.None);
-        await WaitForScopeDisposalsAsync(scopeFactory, 2, TimeSpan.FromSeconds(10));
-        int scopesBeforePause = scopeFactory.ScopesOpened;
-        await fence.RequestPauseAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await WaitForScopeDisposalsAsync(scopeFactory, 2, TimeSpan.FromSeconds(10));
+            int scopesBeforePause = scopeFactory.ScopesOpened;
+            await fence.RequestPauseAsync(CancellationToken.None);
+            await WaitForIntervalBoundaryAcknowledgementAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                TimeSpan.FromSeconds(2));
 
-        await WaitForIntervalBoundaryAcknowledgementAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            TimeSpan.FromSeconds(2));
-        await sut.StopAsync(CancellationToken.None);
-
-        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
-        scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
-            "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+            fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
+            scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
+                "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
+        });
     }
 
     [Fact]
@@ -776,16 +864,17 @@ public class HostUpdateWriterFencingTests : IDisposable
             NullLogger<BedClearAcknowledgementExpiryService>.Instance,
             metrics,
             fence);
-        await sut.StartAsync(CancellationToken.None);
-        await WaitForPauseAcknowledgementsAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            expectedAcknowledgements: AcknowledgementsPerPausedIteration);
-        await sut.StopAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await WaitForPauseAcknowledgementsAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                expectedAcknowledgements: AcknowledgementsPerPausedIteration);
 
-        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
-        spy.InvalidationCount.Should().Be(1, "the paused scanner must not delegate acknowledgement writes");
-        scopeFactory.ScopesOpened.Should().Be(1, "the positive control opens the only scanner scope; the paused scanner must not open another");
+            fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(AcknowledgementsPerPausedIteration);
+            spy.InvalidationCount.Should().Be(1, "the paused scanner must not delegate acknowledgement writes");
+            scopeFactory.ScopesOpened.Should().Be(1, "the positive control opens the only scanner scope; the paused scanner must not open another");
+        });
     }
 
     [Fact]
@@ -830,23 +919,35 @@ public class HostUpdateWriterFencingTests : IDisposable
             metrics,
             fence);
 
-        await sut.StartAsync(CancellationToken.None);
-        await scopeFactory.FirstScopeDisposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
-        int scopesBeforePause = scopeFactory.ScopesOpened;
-        int writesBeforePause = spy.InvalidationCount;
-        writesBeforePause.Should().Be(1, "the unpaused scan must complete before pausing the interval");
-        await fence.RequestPauseAsync(CancellationToken.None);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            await scopeFactory.FirstScopeDisposed.Task.WaitAsync(TimeSpan.FromSeconds(10));
+            int scopesBeforePause = scopeFactory.ScopesOpened;
+            int writesBeforePause = spy.InvalidationCount;
+            writesBeforePause.Should().Be(1, "the unpaused scan must complete before pausing the interval");
+            await fence.RequestPauseAsync(CancellationToken.None);
+            await WaitForIntervalBoundaryAcknowledgementAsync(
+                fence,
+                () => fence.AcknowledgementCount,
+                TimeSpan.FromSeconds(2));
 
-        await WaitForIntervalBoundaryAcknowledgementAsync(
-            fence,
-            () => fence.AcknowledgementCount,
-            TimeSpan.FromSeconds(2));
-        await sut.StopAsync(CancellationToken.None);
+            fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
+            scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
+                "the interval-boundary acknowledgement must stop the next scan before it opens another scope");
+            spy.InvalidationCount.Should().Be(writesBeforePause,
+                "the interval-boundary acknowledgement must precede any subsequent delegated write");
+        });
+    }
 
-        fence.AcknowledgementCount.Should().BeGreaterThanOrEqualTo(1);
-        scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
-            "the interval-boundary acknowledgement must stop the next scan before it opens another scope");
-        spy.InvalidationCount.Should().Be(writesBeforePause,
-            "the interval-boundary acknowledgement must precede any subsequent delegated write");
+    private sealed class BlockingStopHostedService : IHostedService, IDisposable
+    {
+        public bool Disposed { get; private set; }
+
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) =>
+            Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+
+        public void Dispose() => Disposed = true;
     }
 }
