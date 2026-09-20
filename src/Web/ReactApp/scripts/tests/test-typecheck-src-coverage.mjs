@@ -229,14 +229,15 @@ test("walkSrcFiles finds nested checkable files, skips node_modules under src/, 
   }
 });
 
-test("walkSrcFiles dedups a symlink to an already-walked file via realpath", async (t) => {
+test("walkSrcFiles visits a symlink-only file and preserves the symlink path", async (t) => {
   const fixtureDirectory = await mkdtemp(
-    path.join(tmpdir(), "typecheck-src-coverage-walk-dedup-"),
+    path.join(tmpdir(), "typecheck-src-coverage-walk-symlink-file-"),
   );
 
   try {
     await mkdir(path.join(fixtureDirectory, "src"), { recursive: true });
-    const targetPath = path.join(fixtureDirectory, "src/real.ts");
+    await mkdir(path.join(fixtureDirectory, "shared"), { recursive: true });
+    const targetPath = path.join(fixtureDirectory, "shared/real.ts");
     const linkPath = path.join(fixtureDirectory, "src/link.ts");
     await writeFile(targetPath, "export const a = 1;\n");
 
@@ -248,7 +249,61 @@ test("walkSrcFiles dedups a symlink to an already-walked file via realpath", asy
     }
 
     const files = await walkSrcFiles(fixtureDirectory);
-    assert.equal(files.size, 1);
+    assert.deepEqual([...files.values()], ["src/link.ts"]);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("walkSrcFiles follows a symlinked directory and reports children under the symlink path", async (t) => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-src-coverage-walk-symlink-dir-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "shared/nested"), {
+      recursive: true,
+    });
+    const targetPath = path.join(fixtureDirectory, "shared/nested/leaf.ts");
+    const linkPath = path.join(fixtureDirectory, "src/linked-dir");
+    await writeFile(targetPath, "export const a = 1;\n");
+
+    try {
+      await symlink(path.join(fixtureDirectory, "shared/nested"), linkPath, "dir");
+    } catch (error) {
+      t.skip(`symlinks unavailable in this environment: ${error.message}`);
+      return;
+    }
+
+    const files = await walkSrcFiles(fixtureDirectory);
+    assert.deepEqual([...files.values()], ["src/linked-dir/leaf.ts"]);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("walkSrcFiles avoids infinite recursion on a self-referential symlinked directory", async (t) => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-src-coverage-walk-symlink-cycle-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src"), { recursive: true });
+    await writeFile(
+      path.join(fixtureDirectory, "src/real.ts"),
+      "export const a = 1;\n",
+    );
+
+    try {
+      await symlink(path.join(fixtureDirectory, "src"), path.join(fixtureDirectory, "src/loop"), "dir");
+    } catch (error) {
+      t.skip(`symlinks unavailable in this environment: ${error.message}`);
+      return;
+    }
+
+    const files = await walkSrcFiles(fixtureDirectory);
+    assert.deepEqual([...files.values()], ["src/real.ts"]);
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }
@@ -262,6 +317,51 @@ test("walkSrcFiles returns an empty result rather than throwing when src/ does n
   try {
     const files = await walkSrcFiles(fixtureDirectory);
     assert.equal(files.size, 0);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("a symlink-only walked file is reported as uncovered until one project lists the symlink path", async (t) => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-src-coverage-symlink-gate-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "shared"), { recursive: true });
+    const targetPath = path.join(fixtureDirectory, "shared/real.ts");
+    const linkPath = path.join(fixtureDirectory, "src/link.ts");
+    await writeFile(targetPath, "export const a = 1;\n");
+
+    try {
+      await symlink(targetPath, linkPath, "file");
+    } catch (error) {
+      t.skip(`symlinks unavailable in this environment: ${error.message}`);
+      return;
+    }
+
+    const walkedFiles = await walkSrcFiles(fixtureDirectory);
+    const uncovered = evaluate({
+      appListFilesResult: okResult,
+      appListFilesOutput: "",
+      testListFilesResult: okResult,
+      testListFilesOutput: "",
+      walkedFiles,
+      directory: fixtureDirectory,
+    });
+    assert.equal(uncovered.ok, false);
+    assert.match(uncovered.message, /src\/link\.ts/);
+
+    const covered = evaluate({
+      appListFilesResult: okResult,
+      appListFilesOutput: "src/link.ts",
+      testListFilesResult: okResult,
+      testListFilesOutput: "",
+      walkedFiles,
+      directory: fixtureDirectory,
+    });
+    assert.equal(covered.ok, true);
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }

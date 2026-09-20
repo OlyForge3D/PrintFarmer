@@ -20,7 +20,7 @@
 // under node_modules, not escaping the project directory" guard idiom those
 // two modules use (isAppSourceFile / isTestFile) rather than importing a
 // private helper from either.
-import { readdir } from "node:fs/promises";
+import { readdir, stat } from "node:fs/promises";
 import { isAbsolute, relative, resolve } from "node:path";
 import { toRealPath } from "./typecheck-tests-core.mjs";
 
@@ -60,6 +60,18 @@ function toSrcRelativePath(path, directory) {
   return normalized;
 }
 
+function isProjectRelativePath(path, directory) {
+  const normalized = relative(directory, resolve(directory, path)).replaceAll(
+    "\\",
+    "/",
+  );
+  return (
+    !isAbsolute(normalized) &&
+    !normalized.startsWith("../") &&
+    !normalized.split("/").includes("node_modules")
+  );
+}
+
 // Parses one project's --listFilesOnly output into a Map keyed by realpath
 // (so a symlink pointing at an already-listed file cannot be double-counted,
 // or -- more importantly here -- cannot make a file LOOK uncovered under one
@@ -94,44 +106,98 @@ export function parseListFilesOutput(listFilesOutput, directory) {
 // file no type-check gate has ever looked at.
 export async function walkSrcFiles(directory) {
   const srcDirectory = resolve(directory, "src");
+  const realProjectDirectory = toRealPath(directory);
   const files = new Map();
+  const visitedDirectories = new Set();
 
-  let entries;
-  try {
-    entries = await readdir(srcDirectory, {
-      withFileTypes: true,
-      recursive: true,
-    });
-  } catch (error) {
-    // No src/ directory at all is not this gate's problem to diagnose --
-    // every other build/test step already fails loudly in that case. Treat
-    // it as "found nothing" rather than crashing this gate with an
-    // unrelated, confusing stack trace.
-    if (error && error.code === "ENOENT") {
-      return files;
+  async function walkDirectory(currentDirectory) {
+    const realDirectory = toRealPath(currentDirectory);
+    if (
+      visitedDirectories.has(realDirectory) ||
+      !isProjectRelativePath(realDirectory, realProjectDirectory)
+    ) {
+      return;
     }
-    throw error;
+    visitedDirectories.add(realDirectory);
+
+    let entries;
+    try {
+      entries = await readdir(currentDirectory, { withFileTypes: true });
+    } catch (error) {
+      // No src/ directory at all is not this gate's problem to diagnose --
+      // every other build/test step already fails loudly in that case. Treat
+      // it as "found nothing" rather than crashing this gate with an
+      // unrelated, confusing stack trace.
+      if (error && error.code === "ENOENT") {
+        return;
+      }
+      throw error;
+    }
+
+    for (const entry of entries) {
+      const absolutePath = resolve(currentDirectory, entry.name);
+      const relativePath = toSrcRelativePath(absolutePath, directory);
+      if (!relativePath) {
+        continue;
+      }
+
+      if (entry.isDirectory()) {
+        await walkDirectory(absolutePath);
+        continue;
+      }
+
+      if (entry.isFile()) {
+        if (!isCheckableSourceFile(relativePath)) {
+          continue;
+        }
+
+        const real = toRealPath(absolutePath);
+        if (
+          !files.has(real) &&
+          isProjectRelativePath(real, realProjectDirectory)
+        ) {
+          files.set(real, relativePath);
+        }
+        continue;
+      }
+
+      if (!entry.isSymbolicLink()) {
+        continue;
+      }
+
+      let target;
+      try {
+        target = await stat(absolutePath);
+      } catch (error) {
+        if (
+          error &&
+          (error.code === "ENOENT" || error.code === "ELOOP")
+        ) {
+          continue;
+        }
+        throw error;
+      }
+
+      if (target.isDirectory()) {
+        await walkDirectory(absolutePath);
+        continue;
+      }
+
+      if (!target.isFile() || !isCheckableSourceFile(relativePath)) {
+        continue;
+      }
+
+      const real = toRealPath(absolutePath);
+      if (
+        !files.has(real) &&
+        isProjectRelativePath(real, realProjectDirectory)
+      ) {
+        files.set(real, relativePath);
+      }
+    }
   }
 
-  for (const entry of entries) {
-    if (!entry.isFile()) {
-      continue;
-    }
-
-    // Node's recursive readdir reports `parentPath` (the directory actually
-    // containing this entry, which may be nested arbitrarily deep) rather
-    // than re-deriving it from `entry.name` alone.
-    const absolutePath = resolve(entry.parentPath, entry.name);
-    const relativePath = toSrcRelativePath(absolutePath, directory);
-    if (!relativePath || !isCheckableSourceFile(relativePath)) {
-      continue;
-    }
-
-    const real = toRealPath(absolutePath);
-    if (!files.has(real)) {
-      files.set(real, relativePath);
-    }
-  }
+  await walkDirectory(srcDirectory);
 
   return files;
 }
