@@ -2,12 +2,11 @@ import { act, renderHook } from "@testing-library/react";
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { useDirtyState } from "../useDirtyState";
 
-interface Sample {
-  [key: string]: unknown;
+type Sample = {
   name: string;
   count: number;
   tags: string[];
-}
+};
 
 const initial: Sample = { name: "a", count: 1, tags: ["x"] };
 

@@ -38,9 +38,6 @@ describe("useFileBrowser", () => {
       fileName: item.name,
       isDirectory: false,
     }),
-    canDownload: true,
-    onDelete: vi.fn(),
-    onDownload: vi.fn(),
   };
 
   it("loads files and maps domain items", async () => {

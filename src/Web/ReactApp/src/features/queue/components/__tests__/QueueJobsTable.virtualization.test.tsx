@@ -130,7 +130,6 @@ function createJobs(count: number): QueuedPrintJobWithFileMetaDto[] {
   return Array.from({ length: count }, (_, index) => {
     const id = `job-${index}`;
     return {
-      id,
       job: {
         id,
         name: `print-${index}`,

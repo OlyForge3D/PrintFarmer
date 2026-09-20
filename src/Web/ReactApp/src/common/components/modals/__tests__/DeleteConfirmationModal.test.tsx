@@ -1,7 +1,7 @@
 import { render, screen, fireEvent } from "@testing-library/react";
 import { describe, it, expect, vi } from "vitest";
 import { DeleteConfirmationModal } from "../DeleteConfirmationModal";
-import { Printer } from "@/types/api";
+import { Printer, PrinterBackend } from "@/types/api";
 
 const mockPrinter: Printer = {
   id: "1",
@@ -11,7 +11,7 @@ const mockPrinter: Printer = {
   ipAddress: "192.168.1.100",
   backendUrl: "http://192.168.1.100",
   isReachable: true,
-  backend: "Moonraker" as never,
+  backend: PrinterBackend.Moonraker,
   isOnline: true,
 };
 
