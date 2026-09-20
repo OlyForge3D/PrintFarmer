@@ -16,9 +16,9 @@ import { isAbsolute, relative, resolve } from "node:path";
 const TS_NOCHECK_PATTERN = /^[ \t]*\/\/+[ \t]*@ts-nocheck\b/m;
 
 // Bounds an env-var-supplied override for a spawnSync limit so the seam can
-// only ever tighten the default (shorten the timeout), never lengthen,
-// enlarge, or disable it. Invalid, non-finite, and oversize values must
-// silently fall back to the default.
+// only ever tighten the default (shorten the timeout or reduce buffer
+// capacity), never lengthen, enlarge, or disable it. Invalid, non-finite,
+// and oversize values must silently fall back to the default.
 export function clampedOverride(envValue, defaultValue) {
   const parsed = Number(envValue);
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= defaultValue
