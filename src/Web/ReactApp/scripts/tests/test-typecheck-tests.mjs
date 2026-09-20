@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { cp, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { cp, mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -29,6 +29,17 @@ function evaluateGate(overrides = {}) {
     ...overrides,
   });
 }
+
+test("runs the typecheck ratchet before coverage", async () => {
+  const packageJson = JSON.parse(
+    await readFile(path.join(packageDirectory, "package.json"), "utf8"),
+  );
+
+  assert.equal(
+    packageJson.scripts["pretest:coverage"],
+    "npm run ci:typecheck-tests",
+  );
+});
 
 test("accepts an exact test diagnostic baseline", () => {
   assert.equal(evaluateGate().ok, true);
@@ -136,7 +147,11 @@ test("classifies project-relative and absolute test paths while excluding depend
     false,
   );
   assert.equal(isTestFile("../../outside.test.ts", packageDirectory), false);
-  assert.equal(isTestFile("Z:/outside.test.ts", packageDirectory), false);
+  // Different drive roots only exist on Windows; on POSIX relative() cannot
+  // return an absolute path, so this covers the Windows-only isAbsolute guard.
+  if (process.platform === "win32") {
+    assert.equal(isTestFile("Z:/outside.test.ts", packageDirectory), false);
+  }
   assert.equal(isTestFile("src/services/e.ts", packageDirectory), false);
 });
 
