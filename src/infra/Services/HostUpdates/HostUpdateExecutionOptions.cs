@@ -64,7 +64,7 @@ public sealed class HostUpdateExecutionOptions
     public int DrainPollIntervalSeconds { get; set; } = 5;
 
     /// <summary>Bounded wait to prove every registered writer has actually quiesced before backup.</summary>
-    public int FenceProofTimeoutSeconds { get; set; } = 320;
+    public int FenceProofTimeoutSeconds { get; set; } = 321;
 
     public int FencePollIntervalSeconds { get; set; } = 2;
 

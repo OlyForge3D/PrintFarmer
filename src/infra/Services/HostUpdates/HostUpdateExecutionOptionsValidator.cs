@@ -62,6 +62,14 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
                 $"{BackendStartCommandConsumerService.RequiredFenceProofDuration.TotalSeconds} seconds " +
                 "to cover the backend-start writer deadline and acknowledgement margin.");
         }
+        else if (TimeSpan.FromSeconds(
+                     options.FenceProofTimeoutSeconds - options.FencePollIntervalSeconds) <
+                 BackendStartCommandConsumerService.RequiredFenceProofDuration)
+        {
+            failures.Add(
+                "HostUpdateExecution:FenceProofTimeoutSeconds must exceed the required " +
+                $"writer duration by at least FencePollIntervalSeconds ({options.FencePollIntervalSeconds} seconds).");
+        }
 
         string root = options.RootDirectory;
         if (!Path.IsPathRooted(root))

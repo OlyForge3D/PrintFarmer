@@ -14,6 +14,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.Queue.Dispatch;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Settings;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
 using Microsoft.Data.Sqlite;
@@ -22,6 +23,7 @@ using Microsoft.EntityFrameworkCore.Infrastructure;
 using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Moq;
 using Xunit;
 
@@ -675,10 +677,12 @@ public class CalibrationProviderMigrationHarnessTests
         {
             var first = new BackendStartCommandConsumerService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                NullLogger<BackendStartCommandConsumerService>.Instance);
+                NullLogger<BackendStartCommandConsumerService>.Instance,
+                Options.Create(new BackendTimeoutSettings()));
             var second = new BackendStartCommandConsumerService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                NullLogger<BackendStartCommandConsumerService>.Instance);
+                NullLogger<BackendStartCommandConsumerService>.Instance,
+                Options.Create(new BackendTimeoutSettings()));
             await Task.WhenAll(
                 first.ProcessPendingCommandsAsync(CancellationToken.None),
                 second.ProcessPendingCommandsAsync(CancellationToken.None));

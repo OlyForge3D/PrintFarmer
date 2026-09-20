@@ -8,6 +8,7 @@ using Farm.Infrastructure.Services.HostUpdates;
 using Farm.Infrastructure.Services.Interfaces;
 using Farm.Infrastructure.Services.Queue;
 using Farm.Infrastructure.Services.SignalR;
+using Farm.Infrastructure.Settings;
 using Farm.Infrastructure.Tests.Builders;
 using FluentAssertions;
 using Microsoft.AspNetCore.SignalR;
@@ -775,6 +776,7 @@ public class HostUpdateWriterFencingTests : IDisposable
         var sut = new BackendStartCommandConsumerService(
             scopeFactory,
             NullLogger<BackendStartCommandConsumerService>.Instance,
+            Options.Create(new BackendTimeoutSettings()),
             fence);
         await RunHostedServiceAsync(sut, async () =>
         {
@@ -796,6 +798,7 @@ public class HostUpdateWriterFencingTests : IDisposable
         var sut = new BackendStartCommandConsumerService(
             scopeFactory,
             NullLogger<BackendStartCommandConsumerService>.Instance,
+            Options.Create(new BackendTimeoutSettings()),
             fence);
 
         await RunHostedServiceAsync(sut, async () =>
