@@ -4833,6 +4833,8 @@ export interface ProfileTypeSchema {
   fields: ProfileFieldMetadata[];
 }
 
+export type ProfileTypeSchemaDto = ProfileTypeSchema;
+
 export interface ProfileSchemasResponse {
   process: ProfileTypeSchema;
   machine: ProfileTypeSchema;

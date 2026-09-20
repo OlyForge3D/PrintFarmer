@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import clsx from 'clsx';
-import { Spinner, Tabs, TabList, Tab, TabPanels, TabPanel } from '@/common/components/ui';
+import { Spinner, Tabs } from '@/common/components/ui';
 import { useProfileSchema } from './useProfileSchema';
 import { SchemaCategoryPanel } from './SchemaCategoryPanel';
 
@@ -110,16 +110,20 @@ export function SchemaSettingsEditor({
 
   return (
     <div className={clsx('space-y-4', className)}>
-      <Tabs selectedIndex={activeTab} onChange={setActiveTab}>
-        <TabList>
+      <Tabs
+        defaultTab={categories[0]}
+        activeTab={categories[activeTab]}
+        onTabChange={(tab) => setActiveTab(Math.max(0, categories.indexOf(tab)))}
+      >
+        <Tabs.List>
           {categories.map(cat => (
-            <Tab key={cat}>{CATEGORY_LABELS[cat] || cat}</Tab>
+            <Tabs.Tab key={cat} id={cat}>{CATEGORY_LABELS[cat] || cat}</Tabs.Tab>
           ))}
-        </TabList>
+        </Tabs.List>
 
-        <TabPanels>
+        <Tabs.Panels>
           {categories.map(cat => (
-            <TabPanel key={cat}>
+            <Tabs.Panel key={cat} id={cat}>
               <SchemaCategoryPanel
                 category={cat}
                 categoryLabel={CATEGORY_LABELS[cat] || cat}
@@ -131,9 +135,9 @@ export function SchemaSettingsEditor({
                 onReset={handleReset}
                 getOriginalValue={getOriginalValue}
               />
-            </TabPanel>
+            </Tabs.Panel>
           ))}
-        </TabPanels>
+        </Tabs.Panels>
       </Tabs>
     </div>
   );

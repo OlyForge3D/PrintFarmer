@@ -62,9 +62,9 @@ export function EditPrinterModal({ printerId, isOpen, onClose, onSuccess }: Edit
     if (printerDetails) {
       const initialFormData: UpdatePrinterDto = {
         name: printerDetails.name,
-        serverUrl: printerDetails.serverUrl,
-        originalServerUrl: printerDetails.originalServerUrl,
-        notes: printerDetails.notes,
+        serverUrl: printerDetails.serverUrl ?? undefined,
+        originalServerUrl: printerDetails.originalServerUrl ?? undefined,
+        notes: printerDetails.notes ?? undefined,
         manufacturerId: printerDetails.manufacturerId,
         modelId: printerDetails.modelId,
         newManufacturerName: undefined,

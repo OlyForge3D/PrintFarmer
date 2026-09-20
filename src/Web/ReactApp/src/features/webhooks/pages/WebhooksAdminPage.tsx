@@ -245,7 +245,7 @@ interface WebhookFormModalProps {
  webhook?: WebhookSubscription;
  eventTypes: string[];
  onClose: () => void;
- onSubmit: (dto: CreateWebhookDto | UpdateWebhookDto) => Promise<void>;
+ onSubmit: (dto: CreateWebhookDto) => Promise<void>;
  isSubmitting: boolean;
 }
 
@@ -295,7 +295,7 @@ function WebhookFormModal({ webhook, eventTypes, onClose, onSubmit, isSubmitting
  return;
  }
 
- const dto: CreateWebhookDto | UpdateWebhookDto = {
+ const dto: CreateWebhookDto = {
  name: name.trim(),
  url: url.trim(),
  ...(secret ? { secret: secret.trim() } : {}),
@@ -323,11 +323,11 @@ function WebhookFormModal({ webhook, eventTypes, onClose, onSubmit, isSubmitting
  <Input id="webhook-url" type="url" value={url} onChange={(e) => setUrl(e.target.value)} placeholder="https://example.com/webhook" />
  </FormField>
 
- <FormField label="Secret" hint="Optional. Used to sign payloads with HMAC-SHA256.">
+ <FormField label="Secret" helper="Optional. Used to sign payloads with HMAC-SHA256.">
  <Input value={secret} onChange={(e) => setSecret(e.target.value)} placeholder={isEdit ? '(unchanged)' : 'Optional secret'} />
  </FormField>
 
- <FormField label="Max Consecutive Failures" hint="Webhook is auto-disabled after this many failures.">
+ <FormField label="Max Consecutive Failures" helper="Webhook is auto-disabled after this many failures.">
  <Input type="number" min={1} max={100} value={maxFailures} onChange={(e) => setMaxFailures(Number(e.target.value))} />
  </FormField>
 

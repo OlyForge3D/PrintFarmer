@@ -13,7 +13,7 @@ import { Badge, Button } from '@/common/components/ui';
 import { formatFileSize } from '@/common/utils/stlFileUtils';
 import { useAuth } from '@/features/auth/hooks/useAuth';
 import { getSystemInfo } from '@/services/api/systemApi';
-import type { SystemInfo, SystemServiceHealth } from '@/types/api';
+import { SystemServiceHealth, type SystemInfo } from '@/types/api';
 
 const EMPTY_VALUE = '—';
 const SYSTEM_INFO_QUERY_KEY = ['system-info'];
@@ -499,7 +499,9 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
                       <p className="truncate text-xs text-pf-text-secondary">{service.version || EMPTY_VALUE}</p>
                     </div>
                     <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-                      <Badge dot variant={getServiceBadgeVariant(service.health)} />
+                      <Badge dot variant={getServiceBadgeVariant(service.health)}>
+                        {service.health}
+                      </Badge>
                       <span>{service.health}</span>
                     </span>
                   </li>

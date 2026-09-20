@@ -1,4 +1,5 @@
 export type { PrinterControlMode, UserSettingsResponse, UpdateUserSettingsRequest } from '@/features/settings/types/index';
+export type { FarmSettingsResponse, UpdateFarmSettingsRequest } from '@/features/settings/types/index';
 
 export type SettingsScopeId = 'user' | 'system';
 

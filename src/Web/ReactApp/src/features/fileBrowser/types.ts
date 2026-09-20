@@ -23,6 +23,11 @@ export interface FileItem {
       extractedLayerHeight?: number;
       extractedHotendTemp?: number;
       extractedBedTemp?: number;
+      totalLayers?: number;
+      objectDimensionX?: number;
+      objectDimensionY?: number;
+      objectDimensionZ?: number;
+      supportEnabled?: boolean;
     };
     model3d?: Record<string, unknown>;
   };

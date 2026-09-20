@@ -20,7 +20,10 @@ export interface FeatureFlags {
 export function useFeatureFlags() {
   return useQuery<FeatureFlags>({
     queryKey: ['feature-flags'],
-    queryFn: () => apiClient.getFeatureFlags(),
+    queryFn: async () => {
+      const flags = await apiClient.getFeatureFlags();
+      return flags as unknown as FeatureFlags;
+    },
     staleTime: 300_000, // 5 min cache
   });
 }

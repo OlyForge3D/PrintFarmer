@@ -275,6 +275,7 @@ export function PowerMonitorSettingsPage() {
       {/* Add/Edit Modal */}
       {showModal && (
         <Modal
+          isOpen={showModal}
           title={editing ? 'Edit Power Monitor' : 'Add Power Monitor'}
           onClose={() => setShowModal(false)}
         >

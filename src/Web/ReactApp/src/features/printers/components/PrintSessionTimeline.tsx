@@ -253,7 +253,7 @@ export function PrintSessionTimeline({
         </div>
         <div className="mt-1 flex flex-wrap items-center gap-2">
           <div className="text-sm font-medium text-pf-text-primary">{jobLabel}</div>
-          <Badge variant="secondary" size="sm">
+          <Badge variant="default" size="sm">
             {incidents.length} incident{incidents.length === 1 ? '' : 's'}
           </Badge>
         </div>

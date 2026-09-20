@@ -29,6 +29,18 @@ export interface NfcLinkRequest {
   trayId?: string;
 }
 
+export interface NfcBindingDto {
+  id: string;
+  tagUid: string;
+  printerId?: string;
+  spoolId?: number | null;
+  spoolName?: string;
+  trayId?: string;
+  createdAt: string;
+  updatedAt?: string;
+  spoolLastSeenAt?: string;
+}
+
 /** Response from POST /api/nfc/link */
 export interface NfcLinkResponse {
   tagUid: string;

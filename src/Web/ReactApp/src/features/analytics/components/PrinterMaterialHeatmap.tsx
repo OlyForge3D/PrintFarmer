@@ -60,7 +60,7 @@ export const PrinterMaterialHeatmap = React.memo(function PrinterMaterialHeatmap
             <CartesianGrid strokeDasharray="3 3" />
             <XAxis dataKey="printerName" tick={{ fontSize: 11 }} />
             <YAxis domain={[0, 100]} tickFormatter={(v: number) => `${v}%`} />
-            <Tooltip formatter={(value: number) => [`${value}%`, '']} />
+            <Tooltip formatter={(value) => [`${Number(value)}%`, '']} />
             <Legend />
             {materials.map((mat, idx) => (
               <Bar

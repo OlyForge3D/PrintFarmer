@@ -11,6 +11,15 @@ import type { HistoryJob } from "@/types/queue";
 import type { HarvestJobResponse } from "@/types/parts-inventory";
 import type { QueueHistoryTabProps } from "@/types/components";
 
+export interface HistoryStats {
+  totalCompleted: number;
+  totalFailed: number;
+  totalCancelled: number;
+  successRate: number;
+  averageDurationMinutes: number;
+  failureReasons: Record<string, number>;
+}
+
 /**
  * QueueHistoryTab Component
  *

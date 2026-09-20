@@ -57,8 +57,6 @@ export function SchedulingPage() {
         return 'success';
       case 'paused':
         return 'warning';
-      case 'cancelled':
-        return 'error';
       case 'completed':
         return 'default';
       case 'reauthorizationRequired':
@@ -225,7 +223,6 @@ export function SchedulingPage() {
                 columns={columns}
                 data={scheduledJobs}
                 getRowKey={(job: ScheduledJob) => job.id}
-                sortable
               />
             )}
           </Card.Body>

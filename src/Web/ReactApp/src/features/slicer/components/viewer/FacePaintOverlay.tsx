@@ -153,7 +153,7 @@ export function FacePaintOverlay({
     );
     raycaster.setFromCamera(ndc, camera);
     const hits = raycaster.intersectObject(mesh, false);
-    if (hits.length === 0 || hits[0].faceIndex === undefined) return null;
+    if (hits.length === 0 || hits[0].faceIndex == null) return null;
     return { faceIndex: hits[0].faceIndex, point: hits[0].point.clone() };
   }, [camera, getTargetMesh, gl.domElement, raycaster]);
 
