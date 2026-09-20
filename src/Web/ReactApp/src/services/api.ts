@@ -780,14 +780,13 @@ export class ApiClient {
   // ============ Printer API methods ============
 
   async getPrinters(includeDisabled?: boolean, refresh = false): Promise<Printer[]> {
-    // Get lightweight list of all printers
+    // GET /printers returns CompletePrinterDto with configuration and live status.
     const params = includeDisabled ? { includeDisabled: true } : undefined;
-    const response = await this.client.get<PrinterFast[]>("/printers", {
+    const response = await this.client.get<Printer[]>("/printers", {
       params,
       ...(refresh ? { headers: { "Cache-Control": "no-cache" } } : {}),
     });
-    // Cast to Printer[] for compatibility; fast objects are subset of Printer
-    return response.data as unknown as Printer[];
+    return response.data;
   }
 
   async getPrintersFast(includeDisabled?: boolean): Promise<PrinterFast[]> {
