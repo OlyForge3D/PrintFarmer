@@ -88,7 +88,14 @@ public static class HostUpdateInstallationIdentity
 
         string root = Path.GetFullPath(hostStateRoot);
         HostStateFileSecurity.ValidateExistingPathComponents(root);
-        Directory.CreateDirectory(root);
+        try
+        {
+            Directory.CreateDirectory(root);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            return CreateIdentity();
+        }
         HostStateFileSecurity.ValidateExistingPathComponents(root);
         string path = Path.Combine(root, FileName);
 

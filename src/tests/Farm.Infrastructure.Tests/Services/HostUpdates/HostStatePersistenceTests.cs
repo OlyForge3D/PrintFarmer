@@ -1,4 +1,5 @@
-﻿using System.Text.Json;
+﻿using System.Security;
+using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using Microsoft.Extensions.Options;
 using Xunit;
@@ -13,6 +14,112 @@ public sealed class HostStatePersistenceTests
         RootPath = root,
         WindowsSecurityAttested = OperatingSystem.IsWindows(),
     };
+
+    [Fact]
+    public void InstallationIdentity_BlankRootUsesEphemeralIdentityWithoutWriting()
+    {
+        string identityPath = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "PrintFarmer",
+            "installation.id");
+        bool existedBefore = File.Exists(identityPath);
+        string? contentsBefore = existedBefore ? File.ReadAllText(identityPath) : null;
+        DateTime? writeTimeBefore = existedBefore ? File.GetLastWriteTimeUtc(identityPath) : null;
+
+        string first = HostUpdateInstallationIdentity.GetOrCreate(" ");
+        string second = HostUpdateInstallationIdentity.GetOrCreate(null);
+
+        Assert.Matches("^[0-9a-f]{32}$", first);
+        Assert.Matches("^[0-9a-f]{32}$", second);
+        Assert.NotEqual(first, second);
+        Assert.Equal(existedBefore, File.Exists(identityPath));
+        if (existedBefore)
+        {
+            Assert.Equal(contentsBefore, File.ReadAllText(identityPath));
+            Assert.Equal(writeTimeBefore, File.GetLastWriteTimeUtc(identityPath));
+        }
+    }
+
+    [Fact]
+    public void InstallationIdentity_PersistsAcrossReadsOnValidatedRoot()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            string first = HostUpdateInstallationIdentity.GetOrCreate(root);
+            string second = HostUpdateInstallationIdentity.GetOrCreate(root);
+
+            Assert.Equal(first, second);
+            Assert.Equal(first, File.ReadAllText(Path.Combine(root, "installation.id")));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
+    [Fact]
+    public void InstallationIdentity_IoFailureDegradesToEphemeralIdentity()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
+        File.WriteAllText(root, "not a directory");
+        try
+        {
+            string identity = HostUpdateInstallationIdentity.GetOrCreate(root);
+
+            Assert.Matches("^[0-9a-f]{32}$", identity);
+            Assert.Equal("not a directory", File.ReadAllText(root));
+        }
+        finally
+        {
+            if (File.Exists(root))
+            {
+                File.Delete(root);
+            }
+        }
+    }
+
+    [Fact]
+    public void InstallationIdentity_ReparseTargetIsRejectedWhenSymlinksAreAvailable()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
+        string outside = Path.Combine(Path.GetTempPath(), "printfarmer-installation-target-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        Directory.CreateDirectory(outside);
+        string link = Path.Combine(root, "installation.id");
+        try
+        {
+            try
+            {
+                File.CreateSymbolicLink(link, Path.Combine(outside, "target"));
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
+            {
+                return;
+            }
+
+            Assert.Throws<SecurityException>(() => HostUpdateInstallationIdentity.GetOrCreate(root));
+        }
+        finally
+        {
+            if (File.Exists(link))
+            {
+                File.Delete(link);
+            }
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+            if (Directory.Exists(outside))
+            {
+                Directory.Delete(outside, true);
+            }
+        }
+    }
+
     [Fact]
     public async Task ReplayAnchor_RequiresProvisioning_AndRejectsRollback()
     {
