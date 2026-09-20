@@ -125,4 +125,42 @@ test('review prompt template (.github/prompts/review.prompt.md)', async () => {
   assert.ok(!/agent_type:\s*"Code Review \(/i.test(body), 'Prompt must not reference legacy Code Review (...) agent types');
 });
 
+test('panel rereview entry points link to the canonical delta-only scope', async () => {
+  const entryPoints = [
+    '.github/agents/code-review-opus.agent.md',
+    '.github/agents/code-review-codex.agent.md',
+    '.github/agents/code-review-gemini.agent.md',
+    '.github/agents/squad.agent.md',
+    '.github/prompts/review.prompt.md',
+    '.github/skills/reviewer-protocol/SKILL.md',
+    '.github/ralph-reference.md',
+    ...['bishop', 'hicks', 'vasquez'].map((member) => `.squad/agents/${member}/charter.md`),
+  ];
+  const canonicalPath = path.join(repositoryRoot, '.github/copilot-instructions.md');
+  const canonical = await readFile(canonicalPath, 'utf8');
+  const section = canonical.split('### Delta-Only Panel Rereview\n')[1]?.split('\n### ')[0];
+  assert.ok(section, 'A single canonical rereview scope must exist');
+  assert.equal(canonical.match(/^### Delta-Only Panel Rereview$/gm)?.length, 1);
+  for (const invariant of [
+    /only the revision delta/,
+    /git diff <last-reviewed-sha> <new-head-sha>/,
+    /not\s+a merge-base\/three-dot diff/,
+    /surrounding code, callers, and tests/,
+    /every.*\n.*change in that range/,
+    /unresolved prior findings/,
+    /their own last reviewed SHA/,
+    /recover it before proceeding/,
+    /Squad-Head-SHA.*equal to the\s+\*\*new current head\*\*/,
+    /full PR change/,
+    /never from the smaller delta/,
+  ]) {
+    assert.match(section, invariant);
+  }
+  for (const file of entryPoints) {
+    const content = await readFile(path.join(repositoryRoot, file), 'utf8');
+    const link = content.match(/\[Delta-Only Panel Rereview\]\(([^)]+)#delta-only-panel-rereview\)/);
+    assert.ok(link, `${file} must route follow-on rounds to canonical policy`);
+    assert.equal(path.resolve(repositoryRoot, path.dirname(file), link[1]), canonicalPath);
+  }
+});
 
