@@ -413,21 +413,26 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
 
         try
         {
-            // Actually open and read the file rather than only checking FileInfo metadata:
-            // proving PrintFarmer can read real bytes back is what the mapping needs to
-            // guarantee (verification/restore later reads this same directory), not merely
-            // that a directory-listing sees an entry.
-            byte[] probeBytes;
+            // Actually open and read a byte from the file rather than only checking FileInfo
+            // metadata: proving PrintFarmer can read real bytes back is what the mapping needs
+            // to guarantee (verification/restore later reads this same directory), not merely
+            // that a directory-listing sees an entry. A real BACKUP DATABASE [master] file can
+            // be several MB, so this deliberately reads a single byte via a stream instead of
+            // File.ReadAllBytesAsync -- proving readability does not require buffering the
+            // whole backup into memory on every periodic availability check.
+            int bytesRead;
             try
             {
-                probeBytes = await File.ReadAllBytesAsync(probePath, cancellationToken).ConfigureAwait(false);
+                byte[] probeBuffer = new byte[1];
+                await using FileStream probeStream = new(probePath, FileMode.Open, FileAccess.Read, FileShare.ReadWrite);
+                bytesRead = await probeStream.ReadAsync(probeBuffer.AsMemory(0, 1), cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
             {
                 return "probe_file_not_visible_from_printfarmer";
             }
 
-            if (probeBytes.Length == 0)
+            if (bytesRead == 0)
             {
                 return "probe_file_not_visible_from_printfarmer";
             }
@@ -451,9 +456,13 @@ internal sealed class SqlServerProcessDatabaseBackupTarget(
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException)
         {
-            // Best-effort cleanup only: a probe file that cannot be deleted (e.g. a read-only
-            // mount for the app side) does not itself invalidate a mapping that was otherwise
-            // successfully verified as readable.
+            // Best-effort cleanup only: the round trip this invocation just performed (a fresh
+            // sqlcmd write, verified readable above) already proved the mapping, so a failure to
+            // delete the probe file here does not invalidate *that* result. It is not silently
+            // tolerated indefinitely, though: the next check's pre-invocation removal (above)
+            // will hit this same file and, if it still cannot be deleted, fail closed with
+            // probe_stale_file_removal_failed -- so a persistently undeletable probe still ends
+            // up reporting Unavailable rather than masking the problem forever.
         }
     }
 }

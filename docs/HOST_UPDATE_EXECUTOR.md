@@ -212,22 +212,26 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
   sufficient, even though it may be adequate for real per-database backups. Before every
   backup/migration execution, `HostUpdateExecutionAvailabilityProvider.CheckAsync` asks the
   configured backup target to prove the mapping:
-  `SqlServerProcessDatabaseBackupTarget.VerifyVisibleBackupPathMappingAsync` first removes any
+  `SqlServerProcessDatabaseBackupTarget.VerifyVisibleBackupPathMappingAsync` first lazily creates
+  `BackupRootDirectory` if it does not yet exist (failing closed if it cannot, so a
+  freshly-provisioned host with `RootDirectory` set but no `backups` subdirectory yet does not
+  report a false negative), then removes any
   stale probe file already visible to PrintFarmer at that path (failing closed if it cannot, so a
   leftover file from an earlier check can never be mistaken for a fresh round trip), then runs a
   real `BACKUP DATABASE [master] TO DISK` probe through the same `sqlcmd` path as production
   backups, writing a small, fixed-name probe file into `BackupRootDirectory` (reused, not
   regenerated, on every check so a persistently broken mapping cannot accumulate probe files on the
   SQL Server volume — each check simply overwrites the same file via `WITH INIT`), then opens and
-  reads the identical probe file back from PrintFarmer's own filesystem view (not merely a
-  directory-listing/metadata check) to confirm it is actually readable, and best-effort deletes it
-  afterward. The probe itself is capped at a short, fixed timeout (independent of the full
+  reads a byte back from the identical probe file from PrintFarmer's own filesystem view (not
+  merely a directory-listing/metadata check) to confirm it is actually readable, and best-effort
+  deletes it afterward. The probe itself is capped at a short, fixed timeout (independent of the full
   `BackupTimeoutSeconds` used for real backups) so a hung or unreachable SQL Server cannot block
   every ~5-minute availability check for as long as a real backup would be allowed to run. A
   configuration-presence check alone is explicitly not sufficient and is not what this does — an
   absent, misconfigured (missing or relative), or unreadable-back mapping is reported as
   `facility_unavailable:sql_server_visible_backup_path_mapping_unverified:<evidence>` (e.g.
   `backup_root_directory_not_configured`, `backup_root_directory_not_absolute`,
+  `probe_directory_creation_failed:<exception-type>`,
   `probe_stale_file_removal_failed:<exception-type>`, `probe_backup_invocation_failed:<exception-type>`,
   `probe_backup_command_failed:<exit-code>`, `probe_file_not_visible_from_printfarmer`) and closes
   availability for the whole executor, exactly like the other code-owned facilities. This
