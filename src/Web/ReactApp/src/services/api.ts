@@ -7,6 +7,7 @@ import type {
   HostUpdateManualAuthorizationIntent,
   HostUpdateManualAuthorizationResponse,
   HostUpdateRecoveryResult,
+  HostUpdateExecutionState,
   HostUpdateStatusResponse,
   UpdateChannelSettings,
 } from "@/types/api";
@@ -166,7 +167,7 @@ import {
   UpdateCustomFieldDefinitionRequest,
 } from "@/types/api";
 
-const HOST_UPDATE_STATES = new Set([
+const HOST_UPDATE_STATES = [
   "Accepted",
   "Preflight",
   "Draining",
@@ -177,13 +178,26 @@ const HOST_UPDATE_STATES = new Set([
   "Verifying",
   "Completed",
   "RecoveryRequired",
-]);
+] as const satisfies readonly HostUpdateExecutionState[];
+
+const HOST_UPDATE_STATE_SET = new Set<HostUpdateExecutionState>(HOST_UPDATE_STATES);
+
+export function isHostUpdateManualAuthorizationResponse(
+  value: unknown,
+): value is HostUpdateManualAuthorizationResponse {
+  return typeof value === "object" &&
+    value !== null &&
+    typeof (value as { authorizationId?: unknown }).authorizationId === "string" &&
+    (value as { authorizationId: string }).authorizationId.length > 0 &&
+    typeof (value as { releaseId?: unknown }).releaseId === "string" &&
+    (value as { releaseId: string }).releaseId.length > 0;
+}
 
 export function isHostUpdateStatusResponse(value: unknown): value is HostUpdateStatusResponse {
   return typeof value === "object" &&
     value !== null &&
     typeof (value as { releaseId?: unknown }).releaseId === "string" &&
-    HOST_UPDATE_STATES.has((value as { currentState?: unknown }).currentState as string) &&
+    HOST_UPDATE_STATE_SET.has((value as { currentState?: unknown }).currentState as HostUpdateExecutionState) &&
     Array.isArray((value as { activities?: unknown }).activities);
 }
 
@@ -527,6 +541,13 @@ export class ApiClient {
       "/admin/host-updates/authorizations",
       intent,
     );
+    if (!isHostUpdateManualAuthorizationResponse(response.data)) {
+      throw {
+        message: "The host update authorization response was invalid.",
+        statusCode: response.status,
+        data: response.data,
+      };
+    }
     return response.data;
   }
 

@@ -78,6 +78,18 @@ describe("ApiClient", () => {
       expect(postMock).toHaveBeenCalledWith("/admin/host-updates/authorizations", { expectedPolicyRevision: 3 });
     });
 
+    it("rejects malformed authorization responses before execute can use them", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { authorizationId: "", releaseId: "" },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.authorizeHostUpdate()).rejects.toMatchObject({
+        message: "The host update authorization response was invalid.",
+      });
+    });
+
     it("encodes release IDs and rejects malformed status bodies", async () => {
       const getMock = vi.fn()
         .mockResolvedValueOnce({ data: status })
@@ -187,6 +199,18 @@ describe("ApiClient", () => {
       await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
         statusCode: 503,
         message: "Host update execution is unavailable.",
+      });
+    });
+
+    it("rejects malformed successful execute bodies", async () => {
+      const postMock = vi.fn().mockResolvedValue({
+        status: 200,
+        data: { releaseId: "release-1", currentState: "Applying" },
+      });
+      (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
+
+      await expect(apiClient.executeHostUpdate()).rejects.toMatchObject({
+        message: "The host update status response was invalid.",
       });
     });
   });

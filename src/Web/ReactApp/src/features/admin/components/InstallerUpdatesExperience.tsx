@@ -340,6 +340,7 @@ export function InstallerUpdatesExperience({
   const [manualUpdateStatus, setManualUpdateStatus] = useState<HostUpdateStatusResponse | null>(null);
   const [manualUpdateRecovery, setManualUpdateRecovery] = useState<HostUpdateRecoveryResult | null>(null);
   const [hostUpdateUnsupported, setHostUpdateUnsupported] = useState(false);
+  const [manualUpdateFencePending, setManualUpdateFencePending] = useState(false);
   const [manualUpdateReleaseId, setManualUpdateReleaseId] = useState<string | null>(readManualUpdateReleaseId);
   const initialManualUpdateReleaseId = useRef(manualUpdateReleaseId);
   const [manualUpdateAttempted, setManualUpdateAttempted] = useState(false);
@@ -526,6 +527,7 @@ export function InstallerUpdatesExperience({
     inventory?.eligibility === "Eligible" &&
     !blocked &&
     !hostUpdateUnsupported &&
+    !manualUpdateFencePending &&
     onAuthorizeHostUpdate != null &&
     onExecuteHostUpdate != null;
 
@@ -636,6 +638,9 @@ export function InstallerUpdatesExperience({
     try {
       const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
       setManualUpdateStatus(status);
+      if (status.currentState !== "RecoveryRequired") {
+        setManualUpdateFencePending(false);
+      }
       if (isTerminalForRetry(status)) {
         if (isTerminalForReleaseIdentity(status)) {
           clearManualUpdateReleaseId();
@@ -659,6 +664,7 @@ export function InstallerUpdatesExperience({
       const recovery = await onRecoverHostUpdate(manualUpdateStatus.releaseId);
       setManualUpdateRecovery(recovery);
       if (recovery.outcome === "FenceReleasePending") {
+        setManualUpdateFencePending(true);
         setManualUpdateError(
           "Recovery is waiting for the host fence to be released. Refresh status before retrying.",
         );
@@ -666,6 +672,9 @@ export function InstallerUpdatesExperience({
       if (onGetHostUpdateStatus) {
         const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
         setManualUpdateStatus(status);
+        if (status.currentState !== "RecoveryRequired") {
+          setManualUpdateFencePending(false);
+        }
         if (isTerminalForRetry(status)) {
           if (isTerminalForReleaseIdentity(status)) {
             clearManualUpdateReleaseId();
@@ -804,7 +813,9 @@ export function InstallerUpdatesExperience({
               variant="primary"
               disabled={!manualUpdateAvailable || manualUpdateBusy}
               explainedDisabled={!manualUpdateAvailable || manualUpdateBusy}
-              title={hostUpdateUnsupported
+              title={manualUpdateFencePending
+                ? "Recovery is waiting for the host fence to be released. Refresh update status before retrying."
+                : hostUpdateUnsupported
                 ? "Host update execution is unavailable on this host until fresh host inventory is loaded."
                 : !manualUpdateAvailable
                 ? MANUAL_DISABLED_REASON
@@ -1039,7 +1050,9 @@ export function InstallerUpdatesExperience({
                 loading={manualUpdateBusy}
                 disabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
                 explainedDisabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
-                title={hostUpdateUnsupported
+                title={manualUpdateFencePending
+                  ? "Recovery is waiting for the host fence to be released. Refresh update status before retrying."
+                  : hostUpdateUnsupported
                   ? "Host update execution is unavailable on this host until fresh host inventory is loaded."
                   : !manualUpdateAvailable
                   ? MANUAL_DISABLED_REASON

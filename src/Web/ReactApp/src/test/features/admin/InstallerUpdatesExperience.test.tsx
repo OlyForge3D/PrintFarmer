@@ -620,6 +620,11 @@ describe('InstallerUpdatesExperience', () => {
       outcome: 'FenceReleasePending',
       detail: 'fence_pending',
     });
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [],
+    });
     const user = userEvent.setup();
 
     render(<InstallerUpdatesExperience
@@ -627,6 +632,7 @@ describe('InstallerUpdatesExperience', () => {
       observation="connected"
       onAuthorizeHostUpdate={authorize}
       onExecuteHostUpdate={execute}
+      onGetHostUpdateStatus={status}
       onRecoverHostUpdate={recover}
     />);
 
@@ -635,6 +641,8 @@ describe('InstallerUpdatesExperience', () => {
     await user.click(await screen.findByRole('button', { name: 'Recover update' }));
     expect(await screen.findByText(/Recovery is waiting for the host fence to be released/)).toBeVisible();
     expect(screen.getByRole('button', { name: 'Recover update' })).toBeVisible();
+    await user.click(screen.getByRole('button', { name: 'Close' }));
+    expect(screen.getByRole('button', { name: 'Update now' })).toHaveAttribute('aria-disabled', 'true');
   });
 
   it('keeps recovery available after NeedsOperator when status cannot be rechecked', async () => {
