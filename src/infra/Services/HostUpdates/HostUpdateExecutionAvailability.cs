@@ -58,7 +58,6 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
     private static readonly string[] CodeOwnedUnavailableFacilities =
     [
         "queue_reconciliation_writer_fence_unavailable",
-        "sql_server_visible_backup_path_mapping_unverified",
     ];
 
     public async Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken)
@@ -107,6 +106,35 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         if (backupTargets.Count == 0)
         {
             reasons.Add("no_backup_targets_configured");
+        }
+
+        // sql_server_visible_backup_path_mapping_unverified (issue #2788): only meaningful for a
+        // deployment that actually has a SQL Server-backed backup target. Never a blanket
+        // config-presence assertion -- each such target must positively prove, via a real
+        // server-side write/client-side read round trip, that PrintFarmer's own visible backup
+        // directory and the SQL Server engine's visible directory refer to the same physical
+        // location before this facility is considered resolved for this host.
+        foreach (IHostUpdateBackupTarget target in backupTargets)
+        {
+            if (target is not IHostUpdateServerSideBackupTarget serverSideTarget)
+            {
+                continue;
+            }
+
+            string? unverifiedEvidence;
+            try
+            {
+                unverifiedEvidence = await serverSideTarget.VerifyVisibleBackupPathMappingAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Exception exception) when (exception is not OperationCanceledException)
+            {
+                unverifiedEvidence = $"probe_exception:{exception.GetType().Name}";
+            }
+
+            if (unverifiedEvidence is not null)
+            {
+                reasons.Add($"facility_unavailable:sql_server_visible_backup_path_mapping_unverified:{unverifiedEvidence}");
+            }
         }
 
         foreach (string unavailableFacility in CodeOwnedUnavailableFacilities.Concat(options.RequiredUnavailableFacilities).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal))
