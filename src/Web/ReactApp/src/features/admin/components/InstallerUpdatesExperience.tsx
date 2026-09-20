@@ -53,8 +53,12 @@ function isRolledBackStatus(status: HostUpdateStatusResponse) {
     terminal?.phase === "recovery:rolled_back";
 }
 
-function isTerminalManualUpdateStatus(status: HostUpdateStatusResponse) {
+function isTerminalForRetry(status: HostUpdateStatusResponse) {
   return status.currentState === "Completed" || status.currentState === "RecoveryRequired";
+}
+
+function isTerminalForReleaseIdentity(status: HostUpdateStatusResponse) {
+  return status.currentState === "Completed";
 }
 
 export interface InstallerUpdatesExperienceProps {
@@ -385,7 +389,7 @@ export function InstallerUpdatesExperience({
       setManualUpdateStatus(status);
       setManualUpdateOpen(true);
       setManualUpdateBusy(false);
-      if (isTerminalManualUpdateStatus(status)) {
+      if (isTerminalForReleaseIdentity(status)) {
         clearManualUpdateReleaseId();
         setManualUpdateReleaseId(null);
       }
@@ -547,9 +551,11 @@ export function InstallerUpdatesExperience({
       executeDispatched = true;
       const status = await onExecuteHostUpdate(authorization.authorizationId);
       setManualUpdateStatus(status);
-      if (isTerminalManualUpdateStatus(status)) {
-        clearManualUpdateReleaseId();
-        setManualUpdateReleaseId(null);
+      if (isTerminalForRetry(status)) {
+        if (isTerminalForReleaseIdentity(status)) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
+        }
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
@@ -569,9 +575,11 @@ export function InstallerUpdatesExperience({
           const status = await onGetHostUpdateStatus(releaseId);
           setManualUpdateStatus(status);
           setManualUpdateOpen(true);
-          if (status.currentState === "Completed") {
-            clearManualUpdateReleaseId();
-            setManualUpdateReleaseId(null);
+          if (isTerminalForRetry(status)) {
+            if (isTerminalForReleaseIdentity(status)) {
+              clearManualUpdateReleaseId();
+              setManualUpdateReleaseId(null);
+            }
             setManualUpdateAttempted(false);
             manualUpdateDispatchLock.current = false;
           }
@@ -605,10 +613,12 @@ export function InstallerUpdatesExperience({
     try {
       const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
       setManualUpdateStatus(status);
-      if (isTerminalManualUpdateStatus(status)) {
-        clearManualUpdateReleaseId();
-        setManualUpdateReleaseId(null);
-        setManualUpdateStatus(null);
+      if (isTerminalForRetry(status)) {
+        if (isTerminalForReleaseIdentity(status)) {
+          clearManualUpdateReleaseId();
+          setManualUpdateReleaseId(null);
+          setManualUpdateStatus(null);
+        }
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
@@ -628,10 +638,12 @@ export function InstallerUpdatesExperience({
       setManualUpdateRecovery(recovery);
       if (onGetHostUpdateStatus) {
         const status = await onGetHostUpdateStatus(manualUpdateStatus.releaseId);
-        if (isTerminalManualUpdateStatus(status)) {
-          clearManualUpdateReleaseId();
-          setManualUpdateReleaseId(null);
-          setManualUpdateStatus(null);
+        if (isTerminalForRetry(status)) {
+          if (isTerminalForReleaseIdentity(status)) {
+            clearManualUpdateReleaseId();
+            setManualUpdateReleaseId(null);
+            setManualUpdateStatus(null);
+          }
           setManualUpdateAttempted(false);
           manualUpdateDispatchLock.current = false;
         } else {
@@ -645,8 +657,6 @@ export function InstallerUpdatesExperience({
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       } else if (recovery.outcome === "NeedsOperator") {
-        clearManualUpdateReleaseId();
-        setManualUpdateReleaseId(null);
         setManualUpdateAttempted(false);
         manualUpdateDispatchLock.current = false;
       }
@@ -781,7 +791,7 @@ export function InstallerUpdatesExperience({
               onClick={() => {
                 setManualUpdateError(null);
                 setManualUpdateRecovery(null);
-                if (manualUpdateStatus && isTerminalManualUpdateStatus(manualUpdateStatus)) {
+                if (manualUpdateStatus && isTerminalForReleaseIdentity(manualUpdateStatus)) {
                   clearManualUpdateReleaseId();
                   setManualUpdateReleaseId(null);
                   setManualUpdateStatus(null);
@@ -1003,6 +1013,14 @@ export function InstallerUpdatesExperience({
                 variant="primary"
                 loading={manualUpdateBusy}
                 disabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
+                explainedDisabled={manualUpdateBusy || !manualUpdateAvailable || manualUpdateAttempted}
+                title={!manualUpdateAvailable
+                  ? MANUAL_DISABLED_REASON
+                  : manualUpdateBusy
+                    ? "An update operation is already in progress."
+                    : manualUpdateAttempted
+                      ? "The previous attempt's outcome is unknown — refresh status or reload before retrying."
+                      : undefined}
                 onClick={() => { void authorizeAndExecuteHostUpdate(); }}
               >
                 Authorize and update

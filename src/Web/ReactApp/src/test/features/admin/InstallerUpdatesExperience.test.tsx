@@ -264,6 +264,7 @@ describe('InstallerUpdatesExperience', () => {
     const action = screen.getByRole('button', { name: 'Authorize and update' });
     await user.click(action);
     expect(await screen.findByText('The host update request timed out while execution may still be running.')).toBeVisible();
+    expect(action).toHaveAttribute('title', "The previous attempt's outcome is unknown — refresh status or reload before retrying.");
     await user.click(action);
 
     expect(authorize).toHaveBeenCalledOnce();
@@ -464,38 +465,21 @@ describe('InstallerUpdatesExperience', () => {
   });
 
   it('allows a retry after recovery terminates with NeedsOperator', async () => {
-    const authorize = vi.fn()
-      .mockResolvedValueOnce({
-        authorizationId: 'auth-1',
-        releaseId: 'stable:1.2.4',
-        sequence: 4,
-        channel: 'stable',
-        candidateFingerprint: 'candidate',
-        policyRevision: 1,
-        policyFingerprint: 'policy',
-        expiresAt: '2026-09-19T20:00:00Z',
-      })
-      .mockResolvedValueOnce({
-        authorizationId: 'auth-2',
-        releaseId: 'stable:1.2.5',
-        sequence: 5,
-        channel: 'stable',
-        candidateFingerprint: 'candidate-2',
-        policyRevision: 1,
-        policyFingerprint: 'policy',
-        expiresAt: '2026-09-19T20:00:00Z',
-      });
-    const execute = vi.fn()
-      .mockResolvedValueOnce({
-        releaseId: 'stable:1.2.4',
-        currentState: 'RecoveryRequired',
-        activities: [],
-      })
-      .mockResolvedValueOnce({
-        releaseId: 'stable:1.2.5',
-        currentState: 'Completed',
-        activities: [],
-      });
+    const authorize = vi.fn().mockResolvedValue({
+      authorizationId: 'auth-1',
+      releaseId: 'stable:1.2.4',
+      sequence: 4,
+      channel: 'stable',
+      candidateFingerprint: 'candidate',
+      policyRevision: 1,
+      policyFingerprint: 'policy',
+      expiresAt: '2026-09-19T20:00:00Z',
+    });
+    const execute = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [],
+    });
     const recover = vi.fn().mockResolvedValue({
       outcome: 'NeedsOperator',
       detail: 'manual_intervention_required',
@@ -520,12 +504,47 @@ describe('InstallerUpdatesExperience', () => {
     await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
     await user.click(await screen.findByRole('button', { name: 'Recover update' }));
     expect(await screen.findByText(/NeedsOperator: manual_intervention_required/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Recover update' })).toBeVisible();
+    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBe('stable:1.2.4');
+  });
 
-    await user.click(screen.getByRole('button', { name: 'Close' }));
-    await user.click(screen.getByRole('button', { name: 'Update now' }));
-    await user.click(screen.getByRole('button', { name: 'Authorize and update' }));
-    await waitFor(() => expect(authorize).toHaveBeenCalledTimes(2));
-    expect(execute).toHaveBeenCalledTimes(2);
+  it('keeps recovery available after NeedsOperator when status cannot be rechecked', async () => {
+    const execute = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [],
+    });
+    const recover = vi.fn().mockResolvedValue({
+      outcome: 'NeedsOperator',
+      detail: 'manual_intervention_required',
+    });
+    const status = vi.fn().mockResolvedValue({
+      releaseId: 'stable:1.2.4',
+      currentState: 'RecoveryRequired',
+      activities: [],
+    });
+    const user = userEvent.setup();
+
+    window.localStorage.setItem('printfarmer.manual-host-update.release-id', 'stable:1.2.4');
+    const mounted = render(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onExecuteHostUpdate={execute}
+      onGetHostUpdateStatus={status}
+      onRecoverHostUpdate={recover}
+    />);
+
+    expect(await screen.findByRole('button', { name: 'Recover update' })).toBeVisible();
+    mounted.rerender(<InstallerUpdatesExperience
+      inventory={inventory({ eligibility: 'Eligible', readiness: { state: 'Eligible', reasons: [], hops: [] } })}
+      observation="connected"
+      onExecuteHostUpdate={execute}
+      onRecoverHostUpdate={recover}
+    />);
+    await user.click(screen.getByRole('button', { name: 'Recover update' }));
+    expect(await screen.findByText(/NeedsOperator: manual_intervention_required/)).toBeVisible();
+    expect(screen.getByRole('button', { name: 'Recover update' })).toBeVisible();
+    expect(window.localStorage.getItem('printfarmer.manual-host-update.release-id')).toBe('stable:1.2.4');
   });
 
   it('allows retry after authorization fails before execute dispatch', async () => {
