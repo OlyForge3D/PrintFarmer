@@ -15,12 +15,13 @@ namespace Farm.Infrastructure.Services.HostUpdates;
 /// a value for it today, so requiring it unconditionally crashed every host on startup the moment
 /// <c>AddHostUpdateExecution</c> is registered (which happens unconditionally from
 /// <c>FeatureServicesStartup</c>). When <c>RootDirectory</c> is not configured at all, this
-/// validator succeeds without checking any other host-update-execution option -- the executor's
-/// own <see cref="HostUpdateExecutionAvailabilityProvider"/> is the correct place to report
-/// <c>root_directory_not_configured</c> as a runtime-queryable <c>Unavailable</c> reason, not a
-/// process crash. Once an operator explicitly configures a <c>RootDirectory</c> (opting into the
-/// feature for that deployment), every check below still runs and still fails process start fast
-/// on a genuine misconfiguration.
+/// validator skips deployment-specific checks -- the executor's own
+/// <see cref="HostUpdateExecutionAvailabilityProvider"/> reports
+/// <c>root_directory_not_configured</c> as a runtime-queryable <c>Unavailable</c> reason rather
+/// than crashing the process. The code-owned fenced-writer minimum is always validated because
+/// configuration must never weaken that safety boundary. Once an operator explicitly configures
+/// a <c>RootDirectory</c> (opting into the feature for that deployment), every remaining check
+/// below also runs and fails process start fast on a genuine misconfiguration.
 /// </remarks>
 public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostUpdateExecutionOptions>
 {
@@ -28,12 +29,25 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        if (string.IsNullOrWhiteSpace(options.RootDirectory))
+        var failures = new List<string>();
+        var configuredFencedWriterNames = new HashSet<string>(
+            options.RequiredFencedWriterNames?.Where(name => !string.IsNullOrWhiteSpace(name)) ?? [],
+            StringComparer.Ordinal);
+        string[] missingCodeOwnedWriterNames = HostUpdateExecutionAvailabilityProvider.CodeOwnedRequiredFencedWriterNames
+            .Where(name => !configuredFencedWriterNames.Contains(name))
+            .ToArray();
+        if (missingCodeOwnedWriterNames.Length > 0)
         {
-            return ValidateOptionsResult.Success;
+            failures.Add(
+                "HostUpdateExecution:RequiredFencedWriterNames must include every code-owned required writer: "
+                + string.Join(',', missingCodeOwnedWriterNames)
+                + ".");
         }
 
-        var failures = new List<string>();
+        if (string.IsNullOrWhiteSpace(options.RootDirectory))
+        {
+            return failures.Count == 0 ? ValidateOptionsResult.Success : ValidateOptionsResult.Fail(failures);
+        }
 
         string root = options.RootDirectory;
         if (!Path.IsPathRooted(root))

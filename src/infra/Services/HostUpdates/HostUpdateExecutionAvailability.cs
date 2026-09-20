@@ -57,6 +57,20 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
 
     private static readonly string[] CodeOwnedUnavailableFacilities = [];
 
+    internal static readonly string[] CodeOwnedRequiredFencedWriterNames =
+    [
+        "api-admission",
+        "queue-outbox-publisher",
+        "power-reading-prune",
+        "queue-retention-prune",
+        "backend-start-command-consumer",
+        "backend-control-command-consumer",
+        "bed-clear-acknowledgement-expiry",
+        "auto-dispatch",
+        "webhook-delivery",
+        "queue-reconciliation",
+    ];
+
     public async Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken)
     {
         var reasons = new List<string>();
@@ -140,7 +154,10 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
         }
 
         var fencedNames = new HashSet<string>(fenceableWriters.Select(w => w.Name), StringComparer.Ordinal);
-        string[] missingWriters = options.RequiredFencedWriterNames
+        string[] missingWriters = CodeOwnedRequiredFencedWriterNames
+            .Concat(options.RequiredFencedWriterNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)
             .Where(name => !fencedNames.Contains(name))
             .ToArray();
         if (missingWriters.Length > 0)
