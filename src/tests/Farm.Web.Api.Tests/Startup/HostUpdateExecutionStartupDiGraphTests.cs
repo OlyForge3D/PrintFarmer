@@ -55,6 +55,31 @@ public sealed class HostUpdateExecutionStartupDiGraphTests
     }
 
     [Fact]
+    public void AddHostUpdateExecution_RegistersQueueReconciliationFence()
+    {
+        string root = CreateValidRoot();
+        try
+        {
+            ServiceCollection services = new();
+            services.AddLogging();
+            IConfiguration configuration = BuildConfiguration(root);
+            services.AddSingleton(configuration);
+            services.AddHostUpdateExecution(configuration);
+
+            using ServiceProvider provider = services.BuildServiceProvider();
+
+            Assert.NotNull(provider.GetRequiredService<QueueReconciliationFenceFlag>());
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, recursive: true);
+            }
+        }
+    }
+
+    [Fact]
     public void AddHostUpdateExecution_ResolvingBackupTargetList_DoesNotRecurseAndReturnsRealTargets()
     {
         string root = CreateValidRoot();

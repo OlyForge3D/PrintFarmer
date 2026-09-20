@@ -44,6 +44,8 @@ public sealed class FileHostUpdateAdmissionGateTests
     }
 
     [Fact]
+    // Pins the existing fail-closed contract: any durable marker, including malformed content,
+    // means admission remains closed.
     public async Task IsClosedAsync_WhenMarkerIsCorrupt_FailsClosed()
     {
         string root = Path.Combine(Path.GetTempPath(), "pf-host-update-gate-corrupt-" + Guid.NewGuid().ToString("N"));

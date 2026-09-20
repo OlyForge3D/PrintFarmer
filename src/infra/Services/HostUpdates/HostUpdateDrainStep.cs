@@ -70,26 +70,20 @@ public sealed class FileHostUpdateAdmissionGate(HostUpdateExecutionOptions optio
         return Task.CompletedTask;
     }
 
-    public async Task<bool> IsClosedAsync(CancellationToken cancellationToken)
+    public Task<bool> IsClosedAsync(CancellationToken cancellationToken)
     {
         if (!IsConfigured)
         {
-            return false;
+            return Task.FromResult(false);
         }
 
         try
         {
-            if (!File.Exists(GatePath))
-            {
-                return false;
-            }
-
-            _ = await File.ReadAllTextAsync(GatePath, cancellationToken).ConfigureAwait(false);
-            return true;
+            return Task.FromResult(File.Exists(GatePath));
         }
         catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or InvalidOperationException or ArgumentException)
         {
-            return true;
+            return Task.FromResult(true);
         }
     }
 }
