@@ -1,4 +1,4 @@
-// Pure evaluation logic for the squad pre-PR review record.
+// Pure evaluation logic for the squad readiness/merge review record.
 //
 // ⚠️ THIS IS NOT INDEPENDENT REVIEW AND PROVIDES NO SEPARATION OF DUTIES.
 // Every squad agent runs under the repository owner's authority and posts
@@ -27,8 +27,8 @@
 export const verdictContext = 'squad/pre-pr-verdict';
 
 /**
- * Squad members that form the elevated review panel. Three agents reviewing
- * instead of one is a quality measure, not three independent parties.
+ * Eligible elevated reviewers. Two are required; the third adjudicates
+ * escalations. These are fresh perspectives, not independent parties.
  */
 export const reviewPanel = ['bishop', 'hicks', 'vasquez'];
 
@@ -871,28 +871,52 @@ export function evaluateGate({
     decision.state === 'APPROVED' &&
     !unresolvedDismissals.has(decision.login.toLowerCase())) ??
     adminDecisions.find((decision) => decision.state === 'CHANGES_REQUESTED');
+  const { current, stale, unauthenticated } = collectVerdicts(comments, head, { carriedShas });
+  const scope = classifyChangeScope(changedPaths);
+  const requiredCount = scope.highRisk ? 2 : 1;
+  const requiredMembers = scope.highRisk ? reviewPanel : [];
   if (adminDecision) {
     const passed = adminDecision.state === 'APPROVED';
+    const agentRecords = [...current.values()].filter((record) =>
+      !record.isSelfDeclaredAdmin && roster.has(record.reviewer) &&
+      !authorMembers.has(record.reviewer));
+    const dissent = agentRecords
+      .filter((record) => record.verdict === 'REQUEST_CHANGES')
+      .map((record) => record.reviewer).sort();
+    const approvals = agentRecords
+      .filter((record) => record.verdict === 'APPROVE' &&
+        (!scope.highRisk || reviewPanel.includes(record.reviewer)))
+      .map((record) => record.reviewer).sort();
+    const missingApprovals = Math.max(0, requiredCount - approvals.length);
+    const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
+    notes.push(
+      `Owner decision is authorization, not agent review. Agent approvals: ${approvals.join(', ') || '(none)'}.`,
+      `Dissent preserved: ${dissent.join(', ') || '(none)'}.`,
+      `Review quorum: ${approvals.length}/${requiredCount}; missing approvals: ${missingApprovals}. ` +
+      `Panel members without approval: ${missingPanel.join(', ') || '(none)'}.`,
+    );
     return {
       state: passed ? 'success' : 'failure',
       passed,
       override: adminDecision.override,
       description: truncate(
         passed
-          ? `APPROVE (owner) @ ${shortSha(head)} by ${adminDecision.login}`
+          ? `APPROVE (owner) @ ${shortSha(head)} by ${adminDecision.login}; dissent=${dissent.length}; short=${missingApprovals}`
           : `REQUEST_CHANGES @ ${shortSha(head)} by ${adminDecision.login}`,
       ),
       reason:
         `administrator ${adminDecision.login} recorded ${adminDecision.state} ` +
         `on the current head via ${adminDecision.override}`,
       notes,
-      requiredMembers: [],
-      approvals: passed ? [adminDecision.login] : [],
-      stale: [],
+      requiredMembers,
+      requiredCount,
+      approvals,
+      dissent,
+      missingApprovals,
+      stale,
     };
   }
 
-  const { current, stale, unauthenticated } = collectVerdicts(comments, head, { carriedShas });
   if (unauthenticated.length > 0) {
     notes.push(
       `Rejected ${unauthenticated.length} record(s) whose author could not be ` +
@@ -903,10 +927,9 @@ export function evaluateGate({
     );
   }
 
-  const scope = classifyChangeScope(changedPaths);
   notes.push(
     scope.highRisk
-      ? `High-risk gate (${scope.reason}): the ${reviewPanel.join('/')} panel is required.`
+      ? `High-risk gate (${scope.reason}): ${requiredCount} approvals from ${reviewPanel.join('/')} are required.`
       : `${scope.docsOnly ? 'Documentation-only change' : 'Standard change'} (${scope.reason}): one reviewer required.`,
   );
   if (authorMembers.size > 0) {
@@ -995,18 +1018,14 @@ export function evaluateGate({
   }
 
   const approvals = [...eligible.values()]
-    .filter((record) => record.verdict === 'APPROVE')
+    .filter((record) => record.verdict === 'APPROVE' &&
+      (!scope.highRisk || reviewPanel.includes(record.reviewer)))
     .map((record) => record.reviewer)
     .sort();
 
   // 5. Reviewer count and panel membership.
-  const requiredCount = scope.highRisk ? 3 : 1;
-  const requiredMembers = scope.highRisk
-    ? reviewPanel
-    : [];
-
   const missingPanel = requiredMembers.filter((member) => !approvals.includes(member));
-  if (missingPanel.length > 0 || approvals.length < requiredCount) {
+  if (approvals.length < requiredCount) {
     const staleNote = stale.length > 0
       ? ` (stale at ${stale.map((r) => `${r.reviewer}@${shortSha(r.headSha)}`).join(', ')})`
       : '';
@@ -1016,7 +1035,7 @@ export function evaluateGate({
           `(${unauthenticated.length} unauthenticated)`
         : `no review recorded for ${shortSha(head)}`)
       : `have ${approvals.length}/${requiredCount}` +
-        (missingPanel.length > 0 ? `, missing ${missingPanel.join('+')}` : '') +
+        (missingPanel.length > 0 ? `, choose ${missingPanel.join('+')}` : '') +
         staleNote;
     return {
       state: 'failure',
@@ -1029,6 +1048,7 @@ export function evaluateGate({
         : detail,
       notes,
       requiredMembers,
+      requiredCount,
       approvals,
       stale,
     };
@@ -1039,7 +1059,7 @@ export function evaluateGate({
   // audit trail must say so explicitly — never silently present a carried
   // record as a fresh review of the current head.
   const carried = [...eligible.values()]
-    .filter((record) => record.verdict === 'APPROVE' && record.carriedAcrossSync === true);
+    .filter((record) => approvals.includes(record.reviewer) && record.carriedAcrossSync === true);
   if (carried.length > 0) {
     notes.push(
       `Carried across sync: ${carried
@@ -1068,6 +1088,7 @@ export function evaluateGate({
         : ''),
     notes,
     requiredMembers,
+    requiredCount,
     approvals,
     stale,
     carried: carried.map((record) => record.reviewer),
