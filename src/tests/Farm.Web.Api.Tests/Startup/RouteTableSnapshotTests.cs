@@ -1,6 +1,9 @@
-﻿using Microsoft.AspNetCore.Mvc.ActionConstraints;
+﻿using Farm.Infrastructure.Authorization;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc.Controllers;
 using Microsoft.AspNetCore.Mvc.Infrastructure;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.Web.Api.Tests.Startup;
@@ -37,40 +40,97 @@ public sealed class RouteTableSnapshotTests
     {
         using CustomWebApplicationFactory factory = new();
 
-        IActionDescriptorCollectionProvider actionProvider =
-            factory.Services.GetRequiredService<IActionDescriptorCollectionProvider>();
+        EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
 
-        string[] actual = BuildRouteTable(actionProvider);
+        string[] actual = BuildRouteTable(endpointDataSource);
         string[] expected = File.ReadAllLines(SnapshotPath);
 
-        actual.Should().Equal(
-            expected,
-            "the controller-action route table must not change while Farm.Modules.Abstractions " +
-            "lands the module host seam (issue #2035) -- if this is a deliberate route change " +
-            "unrelated to the module seam, regenerate Startup/RouteTableSnapshot.txt and review " +
-            "the diff carefully");
+        AssertSnapshotMatches(actual, expected);
+    }
+
+    [Fact]
+    public void ControllerActionRouteTable_RejectsAnonymousRegressionOnPrivilegedRoute()
+    {
+        using CustomWebApplicationFactory factory = new();
+
+        EndpointDataSource endpointDataSource = factory.Services.GetRequiredService<EndpointDataSource>();
+        string[] expected = BuildRouteTable(endpointDataSource);
+        string privilegedRoute = expected.Single(line =>
+            line.Contains(
+                "DELETE /api/admin/roles/{roleId:guid}",
+                StringComparison.Ordinal) &&
+            line.Contains("permission=roles:admin", StringComparison.Ordinal));
+        string[] regressed = expected
+            .Select(line => line == privilegedRoute
+                ? line[..line.IndexOf(" [", StringComparison.Ordinal)] + " [auth=anonymous]"
+                : line)
+            .ToArray();
+
+        Action assertRegression = () => AssertSnapshotMatches(regressed, expected);
+
+        _ = assertRegression.Should().Throw<Xunit.Sdk.XunitException>();
+    }
+
+    [Fact]
+    public void ControllerActionRouteTable_RecordsEffectiveAuthorizationMetadata()
+    {
+        using CustomWebApplicationFactory factory = new();
+
+        string[] actual = BuildRouteTable(factory.Services.GetRequiredService<EndpointDataSource>());
+
+        _ = actual.Should().Contain(line =>
+            line.Contains(
+                "GET /api/admin/overview",
+                StringComparison.Ordinal) &&
+            line.Contains("permission=system_settings:admin", StringComparison.Ordinal));
+        _ = actual.Should().Contain(line =>
+            line.Contains(
+                "GET /api/admin/roles",
+                StringComparison.Ordinal) &&
+            line.Contains("permission=roles:admin", StringComparison.Ordinal));
+        _ = actual.Should().Contain(line =>
+            line.Contains(
+                "GET /api/schema-health/ready",
+                StringComparison.Ordinal) &&
+            line.EndsWith("[auth=anonymous]", StringComparison.Ordinal));
+        _ = actual.Should().Contain(line =>
+            line.Contains(
+                "UnifiedSettingsController.GetSettingsByKeyName",
+                StringComparison.Ordinal) &&
+            line.EndsWith("[auth=anonymous]", StringComparison.Ordinal));
+        _ = actual.Count(line => line.Contains("permission=", StringComparison.Ordinal))
+            .Should().BeGreaterThan(0);
+        _ = actual.Count(line => line.EndsWith("[auth=anonymous]", StringComparison.Ordinal))
+            .Should().BeGreaterThan(0);
     }
 
     /// <summary>
-    /// Builds the sorted, checked-in-snapshot line format: one line per controller action, each
-    /// listing every HTTP verb it accepts, its attribute-route template, and its
-    /// <c>Assembly::Controller.Action</c> identity. The assembly qualifier deliberately makes
+    /// Builds the sorted, checked-in-snapshot line format: one line per runtime controller
+    /// endpoint, each listing every HTTP verb it accepts, its attribute-route template,
+    /// effective authorization metadata, and its <c>Assembly::Controller.Action</c> identity.
+    /// The assembly qualifier deliberately makes
     /// two identically-named controllers in different assemblies produce distinct lines (see
     /// class remarks); no <c>Distinct()</c> is applied afterward, so a genuine duplicate route
     /// registration -- which this format could otherwise mask -- instead surfaces as a real
     /// diff against the snapshot rather than being silently deduplicated away.
     /// </summary>
-    private static string[] BuildRouteTable(IActionDescriptorCollectionProvider actionProvider)
+    private static string[] BuildRouteTable(EndpointDataSource endpointDataSource)
     {
-        return actionProvider.ActionDescriptors.Items
-            .OfType<ControllerActionDescriptor>()
-            .Select(action =>
+        return endpointDataSource.Endpoints
+            .OfType<RouteEndpoint>()
+            .Select(endpoint => new
             {
+                Endpoint = endpoint,
+                Action = endpoint.Metadata.GetMetadata<ControllerActionDescriptor>()
+            })
+            .Where(item => item.Action is not null)
+            .Select(item =>
+            {
+                RouteEndpoint endpoint = item.Endpoint;
+                ControllerActionDescriptor action = item.Action!;
                 string methods = string.Join(
                     "+",
-                    action.ActionConstraints?
-                        .OfType<HttpMethodActionConstraint>()
-                        .SelectMany(c => c.HttpMethods)
+                    endpoint.Metadata.GetMetadata<HttpMethodMetadata>()?.HttpMethods
                         .Distinct(StringComparer.Ordinal)
                         .OrderBy(m => m, StringComparer.Ordinal)
                     ?? Enumerable.Empty<string>());
@@ -82,9 +142,47 @@ public sealed class RouteTableSnapshotTests
                 string template = action.AttributeRouteInfo?.Template ?? string.Empty;
                 string assemblyName = action.ControllerTypeInfo.Assembly.GetName().Name ?? "?";
                 string identity = $"{assemblyName}::{action.ControllerTypeInfo.FullName}.{action.MethodInfo.Name}";
-                return $"{methods} /{template} -> {identity}";
+                string authorization = BuildAuthorization(endpoint.Metadata);
+                return $"{methods} /{template} -> {identity} [{authorization}]";
             })
             .OrderBy(line => line, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static string BuildAuthorization(EndpointMetadataCollection metadata)
+    {
+        if (metadata.GetMetadata<IAllowAnonymous>() is not null)
+        {
+            return "auth=anonymous";
+        }
+
+        string[] requirements = metadata
+            .GetOrderedMetadata<IAuthorizeData>()
+            .Select(data =>
+            {
+                string policy = data.Policy ?? string.Empty;
+                string roles = data.Roles ?? string.Empty;
+                string schemes = data.AuthenticationSchemes ?? string.Empty;
+                return $"policy={policy};roles={roles};schemes={schemes}";
+            })
+            .Concat(
+                metadata
+                    .GetOrderedMetadata<IPermissionMetadata>()
+                    .Select(permission => $"permission={permission.Permission}"))
+            .ToArray();
+
+        return requirements.Length == 0
+            ? "auth=none"
+            : $"auth={string.Join("|", requirements)}";
+    }
+
+    private static void AssertSnapshotMatches(string[] actual, string[] expected)
+    {
+        actual.Should().Equal(
+            expected,
+            "the controller-action route table and effective authorization must not change while " +
+            "Farm.Modules.Abstractions lands the module host seam (issue #2035) -- if this is a " +
+            "deliberate route or authorization change, regenerate Startup/RouteTableSnapshot.txt " +
+            "and review the diff carefully");
     }
 }
