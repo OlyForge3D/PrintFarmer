@@ -92,15 +92,7 @@ public sealed class HostStatePersistenceTests
         string link = Path.Combine(root, "installation.id");
         try
         {
-            try
-            {
-                File.CreateSymbolicLink(link, Path.Combine(outside, "target"));
-            }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or PlatformNotSupportedException)
-            {
-                throw Xunit.Sdk.SkipException.ForSkip(
-                    "The test environment cannot create a symbolic link; enable Windows Developer Mode or run with the required privilege.");
-            }
+            File.CreateSymbolicLink(link, Path.Combine(outside, "target"));
 
             Assert.Throws<SecurityException>(() => HostUpdateInstallationIdentity.GetOrCreate(root));
         }
@@ -333,9 +325,7 @@ public sealed class HostStatePersistenceTests
         string link = Path.Combine(parent, "linked");
         try
         {
-            try
-            { Directory.CreateSymbolicLink(link, target); }
-            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { return; }
+            Directory.CreateSymbolicLink(link, target);
             ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, OptionsFor(Path.Combine(link, "state")));
             Assert.False(result.Succeeded);
             Assert.Contains("reparse", result.FailureMessage, StringComparison.OrdinalIgnoreCase);
