@@ -377,10 +377,22 @@ public sealed class BackendStartCommandConsumerServiceTests
         // just from a narrower window than before.
         await harness.Service.StartAsync(CancellationToken.None);
 
-        // Give the loop a deliberately generous real-time window to complete at least one
-        // full ProcessPendingCommandsAsync pass (and, because CreateTimer's scaling above is
-        // independent of the freeze, likely many more) while "now" is still pinned at anchor.
-        await Task.Delay(TimeSpan.FromMilliseconds(250));
+        // Wait for an explicit signal instead of a fixed real-time delay: `FirstTimerCreated`
+        // completes only when `WaitForIntervalOrPauseAsync`'s `Task.Delay(..., clock, ...)`
+        // first calls `clock.CreateTimer`, which production code can only reach after
+        // `ExecuteAsync`'s first `ProcessPendingCommandsAsync` call has returned (see
+        // `AcceleratedTimeProvider.FirstTimerCreated`'s doc comment). A panel review found a
+        // fixed 250ms delay here was not guaranteed to outlast that first pass under
+        // scheduler/SQLite contention, so the "still Pending" assertion below could
+        // spuriously pass without the pass having actually finished; this signal cannot
+        // complete before it has.
+        bool firstPassCompleted = await Task.WhenAny(
+            clock.FirstTimerCreated,
+            Task.Delay(TimeSpan.FromSeconds(20))) == clock.FirstTimerCreated;
+        firstPassCompleted.Should().BeTrue(
+            "the hosted loop must reach WaitForIntervalOrPauseAsync's poll-delay timer " +
+            "creation -- i.e. complete its first ProcessPendingCommandsAsync pass -- within " +
+            "20 real seconds; if it never does, the loop is stuck or was never started");
 
         // Deterministic proof the freeze held through the loop's own startup overhead, not
         // just through this test's setup code above: while the clock remains frozen at
@@ -687,12 +699,29 @@ public sealed class BackendStartCommandConsumerServiceTests
         private readonly double _accelerationFactor;
         private readonly object _gate = new();
         private global::System.Diagnostics.Stopwatch? _stopwatch;
+        private readonly TaskCompletionSource _firstTimerCreated =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
 
         public AcceleratedTimeProvider(DateTime utcNow, double accelerationFactor)
         {
             _startUtc = new DateTimeOffset(utcNow, TimeSpan.Zero);
             _accelerationFactor = accelerationFactor;
         }
+
+        /// <summary>
+        /// Completes the first time <see cref="CreateTimer"/> is invoked. In this test's
+        /// harness (<c>hostUpdateFence: null</c>), the ONLY caller of
+        /// <c>TimeProvider.CreateTimer</c> on this instance is
+        /// <c>WaitForIntervalOrPauseAsync</c>'s <c>Task.Delay(..., this, ...)</c> call, which
+        /// production code only reaches after <c>ExecuteAsync</c>'s call to
+        /// <c>ProcessPendingCommandsAsync</c> has returned. Awaiting this task is therefore an
+        /// exact, deterministic proof that the hosted loop's first frozen-time processing pass
+        /// has fully completed -- unlike a fixed real-time delay, it cannot complete early
+        /// under a fast run and cannot spuriously miss the pass under scheduler/SQLite
+        /// contention on a slow one, closing the race a panel review flagged twice against
+        /// earlier fixed-delay designs.
+        /// </summary>
+        public Task FirstTimerCreated => _firstTimerCreated.Task;
 
         /// <summary>
         /// Begins advancing this clock's virtual time. Before this is called,
@@ -740,6 +769,7 @@ public sealed class BackendStartCommandConsumerServiceTests
 
         public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
         {
+            _firstTimerCreated.TrySetResult();
             return System.CreateTimer(callback, state, ScaleDown(dueTime), ScaleDown(period));
         }
 
