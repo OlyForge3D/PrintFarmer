@@ -2,7 +2,11 @@ import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { clampedOverride, evaluate } from "./typecheck-app-core.mjs";
+import {
+  clampedOverride,
+  evaluate,
+  formatSinkOutput,
+} from "./typecheck-app-core.mjs";
 
 const projectDirectory = fileURLToPath(new URL("..", import.meta.url));
 const tscPath = resolve(projectDirectory, "node_modules/typescript/bin/tsc");
@@ -51,7 +55,7 @@ const compilerResult = spawnSync(
   [tscPath, ...tscArguments],
   spawnOptions,
 );
-const output = `${compilerResult.stdout ?? ""}${compilerResult.stderr ?? ""}`;
+const output = formatSinkOutput(compilerResult.stdout, compilerResult.stderr);
 process.stdout.write(output);
 
 // Matches the compiler-result guards evaluate() checks first, in the same
@@ -75,7 +79,10 @@ const listFilesResult = compilerAlreadyFatal
       [tscPath, ...tscArguments, "--listFilesOnly"],
       spawnOptions,
     );
-const listFilesOutput = `${listFilesResult.stdout ?? ""}${listFilesResult.stderr ?? ""}`;
+const listFilesOutput = formatSinkOutput(
+  listFilesResult.stdout,
+  listFilesResult.stderr,
+);
 
 const evaluation = evaluate({
   baseline,
@@ -88,6 +95,10 @@ const evaluation = evaluate({
 
 if (!evaluation.ok) {
   console.error(evaluation.message);
+  if (evaluation.showListFilesOutput && listFilesOutput.trim()) {
+    process.stdout.write("tsc --listFilesOnly output:\n");
+    process.stdout.write(listFilesOutput);
+  }
   process.exitCode = 1;
 } else {
   console.warn(evaluation.message);

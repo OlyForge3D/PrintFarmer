@@ -1,4 +1,5 @@
-﻿using System.Linq;
+﻿using System.Collections.Immutable;
+using System.Linq;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
@@ -55,7 +56,60 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
 {
     private const string ProbeReleaseId = "__availability_probe__";
 
-    private static readonly string[] CodeOwnedUnavailableFacilities = [];
+    internal static readonly ImmutableArray<string> CodeOwnedRequiredFencedWriterNames =
+    [
+        "api-admission",
+        "queue-outbox-publisher",
+        "power-reading-prune",
+        "queue-retention-prune",
+        "backend-start-command-consumer",
+        "backend-control-command-consumer",
+        "bed-clear-acknowledgement-expiry",
+        "auto-dispatch",
+        "webhook-delivery",
+        "queue-reconciliation",
+    ];
+
+    /// <summary>
+    /// Drops null/whitespace-only entries and de-duplicates while preserving first-occurrence
+    /// order. Does not trim surrounding whitespace from otherwise-valid names: an untrimmed name
+    /// simply fails to match anywhere else in the system, so the deployment fails closed as
+    /// unavailable rather than silently normalizing a typo'd name into a different one.
+    /// </summary>
+    /// <remarks>
+    /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
+    /// runtime availability depend on case variants remaining distinct.
+    /// </remarks>
+    internal static ImmutableArray<string> NormalizeConfiguredRequiredFencedWriterNames(
+        string[]? configuredWriterNames) =>
+        [.. (configuredWriterNames ?? [])
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal)];
+
+    /// <summary>Determines whether <paramref name="candidateName"/> is present in <paramref name="writerNames"/>.</summary>
+    /// <remarks>
+    /// Ordinal comparison is the canonical writer-name contract. Both startup validation and
+    /// effective-set construction depend on case variants remaining distinct.
+    /// </remarks>
+    internal static bool ContainsRequiredFencedWriterName(
+        ImmutableArray<string> writerNames,
+        string candidateName) =>
+        writerNames.Contains(candidateName, StringComparer.Ordinal);
+
+    private static ImmutableArray<string> GetEffectiveRequiredFencedWriterNames(
+        string[]? configuredWriterNames)
+    {
+        ImmutableArray<string> normalizedConfiguredWriterNames =
+            NormalizeConfiguredRequiredFencedWriterNames(configuredWriterNames);
+        return
+        [
+            .. CodeOwnedRequiredFencedWriterNames,
+            .. normalizedConfiguredWriterNames.Where(
+                name => !ContainsRequiredFencedWriterName(
+                    CodeOwnedRequiredFencedWriterNames,
+                    name)),
+        ];
+    }
 
     public async Task<HostUpdateExecutionAvailability> CheckAsync(CancellationToken cancellationToken)
     {
@@ -134,13 +188,15 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
             }
         }
 
-        foreach (string unavailableFacility in CodeOwnedUnavailableFacilities.Concat(options.RequiredUnavailableFacilities).Where(name => !string.IsNullOrWhiteSpace(name)).Distinct(StringComparer.Ordinal))
+        foreach (string unavailableFacility in options.RequiredUnavailableFacilities
+            .Where(name => !string.IsNullOrWhiteSpace(name))
+            .Distinct(StringComparer.Ordinal))
         {
             reasons.Add($"facility_unavailable:{unavailableFacility}");
         }
 
         var fencedNames = new HashSet<string>(fenceableWriters.Select(w => w.Name), StringComparer.Ordinal);
-        string[] missingWriters = options.RequiredFencedWriterNames
+        string[] missingWriters = GetEffectiveRequiredFencedWriterNames(options.RequiredFencedWriterNames)
             .Where(name => !fencedNames.Contains(name))
             .ToArray();
         if (missingWriters.Length > 0)

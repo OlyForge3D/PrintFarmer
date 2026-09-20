@@ -64,7 +64,7 @@ public sealed class HostUpdateExecutionOptions
     public int DrainPollIntervalSeconds { get; set; } = 5;
 
     /// <summary>Bounded wait to prove every registered writer has actually quiesced before backup.</summary>
-    public int FenceProofTimeoutSeconds { get; set; } = 60;
+    public int FenceProofTimeoutSeconds { get; set; } = 321;
 
     public int FencePollIntervalSeconds { get; set; } = 2;
 
@@ -116,25 +116,15 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>
     /// Writer names (matching <see cref="IFenceableWriter.Name"/>) that must all be present in
-    /// the registered fence coordinator before the executor is considered available. Backfills
-    /// coverage over time as more background writers are fenced (issue #2663); an entry here
-    /// with no corresponding registered <see cref="IFenceableWriter"/> makes the executor
-    /// explicitly <see cref="HostUpdateExecutionAvailabilityState.Unavailable"/> rather than
-    /// silently proceeding to fence only whatever happens to be registered.
+    /// the registered fence coordinator before the executor is considered available. The
+    /// code-owned baseline cannot be removed by configuration; configured entries may only add
+    /// deployment-specific writers. Any required name with no corresponding registered
+    /// <see cref="IFenceableWriter"/> makes the executor explicitly
+    /// <see cref="HostUpdateExecutionAvailabilityState.Unavailable"/> rather than silently
+    /// proceeding to fence only whatever happens to be registered.
     /// </summary>
     public string[] RequiredFencedWriterNames { get; set; } =
-    [
-        "api-admission",
-        "queue-outbox-publisher",
-        "power-reading-prune",
-        "queue-retention-prune",
-        "backend-start-command-consumer",
-        "backend-control-command-consumer",
-        "bed-clear-acknowledgement-expiry",
-        "auto-dispatch",
-        "webhook-delivery",
-        "queue-reconciliation",
-    ];
+        [.. HostUpdateExecutionAvailabilityProvider.CodeOwnedRequiredFencedWriterNames];
 
     /// <summary>
     /// Application-owned directories to back up (name to absolute path), matching this host's

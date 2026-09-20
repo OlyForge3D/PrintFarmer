@@ -98,17 +98,22 @@ export function countApplicationFiles(listFilesOutput, directory) {
 
 // Bounds an env-var-supplied override for a spawnSync limit (timeout or
 // maxBuffer) so the seam can only ever SHORTEN the given default, never
-// lengthen or disable it. The env var is read unconditionally, in every run
-// -- production, CI, and Docker alike -- so anything invalid, non-finite, or
-// above the ceiling -- including a value technically representable as a
-// JS number, such as 1e21 (which fails Number.isSafeInteger, since it
-// exceeds Number.MAX_SAFE_INTEGER) -- must silently fall back to the
-// default rather than disabling the bound it exists to enforce.
+// lengthen, enlarge, or disable it. The env var is read unconditionally, in
+// every run -- production, CI, and Docker alike -- so anything invalid,
+// non-finite, or above the ceiling -- including a value technically
+// representable as a JS number, such as 1e21 (which fails
+// Number.isSafeInteger, since it exceeds Number.MAX_SAFE_INTEGER) -- must
+// silently fall back to the default rather than disabling the bound it exists
+// to enforce.
 export function clampedOverride(envValue, defaultValue) {
   const parsed = Number(envValue);
   return Number.isSafeInteger(parsed) && parsed > 0 && parsed <= defaultValue
     ? parsed
     : defaultValue;
+}
+
+export function formatSinkOutput(stdout, stderr) {
+  return `${stdout ?? ""}${stderr ?? ""}`;
 }
 
 export function validateBaseline(baseline) {
@@ -153,6 +158,7 @@ export function evaluate({
     return {
       ok: false,
       message: `Invalid application type-check baseline: ${baselineError}`,
+      showListFilesOutput: false,
     };
   }
 
@@ -166,6 +172,7 @@ export function evaluate({
     return {
       ok: false,
       message: "TypeScript application compiler timed out and was killed.",
+      showListFilesOutput: false,
     };
   }
 
@@ -177,6 +184,7 @@ export function evaluate({
     return {
       ok: false,
       message: "TypeScript application compiler did not complete successfully.",
+      showListFilesOutput: false,
     };
   }
 
@@ -185,6 +193,7 @@ export function evaluate({
     return {
       ok: false,
       message: `TypeScript application compiler reported ${diagnostics.globalDiagnostics.length} global diagnostic(s).`,
+      showListFilesOutput: false,
     };
   }
 
@@ -195,6 +204,7 @@ export function evaluate({
     return {
       ok: false,
       message: `TypeScript application compiler exited unexpectedly with status ${compilerResult.status}.`,
+      showListFilesOutput: false,
     };
   }
 
@@ -203,6 +213,7 @@ export function evaluate({
       ok: false,
       message:
         "TypeScript application compiler exited nonzero without file diagnostics.",
+      showListFilesOutput: false,
     };
   }
 
@@ -214,6 +225,7 @@ export function evaluate({
     return {
       ok: false,
       message: "TypeScript application compiler could not list its project files.",
+      showListFilesOutput: true,
     };
   }
 
@@ -224,11 +236,13 @@ export function evaluate({
   // @ts-nocheck count in the same run reports as one failure, not two
   // sequential, seemingly-unrelated ones.
   const failures = [];
+  let showListFilesOutput = false;
 
   if (applicationFileCount < baseline.minimumAppFileCount) {
     failures.push(
       `TypeScript application compiler found ${applicationFileCount} application file(s); expected at least ${baseline.minimumAppFileCount}. Regenerate minimumAppFileCount in scripts/app-typecheck-baseline.json in the same commit.`,
     );
+    showListFilesOutput = true;
   }
 
   if (diagnostics.fileDiagnostics.length !== baseline.applicationDiagnosticCount) {
@@ -261,11 +275,13 @@ export function evaluate({
     return {
       ok: false,
       message: failures.join("\n"),
+      showListFilesOutput,
     };
   }
 
   return {
     ok: true,
     message: `Application type-check passed with ${diagnostics.fileDiagnostics.length}/${baseline.applicationDiagnosticCount} baseline diagnostic(s) (exact count, not diagnostic identity), ${applicationFileCount} application file(s), and ${noCheck.count}/${baseline.applicationNoCheckFileCount} @ts-nocheck file(s). See #2820 to drive the diagnostic count to zero.`,
+    showListFilesOutput: false,
   };
 }

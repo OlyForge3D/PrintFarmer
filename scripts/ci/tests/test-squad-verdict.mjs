@@ -442,6 +442,38 @@ test('every description evaluateGate can emit round-trips through the verifier',
         state: 'APPROVED', commitId: reviewedHeadSha, login: 'jpapiez', isAdmin: true,
       }],
     }, 'APPROVED'],
+    ['owner comment overrides earlier native and newer agent rejections', {
+      changedPaths: codePaths,
+      reviews: [{
+        state: 'CHANGES_REQUESTED', commitId: reviewedHeadSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-07T00:00:00Z',
+      }],
+      comments: [
+        record('jpapiez', 'APPROVE', reviewedHeadSha, {
+          squadAdminOverride: true, updated_at: '2026-08-07T01:00:00Z',
+        }),
+        record('hicks', 'REQUEST_CHANGES', reviewedHeadSha, {
+          updated_at: '2026-08-07T02:00:00Z',
+        }),
+      ],
+    }, 'APPROVED'],
+    ['new owner rejection revokes earlier native approval', {
+      changedPaths: codePaths,
+      reviews: [{
+        state: 'APPROVED', commitId: reviewedHeadSha, login: 'jpapiez',
+        isAdmin: true, submittedAt: '2026-08-07T00:00:00Z',
+      }],
+      comments: [record('jpapiez', 'REQUEST_CHANGES', reviewedHeadSha, {
+        squadAdminOverride: true, updated_at: '2026-08-07T01:00:00Z',
+      })],
+    }, 'CHANGES_REQUESTED'],
+    ['fresh delta reviews replace a rejected prior round without carrying evidence', {
+      changedPaths: codePaths,
+      comments: [
+        ...panel.map((m) => record(m, 'REQUEST_CHANGES', movedHeadSha)),
+        ...panel.map((m) => record(m, 'APPROVE')),
+      ],
+    }, 'REVIEWED'],
   ];
 
   for (const [name, input, expected] of scenarios) {

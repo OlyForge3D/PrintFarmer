@@ -34,6 +34,13 @@ When a team member has a **Reviewer** role:
   get to self-revise for that artifact.
 - If the Reviewer approves, work proceeds normally.
 
+### Follow-On Review Dispatch
+
+For follow-on panel rounds, follow the canonical
+[Delta-Only Panel Rereview](../../copilot-instructions.md#delta-only-panel-rereview)
+scope. Include the prior reviewed head, new head, findings, and correction summary
+in the dispatch; require a fresh current-head verdict.
+
 ### Strict Lockout Mechanics (once invoked)
 
 These rules apply only after a Reviewer has explicitly invoked lockout per the canonical
