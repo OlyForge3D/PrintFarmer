@@ -168,6 +168,7 @@ test("CLI fails without success or baseline-reduction advice after compiler sign
 
     assert.notEqual(result.status, 0);
     assert.match(output, /TypeScript test compiler/);
+    assert.doesNotMatch(output, /typecheck-tests\.mjs:\d+/);
     assert.doesNotMatch(output, /Test type-check passed/);
     assert.doesNotMatch(output, /baseline is stale/);
   } finally {

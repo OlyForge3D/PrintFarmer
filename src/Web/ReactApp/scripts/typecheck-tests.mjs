@@ -49,7 +49,8 @@ if (!evaluation.ok) {
     process.stdout.write(listFilesOutput);
   }
 
-  throw new Error(evaluation.message);
+  console.error(evaluation.message);
+  process.exitCode = 1;
+} else {
+  console.warn(evaluation.message);
 }
-
-console.warn(evaluation.message);
