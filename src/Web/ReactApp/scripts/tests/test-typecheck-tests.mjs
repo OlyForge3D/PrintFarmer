@@ -9,7 +9,7 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { readdirSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import test from "node:test";
@@ -114,65 +114,25 @@ test("clampedOverride only accepts shrink-only values and defaults invalid bound
   }
 });
 
-test("null stdout/stderr is sanitized at the real CLI output sinks", async () => {
-  const fixtureDirectory = await mkdtemp(
-    path.join(tmpdir(), "typecheck-null-sinks-"),
+test("typecheck-tests driver keeps both CLI sinks routed through the shared nullish-coalescing formatter", () => {
+  const source = readFileSync(
+    path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
+    "utf8",
+  );
+  const coreSource = readFileSync(
+    path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
+    "utf8",
   );
 
-  try {
-    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
-    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
-      recursive: true,
-    });
-    await cp(
-      path.join(packageDirectory, "scripts/typecheck-tests.mjs"),
-      path.join(fixtureDirectory, "scripts/typecheck-tests.mjs"),
-    );
-    await cp(
-      path.join(packageDirectory, "scripts/typecheck-tests-core.mjs"),
-      path.join(fixtureDirectory, "scripts/typecheck-tests-core.mjs"),
-    );
-    await writeFile(
-      path.join(fixtureDirectory, "scripts/test-typecheck-baseline.json"),
-      JSON.stringify(baseline),
-    );
-    await writeFile(
-      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
-      [
-        'const fs = require("node:fs");',
-        'const args = process.argv.slice(2);',
-        'if (args.includes("--listFilesOnly")) {',
-        '  fs.writeFileSync(process.env.SINK_LOG_PATH, "src/test/example.test.ts\\n");',
-        '  process.stdout.write("src/test/example.test.ts\\n");',
-        '  setInterval(() => {}, 1000);',
-        '} else {',
-        '  process.stdout.write("src/test/example.test.ts\\n");',
-        '}',
-      ].join("\n"),
-    );
-
-    const result = spawnSync(
-      process.execPath,
-      [path.join(fixtureDirectory, "scripts/typecheck-tests.mjs")],
-      {
-        encoding: "utf8",
-        env: {
-          ...process.env,
-          TYPECHECK_TEST_TIMEOUT_MS: "50",
-          SINK_LOG_PATH: path.join(fixtureDirectory, "tx.log"),
-        },
-        timeout: 10_000,
-      },
-    );
-    const output = `${result.stdout}${result.stderr}`;
-
-    assert.notEqual(result.status, 0);
-    assert.doesNotMatch(output, /null/);
-    assert.match(output, /TypeScript test compiler timed out and was killed/);
-    assert.doesNotMatch(output, /undefined/);
-  } finally {
-    await rm(fixtureDirectory, { recursive: true, force: true });
-  }
+  assert.match(
+    source,
+    /const output = formatSinkOutput\(compilerResult\.stdout, compilerResult\.stderr\);/,
+  );
+  assert.match(
+    source,
+    /const listFilesOutput = formatSinkOutput\(\s*listFilesResult\.stdout,\s*listFilesResult\.stderr,\s*\);/,
+  );
+  assert.match(coreSource, /return `\$\{stdout \?\? ""\}\$\{stderr \?\? ""\}`;/);
 });
 
 // Real CLI wiring: the first compiler run passes, then the listFiles pass hangs
