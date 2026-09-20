@@ -15,8 +15,10 @@ import { fileURLToPath } from "node:url";
 import {
   countTestFiles,
   evaluate,
+  hasTsNoCheckDirective,
   isCountableTestFile,
   isTestFile,
+  toRealPath,
 } from "../typecheck-tests-core.mjs";
 
 const packageDirectory = path.resolve(
@@ -105,11 +107,11 @@ test("fails above and below the exact diagnostic baseline", () => {
   const below = evaluateGate({ output: appDiagnostic });
   assert.match(
     above.message,
-    /measured 2 direct test diagnostic\(s\); expected exact snapshot 1\. Fix the errors; do not raise the exact snapshot/,
+    /measured 2 direct test diagnostic\(s\); expected exact count 1\. Fix the errors; do not raise the exact count/,
   );
   assert.match(
     below.message,
-    /measured 0 direct test diagnostic\(s\); expected exact snapshot 1\. The exact snapshot is stale; regenerate testDiagnosticCount in scripts\/test-typecheck-baseline\.json in the same commit/,
+    /measured 0 direct test diagnostic\(s\); expected exact count 1\. The exact count is stale; regenerate testDiagnosticCount in scripts\/test-typecheck-baseline\.json in the same commit/,
   );
 });
 
@@ -121,7 +123,7 @@ test("reports the file-count and diagnostic-snapshot failures together, not sequ
   assert.match(result.message, /found 1 test file\(s\); expected at least 2/);
   assert.match(
     result.message,
-    /measured 0 direct test diagnostic\(s\); expected exact snapshot 1/,
+    /measured 0 direct test diagnostic\(s\); expected exact count 1/,
   );
   assert.equal(result.showListFilesOutput, true);
 });
@@ -169,24 +171,120 @@ test("countTestFiles dedups a symlink to an already-counted test file via realpa
   }
 });
 
-test("countTestFiles excludes a test file carrying // @ts-nocheck from the floor (#2811 item 5)", async () => {
+test("countTestFiles excludes a test file carrying @ts-nocheck from the floor across evasion variants (#2811 item 5, R1)", async () => {
   const fixtureDirectory = await mkdtemp(
     path.join(tmpdir(), "typecheck-nocheck-"),
   );
 
   try {
     await mkdir(path.join(fixtureDirectory, "src/test"), { recursive: true });
-    await writeFile(
-      path.join(fixtureDirectory, "src/test/normal.test.ts"),
-      "export const a = 1;\n",
-    );
-    await writeFile(
-      path.join(fixtureDirectory, "src/test/nocheck.test.ts"),
-      "// @ts-nocheck\nexport const b: number = 'not a number';\n",
-    );
 
-    const listing = "src/test/normal.test.ts\nsrc/test/nocheck.test.ts";
-    assert.equal(countTestFiles(listing, fixtureDirectory), 1);
+    // [name, file content, whether it must be EXCLUDED from the floor]
+    const cases = [
+      ["double-slash", "// @ts-nocheck\nexport const a: number = 'x';\n", true],
+      // tsc honors triple-slash too (verified against the pinned compiler):
+      // a pattern that only matched exactly "//" would miss this.
+      ["triple-slash", "/// @ts-nocheck\nexport const a: number = 'x';\n", true],
+      // Not independently verified against tsc, but pinned deliberately:
+      // \/\/+ accepts any run of slashes rather than enumerating "// or ///"
+      // specifically, so a currently-hypothetical four-slash form is also
+      // excluded rather than silently falling through as a new hole.
+      [
+        "quad-slash",
+        "//// @ts-nocheck\nexport const a: number = 'x';\n",
+        true,
+      ],
+      [
+        "bom-double-slash",
+        "\uFEFF// @ts-nocheck\nexport const a: number = 'x';\n",
+        true,
+      ],
+      // Negative case: tsc does NOT honor the block-comment form (verified:
+      // still 1 diagnostic), so it must still count toward the floor.
+      [
+        "block-comment-negative",
+        "/* @ts-nocheck */\nexport const a: number = 'x';\n",
+        false,
+      ],
+    ];
+
+    for (const [name, content, mustExclude] of cases) {
+      await writeFile(
+        path.join(fixtureDirectory, "src/test", `${name}.test.ts`),
+        content,
+      );
+    }
+
+    const listing = cases
+      .map(([name]) => `src/test/${name}.test.ts`)
+      .join("\n");
+    const excludedCount = cases.filter(([, , mustExclude]) => mustExclude)
+      .length;
+    const expectedCount = cases.length - excludedCount;
+
+    assert.equal(countTestFiles(listing, fixtureDirectory), expectedCount);
+
+    // Also assert per-case so a regression names the exact evasion variant
+    // that broke, rather than only an aggregate off-by-one.
+    for (const [name, , mustExclude] of cases) {
+      const absolute = path.join(
+        fixtureDirectory,
+        "src/test",
+        `${name}.test.ts`,
+      );
+      assert.equal(
+        hasTsNoCheckDirective(absolute),
+        mustExclude,
+        `expected hasTsNoCheckDirective(${name}) to be ${mustExclude}`,
+      );
+    }
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("hasTsNoCheckDirective fails closed on non-ENOENT I/O errors instead of silently returning false (#2811 hardening, R4)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-nocheck-io-"),
+  );
+
+  try {
+    // Reading a directory as if it were a file fails with EISDIR, not
+    // ENOENT -- a portable stand-in for any other unexpected I/O failure
+    // (EACCES, EPERM, EBUSY, ...) that this repo cannot reliably trigger in
+    // a shared, cross-platform test environment. Only ENOENT (a synthetic
+    // path used purely in unit tests, e.g. above) may be swallowed; every
+    // other failure must surface, not fail open and silently treat an
+    // unreadable file as "not opted out".
+    assert.throws(() => hasTsNoCheckDirective(fixtureDirectory), {
+      code: "EISDIR",
+    });
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("toRealPath collapses two casings of the same real file into one entry on Windows (#2811 hardening, R3)", async (t) => {
+  if (process.platform !== "win32") {
+    t.skip(
+      "case-insensitive realpath normalization only applies on win32 filesystems",
+    );
+    return;
+  }
+
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-casefold-"),
+  );
+
+  try {
+    const actualPath = path.join(fixtureDirectory, "CaseTest.test.ts");
+    await writeFile(actualPath, "export const a = 1;\n");
+    const differentCasePath = path.join(fixtureDirectory, "casetest.test.ts");
+
+    // NTFS is case-insensitive by default, so both casings resolve to the
+    // same on-disk file; toRealPath must fold them to one Set entry.
+    const seen = new Set([toRealPath(actualPath), toRealPath(differentCasePath)]);
+    assert.equal(seen.size, 1);
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }
