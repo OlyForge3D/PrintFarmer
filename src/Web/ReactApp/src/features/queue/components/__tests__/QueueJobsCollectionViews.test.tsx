@@ -1,12 +1,17 @@
 import { fireEvent, render, screen } from "@testing-library/react";
 import "@testing-library/jest-dom";
 import { describe, expect, it, vi } from "vitest";
-import { QueueJobsCardView, QueueJobsListView } from "../QueueJobsCollectionViews";
+import {
+  QueueJobsCardView,
+  QueueJobsListView,
+} from "../QueueJobsCollectionViews";
 import { QueueViewModeSelector } from "../QueueViewModeSelector";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority } from "@/types/api";
 
-function createMockJob(overrides?: Partial<QueuedPrintJobWithFileMetaDto>): QueuedPrintJobWithFileMetaDto {
+function createMockJob(
+  overrides?: Partial<QueuedPrintJobWithFileMetaDto>,
+): QueuedPrintJobWithFileMetaDto {
   return {
     job: {
       id: "job-1",
@@ -89,10 +94,10 @@ describe("Queue view mode + collection renderers", () => {
         id: "job-1",
         name: "external-print",
         gcodeFileId: "",
-      copies: 1,
-      completedCopies: 0,
-      remainingCopies: 1,
-      status: "Printing",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
+        status: "Printing",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -101,7 +106,7 @@ describe("Queue view mode + collection renderers", () => {
       },
       gcodeFile: {
         id: "file-1",
-      name: "file-1",
+        name: "file-1",
         fileName: "external-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -109,10 +114,15 @@ describe("Queue view mode + collection renderers", () => {
     });
 
     const { container } = render(
-      <QueueJobsCardView jobs={[job]} printThumbnailByPrinterId={{ "printer-1": "http://printer/live.png" }} />,
+      <QueueJobsCardView
+        jobs={[job]}
+        printThumbnailByPrinterId={{ "printer-1": "http://printer/live.png" }}
+      />,
     );
 
-    expect(container.querySelector('img[src="http://printer/live.png"]')).toBeInTheDocument();
+    expect(
+      container.querySelector('img[src="http://printer/live.png"]'),
+    ).toBeInTheDocument();
   });
 
   it("list view does NOT show a live thumbnail on a Queued job pre-assigned to a busy printer", () => {
@@ -121,10 +131,10 @@ describe("Queue view mode + collection renderers", () => {
         id: "job-1",
         name: "waiting-print",
         gcodeFileId: "",
-      copies: 1,
-      completedCopies: 0,
-      remainingCopies: 1,
-      status: "Queued",
+        copies: 1,
+        completedCopies: 0,
+        remainingCopies: 1,
+        status: "Queued",
         priority: PrintJobPriority.Low,
         queuePosition: 1,
         createdAtUtc: new Date().toISOString(),
@@ -133,7 +143,7 @@ describe("Queue view mode + collection renderers", () => {
       },
       gcodeFile: {
         id: "file-1",
-      name: "file-1",
+        name: "file-1",
         fileName: "waiting-print.gcode",
         fileSizeBytes: 0,
         createdAtUtc: new Date().toISOString(),
@@ -141,15 +151,16 @@ describe("Queue view mode + collection renderers", () => {
     });
 
     const { container } = render(
-      <QueueJobsListView jobs={[job]} printThumbnailByPrinterId={{ "printer-1": "http://printer/other-job.png" }} />,
+      <QueueJobsListView
+        jobs={[job]}
+        printThumbnailByPrinterId={{
+          "printer-1": "http://printer/other-job.png",
+        }}
+      />,
     );
 
-    expect(container.querySelector('img[src="http://printer/other-job.png"]')).not.toBeInTheDocument();
+    expect(
+      container.querySelector('img[src="http://printer/other-job.png"]'),
+    ).not.toBeInTheDocument();
   });
 });
-
-
-
-
-
-

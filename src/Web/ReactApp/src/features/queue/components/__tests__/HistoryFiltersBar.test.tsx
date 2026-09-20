@@ -32,9 +32,18 @@ describe("HistoryFiltersBar accessibility", () => {
   it("exposes stable names and selected state for every status toggle", () => {
     renderHistoryFilters();
 
-    expect(screen.getByRole("button", { name: "Done" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Failed" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Cancelled" })).toHaveAttribute("aria-pressed", "false");
+    expect(screen.getByRole("button", { name: "Done" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Failed" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "Cancelled" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
   });
 
   it("preserves status toggle click behavior", () => {
@@ -52,8 +61,14 @@ describe("HistoryFiltersBar accessibility", () => {
     const onViewModeChange = vi.fn();
     renderHistoryFilters({ viewMode: "table", onViewModeChange });
 
-    expect(screen.getByRole("button", { name: "Card view" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Table view" })).toHaveAttribute("aria-pressed", "true");
+    expect(screen.getByRole("button", { name: "Card view" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "Table view" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Card view" }));
     expect(onViewModeChange).toHaveBeenCalledWith("cards");
@@ -63,7 +78,9 @@ describe("HistoryFiltersBar accessibility", () => {
     const onSortChange = vi.fn();
     renderHistoryFilters({ onSortChange });
 
-    const sortControl = screen.getByRole("combobox", { name: "Sort history jobs" });
+    const sortControl = screen.getByRole("combobox", {
+      name: "Sort history jobs",
+    });
     expect(screen.getByRole("option", { name: "Model" })).toBeInTheDocument();
 
     fireEvent.change(sortControl, { target: { value: "model" } });
@@ -88,15 +105,33 @@ describe("ModelFiltersBar accessibility", () => {
       />,
     );
 
-    expect(screen.getByRole("combobox", { name: "Printer Model" })).toBeInTheDocument();
-    expect(screen.getByRole("combobox", { name: "Sort By" })).toBeInTheDocument();
-    expect(screen.getByRole("group", { name: "Job Status" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Queued" })).toHaveAttribute("aria-pressed", "true");
-    expect(screen.getByRole("button", { name: "Printing" })).toHaveAttribute("aria-pressed", "false");
-    expect(screen.getByRole("button", { name: "Paused" })).toHaveAttribute("aria-pressed", "true");
+    expect(
+      screen.getByRole("combobox", { name: "Printer Model" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("combobox", { name: "Sort By" }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("group", { name: "Job Status" }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Queued" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+    expect(screen.getByRole("button", { name: "Printing" })).toHaveAttribute(
+      "aria-pressed",
+      "false",
+    );
+    expect(screen.getByRole("button", { name: "Paused" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
 
     fireEvent.click(screen.getByRole("button", { name: "Printing" }));
-    expect(onStatusChange).toHaveBeenCalledWith(["queued", "paused", "printing"]);
+    expect(onStatusChange).toHaveBeenCalledWith([
+      "queued",
+      "paused",
+      "printing",
+    ]);
   });
 });
-

@@ -1,8 +1,8 @@
-import { describe, it, expect, vi } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { useFileBrowser } from '../useFileBrowser';
-import type { FileQueryState, UseFileBrowserConfig } from '../types';
+import { describe, it, expect, vi } from "vitest";
+import { renderHook, act, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { useFileBrowser } from "../useFileBrowser";
+import type { FileQueryState, UseFileBrowserConfig } from "../types";
 
 const createWrapper = () => {
   const queryClient = new QueryClient({
@@ -16,8 +16,8 @@ const createWrapper = () => {
   );
 };
 
-describe('useFileBrowser', () => {
-  const domainItem = { id: '1', path: '/file.gcode', name: 'file.gcode' };
+describe("useFileBrowser", () => {
+  const domainItem = { id: "1", path: "/file.gcode", name: "file.gcode" };
 
   const mapQueryParams = (query: FileQueryState) => ({
     search: query.search,
@@ -43,35 +43,33 @@ describe('useFileBrowser', () => {
     onDownload: vi.fn(),
   };
 
-  it('loads files and maps domain items', async () => {
+  it("loads files and maps domain items", async () => {
     const wrapper = createWrapper();
-    const { result } = renderHook(() => useFileBrowser(baseConfig), { wrapper });
+    const { result } = renderHook(() => useFileBrowser(baseConfig), {
+      wrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.files).toHaveLength(1);
     });
 
-    expect(result.current.files[0].fileName).toBe('file.gcode');
+    expect(result.current.files[0].fileName).toBe("file.gcode");
   });
 
-  it('supports selection', async () => {
+  it("supports selection", async () => {
     const wrapper = createWrapper();
-    const { result } = renderHook(
-      () => useFileBrowser(baseConfig),
-      { wrapper }
-    );
+    const { result } = renderHook(() => useFileBrowser(baseConfig), {
+      wrapper,
+    });
 
     await waitFor(() => {
       expect(result.current.files).toHaveLength(1);
     });
 
     act(() => {
-      result.current.toggleSelect('1');
+      result.current.toggleSelect("1");
     });
 
-    expect(result.current.selectedIds).toEqual(['1']);
+    expect(result.current.selectedIds).toEqual(["1"]);
   });
 });
-
-
-

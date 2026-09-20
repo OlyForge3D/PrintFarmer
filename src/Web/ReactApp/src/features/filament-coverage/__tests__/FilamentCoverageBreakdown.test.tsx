@@ -15,7 +15,8 @@ import type { PrinterFilamentCoverage } from "../types";
 // Mock the hook so we can drive isLoading / isError / data independently
 // ---------------------------------------------------------------------------
 
-const mockUsePrinterCoverageFromFleet = vi.fn<() => Partial<UseQueryResult<PrinterFilamentCoverage | null>>>();
+const mockUsePrinterCoverageFromFleet =
+  vi.fn<() => Partial<UseQueryResult<PrinterFilamentCoverage | null>>>();
 
 vi.mock("../hooks", () => ({
   usePrinterCoverageFromFleet: () => mockUsePrinterCoverageFromFleet(),
@@ -135,7 +136,9 @@ describe("FilamentCoverageBreakdown", () => {
       data: {
         ...baseCoverage,
         status: "runout",
-        earliestPredictedRunoutAt: new Date(Date.now() + 20 * 60_000).toISOString(),
+        earliestPredictedRunoutAt: new Date(
+          Date.now() + 20 * 60_000,
+        ).toISOString(),
       },
     });
     const qc = makeClient();
@@ -194,9 +197,8 @@ describe("FilamentCoverageBreakdown", () => {
     expect(screen.queryByText(/Runout risk/i)).not.toBeInTheDocument();
     // The per-toolhead badge must also read "unknown", not "Filament OK"/"Runout risk".
     const badges = screen.getAllByRole("status");
-    expect(badges.some((el) => /Filament unknown/i.test(el.textContent ?? ""))).toBe(true);
+    expect(
+      badges.some((el) => /Filament unknown/i.test(el.textContent ?? "")),
+    ).toBe(true);
   });
 });
-
-
-

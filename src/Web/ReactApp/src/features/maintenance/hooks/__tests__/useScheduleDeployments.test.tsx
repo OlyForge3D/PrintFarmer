@@ -17,19 +17,19 @@
  * seeded fresh in the cache is dropped to a stale state after each
  * mutation completes.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { renderHook, waitFor, act } from '@testing-library/react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { ReactNode } from 'react';
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { renderHook, waitFor, act } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import {
   useDeployPlan,
   useUpdateScheduleDeployment,
   useDeleteScheduleDeployment,
   scheduleKeys,
-} from '../useScheduleDeployments';
-import { maintenanceQueryKeys } from '../../queryKeys';
+} from "../useScheduleDeployments";
+import { maintenanceQueryKeys } from "../../queryKeys";
 
-vi.mock('@/services/maintenancePlanService', () => ({
+vi.mock("@/services/maintenancePlanService", () => ({
   maintenancePlanService: {
     deployPlan: vi.fn(),
     updateScheduleDeployment: vi.fn(),
@@ -37,7 +37,7 @@ vi.mock('@/services/maintenancePlanService', () => ({
   },
 }));
 
-import { maintenancePlanService } from '@/services/maintenancePlanService';
+import { maintenancePlanService } from "@/services/maintenancePlanService";
 
 function wrapper(qc: QueryClient) {
   return ({ children }: { children: ReactNode }) => (
@@ -61,12 +61,14 @@ function seedFresh<T>(qc: QueryClient, key: readonly unknown[], data: T) {
   qc.setQueryData(key, data);
 }
 
-describe('useScheduleDeployments — cross-invalidation of upcoming-maintenance (Hicks #2)', () => {
+describe("useScheduleDeployments — cross-invalidation of upcoming-maintenance (Hicks #2)", () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('useDeployPlan invalidates BOTH scheduleDeployments and upcoming-maintenance prefixes on success', async () => {
-    (maintenancePlanService.deployPlan as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: 'sched-new',
+  it("useDeployPlan invalidates BOTH scheduleDeployments and upcoming-maintenance prefixes on success", async () => {
+    (
+      maintenancePlanService.deployPlan as unknown as ReturnType<typeof vi.fn>
+    ).mockResolvedValue({
+      id: "sched-new",
     });
     const qc = makeQc();
 
@@ -75,25 +77,35 @@ describe('useScheduleDeployments — cross-invalidation of upcoming-maintenance 
     // provided array as a prefix by default. We seed several variants
     // (with different filter objects) so a "shallow match" bug on the
     // hook implementation would be caught here.
-    seedFresh(qc, [...scheduleKeys.list()], ['seed']);
-    seedFresh(qc, maintenanceQueryKeys.upcomingMaintenance(), ['seed-a']);
+    seedFresh(qc, [...scheduleKeys.list()], ["seed"]);
+    seedFresh(qc, maintenanceQueryKeys.upcomingMaintenance(), ["seed-a"]);
     seedFresh(
       qc,
-      maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays: 30, includeOverdue: true, printerId: undefined }),
-      ['seed-b'],
+      maintenanceQueryKeys.upcomingMaintenance({
+        lookaheadDays: 30,
+        includeOverdue: true,
+        printerId: undefined,
+      }),
+      ["seed-b"],
     );
     seedFresh(
       qc,
-      maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays: 7, includeOverdue: false, printerId: 'printer-1' }),
-      ['seed-c'],
+      maintenanceQueryKeys.upcomingMaintenance({
+        lookaheadDays: 7,
+        includeOverdue: false,
+        printerId: "printer-1",
+      }),
+      ["seed-c"],
     );
 
-    const { result } = renderHook(() => useDeployPlan(), { wrapper: wrapper(qc) });
+    const { result } = renderHook(() => useDeployPlan(), {
+      wrapper: wrapper(qc),
+    });
 
     await act(async () => {
       await result.current.mutateAsync({
-        maintenancePlanId: 'plan-1',
-        printerId: 'printer-1',
+        maintenancePlanId: "plan-1",
+        printerId: "printer-1",
         toolheadId: null,
         notes: null,
       });
@@ -102,72 +114,110 @@ describe('useScheduleDeployments — cross-invalidation of upcoming-maintenance 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
 
     // Every prefix variant we seeded must now be stale.
-    expect(qc.getQueryState([...scheduleKeys.list()])!.isInvalidated).toBe(true);
-    expect(qc.getQueryState(maintenanceQueryKeys.upcomingMaintenance())!.isInvalidated).toBe(true);
-    expect(
-      qc.getQueryState(
-        maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays: 30, includeOverdue: true, printerId: undefined })
-      )!.isInvalidated,
-    ).toBe(true);
-    expect(
-      qc.getQueryState(
-        maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays: 7, includeOverdue: false, printerId: 'printer-1' })
-      )!.isInvalidated,
-    ).toBe(true);
-  });
-
-  it('useUpdateScheduleDeployment invalidates BOTH prefixes on success', async () => {
-    (maintenancePlanService.updateScheduleDeployment as unknown as ReturnType<typeof vi.fn>).mockResolvedValue({
-      id: 'sched-1',
-    });
-    const qc = makeQc();
-    seedFresh(qc, [...scheduleKeys.list()], ['seed']);
-    seedFresh(qc, maintenanceQueryKeys.upcomingMaintenance(), ['seed']);
-    seedFresh(
-      qc,
-      maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays: 30, includeOverdue: true, printerId: 'printer-1' }),
-      ['seed-scoped'],
+    expect(qc.getQueryState([...scheduleKeys.list()])!.isInvalidated).toBe(
+      true,
     );
-
-    const { result } = renderHook(() => useUpdateScheduleDeployment(), { wrapper: wrapper(qc) });
-
-    await act(async () => {
-      await result.current.mutateAsync({
-        id: 'sched-1',
-        data: { isActive: true, notes: 'tuned' },
-      });
-    });
-
-    await waitFor(() => expect(result.current.isSuccess).toBe(true));
-
-    expect(qc.getQueryState([...scheduleKeys.list()])!.isInvalidated).toBe(true);
-    expect(qc.getQueryState(maintenanceQueryKeys.upcomingMaintenance())!.isInvalidated).toBe(true);
+    expect(
+      qc.getQueryState(maintenanceQueryKeys.upcomingMaintenance())!
+        .isInvalidated,
+    ).toBe(true);
     expect(
       qc.getQueryState(
         maintenanceQueryKeys.upcomingMaintenance({
           lookaheadDays: 30,
           includeOverdue: true,
-          printerId: 'printer-1',
-        })
-      )!.isInvalidated
+          printerId: undefined,
+        }),
+      )!.isInvalidated,
+    ).toBe(true);
+    expect(
+      qc.getQueryState(
+        maintenanceQueryKeys.upcomingMaintenance({
+          lookaheadDays: 7,
+          includeOverdue: false,
+          printerId: "printer-1",
+        }),
+      )!.isInvalidated,
     ).toBe(true);
   });
 
-  it('useDeleteScheduleDeployment invalidates BOTH prefixes on success (undeploy path)', async () => {
-    (maintenancePlanService.deleteScheduleDeployment as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(undefined);
+  it("useUpdateScheduleDeployment invalidates BOTH prefixes on success", async () => {
+    (
+      maintenancePlanService.updateScheduleDeployment as unknown as ReturnType<
+        typeof vi.fn
+      >
+    ).mockResolvedValue({
+      id: "sched-1",
+    });
     const qc = makeQc();
-    seedFresh(qc, [...scheduleKeys.list()], ['seed']);
-    seedFresh(qc, maintenanceQueryKeys.upcomingMaintenance(), ['seed']);
+    seedFresh(qc, [...scheduleKeys.list()], ["seed"]);
+    seedFresh(qc, maintenanceQueryKeys.upcomingMaintenance(), ["seed"]);
     seedFresh(
       qc,
-      maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays: 14, includeOverdue: true, printerId: 'printer-42' }),
-      ['seed-scoped'],
+      maintenanceQueryKeys.upcomingMaintenance({
+        lookaheadDays: 30,
+        includeOverdue: true,
+        printerId: "printer-1",
+      }),
+      ["seed-scoped"],
     );
 
-    const { result } = renderHook(() => useDeleteScheduleDeployment(), { wrapper: wrapper(qc) });
+    const { result } = renderHook(() => useUpdateScheduleDeployment(), {
+      wrapper: wrapper(qc),
+    });
 
     await act(async () => {
-      await result.current.mutateAsync('sched-to-delete');
+      await result.current.mutateAsync({
+        id: "sched-1",
+        data: { isActive: true, notes: "tuned" },
+      });
+    });
+
+    await waitFor(() => expect(result.current.isSuccess).toBe(true));
+
+    expect(qc.getQueryState([...scheduleKeys.list()])!.isInvalidated).toBe(
+      true,
+    );
+    expect(
+      qc.getQueryState(maintenanceQueryKeys.upcomingMaintenance())!
+        .isInvalidated,
+    ).toBe(true);
+    expect(
+      qc.getQueryState(
+        maintenanceQueryKeys.upcomingMaintenance({
+          lookaheadDays: 30,
+          includeOverdue: true,
+          printerId: "printer-1",
+        }),
+      )!.isInvalidated,
+    ).toBe(true);
+  });
+
+  it("useDeleteScheduleDeployment invalidates BOTH prefixes on success (undeploy path)", async () => {
+    (
+      maintenancePlanService.deleteScheduleDeployment as unknown as ReturnType<
+        typeof vi.fn
+      >
+    ).mockResolvedValue(undefined);
+    const qc = makeQc();
+    seedFresh(qc, [...scheduleKeys.list()], ["seed"]);
+    seedFresh(qc, maintenanceQueryKeys.upcomingMaintenance(), ["seed"]);
+    seedFresh(
+      qc,
+      maintenanceQueryKeys.upcomingMaintenance({
+        lookaheadDays: 14,
+        includeOverdue: true,
+        printerId: "printer-42",
+      }),
+      ["seed-scoped"],
+    );
+
+    const { result } = renderHook(() => useDeleteScheduleDeployment(), {
+      wrapper: wrapper(qc),
+    });
+
+    await act(async () => {
+      await result.current.mutateAsync("sched-to-delete");
     });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
@@ -175,13 +225,21 @@ describe('useScheduleDeployments — cross-invalidation of upcoming-maintenance 
     // Delete/undeploy must reach the same set of prefixes; without the
     // fix, the operator's "upcoming" roster would still show the
     // deleted plan for up to 120 seconds (the poll interval).
-    expect(qc.getQueryState([...scheduleKeys.list()])!.isInvalidated).toBe(true);
-    expect(qc.getQueryState(maintenanceQueryKeys.upcomingMaintenance())!.isInvalidated).toBe(true);
+    expect(qc.getQueryState([...scheduleKeys.list()])!.isInvalidated).toBe(
+      true,
+    );
+    expect(
+      qc.getQueryState(maintenanceQueryKeys.upcomingMaintenance())!
+        .isInvalidated,
+    ).toBe(true);
     expect(
       qc.getQueryState(
-        maintenanceQueryKeys.upcomingMaintenance({ lookaheadDays: 14, includeOverdue: true, printerId: 'printer-42' })
+        maintenanceQueryKeys.upcomingMaintenance({
+          lookaheadDays: 14,
+          includeOverdue: true,
+          printerId: "printer-42",
+        }),
       )!.isInvalidated,
     ).toBe(true);
   });
 });
-

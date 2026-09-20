@@ -1,18 +1,18 @@
-import '@testing-library/jest-dom';
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { NotificationDrawer } from '@/common/components/NotificationDrawer';
-import { NotificationDto, NotificationType } from '@/types/api';
+import "@testing-library/jest-dom";
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { NotificationDrawer } from "@/common/components/NotificationDrawer";
+import { NotificationDto, NotificationType } from "@/types/api";
 
 // Mock date-fns
-vi.mock('date-fns', () => ({
-  formatDistanceToNow: () => '5 minutes ago',
+vi.mock("date-fns", () => ({
+  formatDistanceToNow: () => "5 minutes ago",
 }));
 
 // Mock the API hooks
-vi.mock('@/common/hooks/useNotificationsList', () => ({
+vi.mock("@/common/hooks/useNotificationsList", () => ({
   useNotifications: vi.fn(),
   useMarkNotificationAsRead: vi.fn(),
   useMarkAllNotificationsAsRead: vi.fn(),
@@ -25,7 +25,7 @@ const {
   useMarkNotificationAsRead,
   useMarkAllNotificationsAsRead,
   useDeleteNotification,
-} = await import('@/common/hooks/useNotificationsList');
+} = await import("@/common/hooks/useNotificationsList");
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -37,46 +37,44 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
   });
 
   return (
-    <QueryClientProvider client={queryClient}>
-      {children}
-    </QueryClientProvider>
+    <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>
   );
 }
 
 const mockNotifications: NotificationDto[] = [
   {
-    id: '1',
-    userId: 'user-1',
-    subject: 'Job completed',
+    id: "1",
+    userId: "user-1",
+    subject: "Job completed",
     body: 'Print job "test-model.gcode" completed successfully',
     type: NotificationType.JobCompleted,
     isRead: false,
-    createdAt: new Date('2024-01-15T10:00:00Z').toISOString(),
-    jobId: 'job-1',
+    createdAt: new Date("2024-01-15T10:00:00Z").toISOString(),
+    jobId: "job-1",
   },
   {
-    id: '2',
-    userId: 'user-1',
-    subject: 'Job failed',
+    id: "2",
+    userId: "user-1",
+    subject: "Job failed",
     body: 'Print job "failed-model.gcode" failed',
     type: NotificationType.JobFailed,
     isRead: true,
-    createdAt: new Date('2024-01-15T09:00:00Z').toISOString(),
-    jobId: 'job-2',
+    createdAt: new Date("2024-01-15T09:00:00Z").toISOString(),
+    jobId: "job-2",
   },
   {
-    id: '3',
-    userId: 'user-1',
-    subject: 'System alert',
-    body: 'Low filament warning',
+    id: "3",
+    userId: "user-1",
+    subject: "System alert",
+    body: "Low filament warning",
     type: NotificationType.SystemAlert,
     isRead: false,
-    createdAt: new Date('2024-01-15T08:00:00Z').toISOString(),
+    createdAt: new Date("2024-01-15T08:00:00Z").toISOString(),
     jobId: undefined,
   },
 ];
 
-describe('NotificationDrawer', () => {
+describe("NotificationDrawer", () => {
   const mockMarkAsRead = vi.fn();
   const mockMarkAllAsRead = vi.fn();
   const mockDelete = vi.fn();
@@ -109,17 +107,19 @@ describe('NotificationDrawer', () => {
     } as ReturnType<typeof useNotifications>);
   });
 
-  it('does not render when closed', () => {
+  it("does not render when closed", () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={false} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    expect(screen.queryByRole('heading', { name: 'Notifications' })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("heading", { name: "Notifications" }),
+    ).not.toBeInTheDocument();
   });
 
-  it('renders empty state when no notifications', () => {
+  it("renders empty state when no notifications", () => {
     vi.mocked(useNotifications).mockReturnValue({
       data: [],
       refetch: mockRefetch,
@@ -128,15 +128,17 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    expect(screen.getByRole('heading', { name: 'Notifications' })).toBeInTheDocument();
-    expect(screen.getByText('No notifications')).toBeInTheDocument();
-    expect(screen.getByText('📭')).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: "Notifications" }),
+    ).toBeInTheDocument();
+    expect(screen.getByText("No notifications")).toBeInTheDocument();
+    expect(screen.getByText("📭")).toBeInTheDocument();
   });
 
-  it('renders notification list with unread and read notifications', () => {
+  it("renders notification list with unread and read notifications", () => {
     vi.mocked(useNotifications).mockReturnValue({
       data: mockNotifications,
       refetch: mockRefetch,
@@ -145,15 +147,15 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    expect(screen.getByText('Job completed')).toBeInTheDocument();
-    expect(screen.getByText('Job failed')).toBeInTheDocument();
-    expect(screen.getByText('System alert')).toBeInTheDocument();
+    expect(screen.getByText("Job completed")).toBeInTheDocument();
+    expect(screen.getByText("Job failed")).toBeInTheDocument();
+    expect(screen.getByText("System alert")).toBeInTheDocument();
 
     // Check for unread indicators
-    const unreadIndicators = screen.getAllByTitle('Unread');
+    const unreadIndicators = screen.getAllByTitle("Unread");
     expect(unreadIndicators).toHaveLength(2); // Two unread notifications
   });
 
@@ -166,14 +168,19 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    expect(screen.getByRole('button', { name: /mark all as read/i })).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /mark all as read/i }),
+    ).toBeInTheDocument();
   });
 
   it('does not show "Mark all as read" button when all notifications are read', () => {
-    const allReadNotifications = mockNotifications.map(n => ({ ...n, isRead: true }));
+    const allReadNotifications = mockNotifications.map((n) => ({
+      ...n,
+      isRead: true,
+    }));
     vi.mocked(useNotifications).mockReturnValue({
       data: allReadNotifications,
       refetch: mockRefetch,
@@ -182,13 +189,15 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    expect(screen.queryByRole('button', { name: /mark all as read/i })).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: /mark all as read/i }),
+    ).not.toBeInTheDocument();
   });
 
-  it('marks individual notification as read when clicked', async () => {
+  it("marks individual notification as read when clicked", async () => {
     const user = userEvent.setup();
     vi.mocked(useNotifications).mockReturnValue({
       data: mockNotifications,
@@ -198,19 +207,19 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     // Click on an unread notification
-    const notification = screen.getByText('Job completed');
+    const notification = screen.getByText("Job completed");
     await user.click(notification);
 
     await waitFor(() => {
-      expect(mockMarkAsRead).toHaveBeenCalledWith('1');
+      expect(mockMarkAsRead).toHaveBeenCalledWith("1");
     });
   });
 
-  it('does not mark already read notification when clicked', async () => {
+  it("does not mark already read notification when clicked", async () => {
     const user = userEvent.setup();
     vi.mocked(useNotifications).mockReturnValue({
       data: mockNotifications,
@@ -220,11 +229,11 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     // Click on a read notification
-    const notification = screen.getByText('Job failed');
+    const notification = screen.getByText("Job failed");
     await user.click(notification);
 
     await waitFor(() => {
@@ -232,7 +241,7 @@ describe('NotificationDrawer', () => {
     });
   });
 
-  it('marks all notifications as read when button clicked', async () => {
+  it("marks all notifications as read when button clicked", async () => {
     const user = userEvent.setup();
     vi.mocked(useNotifications).mockReturnValue({
       data: mockNotifications,
@@ -242,18 +251,20 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    const markAllButton = screen.getByRole('button', { name: /mark all as read/i });
+    const markAllButton = screen.getByRole("button", {
+      name: /mark all as read/i,
+    });
     await user.click(markAllButton);
 
     await waitFor(() => {
-      expect(mockMarkAllAsRead).toHaveBeenCalledWith(['1', '3']); // Only unread notification IDs
+      expect(mockMarkAllAsRead).toHaveBeenCalledWith(["1", "3"]); // Only unread notification IDs
     });
   });
 
-  it('deletes notification when delete button clicked', async () => {
+  it("deletes notification when delete button clicked", async () => {
     const user = userEvent.setup();
     vi.mocked(useNotifications).mockReturnValue({
       data: [mockNotifications[0]],
@@ -263,19 +274,19 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     // Find delete button (aria-label="Delete notification")
-    const deleteButtons = screen.getAllByLabelText('Delete notification');
+    const deleteButtons = screen.getAllByLabelText("Delete notification");
     await user.click(deleteButtons[0]);
 
     await waitFor(() => {
-      expect(mockDelete).toHaveBeenCalledWith('1');
+      expect(mockDelete).toHaveBeenCalledWith("1");
     });
   });
 
-  it('closes drawer when backdrop is clicked', async () => {
+  it("closes drawer when backdrop is clicked", async () => {
     const user = userEvent.setup();
     const mockOnClose = vi.fn();
     vi.mocked(useNotifications).mockReturnValue({
@@ -286,10 +297,10 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={mockOnClose} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    const backdrop = document.querySelector('.fixed.inset-0.bg-black\\/50');
+    const backdrop = document.querySelector(".fixed.inset-0.bg-black\\/50");
     expect(backdrop).toBeInTheDocument();
 
     await user.click(backdrop!);
@@ -299,7 +310,7 @@ describe('NotificationDrawer', () => {
     });
   });
 
-  it('closes drawer when close button clicked', async () => {
+  it("closes drawer when close button clicked", async () => {
     const user = userEvent.setup();
     const mockOnClose = vi.fn();
     vi.mocked(useNotifications).mockReturnValue({
@@ -310,10 +321,10 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={mockOnClose} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    const closeButton = screen.getByLabelText('Close notifications');
+    const closeButton = screen.getByLabelText("Close notifications");
     await user.click(closeButton);
 
     await waitFor(() => {
@@ -321,11 +332,11 @@ describe('NotificationDrawer', () => {
     });
   });
 
-  it('refetches notifications when drawer opens', () => {
+  it("refetches notifications when drawer opens", () => {
     const { rerender } = render(
       <TestWrapper>
         <NotificationDrawer isOpen={false} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(mockRefetch).not.toHaveBeenCalled();
@@ -333,21 +344,21 @@ describe('NotificationDrawer', () => {
     rerender(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
     expect(mockRefetch).toHaveBeenCalled();
   });
 
-  it('displays correct icon for each notification type', () => {
+  it("displays correct icon for each notification type", () => {
     const typeNotifications: NotificationDto[] = [
       { ...mockNotifications[0], type: NotificationType.JobCompleted },
-      { ...mockNotifications[1], id: '4', type: NotificationType.JobFailed },
-      { ...mockNotifications[2], id: '5', type: NotificationType.JobStarted },
-      { ...mockNotifications[0], id: '6', type: NotificationType.JobPaused },
-      { ...mockNotifications[0], id: '7', type: NotificationType.JobResumed },
-      { ...mockNotifications[0], id: '8', type: NotificationType.QueueAlert },
-      { ...mockNotifications[0], id: '9', type: NotificationType.SystemAlert },
+      { ...mockNotifications[1], id: "4", type: NotificationType.JobFailed },
+      { ...mockNotifications[2], id: "5", type: NotificationType.JobStarted },
+      { ...mockNotifications[0], id: "6", type: NotificationType.JobPaused },
+      { ...mockNotifications[0], id: "7", type: NotificationType.JobResumed },
+      { ...mockNotifications[0], id: "8", type: NotificationType.QueueAlert },
+      { ...mockNotifications[0], id: "9", type: NotificationType.SystemAlert },
     ];
 
     vi.mocked(useNotifications).mockReturnValue({
@@ -358,15 +369,14 @@ describe('NotificationDrawer', () => {
     render(
       <TestWrapper>
         <NotificationDrawer isOpen={true} onClose={vi.fn()} />
-      </TestWrapper>
+      </TestWrapper>,
     );
 
-    expect(screen.getByText('✅')).toBeInTheDocument(); // JobCompleted
-    expect(screen.getByText('❌')).toBeInTheDocument(); // JobFailed
-    expect(screen.getAllByText('▶️')).toHaveLength(2); // JobStarted, JobResumed
-    expect(screen.getByText('⏸️')).toBeInTheDocument(); // JobPaused
-    expect(screen.getByText('⚠️')).toBeInTheDocument(); // QueueAlert
-    expect(screen.getByText('🔔')).toBeInTheDocument(); // SystemAlert
+    expect(screen.getByText("✅")).toBeInTheDocument(); // JobCompleted
+    expect(screen.getByText("❌")).toBeInTheDocument(); // JobFailed
+    expect(screen.getAllByText("▶️")).toHaveLength(2); // JobStarted, JobResumed
+    expect(screen.getByText("⏸️")).toBeInTheDocument(); // JobPaused
+    expect(screen.getByText("⚠️")).toBeInTheDocument(); // QueueAlert
+    expect(screen.getByText("🔔")).toBeInTheDocument(); // SystemAlert
   });
 });
-
