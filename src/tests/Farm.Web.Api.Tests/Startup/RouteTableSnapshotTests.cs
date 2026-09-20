@@ -83,7 +83,8 @@ public sealed class RouteTableSnapshotTests
 
         Action assertRegression = () => AssertSnapshotMatches(regressed, expected);
 
-        _ = assertRegression.Should().Throw<Xunit.Sdk.XunitException>();
+        _ = assertRegression.Should().Throw<Xunit.Sdk.XunitException>()
+            .Which.Message.Should().Contain("DELETE /api/admin/roles/{roleId:guid}");
     }
 
     [Fact]
@@ -263,11 +264,26 @@ public sealed class RouteTableSnapshotTests
 
     private static void AssertSnapshotMatches(string[] actual, string[] expected)
     {
+        actual.Length.Should().Be(
+            expected.Length,
+            "the route snapshot must contain the same number of ordered controller-action routes");
+
+        int firstDifference = Enumerable.Range(0, expected.Length)
+            .FirstOrDefault(index => !string.Equals(actual[index], expected[index], StringComparison.Ordinal), -1);
+        if (firstDifference >= 0)
+        {
+            throw new Xunit.Sdk.XunitException(
+                "Route snapshot differs at index " + firstDifference + Environment.NewLine +
+                "Expected: " + expected[firstDifference] + Environment.NewLine +
+                "Actual:   " + actual[firstDifference] + Environment.NewLine +
+                "An authorization annotation changed -- confirm this is intended before " +
+                "regenerating Startup/RouteTableSnapshot.txt.");
+        }
+
         actual.Should().Equal(
             expected,
-            "the controller-action route table and declared endpoint authorization metadata must not change while " +
-            "Farm.Modules.Abstractions lands the module host seam (issue #2035) -- if this is a " +
-            "deliberate route or authorization change, regenerate Startup/RouteTableSnapshot.txt " +
-            "and review the diff carefully");
+            "the controller-action route table and declared endpoint authorization metadata must not change; " +
+            "confirm an authorization annotation change is intended before regenerating " +
+            "Startup/RouteTableSnapshot.txt");
     }
 }
