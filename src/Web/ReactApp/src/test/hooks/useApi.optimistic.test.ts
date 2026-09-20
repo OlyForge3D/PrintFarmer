@@ -257,7 +257,11 @@ describe('optimistic queue print job', () => {
     const { result } = renderHook(() => useQueuePrintJob(), { wrapper });
 
     await act(async () => {
-      result.current.mutate({ printerId, gcodeFileId: 'file-9', priority: PrintJobPriority.Normal });
+      result.current.mutate({
+        printerId,
+        gcodeFileId: 'file-9',
+        priority: PrintJobPriority.Normal,
+      });
     });
 
     const printerQueueKey = queryKeys.jobQueue(printerId);

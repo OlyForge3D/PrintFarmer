@@ -2,7 +2,6 @@ import '@testing-library/jest-dom';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { PrintJobPriority } from '@/types/api';
 
 // Mock the API hooks
 const mockScheduleJob = vi.fn();
@@ -45,7 +44,7 @@ vi.mock('@/common/components/modals/Modal', () => ({
 
 import { ScheduleModal } from '@/features/scheduling/components/ScheduleModal';
 import { apiClient } from '@/services/api';
-import type { QueuedPrintJobWithFileMetaDto } from '@/types/api';
+import { PrintJobPriority, type QueuedPrintJobWithFileMetaDto } from '@/types/api';
 
 const mockJobs: QueuedPrintJobWithFileMetaDto[] = [
   {
