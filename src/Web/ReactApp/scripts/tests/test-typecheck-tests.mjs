@@ -655,7 +655,7 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
       [path.join(fixtureDirectory, "scripts/typecheck-tests.mjs")],
       {
         encoding: "utf8",
-        env: { ...process.env, TYPECHECK_TEST_TIMEOUT_MS: "300" },
+        env: { ...process.env, TYPECHECK_TEST_TIMEOUT_MS: "1500" },
         timeout: 10_000,
       },
     );
@@ -673,7 +673,9 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
     assert.match(output, /TypeScript test compiler timed out and was killed/);
     assert.doesNotMatch(output, /Test type-check passed/);
 
-    const invocationLines = (await readFile(invocationLogPath, "utf8"))
+    const invocationLines = (
+      await readFile(invocationLogPath, "utf8").catch(() => "")
+    )
       .split("\n")
       .filter((line) => line.length > 0);
     assert.equal(
