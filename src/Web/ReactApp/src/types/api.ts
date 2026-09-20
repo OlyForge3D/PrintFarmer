@@ -3985,13 +3985,6 @@ export interface RoleDetail extends RoleSummary {
   permissions: PermissionDto[];
 }
 
-/** Minimal permission shape used inside `RoleDetail.permissions`. */
-export interface PermissionDto {
-  resource: string;
-  action: string;
-  permission: string;
-}
-
 /** Request to create a new custom role. `POST /api/admin/roles`. */
 export interface CreateCustomRoleRequest {
   /** Immutable slug, must match `^[a-z][a-z0-9_]{2,49}$`, unique, no `farm_` prefix. */
