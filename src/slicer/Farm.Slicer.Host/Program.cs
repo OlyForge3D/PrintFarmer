@@ -14,6 +14,7 @@ using Farm.Slicer.Module.Data;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Diagnostics.HealthChecks;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 
 WebApplicationBuilder builder = WebApplication.CreateBuilder(args);
@@ -168,6 +169,11 @@ builder.WebHost.UseUrls("http://0.0.0.0:5246");
 
 WebApplication app = builder.Build();
 
+if (await RunHostUpdateMigrationAsync(args, app.Services))
+{
+    return;
+}
+
 app.ConfigureSlicerMetrics();
 
 // ── Slicer plugin sanity check (issue #578) ───────────────────────────────────
@@ -252,6 +258,65 @@ app.MapGet("/api/system/version", () =>
 });
 
 await app.RunAsync();
+
+static async Task<bool> RunHostUpdateMigrationAsync(IReadOnlyList<string> args, IServiceProvider services)
+{
+    int commandIndex = Array.IndexOf(args.ToArray(), "--host-update-migration");
+    if (commandIndex < 0)
+    {
+        return false;
+    }
+
+    if (args.Count != commandIndex + 3 ||
+        !string.Equals(args[commandIndex + 1], "SlicerDbContext", StringComparison.Ordinal))
+    {
+        Environment.ExitCode = 1;
+        await Console.Error.WriteLineAsync("HOST_UPDATE_MIGRATION_ERROR:SlicerDbContext:command_invalid");
+        return true;
+    }
+
+    string operation = args[commandIndex + 2];
+    await using AsyncServiceScope scope = services.CreateAsyncScope();
+    SlicerDbContext context = scope.ServiceProvider.GetRequiredService<SlicerDbContext>();
+    string provider = context.Database.ProviderName ?? string.Empty;
+    if (provider is not "Npgsql.EntityFrameworkCore.PostgreSQL" and not "Microsoft.EntityFrameworkCore.SqlServer")
+    {
+        Environment.ExitCode = 1;
+        await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:SlicerDbContext:provider_unsupported:{provider}");
+        return true;
+    }
+
+    try
+    {
+        bool pending = (await context.Database.GetPendingMigrationsAsync()).Any();
+        if (string.Equals(operation, "probe", StringComparison.Ordinal))
+        {
+            await Console.Out.WriteLineAsync($"HOST_UPDATE_MIGRATION_PENDING:SlicerDbContext:{(pending ? 1 : 0)}");
+            return true;
+        }
+
+        if (!string.Equals(operation, "apply", StringComparison.Ordinal))
+        {
+            Environment.ExitCode = 1;
+            await Console.Error.WriteLineAsync("HOST_UPDATE_MIGRATION_ERROR:SlicerDbContext:operation_invalid");
+            return true;
+        }
+
+        if (pending)
+        {
+            await context.Database.MigrateAsync();
+        }
+
+        await Console.Out.WriteLineAsync("HOST_UPDATE_MIGRATION_APPLIED:SlicerDbContext");
+    }
+    catch (Exception exception) when (exception is not OperationCanceledException)
+    {
+        Environment.ExitCode = 1;
+        await Console.Error.WriteLineAsync($"HOST_UPDATE_MIGRATION_ERROR:SlicerDbContext:{exception.GetType().Name}");
+    }
+
+    return true;
+}
 
 /// <summary>Marker type so integration tests can reference the host assembly.</summary>
 #pragma warning disable S1118 // Utility classes should not have public constructors - marker type for WebApplicationFactory.

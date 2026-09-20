@@ -187,19 +187,29 @@ public static class HostUpdateExecutionStartup
 
     private static void AddBackupAndMigration(IServiceCollection services)
     {
-        services.AddScoped<IHostUpdateMigrationTarget>(sp => new DbContextMigrationTarget<AppDbContext>(
+        services.AddScoped<HostUpdateTargetImageMigrationRunner>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return new HostUpdateTargetImageMigrationRunner(
+                sp.GetRequiredService<IHostUpdateProcessRunner>(),
+                sp.GetRequiredService<IHostUpdateExecutableResolver>(),
+                options.ServiceMappings.ToDictionary(
+                    mapping => mapping.ServiceId,
+                    mapping => new HostUpdateApplyServiceMapping(mapping.ServiceId, mapping.ComposeServiceName, mapping.ImageEnvironmentVariable, mapping.ImageRepository),
+                    StringComparer.Ordinal),
+                TimeSpan.FromSeconds(options.BackupTimeoutSeconds));
+        });
+        services.AddScoped<IHostUpdateMigrationTarget>(sp => new TargetImageMigrationTarget<AppDbContext>(
             "AppDbContext",
-            DatabaseMigrationTarget.Core,
             () => sp.GetRequiredService<AppDbContext>(),
-            sp.GetRequiredService<ILogger<AppDbContext>>()));
+            sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>()));
         services.AddScoped<IHostUpdateMigrationTarget>(sp =>
         {
             SlicerDbContext? slicerDb = sp.GetService<SlicerDbContext>();
-            return new DbContextMigrationTarget<SlicerDbContext>(
+            return new TargetImageMigrationTarget<SlicerDbContext>(
                 "SlicerDbContext",
-                DatabaseMigrationTarget.Slicer,
                 () => slicerDb ?? throw new InvalidOperationException("slicer_db_context_not_registered"),
-                sp.GetRequiredService<ILogger<SlicerDbContext>>());
+                sp.GetRequiredService<HostUpdateTargetImageMigrationRunner>());
         });
         services.AddScoped<IReadOnlyList<IHostUpdateMigrationTarget>>(sp => [.. sp.GetServices<IHostUpdateMigrationTarget>()]);
         services.AddScoped<HostUpdateMigrationCoordinator>(sp =>

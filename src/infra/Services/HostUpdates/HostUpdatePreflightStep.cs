@@ -192,6 +192,12 @@ public interface IHostUpdateMigrationTarget
 
     Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(CancellationToken cancellationToken);
 
+    Task<bool> HasPendingMigrationsAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+        HasPendingMigrationsAsync(cancellationToken);
+
+    Task<Farm.Infrastructure.Data.Migrations.DatabaseMigrationResult> MigrateAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken) =>
+        MigrateAsync(cancellationToken);
+
     /// <summary>
     /// A non-secret SHA256 fingerprint of this context's resolved connection string. Used only
     /// to detect -- never to reveal -- whether two in-process migration targets are pointed at
