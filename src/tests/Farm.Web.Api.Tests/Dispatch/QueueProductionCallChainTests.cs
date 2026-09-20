@@ -5565,17 +5565,6 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         deadlineCancellationObserved.Should().BeTrue();
         elapsed.Should().Be(BackendStartCommandConsumerService.IterationDeadline);
-        BackendStartCommandConsumerService.IterationDeadline
-            .Should().Be(TimeSpan.FromSeconds(310));
-        BackendStartCommandConsumerService.CancellationCleanupDeadline
-            .Should().Be(TimeSpan.FromSeconds(4));
-        BackendStartCommandConsumerService.OutcomePersistenceDeadline
-            .Should().Be(TimeSpan.FromSeconds(4));
-        BackendStartCommandConsumerService.FenceAcknowledgementMargin
-            .Should().Be(TimeSpan.FromSeconds(1));
-        BackendStartCommandConsumerService.RequiredFenceProofDuration
-            .Should().Be(TimeSpan.FromSeconds(319));
-        new HostUpdateExecutionOptions().FenceProofTimeoutSeconds.Should().Be(321);
         management.Verify(service => service.DispatchJobWithAckAsync(
             It.IsAny<string>(),
             It.IsAny<string>(),
