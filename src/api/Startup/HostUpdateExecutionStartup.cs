@@ -116,6 +116,8 @@ public static class HostUpdateExecutionStartup
         services.AddSingleton<BedClearAcknowledgementExpiryFenceFlag>();
         services.AddSingleton<AutoDispatchFenceFlag>();
         services.AddSingleton<WebhookDeliveryFenceFlag>();
+        services.AddSingleton<QueueReconciliationFenceFlag>(sp =>
+            new QueueReconciliationFenceFlag(sp.GetRequiredService<IHostUpdateAdmissionGate>()));
         services.AddSingleton<IReadOnlyList<IFenceableWriter>>(sp =>
         [
             new AdmissionFenceableWriter(sp.GetRequiredService<IHostUpdateAdmissionGate>()),
@@ -127,6 +129,7 @@ public static class HostUpdateExecutionStartup
             new BackgroundWriterFenceableWriter("bed-clear-acknowledgement-expiry", sp.GetRequiredService<BedClearAcknowledgementExpiryFenceFlag>()),
             new BackgroundWriterFenceableWriter("auto-dispatch", sp.GetRequiredService<AutoDispatchFenceFlag>()),
             new BackgroundWriterFenceableWriter("webhook-delivery", sp.GetRequiredService<WebhookDeliveryFenceFlag>()),
+            new BackgroundWriterFenceableWriter("queue-reconciliation", sp.GetRequiredService<QueueReconciliationFenceFlag>()),
         ]);
         services.AddSingleton<IHostUpdateFenceCoordinator>(sp =>
         {
@@ -134,7 +137,8 @@ public static class HostUpdateExecutionStartup
             return new HostUpdateFenceCoordinator(
                 sp.GetRequiredService<IReadOnlyList<IFenceableWriter>>(),
                 TimeSpan.FromSeconds(options.FenceProofTimeoutSeconds),
-                TimeSpan.FromSeconds(options.FencePollIntervalSeconds));
+                TimeSpan.FromSeconds(options.FencePollIntervalSeconds),
+                logger: sp.GetRequiredService<ILogger<HostUpdateFenceCoordinator>>());
         });
 
         AddBackupAndMigration(services);
