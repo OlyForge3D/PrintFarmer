@@ -7,6 +7,14 @@ confidence: "high"
 
 ## Triage And Analysis
 
+Scheduled instances first follow [the shared lifecycle](automation.md) and its
+verified host profile. PR recovery is independent of the new-issue READY filter
+below. The Windows-owned ledger remains the authority for its local and remote
+jobs; an independent macOS controller must not initialize a second ledger and
+claim cross-host coordination. Unknown remote ownership and shared-file overlap
+retain the affected work. No new remote mobile dispatch occurs under the split
+macOS-mobile/Windows-general profiles; reconcile existing remote jobs normally.
+
 Every open issue receives exactly one bucket and every blocked report names its live blocker.
 Triage missing ownership with one valid `squad:*` label, justified type/priority labels, and an
 owner/first-step comment; remove bare `squad` when assigning. Never assign Ralph. Epics are never
@@ -64,7 +72,7 @@ publication location. Before every spawn, perform this exact claim protocol: fre
 fetch; apply claim label and comment; re-fetch; verify that exact claim landed; then spawn. Abort
 on any failed or stale claim.
 
-Every enabled local or SSH implementation/analysis dispatch reserves the same PrintFarmer
+Every Windows-controlled local or SSH implementation/analysis dispatch reserves the same PrintFarmer
 admission ledger before delivery through `scripts/ci/ralph-admission.mjs`. The scheduled Ralph
 prompt must use only these one-shot JSON-stdin commands—never a naked `create_session` or SSH
 delivery:
@@ -123,6 +131,12 @@ delivery:
    have both ended.
 
 ## Reconcile Before Admission
+
+For existing general PR recovery on the Windows authority, use
+[`reserve-local-pr`](pr-recovery-admission.md), not new-issue eligibility with
+fabricated `linkedPr:false`. It uses the same ledger, CAS, capacity and conservative
+acknowledgment/recovery lifecycle. Native macOS rounds continue their separate
+verified claim protocol and must not initialize a substitute shared ledger.
 
 Only one round or explicitly designated repair session may own operational reconciliation.
 Check for another active round before writing the shared ledger; agree ownership rather than

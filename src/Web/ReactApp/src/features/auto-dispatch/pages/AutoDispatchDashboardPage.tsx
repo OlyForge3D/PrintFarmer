@@ -281,7 +281,7 @@ export function AutoDispatchDashboardPage() {
           </span>
           <Toggle
             checked={globalEnabled}
-            onChange={handleGlobalToggle}
+            onChange={event => handleGlobalToggle(event.target.checked)}
             disabled={setGlobalEnabledMutation.isPending}
             aria-label="Global auto-dispatch toggle"
           />

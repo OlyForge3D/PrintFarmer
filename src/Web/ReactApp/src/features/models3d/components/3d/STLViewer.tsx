@@ -186,6 +186,7 @@ function CameraController({
       bbox.max.z - bbox.min.z
     );
     const maxDim = Math.max(size.x, size.y, size.z);
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
     const fov = camera.fov * (Math.PI / 180);
     let distance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
     distance *= 1.5; // Add padding
@@ -217,6 +218,7 @@ function CameraController({
       bbox.max.z - bbox.min.z
     );
     const maxDim = Math.max(size.x, size.y, size.z);
+    if (!(camera instanceof THREE.PerspectiveCamera)) return;
     const fov = camera.fov * (Math.PI / 180);
     let distance = Math.abs(maxDim / 2 / Math.tan(fov / 2));
     distance *= 1.5;

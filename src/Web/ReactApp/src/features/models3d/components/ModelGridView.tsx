@@ -65,9 +65,9 @@ export const ModelGridView: React.FC<ModelGridViewProps> = ({
             >
               {/* Model Preview */}
               <div className="aspect-square bg-pf-bg-2 relative flex items-center justify-center min-h-32 overflow-hidden">
-                {model.thumbnailPath ? (
+                {model.thumbnailUrl ? (
                   <img
-                    src={model.thumbnailPath}
+                    src={model.thumbnailUrl}
                     alt={model.fileName}
                     className="w-full h-full object-contain group-hover:scale-105 transition-transform"
                   />

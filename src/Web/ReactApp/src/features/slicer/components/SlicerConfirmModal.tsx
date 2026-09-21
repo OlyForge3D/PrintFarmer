@@ -20,7 +20,7 @@ export function SlicerConfirmModal({
   const modalFooter = (
     <div className="flex gap-3">
       <Button
-        variant="outline"
+        variant="subtle"
         onClick={onCancel}
       >
         Cancel

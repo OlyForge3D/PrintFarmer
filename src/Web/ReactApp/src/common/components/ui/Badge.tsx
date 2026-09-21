@@ -6,9 +6,7 @@ export type BadgeVariant = 'default' | 'primary' | 'success' | 'warning' | 'erro
 export type BadgeSize = 'sm' | 'md';
 export type BadgeShape = 'status' | 'tag';
 
-export interface BadgeProps {
-  /** The content to display inside the badge */
-  children: React.ReactNode;
+interface BadgeBaseProps {
   /** Visual variant */
   variant?: BadgeVariant;
   /** Size of the badge */
@@ -19,11 +17,23 @@ export interface BadgeProps {
    * and signs the waiver for it. See DESIGN-LANGUAGE "Badges / Status Pills".
    */
   shape?: BadgeShape;
-  /** Show as a dot/indicator only (no text) */
-  dot?: boolean;
   /** Additional className */
   className?: string;
 }
+
+export type BadgeProps = BadgeBaseProps &
+  (
+    | {
+        /** Render only a decorative status dot. */
+        dot: true;
+        children?: never;
+      }
+    | {
+        /** Render a badge containing the supplied label. */
+        dot?: false;
+        children: React.ReactNode;
+      }
+  );
 
 const variantClasses: Record<BadgeVariant, string> = {
   default: 'bg-pf-bg-2 text-pf-text-secondary border-pf-border',

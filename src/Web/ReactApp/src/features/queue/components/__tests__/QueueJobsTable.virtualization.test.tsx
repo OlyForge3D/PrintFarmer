@@ -147,6 +147,7 @@ function createJobs(count: number): QueuedPrintJobWithFileMetaDto[] {
       },
       gcodeFile: {
         id: `file-${index}`,
+        name: `print-${index}.gcode`,
         fileName: `print-${index}.gcode`,
         fileSizeBytes: 1024,
         materialType: "PLA",
@@ -341,7 +342,11 @@ describe("QueueJobsTable virtualization", () => {
     const insertedJob: QueuedPrintJobWithFileMetaDto = {
       ...jobs[0],
       job: { ...jobs[0].job, id: "job-inserted" },
-      gcodeFile: { ...jobs[0].gcodeFile!, fileName: "inserted.gcode" },
+      gcodeFile: {
+        ...jobs[0].gcodeFile!,
+        name: "inserted.gcode",
+        fileName: "inserted.gcode",
+      },
     };
     const jobsAfterInsert = [insertedJob, ...jobs];
     rerender(
@@ -397,7 +402,11 @@ describe("QueueJobsTable virtualization", () => {
       (job, index) => ({
         ...job,
         job: { ...job.job, id: `filtered-${index}` },
-        gcodeFile: { ...job.gcodeFile!, fileName: `filtered-${index}.gcode` },
+        gcodeFile: {
+          ...job.gcodeFile!,
+          name: `filtered-${index}.gcode`,
+          fileName: `filtered-${index}.gcode`,
+        },
       }),
     );
 

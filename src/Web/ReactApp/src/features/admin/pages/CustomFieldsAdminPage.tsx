@@ -360,7 +360,10 @@ export function CustomFieldsAdminPage({ embedded = false }: EmbeddablePageProps)
               />
             </FormField>
             <div className="flex items-center gap-2">
-              <Toggle checked={form.values.isRequired} onChange={value => form.setValue('isRequired', value)} />
+              <Toggle
+                checked={form.values.isRequired}
+                onChange={(event) => form.setValue('isRequired', event.target.checked)}
+              />
               <span className="text-sm text-pf-text-primary">Required</span>
             </div>
           </div>

@@ -10,7 +10,6 @@ export interface WorkerResponse {
   id: string;
   serviceId: string;
   name: string;
-  endpointUrl: string;
   capabilities: string[];
   status: string; // "Online" | "Offline" | "Busy" | "Error" | "Draining"
   freeSlots: number;

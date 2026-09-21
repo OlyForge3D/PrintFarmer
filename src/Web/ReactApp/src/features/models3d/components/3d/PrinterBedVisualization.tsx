@@ -14,6 +14,7 @@ import React, { useEffect, useRef, useState, useMemo } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import { OrbitControls, PerspectiveCamera } from '@react-three/drei';
 import * as THREE from 'three';
+import type { OrbitControls as OrbitControlsImpl } from 'three-stdlib';
 import { PrinterModelDto } from '@/types/api';
 import {
   createBedVisualization,
@@ -93,7 +94,7 @@ const BedScene: React.FC<PrinterBedVisualizationProps> = ({
 }) => {
   const { camera } = useThree();
   const bedGroupRef = useRef<THREE.Group>(null);
-  const controlsRef = useRef<InstanceType<typeof OrbitControls> | null>(null);
+  const controlsRef = useRef<OrbitControlsImpl | null>(null);
   const [autoRotateEnabled, setAutoRotateEnabled] = useState(autoRotate);
 
   // Sync autoRotate prop to state

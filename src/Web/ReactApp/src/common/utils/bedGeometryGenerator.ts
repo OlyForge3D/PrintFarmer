@@ -39,9 +39,10 @@ export function extractBedDimensions(printerModel: PrinterModelDto): BedDimensio
  */
 export function generateBedPlatformMesh(dimensions: BedDimensions): THREE.Mesh {
   const { width, depth, thickness } = dimensions;
+  const bedThickness = thickness ?? 5;
 
   // Create bed platform geometry (positioned with top surface at Z=0)
-  const geometry = new THREE.BoxGeometry(width, thickness, depth);
+  const geometry = new THREE.BoxGeometry(width, bedThickness, depth);
 
   // Material with slight reflectivity for realism
   const material = new THREE.MeshPhongMaterial({
@@ -52,7 +53,7 @@ export function generateBedPlatformMesh(dimensions: BedDimensions): THREE.Mesh {
 
   const mesh = new THREE.Mesh(geometry, material);
   // Position so top of bed is at Z=0
-  mesh.position.y = -thickness / 2;
+  mesh.position.y = -bedThickness / 2;
 
   return mesh;
 }
@@ -61,7 +62,7 @@ export function generateBedPlatformMesh(dimensions: BedDimensions): THREE.Mesh {
  * Generate a build volume wireframe
  * Shows the printable area boundaries
  */
-export function generateBuildVolumeWireframe(dimensions: BedDimensions): THREE.Mesh {
+export function generateBuildVolumeWireframe(dimensions: BedDimensions): THREE.LineSegments {
   const { width, depth, height } = dimensions;
 
   // Create a box representing the build volume

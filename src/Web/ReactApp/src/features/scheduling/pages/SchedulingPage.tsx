@@ -57,8 +57,6 @@ export function SchedulingPage() {
         return 'success';
       case 'paused':
         return 'warning';
-      case 'cancelled':
-        return 'error';
       case 'completed':
         return 'default';
       case 'reauthorizationRequired':
@@ -171,7 +169,7 @@ export function SchedulingPage() {
     return (
       <PageTemplate title="Job Scheduling" icon={CalendarIcon}>
         <div className="text-pf-error p-4">
-          Failed to load scheduled jobs: {error instanceof Error ? error.message : String(error)}
+          Failed to load scheduled jobs: {error.message}
         </div>
       </PageTemplate>
     );
@@ -225,7 +223,6 @@ export function SchedulingPage() {
                 columns={columns}
                 data={scheduledJobs}
                 getRowKey={(job: ScheduledJob) => job.id}
-                sortable
               />
             )}
           </Card.Body>

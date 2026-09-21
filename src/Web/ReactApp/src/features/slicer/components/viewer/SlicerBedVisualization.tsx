@@ -207,6 +207,8 @@ export interface SlicerBedVisualizationProps {
     geometryAbove: THREE.BufferGeometry,
     geometryBelow: THREE.BufferGeometry,
     options?: {
+      cutAxis: 'x' | 'y' | 'z';
+      worldPlanePos: number;
       keepUpper: boolean;
       keepLower: boolean;
       placeOnCutUpper: boolean;

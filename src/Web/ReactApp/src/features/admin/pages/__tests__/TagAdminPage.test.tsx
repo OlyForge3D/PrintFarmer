@@ -24,13 +24,11 @@ vi.mock('@/services/api', () => ({
 
 import { apiClient } from '@/services/api';
 
-type GetTagsItem = Awaited<ReturnType<typeof apiClient.getTags>>[number];
-
 function makeApiError(overrides: Partial<ApiError> = {}): ApiError {
   return { message: 'Request failed', statusCode: 500, ...overrides } as ApiError;
 }
 
-const resin = { id: 'tag-1', name: 'Resin', color: '#ff0000', description: 'Resin prints', revision: 1 } satisfies TagOption & GetTagsItem;
+const resin = { id: 'tag-1', name: 'Resin', color: '#ff0000', description: 'Resin prints', revision: 1 } satisfies TagOption;
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -281,7 +279,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     // A tag without a revision (e.g. loaded from a legacy source) must never be saved
     // with a guessed expectedRevision (like 0), since that could spuriously conflict on
     // every save or silently match an unrelated revision. The user must be told to refresh.
-    const noRevisionTag = { id: 'tag-2', name: 'Unversioned', color: '#00ff00' } satisfies TagOption & GetTagsItem;
+    const noRevisionTag = { id: 'tag-2', name: 'Unversioned', color: '#00ff00' } satisfies TagOption;
     vi.mocked(apiClient.getTags).mockResolvedValue([noRevisionTag]);
     const user = userEvent.setup();
     renderPage();
@@ -291,7 +289,10 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     await user.click(within(row).getByRole('button', { name: /^edit$/i }));
 
     const nameInput = screen.getByDisplayValue('Unversioned');
-    await user.type(nameInput, ' updated');
+    await waitFor(() => expect(nameInput).toHaveFocus());
+    await user.clear(nameInput);
+    await user.type(nameInput, 'Unversioned updated');
+    expect(nameInput).toHaveValue('Unversioned updated');
     await saveCurrentEdit(user);
 
     expect(await screen.findByRole('alert')).toHaveTextContent(/refresh the page/i);
