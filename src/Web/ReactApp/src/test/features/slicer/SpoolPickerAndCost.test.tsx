@@ -33,17 +33,23 @@ vi.mock('@/features/slicer/components/SendToPrinterModal', () => ({
   SendToPrinterModal: () => null,
 }));
 
-const mockComputeMaterialCostPerGram = vi.fn();
-const mockComputeMaterialCost = vi.fn();
-const mockFormatPrintTime = vi.fn(() => '1h 0m');
-const mockFormatFilamentUsed = vi.fn(() => '50.0g');
+const mockComputeMaterialCostPerGram = vi.fn<
+  (grams: number | null | undefined, costPerGram: number | null | undefined) => number | null
+>();
+const mockComputeMaterialCost = vi.fn<
+  (grams: number | null | undefined, costPerKg: number | null | undefined) => number | null
+>();
+const mockFormatPrintTime = vi.fn<(seconds: number) => string>(() => '1h 0m');
+const mockFormatFilamentUsed = vi.fn<(grams: number) => string>(() => '50.0g');
 
 vi.mock('@/services/sliceJobService', () => ({
   sliceJobService: {
-    computeMaterialCostPerGram: (...args: unknown[]) => mockComputeMaterialCostPerGram(...args),
-    computeMaterialCost: (...args: unknown[]) => mockComputeMaterialCost(...args),
-    formatPrintTime: (...args: unknown[]) => mockFormatPrintTime(...args),
-    formatFilamentUsed: (...args: unknown[]) => mockFormatFilamentUsed(...args),
+    computeMaterialCostPerGram: (grams: number | null | undefined, costPerGram: number | null | undefined) =>
+      mockComputeMaterialCostPerGram(grams, costPerGram),
+    computeMaterialCost: (grams: number | null | undefined, costPerKg: number | null | undefined) =>
+      mockComputeMaterialCost(grams, costPerKg),
+    formatPrintTime: (seconds: number) => mockFormatPrintTime(seconds),
+    formatFilamentUsed: (grams: number) => mockFormatFilamentUsed(grams),
     sendToPrinter: vi.fn(),
     addSliceToQueue: vi.fn(),
     getSpoolCostPerGram: vi.fn(),
@@ -64,11 +70,11 @@ function createWrapper() {
 const completedProgress: SliceJobProgressState = {
   status: 'Completed',
   progressPercent: 100,
-  progressMessage: undefined,
+  progressMessage: null,
   filamentUsedGrams: 50,
   estimatedPrintTimeSeconds: 3600,
   artifactsRoute: '/api/artifacts/job/job-1',
-  error: undefined,
+  error: null,
   isConnected: true,
 };
 

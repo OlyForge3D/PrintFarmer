@@ -13,6 +13,12 @@ import { resetAuthenticatedSignalRSession } from "@/common/auth/authenticatedSig
 import { notifyAuthenticationExpired } from "@/common/auth/authenticationExpiration";
 import type { ApiError } from "@/types/api";
 
+declare module "axios" {
+  interface AxiosRequestConfig {
+    skipAuthRedirect?: boolean;
+  }
+}
+
 /**
  * Extended Axios request config with PrintFarmer-specific interceptor bypass flags.
  * Pass a `PfRequestConfig` when you need to suppress the default 401 redirect

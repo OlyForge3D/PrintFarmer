@@ -56,7 +56,7 @@ export function useStatisticsSummary(days?: number, startDate?: string, endDate?
     queryKey: ['statistics', 'summary', days, startDate, endDate],
     queryFn: async () => {
       const params = buildStatsParams(days, startDate, endDate);
-      const response = await apiClient.get(`/statistics/summary${params}`);
+      const response = await apiClient.get<StatisticsSummary>(`/statistics/summary${params}`);
       return response.data;
     },
   });
@@ -67,7 +67,7 @@ export function useJobsOverTime(days?: number, startDate?: string, endDate?: str
     queryKey: ['statistics', 'jobs-over-time', days, startDate, endDate],
     queryFn: async () => {
       const params = buildStatsParams(days, startDate, endDate);
-      const response = await apiClient.get(`/statistics/jobs-over-time${params}`);
+      const response = await apiClient.get<DailyJobCount[]>(`/statistics/jobs-over-time${params}`);
       return response.data;
     },
   });
@@ -78,7 +78,7 @@ export function useCostOverTime(days?: number, startDate?: string, endDate?: str
     queryKey: ['statistics', 'cost-over-time', days, startDate, endDate],
     queryFn: async () => {
       const params = buildStatsParams(days, startDate, endDate);
-      const response = await apiClient.get(`/statistics/cost-over-time${params}`);
+      const response = await apiClient.get<DailyCost[]>(`/statistics/cost-over-time${params}`);
       return response.data;
     },
   });
@@ -89,7 +89,7 @@ export function useFilamentByMaterial(days?: number, startDate?: string, endDate
     queryKey: ['statistics', 'filament-by-material', days, startDate, endDate],
     queryFn: async () => {
       const params = buildStatsParams(days, startDate, endDate);
-      const response = await apiClient.get(`/statistics/filament-by-material${params}`);
+      const response = await apiClient.get<FilamentByMaterial[]>(`/statistics/filament-by-material${params}`);
       return response.data;
     },
   });
@@ -100,7 +100,7 @@ export function usePrinterUtilization(days?: number, startDate?: string, endDate
     queryKey: ['statistics', 'printer-utilization', days, startDate, endDate],
     queryFn: async () => {
       const params = buildStatsParams(days, startDate, endDate);
-      const response = await apiClient.get(`/statistics/printer-utilization${params}`);
+      const response = await apiClient.get<PrinterUtilization[]>(`/statistics/printer-utilization${params}`);
       return response.data;
     },
   });

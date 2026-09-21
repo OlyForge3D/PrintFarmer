@@ -7,7 +7,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { queryKeys, useCancelPrintQueueJob, useCreateManufacturer, useCreateModel, useDeletePrintQueueJob, useQueuePrintJob } from '@/common/hooks/useApi';
 import { apiClient } from '@/services/api';
 import { queueSummariesFleetQueryKey } from '@/features/printers/hooks/useQueueSummariesFleet';
-import { JobQueuePrintJob, PrinterModelDto, PrintJobPriority, QueuedPrintJobWithFileMetaDto } from '@/types/api';
+import { PrinterModelDto, QueuedPrintJobWithFileMetaDto, JobQueuePrintJob, PrintJobPriority } from '@/types/api';
 
 function createClient() {
   return new QueryClient({ defaultOptions: { queries: { retry: false } } });

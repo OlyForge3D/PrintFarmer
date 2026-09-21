@@ -216,7 +216,7 @@ export function useComponentMaintenance(
             id: log.id,
             component: comp,
             printerId: log.printerId,
-            printerName: log.printer?.name || 'Unknown',
+            printerName: typeof log.printer?.name === 'string' ? log.printer.name : 'Unknown',
             replacedAt: parseISO(log.performedAt),
             partsReplaced: log.partsReplaced!,
             cost: log.cost ?? null,

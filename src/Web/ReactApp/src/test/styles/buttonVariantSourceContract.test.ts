@@ -546,7 +546,7 @@ describe('Button caller contract — unmasked callers gate hover on :enabled (#1
       !forwardsVariant && 'ControlPadButton must forward variant to Button',
       !forwardsClassName && 'ControlPadButton must forward className to Button',
       !forwardsRest && 'ControlPadButton must spread remaining ButtonProps onto Button',
-    ].filter((violation): violation is string => violation !== false);
+    ].filter((violation): violation is string => typeof violation === 'string');
   };
 
   /**

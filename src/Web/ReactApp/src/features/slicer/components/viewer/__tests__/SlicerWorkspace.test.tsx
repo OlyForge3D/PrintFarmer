@@ -84,6 +84,7 @@ describe('SlicerWorkspace multi-plate', () => {
       expect(first).toEqual({
         id: expect.stringMatching(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i),
         fileName: '[text]_Hello.stl', url: 'blob:test-text',
+        fileType: 'stl', geometry: expect.anything(),
         position: [1, 2, 3], rotation: expect.any(Array), scale: [1, 1, 1],
       });
       expect(crypto.getRandomValues).toHaveBeenCalledTimes(callsBeforePlacement + 1);

@@ -468,7 +468,7 @@ export function WorkerManagementPage({ tabQueryParamName = 'tab', embedded = fal
                     )}
                     {(worker.activeJobs > 0 || worker.status === 'Busy') && (
                       <Button
-                        variant="warning"
+                        variant="secondary"
                         size="sm"
                         onClick={() => handleResetWorker(worker)}
                         title="Reset worker — clears ghost jobs and frees slots"

@@ -258,7 +258,6 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
         'fixed inset-0 z-[60] flex items-start justify-center px-4 py-6 sm:pt-[12vh] sm:pb-10 transition-opacity motion-reduce:transition-none',
         isVisible ? 'opacity-100' : 'opacity-0',
       )}
-      style={transitionStyle}
       onClick={handleDismiss}
       aria-hidden={false}
     >
@@ -422,8 +421,6 @@ export function CommandPalette({ isOpen, items, onClose, onSelect }: CommandPale
                                 'mt-1 h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none',
                                 isActive ? 'translate-x-0 text-pf-accent' : 'text-pf-text-tertiary group-hover:translate-x-0.5',
                               )}
-                              style={transitionStyle}
-                              ariaLabel="Open"
                             />
                           </span>
                         </div>

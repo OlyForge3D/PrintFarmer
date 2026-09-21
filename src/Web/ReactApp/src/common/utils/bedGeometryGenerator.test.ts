@@ -83,8 +83,9 @@ describe('Bed Geometry Generator', () => {
     it('positions bed at correct height', () => {
       const dims: BedDimensions = { width: 100, depth: 100, height: 200, thickness: 10 };
       const mesh = generateBedPlatformMesh(dims);
+      const thickness = dims.thickness ?? 5;
 
-      expect(mesh.position.y).toBe(-dims.thickness / 2);
+      expect(mesh.position.y).toBe(-thickness / 2);
     });
 
     it('applies phong material', () => {

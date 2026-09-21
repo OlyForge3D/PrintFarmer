@@ -46,7 +46,7 @@ export function useMaterialSuccessRates(days?: number) {
     queryKey: ['correlation-analytics', 'material-success-rates', days],
     queryFn: async () => {
       const params = days ? `?days=${days}` : '';
-      const response = await apiClient.get(`/correlation-analytics/material-success-rates${params}`);
+      const response = await apiClient.get<MaterialSuccessRate[]>(`/correlation-analytics/material-success-rates${params}`);
       return response.data;
     },
     staleTime: CORRELATION_STALE_TIME,
@@ -58,7 +58,7 @@ export function usePrinterMaterialPerformance(days?: number) {
     queryKey: ['correlation-analytics', 'printer-material-performance', days],
     queryFn: async () => {
       const params = days ? `?days=${days}` : '';
-      const response = await apiClient.get(`/correlation-analytics/printer-material-performance${params}`);
+      const response = await apiClient.get<PrinterMaterialPerformance[]>(`/correlation-analytics/printer-material-performance${params}`);
       return response.data;
     },
     staleTime: CORRELATION_STALE_TIME,
@@ -70,7 +70,7 @@ export function useTemperatureQualityCorrelation(days?: number) {
     queryKey: ['correlation-analytics', 'temperature-quality', days],
     queryFn: async () => {
       const params = days ? `?days=${days}` : '';
-      const response = await apiClient.get(`/correlation-analytics/temperature-quality${params}`);
+      const response = await apiClient.get<TemperatureQualityCorrelation[]>(`/correlation-analytics/temperature-quality${params}`);
       return response.data;
     },
     staleTime: CORRELATION_STALE_TIME,
@@ -82,7 +82,7 @@ export function useDurationTrends(days?: number) {
     queryKey: ['correlation-analytics', 'duration-trends', days],
     queryFn: async () => {
       const params = days ? `?days=${days}` : '';
-      const response = await apiClient.get(`/correlation-analytics/duration-trends${params}`);
+      const response = await apiClient.get<DurationTrend[]>(`/correlation-analytics/duration-trends${params}`);
       return response.data;
     },
     staleTime: CORRELATION_STALE_TIME,
@@ -94,7 +94,7 @@ export function useFailureReasons(days?: number) {
     queryKey: ['correlation-analytics', 'failure-reasons', days],
     queryFn: async () => {
       const params = days ? `?days=${days}` : '';
-      const response = await apiClient.get(`/correlation-analytics/failure-reasons${params}`);
+      const response = await apiClient.get<FailureReason[]>(`/correlation-analytics/failure-reasons${params}`);
       return response.data;
     },
     staleTime: CORRELATION_STALE_TIME,

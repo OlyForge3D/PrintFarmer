@@ -13,17 +13,16 @@ function shallowEqualPrinter(previous: Printer | PrinterDisplay, next: Printer |
     return true;
   }
 
-  const previousRecord = previous as Record<string, unknown>;
-  const nextRecord = next as Record<string, unknown>;
-  const previousKeys = Object.keys(previousRecord);
-  const nextKeys = Object.keys(nextRecord);
+  const previousEntries = Object.entries(previous);
+  const nextEntries = Object.entries(next);
+  const previousKeys = previousEntries.map(([key]) => key);
+  const nextKeys = nextEntries.map(([key]) => key);
   if (previousKeys.length !== nextKeys.length) {
     return false;
   }
 
-  return previousKeys.every((key) => (
-    Object.prototype.hasOwnProperty.call(nextRecord, key) &&
-    Object.is(previousRecord[key], nextRecord[key])
+  return previousEntries.every(([key, value]) => (
+    nextEntries.some(([nextKey, nextValue]) => nextKey === key && Object.is(value, nextValue))
   ));
 }
 
