@@ -1,17 +1,36 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { renderHook, waitFor } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import type { ReactNode } from 'react';
 import { useHarvestJob, HARVEST_INVALIDATION_KEYS } from '../useHarvestJob';
 import { configurePartsHarvestClient } from '@/services/partsHarvest';
+import type { HarvestJobRequest } from '@/types/parts-inventory';
 
 interface StubClient {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
+  get: Mock<(url: string, config?: { params?: unknown }) => Promise<{ data: unknown }>>;
+  post: Mock<(url: string, data: HarvestJobRequest) => Promise<{ data: unknown }>>;
 }
 
 function makeStubClient(): StubClient {
-  return { get: vi.fn(), post: vi.fn() };
+  return {
+    get: vi.fn<(url: string, config?: { params?: unknown }) => Promise<{ data: unknown }>>(),
+    post: vi.fn<(url: string, data: HarvestJobRequest) => Promise<{ data: unknown }>>(),
+  };
+}
+
+function configureStub(stub: StubClient): void {
+  configurePartsHarvestClient({
+    get: async <T = unknown>(url: string, config?: { params?: unknown }) => {
+      const response = await stub.get(url, config);
+      return { data: response.data as T };
+    },
+    post: async <T = unknown>(url: string, data?: unknown) => {
+      if (data === undefined) throw new Error('Harvest requests require a body.');
+      const response = await stub.post(url, data as HarvestJobRequest);
+      return { data: response.data as T };
+    },
+  });
 }
 
 function makeWrapper(client: QueryClient) {
@@ -26,7 +45,7 @@ describe('useHarvestJob', () => {
 
   beforeEach(() => {
     stub = makeStubClient();
-    configurePartsHarvestClient(stub);
+    configureStub(stub);
     queryClient = new QueryClient({
       defaultOptions: {
         queries: { retry: false, gcTime: 0 },
