@@ -7,12 +7,15 @@ import {
   areCompactPrinterCardPropsEqual,
   type CompactPrinterCardMemoProps,
 } from '@/features/printers/utils/compactPrinterCardMemo';
+import type { TagDto } from '@/services/tagService';
 import { PrinterBackend, type MmuStatus, type Printer, type PrinterBackendCapabilitiesDto } from '@/types/api';
 import type { PrinterQueueSummaryDto } from '@/types/api';
 
 const progressBarRender = vi.hoisted(() => vi.fn());
 const printerTagsFromFleetMock = vi.hoisted(() =>
-  vi.fn(() => ({ data: [], isPending: false, isError: false, error: null }))
+  vi.fn((): { data: TagDto[]; isPending: boolean; isError: boolean; error: null } => (
+    { data: [], isPending: false, isError: false, error: null }
+  ))
 );
 const queueSummaryFromFleetMock = vi.hoisted(() =>
   vi.fn(() => ({ data: undefined as PrinterQueueSummaryDto | undefined, isPending: false, isError: false, error: null }))
@@ -179,6 +182,7 @@ function createCapabilities(
     supportsPrinterInformation: true,
     supportsHistory: true,
     supportsFilamentControl: true,
+    supportsObjectExclusion: false,
     ...overrides,
   };
 }
