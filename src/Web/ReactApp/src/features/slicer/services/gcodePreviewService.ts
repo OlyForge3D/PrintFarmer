@@ -17,10 +17,9 @@
  * environment) fall back to running the exact same parsing core
  * synchronously on the main thread, fetching the URL directly.
  *
- * The gcode-preview package (v2.18+) is installed as the intended rendering
- * engine for a future v3. Its WebGLPreview class requires a real WebGL
- * context, so this service uses a standalone parser to avoid DOM/GPU
- * coupling in service code and tests.
+ * A WebGL rendering engine may be added in a future version. For now, this
+ * service uses a standalone parser to avoid DOM/GPU coupling in service code
+ * and tests.
  */
 
 import {
