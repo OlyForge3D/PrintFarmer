@@ -8,6 +8,14 @@ source: "Ralph workflow policy"
 
 ## Round Contract
 
+**Native role packages take a separate entrypoint.** When the approved saved
+prompt contains `NATIVE-MAILBOX-ROLE-V1`, follow [native-roles.md](native-roles.md)
+instead of the legacy first-actions/dispatch loop below. The mini coordinator
+alone triages all issues (including quota-accounted `go:needs-research`); device
+consumers only accept assigned work and follow its native local lifecycle.
+Require the private queue/genesis, native identity and migration attestations.
+Do not run both dispatch paths, invent a fallback or enable any schedule.
+
 The shared scheduled entrypoint is [automation.md](automation.md), deployed with
 [bootstrap.md](bootstrap.md) and [hosts.json](hosts.json). Read it first. It governs
 both macOS-mobile and Windows-general instances, including PR-first recovery and
@@ -17,7 +25,8 @@ The remaining sections are conditional reference, not a second issue-first loop.
 This scheduled workflow performs **one round and exits**: no sleep, polling, implementation,
 or worktree mutation. Ralph is a monitor. It may only update issue labels/comments, make an
 authorized safe merge, and refresh `development` as documented below. One session per issue,
-five implementation/analysis slots maximum; reviewers are task agents, not sessions.
+five implementation/analysis slots maximum per host: macOS 1 mobile + 4 general,
+Windows 0 mobile + 5 general, no borrowing; reviewers are task agents, not sessions.
 
 Before every dispatch, claim, message, review decision, or merge, fetch the affected live
 issue/PR again. Never treat cached data as authorization or permission to mutate GitHub.
@@ -51,13 +60,14 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
 2. Collect every open issue and PR with complete pagination. Account for each open issue as
    dispatched, in-flight, awaiting-analysis, blocked (name each open blocker), epic-tracking,
    deferred-to-macOS-Ralph, or unaccounted.
-3. On Windows, triage mobile work and normally report it as deferred. Dispatch it only through the
-   disabled-by-default, verified macOS SSH adapter in `scripts/ci/ralph-macos-ssh.mjs`; never fall back to native `--connect` or local Windows execution. The adapter is PrintFarmer-only,
-   requires explicit trusted runtime configuration, a fresh exact issue claim, and a reservation
-   in its authoritative five-slot ledger before delivery. It sends structured stdin to a fixed
-   remote worker command and retains the reservation through lost acknowledgements until the same
-   job is reconciled. The Mac owns the isolated worktree, mobile validation, review and authorized
-   merge. Windows records only correlated results and never fabricates Mac evidence.
+3. Windows never starts mobile work, locally or through SSH. Retain and reconcile
+   historical remote workers through `status-remote` by their original job/fence;
+   never abandon records because new mobile dispatch is forbidden.
+   macOS eligibility includes all issues but has hard 1-mobile + 4-general caps,
+   5 total; Windows permits only 5 general. No category-slot borrowing.
+   Legacy Mac general cross-host admission stays blocked; only explicitly
+   attested native-role packages use the new private authority path in
+   `native-roles.md`. Eligibility alone is not dispatch authority.
    Classify from labels, paths, acceptance criteria, or Swift/Xcode signals—not owner identity.
    For every configured local or remote dispatch, use the exact admission command sequence in
    `operations.md`; no direct `create_session` or SSH delivery is permitted outside that sequence.
@@ -86,8 +96,8 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
 
 ## Non-Negotiable Gates
 
-Never implement. Never dispatch mobile work from Windows except through the enabled verified SSH
-adapter. Never silently skip an issue. Never self-review or invent/substitute a reviewer/model. Apply the
+Never implement. Never dispatch new mobile work from Windows, including SSH.
+Never silently skip an issue. Never self-review or invent/substitute a reviewer/model. Apply the
 canonical risk-based scope in `.github/copilot-instructions.md` § `Risk-Based Review Scope`:
 standard review uses one qualified non-author reviewer from a different model family; high-risk
 review requires two qualified reviewers with distinct primary lenses. Use the

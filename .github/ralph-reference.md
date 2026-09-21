@@ -2,10 +2,29 @@
 
 ## Shared Scheduled Automations
 
+New `NATIVE-MAILBOX-ROLE-V1` packages use the
+[native coordinator/consumer contract](../.copilot/skills/ralph-loop/native-roles.md):
+one mini coordinator performs global triage and durable assignment, including
+bounded `go:needs-research`; device consumers pull only their assigned work and
+follow local native sessions. The private control repository is the sole
+reservation ledger. Setup stages disabled packages, not live takeover. Actual
+current invocation identity, approved policy, pinned genesis and reconciled
+legacy authority migration are all required. No direct remote native creation,
+SSH worker dispatch or independent consumer backlog selection is introduced.
+
 The macOS-mobile and Windows-general scheduled instances use one checked-in
 [automation lifecycle](../.copilot/skills/ralph-loop/automation.md), with explicit
 [host profiles](../.copilot/skills/ralph-loop/hosts.json) and a pinned
 [bootstrap/deployment contract](../.copilot/skills/ralph-loop/bootstrap.md).
+Shared profiles define roles, not deployment workflow/project/environment IDs.
+Those bindings stay private. Filesystem preflight never authorizes dispatch;
+each round must reconcile its **current native execution identity** before any
+mutation, failing closed if supported tools cannot establish it. Use the
+[Mac mini setup guide](../docs/ralph-macos-migration.md) for unverified staging.
+macOS now has mixed eligibility with hard 1-mobile + 4-general work slots;
+Windows has 0-mobile + 5-general. Category slots cannot be borrowed. New Mac
+general admission remains blocked on legacy dispatch; use the separately
+attested native-role path, not spare capacity or matching GitHub labels as authority.
 Each round scans draft and non-draft PR recovery before new issues, records real
 host/session/head handoffs, and retains unknown remote ownership. Shared-file
 integration is serialized; cross-host overlap requires a verified sole owner.

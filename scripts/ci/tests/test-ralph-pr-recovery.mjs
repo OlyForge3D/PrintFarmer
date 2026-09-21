@@ -17,7 +17,13 @@ const inactive = (overrides = {}) => ({
   ...overrides,
 });
 const plan = (pulls, ownership = Object.fromEntries(pulls.map((pr) => [pr.number, inactive()]))) =>
-  planPrRecovery({ pulls, ownership, now, host: 'macos-mobile', scope: 'mobile' });
+  planPrRecovery({
+    pulls, ownership, now, host: 'macos-mobile', scope: 'mixed',
+    capacity: {
+      complete: true, historyChecked: true, queueChecked: true, reservationsChecked: true,
+      remoteOwnershipChecked: true, observedAt: new Date(now).toISOString(), source: 'fixture complete inventory', work: [],
+    },
+  });
 
 test('rejected draft with inactive owner remains actionable under a blocked assigned parent', () => {
   const result = plan([pull(2897, { parent: { labels: ['status:blocked'], assignees: ['jpapiez'] } })]);
@@ -66,14 +72,16 @@ test('revision and CI work sort before review and approved draft integration', (
     pull(3, { verdict: { classification: 'APPROVED', headSha }, failedChecks: ['typecheck'] }),
     pull(4),
   ]);
-  assert.deepEqual(result.ready.map((item) => item.kind), ['revision', 'ci', 'review', 'integration']);
+  assert.deepEqual(result.ready.map((item) => item.kind), ['revision']);
+  assert.equal(result.blocked.filter((item) => /capacity/.test(item.reason)).length, 3);
 });
 
 test('shared baseline recovery serializes while independent files stay parallel', () => {
   const baseline = 'src/Web/ReactApp/test-typecheck-baseline.json';
   const result = plan([pull(1, { files: [baseline] }), pull(2, { files: [baseline] }), pull(3)]);
-  assert.deepEqual(result.ready.map((item) => item.pr), [1, 3]);
+  assert.deepEqual(result.ready.map((item) => item.pr), [1]);
   assert.deepEqual(result.blocked[0].conflicts, [1]);
+  assert.match(result.blocked[1].reason, /capacity/);
 });
 
 test('live and uncertain owners reserve conflicting files; unknown coverage fails closed', () => {
@@ -107,11 +115,11 @@ test('local inventory never proves another host inactive', () => {
 
 test('cross-host overlap is retained, while independent local recovery may proceed', () => {
   const result = plan([
-    pull(1, { scope: 'general', files: ['shared.json'] }),
+    pull(1, { scope: 'general', classificationComplete: true, files: ['shared.json'] }),
     pull(2, { files: ['shared.json'] }),
     pull(3),
   ]);
-  assert.deepEqual(result.deferred.map((entry) => entry.pr), [1]);
+  assert.match(result.blocked.find((entry) => entry.pr === 1).reason, /shared atomic Windows-authority/);
   assert.deepEqual(result.ready.map((entry) => entry.pr), [3]);
-  assert.deepEqual(result.blocked[0].conflicts, [1]);
+  assert.deepEqual(result.blocked.find((entry) => entry.pr === 2).conflicts, [1]);
 });

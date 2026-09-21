@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
 import { collectPaginated } from './ralph-round-cache.mjs';
+import { classifyWork } from './ralph-host-capacity.mjs';
 
 export const printFarmerRepository = 'OlyForge3D/PrintFarmer';
 export const activeJobStates = new Set(['reserved', 'delivery-intent', 'accepted', 'running', 'uncertain']);
@@ -437,6 +438,13 @@ async function reserveJobInternal({ job, eligibility, mode = 'remote', now = new
   const handoff = sessionEvidence === undefined ? undefined : validateSessionEvidence(sessionEvidence, job, 'active');
   if (handoff && mode !== 'local') throw new RalphMacSshError('Only local handoffs may be accounted.', 'INVALID_REQUEST');
   if (!handoff && !prRecovery) assertFreshEligibility(eligibility, job);
+  if (mode === 'local' && !handoff && !prRecovery &&
+      (eligibility.filesComplete !== true || !Array.isArray(eligibility.files) || !eligibility.files.length ||
+        eligibility.files.some((file) => typeof file !== 'string' || !file || /[\\\x00-\x1f\x7f]/.test(file) ||
+          path.win32.isAbsolute(file) || file.split('/').some((part) => ['', '.', '..'].includes(part))) ||
+        classifyWork({ ...eligibility, acceptanceCriteria: job.acceptanceCriteria }) !== 'general')) {
+    throw new RalphMacSshError('New Windows work requires complete general classification; mobile, mixed and unknown work is forbidden.', 'MOBILE_ADMISSION_DISABLED');
+  }
   const immutableJob = prRecovery
     ? Object.fromEntries(['jobId', 'repository', 'issue', 'owner', 'baseSha', 'expectedHost', 'model', 'effort', 'agent', 'acceptanceCriteria', 'charter']
       .filter((key) => job[key] !== undefined).map((key) => [key, structuredClone(job[key])]))
@@ -1546,7 +1554,7 @@ export function runSsh(invocation, input, { spawn = nodeSpawn, timeoutMs = 45_00
   });
 }
 
-export async function dispatchMacJob({ job, eligibility, controllerPid }, options = {}) {
+export async function dispatchMacJob({ job, controllerPid }, options = {}) {
   if (!Number.isInteger(controllerPid) || controllerPid <= 0) {
     throw new RalphMacSshError('Remote dispatch requires the Ralph controller process identifier.', 'INVALID_REQUEST');
   }
@@ -1556,29 +1564,7 @@ export async function dispatchMacJob({ job, eligibility, controllerPid }, option
     throw new RalphMacSshError('Remote jobs must use an approved model, effort, and squad agent.', 'INVALID_REQUEST');
   }
   createRemoteRequest({ ...request, fence: Number.MAX_SAFE_INTEGER });
-  let reservation = await reserveJob({ job: request, eligibility, reservationOwnerPid: controllerPid }, options);
-  if (reservation.state === 'delivery-intent') {
-    await recoverRemoteDelivery(request.jobId, options);
-    reservation = await reserveJob({ job: request, eligibility, reservationOwnerPid: controllerPid }, options);
-  }
-  request.fence = reservation.fence;
-  const reconciling = reservation.state === 'uncertain';
-  if (['reserved', 'uncertain'].includes(reservation.state)) await recordDeliveryIntent(request.jobId, options);
-  else {
-    throw new RalphMacSshError('Job is already delivered and must be reconciled by its existing session.', 'INVALID_TRANSITION');
-  }
-  try {
-    const output = await runSsh(
-      createSshInvocation(configuration),
-      createRemoteRequest(request, reconciling ? 'reconcile' : 'dispatch'),
-      options,
-    );
-    const response = parseRemoteWorkerResponse(output, request);
-    return recordRemoteWorkerResponse(response, options);
-  } catch (error) {
-    await markUncertain(request.jobId, options);
-    throw error;
-  }
+  throw new RalphMacSshError('Windows may not dispatch new mobile work. Retain historical jobs and reconcile only by existing job ID with status-remote.', 'MOBILE_ADMISSION_DISABLED');
 }
 
 export async function reconcileMacJob({ job, jobId = job?.jobId, legacyIdentity = false, abandonIncomplete = false }, options = {}) {

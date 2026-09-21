@@ -489,20 +489,23 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   ]);
   for (const reference of [
     'implementation-pre-pr.md', 'session-terminal-contract.md', 'pr-merge.md',
-    'one round and exits', 'five implementation/analysis slots maximum',
-    'verified macOS SSH adapter', 'never fall back to native `--connect` or local Windows execution',
+    'one round and exits', 'five implementation/analysis slots maximum per host: macOS 1 mobile + 4 general',
+    'Windows 0 mobile + 5 general, no borrowing',
+    'Windows never starts mobile work, locally or through SSH',
+    '1-mobile + 4-general caps',
     'Before every dispatch, claim, message, review decision, or merge, fetch',
     'unavailable required model is a blocker',
     'assessCleanupCandidate', 'operations.md', 'cleanup.md',
-    'authoritative five-slot ledger', 'No named non-workflow test entrypoint',
+    'reconcile existing remote jobs by ID', 'No named non-workflow test entrypoint',
     'test-ralph-round-cache.mjs',
   ]) assert.match(skill, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
   assert.match(skill, /two qualified reviewers with distinct primary lenses/i);
   assert.doesNotMatch(skill, /\.squad\/templates\/ralph-reference\.md/i);
-  assert.match(operations, /mobile work is READY only when the verified\s+SSH adapter is explicitly enabled/i);
-  assert.doesNotMatch(operations, /not needs-analysis,\s+non-mobile on Windows/i);
+  assert.match(operations, /mobile work is always\s+deferred to macOS/i);
+  assert.match(operations, /dispatch-remote.*retired for new work/i);
+  assert.doesNotMatch(operations, /mobile work is READY only when the verified/i);
   for (const reference of [
-    'GitHub native', 'dependency prose markers', 'Detect cycles', 'five live',
+    'GitHub native', 'dependency prose markers', 'Detect cycles', 'Never borrow category slots',
     'fresh eligibility', 'apply claim label and comment', 'verify that exact claim landed',
     'Authoritative Label Vocabulary', 'squad:lambert', 'type:feature', 'priority:p0',
     'Emoji-prefixed duplicate owner labels', 'plain form',

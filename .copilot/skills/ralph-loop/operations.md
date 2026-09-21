@@ -40,29 +40,36 @@ the plain form to new claims. An emoji/plain pair is one owner, not an ownership
 
 For a non-mobile epic needing decomposition, unmet architecture gate, or under-specified issue,
 apply `status:needs-analysis` and dispatch Dallas for child issues or an issue sign-off—not code.
-Do not re-dispatch a live analysis session. Windows only dispatches mobile work through the
-enabled verified SSH adapter; it never performs mobile work, reviews, or merges it locally.
+Do not re-dispatch a live analysis session. Windows never admits new mobile,
+mixed or unknown-scope work, even with an enabled SSH adapter. The adapter is
+retained only for existing-worker reconciliation, not new dispatch.
 
 ## Ready Queue
 
 READY means open, exactly one valid owner, unassigned/unclaimed, non-epic, not in-progress,
-not needs-analysis, and no live blocker. On Windows, mobile work is READY only when the verified
-SSH adapter is explicitly enabled and its trusted configuration/readiness checks pass; otherwise
-it remains deferred to macOS. Read GitHub native `blocked_by`/`blocking` edges as authoritative.
+not needs-analysis, and no live blocker. On Windows, mobile work is always
+deferred to macOS. A trusted SSH configuration never overrides this prohibition.
+Read GitHub native `blocked_by`/`blocking` edges as authoritative.
 Resolve “blocked by”/dependency prose markers live as an additional decaying claim; either live
 source blocks. Closed blockers do not.
 
 Build the complete dependency graph before selecting READY candidates. Detect cycles, deduplicate
 transitive descendants, inherit the highest downstream priority, then sort READY candidates by
 effective p0–p3, unblock value descending, creation time, and issue number. Report non-mobile
-critical-path work that unblocks macOS issues. A verified, explicitly enabled SSH adapter may
-dispatch a mobile dependent only after it reserves the issue in the shared Windows-owned
-PrintFarmer ledger; legacy Mac Ralph admission must be drained before activation. Never use GitHub
+critical-path work that unblocks macOS issues. Never newly dispatch mobile
+dependents from Windows; reconcile historical remote workers by existing job ID.
+Never use GitHub
 labels/comments or the round cache as admission authorization, never fall back to local Windows,
 and leave the reservation in place for offline, timeout, or uncorrelated acknowledgement results.
 
-Re-fetch and confirm each issue immediately before claim/spawn. Maintain at most five live
-implementation/analysis sessions. Use `gpt-5.6-terra` medium for implementation and
+Re-fetch and confirm each issue immediately before claim/spawn. Enforce the
+shared lifecycle's hard category quotas across implementation, analysis,
+queued/reserved work and PR recovery: macOS 1 mobile + 4 general (5 total),
+Windows 0 mobile + 5 general. Never borrow category slots. Run `capacity-check`
+with complete fresh union inventory, and retain uncertain claims. Mac general
+admission remains blocked pending an authenticated shared authority path; do not
+mistake eligibility or spare capacity for duplicate-safe cross-host admission.
+Use `gpt-5.6-terra` medium for implementation and
 `gpt-5.6-luna` medium for non-code analysis unless an explicit premium justification exists.
 Every implementation and Dallas/non-code analysis kickoff uses `create_session` with
 `base_branch: development` in an isolated worktree. Every kickoff passes
@@ -111,11 +118,8 @@ delivery:
    session ID and verified head, exit, validation, clean-worktree, and pushed-commit evidence.
    App-managed task completion without a process-exit result uses the separate
    `complete-local-session` route below; never synthesize an exit code.
-5. For an eligible mobile issue only, run `dispatch-remote` with
-   `{"job":...,"eligibility":...,"controllerPid":...}` using the app Ralph controller's own
-   process ID instead of local session creation. It reserves, records a PID-and-lease-fenced
-   intent, and sends SSH in one durable operation; lost acknowledgement/timeouts remain reserved.
-   For a stranded `delivery-intent`, run `recover-remote` only after the lease expires and the
+5. `dispatch-remote` is retired for new work and fails closed. For a historical
+   stranded `delivery-intent`, run `recover-remote` only after the lease expires and the
    owning controller is demonstrably dead. This changes it to `uncertain`, not terminal.
    For an `accepted`, `running`, or `uncertain` remote job, run `status-remote` with
    `{"jobId":"the-existing-job"}`. New reservations persist their exact immutable wire job.
@@ -129,6 +133,13 @@ delivery:
    child by its unguessable launch token and retains the slot while that exact process is alive;
    only the trusted worker may emit `SUPERVISOR_LOST` after the launch lease and fenced process
    have both ended.
+
+New Windows `reserve-local` eligibility must include `scope:"general"`,
+`classificationComplete:true`, `filesComplete:true` and a nonempty normalized
+repository-relative `files` array backed by the current paths/labels/acceptance
+criteria. Missing/unknown/mixed/mobile evidence rejects admission; mobile path
+or acceptance signals cannot be relabelled general. Existing-session accounting
+and terminal recovery remain available to retain historical ownership.
 
 ## Reconcile Before Admission
 
