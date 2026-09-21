@@ -1,5 +1,13 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { locationService, Location, LocationTreeNode, LocationBreadcrumbItem, MoveLocationRequest, CreateLocationRequest, UpdateLocationRequest } from '../locationService';
+import { locationService } from '../locationService';
+import type {
+  CreateLocationRequest,
+  Location,
+  LocationBreadcrumbItem,
+  LocationTreeNode,
+  MoveLocationRequest,
+  UpdateLocationRequest,
+} from '../locationService';
 import { apiClient } from '../api';
 
 // Mock the api client
@@ -17,6 +25,20 @@ vi.mock('../api', () => ({
   }
 }));
 
+const createLocationFixture = (overrides: Partial<Location> = {}): Location => ({
+  id: '1',
+  name: 'Workshop',
+  description: 'Main workshop',
+  depth: 0,
+  sortOrder: 0,
+  printerCount: 5,
+  totalPrinterCount: 5,
+  createdAt: '2024-01-01T00:00:00Z',
+  modifiedAt: '2024-01-01T00:00:00Z',
+  isActive: true,
+  ...overrides,
+});
+
 describe('locationService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -25,27 +47,19 @@ describe('locationService', () => {
   describe('getAllLocations', () => {
     it('should get all locations', async () => {
       const mockLocations: Location[] = [
-        {
-          id: '1',
-          name: 'Workshop',
-          description: 'Main workshop',
-          printerCount: 5,
-          createdAt: '2024-01-01T00:00:00Z',
-          modifiedAt: '2024-01-01T00:00:00Z',
-          isActive: true
-        },
-        {
+        createLocationFixture(),
+        createLocationFixture({
           id: '2',
           name: 'Lab',
           description: 'Testing lab',
           printerCount: 2,
+          totalPrinterCount: 2,
           createdAt: '2024-01-02T00:00:00Z',
           modifiedAt: '2024-01-02T00:00:00Z',
-          isActive: true
-        }
+        }),
       ];
 
-      vi.mocked(apiClient.getAllLocations).mockResolvedValue(mockLocations as never);
+      vi.mocked(apiClient.getAllLocations).mockResolvedValue(mockLocations);
 
       const result = await locationService.getAllLocations();
 
@@ -54,7 +68,7 @@ describe('locationService', () => {
     });
 
     it('should handle empty locations list', async () => {
-      vi.mocked(apiClient.getAllLocations).mockResolvedValue([] as never);
+      vi.mocked(apiClient.getAllLocations).mockResolvedValue([]);
 
       const result = await locationService.getAllLocations();
 
@@ -64,17 +78,9 @@ describe('locationService', () => {
 
   describe('getLocationById', () => {
     it('should get a location by ID', async () => {
-      const mockLocation: Location = {
-        id: '1',
-        name: 'Workshop',
-        description: 'Main workshop',
-        printerCount: 5,
-        createdAt: '2024-01-01T00:00:00Z',
-        modifiedAt: '2024-01-01T00:00:00Z',
-        isActive: true
-      };
+      const mockLocation = createLocationFixture();
 
-      vi.mocked(apiClient.getLocationById).mockResolvedValue(mockLocation as never);
+      vi.mocked(apiClient.getLocationById).mockResolvedValue(mockLocation);
 
       const result = await locationService.getLocationById('1');
 
@@ -90,17 +96,17 @@ describe('locationService', () => {
         description: 'Test location'
       };
 
-      const mockCreatedLocation: Location = {
+      const mockCreatedLocation = createLocationFixture({
         id: '3',
         name: 'New Location',
         description: 'Test location',
         printerCount: 0,
+        totalPrinterCount: 0,
         createdAt: '2024-01-03T00:00:00Z',
         modifiedAt: '2024-01-03T00:00:00Z',
-        isActive: true
-      };
+      });
 
-      vi.mocked(apiClient.createLocation).mockResolvedValue(mockCreatedLocation as never);
+      vi.mocked(apiClient.createLocation).mockResolvedValue(mockCreatedLocation);
 
       const result = await locationService.createLocation(request);
 
@@ -113,16 +119,17 @@ describe('locationService', () => {
         name: 'Simple Location'
       };
 
-      const mockCreatedLocation: Location = {
+      const mockCreatedLocation = createLocationFixture({
         id: '4',
         name: 'Simple Location',
+        description: undefined,
         printerCount: 0,
+        totalPrinterCount: 0,
         createdAt: '2024-01-03T00:00:00Z',
         modifiedAt: '2024-01-03T00:00:00Z',
-        isActive: true
-      };
+      });
 
-      vi.mocked(apiClient.createLocation).mockResolvedValue(mockCreatedLocation as never);
+      vi.mocked(apiClient.createLocation).mockResolvedValue(mockCreatedLocation);
 
       const result = await locationService.createLocation(request);
 
@@ -138,17 +145,13 @@ describe('locationService', () => {
         description: 'Updated description'
       };
 
-      const mockUpdatedLocation: Location = {
-        id: '1',
+      const mockUpdatedLocation = createLocationFixture({
         name: 'Updated Workshop',
         description: 'Updated description',
-        printerCount: 5,
-        createdAt: '2024-01-01T00:00:00Z',
         modifiedAt: '2024-01-04T00:00:00Z',
-        isActive: true
-      };
+      });
 
-      vi.mocked(apiClient.updateLocation).mockResolvedValue(mockUpdatedLocation as never);
+      vi.mocked(apiClient.updateLocation).mockResolvedValue(mockUpdatedLocation);
 
       const result = await locationService.updateLocation('1', request);
 
@@ -161,17 +164,13 @@ describe('locationService', () => {
         name: 'New Name'
       };
 
-      const mockUpdatedLocation: Location = {
-        id: '1',
+      const mockUpdatedLocation = createLocationFixture({
         name: 'New Name',
         description: 'Original description',
-        printerCount: 5,
-        createdAt: '2024-01-01T00:00:00Z',
         modifiedAt: '2024-01-04T00:00:00Z',
-        isActive: true
-      };
+      });
 
-      vi.mocked(apiClient.updateLocation).mockResolvedValue(mockUpdatedLocation as never);
+      vi.mocked(apiClient.updateLocation).mockResolvedValue(mockUpdatedLocation);
 
       const result = await locationService.updateLocation('1', request);
 
@@ -182,7 +181,7 @@ describe('locationService', () => {
 
   describe('deleteLocation', () => {
     it('should delete a location', async () => {
-      vi.mocked(apiClient.deleteLocation).mockResolvedValue(undefined as never);
+      vi.mocked(apiClient.deleteLocation).mockResolvedValue(undefined);
 
       await locationService.deleteLocation('1');
 
@@ -227,7 +226,7 @@ describe('locationService', () => {
         },
       ];
 
-      vi.mocked(apiClient.getLocationTree).mockResolvedValue(mockTree as never);
+      vi.mocked(apiClient.getLocationTree).mockResolvedValue(mockTree);
 
       const result = await locationService.getLocationTree();
 
@@ -236,7 +235,7 @@ describe('locationService', () => {
     });
 
     it('should return empty array for no locations', async () => {
-      vi.mocked(apiClient.getLocationTree).mockResolvedValue([] as never);
+      vi.mocked(apiClient.getLocationTree).mockResolvedValue([]);
 
       const result = await locationService.getLocationTree();
 
@@ -259,7 +258,7 @@ describe('locationService', () => {
         { id: '3', name: 'Room 101', depth: 2 },
       ];
 
-      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue(mockAncestors as never);
+      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue(mockAncestors);
 
       const result = await locationService.getLocationAncestors('3');
 
@@ -268,7 +267,7 @@ describe('locationService', () => {
     });
 
     it('should return empty array for root location', async () => {
-      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue([] as never);
+      vi.mocked(apiClient.getLocationAncestors).mockResolvedValue([]);
 
       const result = await locationService.getLocationAncestors('root-id');
 
@@ -287,7 +286,6 @@ describe('locationService', () => {
     it('should move a location to a new parent', async () => {
       const request: MoveLocationRequest = {
         newParentId: '5',
-        sortOrder: 2,
       };
 
       const mockMoved: Location = {
@@ -305,7 +303,7 @@ describe('locationService', () => {
         isActive: true,
       };
 
-      vi.mocked(apiClient.moveLocation).mockResolvedValue(mockMoved as never);
+      vi.mocked(apiClient.moveLocation).mockResolvedValue(mockMoved);
 
       const result = await locationService.moveLocation('3', request);
 
@@ -333,7 +331,7 @@ describe('locationService', () => {
         isActive: true,
       };
 
-      vi.mocked(apiClient.moveLocation).mockResolvedValue(mockMoved as never);
+      vi.mocked(apiClient.moveLocation).mockResolvedValue(mockMoved);
 
       const result = await locationService.moveLocation('3', request);
 
