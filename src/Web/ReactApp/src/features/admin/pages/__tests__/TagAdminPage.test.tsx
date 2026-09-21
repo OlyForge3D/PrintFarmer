@@ -24,11 +24,13 @@ vi.mock('@/services/api', () => ({
 
 import { apiClient } from '@/services/api';
 
+type GetTagsItem = Awaited<ReturnType<typeof apiClient.getTags>>[number];
+
 function makeApiError(overrides: Partial<ApiError> = {}): ApiError {
   return { message: 'Request failed', statusCode: 500, ...overrides } as ApiError;
 }
 
-const resin: TagOption = { id: 'tag-1', name: 'Resin', color: '#ff0000', description: 'Resin prints', revision: 1 };
+const resin = { id: 'tag-1', name: 'Resin', color: '#ff0000', description: 'Resin prints', revision: 1 } satisfies TagOption & GetTagsItem;
 
 function renderPage() {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
@@ -55,7 +57,15 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     vi.clearAllMocks();
     vi.mocked(apiClient.getTags).mockResolvedValue([resin]);
     vi.mocked(apiClient.get3DModels).mockResolvedValue([]);
-    vi.mocked(apiClient.getGcodeFilesQuery).mockResolvedValue({ files: [] });
+    vi.mocked(apiClient.getGcodeFilesQuery).mockResolvedValue({
+      files: [],
+      totalFiles: 0,
+      totalSize: 0,
+      page: 1,
+      pageSize: 50,
+      totalPages: 0,
+      totalItems: 0,
+    });
   });
 
   it('renders the tags table once loaded', async () => {
@@ -271,7 +281,7 @@ describe('TagAdminPage - revision-aware tag editing (#844/#846)', () => {
     // A tag without a revision (e.g. loaded from a legacy source) must never be saved
     // with a guessed expectedRevision (like 0), since that could spuriously conflict on
     // every save or silently match an unrelated revision. The user must be told to refresh.
-    const noRevisionTag: TagOption = { id: 'tag-2', name: 'Unversioned', color: '#00ff00' };
+    const noRevisionTag = { id: 'tag-2', name: 'Unversioned', color: '#00ff00' } satisfies TagOption & GetTagsItem;
     vi.mocked(apiClient.getTags).mockResolvedValue([noRevisionTag]);
     const user = userEvent.setup();
     renderPage();
