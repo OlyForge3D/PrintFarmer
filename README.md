@@ -20,6 +20,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 | **Use the API** | [API Reference](./docs/API.md) |
 | **Explore features** | [Features Guide](./docs/FEATURES.md) |
 | **Contribute code** | [Development Guide](./docs/DEVELOPMENT.md) |
+| **Operate Squad automations** | [Shared host-bound Ralph policy](./.github/ralph-reference.md#shared-scheduled-automations) |
 | **Fix an issue** | [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) |
 | **Browse all docs** | [Documentation Index](./docs/INDEX.md) |
 

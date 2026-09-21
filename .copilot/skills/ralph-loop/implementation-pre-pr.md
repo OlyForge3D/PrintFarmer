@@ -17,16 +17,21 @@ do not substitute a full suite. Add tests for changed behavior. For affected .NE
 changes, create migrations for every affected context/provider pair and cover them from a .NET
 test assembly.
 
-## Pre-PR Gate
+## Readiness Gate
 
 Before opening a PR, fetch then merge `origin/development` into the branch, resolve only actual
-conflicts, and rerun targeted validation. Do not rebase. Reviewer count and risk classification are governed solely by
+conflicts, and rerun targeted validation. Do not rebase. Draft PRs may open early;
+review gates readiness and merge, not draft creation. Reviewer count and risk classification are governed solely by
 `.github/copilot-instructions.md` § `Risk-Based Review Scope`. For standard and
 documentation-only changes, dispatch one qualified non-author reviewer using a different model
-family than the implementation agent. For high-risk changes, dispatch Bishop, Hicks, and Vasquez
-as parallel read-only task agents—not sessions—with `tools: ["*"]` (via `.github/agents/code-review-*.agent.md` or `code-review` task agents), provide complete workspace worktree root path (`cwd`), base branch, and target head commit SHA, and explicitly prohibit builds, installs, tests, or file modifications. An unavailable required model blocks the PR; never substitute or self-review. Post exactly
+family than the implementation agent. For high-risk changes, dispatch two qualified
+reviewers from Bishop, Hicks, and Vasquez with distinct primary lenses as read-only
+task agents—not sessions. Provide complete workspace worktree root path (`cwd`), base branch,
+and target head commit SHA, and explicitly prohibit builds, installs, tests, or file modifications.
+An unavailable required model blocks readiness; never substitute or self-review. Post exactly
 the number of genuine canonical verdict comments the canonical rule requires: one for a standard
-or documentation-only change and three for a high-risk change.
+or documentation-only change and two for a high-risk change, unless the canonical
+escalation rule requires a third reviewer.
 If a required high-risk panel member authored the PR, block the PR; never substitute Dallas or
 another roster member.
 
