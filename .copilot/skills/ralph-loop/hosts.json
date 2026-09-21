@@ -7,11 +7,13 @@
     "macos-mobile": {
       "configured": true,
       "platform": "darwin",
-      "scope": "mobile",
-      "workflowId": "5edfe068-4f7c-4734-a078-8ee6fba95918",
+      "scope": "mixed",
       "admission": "native-local",
       "maxLocalSessions": 5,
+      "maxMobileSessions": 1,
+      "maxGeneralSessions": 4,
       "maxLocalXcodeJobs": 1,
+      "generalAdmission": "blocked-pending-shared-authority",
       "commissionReviews": true,
       "mergeHeldPrs": [2603],
       "dallas": { "model": "gpt-6-astra", "reasoningEffort": "xhigh" },
@@ -21,9 +23,10 @@
       "configured": true,
       "platform": "win32",
       "scope": "general",
-      "workflowId": "5534e4be-4a12-42b2-b56d-6c2a31a52d6e",
       "admission": "windows-shared",
       "maxLocalSessions": 5,
+      "maxMobileSessions": 0,
+      "maxGeneralSessions": 5,
       "newRemoteMobileDispatch": false
     }
   }

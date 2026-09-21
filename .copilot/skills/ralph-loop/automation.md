@@ -16,14 +16,25 @@ explicit host bindings. Require its approved policy commit and successful
 `ralph-automation.mjs preflight`. Missing, unmerged, changed, stale or unverified
 policy/host configuration means **report the configuration blocker and exit**.
 Do not install, edit, downgrade or fetch a different runtime to bypass it.
-Compare the private host configuration with the actual workflow/project/host
-from native tools. `verified:true` is a deployment attestation, not discovery.
+Filesystem preflight is non-authorizing and reports `nativeIdentityVerified:false`.
+Before any round mutation, compare the private host configuration with the
+**CURRENT executing automation's** actual workflow/project/app-host and isolated
+session path from supported native tools/runtime metadata, using
+[bootstrap.md's native identity gate](bootstrap.md#native-identity-gate).
+Missing, mismatched or unknown execution identity means report blocked and exit.
+Looking up some workflow with supplied IDs is not current execution evidence.
+`verified:true` is a deployment attestation, not discovery or app authentication.
 
 This document governs both instances; [hosts.json](hosts.json) supplies only
 scope/capabilities/limits/overrides. Machine paths and SSH configuration remain
 private on the owning host. No schedules are enabled by this policy.
-`macos-mobile` owns mobile/iOS; `windows-general` owns general work. Classify from
-paths, labels and acceptance criteria, never member identity. Windows must not
+The stable `macos-mobile` profile is now mixed-scope: mobile/iOS **and** general
+issues are eligible. Its hard concurrent-work limits are **1 mobile + 4 general,
+5 total**, without borrowing unused category slots. Mobile means the entire
+active/queued/reserved mobile work session, not just time spent in Xcode.
+`windows-general` permits **0 mobile + 5 general, 5 total**. Classify from
+paths, labels and acceptance criteria, never member identity; mixed/ambiguous
+work reserves mobile capacity, and unknown file overlap still blocks. Windows must not
 start new remote mobile jobs under this split. It must still reconcile historical
 remote jobs through the existing shared authority. The disabled/unverified
 Windows profile is not permission to assume Windows workers have stopped.
@@ -35,6 +46,34 @@ admission/terminal APIs; [pr-merge.md](pr-merge.md) for trusted merge gates;
 issue-first ordering and machine-local copies, not stronger safety checks.
 Preserve profile-specific explicit kickoff clauses and model overrides. Report
 unresolved conflicts instead of selecting a convenient weaker rule.
+
+## Native Role Packages And Legacy Dispatch
+
+The selected successor is one mini coordinator plus scheduled native consumers
+on each device, including a separate mini consumer. Packages carrying
+`NATIVE-MAILBOX-ROLE-V1` use the implemented private queue helpers and
+[native-roles.md](native-roles.md), not the legacy dispatcher below. They still
+require reviewed policy, actual native identity, pinned private queue genesis
+and explicit legacy-authority migration before any work. Never combine paths.
+
+The coordinator alone globally triages all issues: classify mobile/general and
+tooling requirements, validate type/priority/Squad owner labels (never personal
+assignment to `jpapiez`), reconcile dependencies, analysis gates, epic child
+readiness, holds and existing ownership, choose a device, reserve its quotas and
+track aggregate progress. Squad owner and device assignment are distinct.
+Substantial analysis needs an assignment and reserved capacity, not an uncounted
+coordinator-created implementation session.
+
+Consumers accept only approved assignments for their own stable worker ID and
+follow the assigned native session's local lifecycle/review/recovery. They report
+discoveries and blockers to the coordinator, never independently triage the
+global board, select new issues or reassign authority. Changed scope or a new
+session requires coordinator reconciliation and applicable capacity. Existing
+hold, epic, no-duplicate and source-only review rules remain in force.
+
+See the [setup design](../../../docs/ralph-macos-migration.md#coordinator-and-consumer-contracts)
+for mailbox provenance, persistent role-round gates and native lost-ack recovery.
+Staging those packages creates no runtime authority or deployment.
 
 ## Inventory And Ownership Before Action
 
@@ -68,6 +107,14 @@ unresolved conflicts instead of selecting a convenient weaker rule.
    and existing shared five-slot ceiling where used. Free shared slots do not
    prove the Mac/Xcode host is idle. Keep one Xcode job on the Mac. Never erase
    uncertainty, historical records or tombstones to make space.
+
+Before every new/recovery/analysis handoff, run the
+[category capacity check](bootstrap.md#category-capacity-gate) using the fresh
+distinct union of active, queued, reserved and uncertain jobs/sessions on the
+execution host, including legacy remote mobile workers. Verified terminal work
+alone leaves the count. Reusing an actual live owner consumes its existing slot;
+a new/replacement owner needs capacity. PR recovery and planning cannot bypass
+the category caps. The one-Xcode-job limit remains an additional safeguard.
 
 Idle is not dead. A label, comment, session creation response, elapsed interval or
 controller exit is not evidence of worker cessation. For known local sessions,
@@ -107,6 +154,19 @@ may proceed concurrently. Recompute after every head change and verified merge.
 Unknown remote owner or overlapping files on the other host means **hold those
 conflicting PRs and escalate for a verified sole-owner handoff**. Do not start a
 second repair or assume disjoint host roles guarantee disjoint files.
+
+**Unresolved general-work admission blocker:** broader macOS eligibility does
+not create an atomic cross-host reservation mechanism. New macOS general
+assignments, including replacement PR recovery, remain blocked by
+`generalAdmission: blocked-pending-shared-authority`. Four eligible general
+slots are **not four usable unattended slots yet**. The selected successor uses
+a sole mini coordinator and native consumers pulling a durable mailbox, not a
+reverse SSH adapter to the Windows authority. Its implemented native path needs
+reviewed policy and explicit migration; it does not remove the legacy gate.
+Do not initialize a competing authority, use GitHub
+comments as a lock, or infer sole ownership from disabled schedules. The selected
+architecture is not permission to deploy or migrate authority.
+Existing Mac general sessions remain counted and owned, never abandoned.
 
 There is no new distributed lock service. The Windows admission ledger already
 coordinates its local and remote jobs; this policy does not make it accessible
@@ -160,7 +220,7 @@ Drafts are scanned and repaired, not silently skipped. An approved draft goes
 to its owning implementer for final acceptance/current-head CI and readiness;
 do not mark ready because an older head passed. Reviewers are read-only task
 agents: no builds, tests, installs, linters, scripts or tracking files.
-macOS may commission required mobile reviews; Windows routes review gaps to the
+macOS may commission required reviews for its verified owning sessions; Windows routes review gaps to the
 owning implementer's pre-PR process. Both use the canonical risk-based count,
 distinct lenses, delta-only rereview, exact-head records, and owner precedence.
 

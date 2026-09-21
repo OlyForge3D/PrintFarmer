@@ -34,7 +34,7 @@ function reader({ issueTitle = 'one', fail = false, responses = {} } = {}) {
 test('uses the authorized cache helper for initial and delta observations', async (t) => {
   const directory = await fixtureDirectory(t);
   const input = {
-    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: '5edfe068-4f7c-4734-a078-8ee6fba95918' },
+    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: 'aaaaaaaa-1111-4222-8333-444444444444' },
     policyVersion: '2026-09-08', cacheOptions: { env: { RALPH_CACHE_DIR: directory } },
   };
   const first = await runSnapshot({ ...input, reader: reader() });
@@ -53,7 +53,7 @@ test('uses the authorized cache helper for initial and delta observations', asyn
 test('failed reads do not replace the helper-managed baseline', async (t) => {
   const directory = await fixtureDirectory(t);
   const input = {
-    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: '5edfe068-4f7c-4734-a078-8ee6fba95918' },
+    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: 'aaaaaaaa-1111-4222-8333-444444444444' },
     policyVersion: '2026-09-08', cacheOptions: { env: { RALPH_CACHE_DIR: directory } },
   };
   await runSnapshot({ ...input, reader: reader() });
@@ -63,7 +63,7 @@ test('failed reads do not replace the helper-managed baseline', async (t) => {
 test('CodeQL permission denial is explicit while other CodeQL failures fail closed', async (t) => {
   const directory = await fixtureDirectory(t);
   const input = {
-    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: '5edfe068-4f7c-4734-a078-8ee6fba95918' },
+    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: 'aaaaaaaa-1111-4222-8333-444444444444' },
     policyVersion: '2026-09-08', cacheOptions: { env: { RALPH_CACHE_DIR: directory } },
   };
   const denied = reader();
@@ -94,7 +94,7 @@ test('CodeQL permission denial is explicit while other CodeQL failures fail clos
 test('malformed CodeQL alerts fail without advancing the cache baseline', async (t) => {
   const directory = await fixtureDirectory(t);
   const input = {
-    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: '5edfe068-4f7c-4734-a078-8ee6fba95918' },
+    scope: { repository: 'OlyForge3D/PrintFarmer', workflow: 'aaaaaaaa-1111-4222-8333-444444444444' },
     policyVersion: '2026-09-08', cacheOptions: { env: { RALPH_CACHE_DIR: directory } },
   };
   await runSnapshot({ ...input, reader: reader() });

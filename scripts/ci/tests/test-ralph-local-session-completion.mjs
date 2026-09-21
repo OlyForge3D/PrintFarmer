@@ -96,7 +96,7 @@ test('app completion records runtime provenance, preserves unrelated audits and 
   await assert.rejects(() => reserveLocalJob({
     job: { jobId, issue: 2720, repository, owner: 'parker', baseSha: f.entry.baseSha,
       expectedHost: 'windows-local', model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad', acceptanceCriteria: [] },
-    eligibility: { repository, issue: 2720, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false },
+    eligibility: { repository, issue: 2720, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false, scope: 'general', classificationComplete: true },
   }, f.options), (error) => error.code === 'FENCED');
 });
 

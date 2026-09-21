@@ -1,17 +1,17 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { policyPaths, resolveAutomationHost, runAutomationPreflight, verifyAutomationCheckout } from '../ralph-automation.mjs';
+import { compareNativeAutomationIdentity, policyPaths, resolveAutomationHost, runAutomationPreflight, verifyAutomationCheckout } from '../ralph-automation.mjs';
 
 const exec = promisify(execFile);
 const config = JSON.parse(await readFile('.copilot/skills/ralph-loop/hosts.json', 'utf8'));
-const workflow = config.hosts['macos-mobile'].workflowId;
+const workflow = 'aaaaaaaa-1111-4222-8333-444444444444';
 const runtime = {
-  host: 'macos-mobile', workflowId: workflow, appHostId: 'local', projectId: 'fixture-project',
+  host: 'macos-mobile', workflowId: workflow, appHostId: 'local', projectId: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee',
   worktreeRoot: '/test/worktrees', cacheDirectory: '/test/cache', verified: true,
 };
 const hostInput = {
@@ -20,7 +20,9 @@ const hostInput = {
 
 test('shared host mapping preserves mobile ownership, capacity, hold and explicit model override', () => {
   const host = resolveAutomationHost(config, hostInput);
-  assert.equal(host.scope, 'mobile');
+  assert.equal(host.scope, 'mixed');
+  assert.equal(host.maxMobileSessions, 1);
+  assert.equal(host.maxGeneralSessions, 4);
   assert.equal(host.maxLocalSessions, 5);
   assert.equal(host.maxLocalXcodeJobs, 1);
   assert.deepEqual(host.mergeHeldPrs, [2603]);
@@ -31,9 +33,9 @@ test('shared host mapping preserves mobile ownership, capacity, hold and explici
 });
 
 test('verified Windows instance with matching workflow, platform and absolute paths resolves general scope', () => {
-  const windowsWorkflow = config.hosts['windows-general'].workflowId;
+  const windowsWorkflow = 'bbbbbbbb-1111-4222-8333-444444444444';
   const windowsRuntime = {
-    host: 'windows-general', workflowId: windowsWorkflow, appHostId: 'local', projectId: 'fixture-project',
+    host: 'windows-general', workflowId: windowsWorkflow, appHostId: 'local', projectId: runtime.projectId,
     worktreeRoot: 'C:\\test\\worktrees', cacheDirectory: 'C:\\test\\cache', verified: true,
   };
   const host = resolveAutomationHost(config, {
@@ -45,6 +47,54 @@ test('verified Windows instance with matching workflow, platform and absolute pa
   assert.equal(host.admission, 'windows-shared');
   assert.equal(host.newRemoteMobileDispatch, false);
   assert.equal(host.workflowId, windowsWorkflow);
+});
+
+test('shared roles carry no deployment identity and permit a new private mini UUID without policy edits', () => {
+  for (const profile of Object.values(config.hosts)) {
+    for (const key of ['workflowId', 'projectId', 'appHostId', 'worktreeRoot', 'cacheDirectory']) assert.equal(key in profile, false);
+  }
+  const miniWorkflow = 'cccccccc-1111-4222-8333-444444444444';
+  const mini = { ...runtime, workflowId: miniWorkflow };
+  assert.equal(resolveAutomationHost(config, { ...hostInput, workflow: miniWorkflow, runtime: mini }).workflowId, miniWorkflow);
+  for (const override of [
+    { workflow: undefined }, { host: 'unknown' },
+    { runtime: { ...mini, projectId: '' } }, { runtime: { ...mini, projectId: 'not-a-uuid' } },
+    { runtime: { ...mini, appHostId: '' } }, { runtime: { ...mini, workflowId: workflow } },
+  ]) assert.throws(() => resolveAutomationHost(config, { ...hostInput, workflow: miniWorkflow, runtime: mini, ...override }));
+  const pinned = structuredClone(config);
+  pinned.hosts['macos-mobile'].workflowId = workflow;
+  assert.throws(() => resolveAutomationHost(pinned, hostInput), /private host configuration/);
+});
+
+test('native comparison requires fresh CURRENT execution, not arbitrary workflow lookup or matching config strings', () => {
+  const now = Date.now();
+  const expected = {
+    workflowId: workflow, projectId: runtime.projectId, appHostId: runtime.appHostId,
+    worktreePath: '/test/worktrees/round-one',
+  };
+  const actual = {
+    observedAt: new Date(now).toISOString(),
+    execution: { ...expected, sessionId: 'dddddddd-1111-4222-8333-444444444444' },
+    workflow: { id: workflow, projectId: runtime.projectId, appHostId: runtime.appHostId },
+    project: { id: runtime.projectId, repository: 'OlyForge3D/PrintFarmer' },
+  };
+  const result = compareNativeAutomationIdentity({ expected, actual, now });
+  assert.equal(result.bindingsMatch, true);
+  assert.equal(result.dispatchAuthorized, false);
+  assert.equal(result.observationAuthentication, 'controller-native-tools-required');
+  for (const override of [
+    { execution: undefined }, { execution: { ...actual.execution, workflowId: undefined } },
+    { execution: { ...actual.execution, workflowId: 'eeeeeeee-1111-4222-8333-444444444444' } },
+    { execution: { ...actual.execution, projectId: workflow } },
+    { execution: { ...actual.execution, appHostId: 'another-host' } },
+    { execution: { ...actual.execution, worktreePath: '/test/main' } },
+    { workflow: { ...actual.workflow, projectId: workflow } },
+    { workflow: { ...actual.workflow, appHostId: 'another-host' } },
+    { project: { ...actual.project, repository: 'attacker/fork' } },
+    { project: undefined }, { observedAt: new Date(now - 60_001).toISOString() },
+    { observedAt: new Date(now + 1).toISOString() }, { observedAt: 'unknown' },
+  ]) assert.throws(() => compareNativeAutomationIdentity({ expected, actual: { ...actual, ...override }, now }));
+  assert.throws(() => compareNativeAutomationIdentity({ expected, actual: runtime, now }));
 });
 
 test('unverified Windows instance, wrong workflow/platform and main-checkout paths fail closed', () => {
@@ -63,7 +113,7 @@ test('private host config cannot widen repository-controlled limits or review sc
     ...hostInput, runtime: { ...runtime, maxLocalSessions: 99, scope: 'general', mergeHeldPrs: [] },
   });
   assert.equal(host.maxLocalSessions, 5);
-  assert.equal(host.scope, 'mobile');
+  assert.equal(host.scope, 'mixed');
   assert.deepEqual(host.mergeHeldPrs, [2603]);
 });
 
@@ -123,6 +173,16 @@ test('real Git guard accepts approved policy and unrelated code, rejects modifie
   await assert.rejects(() => verifyAutomationCheckout(f.options), /Untracked policy/);
 });
 
+test('real Git guard rejects ignored policy files and index suppression before native runtime', async (t) => {
+  const f = await gitFixture(t);
+  await f.git(f.cwd, ['update-index', '--assume-unchanged', f.file]);
+  await assert.rejects(verifyAutomationCheckout(f.options), /index suppression/);
+  await f.git(f.cwd, ['update-index', '--no-assume-unchanged', f.file]);
+  await writeFile(path.join(f.cwd, '.gitignore'), '.copilot/skills/ralph-loop/ignored.md\n');
+  await writeFile(path.join(f.cwd, '.copilot/skills/ralph-loop/ignored.md'), 'untrusted ignored instructions');
+  await assert.rejects(verifyAutomationCheckout(f.options), /Untracked policy/);
+});
+
 test('real Git guard rejects stale deployment pin, invalid SHA and wrong origin', async (t) => {
   const f = await gitFixture(t);
   await writeFile(path.join(f.cwd, f.file), 'new policy\n');
@@ -132,6 +192,45 @@ test('real Git guard rejects stale deployment pin, invalid SHA and wrong origin'
   await assert.rejects(() => verifyAutomationCheckout(f.options));
   await assert.rejects(() => verifyAutomationCheckout({ ...f.options, approvedPolicy: 'development' }), /full policy commit/);
   await assert.rejects(() => verifyAutomationCheckout({ ...f.options, git: () => 'https://example.invalid/fork.git' }), /origin must/);
+});
+
+test('CLI preflight remains explicitly non-authorizing after all filesystem checks pass', async (t) => {
+  const f = await gitFixture(t);
+  await writeFile(path.join(f.cwd, '.copilot/skills/ralph-loop/hosts.json'), JSON.stringify(config));
+  await f.git(f.cwd, ['add', '.']);
+  await f.git(f.cwd, ['commit', '-qm', 'Role-only host fixture']);
+  await f.git(f.cwd, ['push', '-q']);
+  const approvedPolicy = (await f.git(f.cwd, ['rev-parse', 'HEAD'])).trim();
+  const hostConfig = path.join(f.root, 'host.json');
+  await writeFile(hostConfig, JSON.stringify({ ...runtime, worktreeRoot: f.root, cacheDirectory: path.join(f.root, 'cache') }));
+  const bin = path.join(f.root, 'bin');
+  await mkdir(bin);
+  const realGit = (await exec('which', ['git'])).stdout.trim();
+  const shim = `#!${process.execPath}
+const { execFileSync } = require('node:child_process');
+const args = process.argv.slice(2);
+if (args.join(' ') === 'remote get-url origin') console.log('https://github.com/OlyForge3D/PrintFarmer.git');
+else {
+  try { process.stdout.write(execFileSync(${JSON.stringify(realGit)}, args)); }
+  catch (error) { process.exit(error.status ?? 1); }
+}
+`;
+  await writeFile(path.join(bin, 'git'), shim, { mode: 0o700 });
+  const output = await exec(process.execPath, [
+    '--input-type=module', '-e',
+    `import { runAutomationPreflight } from ${JSON.stringify(new URL('../ralph-automation.mjs', import.meta.url).href)};
+console.log(JSON.stringify(await runAutomationPreflight(${JSON.stringify({
+      host: 'macos-mobile', workflow, hostConfig, approvedPolicy, cwd: f.cwd, platform: 'darwin',
+    })})));`,
+  ], { env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
+  const result = JSON.parse(output.stdout);
+  assert.equal(result.nativeIdentityVerified, false);
+  assert.equal(result.dispatchAuthorized, false);
+  assert.equal(result.expectedNativeIdentity.workflowId, workflow);
+  assert.equal(result.expectedNativeIdentity.projectId, runtime.projectId);
+  assert.equal(result.expectedNativeIdentity.appHostId, runtime.appHostId);
+  assert.equal(result.expectedNativeIdentity.worktreePath, await realpath(f.cwd));
+  assert.match(result.nextStep, /CURRENT native executing automation/);
 });
 
 test('common policy retains actual handoff, host ownership, dependency and merge protections', async () => {

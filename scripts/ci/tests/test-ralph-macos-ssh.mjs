@@ -26,9 +26,9 @@ const job = (id = 'job-2605') => ({
   jobId: id, repository: 'OlyForge3D/PrintFarmer', issue: 2605, owner: 'hudson',
   baseSha: 'a'.repeat(40), expectedHost: 'trusted-mac.local',
   model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad',
-  acceptanceCriteria: ['Run the targeted iOS test'], charter: 'mobile/AGENTS.md',
+  acceptanceCriteria: ['Run the targeted tests'], charter: 'AGENTS.md',
 });
-const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false };
+const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false, scope: 'general', classificationComplete: true };
 
 const sessionEvidence = (sessionId, state = 'active', fence = 1) => ({
   repository: eligibility.repository, issue: eligibility.issue, sessionId, state,
@@ -560,7 +560,7 @@ test('retains delivery ownership after lost acknowledgement and reconciles the s
   await recordDeliveryIntent('job-2605', configuration);
   await markUncertain('job-2605', configuration);
   const child = fakeChild();
-  const acknowledged = await dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, {
+  const acknowledged = await reconcileMacJob({ jobId: job().jobId }, {
     ...configuration,
     spawn: () => {
       queueMicrotask(() => {
@@ -584,7 +584,7 @@ test('releases an uncertain delivery only from the worker attesting no durable j
   await recordDeliveryIntent('job-2605', configuration);
   await markUncertain('job-2605', configuration);
   const child = fakeChild();
-  const failed = await dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, {
+  const failed = await reconcileMacJob({ jobId: job().jobId }, {
     ...configuration,
     spawn: () => {
       queueMicrotask(() => {
@@ -769,16 +769,19 @@ test('contains SSH stream errors, nonzero exits, and wall-clock timeout', async 
     (error) => error.code === 'SSH_TIMEOUT');
 });
 
-test('marks SSH failure uncertain instead of retrying locally or releasing its slot', async () => {
+test('legacy SSH reconciliation failure retains uncertainty instead of retrying locally or releasing its slot', async () => {
   await reset();
   const configuration = options();
   const controllerPid = process.pid + 100_000;
-  await assert.rejects(() => dispatchMacJob({ job: job(), eligibility, controllerPid }, {
+  await reserveJob({ job: job(), eligibility, reservationOwnerPid: controllerPid }, configuration);
+  await recordDeliveryIntent(job().jobId, configuration);
+  await markUncertain(job().jobId, configuration);
+  await assert.rejects(() => reconcileMacJob({ jobId: job().jobId }, {
     ...configuration,
     spawn: () => { throw new RalphMacSshError('offline', 'SSH_FAILURE'); },
   }), (error) => error.code === 'SSH_FAILURE');
   const ledger = JSON.parse(await readFile(path.join(root, 'printfarmer-jobs.json'), 'utf8'));
-  assert.equal(ledger.jobs['job-2605'].reservationOwnerPid, controllerPid);
+  assert.equal(ledger.jobs['job-2605'].state, 'uncertain');
   await assert.rejects(() => reserveJob({ job: { ...job('duplicate'), issue: 2605 }, eligibility }, configuration),
     (error) => error.code === 'ISSUE_OWNED');
 });
@@ -1031,7 +1034,7 @@ test('rejects Xcode/CoreSimulator host over-subscription independent of the shar
   await recordDeliveryIntent('job-2605', configuration);
   await markUncertain('job-2605', configuration);
   const releaseChild = fakeChild();
-  await dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, {
+  await reconcileMacJob({ jobId: job().jobId }, {
     ...configuration,
     spawn: () => {
       queueMicrotask(() => {
@@ -1045,6 +1048,7 @@ test('rejects Xcode/CoreSimulator host over-subscription independent of the shar
         }));
         releaseChild.emit('close', 0);
       });
+
       return releaseChild;
     },
   });
@@ -1053,4 +1057,30 @@ test('rejects Xcode/CoreSimulator host over-subscription independent of the shar
     eligibility: { ...eligibility, issue: 9001 },
   }, configuration);
   assert.equal(freed.state, 'reserved');
+});
+
+test('operational Windows mobile dispatch is retired without ledger creation or SSH, including enabled adapters', async () => {
+  await reset();
+  await assert.rejects(() => dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, {
+    ...options(), spawn: () => assert.fail('retired dispatcher must not invoke SSH'),
+  }), (error) => error.code === 'MOBILE_ADMISSION_DISABLED');
+  await assert.rejects(() => readLedger(), { code: 'ENOENT' });
+  await reserveJob({ job: job(), eligibility }, options());
+  const before = await readLedger();
+  await assert.rejects(() => dispatchMacJob({ job: job(), eligibility, controllerPid: process.pid }, options()),
+    (error) => error.code === 'MOBILE_ADMISSION_DISABLED');
+  assert.deepEqual(await readLedger(), before);
+});
+
+test('new Windows-local issue admission rejects mobile evidence, mixed scope and incomplete classification', async () => {
+  await reset();
+  for (const observation of [
+    { ...eligibility, scope: 'mobile' }, { ...eligibility, scope: 'mixed' },
+    { ...eligibility, classificationComplete: false }, { ...eligibility, files: ['mobile/App.swift'] },
+  ]) await assert.rejects(() => reserveLocalJob({ job: job(), eligibility: observation }, options()),
+    (error) => error.code === 'MOBILE_ADMISSION_DISABLED');
+  await assert.rejects(() => reserveLocalJob({
+    job: { ...job(), acceptanceCriteria: ['Fix iOS printing'] }, eligibility,
+  }, options()), (error) => error.code === 'MOBILE_ADMISSION_DISABLED');
+  await assert.rejects(() => readLedger(), { code: 'ENOENT' });
 });

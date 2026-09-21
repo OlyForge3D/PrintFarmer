@@ -154,7 +154,7 @@ test('an active recovery fences every linked issue and the same PR after its hea
   await reserveLocalPrRecovery(request(), { ...f.options, readPull: async () => pull(2897, [2799, 2800]) });
   await assert.rejects(() => reserveLocalJob({
     job: job('new-issue-work', 2800),
-    eligibility: { repository, issue: 2800, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false },
+    eligibility: { repository, issue: 2800, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false, scope: 'general', classificationComplete: true },
   }, f.options), code('ISSUE_OWNED'));
   const moved = 'd'.repeat(40);
   await assert.rejects(() => reserveLocalPrRecovery({
@@ -189,7 +189,7 @@ test('stranded recovery fences all closing issues until its real session is reco
   const before = await f.ledger();
   await assert.rejects(() => reserveLocalJob({
     job: job('secondary-issue', 2800),
-    eligibility: { repository, issue: 2800, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false },
+    eligibility: { repository, issue: 2800, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false, scope: 'general', classificationComplete: true },
   }, f.options), code('STRANDED_SESSION'));
   const next = {
     ...request(), job: job('another-pr', 2801), recovery: recovery(2898),
@@ -233,7 +233,7 @@ test('five existing ledger reservations cannot be bypassed by PR admission', asy
   for (let index = 0; index < 5; index++) {
     const entry = await reserveLocalJob({
       job: job(`occupied-${index}`, 4000 + index),
-      eligibility: { repository, issue: 4000 + index, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false },
+      eligibility: { repository, issue: 4000 + index, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false, scope: 'general', classificationComplete: true },
     }, f.options);
     activeJobs.push({ jobId: entry.jobId, fence: entry.fence, host, files: [`src/other-${index}.cs`] });
   }

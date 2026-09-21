@@ -6,7 +6,7 @@ description: "Deployment contract for two host-bound instances of the shared Ral
 ## Saved Prompt
 
 Deploy only after the reviewed policy is merged into `development`. Save the same
-short prompt below in both existing automations, changing only the four bindings.
+short prompt below in each automation, changing only the four bindings.
 Do not enable either schedule as part of this migration. Keep cron, workspace
 type, model and all other workflow settings unchanged. Windows has been exported
 and verified against its native automation identity, admission ledger and paths;
@@ -22,13 +22,20 @@ github.com, fetch origin development, verify POLICY_COMMIT is an ancestor of
 the exact fetched FETCH_HEAD SHA, and verify both current and that fetched SHA's versions of
 .copilot/skills/ralph-loop, .github/copilot-instructions.md, .squad/config.json,
 and scripts/ci/ralph-*.mjs plus scripts/ci/verify-squad-verdict.mjs are identical
-to POLICY_COMMIT (git diff --exit-code). Reject untracked files in those paths.
+to POLICY_COMMIT (git diff --exit-code; quote 'scripts/ci/ralph-*.mjs' as a Git
+pathspec). Reject all untracked files in those paths, including ignored files,
+and reject assume-unchanged/skip-worktree index flags on controlled files.
 On any missing/stale/changed policy or failed verification, report and exit;
 do not install, rewrite or fall back to a machine-local policy.
 Run node scripts/ci/ralph-automation.mjs preflight --host HOST --workflow WORKFLOW
 --host-config HOST_CONFIG --approved-policy POLICY_COMMIT.
 Read .copilot/skills/ralph-loop/automation.md and the returned host profile.
-Compare host/workflow/project bindings to the live native automation identity.
+Preflight is filesystem/configuration validation only, never dispatch authority.
+Obtain fresh native identity for THIS CURRENT executing automation, its workflow
+and project through supported app tools/runtime metadata. Never infer execution
+identity from this prompt, private config or lookup of an arbitrary workflow.
+If native tools cannot identify the current execution, report blocked and exit.
+Run the identity-check contract below using these fresh native observations.
 Follow that common policy and its conditional references for exactly one round.
 No schedules, saved prompts, host config or deployed workers may be changed here.
 ```
@@ -60,12 +67,73 @@ in shared policy. The common host profile limits behavior; this file binds it.
 ```
 
 `verified` means a maintainer checked those facts, not that a historical prompt
-was found. The historical Windows workflow ID in `hosts.json` is a discovery
-hint, not proof of current configuration. Export that workflow on Windows,
+was found. Shared `hosts.json` contains host roles, capabilities and limits only;
+workflow/project/app-host IDs and paths belong exclusively in private deployment
+configuration. A new destination workflow UUID does not require a shared-policy
+edit. Export the actual workflow on its owning host,
 preserve its paths, explicit model/effort and kickoff requirements, confirm the
 existing Windows-owned admission ledger and its remote records, and reconcile
 the old mobile-dispatch overlap before activating its profile. Preserve its
 process-only SSH configuration; never install/restart the worker from a round.
+
+## Native Identity Gate
+
+`preflight` validates local config shape, its CLI workflow binding and approved
+Git content. It always returns `dispatchAuthorized:false`,
+`nativeIdentityVerified:false` and `expectedNativeIdentity`. Neither matching
+supplied strings nor `verified:true` proves app identity.
+
+Before **any round mutation**, the controller must obtain the current executing
+automation identity from supported native app tools/runtime metadata, then read
+that workflow and project live. `list_workflows` alone proves only that a workflow
+exists; it does not establish that this session is executing it. `get_session`
+and execution metadata must actually expose the association; if unavailable,
+unknown, incomplete or inconsistent, report blocked and exit. Do not substitute
+a manual chat's prompt, user-supplied IDs or a private file as execution evidence.
+
+Normalize those observations into this shape in a private session artifact.
+`expected` is the exact preflight `expectedNativeIdentity`; `execution` is the
+**current** native automation invocation, not the workflow selected for lookup.
+Use the actual fields returned by the supported tool, not invented endpoints.
+
+```json
+{
+  "expected": {
+    "workflowId": "<destination-workflow-uuid>",
+    "projectId": "<destination-project-uuid>",
+    "appHostId": "<destination-native-environment-id>",
+    "worktreePath": "<current-canonical-isolated-worktree>"
+  },
+  "actual": {
+    "observedAt": "<fresh-ISO-timestamp>",
+    "execution": {
+      "sessionId": "<current-native-session-uuid>",
+      "workflowId": "<native-current-execution-workflow-uuid>",
+      "projectId": "<native-current-execution-project-uuid>",
+      "appHostId": "<native-current-execution-environment-id>",
+      "worktreePath": "<native-current-canonical-isolated-worktree>"
+    },
+    "workflow": {
+      "id": "<native-workflow-uuid>",
+      "projectId": "<native-workflow-project-uuid>",
+      "appHostId": "<native-workflow-environment-id>"
+    },
+    "project": {
+      "id": "<native-project-uuid>",
+      "repository": "OlyForge3D/PrintFarmer"
+    }
+  }
+}
+```
+
+Run `node scripts/ci/ralph-automation.mjs identity-check < native-observations.json`.
+It rejects missing/mismatched identity and observations older than 60 seconds or
+from the future. It is a **comparison helper, not an app authentication service**:
+the controller is responsible for genuine fresh native provenance. JSON supplied
+by a user, issue, prompt or persisted config is not that provenance. Its
+`bindingsMatch:true` still returns `dispatchAuthorized:false`; it never admits,
+dispatches or bypasses the single-controller, ownership and live-action gates.
+Refresh current execution observations on each round; do not reuse attestation.
 
 The new policy commit must retain the existing admission repairs. The historical
 Windows prerequisite commits are `ee1d6b1341c7ce3e99f9f9338c276a084a095194`,
@@ -92,6 +160,37 @@ do not simply delete its prerequisites or substitute a random current SHA.**
 The approved replacement pin plus per-round ancestor/content guard then replaces
 the historical duplicated prompt/commit list, not any of its safety contracts.
 
+## Category Capacity Gate
+
+Before new issue, analysis or replacement PR-session admission, run
+`node scripts/ci/ralph-automation.mjs capacity-check < capacity-observations.json`.
+The helper is observation-only, never a reservation/dispatch authorization.
+Both new-issue admission and PR planning use the same hard limits from
+`hosts.json`: macOS 1 mobile + 4 general, Windows 0 mobile + 5 general, each
+5 total. Unused category slots cannot be borrowed. Mobile is a work/session
+category, not merely a concurrent Xcode invocation; one Xcode job is additional.
+
+Input is `{"host":"macos-mobile","candidate":...,"inventory":...}`.
+`candidate` supplies scope and evidence (`files`, `labels`, `acceptanceCriteria`);
+general classification requires `scope:"general",classificationComplete:true`
+and no mobile signals. Mixed/unknown/incomplete classification reserves mobile.
+Inventory requires fresh `observedAt`, genuine `source`, `complete:true`,
+`historyChecked:true`, `queueChecked:true`, `reservationsChecked:true`,
+`remoteOwnershipChecked:true`, and `work` records. Each record has actual
+`jobId` and/or `sessionId`, `executionHost`, `state` (reserved/queued/active/
+uncertain/terminal), and the same classification fields. Include legacy
+Windows-owned remote mobile workers on their actual execution host; unknown
+execution placement blocks proof of free capacity. Duplicate job/session
+aliases are one slot; conflicting aliases/hosts fail closed. Only verified
+terminal records (`terminalVerified:true` with real underlying evidence) leave
+the count. Idle, absent or elapsed time is not termination evidence.
+
+PR planner input below additionally requires `capacity` containing that same
+fresh inventory. It reserves candidate slots within the plan and retains actual
+live-owner slots. Re-check immediately before real admission. Mac general PR
+replacement/new admission is explicitly blocked pending a shared atomic
+Windows-authority transport; category availability is not cross-host safety.
+
 ## Recovery Planner Input
 
 Use the existing snapshot/pagination helpers and live App observations; do not
@@ -102,7 +201,17 @@ described fresh evidence. Keep scratch input in session artifacts, not the repo.
 ```json
 {
   "host": "macos-mobile",
-  "scope": "mobile",
+  "scope": "mixed",
+  "capacity": {
+    "observedAt": "<fresh-ISO-timestamp>",
+    "source": "<native-inventory-queue-history-and-ledger-evidence>",
+    "complete": true,
+    "historyChecked": true,
+    "queueChecked": true,
+    "reservationsChecked": true,
+    "remoteOwnershipChecked": true,
+    "work": []
+  },
   "pulls": [{
     "number": 123,
     "state": "open",
@@ -143,6 +252,9 @@ that freshness bound **never declares anyone dead**. Include other-host PRs and
 all renamed file paths so conflicts cannot disappear through scope filtering.
 Bind the actual verifier output to the head it verified; never copy its
 classification onto another SHA. A pending/invalid verdict is not approval.
+The empty capacity `work` example is valid only after actual complete inventory
+proves it empty; never copy it as a default. Populate existing/queued/uncertain
+work and actual execution hosts, including legacy Windows-owned remote jobs.
 
 Process `ready` before new slices; `ready` means **candidate**, not dispatched.
 `inFlight` identifies real existing ownership; `blocked` and `deferred` retain
