@@ -291,26 +291,39 @@ The durable read and write contract is a printer-scoped reconciliation resource:
   `printerName`, `jobId`, `dispatchAttemptId`, `claimRevision`, `claimAgeSeconds`,
   `claimedAtUtc`, `lastReconciledAtUtc`, redacted `lastEvidence`, string
   `outcome`, string `escalationLevel`, `recoveryPermission`, and
-  `recoveryAuditId` when recovery has settled.
+  `recoveryAuditId` when recovery has settled. It emits the opaque current claim
+  ETag in the `ETag` response header; an empty result emits the printer
+  reconciliation revision ETag.
 - `POST /api/dispatch/{printerId}/reconciliation/recover` accepts
-  `If-Match: <claim ETag>` and `Idempotency-Key: <opaque key>` with this
+  a mandatory `If-Match: <claim ETag>` and mandatory
+  `Idempotency-Key: <opaque key>` with this
   camelCase body:
   `{"dispatchAttemptId":"...","claimRevision":42,"physicalCheckConfirmed":true,"note":"..."}`.
-  The server requires `physicalCheckConfirmed: true`, `queue:reconcile`, and
-  the exact current claim. It returns `200` with the resulting reconciliation
-  resource and `recoveryAuditId`; it returns `403` for missing permission,
-  `404` without revealing an unauthorized claim, `409` for a no-longer
-  indeterminate attempt or idempotency-payload mismatch, and `412` for a stale
-  ETag. Repeating the same idempotency key and identical body returns the
-  original result without another release or audit row; reuse with a different
-  body returns `409`.
+  The server authenticates and authorizes `queue:reconcile`, validates the
+  request shape and exact printer/attempt binding, and then requires
+  `physicalCheckConfirmed: true`. Missing headers return `428`; malformed
+  headers/body return `400`; missing permission returns `403` without exposing
+  claim data; a stale ETag returns `412`; and a no-longer-indeterminate attempt
+  returns `409`. The idempotency key is scoped to the authenticated actor,
+  route, printer, and request fingerprint, stored with the original status,
+  headers, and body for the documented audit-retention period. An exact replay
+  is resolved after authentication but before current-state and ETag checks,
+  returning the original result without another release or audit row. Reusing
+  the key with a different body or scope returns `409`; a new key must pass
+  the `If-Match` check. A successful new request returns `200` with the
+  resulting reconciliation resource and `recoveryAuditId`.
 - `GET /api/dispatch/{printerId}/reconciliation/audit/{auditId}` returns the
   authorized, redacted immutable recovery-evidence record, including
   `auditId`, `printerId`, `jobId`, `dispatchAttemptId`, `claimRevision`,
   `priorOutcome`, `actorId`, `actorRecordedAtUtc`, `serverRecordedAtUtc`,
   `assertionVersion`, `note`, `correlationId`, and string `transition`. The
-  endpoint never returns raw backend payloads or credentials and returns `404`
-  when the caller is not authorized to observe the record.
+  endpoint requires `queue:reconcile` and the same printer-resource scope used
+  for reconciliation. It returns `404` for a missing record or any caller who
+  lacks that permission/scope, so existence is not disclosed. Authorized
+  responses expose only the listed identifiers, timestamps, enum, bounded
+  assertion version, bounded operator note, and correlation ID; backend
+  payloads, credentials, free-form exception text, and unrelated user data are
+  always redacted.
 
 All payloads use camelCase and string enum values. SignalR may notify clients
 that this resource changed, but refresh of the GET endpoint is authoritative
