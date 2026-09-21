@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import type { Mock } from 'vitest';
 import {
   harvestJob,
   listParts,
@@ -7,17 +8,32 @@ import {
   generateHarvestOperationKey,
   HarvestServiceError,
 } from '../partsHarvest';
+import type { HarvestJobRequest } from '@/types/parts-inventory';
 
 interface StubClient {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
+  get: Mock<(url: string, config?: { params?: unknown }) => Promise<{ data: unknown }>>;
+  post: Mock<(url: string, data: HarvestJobRequest) => Promise<{ data: unknown }>>;
 }
 
 function makeStubClient(): StubClient {
   return {
-    get: vi.fn(),
-    post: vi.fn(),
+    get: vi.fn<(url: string, config?: { params?: unknown }) => Promise<{ data: unknown }>>(),
+    post: vi.fn<(url: string, data: HarvestJobRequest) => Promise<{ data: unknown }>>(),
   };
+}
+
+function configureStub(stub: StubClient): void {
+  configurePartsHarvestClient({
+    get: async <T = unknown>(url: string, config?: { params?: unknown }) => {
+      const response = await stub.get(url, config);
+      return { data: response.data as T };
+    },
+    post: async <T = unknown>(url: string, data?: unknown) => {
+      if (data === undefined) throw new Error('Harvest requests require a body.');
+      const response = await stub.post(url, data as HarvestJobRequest);
+      return { data: response.data as T };
+    },
+  });
 }
 
 /**
@@ -61,7 +77,7 @@ describe('partsHarvest service', () => {
 
   beforeEach(() => {
     stub = makeStubClient();
-    configurePartsHarvestClient(stub);
+    configureStub(stub);
   });
 
   describe('toHarvestError', () => {
