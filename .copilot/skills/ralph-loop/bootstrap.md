@@ -8,8 +8,9 @@ description: "Deployment contract for two host-bound instances of the shared Ral
 Deploy only after the reviewed policy is merged into `development`. Save the same
 short prompt below in both existing automations, changing only the four bindings.
 Do not enable either schedule as part of this migration. Keep cron, workspace
-type, model and all other workflow settings unchanged. Windows is not live-verified
-and its checked-in profile intentionally blocks execution until reconciled.
+type, model and all other workflow settings unchanged. Windows has been exported
+and verified against its native automation identity, admission ledger and paths;
+its schedule stays disabled until the owner separately authorizes enabling it.
 
 ```text
 Run one PrintFarmer Ralph round, then report and exit. No polling or sleep.
