@@ -17,9 +17,9 @@ export const MaintenanceCostAnalysis = React.memo(function MaintenanceCostAnalys
       ) : (
         <ResponsiveContainer width="100%" height="90%">
           <PieChart>
-            <Pie data={data} dataKey="cost" nameKey="component" cx="50%" cy="50%" outerRadius={100} label>
-              {data.map((entry, idx: number) => (
-                <Cell key={`cell-${entry.component || idx}`} fill={COLORS[idx % COLORS.length]} />
+            <Pie data={data ?? []} dataKey="cost" nameKey="component" cx="50%" cy="50%" outerRadius={100} label>
+              {(data ?? []).map((entry, idx: number) => (
+                <Cell key={`cell-${entry.month || idx}`} fill={COLORS[idx % COLORS.length]} />
               ))}
             </Pie>
             <Tooltip />

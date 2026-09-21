@@ -353,7 +353,7 @@ export function Layout() {
   const { user, logout, isAuthenticated, hasRole, hasPermission } = useAuth();
   const { pinnedIds: adminPinnedIds } = useAdminNavPins();
   const { isSlicerAvailable } = useSlicer();
-  const canRole = useCallback((role: string) => typeof hasRole === 'function' ? hasRole(role) : user?.role === role, [hasRole, user?.role]);
+  const canRole = useCallback((role: string) => typeof hasRole === 'function' ? hasRole(role) : user?.roles.includes(role) ?? false, [hasRole, user?.roles]);
   const canPermission = useCallback((resource: string, action: string) => typeof hasPermission === 'function' ? hasPermission(resource, action) : true, [hasPermission]);
   const { data: capabilities } = useSystemCapabilities();
 

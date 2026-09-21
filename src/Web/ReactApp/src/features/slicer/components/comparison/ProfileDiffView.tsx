@@ -159,7 +159,7 @@ export function ProfileDiffView({
           <Toggle
             id="show-differences-only"
             checked={showOnlyDifferences}
-            onChange={setShowOnlyDifferences}
+            onChange={(event) => setShowOnlyDifferences(event.target.checked)}
           />
         </div>
       </div>

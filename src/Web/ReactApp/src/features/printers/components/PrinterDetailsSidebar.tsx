@@ -645,7 +645,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
-  const handleHotendTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleHotendTempKeyDown = async (e: React.KeyboardEvent) => {
     if (e.key !== 'Enter' || hotendTemp === '' || temperatureActionPending) return;
 
     setTemperatureActionPending(true);
@@ -666,7 +666,7 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
     }
   };
 
-  const handleBedTempKeyDown = async (e: React.KeyboardEvent<HTMLInputElement>) => {
+  const handleBedTempKeyDown = async (e: React.KeyboardEvent) => {
     if (e.key !== 'Enter' || bedTemp === '' || temperatureActionPending) return;
 
     setTemperatureActionPending(true);
@@ -1270,10 +1270,10 @@ export function PrinterDetailsSidebar({ printerId, printer: printerProp, backend
             temperatureActionPending={temperatureActionPending}
             canSetTemperatures={canSetTemperaturesNow}
             canCooldown={canCooldownNow}
-            onHotendTempChange={setHotendTemp}
-            onBedTempChange={setBedTemp}
-            onHotendTempKeyDown={handleHotendTempKeyDown}
-            onBedTempKeyDown={handleBedTempKeyDown}
+            onHotendTempChange={(value) => setHotendTemp(value === '' ? '' : Number(value))}
+            onBedTempChange={(value) => setBedTemp(value === '' ? '' : Number(value))}
+            onHotendTempKeyDown={(event) => { void handleHotendTempKeyDown(event); }}
+            onBedTempKeyDown={(event) => { void handleBedTempKeyDown(event); }}
             onApplyPreset={(preset) => {
               void handleApplyPreset(preset);
             }}

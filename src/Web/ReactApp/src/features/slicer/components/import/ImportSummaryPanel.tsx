@@ -1,6 +1,6 @@
 import clsx from 'clsx';
 import { Button, Card, Badge, Spinner, ProgressBar } from '@/common/components/ui';
-import { CheckCircleIcon, AlertTriangleIcon } from '@/common/components/icons/MdiIcons';
+import { CheckCircleIcon, AlertIcon } from '@/common/components/icons/MdiIcons';
 
 export interface ImportSummaryPanelProps {
   totalProfiles: number;
@@ -152,7 +152,7 @@ export function ImportSummaryPanel({
           {/* Status messages */}
           {unresolvedConflicts > 0 && !isImporting && (
             <div className="flex items-start gap-2 p-3 rounded-lg bg-pf-warning/10 border border-pf-warning/20">
-              <AlertTriangleIcon className="w-5 h-5 text-pf-warning flex-shrink-0 mt-0.5" />
+              <AlertIcon className="w-5 h-5 text-pf-warning flex-shrink-0 mt-0.5" />
               <div className="text-sm text-pf-text-primary">
                 <strong className="font-medium">
                   {unresolvedConflicts} unresolved conflict{unresolvedConflicts !== 1 ? 's' : ''}

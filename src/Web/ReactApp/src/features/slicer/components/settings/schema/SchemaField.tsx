@@ -34,10 +34,9 @@ export function SchemaField({
         <SettingRow
           type="checkbox"
           label={field.label}
-          value={Boolean(displayValue)}
-          onChange={handleChange}
+          checked={Boolean(displayValue)}
+          onChange={(checked) => handleChange(checked)}
           disabled={disabled}
-          unit={field.unit}
           isModified={isModified}
           onReset={onReset}
         />
@@ -50,9 +49,9 @@ export function SchemaField({
           type="slider"
           label={field.label}
           value={Number(displayValue) || 0}
-          onChange={handleChange}
-          min={field.min}
-          max={field.max}
+          onChange={(nextValue) => handleChange(nextValue)}
+          min={field.min ?? 0}
+          max={field.max ?? 100}
           step={field.step ?? (field.fieldType === 'integer' ? 1 : 0.1)}
           disabled={disabled}
           unit={field.unit}
@@ -67,10 +66,9 @@ export function SchemaField({
           type="select"
           label={field.label}
           value={String(displayValue)}
-          onChange={handleChange}
+          onChange={(nextValue) => handleChange(nextValue)}
           options={field.options?.map(opt => ({ value: opt.value, label: opt.label })) ?? []}
           disabled={disabled}
-          unit={field.unit}
           isModified={isModified}
           onReset={onReset}
         />
@@ -83,9 +81,8 @@ export function SchemaField({
           type="text"
           label={field.label}
           value={String(displayValue)}
-          onChange={handleChange}
+          onChange={(nextValue) => handleChange(nextValue)}
           disabled={disabled}
-          unit={field.unit}
           isModified={isModified}
           onReset={onReset}
         />

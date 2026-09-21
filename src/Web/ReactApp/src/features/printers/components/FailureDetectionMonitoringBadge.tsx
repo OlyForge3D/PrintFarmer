@@ -58,12 +58,13 @@ export function FailureDetectionMonitoringBadge({
   const resolvedPrinterName = effectiveStatus?.printerName ?? printerName;
 
   // Color mapping based on state
-  const iconColorClass = {
-    monitoring: 'text-pf-success',
-    checking: 'text-pf-text-secondary',
-    disabled: 'text-pf-text-tertiary',
-    error: 'text-pf-error',
-  }[displayState] || 'text-pf-text-secondary';
+  const iconColorClass = displayState === 'monitoring'
+    ? 'text-pf-success'
+    : displayState === 'checking'
+      ? 'text-pf-text-secondary'
+      : displayState === 'disabled'
+        ? 'text-pf-text-tertiary'
+        : 'text-pf-error';
 
   return (
     <>

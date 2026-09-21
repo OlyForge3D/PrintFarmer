@@ -268,12 +268,12 @@ describe('navPreferences', () => {
 describe('nav preference change subscriptions', () => {
   const storageKey = getNavPreferencesStorageKey('user-1');
   let unsubscribe: () => void;
-  let onChange: ReturnType<typeof vi.fn>;
+  let onChange: () => void;
 
   beforeEach(() => {
     localStorage.clear();
     onChange = vi.fn();
-    unsubscribe = subscribeToNavPreferences(storageKey, onChange);
+    unsubscribe = subscribeToNavPreferences(storageKey, () => onChange());
   });
 
   afterEach(() => {

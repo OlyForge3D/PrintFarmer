@@ -60,14 +60,14 @@ vi.mock('@/features/admin/pages/SettingsPage', () => ({
         </div>
         <button
           data-testid="make-dirty-btn"
-          onClick={() =>
-            saveRegistry?.registerSection({
+          onClick={() => {
+            if (saveRegistry?.registerSection) saveRegistry.registerSection({
               id: 'test-section',
               name: 'Test Section',
               isDirty: true,
               onSave: async () => {},
-            })
-          }
+            });
+          }}
         >
           Make Dirty
         </button>
@@ -95,14 +95,14 @@ vi.mock('@/features/admin/pages/RoleManagementPage', () => ({
         Roles editor
         <button
           data-testid="roles-make-dirty-btn"
-          onClick={() =>
-            saveRegistry?.registerSection({
+          onClick={() => {
+            if (saveRegistry?.registerSection) saveRegistry.registerSection({
               id: 'roles-matrix-admin',
               name: 'Role Permissions',
               isDirty: true,
               onSave: async () => {},
-            })
-          }
+            });
+          }}
         >
           Make Roles Dirty
         </button>

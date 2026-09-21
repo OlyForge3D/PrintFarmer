@@ -35,9 +35,9 @@ export const DurationTrendChart = React.memo(function DurationTrendChart({ data,
           <XAxis dataKey="date" tick={{ fontSize: 12 }} />
           <YAxis tickFormatter={(v: number) => `${Math.round(v)}m`} />
           <Tooltip
-            formatter={(value: number, name: string) => [
-              `${value.toFixed(1)} min`,
-              name,
+            formatter={(value, name) => [
+              `${Number(value).toFixed(1)} min`,
+              String(name),
             ]}
           />
           <Legend />

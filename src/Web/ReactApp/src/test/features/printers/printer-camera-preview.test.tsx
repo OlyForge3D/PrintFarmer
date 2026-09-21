@@ -59,7 +59,7 @@ describe('PrinterCameraPreview', () => {
       };
       observer.observe = vi.fn();
       observer.unobserve = vi.fn();
-      observer.disconnect = vi.fn();
+      observer.disconnect = vi.fn(() => undefined);
       observer.takeRecords = vi.fn(() => []);
       observer.root = null;
       observer.rootMargin = '';
