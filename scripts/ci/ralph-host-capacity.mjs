@@ -68,7 +68,7 @@ export function assessHostCapacity({ host, inventory, candidate, now = Date.now(
     counts[group.category]++;
   }
   const category = classifyWork(candidate);
-  const existing = candidate && groups.find((group) =>
+  const existing = groups.find((group) =>
     (candidate.sessionId && group.aliases.has(`session:${candidate.sessionId}`)) ||
     (candidate.jobId && group.aliases.has(`job:${candidate.jobId}`)));
   if (existing && (!existing.hosts.has(host) || existing.category !== category)) {

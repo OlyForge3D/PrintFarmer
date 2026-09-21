@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { confirmPolicy, help, parseArgs, runCommand, setup } from '../../setup-ralph-macos.mjs';
+import { confirmPolicy, help, parseArgs, runCommand, setup, validatePolicy } from '../../setup-ralph-macos.mjs';
 import { resolveAutomationHost } from '../ralph-automation.mjs';
 
 const exec = promisify(execFile);
@@ -309,8 +309,22 @@ test('command wrapper suppresses raw errors and disables resolver GitHub env wri
   await assert.rejects(() => runCommand(process.execPath, ['-e', 'console.error("private-token");process.exit(1)']),
     (error) => !error.message.includes('private-token') && error.message.includes('Raw output suppressed'));
   await assert.rejects(() => runCommand(path.join(root, 'missing'), []), /not installed/);
+  const literal = 'value with spaces; $(printf injected) & --option';
+  assert.equal(await runCommand(process.execPath, ['-e', 'process.stdout.write(process.argv[1])', literal]), literal);
 });
 
+test('programmatic setup rejects unsafe subprocess identities even without CLI parsing', async (t) => {
+  const f = await fixture(t);
+  for (const approved of ['--help', 'HEAD; whoami', 'a'.repeat(40) + '\n']) {
+    await assert.rejects(validatePolicy({ ...f.options, 'approved-policy': approved }, f.command, f.approved), /subprocess inputs/);
+  }
+  assert.equal(f.calls.length, 0);
+  const options = await nativeOptions(f);
+  for (const control of ['--help', 'fixture/repo;whoami', 'fixture/repo\n', 'fixture/repo/extra']) {
+    await assert.rejects(f.run({ ...options, 'control-repo': control }), /repository API input/);
+  }
+  assert.equal(f.calls.some((call) => call.tool === 'gh' && call.args.at(-1)?.startsWith('repos/fixture/')), false);
+});
 test('wrong origins, modified/staged/ignored/untracked controlled files and unrelated approved commit fail closed', async (t) => {
   const f = await fixture(t);
   for (const origin of ['https://github.com/attacker/PrintFarmer.git', 'https://github.com/OlyForge3D/PrintFarmer.git.evil',

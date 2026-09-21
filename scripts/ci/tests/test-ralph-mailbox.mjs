@@ -526,12 +526,11 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
     historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
   } }, dependencies);
   await publishEvent(control, currentEvent('begin-round', 'coordinator', { invocationDigest: digest('coordinator') }), f.api);
-  let state = (await readMailbox(control, f.api)).state;
   await publishEvent(control, currentEvent('reserve', 'coordinator', {
     assignmentId: 'assignment-1', workerId: 'mini', generation: 1, task: taskFromEvidence(evidence()),
     eligibilityDigest: digest('eligibility'), policySha: config.approvedPolicy,
   }), f.api);
-  state = (await readMailbox(control, f.api)).state;
+  const state = (await readMailbox(control, f.api)).state;
   await publishEvent(control, currentEvent('publish', 'coordinator', binding(state, 1)), f.api);
   const start = { ...request, id: 'native-start', type: 'receipt',
     data: { ...binding(state, 1), status: 'starting', correlation: 'correlation-1' },

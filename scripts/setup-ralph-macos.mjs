@@ -171,7 +171,7 @@ export async function runCommand(tool, args, { cwd, env = {} } = {}) {
   delete environment.BASH_ENV;
   delete environment.ENV;
   try {
-    return (await exec(tool, args, { cwd, env: environment, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 })).stdout.trim();
+    return (await exec(tool, args, { cwd, env: environment, shell: false, encoding: 'utf8', timeout: 120_000, maxBuffer: 16 * 1024 * 1024 })).stdout.trim();
   } catch (error) {
     // CLI errors can contain remote URLs or authentication material.
     throw new Error(`${tool} failed (${error.code === 'ENOENT' ? 'not installed/on PATH' : 'nonzero exit or timeout'}). Raw output suppressed.`);
@@ -240,6 +240,7 @@ export async function validatePolicy(options, command, development) {
   const git = (args) => command('git', args, { cwd });
   const api = async (endpoint) => JSON.parse(await command('gh', ['api', '--hostname', 'github.com', `repos/${repository}/${endpoint}`]));
   const approved = options['approved-policy'];
+  if (typeof approved !== 'string' || approved.length !== 40 || !shaPattern.test(approved)) throw new Error('Policy subprocess inputs require a full lowercase Git commit SHA.');
   const actualOrigin = await git(['remote', 'get-url', 'origin']);
   if (![origin, origin.slice(0, -4), `git@github.com:${repository}.git`, `git@github.com:${repository}`].includes(actualOrigin)) {
     throw new Error('Wrong origin: require exactly OlyForge3D/PrintFarmer on github.com (HTTPS or git@ SSH).');
@@ -567,8 +568,12 @@ export async function setup(options, {
     }
     const worker = registry.workers.find((entry) => entry.workerId === options['worker-id']);
     if (!worker || worker.host !== (platform === 'darwin' ? 'macos-mobile' : 'windows-general')) throw new Error('Worker role must match this actual setup platform.');
-    const metadata = JSON.parse(await command('gh', ['api', '--hostname', 'github.com', `repos/${options['control-repo']}`]));
-    if (metadata.full_name !== options['control-repo'] || metadata.private !== true || metadata.visibility !== 'private' ||
+    const controlRepository = options['control-repo'];
+    if (typeof controlRepository !== 'string' || controlRepository.trim() !== controlRepository ||
+        !/^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/.test(controlRepository) ||
+        controlRepository.toLowerCase() === repository.toLowerCase()) throw new Error('Invalid private control repository API input.');
+    const metadata = JSON.parse(await command('gh', ['api', '--hostname', 'github.com', `repos/${controlRepository}`]));
+    if (metadata.full_name !== controlRepository || metadata.private !== true || metadata.visibility !== 'private' ||
         metadata.archived !== false || metadata.disabled !== false || metadata.permissions?.push !== true ||
         !Number.isSafeInteger(metadata.id) || metadata.id < 1) throw new Error('Control repository must be exact, PRIVATE, active and writable.');
     deployment = { worker, control: {
