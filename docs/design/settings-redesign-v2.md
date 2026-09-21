@@ -81,7 +81,7 @@ SettingsShell
 | File | Changes |
 |------|---------|
 | `types.ts` | Add `subPages` array to each tab definition |
-| `SettingsShell.tsx` | New layout using sidebar + sub-tabs instead of `SettingsTabStrip` |
+| `SettingsShell.tsx` | New layout using sidebar + sub-tabs |
 
 ---
 
@@ -345,7 +345,6 @@ src/Web/ReactApp/src/features/settings/
 ├── components/
 │   ├── SettingsSidebar.tsx      ← NEW
 │   ├── SettingsSubTabs.tsx      ← NEW
-│   ├── SettingsTabStrip.tsx     (keep for reference, unused after migration)
 │   └── SettingsSearch.tsx       (unchanged)
 ├── pages/
 │   └── SettingsShell.tsx        ← MODIFIED
