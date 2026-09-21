@@ -10,7 +10,13 @@ vi.mock('@/services/slicerProfilesService', () => ({
     getLibraryHierarchy: vi.fn(),
     getProcessProfilesForMachines: vi.fn(() => Promise.resolve([])),
     getFilamentProfilesForMachines: vi.fn(() => Promise.resolve([])),
-    listCustomProfiles: vi.fn(() => Promise.resolve({ profiles: [], totalCount: 0 })),
+    listCustomProfiles: vi.fn(() => Promise.resolve({
+      profiles: [],
+      totalCount: 0,
+      machineProfileCount: 0,
+      processProfileCount: 0,
+      filamentProfileCount: 0,
+    })),
     importProfile: vi.fn(),
     bulkDelete: vi.fn(() => Promise.resolve({
       machineProfilesDeleted: 0,
@@ -104,6 +110,7 @@ const customProfile = {
   id: 'custom-1',
   name: 'My Micron process',
   profileType: 'process' as const,
+  isSystem: false,
   description: 'User owned',
   createdAt: '2026-08-01T00:00:00Z',
   updatedAt: '2026-08-02T00:00:00Z',
@@ -146,7 +153,13 @@ describe('SlicerProfilesPage worker-backed library', () => {
     vi.mocked(slicerProfilesService.getLibraryHierarchy).mockResolvedValue(hierarchyFixture);
     vi.mocked(slicerProfilesService.getProcessProfilesForMachines).mockResolvedValue([]);
     vi.mocked(slicerProfilesService.getFilamentProfilesForMachines).mockResolvedValue([]);
-    vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({ profiles: [], totalCount: 0 });
+    vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
+      profiles: [],
+      totalCount: 0,
+      machineProfileCount: 0,
+      processProfileCount: 0,
+      filamentProfileCount: 0,
+    });
   });
 
   it('pins the admin library request to all scope and renders its attributed manufacturer', async () => {
@@ -236,6 +249,9 @@ describe('SlicerProfilesPage worker-backed library', () => {
     vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
       profiles: [customProfile],
       totalCount: 1,
+      machineProfileCount: 0,
+      processProfileCount: 1,
+      filamentProfileCount: 0,
     });
     const user = userEvent.setup();
     const { queryClient } = renderPage();
@@ -263,6 +279,9 @@ describe('SlicerProfilesPage worker-backed library', () => {
     vi.mocked(slicerProfilesService.listCustomProfiles).mockResolvedValue({
       profiles: [customProfile],
       totalCount: 1,
+      machineProfileCount: 0,
+      processProfileCount: 1,
+      filamentProfileCount: 0,
     });
     const user = userEvent.setup();
     renderPage();
