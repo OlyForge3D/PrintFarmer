@@ -23,6 +23,7 @@
       "scope": "general",
       "workflowId": "5534e4be-4a12-42b2-b56d-6c2a31a52d6e",
       "admission": "windows-shared",
+      "maxLocalSessions": 5,
       "newRemoteMobileDispatch": false
     }
   }
