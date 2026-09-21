@@ -103,4 +103,12 @@ test('held PR owners still occupy capacity while their work remains live', () =>
   const result = planPrRecovery({ pulls, ownership, host: 'macos-mobile', scope: 'mixed', capacity: inventory(), now });
   assert.deepEqual(result.ready, []);
   assert.match(result.blocked.find((entry) => entry.pr === 2).reason, /capacity/);
+  for (const changed of [{ host: 'typo-host' }, { executionHost: 'typo-host' }]) {
+    const malformed = planPrRecovery({
+      pulls, ownership: { ...ownership, 1: { ...ownership[1], ...changed } },
+      host: 'macos-mobile', scope: 'mixed', capacity: inventory(), now,
+    });
+    assert.deepEqual(malformed.ready, []);
+    for (const entry of malformed.blocked) assert.match(entry.reason, /PR #1 has invalid ownership host/);
+  }
 });

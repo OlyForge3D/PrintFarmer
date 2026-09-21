@@ -134,8 +134,9 @@ delivery:
    only the trusted worker may emit `SUPERVISOR_LOST` after the launch lease and fenced process
    have both ended.
 
-New Windows `reserve-local` eligibility must include `scope:"general"` and
-`classificationComplete:true` backed by the current paths/labels/acceptance
+New Windows `reserve-local` eligibility must include `scope:"general"`,
+`classificationComplete:true`, `filesComplete:true` and a nonempty normalized
+repository-relative `files` array backed by the current paths/labels/acceptance
 criteria. Missing/unknown/mixed/mobile evidence rejects admission; mobile path
 or acceptance signals cannot be relabelled general. Existing-session accounting
 and terminal recovery remain available to retain historical ownership.

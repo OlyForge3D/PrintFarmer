@@ -1,4 +1,7 @@
+import { assessHostCapacity, classifyWork } from './ralph-host-capacity.mjs';
+
 const priorities = { revision: 0, ci: 1, review: 2, integration: 3 };
+const knownHosts = new Set(['macos-mobile', 'windows-general']);
 const holds = new Set(['status:on-hold', 'status:blocked', 'blocked', 'status:wontfix', 'do-not-merge']);
 const shaPattern = /^[0-9a-f]{40}$/i;
 
@@ -50,6 +53,7 @@ export function planPrRecovery({ pulls, ownership, host, scope, capacity, now = 
   const deferred = [];
   const occupied = [];
   const liveCapacity = [];
+  const invalidOwnership = [];
   let unknownRemoteExecution = false;
   for (const pull of pulls) {
     requirePull(pull);
@@ -57,6 +61,14 @@ export function planPrRecovery({ pulls, ownership, host, scope, capacity, now = 
     seen.add(pull.number);
     if (pull.state !== 'open' || !pull.labels.includes('squad')) continue;
     const owner = ownership[pull.number];
+    if (owner && ((owner.host !== undefined && !knownHosts.has(owner.host)) ||
+        (owner.executionHost !== undefined && !knownHosts.has(owner.executionHost)))) {
+      const reason = `PR #${pull.number} has invalid ownership host/executionHost; reconcile its execution placement before admitting work.`;
+      invalidOwnership.push(reason);
+      blocked.push({ pr: pull.number, headSha: pull.headSha, reason });
+      occupied.push(pull);
+      continue;
+    }
     const state = ownershipState(owner, host, now);
     const category = classifyWork(pull);
     if (state === 'live') {
@@ -92,6 +104,11 @@ export function planPrRecovery({ pulls, ownership, host, scope, capacity, now = 
     work: [...(capacity.work ?? []), ...liveCapacity],
   };
   for (const pull of queue) {
+    if (invalidOwnership.length) {
+      blocked.push({ pr: pull.number, headSha: pull.headSha, reason: invalidOwnership.join(' ') });
+      occupied.push(pull);
+      continue;
+    }
     if (!hasCompleteFiles(pull)) {
       blocked.push({ pr: pull.number, headSha: pull.headSha, reason: 'changed-file coverage incomplete' });
       occupied.push(pull);
@@ -136,4 +153,3 @@ export function planPrRecovery({ pulls, ownership, host, scope, capacity, now = 
   }
   return { ready, inFlight, blocked, deferred };
 }
-import { assessHostCapacity, classifyWork } from './ralph-host-capacity.mjs';

@@ -439,7 +439,10 @@ async function reserveJobInternal({ job, eligibility, mode = 'remote', now = new
   if (handoff && mode !== 'local') throw new RalphMacSshError('Only local handoffs may be accounted.', 'INVALID_REQUEST');
   if (!handoff && !prRecovery) assertFreshEligibility(eligibility, job);
   if (mode === 'local' && !handoff && !prRecovery &&
-      classifyWork({ ...eligibility, acceptanceCriteria: job.acceptanceCriteria }) !== 'general') {
+      (eligibility.filesComplete !== true || !Array.isArray(eligibility.files) || !eligibility.files.length ||
+        eligibility.files.some((file) => typeof file !== 'string' || !file || /[\\\x00-\x1f\x7f]/.test(file) ||
+          path.win32.isAbsolute(file) || file.split('/').some((part) => ['', '.', '..'].includes(part))) ||
+        classifyWork({ ...eligibility, acceptanceCriteria: job.acceptanceCriteria }) !== 'general')) {
     throw new RalphMacSshError('New Windows work requires complete general classification; mobile, mixed and unknown work is forbidden.', 'MOBILE_ADMISSION_DISABLED');
   }
   const immutableJob = prRecovery

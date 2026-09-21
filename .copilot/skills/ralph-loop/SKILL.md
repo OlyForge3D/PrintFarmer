@@ -25,7 +25,8 @@ The remaining sections are conditional reference, not a second issue-first loop.
 This scheduled workflow performs **one round and exits**: no sleep, polling, implementation,
 or worktree mutation. Ralph is a monitor. It may only update issue labels/comments, make an
 authorized safe merge, and refresh `development` as documented below. One session per issue,
-five implementation/analysis slots maximum; reviewers are task agents, not sessions.
+five implementation/analysis slots maximum per host: macOS 1 mobile + 4 general,
+Windows 0 mobile + 5 general, no borrowing; reviewers are task agents, not sessions.
 
 Before every dispatch, claim, message, review decision, or merge, fetch the affected live
 issue/PR again. Never treat cached data as authorization or permission to mutate GitHub.

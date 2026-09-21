@@ -489,7 +489,8 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   ]);
   for (const reference of [
     'implementation-pre-pr.md', 'session-terminal-contract.md', 'pr-merge.md',
-    'one round and exits', 'five implementation/analysis slots maximum',
+    'one round and exits', 'five implementation/analysis slots maximum per host: macOS 1 mobile + 4 general',
+    'Windows 0 mobile + 5 general, no borrowing',
     'Windows never starts mobile work, locally or through SSH',
     '1-mobile + 4-general caps',
     'Before every dispatch, claim, message, review decision, or merge, fetch',

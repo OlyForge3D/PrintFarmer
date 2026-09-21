@@ -148,6 +148,8 @@ test('native packages stage coordinator and Windows consumer with distinct roles
     assert.match(settings.name, new RegExp(role));
     const handoff = await readFile(path.join(path.dirname(f.options['host-config']), 'app-native-handoff.txt'), 'utf8');
     assert.match(handoff, /attestations are prerequisites for\ninitialization, not permission to write the queue/);
+    assert.match(handoff, /automationWorkflowIds in EACH mini package/);
+    assert.ok(result.activationBlockers.some((blocker) => blocker.includes('automationWorkflowIds') && blocker.includes('both mini')));
     if (windows) assert.equal(f.calls.some((call) => ['xcode-select', 'xcodebuild', 'xcrun', 'bash', 'python3'].includes(call.tool)), false);
   }
 });

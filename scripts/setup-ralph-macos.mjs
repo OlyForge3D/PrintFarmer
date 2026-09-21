@@ -366,6 +366,9 @@ Use supported native tools ON THIS DEVICE to verify and save workflow-settings.j
 to the existing workflow ${workflow}, always enabled:false, and read it back.
 Verify project/environment/worktree bindings from actual native app records.
 Coordinator and mini consumer MUST have distinct workflow IDs and private packages.
+Before first ready, natively verify BOTH mini workflow IDs and include both in
+automationWorkflowIds in EACH mini package. Windows lists only its verified local
+consumer. Never exempt ordinary work or supplied/unverified IDs from inventory.
 Coordinator performs global triage and reservation; consumers only assigned work.
 Control repository ${deployment.control.repository} numeric ID ${deployment.control.repositoryId}
 was observed PRIVATE. No repo/ref/permission changes were made. Read current
@@ -702,6 +705,7 @@ export async function setup(options, {
     activationBlockers: [
       'Native app bindings, sign-in/model availability and sole-owner/terminal handoff are not attested. Config remains verified:false; no preflight/round/schedule executed.',
       'Every round requires supported native proof of its CURRENT execution identity. Unavailable or mismatched identity blocks mutations; configuration strings are not proof.',
+      ...(deployment ? ['Before first ready, verify both mini coordinator/consumer workflow IDs natively and put both in automationWorkflowIds in each mini package; Windows lists only its verified local consumer. Unverified IDs cannot exempt sessions.'] : []),
       deployment
         ? 'Native role package staged only: private queue genesis, reconciled legacy authority migration and actual runtime invocation identity are required. No queue writes or activation performed.'
         : 'Legacy package cannot activate the new coordinator/consumer architecture. Use --role with explicit private control repository and worker registry.',

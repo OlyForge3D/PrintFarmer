@@ -28,7 +28,7 @@ const job = (id = 'job-2605') => ({
   model: 'gpt-5.6-terra', effort: 'medium', agent: 'squad',
   acceptanceCriteria: ['Run the targeted tests'], charter: 'AGENTS.md',
 });
-const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false, scope: 'general', classificationComplete: true };
+const eligibility = { repository: 'OlyForge3D/PrintFarmer', issue: 2605, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false, scope: 'general', classificationComplete: true, filesComplete: true, files: ['src/general.cs'] };
 
 const sessionEvidence = (sessionId, state = 'active', fence = 1) => ({
   repository: eligibility.repository, issue: eligibility.issue, sessionId, state,
@@ -1077,6 +1077,10 @@ test('new Windows-local issue admission rejects mobile evidence, mixed scope and
   for (const observation of [
     { ...eligibility, scope: 'mobile' }, { ...eligibility, scope: 'mixed' },
     { ...eligibility, classificationComplete: false }, { ...eligibility, files: ['mobile/App.swift'] },
+    { ...eligibility, filesComplete: false }, { ...eligibility, files: undefined },
+    { ...eligibility, files: [] }, { ...eligibility, files: ['../mobile/App.swift'] },
+    { ...eligibility, files: ['/src/general.cs'] }, { ...eligibility, files: ['C:\\src\\general.cs'] },
+    { ...eligibility, files: ['src//general.cs'] },
   ]) await assert.rejects(() => reserveLocalJob({ job: job(), eligibility: observation }, options()),
     (error) => error.code === 'MOBILE_ADMISSION_DISABLED');
   await assert.rejects(() => reserveLocalJob({

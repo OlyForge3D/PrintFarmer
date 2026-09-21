@@ -120,6 +120,9 @@ to the verified destination workflow, enabled:false; obtain any required approva
 Read it back and verify ID, project/environment, name, model, effort, cron,
 worktree mode, exact prompt and disabled state. Never invent a shell app API or
 modify internal app databases. The helper itself does not create/update workflows.
+Before first ready, natively verify both mini coordinator/consumer workflow IDs
+and include both in automationWorkflowIds in EACH mini host.json. On Windows
+list only its verified local consumer. Supplied IDs alone cannot exempt sessions.
 Continue the native handoff checks and retain evidence. verified:true needs
 separate explicit maintainer attestation; policy approval does not grant it.
 Keep migrationAttested:false until all old authorities and workers are reconciled.
