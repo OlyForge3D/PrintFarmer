@@ -56,7 +56,7 @@ const farmUserRole = {
   isSystemRole: true,
   isActive: true,
   permissions: [
-    { resource: 'printers', action: 'view', granted: true },
+    { resource: 'printers', action: 'view', granted: true, permission: 'printers:view' },
   ],
 } satisfies RoleDto;
 
@@ -68,12 +68,16 @@ const farmAdminRole = {
   isSystemRole: true,
   isActive: true,
   permissions: [
-    { resource: 'roles', action: 'admin', granted: true },
-    { resource: 'users', action: 'admin', granted: true },
+    { resource: 'roles', action: 'admin', granted: true, permission: 'roles:admin' },
+    { resource: 'users', action: 'admin', granted: true, permission: 'users:admin' },
   ],
 } satisfies RoleDto;
 
+<<<<<<< HEAD
 function createDeferred<T>() {
+=======
+function createDeferred<T = void>() {
+>>>>>>> 38edac3ca (test(web): align UserManagementPage admin fixtures (#2799))
   let resolve!: (value: T) => void;
   const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
@@ -171,7 +175,11 @@ describe('UserManagementPage shared admin patterns', () => {
       'user-1',
       expect.objectContaining({ firstName: 'Farm' }),
     );
+<<<<<<< HEAD
     update.resolve(testUser);
+=======
+    update.resolve({});
+>>>>>>> 38edac3ca (test(web): align UserManagementPage admin fixtures (#2799))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
@@ -197,7 +205,11 @@ describe('UserManagementPage shared admin patterns', () => {
     const [, payload] = vi.mocked(apiClient.updateUser).mock.calls[0];
     expect((payload as { roleIds: string[] }).roleIds).toHaveLength(2);
     expect(payload).not.toHaveProperty('roles');
+<<<<<<< HEAD
     update.resolve(testUser);
+=======
+    update.resolve({});
+>>>>>>> 38edac3ca (test(web): align UserManagementPage admin fixtures (#2799))
   });
 
   it('states that role changes revoke sessions before the user saves', async () => {
@@ -263,13 +275,21 @@ describe('UserManagementPage shared admin patterns', () => {
       'user-1',
       { accessibleAreas: ['printers', 'files'] },
     );
+<<<<<<< HEAD
     update.resolve(testUser);
+=======
+    update.resolve({});
+>>>>>>> 38edac3ca (test(web): align UserManagementPage admin fixtures (#2799))
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   it('marks the password form pristine after a confirmed password change', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
+<<<<<<< HEAD
     vi.mocked(apiClient.adminChangeUserPassword).mockResolvedValue({ message: 'User password changed successfully' });
+=======
+    vi.mocked(apiClient.adminChangeUserPassword).mockResolvedValue({ message: 'Password updated' });
+>>>>>>> 38edac3ca (test(web): align UserManagementPage admin fixtures (#2799))
     const user = userEvent.setup();
     render(<UserManagementPage />);
 
