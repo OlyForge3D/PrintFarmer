@@ -2,7 +2,12 @@ import '@testing-library/jest-dom';
 import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PrinterBackend, type Printer, type PrintJobObjectDto } from '@/types/api';
+import {
+  PrinterBackend,
+  type Printer,
+  type PrintJobObjectDto,
+  type PrintJobObjectListDto,
+} from '@/types/api';
 
 // Regression coverage for #1584: detailed print cards must show the same
 // level of print detail previously only available behind the "Open details
@@ -10,8 +15,20 @@ import { PrinterBackend, type Printer, type PrintJobObjectDto } from '@/types/ap
 
 const usePrinterDetailsMock = vi.hoisted(() => vi.fn(() => ({ data: undefined, isLoading: false })));
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
+interface PrintJobObjectsHookResult {
+  data: PrintJobObjectListDto | undefined;
+  isLoading: boolean;
+  isFetching: boolean;
+  refetch: () => void;
+}
+
 const usePrintJobObjectsMock = vi.hoisted(() =>
-  vi.fn(() => ({ data: undefined, isLoading: false, isFetching: false, refetch: vi.fn() }))
+  vi.fn<() => PrintJobObjectsHookResult>(() => ({
+    data: undefined,
+    isLoading: false,
+    isFetching: false,
+    refetch: vi.fn(),
+  }))
 );
 const useQueryMock = vi.hoisted(() => vi.fn());
 const excludePrintJobObjectMock = vi.hoisted(() => vi.fn());
@@ -317,7 +334,10 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
 
   it('renders the Print Objects section with a Skip action when object exclusion is supported and a print is active', async () => {
     usePrintJobObjectsMock.mockReturnValue({
-      data: { objects: [makeObject({ name: 'part_1' }), makeObject({ name: 'part_2', isCurrent: true })] },
+      data: {
+        printerId: 'printer-1',
+        objects: [makeObject({ name: 'part_1' }), makeObject({ name: 'part_2', isCurrent: true })],
+      },
       isLoading: false,
       isFetching: false,
       refetch: vi.fn(),
@@ -362,7 +382,7 @@ describe('DetailedPrinterCard inline details (#1584)', () => {
   // Statistics, Version, Objects, Move, Temperature, Materials.
   it('renders shared sections in the same relative order as the sidebar (#1698)', () => {
     usePrintJobObjectsMock.mockReturnValue({
-      data: { objects: [makeObject({ name: 'part_1' })] },
+      data: { printerId: 'printer-1', objects: [makeObject({ name: 'part_1' })] },
       isLoading: false,
       isFetching: false,
       refetch: vi.fn(),
