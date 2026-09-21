@@ -13,10 +13,11 @@ export const orcaProfilesService = {
    * Returns structured preview of all detected presets.
    */
   async previewBundle(bundleJson: string): Promise<OrcaBundlePreview> {
-    return client.post<OrcaBundlePreview>(
+    const response = await client.post<OrcaBundlePreview>(
       `/slicer/profiles/import/orca/preview`,
       { bundleJson }
     );
+    return response.data;
   },
 
   /**
@@ -26,10 +27,11 @@ export const orcaProfilesService = {
   async importBundle(
     request: ImportOrcaBundleRequest
   ): Promise<ImportOrcaBundleResult> {
-    return client.post<ImportOrcaBundleResult>(
+    const response = await client.post<ImportOrcaBundleResult>(
       `/slicer/profiles/import/orca`,
       request
     );
+    return response.data;
   },
 
   /**
@@ -37,10 +39,11 @@ export const orcaProfilesService = {
    * Returns a valid OrcaSlicer JSON bundle string.
    */
   async exportBundle(request?: ExportOrcaBundleRequest): Promise<string> {
-    return client.post<string>(
+    const response = await client.post<string>(
       `/slicer/profiles/export/orca`,
       request || {}
     );
+    return response.data;
   },
 
   /**
@@ -49,9 +52,10 @@ export const orcaProfilesService = {
   async mapBundlePresets(
     preview: OrcaBundlePreview
   ): Promise<OrcaBundleMappingResult> {
-    return client.post<OrcaBundleMappingResult>(
+    const response = await client.post<OrcaBundleMappingResult>(
       `/slicer/profiles/import/orca/map`,
       preview
     );
+    return response.data;
   },
 };

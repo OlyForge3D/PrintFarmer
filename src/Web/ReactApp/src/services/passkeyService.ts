@@ -55,7 +55,7 @@ export async function registerPasskey(): Promise<{ credentialId: string; newCred
 
   const attestationResponse = await startRegistration({ optionsJSON });
 
-  return request<{ credentialId: string }>({
+  return request<{ credentialId: string; newCredentialId: number }>({
     method: 'POST',
     url: '/auth/passkey/register/complete',
     data: attestationResponse,

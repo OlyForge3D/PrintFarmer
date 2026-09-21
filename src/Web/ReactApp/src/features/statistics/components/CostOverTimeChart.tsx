@@ -33,7 +33,10 @@ export const CostOverTimeChart = React.memo(function CostOverTimeChart({ data, i
           <CartesianGrid strokeDasharray="3 3" />
           <XAxis dataKey="date" tick={{ fontSize: 12 }} />
           <YAxis tickFormatter={(v: number) => `$${v}`} />
-          <Tooltip formatter={(value: number) => [`$${value.toFixed(2)}`, 'Cost']} />
+          <Tooltip formatter={(value) => {
+            const numericValue = typeof value === 'number' ? value : Number(value);
+            return [`$${numericValue.toFixed(2)}`, 'Cost'];
+          }} />
           <Bar dataKey="cost" fill="#4F8AFA" name="Cost" />
         </BarChart>
       </ResponsiveContainer>

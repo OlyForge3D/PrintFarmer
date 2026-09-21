@@ -3,6 +3,7 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { UserManagementPage } from '@/features/admin/pages/UserManagementPage';
 import { apiClient } from '@/services/api';
+import type { RoleDto } from '@/types/api';
 
 let hasUsersAdmin = true;
 
@@ -57,7 +58,7 @@ const farmUserRole = {
   permissions: [
     { resource: 'printers', action: 'view', granted: true },
   ],
-};
+} satisfies RoleDto;
 
 const farmAdminRole = {
   id: 'role-2',
@@ -70,11 +71,11 @@ const farmAdminRole = {
     { resource: 'roles', action: 'admin', granted: true },
     { resource: 'users', action: 'admin', granted: true },
   ],
-};
+} satisfies RoleDto;
 
-function createDeferred() {
-  let resolve!: () => void;
-  const promise = new Promise<void>((resolvePromise) => {
+function createDeferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((resolvePromise) => {
     resolve = resolvePromise;
   });
   return { promise, resolve };
@@ -152,7 +153,7 @@ describe('UserManagementPage shared admin patterns', () => {
 
   it('saves a dirty profile and clears its pristine baseline', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
-    const update = createDeferred();
+    const update = createDeferred<Record<string, unknown>>();
     vi.mocked(apiClient.updateUser).mockReturnValue(update.promise);
     const user = userEvent.setup();
     render(<UserManagementPage />);
@@ -170,7 +171,7 @@ describe('UserManagementPage shared admin patterns', () => {
       'user-1',
       expect.objectContaining({ firstName: 'Farm' }),
     );
-    update.resolve();
+    update.resolve(testUser);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
@@ -179,7 +180,7 @@ describe('UserManagementPage shared admin patterns', () => {
   it('assigns multiple roles via checkboxes and saves them as roleIds (not role names)', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
     vi.mocked(apiClient.getRoles).mockResolvedValue([farmUserRole, farmAdminRole]);
-    const update = createDeferred();
+    const update = createDeferred<Record<string, unknown>>();
     vi.mocked(apiClient.updateUser).mockReturnValue(update.promise);
     const user = userEvent.setup();
     render(<UserManagementPage />);
@@ -196,7 +197,7 @@ describe('UserManagementPage shared admin patterns', () => {
     const [, payload] = vi.mocked(apiClient.updateUser).mock.calls[0];
     expect((payload as { roleIds: string[] }).roleIds).toHaveLength(2);
     expect(payload).not.toHaveProperty('roles');
-    update.resolve();
+    update.resolve(testUser);
   });
 
   it('states that role changes revoke sessions before the user saves', async () => {
@@ -246,7 +247,7 @@ describe('UserManagementPage shared admin patterns', () => {
 
   it('saves permissions through an independent dirty-state path', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
-    const update = createDeferred();
+    const update = createDeferred<Record<string, unknown>>();
     vi.mocked(apiClient.updateUser).mockReturnValue(update.promise);
     const user = userEvent.setup();
     render(<UserManagementPage />);
@@ -262,13 +263,13 @@ describe('UserManagementPage shared admin patterns', () => {
       'user-1',
       { accessibleAreas: ['printers', 'files'] },
     );
-    update.resolve();
+    update.resolve(testUser);
     await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
   });
 
   it('marks the password form pristine after a confirmed password change', async () => {
     vi.mocked(apiClient.getUsers).mockResolvedValue([testUser]);
-    vi.mocked(apiClient.adminChangeUserPassword).mockResolvedValue(undefined);
+    vi.mocked(apiClient.adminChangeUserPassword).mockResolvedValue({ message: 'User password changed successfully' });
     const user = userEvent.setup();
     render(<UserManagementPage />);
 

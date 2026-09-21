@@ -1,4 +1,5 @@
 export type { PrinterControlMode, UserSettingsResponse, UpdateUserSettingsRequest } from '@/features/settings/types/index';
+export type { FarmSettingsResponse, UpdateFarmSettingsRequest } from '@/features/settings/types/index';
 
 export type SettingsScopeId = 'user' | 'system';
 
@@ -27,14 +28,6 @@ export interface SettingsScope {
   keywords: string[];
   defaultCategoryId: string;
   adminOnly?: boolean;
-}
-
-/** @deprecated Use SettingsCategory instead */
-export interface SettingsTab {
-  id: string;
-  label: string;
-  icon?: React.ReactNode;
-  keywords: string[];
 }
 
 export const SETTINGS_SCOPES: SettingsScope[] = [
@@ -161,18 +154,8 @@ export const SETTINGS_CATEGORIES_BY_SCOPE: Record<SettingsScopeId, SettingsCateg
   system: SETTINGS_CATEGORIES.filter((category) => category.scopeId === 'system'),
 };
 
-/** @deprecated Use SETTINGS_CATEGORIES instead */
-export const SETTINGS_TABS: SettingsTab[] = SETTINGS_CATEGORIES.map((category) => ({
-  id: category.id,
-  label: category.label,
-  keywords: category.keywords,
-}));
-
 export const DEFAULT_SCOPE: SettingsScopeId = 'user';
 export const DEFAULT_CATEGORY = getDefaultCategoryForScope(DEFAULT_SCOPE);
-
-/** @deprecated Use DEFAULT_CATEGORY instead */
-export const DEFAULT_TAB = DEFAULT_CATEGORY;
 
 export function isSettingsScope(value: string | null | undefined): value is SettingsScopeId {
   return value === 'user' || value === 'system';

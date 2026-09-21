@@ -98,7 +98,7 @@ export function SpoolsTab() {
     vendor: { key: 'vendor', type: 'string', defaultValue: '' },
     color: { key: 'color', type: 'string', defaultValue: '' },
     location: { key: 'location', type: 'string', defaultValue: '' },
-    showEmpty: { key: 'showEmpty', type: 'boolean', defaultValue: false },
+    showEmpty: { key: 'showEmpty', type: 'boolean', defaultValue: false as boolean },
     pageSize: { key: 'pageSize', type: 'number', defaultValue: 50, filterable: false },
     sortField: { key: 'sort', type: 'string', defaultValue: 'id', filterable: false },
     sortDir: { key: 'dir', type: 'string', defaultValue: 'asc', filterable: false },
@@ -915,7 +915,7 @@ export function SpoolsTab() {
                   <Checkbox
                     aria-label="Show empty spools"
                     checked={filters.showEmpty}
-                    onChange={e => setMany({ showEmpty: e.target.checked, page: 0 })}
+                    onChange={e => setMany({ showEmpty: Boolean(e.target.checked), page: 0 })}
                   />
                   Show empty
                 </label>

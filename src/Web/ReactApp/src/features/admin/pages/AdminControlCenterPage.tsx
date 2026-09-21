@@ -49,7 +49,7 @@ type MoveButtonDirection = 'up' | 'down';
 
 interface StatusPresentation {
   label: string;
-  Icon: (props: { className?: string; ariaLabel?: string }) => JSX.Element;
+  Icon: (props: { className?: string; ariaLabel?: string }) => React.ReactElement;
   iconClass: string;
   badgeVariant: 'success' | 'warning' | 'error' | 'default' | 'info';
   tileBorderClass: string;

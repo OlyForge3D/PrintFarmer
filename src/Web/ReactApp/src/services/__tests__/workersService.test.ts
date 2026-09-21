@@ -1,13 +1,47 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { AxiosHeaders, type AxiosResponse } from 'axios';
 import { workersService } from '../workersService';
 import { apiClient } from '../api';
-import { WorkerResponse } from '@/types/worker';
+import type { WorkerJobResponse } from '../workersService';
+import type { WorkerResponse } from '@/types/worker';
 
 vi.mock('../api', () => ({
   apiClient: {
     get: vi.fn(),
   },
 }));
+
+function createWorker(overrides: Partial<WorkerResponse> = {}): WorkerResponse {
+  return {
+    id: 'worker-1',
+    serviceId: 'service-1',
+    name: 'Worker 1',
+    capabilities: ['orcaslicer'],
+    status: 'Online',
+    freeSlots: 2,
+    totalSlots: 2,
+    activeJobs: 0,
+    completedJobs: 0,
+    failedJobs: 0,
+    lastHeartbeat: '2026-09-20T12:00:00Z',
+    registeredAt: '2026-09-01T12:00:00Z',
+    version: '1.0.0',
+    isDisabled: false,
+    ...overrides,
+  };
+}
+
+function createAxiosResponse<T>(data: T): AxiosResponse<T> {
+  return {
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: {
+      headers: new AxiosHeaders(),
+    },
+  };
+}
 
 describe('workersService', () => {
   beforeEach(() => {
@@ -17,16 +51,10 @@ describe('workersService', () => {
   describe('getAvailableWorkers', () => {
     it('should get available workers with default limit', async () => {
       const mockWorkers: WorkerResponse[] = [
-        {
-          id: 'worker-1',
-          name: 'Worker 1',
-          status: 'Available',
-          capabilities: ['orcaslicer'],
-          freeSlots: 2,
-        } as WorkerResponse,
+        createWorker({ status: 'Available' }),
       ];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorkers });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockWorkers));
 
       const result = await workersService.getAvailableWorkers();
 
@@ -37,7 +65,7 @@ describe('workersService', () => {
     it('should get available workers with custom limit', async () => {
       const mockWorkers: WorkerResponse[] = [];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorkers });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockWorkers));
 
       const result = await workersService.getAvailableWorkers(50);
 
@@ -49,23 +77,23 @@ describe('workersService', () => {
   describe('getAllWorkers', () => {
     it('should get all workers with default pagination', async () => {
       const mockWorkers: WorkerResponse[] = [
-        {
-          id: 'worker-1',
-          name: 'Worker 1',
+        createWorker({
           status: 'Busy',
           capabilities: ['orcaslicer', 'prusaslicer'],
           freeSlots: 0,
-        } as WorkerResponse,
-        {
+          activeJobs: 2,
+        }),
+        createWorker({
           id: 'worker-2',
+          serviceId: 'service-2',
           name: 'Worker 2',
           status: 'Available',
-          capabilities: ['orcaslicer'],
           freeSlots: 1,
-        } as WorkerResponse,
+          totalSlots: 1,
+        }),
       ];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorkers });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockWorkers));
 
       const result = await workersService.getAllWorkers();
 
@@ -77,7 +105,7 @@ describe('workersService', () => {
     it('should get all workers with custom pagination', async () => {
       const mockWorkers: WorkerResponse[] = [];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorkers });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockWorkers));
 
       const result = await workersService.getAllWorkers(50, 100);
 
@@ -89,16 +117,15 @@ describe('workersService', () => {
   describe('getWorkersByStatus', () => {
     it('should get workers by status', async () => {
       const mockWorkers: WorkerResponse[] = [
-        {
-          id: 'worker-1',
-          name: 'Worker 1',
+        createWorker({
           status: 'Available',
           capabilities: [],
           freeSlots: 3,
-        } as WorkerResponse,
+          totalSlots: 3,
+        }),
       ];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorkers });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockWorkers));
 
       const result = await workersService.getWorkersByStatus('Available');
 
@@ -109,7 +136,7 @@ describe('workersService', () => {
     it('should encode status with special characters', async () => {
       const mockWorkers: WorkerResponse[] = [];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorkers });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockWorkers));
 
       await workersService.getWorkersByStatus('Status With Spaces');
 
@@ -119,15 +146,16 @@ describe('workersService', () => {
 
   describe('getWorkerById', () => {
     it('should get worker by ID', async () => {
-      const mockWorker: WorkerResponse = {
+      const mockWorker = createWorker({
         id: 'worker-123',
+        serviceId: 'service-123',
         name: 'Worker 123',
         status: 'Busy',
-        capabilities: ['orcaslicer'],
         freeSlots: 0,
-      } as WorkerResponse;
+        activeJobs: 2,
+      });
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockWorker });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockWorker));
 
       const result = await workersService.getWorkerById('worker-123');
 
@@ -138,7 +166,7 @@ describe('workersService', () => {
 
   describe('getWorkerJobs', () => {
     it('should get active jobs for a worker', async () => {
-      const mockJobs = [
+      const mockJobs: WorkerJobResponse[] = [
         {
           jobId: 'job-1',
           modelFileName: 'model1.stl',
@@ -156,7 +184,7 @@ describe('workersService', () => {
         },
       ];
 
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockJobs });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse(mockJobs));
 
       const result = await workersService.getWorkerJobs('worker-123');
 
@@ -166,7 +194,7 @@ describe('workersService', () => {
     });
 
     it('should return empty array when worker has no jobs', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: [] });
+      vi.mocked(apiClient.get).mockResolvedValue(createAxiosResponse<WorkerJobResponse[]>([]));
 
       const result = await workersService.getWorkerJobs('worker-empty');
 
@@ -176,27 +204,25 @@ describe('workersService', () => {
 
   describe('filterWorkersByCapabilities', () => {
     const mockWorkers: WorkerResponse[] = [
-      {
-        id: 'worker-1',
-        name: 'Worker 1',
+      createWorker({
         status: 'Available',
         capabilities: ['orcaslicer', 'prusaslicer'],
         freeSlots: 1,
-      } as WorkerResponse,
-      {
+      }),
+      createWorker({
         id: 'worker-2',
+        serviceId: 'service-2',
         name: 'Worker 2',
         status: 'Available',
-        capabilities: ['orcaslicer'],
-        freeSlots: 2,
-      } as WorkerResponse,
-      {
+      }),
+      createWorker({
         id: 'worker-3',
+        serviceId: 'service-3',
         name: 'Worker 3',
         status: 'Available',
         capabilities: ['prusaslicer'],
         freeSlots: 1,
-      } as WorkerResponse,
+      }),
     ];
 
     it('should return all workers when no capabilities required', () => {

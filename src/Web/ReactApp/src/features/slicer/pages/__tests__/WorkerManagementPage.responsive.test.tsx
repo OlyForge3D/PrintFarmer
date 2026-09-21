@@ -103,14 +103,14 @@ describe('WorkerManagementPage responsive workers table', () => {
       </MemoryRouter>,
     );
     expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Back', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Back' }));
     await waitFor(() => expect(screen.queryByTestId('slice-jobs-panel')).not.toBeInTheDocument());
     expect(screen.getByTestId('worker-location')).toHaveTextContent(/^\/admin\/workers$/);
-    fireEvent.click(screen.getByRole('button', { name: 'Forward', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Forward' }));
     expect(await screen.findByTestId('slice-jobs-panel')).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Workers', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Workers' }));
     expect(screen.getByTestId('worker-location')).toHaveTextContent(/^\/admin\/workers$/);
-    fireEvent.click(screen.getByRole('button', { name: 'Jobs', exact: true }));
+    fireEvent.click(screen.getByRole('button', { name: 'Jobs' }));
     expect(screen.getByTestId('worker-location')).toHaveTextContent('/admin/workers?workerTab=jobs');
     expect(screen.getByTestId('worker-location')).not.toHaveTextContent('tab=operations');
   });

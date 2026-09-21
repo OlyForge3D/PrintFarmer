@@ -148,8 +148,16 @@ describe('SystemPulsePill', () => {
   it('shows the pill for a custom role granted only system_settings:admin (no farm_admin role)', () => {
     isFarmAdmin = false;
     useAuthMock.mockReturnValue({
+      user: null,
+      isAuthenticated: false,
+      isLoading: false,
+      login: vi.fn(),
+      loginWithPasskey: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn(),
       hasRole: () => false,
       hasPermission: (resource: string, action: string) => resource === 'system_settings' && action === 'admin',
+      error: null,
     } as ReturnType<typeof useAuth>);
 
     render(<SystemPulsePill />);

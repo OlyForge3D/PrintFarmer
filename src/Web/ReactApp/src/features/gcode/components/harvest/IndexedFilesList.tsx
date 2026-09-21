@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useCallback, useEffect, useState, useRef, forwardRef, useImperativeHandle } from 'react';
 import { apiClient } from '@/services/api';
 import { DiscoveredGcodeFileDto, HarvestFileStatus } from '@/types/api';
 import type { HarvestFileDiscoveredEvent, HarvestFileProgress, HarvestFileUpdatedEvent } from '@/services/harvest-signalr';

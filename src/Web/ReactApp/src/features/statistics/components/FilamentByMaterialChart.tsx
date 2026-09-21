@@ -38,15 +38,15 @@ export const FilamentByMaterialChart = React.memo(function FilamentByMaterialCha
             cx="50%"
             cy="50%"
             outerRadius={100}
-            label={({ material, grams }: { material: string; grams: number }) =>
-              `${material}: ${(grams / 1000).toFixed(2)}kg`
+            label={({ name, value }) =>
+              `${String(name)}: ${(Number(value) / 1000).toFixed(2)}kg`
             }
           >
             {data.map((entry, idx) => (
               <Cell key={`cell-${entry.material}`} fill={COLORS[idx % COLORS.length]} />
             ))}
           </Pie>
-          <Tooltip formatter={(value: number) => [`${(value / 1000).toFixed(2)} kg`, 'Usage']} />
+          <Tooltip formatter={(value) => [`${(Number(value) / 1000).toFixed(2)} kg`, 'Usage']} />
           <Legend />
         </PieChart>
       </ResponsiveContainer>

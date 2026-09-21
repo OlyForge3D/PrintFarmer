@@ -3,14 +3,28 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { SchedulingPage } from '@/features/scheduling/pages/SchedulingPage';
+import type { ApiError, ScheduledJob } from '@/types/api';
+
+interface ScheduledJobsHookResult {
+  data: ScheduledJob[];
+  isLoading: boolean;
+  error: ApiError | null;
+}
+
+interface ScheduleMutationHookResult {
+  mutate: (jobId: string) => void;
+  isPending: boolean;
+}
+
+const mocks = vi.hoisted(() => ({
+  useScheduledJobs: vi.fn<() => ScheduledJobsHookResult>(),
+  usePauseSchedule: vi.fn<() => ScheduleMutationHookResult>(),
+  useResumeSchedule: vi.fn<() => ScheduleMutationHookResult>(),
+  useCancelSchedule: vi.fn<() => ScheduleMutationHookResult>(),
+}));
 
 // Mock the API hooks
-vi.mock('@/common/hooks/useApi', () => ({
-  useScheduledJobs: vi.fn(),
-  usePauseSchedule: vi.fn(),
-  useResumeSchedule: vi.fn(),
-  useCancelSchedule: vi.fn(),
-}));
+vi.mock('@/common/hooks/useApi', () => mocks);
 
 // Mock DataTable to simplify testing
 vi.mock('@/common/components/ui', async () => {
@@ -57,9 +71,6 @@ vi.mock('@/features/scheduling/components/ScheduleModal', () => ({
   ),
 }));
 
-// Dynamic import after mocks
-const { useScheduledJobs, usePauseSchedule, useResumeSchedule, useCancelSchedule } = await import('@/common/hooks/useApi');
-
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
     defaultOptions: {
@@ -79,30 +90,57 @@ function TestWrapper({ children }: { children: React.ReactNode }) {
 describe('SchedulingPage', () => {
   const mockJobs = [
     {
+      id: 'schedule-1',
       jobId: 'job-1',
       jobName: 'Daily Print Job',
       printerName: 'Printer 1',
-      scheduledTime: '2025-01-15T10:00:00Z',
-      recurrence: 'daily',
-      status: 'active' as const,
+      printerId: 'printer-1',
+      scheduledStartTimeUtc: '2025-01-15T10:00:00Z',
+      scheduledLocalTime: '2025-01-15T10:00:00',
+      timeZone: 'UTC',
+      recurrencePattern: 'Daily',
+      recurrenceInterval: 1,
+      recurrenceEndTimeUtc: null,
+      isActive: true,
+      isPaused: false,
+      requiresOperatorReauthorization: false,
+      status: 'active',
     },
     {
+      id: 'schedule-2',
       jobId: 'job-2',
       jobName: 'Weekly Maintenance',
       printerName: 'Printer 2',
-      scheduledTime: '2025-01-20T14:00:00Z',
-      recurrence: 'weekly',
-      status: 'paused' as const,
+      printerId: 'printer-2',
+      scheduledStartTimeUtc: '2025-01-20T14:00:00Z',
+      scheduledLocalTime: '2025-01-20T14:00:00',
+      timeZone: 'UTC',
+      recurrencePattern: 'Weekly',
+      recurrenceInterval: 1,
+      recurrenceEndTimeUtc: null,
+      isActive: true,
+      isPaused: true,
+      requiresOperatorReauthorization: false,
+      status: 'paused',
     },
     {
+      id: 'schedule-3',
       jobId: 'job-3',
       jobName: 'One-time Job',
       printerName: 'Printer 1',
-      scheduledTime: '2025-01-25T08:00:00Z',
-      recurrence: null,
-      status: 'active' as const,
+      printerId: 'printer-1',
+      scheduledStartTimeUtc: '2025-01-25T08:00:00Z',
+      scheduledLocalTime: '2025-01-25T08:00:00',
+      timeZone: 'UTC',
+      recurrencePattern: null,
+      recurrenceInterval: 1,
+      recurrenceEndTimeUtc: null,
+      isActive: true,
+      isPaused: false,
+      requiresOperatorReauthorization: false,
+      status: 'active',
     },
-  ];
+  ] satisfies ScheduledJob[];
 
   const mockPauseMutation = {
     mutate: vi.fn(),
@@ -122,17 +160,17 @@ describe('SchedulingPage', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     
-    vi.mocked(usePauseSchedule).mockReturnValue(mockPauseMutation as ReturnType<typeof usePauseSchedule>);
-    vi.mocked(useResumeSchedule).mockReturnValue(mockResumeMutation as ReturnType<typeof useResumeSchedule>);
-    vi.mocked(useCancelSchedule).mockReturnValue(mockCancelMutation as ReturnType<typeof useCancelSchedule>);
+    mocks.usePauseSchedule.mockReturnValue(mockPauseMutation);
+    mocks.useResumeSchedule.mockReturnValue(mockResumeMutation);
+    mocks.useCancelSchedule.mockReturnValue(mockCancelMutation);
   });
 
   it('renders page with calendar and scheduled jobs table', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: mockJobs,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -147,11 +185,11 @@ describe('SchedulingPage', () => {
   });
 
   it('shows loading spinner while data is fetching', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: [],
       isLoading: true,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -166,11 +204,11 @@ describe('SchedulingPage', () => {
   });
 
   it('shows empty state when no scheduled jobs', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: [],
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -183,11 +221,11 @@ describe('SchedulingPage', () => {
   });
 
   it('displays scheduled jobs as badges on correct calendar dates', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: mockJobs,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -199,11 +237,11 @@ describe('SchedulingPage', () => {
   });
 
   it('clicking pause button calls pause mutation', async () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: mockJobs,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -219,11 +257,11 @@ describe('SchedulingPage', () => {
   });
 
   it('clicking resume button calls resume mutation', async () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: mockJobs,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -238,11 +276,11 @@ describe('SchedulingPage', () => {
   });
 
   it('clicking cancel button calls cancel mutation after confirmation', async () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: mockJobs,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -259,15 +297,27 @@ describe('SchedulingPage', () => {
     const jobsWithVariousStatuses = [
       { ...mockJobs[0], status: 'active' as const },
       { ...mockJobs[1], status: 'paused' as const },
-      { ...mockJobs[2], jobId: 'job-4', status: 'cancelled' as const },
-      { ...mockJobs[0], jobId: 'job-5', status: 'completed' as const },
+      {
+        ...mockJobs[2],
+        id: 'schedule-4',
+        jobId: 'job-4',
+        isActive: false,
+        status: 'completed' as const,
+      },
+      {
+        ...mockJobs[0],
+        id: 'schedule-5',
+        jobId: 'job-5',
+        requiresOperatorReauthorization: true,
+        status: 'reauthorizationRequired' as const,
+      },
     ];
 
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: jobsWithVariousStatuses,
       isLoading: false,
       error: null,
-    } as ReturnType<typeof useScheduledJobs>);
+    });
 
     render(
       <TestWrapper>
@@ -277,16 +327,16 @@ describe('SchedulingPage', () => {
 
     expect(screen.getByText('active')).toBeInTheDocument();
     expect(screen.getByText('paused')).toBeInTheDocument();
-    expect(screen.getByText('cancelled')).toBeInTheDocument();
     expect(screen.getByText('completed')).toBeInTheDocument();
+    expect(screen.getByText('reauthorizationRequired')).toBeInTheDocument();
   });
 
   it('shows error message when data fails to load', () => {
-    vi.mocked(useScheduledJobs).mockReturnValue({
+    mocks.useScheduledJobs.mockReturnValue({
       data: [],
       isLoading: false,
-      error: new Error('Failed to fetch'),
-    } as ReturnType<typeof useScheduledJobs>);
+      error: { message: 'Failed to fetch', statusCode: 503 },
+    });
 
     render(
       <TestWrapper>
@@ -294,6 +344,6 @@ describe('SchedulingPage', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText(/Failed to load scheduled jobs/)).toBeInTheDocument();
+    expect(screen.getByText('Failed to load scheduled jobs: Failed to fetch')).toBeInTheDocument();
   });
 });
