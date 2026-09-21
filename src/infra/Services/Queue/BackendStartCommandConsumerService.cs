@@ -512,6 +512,7 @@ public sealed class BackendStartCommandConsumerService(
                 bool claimCommitted = command?.Status == BedClearCommandStatus.Claimed;
                 if (claimCommitted)
                 {
+                    await db.Entry(evt).ReloadAsync(persistenceDeadline.Token);
                     evt.Status = QueueOutboxEventStatus.Processing;
                     evt.FailureCode = UnknownOutcomeFailureCode;
                     evt.LastError =
