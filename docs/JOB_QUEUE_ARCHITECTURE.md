@@ -284,16 +284,38 @@ as stale, or rejected because the claim was no longer indeterminate. Audit
 records are append-only and hash-/identity-linked to the attempt; later
 reconciliation cannot rewrite or delete the physical-check evidence.
 
-The durable read contract is a printer-scoped reconciliation resource:
-`GET /api/dispatch/{printerId}/reconciliation` returns the current indeterminate
-claim (or an explicit empty result) with printer ID/name, job ID, dispatch
-attempt ID, claim revision/ETag, claim age and timestamps, redacted last
-reconciliation evidence, current outcome, escalation level, actor permission
-requirements, and the audit-record ID when recovery has settled. The recovery
-write uses the same resource with `If-Match` and an idempotency key; it returns
-the resulting state and audit ID, never raw backend payloads. SignalR may notify
-clients that this resource changed, but refresh of this endpoint is authoritative
-after reconnect. Unauthorized callers receive no claim or audit details.
+The durable read and write contract is a printer-scoped reconciliation resource:
+
+- `GET /api/dispatch/{printerId}/reconciliation` returns the current
+  indeterminate claim (or an explicit empty result) with `printerId`,
+  `printerName`, `jobId`, `dispatchAttemptId`, `claimRevision`, `claimAgeSeconds`,
+  `claimedAtUtc`, `lastReconciledAtUtc`, redacted `lastEvidence`, string
+  `outcome`, string `escalationLevel`, `recoveryPermission`, and
+  `recoveryAuditId` when recovery has settled.
+- `POST /api/dispatch/{printerId}/reconciliation/recover` accepts
+  `If-Match: <claim ETag>` and `Idempotency-Key: <opaque key>` with this
+  camelCase body:
+  `{"dispatchAttemptId":"...","claimRevision":42,"physicalCheckConfirmed":true,"note":"..."}`.
+  The server requires `physicalCheckConfirmed: true`, `queue:reconcile`, and
+  the exact current claim. It returns `200` with the resulting reconciliation
+  resource and `recoveryAuditId`; it returns `403` for missing permission,
+  `404` without revealing an unauthorized claim, `409` for a no-longer
+  indeterminate attempt or idempotency-payload mismatch, and `412` for a stale
+  ETag. Repeating the same idempotency key and identical body returns the
+  original result without another release or audit row; reuse with a different
+  body returns `409`.
+- `GET /api/dispatch/{printerId}/reconciliation/audit/{auditId}` returns the
+  authorized, redacted immutable recovery-evidence record, including
+  `auditId`, `printerId`, `jobId`, `dispatchAttemptId`, `claimRevision`,
+  `priorOutcome`, `actorId`, `actorRecordedAtUtc`, `serverRecordedAtUtc`,
+  `assertionVersion`, `note`, `correlationId`, and string `transition`. The
+  endpoint never returns raw backend payloads or credentials and returns `404`
+  when the caller is not authorized to observe the record.
+
+All payloads use camelCase and string enum values. SignalR may notify clients
+that this resource changed, but refresh of the GET endpoint is authoritative
+after reconnect. Contract tests must pin these paths, shapes, status codes,
+ETag/idempotency behavior, redaction, and authorized audit retrieval.
 
 Time-to-live is an escalation policy, never an automatic release policy. The
 default warning begins immediately, an operational escalation notification is
