@@ -5,6 +5,7 @@ import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { QuickSliceModal } from '@/features/slicer/components/QuickSliceModal';
 import type { Model } from '@/types/models';
+import type { SubmitSliceJobRequest, SubmitSliceJobResponse } from '@/services/sliceJobService';
 
 // Mock navigation
 const mockNavigate = vi.fn();
@@ -48,12 +49,20 @@ vi.mock('@/services/slicerProfilesService', () => ({
 }));
 
 // Mock sliceJobService
-const mockSubmitJob = vi.fn(() => Promise.resolve({ jobId: 'job-123', status: 'Queued', queuedAt: '2026-05-31T00:00:00Z', queuePosition: 1 }));
+const defaultSubmitResponse: SubmitSliceJobResponse = {
+  jobId: 'job-123',
+  status: 'Queued',
+  queuedAt: '2026-05-31T00:00:00Z',
+  queuePosition: 1,
+};
+const mockSubmitJob = vi.fn<(request: SubmitSliceJobRequest) => Promise<SubmitSliceJobResponse>>(
+  () => Promise.resolve(defaultSubmitResponse),
+);
 vi.mock('@/services/sliceJobService', async () => {
   const actual = await vi.importActual<typeof import('@/services/sliceJobService')>('@/services/sliceJobService');
   return {
     sliceJobService: {
-      submitJob: (...args: unknown[]) => mockSubmitJob(...args),
+      submitJob: (request: SubmitSliceJobRequest) => mockSubmitJob(request),
     },
     formatQueuePositionSuffix: actual.formatQueuePositionSuffix,
   };
@@ -306,8 +315,8 @@ describe('QuickSliceModal', () => {
 
       await waitFor(() => {
         expect(mockSubmitJob).toHaveBeenCalled();
-        const call = mockSubmitJob.mock.calls[0][0] as { slicerProfileJson: string };
-        expect(call.slicerProfileJson).not.toContain('curr_bed_type');
+        const submittedRequest = mockSubmitJob.mock.calls.at(-1)?.[0];
+        expect(submittedRequest?.slicerProfileJson).not.toContain('curr_bed_type');
       });
     });
   });

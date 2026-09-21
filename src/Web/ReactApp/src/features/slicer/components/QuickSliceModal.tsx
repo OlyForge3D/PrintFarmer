@@ -357,7 +357,7 @@ function QuickSliceForm({ model, onClose }: { model: Model; onClose: () => void 
           </Select>
         </FormField>
 
-        {error && <Alert variant="error">{error}</Alert>}
+        {error && <Alert type="error">{error}</Alert>}
       </div>
 
       <div className="mt-6 flex items-center justify-between">
