@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { printJobQueueService, EnqueuePrintJobRequest } from '../printJobQueueService';
+import {
+  AxiosHeaders,
+  type AxiosResponse,
+  type InternalAxiosRequestConfig,
+} from 'axios';
+import {
+  type EnqueuePrintJobRequest,
+  printJobQueueService,
+  type PrintJobDto,
+} from '../printJobQueueService';
 import { apiClient } from '../api';
 
 vi.mock('../api', () => ({
@@ -7,6 +16,18 @@ vi.mock('../api', () => ({
     post: vi.fn(),
   },
 }));
+
+function createApiResponse(data: PrintJobDto): AxiosResponse<PrintJobDto> {
+  return {
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: {
+      headers: new AxiosHeaders(),
+    } as InternalAxiosRequestConfig,
+  };
+}
 
 describe('printJobQueueService', () => {
   beforeEach(() => {
@@ -28,7 +49,7 @@ describe('printJobQueueService', () => {
         createdAt: '2024-01-01T00:00:00Z',
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await printJobQueueService.enqueue(request);
 
@@ -53,7 +74,7 @@ describe('printJobQueueService', () => {
         createdAt: '2024-01-02T00:00:00Z',
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await printJobQueueService.enqueue(request);
 
@@ -76,7 +97,7 @@ describe('printJobQueueService', () => {
         createdAt: '2024-01-03T00:00:00Z',
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await printJobQueueService.enqueue(request);
 
@@ -101,7 +122,7 @@ describe('printJobQueueService', () => {
         createdAt: '2024-01-04T00:00:00Z',
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await printJobQueueService.enqueue(request);
 
@@ -124,7 +145,7 @@ describe('printJobQueueService', () => {
         createdAt: '2024-01-05T00:00:00Z',
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await printJobQueueService.enqueue(request);
 
@@ -155,7 +176,7 @@ describe('printJobQueueService', () => {
         createdAt: '2024-01-06T00:00:00Z',
       };
 
-      vi.mocked(apiClient.post).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await printJobQueueService.enqueue(request);
 
@@ -182,7 +203,7 @@ describe('printJobQueueService', () => {
           createdAt: '2024-01-07T00:00:00Z',
         };
 
-        vi.mocked(apiClient.post).mockResolvedValue({ data: mockResponse });
+        vi.mocked(apiClient.post).mockResolvedValue(createApiResponse(mockResponse));
 
         const result = await printJobQueueService.enqueue(request);
 

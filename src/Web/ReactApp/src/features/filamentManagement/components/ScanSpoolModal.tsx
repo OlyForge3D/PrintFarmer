@@ -57,14 +57,14 @@ export function ScanSpoolModal({ isOpen, onClose, onSpoolFound }: ScanSpoolModal
   const [cameras, setCameras] = useState<Array<{ id: string; label: string }>>([]);
   const [activeCameraIdx, setActiveCameraIdx] = useState(0);
   const scannerRef = useRef<Html5Qrcode | null>(null);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout>>();
+  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const hasDecodedRef = useRef(false);
   const mountedRef = useRef(true);
 
   const cleanup = useCallback(async () => {
     if (timeoutRef.current) {
       clearTimeout(timeoutRef.current);
-      timeoutRef.current = undefined;
+      timeoutRef.current = null;
     }
     const scanner = scannerRef.current;
     if (scanner) {

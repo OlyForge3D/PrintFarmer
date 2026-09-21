@@ -32,21 +32,42 @@ async function loadFont(family: FontFamily): Promise<Font> {
   const cached = fontCache.get(family);
   if (cached) return cached;
 
-  let data: Record<string, unknown>;
+  let data: ConstructorParameters<typeof Font>[0];
   switch (family) {
     case 'serif': {
       const mod = await import('three/examples/fonts/droid/droid_serif_regular.typeface.json');
-      data = mod.default ?? mod;
+      const raw = mod.default ?? mod;
+      data = {
+        boundingBox: { yMax: raw.boundingBox.yMax, yMin: raw.boundingBox.yMin },
+        familyName: raw.familyName,
+        glyphs: Object.fromEntries(Object.entries(raw.glyphs).map(([key, glyph]) => [key, { _cachedOutline: [], ha: glyph.ha, o: 'o' in glyph ? glyph.o : '' }])),
+        resolution: raw.resolution,
+        underlineThickness: raw.underlineThickness,
+      };
       break;
     }
     case 'monospace': {
       const mod = await import('three/examples/fonts/droid/droid_sans_mono_regular.typeface.json');
-      data = mod.default ?? mod;
+      const raw = mod.default ?? mod;
+      data = {
+        boundingBox: { yMax: raw.boundingBox.yMax, yMin: raw.boundingBox.yMin },
+        familyName: raw.familyName,
+        glyphs: Object.fromEntries(Object.entries(raw.glyphs).map(([key, glyph]) => [key, { _cachedOutline: [], ha: glyph.ha, o: 'o' in glyph ? glyph.o : '' }])),
+        resolution: raw.resolution,
+        underlineThickness: raw.underlineThickness,
+      };
       break;
     }
     default: {
       const mod = await import('three/examples/fonts/droid/droid_sans_regular.typeface.json');
-      data = mod.default ?? mod;
+      const raw = mod.default ?? mod;
+      data = {
+        boundingBox: { yMax: raw.boundingBox.yMax, yMin: raw.boundingBox.yMin },
+        familyName: raw.familyName,
+        glyphs: Object.fromEntries(Object.entries(raw.glyphs).map(([key, glyph]) => [key, { _cachedOutline: [], ha: glyph.ha, o: 'o' in glyph ? glyph.o : '' }])),
+        resolution: raw.resolution,
+        underlineThickness: raw.underlineThickness,
+      };
       break;
     }
   }
@@ -74,7 +95,7 @@ export async function generateTextGeometry(
   const geometry = new ThreeTextGeometry(text, {
     font,
     size: fontSize,
-    depth: extrusionDepth,
+    height: extrusionDepth,
     curveSegments: 4,
     bevelEnabled: false,
   });

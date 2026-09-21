@@ -14,7 +14,7 @@ export function useWebhooks() {
   return useQuery<WebhookSubscription[]>({
     queryKey: KEYS.list(),
     queryFn: async () => {
-      const res = await apiClient.get('/webhooks');
+      const res = await apiClient.get<WebhookSubscription[]>('/webhooks');
       return res.data;
     },
   });
@@ -24,7 +24,7 @@ export function useWebhookEventTypes() {
   return useQuery<string[]>({
     queryKey: KEYS.eventTypes(),
     queryFn: async () => {
-      const res = await apiClient.get('/webhooks/event-types');
+      const res = await apiClient.get<string[]>('/webhooks/event-types');
       return res.data;
     },
     staleTime: Infinity,
@@ -35,7 +35,7 @@ export function useWebhookDeliveries(id: string) {
   return useQuery<WebhookDelivery[]>({
     queryKey: KEYS.deliveries(id),
     queryFn: async () => {
-      const res = await apiClient.get(`/webhooks/${id}/deliveries`);
+      const res = await apiClient.get<WebhookDelivery[]>(`/webhooks/${id}/deliveries`);
       return res.data;
     },
     enabled: !!id,
@@ -46,8 +46,8 @@ export function useCreateWebhook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async (dto: CreateWebhookDto) => {
-      const res = await apiClient.post('/webhooks', dto);
-      return res.data as WebhookSubscription;
+      const res = await apiClient.post<WebhookSubscription>('/webhooks', dto);
+      return res.data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.list() }),
   });
@@ -57,8 +57,8 @@ export function useUpdateWebhook() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: async ({ id, dto }: { id: string; dto: UpdateWebhookDto }) => {
-      const res = await apiClient.put(`/webhooks/${id}`, dto);
-      return res.data as WebhookSubscription;
+      const res = await apiClient.put<WebhookSubscription>(`/webhooks/${id}`, dto);
+      return res.data;
     },
     onSuccess: () => qc.invalidateQueries({ queryKey: KEYS.list() }),
   });

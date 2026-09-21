@@ -29,7 +29,18 @@ it('integrates inventory in the existing page and keeps migration heads separate
 });
 
 it('blocks rendering cached detailed observations and fetching after permission loss', () => {
-  useAuthMock.mockReturnValue({ hasPermission: () => false } as ReturnType<typeof useAuth>);
+  useAuthMock.mockReturnValue({
+    user: null,
+    isAuthenticated: false,
+    isLoading: false,
+    login: vi.fn(),
+    loginWithPasskey: vi.fn(),
+    register: vi.fn(),
+    logout: vi.fn(),
+    hasRole: () => false,
+    hasPermission: () => false,
+    error: null,
+  } as ReturnType<typeof useAuth>);
   render(<SystemStatusPage />);
   expect(screen.getByText('Access denied')).toBeVisible();
   expect(screen.queryByText('Service and replica inventory')).not.toBeInTheDocument();

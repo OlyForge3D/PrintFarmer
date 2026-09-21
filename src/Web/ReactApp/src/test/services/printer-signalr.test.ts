@@ -13,7 +13,9 @@ const signalr = vi.hoisted(() => {
     stop: vi.fn(async () => {
       connection.state = "Disconnected";
     }),
-    invoke: vi.fn(async () => undefined),
+    invoke: vi.fn<(method: string, arg?: unknown) => Promise<unknown>>(
+      async () => undefined
+    ),
     on: vi.fn((name: string, handler: (payload: unknown) => void) => {
       eventHandlers.set(name, handler);
     }),
@@ -234,7 +236,7 @@ describe("PrinterSignalRService queue cursor recovery", () => {
       // subscribe invocation instead of one per printer, so assert the call
       // count, not just that the args were seen at some point.
       const printerInvocations = signalr.connection.invoke.mock.calls.filter(
-        ([method]: [string, unknown]) => method === "SubscribeToPrintersAsync"
+        ([method]) => method === "SubscribeToPrintersAsync"
       );
       expect(printerInvocations).toHaveLength(1);
       expect(printerInvocations[0][1]).toEqual([

@@ -2,7 +2,7 @@ import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/commo
 import { Modal } from "@/common/components/modals/Modal";
 import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
 import { getErrorMessage, isApiError } from "@/common/utils/apiErrors";
-import type { HostUpdateExecutionResult } from "@/services/api";
+import { isHostUpdateStatusResponse, type HostUpdateExecutionResult } from "@/services/api";
 import type {
   HostUpdateManualAuthorizationResponse,
   HostUpdateRecoveryResult,
@@ -583,7 +583,11 @@ export function InstallerUpdatesExperience({
       const execution = await onExecuteHostUpdate(authorization.authorizationId);
       const status = "kind" in execution && execution.kind === "conflict"
         ? execution.status
-        : execution;
+        : isHostUpdateStatusResponse(execution)
+          ? execution
+          : (() => {
+              throw new Error("The host update execution response was invalid.");
+            })();
       setManualUpdateStatus(status);
       if (status.releaseId !== releaseId) {
         setManualUpdateReleaseId(status.releaseId);

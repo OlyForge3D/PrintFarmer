@@ -71,7 +71,8 @@ import { AlertsWidget } from './AlertsWidget';
 import { TasksWidget } from '@/features/tasks';
 import { ActiveJobsWidget } from './ActiveJobsWidget';
 import { RecentPrintsWidget } from './RecentPrintsWidget';
-import { MaintenanceAlertsWidget, MaintenanceOverviewWidget } from '@/features/maintenance/components';
+import { MaintenanceAlertsWidget } from '@/features/maintenance/components/MaintenanceAlertsWidget';
+import { MaintenanceOverviewWidget } from '@/features/maintenance/components/MaintenanceOverviewWidget';
 import { BackgroundServicesWidget } from '@/features/admin/components';
 import { DetailedSystemHealth } from './SystemHealth';
 import { 

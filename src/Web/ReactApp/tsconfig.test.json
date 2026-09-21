@@ -26,6 +26,7 @@
     "src/**/*.test.tsx",
     "src/types/**/*.d.ts",
     "src/vite-env.d.ts",
+    "src/globals.d.ts",
     "src/test/setup.ts"
   ],
   "exclude": [

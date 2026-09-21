@@ -485,9 +485,6 @@ export class PrinterSignalRService {
       void this.refreshSettings();
     };
     window.addEventListener(AUTH_SESSION_ESTABLISHED_EVENT, this.authListener);
-    if (window.PrintFarmerDebug?.printerSignalR) {
-      window.PrintFarmerDebug.printerSignalRService = this;
-    }
   }
 
   private async loadSettings(): Promise<boolean> {
