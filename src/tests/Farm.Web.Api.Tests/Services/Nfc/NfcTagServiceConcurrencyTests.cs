@@ -74,6 +74,85 @@ public class NfcTagServiceConcurrencyTests : IDisposable
     }
 
     [Fact]
+    public async Task LinkTagAsync_WithReadAt_PersistsScanTimestamp()
+    {
+        DateTime readAt = new(2026, 9, 20, 18, 30, 0, DateTimeKind.Utc);
+        await using var db = new AppDbContext(_options);
+        var service = CreateService(db);
+
+        NfcTagBindingDto result = await service.LinkTagAsync(new LinkNfcTagRequest
+        {
+            TagUid = "READ-AT-TEST",
+            SpoolId = 42,
+            ReadAt = readAt
+        }, CancellationToken.None);
+
+        result.SpoolLastSeenAt.Should().Be(readAt);
+
+        await using var verifyDb = new AppDbContext(_options);
+        NfcTagBinding persisted = await verifyDb.NfcTagBindings.SingleAsync(b => b.TagUid == "READ-AT-TEST");
+        persisted.SpoolLastSeenAt.Should().Be(readAt);
+    }
+
+    [Fact]
+    public async Task LinkTagAsync_WithoutReadAt_PreservesExistingScanTimestamp()
+    {
+        DateTime originalReadAt = new(2026, 9, 20, 18, 30, 0, DateTimeKind.Utc);
+
+        await using (var db = new AppDbContext(_options))
+        {
+            var service = CreateService(db);
+            await service.LinkTagAsync(new LinkNfcTagRequest
+            {
+                TagUid = "READ-AT-PRESERVE",
+                SpoolId = 42,
+                ReadAt = originalReadAt
+            }, CancellationToken.None);
+        }
+
+        await using (var db = new AppDbContext(_options))
+        {
+            var service = CreateService(db);
+            await service.LinkTagAsync(new LinkNfcTagRequest
+            {
+                TagUid = "READ-AT-PRESERVE",
+                SpoolId = 99,
+                SpoolName = "Updated without timestamp"
+            }, CancellationToken.None);
+        }
+
+        await using var verifyDb = new AppDbContext(_options);
+        NfcTagBinding persisted = await verifyDb.NfcTagBindings.SingleAsync(b => b.TagUid == "READ-AT-PRESERVE");
+        persisted.SpoolLastSeenAt.Should().Be(originalReadAt);
+        persisted.SpoolId.Should().Be(99);
+    }
+
+    [Fact]
+    public async Task LinkTagAsync_WithUnspecifiedReadAt_NormalizesScanTimestampToUtc()
+    {
+        DateTime readAt = new(2026, 9, 20, 18, 30, 0, DateTimeKind.Unspecified);
+        DateTime expectedReadAt = DateTime.SpecifyKind(readAt, DateTimeKind.Utc);
+        await using var db = new AppDbContext(_options);
+        var service = CreateService(db);
+
+        NfcTagBindingDto result = await service.LinkTagAsync(new LinkNfcTagRequest
+        {
+            TagUid = "READ-AT-NORMALIZE",
+            SpoolId = 42,
+            ReadAt = readAt
+        }, CancellationToken.None);
+
+        result.SpoolLastSeenAt.Should().Be(expectedReadAt);
+        result.SpoolLastSeenAt.Should().HaveValue();
+        result.SpoolLastSeenAt!.Value.Kind.Should().Be(DateTimeKind.Utc);
+
+        await using var verifyDb = new AppDbContext(_options);
+        NfcTagBinding persisted = await verifyDb.NfcTagBindings.SingleAsync(b => b.TagUid == "READ-AT-NORMALIZE");
+        persisted.SpoolLastSeenAt.Should().Be(expectedReadAt);
+        persisted.SpoolLastSeenAt.Should().HaveValue();
+    }
+
+    [Fact]
     public async Task LinkTagAsync_ConcurrentCalls_SameTagUid_ProducesExactlyOneBinding()
     {
         const string tagUid = "AA:BB:CC:DD";

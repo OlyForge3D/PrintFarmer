@@ -29,6 +29,7 @@ export function NfcBindingModal({ isOpen, onClose, event }: NfcBindingModalProps
         tagUid: event.tagUid,
         printerId: selectedPrinterId,
         spoolId: parsedSpoolId,
+        readAt: event.readAt,
       },
       { onSuccess: () => onClose() }
     );

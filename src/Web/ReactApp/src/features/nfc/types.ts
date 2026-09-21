@@ -24,33 +24,30 @@ export interface NfcTagReadEvent {
 /** Request body for POST /api/nfc/link (matches LinkNfcTagRequest C# DTO) */
 export interface NfcLinkRequest {
   tagUid: string;
-  spoolId?: number;
-  printerId?: string;
-  trayId?: string;
-}
-
-export interface NfcBindingDto {
-  id: string;
-  tagUid: string;
-  printerId?: string;
-  printerName?: string;
   spoolId?: number | null;
   spoolName?: string;
+  printerId?: string;
   trayId?: string;
-  createdAt: string;
-  updatedAt?: string;
-  spoolLastSeenAt?: string;
+  /** Timestamp from the scan that initiated this binding. */
+  readAt?: string;
 }
 
 /** Response from POST /api/nfc/link */
 export interface NfcLinkResponse {
+  id: string;
   tagUid: string;
   spoolId?: number;
+  spoolName?: string;
   printerId?: string;
+  printerName?: string;
   trayId?: string;
+  spoolLastSeenAt?: string;
   createdAt: string;
-  updatedAt: string;
+  updatedAt?: string;
 }
+
+/** Response shape for NFC tag bindings listed by GET /api/nfc/bindings. */
+export type NfcBindingDto = NfcLinkResponse;
 
 export type NfcPairingStep =
   | 'scanning'
