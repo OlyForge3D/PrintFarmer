@@ -227,6 +227,152 @@ Acceptance is monotonic: notification, analytics, or other post-accept failures
 cannot turn an accepted physical print into `Unknown`. Persisted and client
 failure details are typed and redacted.
 
+### Indeterminate pre-start claim escape hatch (#2859)
+
+An indeterminate pre-start claim is the narrow state in which the dispatch claim
+was acquired, the backend request may have been sent, and no authoritative
+backend job ID or exact terminal history proves either outcome. It is not a
+failed start and it is not evidence of printer absence. The dispatch claim,
+physical-control barrier, and job ownership remain held; reconciliation must
+never release them merely because a response, log entry, or backend lookup is
+missing.
+
+The only supported escape hatch is an explicit, server-authorized operator
+assertion after a physical check. It is a recovery decision, not a cancel,
+retry, stale-lease cleanup, or alternative dispatch path:
+
+1. The UI exposes a distinct `DispatchReconciliationRequired` condition for the
+   exact printer and dispatch attempt. It shows the possible-start warning,
+   claim age, job/attempt identity, and last reconciliation evidence. It does
+   not present an ordinary cancel or retry action as a substitute.
+2. The operator must hold the existing `queue:reconcile` permission and submit
+   a current printer/dispatch revision. This is intentionally the existing
+   farm-wide, administrator-grantable reconciliation permission; no new
+   printer-resource permission or role bypass is implied. The confirmation
+   names the exact printer, job, and attempt and requires an affirmative assertion equivalent to
+   "I physically checked this printer and confirm that this dispatch did not
+   start." A free-form note may add context but cannot replace the assertion.
+3. The API re-reads the claim under its database fence immediately before
+   accepting the assertion. It accepts only the still-indeterminate attempt
+   identified by the submitted revision. A changed, terminal, or already
+   overridden attempt returns a conflict and leaves all ownership unchanged.
+4. On success, one database transaction atomically appends the assertion
+   audit record and performs the single explicit recovery transition: close the
+   indeterminate claim and release its printer/job ownership without replaying,
+   cancelling, or declaring a successful physical start. If either write fails,
+   neither is committed. Any subsequent dispatch is a new claim and must pass
+   the normal fresh-idle and compatibility gates.
+
+The recovery endpoint is deliberately narrower than general queue mutation:
+clients cannot clear `ActiveDispatchAttemptId`, `PhysicalControlCommandId`, or
+related ownership fields directly, and a successful HTTP response means only
+that the operator recovery transition was durably accepted. The UI must keep
+the warning and audit link visible until refreshed state proves that the
+specific claim was closed.
+
+Each assertion is an immutable recovery-evidence record, stored in the
+protected dispatch/recovery journal rather than the ordinary
+`QueueOperationAudits` stream that may be pruned under system-log retention.
+It is retained for the deployment's incident/audit retention period and may
+only be archived through an explicit, audited retention operation; it is never
+deleted as ordinary queue cleanup. The record contains at least the printer ID,
+job ID, dispatch-attempt ID, claim revision, prior outcome/state, actor identity,
+authorization result, actor UTC time, server-recorded UTC time, assertion text
+version, optional operator note, correlation/request ID, and resulting
+transition. The record identifies whether the transition was accepted, rejected
+as stale, or rejected because the claim was no longer indeterminate. Audit
+records are append-only and hash-/identity-linked to the attempt; later
+reconciliation cannot rewrite or delete the physical-check evidence.
+
+The durable read and write contract is a printer-scoped reconciliation resource:
+
+- `GET /api/dispatch/{printerId}/reconciliation` returns the current
+  indeterminate claim (or an explicit empty result) with `printerId`,
+  `printerName`, `jobId`, `dispatchAttemptId`, `claimRevision`, `claimAgeSeconds`,
+  `claimedAtUtc`, `lastReconciledAtUtc`, redacted `lastEvidence`, string
+  `outcome`, string `escalationLevel`, `recoveryPermission`, and
+  `recoveryAuditId` when recovery has settled. It emits the opaque current claim
+  ETag in the `ETag` response header; an empty result emits the printer
+  reconciliation revision ETag.
+- `POST /api/dispatch/{printerId}/reconciliation/recover` accepts
+  a mandatory `If-Match: <claim ETag>` and mandatory
+  `Idempotency-Key: <opaque key>` with this
+  camelCase body:
+  `{"dispatchAttemptId":"...","claimRevision":42,"physicalCheckConfirmed":true,"note":"..."}`.
+  The server authenticates and authorizes `queue:reconcile`, validates the
+  request shape and exact printer/attempt binding, and then requires
+  `physicalCheckConfirmed: true`. Missing headers return `428`; malformed
+  headers/body return `400`; missing permission returns `403` without exposing
+  claim data; a stale ETag returns `412`; and a no-longer-indeterminate attempt
+  returns `409`. The idempotency key is scoped to the authenticated actor,
+  route, printer, and request fingerprint, stored with the original status,
+  headers, and body for the documented audit-retention period. An exact replay
+  is resolved after authentication but before current-state and ETag checks,
+  returning the original result without another release or audit row. Reusing
+  the key with a different body or scope returns `409`; a new key must pass
+  the `If-Match` check. A successful new request returns `200` with the
+  resulting reconciliation resource and `recoveryAuditId`.
+- `GET /api/dispatch/{printerId}/reconciliation/audit/{auditId}` returns the
+  authorized, redacted immutable recovery-evidence record, including
+  `auditId`, `printerId`, `jobId`, `dispatchAttemptId`, `claimRevision`,
+  `priorOutcome`, `actorId`, `actorRecordedAtUtc`, `serverRecordedAtUtc`,
+  `assertionVersion`, `note`, `correlationId`, and string `transition`. The
+  endpoint requires `queue:reconcile` and the same printer-resource scope used
+  for reconciliation. It returns `404` for a missing record or any caller who
+  lacks that permission/scope, so existence is not disclosed. Authorized
+  responses expose only the listed identifiers, timestamps, enum, bounded
+  assertion version, bounded operator note, and correlation ID; backend
+  payloads, credentials, free-form exception text, and unrelated user data are
+  always redacted.
+
+All payloads use camelCase and string enum values. SignalR may notify clients
+that this resource changed, but refresh of the GET endpoint is authoritative
+after reconnect. Contract tests must pin these paths, shapes, status codes,
+ETag/idempotency behavior, redaction, and authorized audit retrieval.
+
+Time-to-live is an escalation policy, never an automatic release policy. The
+default warning begins immediately, an operational escalation notification is
+emitted at 15 minutes, and an overdue critical alert is emitted at 1 hour
+(deployment policy may tune these thresholds, but they must be positive,
+strictly increasing, and versioned). A 24-hour maximum age is a hard
+escalation boundary for dashboards and incident handling, but it still retains
+the claim and blocks automatic dispatch. Each threshold is a durable,
+idempotent outbox event keyed by dispatch-attempt ID, escalation-policy
+revision, and threshold; a unique key prevents duplicate delivery across
+instances. On restart, the escalation worker scans unresolved claims and
+re-enqueues every due threshold whose event is absent, then records delivery
+outcomes. No timer, background repair, missing telemetry, or failed lookup may
+synthesize the physical-check assertion. Only a currently authorized operator
+can close the claim, and the claim remains eligible for the same explicit
+recovery after escalation.
+
+The safety invariants for this boundary are:
+
+- No release occurs for `Unknown`/indeterminate outcome without one matching,
+  durable operator assertion for the exact claim.
+- Missing backend job IDs, empty history, request cancellation, timeout,
+  process restart, reconciliation error, and TTL expiry all retain ownership.
+- The assertion is one-use and revision-fenced; it cannot be replayed for a
+  successor attempt or used after the claim has changed.
+- A late backend callback cannot release a successor claim or erase the
+  operator audit record.
+- Automatic reconciliation and stale-lease recovery continue to exclude the
+  indeterminate outcome.
+- The recovery audit and ownership release commit atomically, while escalation
+  notifications are independently durable and idempotent.
+- UI, API, and persistence tests prove both the positive recovery path and the
+  negative path: unproven absence never releases the printer automatically.
+
+The minimum validation matrix covers authorization denial, wrong-printer and
+stale-revision conflicts, duplicate/replayed assertions, concurrent
+reconciliation, atomic rollback when audit or release persistence fails,
+restart before and after audit persistence, protected retention/archive
+behavior, read-contract redaction and reconnect refresh, escalation threshold
+validation, durable outbox catch-up and multi-instance deduplication, late
+backend success/failure, and a database assertion that the ownership fields
+remain set for every indeterminate attempt until the explicit recovery
+transition commits.
+
 The generic `/api/printers/{id}/gcode` surface is retired and always returns
 `410 Gone`. Macros, multiline scripts, case variants, and firmware-specific
 aliases cannot be proven non-starting. Operators and clients must use typed
