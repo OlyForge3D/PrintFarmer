@@ -24,7 +24,7 @@ export interface NfcTagReadEvent {
 /** Request body for POST /api/nfc/link (matches LinkNfcTagRequest C# DTO) */
 export interface NfcLinkRequest {
   tagUid: string;
-  spoolId: number;
+  spoolId?: number;
   printerId?: string;
   trayId?: string;
 }
@@ -33,6 +33,7 @@ export interface NfcBindingDto {
   id: string;
   tagUid: string;
   printerId?: string;
+  printerName?: string;
   spoolId?: number | null;
   spoolName?: string;
   trayId?: string;

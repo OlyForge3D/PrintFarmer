@@ -65,7 +65,7 @@ export function NfcBindingsPage({ embedded = false }: NfcBindingsPageProps) {
                     )}
                   </div>
                   <div className="text-xs text-pf-text-secondary">
-                    Printer: {binding.printerId ?? 'Unassigned'}
+                    Printer: {binding.printerName ?? binding.printerId ?? 'Unassigned'}
                     {binding.trayId && ` • Tray: ${binding.trayId}`}
                   </div>
                   <div className="text-xs text-pf-text-tertiary">

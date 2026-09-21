@@ -23,7 +23,6 @@ export function NfcBindingModal({ isOpen, onClose, event }: NfcBindingModalProps
   const handleSubmit = () => {
     if (!event?.tagUid || !selectedPrinterId) return;
     const parsedSpoolId = parseSpoolId(spoolId);
-    if (parsedSpoolId === undefined) return;
 
     linkMutation.mutate(
       {

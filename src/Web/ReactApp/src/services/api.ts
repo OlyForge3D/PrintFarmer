@@ -564,8 +564,12 @@ export class ApiClient {
       { validateStatus: (status) => [200, 409, 503].includes(status) },
     );
     if (response.status === 503) {
+      const detail = (response.data as { detail?: unknown } | undefined)?.detail;
       throw {
-        message: "The host update subsystem is unavailable on this host.",
+        message:
+          typeof detail === "string"
+            ? detail
+            : "The host update subsystem is unavailable on this host.",
         statusCode: response.status,
         data: response.data,
       };
