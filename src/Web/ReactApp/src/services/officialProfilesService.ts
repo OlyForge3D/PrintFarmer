@@ -1,6 +1,6 @@
 // Service for importing official slicer profiles for registered printers
 import { apiClient } from "./api";
-import { SlicerProfileListItem } from "./slicerProfilesService";
+import { OrcaProcessProfile, SlicerProfileListItem } from "./slicerProfilesService";
 import { ImportedProfileNamesDto } from "@/features/tasks/components/profile-wizard/types";
 
 export interface BulkProfileImportRequest {
@@ -66,8 +66,8 @@ export const officialProfilesService = {
    * Get available OrcaSlicer profiles from the worker service
    * These are the actual profiles from OrcaSlicer's local installation
    */
-  async getAvailableProfilesFromWorker(): Promise<SlicerProfileListItem[]> {
-    const response = await apiClient.get<SlicerProfileListItem[]>('/slicer/profiles/available-from-worker');
+  async getAvailableProfilesFromWorker(): Promise<OrcaProcessProfile[]> {
+    const response = await apiClient.get<OrcaProcessProfile[]>('/slicer/profiles/available-from-worker');
     return response.data;
   },
 

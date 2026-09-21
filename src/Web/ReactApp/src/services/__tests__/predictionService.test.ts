@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { predictionService } from '../predictionService';
 import { apiClient } from '../api';
+import type { RecordCompletionRequest } from '@/types/predictions';
 
 // Mock the api client
 vi.mock('../api', () => ({
@@ -163,10 +164,9 @@ describe('predictionService', () => {
 
   describe('recordCompletion', () => {
     it('should record job completion', async () => {
-      const request = {
-        actualDuration: 3600,
-        actualFilamentUsed: 100,
-        success: true,
+      const request: RecordCompletionRequest = {
+        actualDurationMs: 3_600_000,
+        isSuccess: true,
       };
 
       vi.mocked(apiClient.recordCompletion).mockResolvedValue(undefined);
@@ -178,10 +178,10 @@ describe('predictionService', () => {
     });
 
     it('should handle errors when recording completion', async () => {
-      const request = {
-        actualDuration: 3600,
-        actualFilamentUsed: 100,
-        success: false,
+      const request: RecordCompletionRequest = {
+        actualDurationMs: 3_600_000,
+        isSuccess: false,
+        failureReason: 'Print detached from the bed',
       };
 
       const error = new Error('Failed to record completion');

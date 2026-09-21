@@ -3,7 +3,12 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { PrinterBackend, type Printer, type SpoolInfo } from '@/types/api';
+import {
+  PrinterBackend,
+  type Printer,
+  type PrinterDetails,
+  type PrinterSpoolInfo,
+} from '@/types/api';
 
 // Verifies the revision-guard resilience for the single-spool card controls:
 //  (a) a printer object lacking `rowVersion` (compact list DTO) no longer
@@ -11,8 +16,13 @@ import { PrinterBackend, type Printer, type SpoolInfo } from '@/types/api';
 //  (b) when the passed-in printer lacks a revision, the card recovers the
 //      concurrency token from the fetched detail record and the mutation fires.
 
+interface PrinterDetailsHookResult {
+  data: Pick<PrinterDetails, 'rowVersion'> | undefined;
+  isLoading: boolean;
+}
+
 const usePrinterDetailsMock = vi.hoisted(() =>
-  vi.fn(() => ({ data: undefined, isLoading: false }))
+  vi.fn<() => PrinterDetailsHookResult>(() => ({ data: undefined, isLoading: false }))
 );
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 const setActiveSpoolMock = vi.hoisted(() => vi.fn());
@@ -106,7 +116,7 @@ vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn(), info: vi.f
 
 import { DetailedPrinterCard } from '../DetailedPrinterCard';
 
-const activeSpool: SpoolInfo = { hasActiveSpool: true, activeSpoolId: 5, spoolName: 'Old' } as SpoolInfo;
+const activeSpool: PrinterSpoolInfo = { hasActiveSpool: true, activeSpoolId: 5, spoolName: 'Old' };
 
 function makePrinter(overrides: Partial<Printer> = {}): Printer {
   return {

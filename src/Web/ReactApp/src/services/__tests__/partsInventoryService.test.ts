@@ -52,7 +52,7 @@ describe('partsInventoryService', () => {
       mockPost.mockResolvedValueOnce(ok({}));
       const req = {
         sku: 'BRK-001',
-        displayName: 'Bracket',
+        name: 'Bracket',
         reorderPoint: 10,
         defaultBinCode: 'A1',
       };
@@ -62,8 +62,9 @@ describe('partsInventoryService', () => {
 
     it('PUTs updatePart to the encoded SKU URL', async () => {
       mockPut.mockResolvedValueOnce(ok({}));
-      await partsInventoryService.updatePart('BRK 1', { displayName: 'x' });
-      expect(mockPut).toHaveBeenCalledWith('/parts-inventory/BRK%201', { displayName: 'x' });
+      const req = { name: 'Renamed bracket', reorderPoint: 5, isActive: true };
+      await partsInventoryService.updatePart('BRK 1', req);
+      expect(mockPut).toHaveBeenCalledWith('/parts-inventory/BRK%201', req);
     });
 
     it('DELETEs part by encoded SKU', async () => {
@@ -179,15 +180,16 @@ describe('partsInventoryService', () => {
 
     it('POSTs createBin body verbatim', async () => {
       mockPost.mockResolvedValueOnce(ok({}));
-      const req = { code: 'A1', displayName: 'A1', location: 'Rack A' };
+      const req = { code: 'A1', name: 'Small parts', location: 'Rack A' };
       await partsInventoryService.createBin(req);
       expect(mockPost).toHaveBeenCalledWith('/bins', req);
     });
 
     it('PUTs updateBin body', async () => {
       mockPut.mockResolvedValueOnce(ok({}));
-      await partsInventoryService.updateBin('A1', { displayName: 'A1 renamed' });
-      expect(mockPut).toHaveBeenCalledWith('/bins/A1', { displayName: 'A1 renamed' });
+      const req = { name: 'Small parts renamed', isActive: true };
+      await partsInventoryService.updateBin('A1', req);
+      expect(mockPut).toHaveBeenCalledWith('/bins/A1', req);
     });
 
     it('DELETEs bin by encoded code', async () => {

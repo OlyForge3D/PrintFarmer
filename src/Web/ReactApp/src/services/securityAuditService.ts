@@ -3,11 +3,11 @@ import { apiClient } from '@/services/api';
 export interface LoginAuditEntry {
   id: string;
   timestamp: string;
-  username: string;
+  username?: string;
   success: boolean;
   ipAddress: string;
-  userAgent: string;
-  failureReason: string | null;
+  userAgent?: string;
+  failureReason?: string;
 }
 
 export interface LoginAuditResponse {

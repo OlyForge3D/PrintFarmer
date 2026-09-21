@@ -102,7 +102,7 @@ describe('ProfileEditorModal machine profiles', () => {
       screen.getByRole('textbox', { name: 'Custom Profile Name' }),
       'My CoreXY',
     );
-    await user.click(screen.getByRole('button', { name: 'Save', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
     const request = vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0];
@@ -127,7 +127,7 @@ describe('ProfileEditorModal machine profiles', () => {
       target: { value: 'G28\nM117 Ready' },
     });
     await user.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
-    await user.click(screen.getByRole('button', { name: 'Save', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
     const request = vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0];
@@ -176,7 +176,7 @@ describe('ProfileEditorModal machine profiles', () => {
       target: { value: 'G28\nM117 Ready' },
     });
     await user.click(screen.getByRole('button', { name: 'Save as Custom Profile' }));
-    await user.click(screen.getByRole('button', { name: 'Save', exact: true }));
+    await user.click(screen.getByRole('button', { name: 'Save' }));
 
     await waitFor(() => expect(slicerProfilesService.uploadProfile).toHaveBeenCalledOnce());
     const request = vi.mocked(slicerProfilesService.uploadProfile).mock.calls[0][0];

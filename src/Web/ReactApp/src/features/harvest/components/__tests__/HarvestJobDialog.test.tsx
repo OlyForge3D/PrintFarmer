@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import type { Mock } from 'vitest';
 import { render, screen, waitFor, within, act, fireEvent } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
@@ -7,14 +8,33 @@ import { HarvestJobDialog } from '../HarvestJobDialog';
 import { toast } from 'sonner';
 import { ErrorBoundary } from '@/common/components/ErrorBoundary';
 import { configurePartsHarvestClient } from '@/services/partsHarvest';
+import type { HarvestJobRequest } from '@/types/parts-inventory';
 
 interface StubClient {
-  get: ReturnType<typeof vi.fn>;
-  post: ReturnType<typeof vi.fn>;
+  get: Mock<(url: string, config?: { params?: unknown }) => Promise<{ data: unknown }>>;
+  post: Mock<(url: string, data: HarvestJobRequest) => Promise<{ data: unknown }>>;
 }
 
 function makeStub(): StubClient {
-  return { get: vi.fn().mockResolvedValue({ data: [] }), post: vi.fn() };
+  return {
+    get: vi.fn<(url: string, config?: { params?: unknown }) => Promise<{ data: unknown }>>()
+      .mockResolvedValue({ data: [] }),
+    post: vi.fn<(url: string, data: HarvestJobRequest) => Promise<{ data: unknown }>>(),
+  };
+}
+
+function configureStub(stub: StubClient): void {
+  configurePartsHarvestClient({
+    get: async <T = unknown>(url: string, config?: { params?: unknown }) => {
+      const response = await stub.get(url, config);
+      return { data: response.data as T };
+    },
+    post: async <T = unknown>(url: string, data?: unknown) => {
+      if (data === undefined) throw new Error('Harvest requests require a body.');
+      const response = await stub.post(url, data as HarvestJobRequest);
+      return { data: response.data as T };
+    },
+  });
 }
 
 function renderDialog(props: React.ComponentProps<typeof HarvestJobDialog>) {
@@ -45,7 +65,7 @@ describe('HarvestJobDialog', () => {
 
   beforeEach(() => {
     stub = makeStub();
-    configurePartsHarvestClient(stub);
+    configureStub(stub);
   });
 
   afterEach(() => {

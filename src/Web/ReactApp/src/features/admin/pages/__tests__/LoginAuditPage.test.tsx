@@ -27,7 +27,6 @@ const mockEntry = {
   success: true,
   ipAddress: '10.0.0.42',
   userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-  failureReason: null,
 };
 
 const mockFailedEntry = {
@@ -109,6 +108,27 @@ describe('LoginAuditPage', () => {
 
     expect(screen.getByText('admin')).toBeInTheDocument();
     expect(screen.getByText('badactor')).toBeInTheDocument();
+  });
+
+  it('renders placeholders for nullable fields omitted from the response', async () => {
+    vi.mocked(securityAuditService.fetchLoginAudit).mockResolvedValue({
+      ...mockPagedResponse,
+      items: [
+        {
+          id: 'entry-with-omitted-fields',
+          timestamp: '2026-05-26T17:22:00Z',
+          success: false,
+          ipAddress: '10.0.0.43',
+        },
+      ],
+    });
+
+    renderPage();
+
+    await waitFor(() => {
+      expect(screen.getByRole('row', { name: /10\.0\.0\.43/ })).toBeInTheDocument();
+    });
+    expect(screen.getAllByText('—')).toHaveLength(3);
   });
 
   it('shows success badge for successful logins', async () => {

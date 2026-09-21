@@ -1,6 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { apiClient } from '@/services/api';
-import type { ProfileTypeSchemaDto } from '@/types/api';
+import type { ProfileTypeSchema } from '@/types/api';
 
 /**
  * Fetches version-scoped schema metadata for a profile type (issue #578).
@@ -21,7 +21,7 @@ export function useProfileSchema(
     queryKey: ['profile-schema', profileType, engineVersion ?? null],
     queryFn: () => apiClient.getProfileSchemas(engineVersion),
     staleTime: 600_000, // 10 min — schema per (profileType, engineVersion) rarely changes
-    select: (data): ProfileTypeSchemaDto => {
+    select: (data): ProfileTypeSchema => {
       switch (profileType) {
         case 'process':
           return data.process;

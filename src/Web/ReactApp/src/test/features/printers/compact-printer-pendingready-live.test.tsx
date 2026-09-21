@@ -54,7 +54,7 @@ vi.mock('@/services/api/queueSummariesApi', () => ({
 }));
 
 vi.mock('@/services/api/autoDispatchApi', () => ({
-  getAutoDispatchStatus: vi.fn().mockResolvedValue({ printers: [] }),
+  getAutoDispatchStatus: vi.fn().mockResolvedValue({ globalEnabled: false, printers: [] }),
   setAutoDispatchEnabled: vi.fn().mockResolvedValue(undefined),
   skipAutoDispatchJob: vi.fn().mockResolvedValue(undefined),
   cancelAutoDispatch: vi.fn().mockResolvedValue(undefined),
@@ -159,7 +159,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     autoDispatchStateListeners.splice(0, autoDispatchStateListeners.length);
-    vi.mocked(getAutoDispatchStatus).mockResolvedValue({ printers: [] });
+    vi.mocked(getAutoDispatchStatus).mockResolvedValue({ globalEnabled: false, printers: [] });
   });
 
   it('uses the auto-dispatch hook path to fetch bulk status and subscribe to live updates', async () => {
@@ -185,6 +185,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
   it('shows Pending Ready status and bed-clear banner from the initial bulk status snapshot when the bed-clear gate is red', async () => {
     const printer = makePrinter();
     vi.mocked(getAutoDispatchStatus).mockResolvedValueOnce({
+      globalEnabled: true,
       printers: [
         {
           printerId: printer.id,
@@ -226,6 +227,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
     async (state) => {
       const printer = makePrinter({ state });
       vi.mocked(getAutoDispatchStatus).mockResolvedValueOnce({
+        globalEnabled: true,
         printers: [
           {
             printerId: printer.id,
@@ -305,6 +307,7 @@ describe('CompactPrinterCard PendingReady live updates', () => {
   it('keeps the Pending Ready banner when a partial live update omits ready-gate details', async () => {
     const printer = makePrinter();
     vi.mocked(getAutoDispatchStatus).mockResolvedValueOnce({
+      globalEnabled: true,
       printers: [
         {
           printerId: printer.id,

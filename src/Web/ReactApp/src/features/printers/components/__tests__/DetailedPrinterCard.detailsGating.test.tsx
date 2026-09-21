@@ -8,7 +8,9 @@ const usePrinterDetailsMock = vi.hoisted(() =>
   vi.fn(() => ({ data: undefined, isLoading: false }))
 );
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
-const printerHistoryModalMock = vi.hoisted(() => vi.fn(() => null));
+const printerHistoryModalMock = vi.hoisted(() =>
+  vi.fn<(props: { isOpen: boolean }) => null>(() => null)
+);
 
 vi.mock('@/common/hooks/useApi', () => ({
   usePrinterDetails: usePrinterDetailsMock,
