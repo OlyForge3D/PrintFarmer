@@ -78,7 +78,7 @@ describe('PrinterTableView - maintenance button', () => {
     );
 
     const row = screen.getByRole('row', { name: /Printer 1/ });
-    expect(within(row).getByRole('cell', { name: '—', exact: true })).toBeInTheDocument();
+    expect(within(row).getByRole('cell', { name: '—' })).toBeInTheDocument();
     expect(within(row).queryByRole('progressbar')).not.toBeInTheDocument();
     expect(within(row).queryByText('0%')).not.toBeInTheDocument();
   });

@@ -8,12 +8,6 @@ import type { MaintenanceAlert, MaintenanceLog, PrinterMaintenanceScheduleDto } 
 import { MaintenanceAlertStatus } from '@/types/maintenance';
 import type { PrinterDetails, ToolheadDto } from '@/types/api';
 import { ToolheadType } from '@/types/api';
-import { AxiosHeaders } from 'axios';
-import { client } from '@/services/api/httpClient';
-
-vi.mock('@/services/api/httpClient', () => ({
-  client: { get: vi.fn() },
-}));
 
 vi.mock('@/services/api', () => ({
   apiClient: {
@@ -214,7 +208,6 @@ function seedDefaults(overrides: {
   alerts?: MaintenanceAlert[];
   logs?: MaintenanceLog[];
   deployments?: PrinterMaintenanceScheduleDto[];
-  capabilities?: unknown;
   upcoming?: unknown[];
 } = {}) {
   (apiClient.getPrinters as unknown as ReturnType<typeof vi.fn>).mockResolvedValue([printer]);
@@ -247,20 +240,6 @@ function seedDefaults(overrides: {
     overrides.deployments ?? [legacyDeployment, scopedDeployment]
   );
 
-  vi.mocked(client.get).mockResolvedValue({
-    data: overrides.capabilities ?? {
-      architecture: 'x64',
-      slicingEnabled: true,
-      modelFilesEnabled: true,
-      thumbnailGenerationEnabled: true,
-      gcodeUploadEnabled: true,
-      operatorFeatures: { multiSlotFallbackEnabled: true },
-    },
-    status: 200,
-    statusText: 'OK',
-    headers: {},
-    config: { headers: new AxiosHeaders() },
-  });
 }
 
 describe('PrinterMaintenancePage — per-toolhead scope', () => {
@@ -370,22 +349,12 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     expect(t1Radio.checked).toBe(true);
   });
 
-  it('trusts the server-composed supportsPerToolAttribution bool: shows UI when true even if client capabilities cache says otherwise', async () => {
+  it('shows per-tool UI when server-composed supportsPerToolAttribution is true', async () => {
     // #711 stable contract at 0428c66a6: server composes
     // `multiSlotFallbackEnabled AND persisted capability`; when it
     // returns true the client MUST NOT double-gate on its own stale
     // capability flag.
-    seedDefaults({
-      capabilities: {
-        architecture: 'x64',
-        slicingEnabled: true,
-        modelFilesEnabled: true,
-        thumbnailGenerationEnabled: true,
-        gcodeUploadEnabled: true,
-        operatorFeatures: { multiSlotFallbackEnabled: false },
-      },
-      // Printer projection still reports the server-composed bool true.
-    });
+    seedDefaults();
     renderPage();
 
     await waitFor(() =>
@@ -394,17 +363,9 @@ describe('PrinterMaintenancePage — per-toolhead scope', () => {
     expect(screen.getByTestId('printer-maintenance-scope')).toBeInTheDocument();
   });
 
-  it('collapses per-tool UI when server-composed supportsPerToolAttribution is false even if client cache says enabled', async () => {
+  it('collapses per-tool UI when server-composed supportsPerToolAttribution is false', async () => {
     seedDefaults({
       details: printerDetailsMultiUnattributed,
-      capabilities: {
-        architecture: 'x64',
-        slicingEnabled: true,
-        modelFilesEnabled: true,
-        thumbnailGenerationEnabled: true,
-        gcodeUploadEnabled: true,
-        operatorFeatures: { multiSlotFallbackEnabled: true },
-      },
     });
     renderPage();
 

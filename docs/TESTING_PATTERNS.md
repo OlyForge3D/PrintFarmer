@@ -90,8 +90,9 @@ and `src/Web/ReactApp/src/features/fileBrowser/__tests__/fileBrowserViews.test.t
 discovery `SlicerDto` without `activeJobs`/`queuedJobs`; its callers must not
 invent required count fields. `SlicerServiceResponse` in
 `src/slicer/Farm.Slicer.Module/Contracts/SlicerDtos.cs` also has no such fields.
-Worker management's separate `WorkerResponse.ActiveJobs` in `WorkerDtos.cs` is
-real and retained. `src/Web/ReactApp/src/services/__tests__/slicerRegistry.test.ts`
+Worker management's separate `WorkerResponse.ActiveJobs` in
+`src/slicer/Farm.Slicer.Module/Contracts/WorkerDtos.cs` is real and retained.
+`src/Web/ReactApp/src/services/__tests__/slicerRegistry.test.ts`
 checks the exact mapped discovery shape; `workersService.test.ts` in that
 directory covers worker-management counts.
 

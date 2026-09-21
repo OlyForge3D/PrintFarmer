@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, assert, describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { InstallerUpdatesExperience } from '@/features/admin/components/InstallerUpdatesExperience';
 import type { InstallerUpdatesExperienceProps } from '@/features/admin/components/InstallerUpdatesExperience';
 import { UpdateChannelSaveRejectedError } from '@/features/admin/utils/updateChannelSaveErrors';
@@ -1053,8 +1053,9 @@ describe('InstallerUpdatesExperience', () => {
     const observedReplica = observedReplicaSummary.closest('details');
     expect(observedReplica).not.toBeNull();
     await userEvent.setup().click(observedReplicaSummary);
-    assert.isString(identity.releaseId);
-    assert.isString(identity.sourceCommit);
+    if (identity.releaseId === null || identity.sourceCommit === null) {
+      throw new Error('The observed identity fixture must contain its release ID and source commit');
+    }
     expect(within(observedReplica!).getByText(identity.releaseId)).toBeVisible();
     const sourceCommit = within(observedReplica!).getByText('Source commit')
       .parentElement;

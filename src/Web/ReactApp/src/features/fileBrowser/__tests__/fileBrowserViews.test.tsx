@@ -98,7 +98,7 @@ describe("ExplorerView", () => {
         onSelectAll={onSelectAll}
         onNavigate={vi.fn()}
         currentPath="/"
-        renderItemActions={() => null}
+        renderActions={() => null}
         sortBy="fileName"
         sortOrder="asc"
         onSort={onSort}
@@ -128,7 +128,7 @@ describe("ExplorerView", () => {
         onSelectAll={vi.fn()}
         onNavigate={vi.fn()}
         currentPath="/"
-        renderItemActions={() => null}
+        renderActions={() => null}
         sortBy="fileName"
         sortOrder="asc"
         onSort={vi.fn()}
