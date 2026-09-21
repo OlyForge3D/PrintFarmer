@@ -217,13 +217,13 @@ describe('FailureDetectionEvent type', () => {
   });
 
   it('should allow optional jobId to be undefined', () => {
-    const event = {
+    const event: FailureDetectionEvent = {
       printerId: 'abc-123',
       printerName: 'Printer',
       confidence: 0.5,
       detectedAt: '2026-01-01T00:00:00Z',
       autoPaused: false,
-    } satisfies import('@/types/api').FailureDetectionEvent;
+    };
 
     expect(event.jobId).toBeUndefined();
   });
@@ -466,7 +466,6 @@ describe('CompactPrinterCard monitoring badge', () => {
       detectionSource: 'global',
       lastOutcome: 'error',
       lastAnalyzedAt: '2026-01-01T00:00:00Z',
-      lastConfidence: null,
       lastAutoPaused: false,
     };
 

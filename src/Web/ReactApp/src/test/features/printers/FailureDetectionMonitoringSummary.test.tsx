@@ -15,7 +15,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       detectionTarget: 'North bay camera',
       lastOutcome: 'healthy',
       lastAnalyzedAt: '2026-01-15T10:30:00Z',
-      lastConfidence: null,
       lastAutoPaused: false,
     };
 
@@ -144,8 +143,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       detectionSource: 'none',
       detectionTarget: '',
       lastOutcome: 'none',
-      lastAnalyzedAt: null,
-      lastConfidence: null,
       lastAutoPaused: false,
     };
 
@@ -173,8 +170,6 @@ describe('FailureDetectionMonitoringSummary', () => {
       detectionSource: 'pooled',
       detectionTarget: 'North bay camera',
       lastOutcome: 'none',
-      lastAnalyzedAt: null,
-      lastConfidence: null,
       lastAutoPaused: false,
     };
 
@@ -218,7 +213,6 @@ describe('FailureDetectionMonitoringSummary', () => {
         detectionTarget: 'North bay camera',
         lastOutcome: 'healthy',
         lastAnalyzedAt: '2026-01-15T10:30:00Z',
-        lastConfidence: null,
         lastAutoPaused: false,
       };
 
