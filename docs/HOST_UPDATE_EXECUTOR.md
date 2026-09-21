@@ -109,6 +109,15 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
 
 ## Known limitations
 
+- The verify adapter persists each verified target's platform alongside its digest
+  before releasing the writer fence. The real installed-state store requires an
+  exact service-to-platform map for recovery; omitting it previously caused
+  `installed_state_corrupt:service_platforms_missing` after health verification.
+  `HostUpdateExecutionStepsAdapterTests` covers the producer/file-store contract
+  and preserves fail-closed ordering on verification or persistence failure.
+  This repair does **not** establish managed-update eligibility: production
+  readiness/admission adapters, independently verified installed observations,
+  and first-update retained prior-state provisioning remain integration gaps.
 - **Fixed (this pass) — `DigestHostUpdateHealthCheck` was probing a nonexistent field**: it
   previously ran a single `docker inspect --format {{index .RepoDigests 0}} <container>`, but
   `.RepoDigests` is exclusively a property of `docker image inspect` output; it never exists on
