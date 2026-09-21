@@ -9,7 +9,7 @@ The macOS-mobile and Windows-general scheduled instances use one checked-in
 Each round scans draft and non-draft PR recovery before new issues, records real
 host/session/head handoffs, and retains unknown remote ownership. Shared-file
 integration is serialized; cross-host overlap requires a verified sole owner.
-The Windows profile remains disabled until its live host configuration is verified.
+The Windows profile has been exported and verified; its schedule remains disabled pending separate owner authorization to enable.
 
 This is not an upstream CLI fix. In Squad CLI 0.11.0,
 `watch/capabilities/execute.ts` filters blocked/assigned issues and returns before
