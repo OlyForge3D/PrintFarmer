@@ -113,6 +113,7 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
 
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
 import { SettingsPagelet, type SettingMetadata } from '@/common/components/SettingsPagelet';
+import { SettingInputType } from '@/types/SettingInputType';
 
 async function renderPage(fixture: Section[]) {
   sections = fixture;
@@ -265,9 +266,9 @@ const metadata: SettingMetadata = {
   className: 'Demo',
   displayName: 'Demo',
   properties: [
-    { name: 'count', type: 'Int32', attributes: [], display: { name: 'Count', inputType: 'Number' } },
-    { name: 'host', type: 'string', attributes: [], display: { name: 'Host', inputType: 'Hostname' } },
-    { name: 'label', type: 'string', attributes: [], display: { name: 'Label', inputType: 'Text' } },
+    { name: 'count', type: 'Int32', attributes: [], display: { name: 'Count', inputType: SettingInputType.Number } },
+    { name: 'host', type: 'string', attributes: [], display: { name: 'Host', inputType: SettingInputType.Hostname } },
+    { name: 'label', type: 'string', attributes: [], display: { name: 'Label', inputType: SettingInputType.Text } },
   ],
 };
 
