@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  acknowledgeLocalJob, reserveJob, reserveLocalJob, reserveLocalPrRecovery, recoverLocalReservation,
+  acknowledgeLocalJob, clearStrandedKickoff, failLocalKickoff, reserveJob, reserveLocalJob, reserveLocalPrRecovery, recoverLocalReservation,
 } from '../ralph-macos-ssh.mjs';
 
 const repository = 'OlyForge3D/PrintFarmer';
@@ -178,6 +178,29 @@ test('noncanonical file scopes fail closed and Windows case aliases still confli
       }],
     },
   }, f.options), code('EXTERNAL_OWNERSHIP'));
+});
+
+test('stranded recovery fences all closing issues until its real session is reconciled', async (t) => {
+  const f = await fixture(t);
+  await reserveLocalPrRecovery(request(), { ...f.options, readPull: async () => pull(2897, [2799, 2800]) });
+  await failLocalKickoff(job().jobId, {
+    ...f.options, controllerPid: process.pid, sessionId: 'stranded-recovery', kickoffUnverified: true,
+  });
+  const before = await f.ledger();
+  await assert.rejects(() => reserveLocalJob({
+    job: job('secondary-issue', 2800),
+    eligibility: { repository, issue: 2800, open: true, exactClaim: true, held: false, blocked: false, linkedPr: false },
+  }, f.options), code('STRANDED_SESSION'));
+  const next = {
+    ...request(), job: job('another-pr', 2801), recovery: recovery(2898),
+    ownership: ownership(2898), expectedGeneration: before.generation,
+  };
+  const options = { ...f.options, readPull: async () => pull(2898, [2800, 2801]) };
+  await assert.rejects(() => reserveLocalPrRecovery(next, options), code('STRANDED_SESSION'));
+  assert.deepEqual(await f.ledger(), before);
+  await clearStrandedKickoff(job().jobId, { ...f.options, sessionAbsent: true });
+  const admitted = await reserveLocalPrRecovery({ ...next, expectedGeneration: (await f.ledger()).generation }, options);
+  assert.equal(admitted.reservationCreated, true);
 });
 
 test('ownership freshness is rechecked after collecting GitHub facts, before admission', async (t) => {

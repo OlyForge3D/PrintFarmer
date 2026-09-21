@@ -482,7 +482,9 @@ async function reserveJobInternal({ job, eligibility, mode = 'remote', now = new
     // session was never observed processing anything, so it may still wake up and work the issue.
     // Re-admitting the issue before that session is proven gone would put two sessions on the same
     // work — the ledger enforces that here rather than trusting the caller to remember the policy.
-    if (Object.values(ledger.jobs).some((entry) => ((job.issue !== undefined && entry.issue === job.issue) ||
+    const requestedIssues = prRecovery?.work.linkedIssues ?? (job.issue === undefined ? [] : [job.issue]);
+    if (Object.values(ledger.jobs).some((entry) => (requestedIssues.some((issue) =>
+      entry.issue === issue || entry.prRecovery?.work.linkedIssues.includes(issue)) ||
       (prRecovery && entry.prRecovery?.work.pr === prRecovery.work.pr)) &&
       entry.failureReason === 'kickoff-unverified' && validIdentifier(entry.strandedSessionId) &&
       entry.strandedSessionCleared !== true)) {
@@ -1291,7 +1293,8 @@ async function recordAppCompletion({ result, successor, expectedGeneration }, op
     if (!['accepted', 'running'].includes(entry.state)) invalidCompletion('Only live local admissions may complete.');
     if (successor && (successor.job.jobId === entry.jobId || successor.job.issue === entry.issue ||
         ledger.jobs[successor.job.jobId] || Object.values(ledger.jobs).some((other) =>
-          other.issue === successor.job.issue && (activeJobStates.has(other.state) ||
+          (other.issue === successor.job.issue || other.prRecovery?.work.linkedIssues.includes(successor.job.issue)) &&
+          (activeJobStates.has(other.state) ||
             (other.strandedSessionId && other.strandedSessionCleared !== true))))) {
       invalidCompletion('Successor job or issue is already owned or does not identify distinct work.');
     }
