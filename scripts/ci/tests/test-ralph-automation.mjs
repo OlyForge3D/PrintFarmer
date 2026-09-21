@@ -132,7 +132,7 @@ test('common policy retains actual handoff, host ownership, dependency and merge
     're-fetch the native dependency edges', 'no new distributed lock service',
     'Unknown remote owner', 'one resend', 'never archive/delete',
   ]) assert.ok(common.toLowerCase().includes(required.toLowerCase()), required);
-  assert.match(bootstrap, /Windows is not live-verified/);
+  assert.match(bootstrap, /Windows has been exported and verified/);
   assert.match(bootstrap, /squad watch --execute.*not this entrypoint/s);
   assert.match(skill, /automation\.md/);
   assert.match(kickoff, /BEFORE YOU OPEN YOUR PULL REQUEST, SYNC TO THE CURRENT BASE/);
