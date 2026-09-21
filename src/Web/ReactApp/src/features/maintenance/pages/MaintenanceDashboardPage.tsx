@@ -44,12 +44,10 @@ import { useUpcomingMaintenance } from '../hooks/useUpcomingMaintenance';
 import { useComponentMaintenance } from '../hooks/useComponentMaintenance';
 import type { UpcomingMaintenanceTask } from '../hooks/useUpcomingMaintenance';
 
-import {
-  MaintenanceTrendsChart,
-  ComponentLifespanChart,
-  MaintenanceCostAnalysis,
-  PrinterUptimeChart,
-} from '../components';
+import { MaintenanceTrendsChart } from '../components/MaintenanceTrendsChart';
+import { ComponentLifespanChart } from '../components/ComponentLifespanChart';
+import { MaintenanceCostAnalysis } from '../components/MaintenanceCostAnalysis';
+import { PrinterUptimeChart } from '../components/PrinterUptimeChart';
 import { MaintenanceReport } from '../components/MaintenanceReport';
 import { useAdminHubParent } from '@/features/admin/utils/adminHubParentState';
 
