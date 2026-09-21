@@ -7,7 +7,7 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 public sealed class HostUpdateExecutorTests
 {
     private static HostUpdateAutomationPolicy Policy() => new(Enabled: true, Revision: 1);
-    private static HostUpdateExecutionRequest Request() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, [
+    private static HostUpdateExecutionRequest Request() => new("stable:1.2.3", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, [
         new("api", "linux-amd64", "sha256:" + new string('a', 64)),
         new("frontend", "linux-amd64", "sha256:" + new string('b', 64)),
         new("slicer-host", "linux-amd64", "sha256:" + new string('c', 64)),
@@ -125,7 +125,7 @@ public sealed class HostUpdateExecutorTests
     }
 
     private static VerifiedHostUpdateCandidate Candidate() => new(
-        "rel-1",
+        "stable:1.2.3",
         new string('b', 40),
         1,
         "sha256:" + new string('a', 64),

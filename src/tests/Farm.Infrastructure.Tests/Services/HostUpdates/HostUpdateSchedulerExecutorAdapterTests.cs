@@ -8,7 +8,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
 {
     private static HostUpdateExecutorRequest Request(string channel = "stable", string operationToken = "operation-1") => new(
         "request-1",
-        "release-1",
+        channel == "insider" ? "insider:1.2.3-insider.4" : "stable:1.2.3",
         new string('a', 40),
         42,
         "sha256:" + new string('b', 64),
@@ -28,7 +28,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     [Fact]
     public async Task ExecuteAsync_MapsImmutableSchedulerBindingToHostUpdateRequest()
     {
-        CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
+        CapturingExecutor executor = new(new HostUpdateExecutionResult(Request().ReleaseId, HostUpdateExecutionState.Completed, null, []));
         using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(), default);
@@ -36,6 +36,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
         Assert.Equal(HostUpdateExecutorResult.Accepted, response.Result);
         HostUpdateExecutionRequest mapped = Assert.Single(executor.Requests);
         Assert.Equal("request-1", mapped.RequestId);
+        Assert.Equal("stable:1.2.3", mapped.ReleaseId);
         Assert.Equal("root-1", mapped.TrustRoot);
         Assert.Equal(7, mapped.PolicyRevision);
         Assert.Equal("policy-7", mapped.PolicyFingerprint);
@@ -51,7 +52,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     [InlineData(HostUpdateExecutionState.Applying, HostUpdateExecutorResult.Refused)]
     public async Task ExecuteAsync_MapsHostUpdateStateToSchedulerResult(HostUpdateExecutionState state, HostUpdateExecutorResult expected)
     {
-        CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", state, "failure-code", []));
+        CapturingExecutor executor = new(new HostUpdateExecutionResult(Request().ReleaseId, state, "failure-code", []));
         using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(), default);
@@ -63,12 +64,13 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     [Fact]
     public async Task ExecuteAsync_MapsInsiderChannelWithoutSharingStableNamespace()
     {
-        CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
+        CapturingExecutor executor = new(new HostUpdateExecutionResult(Request("insider").ReleaseId, HostUpdateExecutionState.Completed, null, []));
         using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request("insider"), default);
 
         Assert.Equal(HostUpdateExecutorResult.Accepted, response.Result);
+        Assert.Equal("insider:1.2.3-insider.4", Assert.Single(executor.Requests).ReleaseId);
         Assert.Equal(HostUpdateExecutionChannel.Insider, Assert.Single(executor.Requests).Channel);
     }
 
@@ -105,7 +107,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     [Fact]
     public async Task PreArmCancellation_OverflowFailsClosed()
     {
-        CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
+        CapturingExecutor executor = new(new HostUpdateExecutionResult(Request().ReleaseId, HostUpdateExecutionState.Completed, null, []));
         using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         for (int i = 0; i < 16; i++)
@@ -187,7 +189,7 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
     [Fact]
     public async Task ExecuteAsync_RefusesRequestWithoutOperationToken()
     {
-        CapturingExecutor executor = new(new HostUpdateExecutionResult("release-1", HostUpdateExecutionState.Completed, null, []));
+        CapturingExecutor executor = new(new HostUpdateExecutionResult(Request().ReleaseId, HostUpdateExecutionState.Completed, null, []));
         using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
 
         HostUpdateExecutorResponse response = await adapter.ExecuteAsync(Request(operationToken: " "), default);

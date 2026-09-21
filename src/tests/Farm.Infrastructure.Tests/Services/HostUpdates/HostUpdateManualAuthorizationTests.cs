@@ -332,7 +332,7 @@ public sealed class HostUpdateManualAuthorizationTests
             new(Settings, Cache, replayStore, new MemoryManifestBindingStore(), AuthorizationStore, Fence, Clock);
 
         public VerifiedHostUpdateCandidate Candidate { get; } = new(
-            "release-1",
+            "stable:1.2.3",
             new string('a', 40),
             42,
             "sha256:" + new string('b', 64),

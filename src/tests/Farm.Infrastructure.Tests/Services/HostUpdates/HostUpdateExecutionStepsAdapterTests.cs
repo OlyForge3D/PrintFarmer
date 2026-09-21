@@ -9,11 +9,13 @@ public sealed class HostUpdateExecutionStepsAdapterTests : IDisposable
     private readonly string _root = Directory.CreateTempSubdirectory("hu-steps-").FullName;
 
     [Theory]
-    [InlineData("linux-amd64")]
-    [InlineData("linux-arm64")]
-    public async Task VerifyAsync_VerifiedTargets_PersistsCompleteStateBeforeReleasingFence(string platform)
+    [InlineData("linux-amd64", "stable:1.2.3", HostUpdateExecutionChannel.Stable)]
+    [InlineData("linux-arm64", "stable:1.2.3", HostUpdateExecutionChannel.Stable)]
+    [InlineData("linux-amd64", "insider:1.2.3-insider.4", HostUpdateExecutionChannel.Insider)]
+    public async Task VerifyAsync_VerifiedTargets_PersistsCompleteStateBeforeReleasingFence(
+        string platform, string releaseId, HostUpdateExecutionChannel channel)
     {
-        HostUpdateExecutionRequest request = Request(platform);
+        HostUpdateExecutionRequest request = Request(platform) with { ReleaseId = releaseId, Channel = channel };
         Assert.True(request.IsValid(out string error), error);
         string path = Path.Combine(_root, "installed-state.json");
         var store = new FileInstalledHostStateStore(path);
@@ -58,25 +60,93 @@ public sealed class HostUpdateExecutionStepsAdapterTests : IDisposable
     }
 
     [Fact]
-    public async Task VerifyAsync_InvalidTargetPlatform_PreservesPriorStateAndKeepsFenceClosed()
+    public async Task VerifyAsync_AtomicWritePathTooLong_PreservesPriorStateAndKeepsFenceClosed()
     {
-        HostUpdateExecutionRequest request = Request("invalid-platform");
-        string path = Path.Combine(_root, "installed-state.json");
+        HostUpdateExecutionRequest request = Request("linux-amd64");
+        Assert.True(request.IsValid(out string error), error);
+        string priorPath = Path.Combine(_root, "prior-state.json");
+        await WritePriorStateAsync(new FileInstalledHostStateStore(priorPath));
+        // The prior filename fits NTFS/ext4 limits; the atomic writer's GUID suffix does not.
+        string path = Path.Combine(_root, new string('s', 240) + ".json");
+        File.Move(priorPath, path);
         var store = new FileInstalledHostStateStore(path);
-        await WritePriorStateAsync(store);
+        Assert.NotNull(await store.ReadAsync(CancellationToken.None));
         string prior = await File.ReadAllTextAsync(path);
         var verifier = new Mock<IHostUpdateHealthVerifier>(MockBehavior.Strict);
         verifier.Setup(value => value.RunAsync(request, CancellationToken.None)).Returns(Task.CompletedTask);
         var fence = new Mock<IHostUpdateFenceCoordinator>(MockBehavior.Strict);
         HostUpdateExecutionStepsAdapter adapter = CreateAdapter(store, verifier.Object, fence.Object);
 
-        HostUpdateInstalledStateCorruptException exception =
-            await Assert.ThrowsAsync<HostUpdateInstalledStateCorruptException>(() =>
+        await Assert.ThrowsAnyAsync<IOException>(() =>
                 adapter.VerifyAsync(request, CancellationToken.None));
 
-        Assert.Equal("service_platform_invalid", exception.Code);
         Assert.Equal(prior, await File.ReadAllTextAsync(path));
         fence.Verify(value => value.ReleaseAsync(It.IsAny<CancellationToken>()), Times.Never);
+    }
+
+    [Theory]
+    [InlineData("manifest", "sha256:", 'A', 64, "release_binding_invalid")]
+    [InlineData("manifest", "SHA256:", 'a', 64, "release_binding_invalid")]
+    [InlineData("manifest", "sha256:", 'a', 63, "release_binding_invalid")]
+    [InlineData("manifest", "sha256:", 'z', 64, "release_binding_invalid")]
+    [InlineData("platform", "sha256:", 'A', 64, "target_invalid")]
+    [InlineData("platform", "SHA256:", 'a', 64, "target_invalid")]
+    [InlineData("platform", "sha256:", 'a', 63, "target_invalid")]
+    [InlineData("platform", "sha256:", 'z', 64, "target_invalid")]
+    public async Task ExecuteAsync_NoncanonicalDigest_RejectsBeforeAnySideEffect(
+        string field, string prefix, char character, int length, string reason)
+    {
+        HostUpdateExecutionRequest request = Request("linux-amd64");
+        string digest = prefix + new string(character, length);
+        request = field == "manifest"
+            ? request with { ManifestDigest = digest }
+            : request with { Targets = request.Targets.Select(target => target with { ChildDigest = digest }).ToArray() };
+
+        await AssertRejectedBeforeSideEffectsAsync(request, reason);
+    }
+
+    [Theory]
+    [InlineData("manifest")]
+    [InlineData("platform")]
+    public async Task ExecuteAsync_MixedCaseDigest_RejectsBeforeAnySideEffect(string field)
+    {
+        HostUpdateExecutionRequest request = Request("linux-amd64");
+        string digest = "sha256:" + new string('a', 63) + "B";
+        request = field == "manifest"
+            ? request with { ManifestDigest = digest }
+            : request with { Targets = request.Targets.Select(target => target with { ChildDigest = digest }).ToArray() };
+
+        await AssertRejectedBeforeSideEffectsAsync(request, field == "manifest" ? "release_binding_invalid" : "target_invalid");
+    }
+
+    [Theory]
+    [InlineData("rel-1")]
+    [InlineData("stable:01.2.3")]
+    [InlineData("stable:1.2.3-insider.4")]
+    [InlineData("insider:1.2.3")]
+    [InlineData("unknown:1.2.3")]
+    public async Task ExecuteAsync_NoncanonicalReleaseId_RejectsBeforeAnySideEffect(string releaseId)
+    {
+        await AssertRejectedBeforeSideEffectsAsync(Request("linux-amd64") with { ReleaseId = releaseId }, "release_binding_invalid");
+    }
+
+    private static async Task AssertRejectedBeforeSideEffectsAsync(HostUpdateExecutionRequest request, string reason)
+    {
+        var steps = new Mock<IHostUpdateExecutionSteps>(MockBehavior.Strict);
+        var journal = new Mock<IHostUpdateExecutionJournal>(MockBehavior.Strict);
+        var updateLock = new Mock<IHostUpdateExecutionLock>(MockBehavior.Strict);
+        var policy = new Mock<IHostUpdateAutomationPolicyRepository>(MockBehavior.Strict);
+        var executor = new HostUpdateExecutor(steps.Object, journal.Object, updateLock.Object, policy.Object);
+
+        HostUpdateExecutionResult result = await executor.ExecuteAsync(request, CancellationToken.None);
+
+        Assert.False(result.Succeeded);
+        Assert.Equal(reason, result.FailureCode);
+        Assert.Empty(result.Activities);
+        steps.VerifyNoOtherCalls();
+        journal.VerifyNoOtherCalls();
+        updateLock.VerifyNoOtherCalls();
+        policy.VerifyNoOtherCalls();
     }
 
     [Fact]
