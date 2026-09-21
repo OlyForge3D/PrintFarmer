@@ -7,7 +7,8 @@ confidence: "high"
 
 ## Verify, Do Not Review
 
-For non-mobile, `squad`-labelled PRs only, re-fetch current fields and run
+For `squad`-labelled PRs in the verified host's scope, including drafts needing
+recovery, re-fetch current fields and run
 `node scripts/ci/verify-squad-verdict.mjs --repo <owner/repo> --pr <n> --json`. Verify the
 current message author and evidence, never free text. Required checks must be green, CodeQL must
 have completed, and CodeQL alerts must be compared with the development baseline; empty alerts
@@ -17,11 +18,18 @@ to the owning session. `strict: false` means `BEHIND` alone is not a blocker.
 Only the verifier's current-SHA `REVIEWED`/`APPROVED` evidence can proceed. A carried base-sync
 record has only the verifier's stated semantics; diff similarity never grants authorization.
 `CHANGES_REQUESTED`, missing, invalid, unauthenticated, stale, fork, or out-of-scope evidence
-never authorizes a merge. Scheduled Ralph never reviews PRs, never commissions reviewer agents,
-and routes missing or invalid verdicts to the owning implementation session's pre-PR process.
+never authorizes a merge. Scheduled Ralph never reviews PRs itself. The Windows-general
+profile never commissions reviewer agents and routes missing or invalid verdicts to
+the owning implementation session's pre-PR process; the macOS-mobile profile may
+commission source-only task reviewers under the canonical current risk-based count.
 When a required check fails or the current verdict is `CHANGES_REQUESTED`, notify that owner
 session with the live PR/head SHA and the exact failed check or review feedback; do not merely
-report it in the round summary.
+report it in the round summary. Follow [automation.md](automation.md)'s verified handoff,
+stale-claim and shared-file protocol; a message alone is not an accepted revision.
+
+A verified `APPROVED` owner override retains canonical precedence over agent
+rejections. Do not veto it using aggregate `reviewDecision`; preserve overridden
+dissent in the audit. Readiness, CI, scope and exact-head merge checks still apply.
 
 ## Merge And Conflict Safety
 

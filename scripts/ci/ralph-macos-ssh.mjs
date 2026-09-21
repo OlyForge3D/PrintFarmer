@@ -6,6 +6,7 @@ import { execFile, spawn as nodeSpawn } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createReadStream } from 'node:fs';
 import { createInterface } from 'node:readline';
+import { collectPaginated } from './ralph-round-cache.mjs';
 
 export const printFarmerRepository = 'OlyForge3D/PrintFarmer';
 export const activeJobStates = new Set(['reserved', 'delivery-intent', 'accepted', 'running', 'uncertain']);
@@ -53,12 +54,12 @@ function safeJson(value, name) {
   return value;
 }
 
-function validateRemoteJob(job, { requireFence = false } = {}) {
+function validateRemoteJob(job, { requireFence = false, allowUnlinked = false } = {}) {
   const request = safeJson(job, 'Job');
   if (request.repository !== printFarmerRepository) {
     throw new RalphMacSshError('Remote macOS dispatch is limited to OlyForge3D/PrintFarmer.', 'UNSUPPORTED_REPOSITORY');
   }
-  if (!Number.isSafeInteger(request.issue) || request.issue <= 0 || !validJobIdentifier(request.jobId) ||
+  if ((!(allowUnlinked && request.issue === undefined) && (!Number.isSafeInteger(request.issue) || request.issue <= 0)) || !validJobIdentifier(request.jobId) ||
       (requireFence && (!Number.isSafeInteger(request.fence) || request.fence <= 0)) ||
       !validIdentifier(request.owner) || !validSha(request.baseSha) || !Array.isArray(request.acceptanceCriteria) ||
       request.acceptanceCriteria.some((criterion) => typeof criterion !== 'string' || !criterion.trim()) ||
@@ -422,25 +423,38 @@ function validateSessionEvidence(evidence, entry, state, now = Date.now()) {
   };
 }
 
-export async function reserveJob({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000, reservationOwnerPid = process.pid, sessionEvidence }, options = {}) {
-  validateRemoteJob(job);
+export async function reserveJob(request, options = {}) {
+  if (request.prRecovery !== undefined) throw new RalphMacSshError('Use the explicit PR recovery reservation API.', 'INVALID_REQUEST');
+  return reserveJobInternal(request, options);
+}
+
+async function reserveJobInternal({ job, eligibility, mode = 'remote', now = new Date().toISOString(), reservationLeaseMs = 60_000, reservationOwnerPid = process.pid, sessionEvidence, prRecovery }, options = {}) {
+  validateRemoteJob(job, { allowUnlinked: prRecovery !== undefined });
   if (!['local', 'remote'].includes(mode)) throw new RalphMacSshError('Invalid admission mode.', 'INVALID_REQUEST');
+  if (prRecovery && (mode !== 'local' || sessionEvidence)) {
+    throw new RalphMacSshError('PR recovery is a separate local reservation, not remote delivery or handoff accounting.', 'INVALID_REQUEST');
+  }
   const handoff = sessionEvidence === undefined ? undefined : validateSessionEvidence(sessionEvidence, job, 'active');
   if (handoff && mode !== 'local') throw new RalphMacSshError('Only local handoffs may be accounted.', 'INVALID_REQUEST');
-  if (!handoff) assertFreshEligibility(eligibility, job);
-  const immutableJob = JSON.parse(createRemoteRequest({ ...job, fence: Number.MAX_SAFE_INTEGER })).job;
+  if (!handoff && !prRecovery) assertFreshEligibility(eligibility, job);
+  const immutableJob = prRecovery
+    ? Object.fromEntries(['jobId', 'repository', 'issue', 'owner', 'baseSha', 'expectedHost', 'model', 'effort', 'agent', 'acceptanceCriteria', 'charter']
+      .filter((key) => job[key] !== undefined).map((key) => [key, structuredClone(job[key])]))
+    : JSON.parse(createRemoteRequest({ ...job, fence: Number.MAX_SAFE_INTEGER })).job;
   return mutateLedger((ledger) => {
     const existing = ledger.jobs[job.jobId];
     if (existing) {
       if (existing.requestDigest !== requestDigest(immutableJob) || existing.mode !== mode ||
+          JSON.stringify(existing.prRecovery?.work) !== JSON.stringify(prRecovery?.work) ||
           (handoff && (existing.sessionId !== handoff.sessionId || !existing.local))) {
         throw new RalphMacSshError('Job identifier is already fenced to different work.', 'FENCED');
       }
       if (!activeJobStates.has(existing.state)) {
         throw new RalphMacSshError('A terminal job identifier cannot be reserved again.', 'FENCED');
       }
-      return existing;
+      return prRecovery ? { ...existing, reservationCreated: false } : existing;
     }
+    if (prRecovery) validatePrRecoveryOwnership(prRecovery, job, ledger);
     const active = Object.values(ledger.jobs).filter((entry) => activeJobStates.has(entry.state));
     if (handoff) {
       const previous = handoff.previousJobId && ledger.jobs[handoff.previousJobId];
@@ -462,12 +476,16 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
         throw new RalphMacSshError('Live handoff evidence must postdate every terminal record for this session.', 'FENCED');
       }
     }
-    if (active.some((entry) => entry.issue === job.issue)) throw new RalphMacSshError('Issue already has an active Ralph job.', 'ISSUE_OWNED');
+    if (job.issue !== undefined && active.some((entry) => entry.issue === job.issue ||
+      entry.prRecovery?.work.linkedIssues.includes(job.issue))) throw new RalphMacSshError('Issue already has an active Ralph job.', 'ISSUE_OWNED');
     // A released stranded kickoff (issue #2621) frees the slot but not the issue: the created
     // session was never observed processing anything, so it may still wake up and work the issue.
     // Re-admitting the issue before that session is proven gone would put two sessions on the same
     // work — the ledger enforces that here rather than trusting the caller to remember the policy.
-    if (Object.values(ledger.jobs).some((entry) => entry.issue === job.issue &&
+    const requestedIssues = prRecovery?.work.linkedIssues ?? (job.issue === undefined ? [] : [job.issue]);
+    if (Object.values(ledger.jobs).some((entry) => (requestedIssues.some((issue) =>
+      entry.issue === issue || entry.prRecovery?.work.linkedIssues.includes(issue)) ||
+      (prRecovery && entry.prRecovery?.work.pr === prRecovery.work.pr)) &&
       entry.failureReason === 'kickoff-unverified' && validIdentifier(entry.strandedSessionId) &&
       entry.strandedSessionCleared !== true)) {
       throw new RalphMacSshError('Issue has a stranded local session that is not yet reconciled.', 'STRANDED_SESSION');
@@ -491,6 +509,7 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
       reservationOwnerPid, reservationExpiresAt: new Date(Date.parse(now) + reservationLeaseMs).toISOString(),
     };
     entry.job = { ...immutableJob, fence: entry.fence };
+    if (prRecovery) entry.prRecovery = structuredClone(prRecovery);
     if (handoff) {
       entry.state = 'accepted';
       entry.local = true;
@@ -500,8 +519,8 @@ export async function reserveJob({ job, eligibility, mode = 'remote', now = new 
       delete entry.reservationExpiresAt;
     }
     ledger.jobs[job.jobId] = entry;
-    return entry;
-  }, options);
+    return prRecovery ? { ...entry, reservationCreated: true } : entry;
+  }, options, Boolean(prRecovery));
 }
 
 export async function accountLocalSession({ job, sessionEvidence, expectedGeneration }, options = {}) {
@@ -515,6 +534,141 @@ export async function reserveLocalJob({ job, eligibility, now = new Date().toISO
   }
   const localJob = { ...job, repository: printFarmerRepository };
   return reserveJob({ job: localJob, eligibility, mode: 'local', now, reservationOwnerPid: controllerPid }, options);
+}
+
+function recoveryError(message, code = 'INVALID_PR_RECOVERY') {
+  throw new RalphMacSshError(message, code);
+}
+
+function completeFiles(files) {
+  return Array.isArray(files) && files.length > 0 &&
+    files.every((file) => typeof file === 'string' && file.length > 0 &&
+      !/[\\\0:*?[\]]/.test(file) && file.split('/').every((part) => part && part !== '.' && part !== '..'));
+}
+
+function validatePrRecoveryOwnership(recovery, job, ledger) {
+  const { work, ownership } = recovery;
+  const observedAt = Date.parse(ownership?.observedAt);
+  if (!work || ownership?.host !== job.expectedHost || ownership.pr !== work.pr ||
+      ownership.headSha !== work.headSha || ownership.state !== 'inactive' ||
+      !Number.isFinite(observedAt) || observedAt > Date.now() || Date.now() - observedAt > 60_000 ||
+      typeof ownership.source !== 'string' || !ownership.source.trim() ||
+      ownership.liveInventoryChecked !== true || ownership.archivedHistoryChecked !== true ||
+      ownership.terminalHistoryChecked !== true || ownership.queueChecked !== true ||
+      ownership.noPendingDelivery !== true || ownership.externalClaimsChecked !== true ||
+      ownership.remoteOwnership !== 'clear' || ownership.prerequisitesSatisfied !== true ||
+      ownership.source.length > 2048 || !Array.isArray(ownership.externalClaims) || !Array.isArray(ownership.activeJobs)) {
+    recoveryError('Fresh host-bound inventory/history/queue, external claims and remote ownership reconciliation are required.');
+  }
+  const workFiles = new Set(work.files.map((file) => file.toLowerCase()));
+  const overlaps = (files) => !completeFiles(files) || files.some((file) => workFiles.has(file.toLowerCase()));
+  for (const entry of Object.values(ledger.jobs)) {
+    if (entry.jobId === job.jobId || !activeJobStates.has(entry.state)) continue;
+    if (entry.prRecovery?.work.pr === work.pr ||
+        work.linkedIssues.includes(entry.issue) ||
+        entry.prRecovery?.work.linkedIssues.some((issue) => work.linkedIssues.includes(issue))) {
+      recoveryError('PR or linked issue already has an active local/remote job.', 'PR_OWNED');
+    }
+    const observation = ownership.activeJobs.find((item) => item.jobId === entry.jobId && item.fence === entry.fence &&
+      item.host === entry.expectedHost && item.sessionId === entry.sessionId);
+    if (!observation || (entry.prRecovery && overlaps(entry.prRecovery.work.files)) || overlaps(observation.files)) {
+      recoveryError('Active job files conflict or are not completely reconciled.', 'FILES_OWNED');
+    }
+  }
+  const union = new Set(Object.values(ledger.jobs).filter((entry) => activeJobStates.has(entry.state))
+    .map((entry) => entry.sessionId ? `${entry.expectedHost}:${entry.sessionId}` : `job:${entry.jobId}`));
+  for (const claim of ownership.externalClaims) {
+    if (!claim || !validHost(claim.host) || !validIdentifier(claim.sessionId) || !claim.source || claim.pr === work.pr ||
+        !Array.isArray(claim.issues) || claim.issues.some((issue) => work.linkedIssues.includes(issue)) || overlaps(claim.files)) {
+      recoveryError('External claim conflicts or has unknown ownership/file scope.', 'EXTERNAL_OWNERSHIP');
+    }
+    union.add(`${claim.host}:${claim.sessionId}`);
+  }
+  if (union.size >= 5) recoveryError('The effective ledger/live-session union occupies all five slots.', 'SLOT_EXHAUSTED');
+}
+
+async function readRecoveryPull(pr) {
+  const endpoint = `/repos/${printFarmerRepository}/pulls/${pr}`;
+  const read = async (args) => JSON.parse((await execFileAsync('gh', args, { encoding: 'utf8', maxBuffer: 8 * 1024 * 1024 })).stdout);
+  const pull = await read(['api', '--hostname', 'github.com', endpoint]);
+  const files = await collectPaginated(({ page, perPage }) => read([
+    'api', '--hostname', 'github.com', `${endpoint}/files?per_page=${perPage}&page=${page}`,
+  ]));
+  const links = await read(['pr', 'view', String(pr), '--repo', printFarmerRepository, '--json', 'closingIssuesReferences']);
+  if (!Array.isArray(links.closingIssuesReferences) || links.closingIssuesReferences.length >= 100 ||
+      !Number.isSafeInteger(pull.changed_files) || files.length !== pull.changed_files) {
+    recoveryError('PR file or issue-link coverage is incomplete.');
+  }
+  const linkedIssues = links.closingIssuesReferences.map((issue) => {
+    if (issue.url !== `https://github.com/${printFarmerRepository}/issues/${issue.number}`) {
+      recoveryError('Cross-repository or unverified issue linkage requires manual reconciliation.');
+    }
+    return issue.number;
+  });
+  const latest = await read(['api', '--hostname', 'github.com', endpoint]);
+  if (latest.head?.sha !== pull.head?.sha || latest.changed_files !== pull.changed_files) {
+    recoveryError('PR changed during recovery observation.', 'STALE_PR');
+  }
+  return {
+    number: latest.number, state: latest.state, headSha: latest.head?.sha,
+    sameRepository: latest.head?.repo?.full_name === printFarmerRepository,
+    labels: latest.labels?.map((label) => label.name),
+    files: files.flatMap((file) => [file.filename, ...(file.previous_filename ? [file.previous_filename] : [])]),
+    requiresMac: /\b(ios|mobile|swiftui|swift|xcui|xctest|xcode|testflight|apns)\b/i.test(`${latest.title}\n${latest.body}`) ||
+      latest.labels?.some((label) => ['area:ios', 'ios', 'mobile'].includes(label.name)) ||
+      files.some((file) => /(^mobile\/|\.swift$|\.xcodeproj\/|\.xcworkspace\/)/i.test(file.filename)),
+    linkedIssues,
+  };
+}
+
+export async function reserveLocalPrRecovery({ job, recovery, ownership, expectedGeneration, controllerPid }, options = {}) {
+  if ((options.platform ?? process.platform) !== 'win32') {
+    recoveryError('This reservation uses the existing Windows-owned admission authority.', 'WRONG_PLATFORM');
+  }
+  if (!Number.isInteger(controllerPid) || controllerPid <= 0 || !Number.isSafeInteger(expectedGeneration) || expectedGeneration < 0 ||
+      job?.expectedHost !== (options.hostname ?? os.hostname()) ||
+      recovery?.scope !== 'general' || !Number.isSafeInteger(recovery.pr) || recovery.pr <= 0 ||
+      !validSha(recovery.headSha) || !completeFiles(recovery.files) || recovery.files.includes('*') ||
+      !Array.isArray(recovery.findings) || recovery.findings.length === 0 ||
+      recovery.findings.some((finding) => typeof finding !== 'string' || !finding.trim())) {
+    recoveryError('PR recovery requires exact PR/head/findings/files, general host scope, local host identity and ledger generation.');
+  }
+  const pull = await (options.readPull ?? readRecoveryPull)(recovery.pr);
+  if (pull.number !== recovery.pr || pull.state !== 'open' || pull.headSha !== recovery.headSha ||
+      pull.sameRepository !== true || !Array.isArray(pull.labels) || !pull.labels.includes('squad') ||
+      pull.requiresMac !== false ||
+      pull.labels.some((label) => ['status:on-hold', 'status:blocked', 'blocked', 'status:wontfix', 'do-not-merge'].includes(label)) ||
+      !completeFiles(pull.files) || !Array.isArray(pull.linkedIssues) ||
+      pull.linkedIssues.some((issue) => !Number.isSafeInteger(issue) || issue <= 0) ||
+      (job.issue === undefined ? pull.linkedIssues.length !== 0 : !pull.linkedIssues.includes(job.issue))) {
+    recoveryError('Live PR/head, scope, hold or issue linkage changed or is unverified.', 'STALE_PR');
+  }
+  const files = [...new Set(pull.files)].sort();
+  if (JSON.stringify(files) !== JSON.stringify([...new Set(recovery.files)].sort())) {
+    recoveryError('Recovery must reserve every current and renamed PR file.', 'STALE_PR');
+  }
+  const work = {
+    repository: printFarmerRepository, pr: recovery.pr, headSha: recovery.headSha, scope: recovery.scope,
+    findings: recovery.findings, files, linkedIssues: [...new Set(pull.linkedIssues)].sort((a, b) => a - b),
+  };
+  safeJson(ownership, 'PR ownership reconciliation');
+  if (!Array.isArray(ownership.activeJobs) || !Array.isArray(ownership.externalClaims)) {
+    recoveryError('Complete active-job and external-claim observations are required.');
+  }
+  const observations = Object.fromEntries([
+    'host', 'pr', 'headSha', 'state', 'observedAt', 'source', 'liveInventoryChecked', 'archivedHistoryChecked',
+    'terminalHistoryChecked', 'queueChecked', 'noPendingDelivery', 'externalClaimsChecked',
+    'remoteOwnership', 'prerequisitesSatisfied',
+  ].map((key) => [key, ownership[key]]));
+  observations.activeJobs = ownership.activeJobs?.map((entry) => ({
+    jobId: entry.jobId, fence: entry.fence, host: entry.host, sessionId: entry.sessionId, files: entry.files,
+  }));
+  observations.externalClaims = ownership.externalClaims?.map((entry) => ({
+    host: entry.host, sessionId: entry.sessionId, source: entry.source, pr: entry.pr, issues: entry.issues, files: entry.files,
+  }));
+  return reserveJobInternal({
+    job, mode: 'local', reservationOwnerPid: controllerPid, prRecovery: { work, ownership: observations },
+  }, { ...options, expectedGeneration });
 }
 
 // A created session is not a started session: a local session can be created with its worktree and
@@ -1139,7 +1293,8 @@ async function recordAppCompletion({ result, successor, expectedGeneration }, op
     if (!['accepted', 'running'].includes(entry.state)) invalidCompletion('Only live local admissions may complete.');
     if (successor && (successor.job.jobId === entry.jobId || successor.job.issue === entry.issue ||
         ledger.jobs[successor.job.jobId] || Object.values(ledger.jobs).some((other) =>
-          other.issue === successor.job.issue && (activeJobStates.has(other.state) ||
+          (other.issue === successor.job.issue || other.prRecovery?.work.linkedIssues.includes(successor.job.issue)) &&
+          (activeJobStates.has(other.state) ||
             (other.strandedSessionId && other.strandedSessionCleared !== true))))) {
       invalidCompletion('Successor job or issue is already owned or does not identify distinct work.');
     }

@@ -1,10 +1,11 @@
 import {
   RalphMacSshError, accountLocalSession, acknowledgeLocalJob, clearStrandedKickoff, dispatchMacJob, failLocalKickoff,
   recordLocalTerminalResult, recordLocalSessionCompletion, recordLocalSessionHandoff, recordLocalCompletedHandoff, reconcileMacJob, recoverLocalReservation, recoverLostLocalSession,
-  recoverRemoteDelivery, reserveLocalJob,
+  recoverRemoteDelivery, reserveLocalJob, reserveLocalPrRecovery,
 } from './ralph-macos-ssh.mjs';
 
 const commands = Object.assign(Object.create(null), {
+  'reserve-local-pr': (request) => reserveLocalPrRecovery(request),
   'reserve-local': ({ job, eligibility, controllerPid }) => {
     if (!Number.isInteger(controllerPid) || controllerPid <= 0) {
       throw new RalphMacSshError('reserve-local requires the Ralph controller process identifier.', 'INVALID_REQUEST');
@@ -58,7 +59,7 @@ async function main() {
   const command = process.argv[2];
   const execute = commands[command];
   if (!execute || process.argv.length !== 3) {
-    throw new RalphMacSshError('Usage: ralph-admission.mjs <reserve-local|account-local-session|acknowledge-local|fail-local-kickoff|clear-stranded-kickoff|recover-local|recover-local-session|terminal-local|complete-local-session|handoff-local-session|complete-local-handoff|dispatch-remote|status-remote|abandon-incomplete-remote|recover-remote>.', 'INVALID_COMMAND');
+    throw new RalphMacSshError('Usage: ralph-admission.mjs <reserve-local|reserve-local-pr|account-local-session|acknowledge-local|fail-local-kickoff|clear-stranded-kickoff|recover-local|recover-local-session|terminal-local|complete-local-session|handoff-local-session|complete-local-handoff|dispatch-remote|status-remote|abandon-incomplete-remote|recover-remote>.', 'INVALID_COMMAND');
   }
   const request = await readRequest();
   const result = await execute(request);

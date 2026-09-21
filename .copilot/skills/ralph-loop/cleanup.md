@@ -7,7 +7,7 @@ confidence: "high"
 
 ## Candidate Assessment
 
-There is one Ralph automation, not a reaper. Reuse the round's session inventory, PR results, and
+There are two host-scoped Ralph instances, neither a reaper. Reuse the round's session inventory, PR results, and
 fresh remote evidence. Call `assessCleanupCandidate`; it only classifies and never authorizes an
 action. Fail closed for active/unknown activity (age alone is insufficient), unknown or dirty
 tracked/untracked worktrees, missing clean/pushed attestations, unsettled terminal state, or

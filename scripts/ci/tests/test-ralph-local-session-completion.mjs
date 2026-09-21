@@ -451,6 +451,18 @@ test('atomic handoff rejects mismatched, ambiguous, missing or completed success
     ['duplicate old job', (f) => { f.successor.job.jobId = jobId; }],
     ['same old issue', (f) => { f.successor.job.issue = 2720; }],
     ['duplicate issue', (f) => { f.ledger.jobs.retained.issue = 2724; }],
+    ['active secondary PR issue', (f) => {
+      f.ledger.jobs.retained.prRecovery = { work: { linkedIssues: [2661, 2724] } };
+    }],
+    ['stranded secondary PR issue', (f) => {
+      Object.assign(f.ledger.jobs.retained, {
+        state: 'failed', failureReason: 'kickoff-unverified', strandedSessionId: randomUUID(),
+        prRecovery: { work: { linkedIssues: [2661, 2724] } },
+      });
+    }],
+    ['predecessor secondary PR issue is not distinct work', (f) => {
+      f.entry.prRecovery = { work: { linkedIssues: [2720, 2724] } };
+    }],
     ['existing new identifier', (f) => { f.ledger.jobs[f.successor.job.jobId] = { state: 'failed' }; }],
     ['wrong assignment source', (f) => { f.successor.assignmentSource = `agent-${randomUUID()}`; }],
     ['wrong assignment digest', (f) => { f.successor.assignmentContentSha256 = 'a'.repeat(64); }],
