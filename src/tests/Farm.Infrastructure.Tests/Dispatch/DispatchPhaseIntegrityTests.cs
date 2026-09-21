@@ -18,6 +18,8 @@ public sealed class DispatchPhaseIntegrityTests
     [Fact]
     public async Task DispatchExceptions_AreClassifiedByDurablePhaseAndRedacted()
     {
+        DateTime expectedNow = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
+        FakeTimeProvider clock = new(expectedNow);
         await using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         DbContextOptions<AppDbContext> options =
@@ -36,15 +38,16 @@ public sealed class DispatchPhaseIntegrityTests
                     printerId,
                     IsOnline: true,
                     State: "idle"),
-                DateTime.UtcNow.AddSeconds(-1),
-                DateTime.UtcNow.AddSeconds(-1),
+                expectedNow.AddSeconds(-1),
+                expectedNow.AddSeconds(-1),
                 "test"));
         var service = new DispatchClaimService(
             db,
             snapshots.Object,
             new DbOutboxSequenceAllocator(),
             NullLogger<DispatchClaimService>.Instance,
-            DispatchTestDoubles.TelemetryFreshnessPolicy());
+            DispatchTestDoubles.TelemetryFreshnessPolicy(),
+            timeProvider: clock);
 
         DispatchClaimResult preClaim = await service.AcquireClaimAsync(
             Request(preCall));
@@ -103,6 +106,9 @@ public sealed class DispatchPhaseIntegrityTests
         acceptedAttempt.Outcome.Should().Be(DispatchAttemptOutcome.Accepted);
         acceptedAttempt.BackendCallPhase.Should().Be(
             DispatchBackendCallPhase.PostAccept);
+        preAttempt.ClaimedAtUtc.Should().Be(expectedNow);
+        backendAttempt.BackendCallStartedAtUtc.Should().Be(expectedNow);
+        backendAttempt.UpdatedAtUtc.Should().Be(expectedNow);
         new[]
         {
             preAttempt.ErrorDetail,
@@ -111,6 +117,89 @@ public sealed class DispatchPhaseIntegrityTests
         }.Should().NotContain(detail => detail != null &&
             (detail.Contains("private", StringComparison.OrdinalIgnoreCase) ||
              detail.Contains("token", StringComparison.OrdinalIgnoreCase)));
+    }
+
+    // Anchored to the real wall clock (not a distant future/past date) so that reverting
+    // the telemetry freshness check from `_timeProvider.GetUtcNow()` back to
+    // `DateTime.UtcNow` cannot accidentally compute a large-magnitude negative age that
+    // trivially satisfies `age <= freshnessLimit` regardless of which clock is used. With
+    // this anchoring, the "just beyond the limit" case below only passes if the freshness
+    // comparison genuinely reads through the injected provider.
+    [Fact]
+    public async Task AcquireClaimAsync_TelemetryJustWithinFreshnessLimit_Succeeds()
+    {
+        TimeSpan freshnessLimit = TimeSpan.FromMinutes(1);
+        DateTime anchor = DateTime.UtcNow;
+        AdvancingFakeTimeProvider clock = new(anchor);
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        ProviderFixture fixture = await SeedFixtureAsync(db, "fresh-boundary");
+        var snapshots = new Mock<IPrinterStatusSnapshotReader>();
+        snapshots.Setup(reader => reader.GetStatusSnapshot(fixture.PrinterId))
+            .Returns(new PrinterStatusSnapshot(
+                new PrinterStatusDto(fixture.PrinterId, IsOnline: true, State: "idle"),
+                anchor,
+                anchor,
+                "test"));
+        var service = new DispatchClaimService(
+            db,
+            snapshots.Object,
+            new DbOutboxSequenceAllocator(),
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(freshnessLimit),
+            timeProvider: clock);
+
+        // Observation is 1 second inside the freshness limit at claim time.
+        clock.Advance(freshnessLimit - TimeSpan.FromSeconds(1));
+
+        DispatchClaimResult result = await service.AcquireClaimAsync(Request(fixture));
+
+        result.Success.Should().BeTrue(result.ErrorDetail);
+    }
+
+    [Fact]
+    public async Task AcquireClaimAsync_TelemetryJustBeyondFreshnessLimit_FailsAsStale()
+    {
+        TimeSpan freshnessLimit = TimeSpan.FromMinutes(1);
+        DateTime anchor = DateTime.UtcNow;
+        AdvancingFakeTimeProvider clock = new(anchor);
+        await using var connection = new SqliteConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        DbContextOptions<AppDbContext> options =
+            new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
+        await using var db = new AppDbContext(options);
+        await db.Database.EnsureCreatedAsync();
+        ProviderFixture fixture = await SeedFixtureAsync(db, "stale-boundary");
+        var snapshots = new Mock<IPrinterStatusSnapshotReader>();
+        snapshots.Setup(reader => reader.GetStatusSnapshot(fixture.PrinterId))
+            .Returns(new PrinterStatusSnapshot(
+                new PrinterStatusDto(fixture.PrinterId, IsOnline: true, State: "idle"),
+                anchor,
+                anchor,
+                "test"));
+        var service = new DispatchClaimService(
+            db,
+            snapshots.Object,
+            new DbOutboxSequenceAllocator(),
+            NullLogger<DispatchClaimService>.Instance,
+            DispatchTestDoubles.TelemetryFreshnessPolicy(freshnessLimit),
+            timeProvider: clock);
+
+        // Observation is 1 second beyond the freshness limit at claim time. If the
+        // freshness check is reverted to `DateTime.UtcNow`, the real elapsed time since
+        // `anchor` is only the test's own execution time (milliseconds), which is well
+        // within the limit, so the claim would incorrectly succeed and this assertion
+        // would fail.
+        clock.Advance(freshnessLimit + TimeSpan.FromSeconds(1));
+
+        DispatchClaimResult result = await service.AcquireClaimAsync(Request(fixture));
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be("telemetry_stale");
     }
 
     private static DispatchClaimRequest Request(ProviderFixture fixture) =>
@@ -127,7 +216,7 @@ public sealed class DispatchPhaseIntegrityTests
         AppDbContext db,
         string suffix)
     {
-        DateTime now = DateTime.UtcNow;
+        DateTime now = new(2031, 4, 5, 6, 7, 8, DateTimeKind.Utc);
         var manufacturer = new Manufacturer
         {
             Id = Guid.NewGuid(),
@@ -194,4 +283,20 @@ public sealed class DispatchPhaseIntegrityTests
     }
 
     private sealed record ProviderFixture(Guid PrinterId, Guid JobId);
+
+    private sealed class FakeTimeProvider(DateTime utcNow) : TimeProvider
+    {
+        private readonly DateTimeOffset _utcNow = new(utcNow, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+    }
+
+    private sealed class AdvancingFakeTimeProvider(DateTime utcNow) : TimeProvider
+    {
+        private DateTimeOffset _utcNow = new(utcNow, TimeSpan.Zero);
+
+        public override DateTimeOffset GetUtcNow() => _utcNow;
+
+        public void Advance(TimeSpan delta) => _utcNow += delta;
+    }
 }
