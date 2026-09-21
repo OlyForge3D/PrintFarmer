@@ -1162,14 +1162,7 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
       };
 
       // Use a non-existent removedId to add without removing
-      onModelsReplace('__text_add__', [{
-        url: newModel.url,
-        fileName: newModel.fileName,
-        geometry,
-        position: newModel.position,
-        rotation: newModel.rotation,
-        scale: newModel.scale,
-      }]);
+      onModelsReplace('__text_add__', [{ ...newModel, geometry }]);
       toast.success(`Placed "${textToolConfig.text}" (${width.toFixed(1)}×${height.toFixed(1)} mm)`);
     } catch (err) {
       toast.error(`Failed to generate text: ${err instanceof Error ? err.message : String(err)}`);
