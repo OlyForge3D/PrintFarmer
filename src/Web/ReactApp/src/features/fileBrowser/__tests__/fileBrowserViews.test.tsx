@@ -105,8 +105,6 @@ describe("ExplorerView", () => {
         page={1}
         totalPages={1}
         onPageChange={vi.fn()}
-        pageSize={25}
-        onPageSizeChange={vi.fn()}
         columns={columns}
       />,
     );
@@ -137,8 +135,6 @@ describe("ExplorerView", () => {
         page={1}
         totalPages={1}
         onPageChange={vi.fn()}
-        pageSize={25}
-        onPageSizeChange={vi.fn()}
         columns={columns}
       />,
     );

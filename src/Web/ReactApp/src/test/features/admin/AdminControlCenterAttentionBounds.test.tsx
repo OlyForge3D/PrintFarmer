@@ -112,23 +112,27 @@ function makeOverview(attention: AttentionItemDto[]): AdminOverviewDto {
   };
 }
 
-function farmAdminAccess() {
+function farmAdminAccess(): ReturnType<typeof useAuth> {
   return {
     isAuthenticated: true,
     isLoading: false,
     user: {
       id: 'user-1',
+      username: 'admin',
       email: 'admin@test.com',
+      emailConfirmed: true,
+      createdAt: new Date('2026-09-21T18:00:00Z'),
       roles: ['farm_admin'],
+      permissions: [],
       isActive: true,
     },
     hasRole: (role: string) => role === 'farm_admin',
     hasPermission: () => true,
     error: null,
-    login: vi.fn(),
-    loginWithPasskey: vi.fn(),
-    register: vi.fn(),
-    logout: vi.fn(),
+    login: vi.fn().mockResolvedValue(true),
+    loginWithPasskey: vi.fn().mockResolvedValue(true),
+    register: vi.fn().mockResolvedValue(true),
+    logout: vi.fn().mockResolvedValue(undefined),
   };
 }
 
@@ -200,7 +204,7 @@ function visibleRowCount() {
 describe('Admin Control Center attention bounds (#2517)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockedUseAuth.mockReturnValue(farmAdminAccess() as ReturnType<typeof useAuth>);
+    mockedUseAuth.mockReturnValue(farmAdminAccess());
   });
 
   describe('0 items', () => {

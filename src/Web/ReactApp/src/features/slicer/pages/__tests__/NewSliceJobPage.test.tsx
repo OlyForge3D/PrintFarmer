@@ -2792,7 +2792,14 @@ describe('NewSliceJobPage', () => {
 
       expect(sliceJobService.submitJob).toHaveBeenCalledTimes(2);
 
-      await act(async () => { resolveRetry({ jobId: 'job-2', queuePosition: null }); });
+      await act(async () => {
+        resolveRetry({
+          jobId: 'job-2',
+          status: 'Queued',
+          queuedAt: '2026-09-21T18:00:00Z',
+          queuePosition: null,
+        });
+      });
     });
 
     it('replays only the originally-active plate subset on Retry, not every model since added to the bed (Hicks review)', async () => {

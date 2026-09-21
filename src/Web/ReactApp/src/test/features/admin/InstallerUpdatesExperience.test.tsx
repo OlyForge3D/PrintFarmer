@@ -1,6 +1,6 @@
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, assert, describe, expect, it, vi } from 'vitest';
 import { InstallerUpdatesExperience } from '@/features/admin/components/InstallerUpdatesExperience';
 import type { InstallerUpdatesExperienceProps } from '@/features/admin/components/InstallerUpdatesExperience';
 import { UpdateChannelSaveRejectedError } from '@/features/admin/utils/updateChannelSaveErrors';
@@ -1053,6 +1053,8 @@ describe('InstallerUpdatesExperience', () => {
     const observedReplica = observedReplicaSummary.closest('details');
     expect(observedReplica).not.toBeNull();
     await userEvent.setup().click(observedReplicaSummary);
+    assert.isString(identity.releaseId);
+    assert.isString(identity.sourceCommit);
     expect(within(observedReplica!).getByText(identity.releaseId)).toBeVisible();
     const sourceCommit = within(observedReplica!).getByText('Source commit')
       .parentElement;

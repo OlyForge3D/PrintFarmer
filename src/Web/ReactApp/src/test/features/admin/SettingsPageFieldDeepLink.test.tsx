@@ -28,7 +28,9 @@ const matchMediaMock = vi.fn().mockImplementation(() => ({
   addEventListener: vi.fn(),
   removeEventListener: vi.fn(),
 }));
-const usePageTourMock = vi.fn(() => ({ startTour: vi.fn(), hasSeenTour: true, resetTour: vi.fn() }));
+const usePageTourMock = vi.fn<typeof import('@/common/hooks/usePageTour').usePageTour>(
+  () => ({ startTour: vi.fn(), hasSeenTour: true, resetTour: vi.fn() }),
+);
 
 vi.mock('@/services/settingsApi', async () => {
   return {
@@ -104,7 +106,7 @@ vi.mock('@/hooks/useSlicer', () => ({
   useSlicer: () => ({ isSlicerAvailable: true, workerCount: 1 }),
 }));
 vi.mock('@/common/hooks/usePageTour', () => ({
-  usePageTour: (...args: unknown[]) => usePageTourMock(...args),
+  usePageTour: (...args: Parameters<typeof usePageTourMock>) => usePageTourMock(...args),
 }));
 vi.mock('@/features/admin/tours/settings.tour', () => ({ settingsTour: [] }));
 vi.mock('@/features/admin/components/ObicoServersSection', () => ({

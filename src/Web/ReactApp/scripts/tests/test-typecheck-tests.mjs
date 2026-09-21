@@ -30,7 +30,7 @@ const packageDirectory = path.resolve(
   "..",
   "..",
 );
-const baseline = { testDiagnosticCount: 1, minimumTestFileCount: 1 };
+const baseline = { minimumTestFileCount: 1 };
 const testDiagnostic =
   "src/test/example.test.ts(1,1): error TS2322: Type error.";
 const appDiagnostic = "src/services/example.ts(1,1): error TS2322: Type error.";
@@ -39,17 +39,38 @@ const listFiles = "src/test/example.test.ts";
 function evaluateGate(overrides = {}) {
   return evaluate({
     baseline,
-    compilerResult: { status: 2, signal: null, error: undefined },
+    compilerResult: { status: 0, signal: null, error: undefined },
     listFilesResult: { status: 0, signal: null, error: undefined },
-    output: testDiagnostic,
+    output: "",
     listFilesOutput: listFiles,
     directory: packageDirectory,
     ...overrides,
   });
 }
 
-test("accepts an exact test diagnostic baseline", () => {
-  assert.equal(evaluateGate().ok, true);
+test("accepts zero diagnostics with the test-file floor preserved", () => {
+  const result = evaluateGate();
+  assert.equal(result.ok, true);
+  assert.match(result.message, /0 direct test diagnostic\(s\), 0 imported application diagnostic\(s\), and 1 test file\(s\)/);
+});
+
+test("fails every direct or imported diagnostic, even with compiler status zero", () => {
+  for (const output of [
+    testDiagnostic,
+    appDiagnostic,
+    "src/test/setup.ts(1,1): error TS2322: Type error.",
+    "node_modules/example/index.d.ts(1,1): error TS2322: Type error.",
+    `${testDiagnostic}\n${appDiagnostic}`,
+  ]) {
+    for (const status of [0, 2]) {
+      const result = evaluateGate({
+        output,
+        compilerResult: { status, signal: null, error: undefined },
+      });
+      assert.equal(result.ok, false, `${status}: ${output}`);
+      assert.match(result.message, /expected zero diagnostics/);
+    }
+  }
 });
 
 test("fails compiler signal death and null status before another guard can match", () => {
@@ -333,30 +354,25 @@ test("fails below the exact test-file floor", () => {
   );
 });
 
-test("fails above and below the exact diagnostic baseline", () => {
-  const above = evaluateGate({
+test("reports all diagnostics without an allowance", () => {
+  const result = evaluateGate({
     output: `${testDiagnostic}\n${testDiagnostic.replace("(1,1)", "(2,1)")}`,
   });
-  const below = evaluateGate({ output: appDiagnostic });
   assert.match(
-    above.message,
-    /measured 2 direct test diagnostic\(s\); expected exact count 1\. Fix the errors; do not raise the exact count/,
-  );
-  assert.match(
-    below.message,
-    /measured 0 direct test diagnostic\(s\); expected exact count 1\. The exact count is stale; regenerate testDiagnosticCount in scripts\/test-typecheck-baseline\.json in the same commit/,
+    result.message,
+    /2 direct test diagnostic\(s\) and 0 imported application diagnostic\(s\); expected zero diagnostics/,
   );
 });
 
-test("reports the file-count and diagnostic-snapshot failures together, not sequentially (#2811 item 1)", () => {
+test("reports the file-count and diagnostic failures together", () => {
   const result = evaluateGate({
-    baseline: { testDiagnosticCount: 1, minimumTestFileCount: 2 },
+    baseline: { minimumTestFileCount: 2 },
     output: appDiagnostic,
   });
   assert.match(result.message, /found 1 test file\(s\); expected at least 2/);
   assert.match(
     result.message,
-    /measured 0 direct test diagnostic\(s\); expected exact count 1/,
+    /0 direct test diagnostic\(s\) and 1 imported application diagnostic\(s\); expected zero diagnostics/,
   );
   assert.equal(result.showListFilesOutput, true);
 });
@@ -372,15 +388,6 @@ test("isCountableTestFile excludes non-test helpers under test roots that isTest
 });
 
 test("classifyDiagnostics still gates a helper file's diagnostics via the broad isTestFile, not the strict isCountableTestFile (#2811 item 3 unbound classification)", () => {
-  // countTestFiles/isCountableTestFile correctly stop a helper from
-  // satisfying the file-count FLOOR (proven above), but nothing previously
-  // proved classifyDiagnostics still uses the broad isTestFile to bucket
-  // that same helper's DIAGNOSTICS. If classifyDiagnostics's testDiagnostics
-  // filter were silently swapped from isTestFile to isCountableTestFile, a
-  // literal bug in src/test/setup.ts (a non-`.test.ts`-named helper) would
-  // stop being gated by testDiagnosticCount at all -- it would instead fall
-  // into the untracked "imported application diagnostic" bucket, exactly
-  // the silent evasion #2811 item 3/4 exists to close.
   const helperDiagnostic =
     "src/test/setup.ts(1,1): error TS2322: Type error.";
   const classification = classifyDiagnostics(helperDiagnostic, packageDirectory);
@@ -389,11 +396,9 @@ test("classifyDiagnostics still gates a helper file's diagnostics via the broad 
   assert.equal(classification.testDiagnostics.length, 1);
   assert.equal(classification.testDiagnostics[0].path, "src/test/setup.ts");
 
-  // End-to-end confirmation through evaluate(): the helper diagnostic alone
-  // must satisfy testDiagnosticCount: 1 exactly as a real *.test.ts
-  // diagnostic would -- it is not silently dropped into an unchecked bucket.
   const result = evaluateGate({ output: helperDiagnostic });
-  assert.equal(result.ok, true);
+  assert.equal(result.ok, false);
+  assert.match(result.message, /1 direct test diagnostic/);
 });
 
 test("countTestFiles ignores non-test helper files even though isTestFile still classifies their diagnostics (#2811 items 3-4)", () => {
@@ -612,18 +617,14 @@ test("toRealPath folds casing on a simulated win32 platform regardless of the ho
 
 test("fails missing, malformed, and non-object baselines", () => {
   assert.match(
-    evaluateGate({ baseline: { minimumTestFileCount: 1 } }).message,
-    /testDiagnosticCount/,
-  );
-  assert.match(
-    evaluateGate({ baseline: { testDiagnosticCount: 1 } }).message,
+    evaluateGate({ baseline: {} }).message,
     /minimumTestFileCount/,
   );
   assert.match(
     evaluateGate({
-      baseline: { testDiagnosticCount: 1.5, minimumTestFileCount: 1 },
+      baseline: { minimumTestFileCount: 1.5 },
     }).message,
-    /testDiagnosticCount/,
+    /minimumTestFileCount/,
   );
   assert.match(
     evaluateGate({ baseline: null }).message,
@@ -676,7 +677,7 @@ test("no *.spec.* file exists under src/ -- the gap neither gate covers is pinne
   // name would therefore be compiled by neither `typecheck:app` nor
   // `typecheck:test` and could ship a type error unchecked. Closing that gap
   // by wiring *.spec.* into tsconfig.test.json would move
-  // minimumTestFileCount/testDiagnosticCount for a scenario that has never
+  // minimumTestFileCount for a scenario that has never
   // actually occurred (Bishop confirmed zero such files exist today), so
   // this pins the latent gap at its current, safe state instead: if anyone
   // ever adds a *.spec.* file under src/, this test fails immediately and
@@ -692,7 +693,7 @@ test("no *.spec.* file exists under src/ -- the gap neither gate covers is pinne
     `found *.spec.* file(s) under src/ that neither typecheck:app nor ` +
       `typecheck:test compiles: ${specFiles.join(", ")}. Add coverage for ` +
       `these files (e.g. wire *.spec.* into tsconfig.test.json and ` +
-      `isTestFile, re-baselining testDiagnosticCount/minimumTestFileCount ` +
+      `isTestFile, updating minimumTestFileCount ` +
       `deliberately) before removing this guard.`,
   );
 });

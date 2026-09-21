@@ -25,7 +25,7 @@ const tscArguments = [
 
 const DEFAULT_TIMEOUT_MS = 120_000;
 // Node's default maxBuffer is ~1 MiB, which is too small for large typecheck
-// output and causes false ENOBUFS failures; the test ratchet intentionally
+// output and causes false ENOBUFS failures; the test gate intentionally
 // raises it to 10 MiB to match the application-side guard rationale.
 const DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 

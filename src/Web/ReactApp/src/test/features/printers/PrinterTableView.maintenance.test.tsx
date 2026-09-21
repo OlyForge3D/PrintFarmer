@@ -63,7 +63,7 @@ describe('PrinterTableView - maintenance button', () => {
     ['null', { progress: null }],
     ['negative', { progress: -1 }],
     ['unknown', { progress: Number.NaN }],
-  ])('keeps the missing-progress placeholder for %s progress', (_label, overrides) => {
+  ] as const)('keeps the missing-progress placeholder for %s progress', (_label, overrides) => {
     // Runtime JSON can contain null even though the API type only declares an optional number.
     const printer = { ...basePrinter, state: 'Printing', ...overrides } as Printer;
 

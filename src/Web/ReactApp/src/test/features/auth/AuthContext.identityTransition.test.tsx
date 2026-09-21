@@ -17,6 +17,7 @@ import React from 'react';
 import { render, screen, act, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClientProvider } from '@tanstack/react-query';
+import { AxiosHeaders, type AxiosResponse } from 'axios';
 import { queryClient } from '@/services/queryClient';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 import { notifyAuthenticationExpired } from '@/common/auth/authenticationExpiration';
@@ -659,7 +660,7 @@ describe('Identity transition cache isolation (#762)', () => {
 
     // A edits the form and clicks save, but the PUT response is slow — hold
     // it open so we can log out before it resolves ("dirty-form timing").
-    let resolveSave: (value: { data: UserSettingsResponse }) => void = () => {};
+    let resolveSave: (value: AxiosResponse<UserSettingsResponse>) => void = () => {};
     vi.mocked(apiClient.put).mockImplementation(
       () => new Promise((resolve) => { resolveSave = resolve; }),
     );
@@ -678,7 +679,13 @@ describe('Identity transition cache isolation (#762)', () => {
     // identity transition and discard the response rather than writing A's
     // data back into the shared ['settings', 'user'] cache key.
     await act(async () => {
-      resolveSave({ data: settingsFor('user-a') });
+      resolveSave({
+        data: settingsFor('user-a'),
+        status: 200,
+        statusText: 'OK',
+        headers: {},
+        config: { headers: new AxiosHeaders() },
+      });
     });
 
     expect(queryClient.getQueryData(['settings', 'user'])).toBeUndefined();

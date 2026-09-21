@@ -49,16 +49,16 @@ describe('PrinterCameraPreview', () => {
       callback: IntersectionObserverCallback
     ) {
       const observer = this as IntersectionObserver & {
-        observe: ReturnType<typeof vi.fn>;
-        unobserve: ReturnType<typeof vi.fn>;
-        disconnect: ReturnType<typeof vi.fn>;
-        takeRecords: ReturnType<typeof vi.fn>;
+        observe: ReturnType<typeof vi.fn<IntersectionObserver['observe']>>;
+        unobserve: ReturnType<typeof vi.fn<IntersectionObserver['unobserve']>>;
+        disconnect: ReturnType<typeof vi.fn<IntersectionObserver['disconnect']>>;
+        takeRecords: ReturnType<typeof vi.fn<IntersectionObserver['takeRecords']>>;
         root: null;
         rootMargin: string;
         thresholds: number[];
       };
-      observer.observe = vi.fn();
-      observer.unobserve = vi.fn();
+      observer.observe = vi.fn<IntersectionObserver['observe']>();
+      observer.unobserve = vi.fn<IntersectionObserver['unobserve']>();
       observer.disconnect = vi.fn(() => undefined);
       observer.takeRecords = vi.fn(() => []);
       observer.root = null;

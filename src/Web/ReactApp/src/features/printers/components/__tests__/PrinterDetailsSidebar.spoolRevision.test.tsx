@@ -7,7 +7,7 @@ import React from 'react';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import { PrinterBackend, type Printer } from '@/types/api';
+import { PrinterBackend, type Printer, type PrinterDetails } from '@/types/api';
 import { PrinterDetailsSidebar } from '../PrinterDetailsSidebar';
 
 // The sidebar receives its `printer` prop from the compact list query, which can
@@ -16,7 +16,9 @@ import { PrinterDetailsSidebar } from '../PrinterDetailsSidebar';
 
 const setActiveSpoolMock = vi.hoisted(() => vi.fn());
 const clearActiveSpoolMock = vi.hoisted(() => vi.fn());
-const usePrinterDetailsMock = vi.hoisted(() => vi.fn(() => ({ data: undefined })));
+const usePrinterDetailsMock = vi.hoisted(() =>
+  vi.fn<() => { data: Pick<PrinterDetails, 'rowVersion'> | undefined }>(() => ({ data: undefined })),
+);
 const useSpoolmanConfiguredMock = vi.hoisted(() => vi.fn(() => ({ ready: true })));
 
 vi.mock('@tanstack/react-query', () => ({

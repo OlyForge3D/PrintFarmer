@@ -4,6 +4,11 @@ This document captures common patterns and best practices discovered during test
 
 ## React printer response contracts
 
+`npm run typecheck:test` rejects every direct test, helper, imported-source, or
+global diagnostic. `scripts/test-typecheck-baseline.json` retains only the
+minimum test-file coverage floor; there is no diagnostic allowance. Keep the
+application typecheck and source-coverage gate enabled alongside it.
+
 Printer read fixtures must not invent required connection fields.
 `GET /api/printers` returns `CompletePrinterDto`; `GET /api/printers/{id}`
 returns `PrinterDto`. Both suppress `backendUrl` during serialization and

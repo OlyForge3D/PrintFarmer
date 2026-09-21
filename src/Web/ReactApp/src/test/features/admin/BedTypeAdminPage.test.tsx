@@ -69,6 +69,8 @@ describe('BedTypeAdminPage shared admin patterns', () => {
       name: 'Textured PEI',
       color: '#6366f1',
       isSystem: false,
+      createdDate: '2026-09-21T18:00:00Z',
+      updatedDate: '2026-09-21T18:00:00Z',
     });
     const user = userEvent.setup();
     renderPage();

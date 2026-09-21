@@ -73,7 +73,7 @@ describe('OpenTelemetry deferred from first paint (#1238)', () => {
     // a real production deploy (Vitest's own process may run under
     // NODE_ENV=test, which would otherwise leak into this child build and
     // make Vite treat it as a dev build).
-    const env = { ...process.env, NODE_ENV: 'production' };
+    const env: NodeJS.ProcessEnv = { ...process.env, NODE_ENV: 'production' };
     delete env.VITE_OTEL_EXPORTER_OTLP_ENDPOINT;
 
     const bundle = await build(outDir, env);

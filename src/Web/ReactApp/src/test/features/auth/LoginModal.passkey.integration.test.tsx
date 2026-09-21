@@ -18,7 +18,7 @@ import React from 'react';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { AxiosError } from 'axios';
-import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
+import type { AxiosAdapter, AxiosInstance } from 'axios';
 import { AuthProvider } from '@/common/contexts/AuthContext';
 import { LoginModal } from '@/features/auth/components/LoginModal';
 import { apiClient } from '@/services/api';
@@ -160,8 +160,8 @@ type RouteStub = { status: number; data: unknown };
  * Returns an axios adapter that dispatches by URL substring.
  * Unmatched routes resolve to a 401 (simulates no active session).
  */
-function makeDispatchAdapter(routes: Record<string, RouteStub>) {
-  return (config: InternalAxiosRequestConfig): Promise<unknown> => {
+function makeDispatchAdapter(routes: Record<string, RouteStub>): AxiosAdapter {
+  return (config) => {
     const url = config.url ?? '';
     const matchedKey = Object.keys(routes).find((k) => url.includes(k));
     const stub: RouteStub = matchedKey

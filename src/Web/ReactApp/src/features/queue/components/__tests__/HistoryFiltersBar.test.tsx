@@ -1,15 +1,16 @@
 import { fireEvent, render, screen } from "@testing-library/react";
+import type { ComponentProps } from "react";
 import { describe, expect, it, vi } from "vitest";
 import HistoryFiltersBar from "../HistoryFiltersBar";
 import ModelFiltersBar from "../ModelFiltersBar";
 
 const renderHistoryFilters = ({
   selectedStatuses = ["completed"],
-  viewMode = "cards" as const,
+  viewMode = "cards",
   onStatusChange = vi.fn(),
   onSortChange = vi.fn(),
   onViewModeChange = vi.fn(),
-} = {}) => {
+}: Partial<ComponentProps<typeof HistoryFiltersBar>> = {}) => {
   render(
     <HistoryFiltersBar
       selectedStatuses={selectedStatuses}

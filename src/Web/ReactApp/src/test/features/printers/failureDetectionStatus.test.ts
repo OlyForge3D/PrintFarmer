@@ -188,6 +188,8 @@ describe("failureDetectionStatus utilities", () => {
     describe("when state is not monitoring", () => {
       it("returns reason for idle state", () => {
         const status: FailureDetectionPrinterStatusDto = {
+          printerId: "printer-1",
+          printerName: "Voron 2.4",
           state: "idle",
           reason: "Printer is not printing.",
           isPrinting: false,

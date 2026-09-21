@@ -208,7 +208,6 @@ describe('filterDestinationsByAccess', () => {
 
   it('respects requiredPermission in addition to requiredRole', () => {
     const gated: AdminDestination = {
-      kind: 'operational',
       ...ADMIN_DESTINATIONS[1],
       id: 'gated',
       requiredPermission: { resource: 'printers', action: 'admin' },
@@ -245,7 +244,6 @@ describe('filterDestinationsByAccess', () => {
 
   it('respects requiredPermissionAnyOf: any one of several permissions unlocks the destination', () => {
     const gated: AdminDestination = {
-      kind: 'operational',
       ...ADMIN_DESTINATIONS[1],
       id: 'gated-any-of',
       requiredRole: null,

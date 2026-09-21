@@ -8,12 +8,17 @@ import type { MaintenanceAlert, MaintenanceLog, PrinterMaintenanceScheduleDto } 
 import { MaintenanceAlertStatus } from '@/types/maintenance';
 import type { PrinterDetails, ToolheadDto } from '@/types/api';
 import { ToolheadType } from '@/types/api';
+import { AxiosHeaders } from 'axios';
+import { client } from '@/services/api/httpClient';
+
+vi.mock('@/services/api/httpClient', () => ({
+  client: { get: vi.fn() },
+}));
 
 vi.mock('@/services/api', () => ({
   apiClient: {
     getPrinters: vi.fn(),
     getPrinterDetails: vi.fn(),
-    getSystemCapabilities: vi.fn(),
     get: vi.fn(),
     post: vi.fn(),
     put: vi.fn(),
@@ -129,23 +134,23 @@ const printerDetailsMmuOnly: PrinterDetails = {
 const legacyAlert: MaintenanceAlert = {
   id: 'a-legacy',
   printerId,
-  scheduleId: 's-1',
-  planName: 'Legacy plan',
-  taskName: 'Legacy task',
+  printerMaintenanceScheduleId: 's-1',
   title: 'Legacy alert (printer-wide)',
   message: 'Legacy alert body',
   severity: 2,
   status: MaintenanceAlertStatus.Active,
   createdAt: new Date().toISOString(),
+  updatedAt: new Date().toISOString(),
+  printerHoursAtTrigger: 10,
   toolheadId: null,
-} as MaintenanceAlert;
+};
 
 const scopedAlert: MaintenanceAlert = {
   ...legacyAlert,
   id: 'a-t1',
   title: 'Alert for T1',
   toolheadId: 'th-1',
-} as MaintenanceAlert;
+};
 
 const legacyLog: MaintenanceLog = {
   id: 'l-legacy',
@@ -242,16 +247,20 @@ function seedDefaults(overrides: {
     overrides.deployments ?? [legacyDeployment, scopedDeployment]
   );
 
-  (apiClient.getSystemCapabilities as unknown as ReturnType<typeof vi.fn>).mockResolvedValue(
-    overrides.capabilities ?? {
+  vi.mocked(client.get).mockResolvedValue({
+    data: overrides.capabilities ?? {
       architecture: 'x64',
       slicingEnabled: true,
       modelFilesEnabled: true,
       thumbnailGenerationEnabled: true,
       gcodeUploadEnabled: true,
       operatorFeatures: { multiSlotFallbackEnabled: true },
-    }
-  );
+    },
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+  });
 }
 
 describe('PrinterMaintenancePage — per-toolhead scope', () => {

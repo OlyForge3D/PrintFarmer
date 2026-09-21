@@ -246,7 +246,21 @@ describe('SlicerConfigModal', () => {
       vi.mocked(slicerService.sliceModel).mockResolvedValueOnce(sliceResult);
       vi.mocked(slicerService.subscribeToSlicingProgress).mockImplementationOnce((_jobId, onProgress) => {
         reportProgress = onProgress;
-        return { close: closeProgressSource } as EventSource;
+        return {
+          close: closeProgressSource,
+          url: '/api/slicer/progress/job-1',
+          readyState: 1,
+          withCredentials: false,
+          CONNECTING: 0,
+          OPEN: 1,
+          CLOSED: 2,
+          onopen: null,
+          onmessage: null,
+          onerror: null,
+          addEventListener: vi.fn(),
+          removeEventListener: vi.fn(),
+          dispatchEvent: vi.fn(() => true),
+        };
       });
 
       const sliceButton = await selectPrinterAndSlice();
