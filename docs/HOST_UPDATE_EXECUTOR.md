@@ -109,6 +109,30 @@ bind one immutable request per call. Both endpoints now gate on the same `HostUp
 
 ## Known limitations
 
+- The verify adapter persists each verified target's platform alongside its digest
+  before releasing the writer fence. The real installed-state store requires an
+  exact service-to-platform map for recovery; omitting it previously caused
+  `installed_state_corrupt:service_platforms_missing` after health verification.
+  The retained map also supplies rollback's `docker image pull --platform`
+  arguments through `ApplyByDigestsAsync`.
+  `HostUpdateExecutionStepsAdapterTests` covers the producer/file-store contract
+  and preserves fail-closed ordering on verification or persistence failure.
+  This repair does **not** establish managed-update eligibility: production
+  readiness/admission adapters, independently verified installed observations,
+  and first-update retained prior-state provisioning remain integration gaps.
+- Signed-identity and candidate admission, plus execution-request validation,
+  reject noncanonical manifest/image digests rather than lowercasing them:
+  publication emits lowercase hex, so normalization would hide evidence that
+  did not come from that canonical publication path. Execution also requires
+  the installed-state store's canonical release-id grammar. Rejection occurs
+  before the execution lock, journal, policy read, or any update step, not
+  after apply during installed-state persistence. Existing diagnostics remain
+  `release_identity_invalid` (foundation identity),
+  `verified_release_identity_invalid` (candidate identity),
+  `verified_release_target_platform_invalid` (candidate target; arm64 uses
+  `verified_release_target_platform_unavailable`), `release_binding_invalid`
+  (execution identity), and `target_invalid` (execution target). No new reason
+  codes or eligibility states are introduced.
 - **Fixed (this pass) — `DigestHostUpdateHealthCheck` was probing a nonexistent field**: it
   previously ran a single `docker inspect --format {{index .RepoDigests 0}} <container>`, but
   `.RepoDigests` is exclusively a property of `docker image inspect` output; it never exists on

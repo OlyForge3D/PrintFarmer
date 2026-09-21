@@ -1352,7 +1352,7 @@ public class HostUpdateExecutionAvailabilityTests
     }
 
     private static HostUpdateExecutionRequest ExecutionRequest() => new(
-        "release-5",
+        "stable:1.2.3",
         1,
         "sha256:" + new string('a', 64),
         new string('b', 40),

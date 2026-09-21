@@ -58,7 +58,7 @@ public sealed class HostUpdateSchedulerTests
             .BuildServiceProvider();
         scheduler = Create(
             new HostUpdateSchedulerSettings(AutoEnabled: true),
-            Candidate() with { SourceCommit = new string('a', 40), ManifestDigest = "sha256:" + new string('b', 64) },
+            Candidate() with { ReleaseId = "stable:1.2.3", SourceCommit = new string('a', 40), ManifestDigest = "sha256:" + new string('b', 64) },
             replay: null,
             cancellationBridge: bridge,
             scopeFactory: services.GetRequiredService<IServiceScopeFactory>());

@@ -1,4 +1,5 @@
-﻿using System.Security.Cryptography;
+﻿using System.Diagnostics.CodeAnalysis;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -968,7 +969,7 @@ internal static class HostUpdateValidation
     /// <c>stable:1.2.3</c> or <c>insider:1.2.3-insider.4</c>). This is the same composition
     /// <see cref="IsReleaseIdentity"/> asserts, exposed for callers that hold only the id.
     /// </summary>
-    public static bool IsReleaseId(string? value)
+    public static bool IsReleaseId([NotNullWhen(true)] string? value)
     {
         if (value is null)
         {
@@ -1115,7 +1116,7 @@ internal static class HostUpdateValidation
         IsChannel(identity.Channel) && identity.Channel == channel && identity.SourceTag == $"v{identity.Version}" && HasExpectedSourceBranch(identity.SourceBranch, channel) &&
         IsHexHash(identity.SourceCommit) && identity.SourceCommit == identity.AuthorizedBranchHead &&
         IsIdentifier(identity.BuildMetadata) && identity.ReleaseId == identity.OciReleaseLabel && identity.Version == identity.OciVersionLabel &&
-        IsDigest(identity.ManifestDigest);
+        IsCanonicalDigest(identity.ManifestDigest);
     private static bool HasExpectedSourceBranch(string sourceBranch, string channel) =>
         (channel == "stable" && sourceBranch == "main") || (channel == "insider" && sourceBranch == "development");
     /// <summary>Accepts only the release-channel version grammar used in immutable publication identities.</summary>

@@ -87,12 +87,12 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
 
         CanonicalReleaseIdentityDto? identity = current.Identity;
         if (identity is null
-            || string.IsNullOrWhiteSpace(identity.ReleaseId)
+            || !HostUpdateValidation.IsReleaseId(identity.ReleaseId)
             || string.IsNullOrWhiteSpace(identity.Channel)
             || string.IsNullOrWhiteSpace(identity.SourceCommit)
             || (identity.Channel != UpdateChannelSettings.StableChannel && identity.Channel != UpdateChannelSettings.InsiderChannel)
             || !IsCommit(identity.SourceCommit)
-            || !HostUpdateValidation.IsDigest(current.ManifestDigest))
+            || !HostUpdateValidation.IsCanonicalDigest(current.ManifestDigest))
         {
             error = "verified_release_identity_invalid";
             return null;
@@ -121,7 +121,7 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
         }
 
         if (executionTargets.Any(target => !string.Equals(target.Platform, hostPlatform, StringComparison.Ordinal)
-            || !HostUpdateValidation.IsDigest(target.PlatformDigest)))
+            || !HostUpdateValidation.IsCanonicalDigest(target.PlatformDigest)))
         {
             error = hostPlatform == "linux-arm64" ? "verified_release_target_platform_unavailable" : "verified_release_target_platform_invalid";
             return null;

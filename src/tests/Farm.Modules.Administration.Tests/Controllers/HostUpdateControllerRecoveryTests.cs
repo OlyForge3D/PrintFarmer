@@ -201,7 +201,7 @@ public sealed class HostUpdateControllerRecoveryTests
     }
 
 
-    private static HostUpdateExecutionRequest Request() => new("rel-1", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, Targets())
+    private static HostUpdateExecutionRequest Request() => new("stable:1.2.3", 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, Targets())
     {
         RequestId = "request-1",
         TrustRoot = "trust-root",

@@ -41,8 +41,9 @@ public sealed class HostUpdateExecutionStepsAdapter(
         // Only after every readiness signal (including exact running digests) has verified
         // healthy do we persist this as the new installed state and reopen writers.
         var serviceDigests = request.Targets.ToDictionary(t => t.ServiceId, t => t.ChildDigest, StringComparer.Ordinal);
+        var servicePlatforms = request.Targets.ToDictionary(t => t.ServiceId, t => t.Platform, StringComparer.Ordinal);
         await installedStateStore.WriteAsync(
-            new InstalledHostState(request.ReleaseId, request.ManifestDigest, serviceDigests, Topology(request), DateTimeOffset.UtcNow),
+            new InstalledHostState(request.ReleaseId, request.ManifestDigest, serviceDigests, Topology(request), DateTimeOffset.UtcNow, servicePlatforms),
             ct).ConfigureAwait(false);
         await fence.ReleaseAsync(ct).ConfigureAwait(false);
     }

@@ -9,11 +9,26 @@ public sealed class ProductionHostUpdateAdaptersTests
     private const string Platform = "linux-amd64";
     private static readonly string Digest = "sha256:" + new string('a', 64);
 
-    [Fact]
-    public void ValidEvidenceMapsDirectSequenceIdentityAndExactlySixTargets()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ValidEvidenceMapsDirectSequenceIdentityAndExactlySixTargets(bool explicitTargets)
     {
         VerifiedReleaseEvidenceCache evidence = new();
-        evidence.SetVerified(Evidence(sequence: long.MaxValue), DateTimeOffset.UtcNow);
+        VerifiedReleaseEvidenceDto value = Evidence(sequence: long.MaxValue);
+        if (explicitTargets)
+        {
+            value = value with
+            {
+                ExecutionTargets = value.Services.Select(service => new VerifiedReleaseExecutionTargetDto
+                {
+                    ServiceId = service.ServiceId,
+                    Platform = service.Platform,
+                    PlatformDigest = service.PlatformDigest,
+                }).ToArray(),
+            };
+        }
+        evidence.SetVerified(value, DateTimeOffset.UtcNow);
         VerifiedReleaseEvidenceCandidateCache cache = new(evidence, new Ready(), Platform, TimeSpan.FromMinutes(10));
 
         VerifiedHostUpdateCandidate candidate = Assert.IsType<VerifiedHostUpdateCandidate>(cache.Current);
@@ -78,6 +93,45 @@ public sealed class ProductionHostUpdateAdaptersTests
             Assert.Null(cache.Current);
             Assert.NotNull(cache.LastError);
         }
+    }
+
+    [Theory]
+    [InlineData("manifest", "verified_release_identity_invalid")]
+    [InlineData("manifest-mixed", "verified_release_identity_invalid")]
+    [InlineData("platform", "verified_release_target_platform_invalid")]
+    [InlineData("platform-mixed", "verified_release_target_platform_invalid")]
+    [InlineData("execution-platform", "verified_release_target_platform_invalid")]
+    [InlineData("execution-platform-mixed", "verified_release_target_platform_invalid")]
+    [InlineData("release-id", "verified_release_identity_invalid")]
+    public void Current_NoncanonicalEvidence_RejectsBeforeReadingReadiness(string field, string reason)
+    {
+        VerifiedReleaseEvidenceDto value = Evidence();
+        string digest = "sha256:" + (field.EndsWith("-mixed", StringComparison.Ordinal) ? new string('a', 63) + "B" : new string('A', 64));
+        value = field switch
+        {
+            "manifest" or "manifest-mixed" => value with { ManifestDigest = digest },
+            "platform" or "platform-mixed" => value with
+            {
+                Services = value.Services.Select(service => service with { PlatformDigest = digest }).ToArray(),
+            },
+            "execution-platform" or "execution-platform-mixed" => value with
+            {
+                ExecutionTargets = value.Services.Select(service => new VerifiedReleaseExecutionTargetDto
+                {
+                    ServiceId = service.ServiceId,
+                    Platform = service.Platform,
+                    PlatformDigest = digest,
+                }).ToArray(),
+            },
+            _ => value with { Identity = value.Identity! with { ReleaseId = "rel-1" } },
+        };
+        VerifiedReleaseEvidenceCache evidence = new();
+        evidence.SetVerified(value, DateTimeOffset.UtcNow);
+        VerifiedReleaseEvidenceCandidateCache cache = new(
+            evidence, new Moq.Mock<IHostUpdateCandidateReadiness>(Moq.MockBehavior.Strict).Object, Platform, TimeSpan.FromMinutes(10));
+
+        Assert.Null(cache.Current);
+        Assert.Equal(reason, cache.LastError);
     }
 
     [Fact]

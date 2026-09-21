@@ -219,6 +219,8 @@ public sealed class HostUpdateFoundationTests
             valid with { Version = "1.0.0-beta.1" },
             valid with { Version = "01.0.0" },
             valid with { SourceTag = "v1.0.1" },
+            valid with { ManifestDigest = "sha256:" + new string('A', 64) },
+            valid with { ManifestDigest = "sha256:" + new string('a', 63) + "B" },
             valid with { ReleaseId = "release_1", OciReleaseLabel = "release_1" },
             valid with { ReleaseId = "stable:1.0.1", OciReleaseLabel = "stable:1.0.1" },
         ];

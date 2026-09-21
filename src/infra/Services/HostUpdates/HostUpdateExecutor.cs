@@ -57,7 +57,7 @@ public sealed record HostUpdateExecutionRequest(string ReleaseId, long Authentic
     public bool IsValid(out string error)
     {
         error = string.Empty;
-        if (string.IsNullOrWhiteSpace(RequestId) || string.IsNullOrWhiteSpace(ReleaseId) || AuthenticatedSequence < 1 || !Digest(ManifestDigest) || !Commit(SourceCommit) ||
+        if (string.IsNullOrWhiteSpace(RequestId) || !HostUpdateValidation.IsReleaseId(ReleaseId) || AuthenticatedSequence < 1 || !HostUpdateValidation.IsCanonicalDigest(ManifestDigest) || !Commit(SourceCommit) ||
             string.IsNullOrWhiteSpace(TrustRoot) || PolicyRevision < 0 || string.IsNullOrWhiteSpace(PolicyFingerprint) ||
             !SignedUpdateManifestValidator.IsPlatform(HostPlatform))
         {
@@ -73,7 +73,7 @@ public sealed record HostUpdateExecutionRequest(string ReleaseId, long Authentic
 
         if (Targets.Any(t => t is null || string.IsNullOrWhiteSpace(t.ServiceId) ||
             !SignedUpdateManifestValidator.IsPlatform(t.Platform) ||
-            !string.Equals(t.Platform, HostPlatform, StringComparison.Ordinal) || !Digest(t.ChildDigest)))
+            !string.Equals(t.Platform, HostPlatform, StringComparison.Ordinal) || !HostUpdateValidation.IsCanonicalDigest(t.ChildDigest)))
         {
             error = "target_invalid";
             return false;
@@ -87,8 +87,6 @@ public sealed record HostUpdateExecutionRequest(string ReleaseId, long Authentic
 
         return true;
     }
-
-    private static bool Digest(string value) => !string.IsNullOrWhiteSpace(value) && value.StartsWith("sha256:", StringComparison.Ordinal) && value.Length == 71 && value[7..].All(Uri.IsHexDigit);
 
     private static bool Commit(string value) => !string.IsNullOrWhiteSpace(value) && value.Length is >= 40 and <= 64 && value.All(Uri.IsHexDigit);
 }
