@@ -4,6 +4,8 @@ import { userEvent } from "@testing-library/user-event";
 import { NfcBindingModal } from "../NfcBindingModal";
 import type { NfcTagUnknownEvent } from "@/features/nfc/types";
 
+const mockLinkNfcTag = vi.hoisted(() => vi.fn());
+
 // Mock hooks
 vi.mock("@/common/hooks/useApi", () => ({
   usePrinters: () => ({
@@ -14,7 +16,7 @@ vi.mock("@/common/hooks/useApi", () => ({
     isLoading: false,
   }),
   useLinkNfcTag: () => ({
-    mutate: vi.fn(),
+    mutate: mockLinkNfcTag,
     isPending: false,
   }),
 }));
@@ -31,6 +33,29 @@ describe("NfcBindingModal", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+
+  it("forwards the scan timestamp when binding the tag", async () => {
+    const user = userEvent.setup();
+    render(
+      <NfcBindingModal
+        isOpen={true}
+        onClose={onClose}
+        event={makeEvent("TAG-TIMESTAMP")}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Bind Tag" }));
+
+    expect(mockLinkNfcTag).toHaveBeenCalledWith(
+      {
+        tagUid: "TAG-TIMESTAMP",
+        printerId: "printer-1",
+        spoolId: undefined,
+        readAt: "2026-01-01T00:00:00Z",
+      },
+      expect.objectContaining({ onSuccess: expect.any(Function) }),
+    );
   });
 
   it("resets form fields when event (tag) changes", async () => {
