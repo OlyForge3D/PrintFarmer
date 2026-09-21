@@ -30,6 +30,23 @@ test('shared host mapping preserves mobile ownership, capacity, hold and explici
   assert.equal(config.hosts['windows-general'].newRemoteMobileDispatch, false);
 });
 
+test('verified Windows instance with matching workflow, platform and absolute paths resolves general scope', () => {
+  const windowsWorkflow = config.hosts['windows-general'].workflowId;
+  const windowsRuntime = {
+    host: 'windows-general', workflowId: windowsWorkflow, appHostId: 'local', projectId: 'fixture-project',
+    worktreeRoot: 'C:\\test\\worktrees', cacheDirectory: 'C:\\test\\cache', verified: true,
+  };
+  const host = resolveAutomationHost(config, {
+    host: 'windows-general', workflow: windowsWorkflow, runtime: windowsRuntime,
+    platform: 'win32', cwd: 'C:\\test\\worktrees\\round-one',
+  });
+  assert.equal(host.scope, 'general');
+  assert.equal(host.maxLocalSessions, 5);
+  assert.equal(host.admission, 'windows-shared');
+  assert.equal(host.newRemoteMobileDispatch, false);
+  assert.equal(host.workflowId, windowsWorkflow);
+});
+
 test('unverified Windows instance, wrong workflow/platform and main-checkout paths fail closed', () => {
   for (const override of [
     { host: 'windows-general', platform: 'win32' },
@@ -132,7 +149,7 @@ test('common policy retains actual handoff, host ownership, dependency and merge
     're-fetch the native dependency edges', 'no new distributed lock service',
     'Unknown remote owner', 'one resend', 'never archive/delete',
   ]) assert.ok(common.toLowerCase().includes(required.toLowerCase()), required);
-  assert.match(bootstrap, /Windows is not live-verified/);
+  assert.match(bootstrap, /Windows has been exported\s+and verified/);
   assert.match(bootstrap, /squad watch --execute.*not this entrypoint/s);
   assert.match(skill, /automation\.md/);
   assert.match(kickoff, /BEFORE YOU OPEN YOUR PULL REQUEST, SYNC TO THE CURRENT BASE/);
