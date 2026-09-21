@@ -229,7 +229,6 @@ describe("FailureDetectionMonitoringOverlay", () => {
       lastFailureCount: 0,
       lastScanStartedAt: "2026-03-25T12:00:00Z",
       lastScanCompletedAt: "2026-03-25T12:00:05Z",
-      lastError: null,
       printers: [
         {
           printerId: "printer-1",
@@ -240,12 +239,10 @@ describe("FailureDetectionMonitoringOverlay", () => {
           isPrinting: true,
           detectionSource: "global",
           detectionTarget: "Global Obico ML",
-          snapshotUrl: null,
           lastAnalyzedAt: "2026-03-25T12:00:05Z",
           lastOutcome: "error",
           lastConfidence: undefined,
           lastAutoPaused: false,
-          lastFailureDetectedAt: null,
         },
       ],
     };

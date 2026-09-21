@@ -1,5 +1,5 @@
 {
   "_comment": "testDiagnosticCount is an exact count of measured direct test diagnostics (not a diagnostic-identity snapshot -- fixing one error while introducing another can leave the count unchanged); update it deliberately in the same change that moves the count. minimumTestFileCount is a lower bound set to the measured test file count. Lowered from 542 to 530 in #2811: isCountableTestFile now requires real .test.ts/.test.tsx naming, so the 12 non-test helper/fixture files previously living under src/test/ and __tests__/ (e.g. setup.ts, testIds.ts, wireContracts.ts, serviceInventoryFixture.ts) no longer inflate the floor. testDiagnosticCount is unchanged: diagnostic classification stayed directory-based on purpose so bugs in those same helper files are still gated.",
-  "testDiagnosticCount": 191,
+  "testDiagnosticCount": 177,
   "minimumTestFileCount": 531
 }
