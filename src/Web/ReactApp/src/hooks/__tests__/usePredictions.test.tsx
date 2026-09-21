@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useCompletionPrediction, useJobStatistics, useMaterialStats, useModelStats } from '../usePredictions';
 import { predictionService } from '@/services/predictionService';
+import type { CompletionPredictionDto, DurationStatsDto, PrintJobStatisticsDto } from '@/types/predictions';
 
 // Mock the prediction service
 vi.mock('@/services/predictionService', () => ({
@@ -36,10 +37,14 @@ describe('usePredictions', () => {
 
   describe('useCompletionPrediction', () => {
     it('should fetch completion prediction', async () => {
-      const mockPrediction = {
+      const mockPrediction: CompletionPredictionDto = {
         jobId: 'job-123',
-        estimatedCompletion: '2024-01-01T12:00:00Z',
-        confidence: 0.95,
+        estimatedCompletionTime: '2024-01-01T12:00:00Z',
+        estimatedDuration: 'PT1H',
+        confidence: 'High',
+        sampleSize: 10,
+        variancePercent: 5,
+        note: null,
       };
 
       vi.mocked(predictionService.getPrediction).mockResolvedValue(mockPrediction);
@@ -70,10 +75,17 @@ describe('usePredictions', () => {
 
   describe('useJobStatistics', () => {
     it('should fetch job statistics', async () => {
-      const mockStats = {
+      const mockStats: PrintJobStatisticsDto = {
         jobId: 'job-123',
-        duration: 3600,
-        filamentUsed: 100,
+        actualDurationMs: 3_600_000,
+        estimatedDurationMs: 3_540_000,
+        material: 'PLA',
+        nozzleTemperature: 210,
+        bedTemperature: 60,
+        speedPercentage: 100,
+        isSuccess: true,
+        failureReason: null,
+        completedAtUtc: '2024-01-01T12:00:00Z',
       };
 
       vi.mocked(predictionService.getStatistics).mockResolvedValue(mockStats);
@@ -96,12 +108,20 @@ describe('usePredictions', () => {
 
   describe('useMaterialStats', () => {
     it('should fetch material statistics', async () => {
-      const mockStats = {
+      const mockStats: Record<string, DurationStatsDto> = {
         PLA: {
-          avgDuration: 3600,
-          avgFilamentUsed: 100,
-          jobCount: 10,
-        }
+          totalJobs: 10,
+          successfulJobs: 9,
+          successRate: 0.9,
+          averageDuration: 'PT1H',
+          medianDuration: 'PT55M',
+          minDuration: 'PT30M',
+          maxDuration: 'PT2H',
+          standardDeviation: 300,
+          variance: 90_000,
+          material: 'PLA',
+          printerModelName: null,
+        },
       };
 
       vi.mocked(predictionService.getMaterialStats).mockResolvedValue(mockStats);
@@ -124,10 +144,18 @@ describe('usePredictions', () => {
 
   describe('useModelStats', () => {
     it('should fetch model statistics', async () => {
-      const mockStats = {
-        avgDuration: 3600,
-        avgFilamentUsed: 100,
-        jobCount: 5,
+      const mockStats: DurationStatsDto = {
+        totalJobs: 5,
+        successfulJobs: 5,
+        successRate: 1,
+        averageDuration: 'PT1H',
+        medianDuration: 'PT55M',
+        minDuration: 'PT30M',
+        maxDuration: 'PT2H',
+        standardDeviation: 300,
+        variance: 90_000,
+        material: 'PLA',
+        printerModelName: 'Model 123',
       };
 
       vi.mocked(predictionService.getModelStats).mockResolvedValue(mockStats);
