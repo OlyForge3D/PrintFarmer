@@ -30,12 +30,6 @@ const FOCUSABLE_SELECTOR = [
   '[tabindex]:not([tabindex="-1"])',
 ].join(', ');
 
-const SYSTEM_SERVICE_HEALTH = {
-  Healthy: SystemServiceHealth.Healthy,
-  Degraded: SystemServiceHealth.Degraded,
-  Critical: SystemServiceHealth.Critical,
-} satisfies Record<SystemServiceHealth, SystemServiceHealth>;
-
 type HealthBadgeVariant = 'success' | 'warning' | 'error';
 
 interface HealthTone {
@@ -100,20 +94,20 @@ function getFocusableElements(container: HTMLElement | null): HTMLElement[] {
 }
 
 function getWorstServiceHealth(services: SystemInfo['services']): SystemServiceHealth {
-  if (services.some((service) => service.health === SYSTEM_SERVICE_HEALTH.Critical)) {
-    return SYSTEM_SERVICE_HEALTH.Critical;
+  if (services.some((service) => service.health === SystemServiceHealth.Critical)) {
+    return SystemServiceHealth.Critical;
   }
 
-  if (services.some((service) => service.health === SYSTEM_SERVICE_HEALTH.Degraded)) {
-    return SYSTEM_SERVICE_HEALTH.Degraded;
+  if (services.some((service) => service.health === SystemServiceHealth.Degraded)) {
+    return SystemServiceHealth.Degraded;
   }
 
-  return SYSTEM_SERVICE_HEALTH.Healthy;
+  return SystemServiceHealth.Healthy;
 }
 
 function getHealthTone(health: SystemServiceHealth): HealthTone {
   switch (health) {
-    case SYSTEM_SERVICE_HEALTH.Critical:
+    case SystemServiceHealth.Critical:
       return {
         label: 'Critical',
         buttonClassName: 'border-pf-error/40 bg-pf-error/10 text-pf-error-text hover:bg-pf-error/15',
@@ -121,7 +115,7 @@ function getHealthTone(health: SystemServiceHealth): HealthTone {
         panelAccentClassName: 'from-pf-error/18 via-pf-error/6 to-transparent',
         badgeVariant: 'error',
       };
-    case SYSTEM_SERVICE_HEALTH.Degraded:
+    case SystemServiceHealth.Degraded:
       return {
         label: 'Degraded',
         buttonClassName: 'border-pf-warning/40 bg-pf-warning/10 text-pf-warning-text hover:bg-pf-warning/15',
@@ -129,7 +123,7 @@ function getHealthTone(health: SystemServiceHealth): HealthTone {
         panelAccentClassName: 'from-pf-warning/18 via-pf-warning/6 to-transparent',
         badgeVariant: 'warning',
       };
-    case SYSTEM_SERVICE_HEALTH.Healthy:
+    case SystemServiceHealth.Healthy:
     default:
       return {
         label: 'Healthy',
@@ -143,11 +137,11 @@ function getHealthTone(health: SystemServiceHealth): HealthTone {
 
 function getServiceBadgeVariant(health: SystemServiceHealth): HealthBadgeVariant {
   switch (health) {
-    case SYSTEM_SERVICE_HEALTH.Critical:
+    case SystemServiceHealth.Critical:
       return 'error';
-    case SYSTEM_SERVICE_HEALTH.Degraded:
+    case SystemServiceHealth.Degraded:
       return 'warning';
-    case SYSTEM_SERVICE_HEALTH.Healthy:
+    case SystemServiceHealth.Healthy:
     default:
       return 'success';
   }
@@ -325,7 +319,7 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
 
   const overallHealth = useMemo(() => {
     if (!data) {
-      return SYSTEM_SERVICE_HEALTH.Healthy;
+      return SystemServiceHealth.Healthy;
     }
 
     return getWorstServiceHealth(data.services);
@@ -338,7 +332,7 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
   }
 
   if (error || !data) {
-    const errorTone = getHealthTone(SYSTEM_SERVICE_HEALTH.Degraded);
+    const errorTone = getHealthTone(SystemServiceHealth.Degraded);
     return (
       <div className="relative">
         <Button
@@ -499,9 +493,7 @@ export function SystemPulsePill({ onClick, className, compact = false }: SystemP
                       <p className="truncate text-xs text-pf-text-secondary">{service.version || EMPTY_VALUE}</p>
                     </div>
                     <span className="inline-flex shrink-0 items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.16em] text-pf-text-secondary">
-                      <Badge dot variant={getServiceBadgeVariant(service.health)}>
-                        {service.health}
-                      </Badge>
+                      <Badge dot variant={getServiceBadgeVariant(service.health)} />
                       <span>{service.health}</span>
                     </span>
                   </li>
