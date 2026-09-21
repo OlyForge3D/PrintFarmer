@@ -237,7 +237,7 @@ export function LoginAuditPage({ embedded = false }: EmbeddablePageProps) {
 
                     <TableCell>
                       <span className="text-sm text-pf-text-primary font-medium">
-                        {entry.username}
+                        {entry.username ?? '—'}
                       </span>
                     </TableCell>
 

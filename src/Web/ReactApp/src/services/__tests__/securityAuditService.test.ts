@@ -1,5 +1,6 @@
+import { AxiosHeaders, type AxiosResponse } from 'axios';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { fetchLoginAudit } from '../securityAuditService';
+import { fetchLoginAudit, type LoginAuditResponse } from '../securityAuditService';
 import { apiClient } from '../api';
 
 vi.mock('../api', () => ({
@@ -17,7 +18,6 @@ const mockResponse = {
       success: true,
       ipAddress: '10.0.0.42',
       userAgent: 'Mozilla/5.0',
-      failureReason: null,
     },
     {
       id: 'entry-2',
@@ -32,7 +32,17 @@ const mockResponse = {
   totalCount: 2,
   page: 1,
   pageSize: 50,
-};
+} satisfies LoginAuditResponse;
+
+function createApiResponse(data: LoginAuditResponse): AxiosResponse<LoginAuditResponse> {
+  return {
+    data,
+    status: 200,
+    statusText: 'OK',
+    headers: {},
+    config: { headers: new AxiosHeaders() },
+  };
+}
 
 describe('securityAuditService', () => {
   beforeEach(() => {
@@ -41,7 +51,7 @@ describe('securityAuditService', () => {
 
   describe('fetchLoginAudit', () => {
     it('fetches login audit with default params when no filters passed', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await fetchLoginAudit();
 
@@ -52,7 +62,7 @@ describe('securityAuditService', () => {
     });
 
     it('sends username filter when provided', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       await fetchLoginAudit({ username: 'admin' });
 
@@ -62,7 +72,7 @@ describe('securityAuditService', () => {
     });
 
     it('sends success=true filter when provided', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       await fetchLoginAudit({ success: true });
 
@@ -72,7 +82,7 @@ describe('securityAuditService', () => {
     });
 
     it('sends success=false filter for failure-only queries', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       await fetchLoginAudit({ success: false });
 
@@ -82,7 +92,7 @@ describe('securityAuditService', () => {
     });
 
     it('omits success param when not provided', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       await fetchLoginAudit({});
 
@@ -91,7 +101,7 @@ describe('securityAuditService', () => {
     });
 
     it('sends page and pageSize when specified', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       await fetchLoginAudit({ page: 3, pageSize: 100 });
 
@@ -101,7 +111,7 @@ describe('securityAuditService', () => {
     });
 
     it('converts valid datetime-local from value to ISO 8601', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       await fetchLoginAudit({ from: '2026-05-26T10:00' });
 
@@ -112,7 +122,7 @@ describe('securityAuditService', () => {
     });
 
     it('returns the response data from the API', async () => {
-      vi.mocked(apiClient.get).mockResolvedValue({ data: mockResponse });
+      vi.mocked(apiClient.get).mockResolvedValue(createApiResponse(mockResponse));
 
       const result = await fetchLoginAudit();
 
