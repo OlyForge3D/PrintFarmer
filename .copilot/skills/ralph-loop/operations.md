@@ -132,6 +132,12 @@ delivery:
 
 ## Reconcile Before Admission
 
+For existing general PR recovery on the Windows authority, use
+[`reserve-local-pr`](pr-recovery-admission.md), not new-issue eligibility with
+fabricated `linkedPr:false`. It uses the same ledger, CAS, capacity and conservative
+acknowledgment/recovery lifecycle. Native macOS rounds continue their separate
+verified claim protocol and must not initialize a substitute shared ledger.
+
 Only one round or explicitly designated repair session may own operational reconciliation.
 Check for another active round before writing the shared ledger; agree ownership rather than
 racing it. A user-requested admission repair is maintenance, not a backlog implementation slot.

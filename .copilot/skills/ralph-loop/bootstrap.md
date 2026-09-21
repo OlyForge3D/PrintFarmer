@@ -18,7 +18,7 @@ HOST_CONFIG=<approved-absolute-private-json-path>; POLICY_COMMIT=<approved-full-
 Use only this automation's isolated worktree, never the main checkout.
 Before executing repository code, verify origin is OlyForge3D/PrintFarmer on
 github.com, fetch origin development, verify POLICY_COMMIT is an ancestor of
-origin/development, and verify both current and origin/development versions of
+the exact fetched FETCH_HEAD SHA, and verify both current and that fetched SHA's versions of
 .copilot/skills/ralph-loop, .github/copilot-instructions.md, .squad/config.json,
 and scripts/ci/ralph-*.mjs plus scripts/ci/verify-squad-verdict.mjs are identical
 to POLICY_COMMIT (git diff --exit-code). Reject untracked files in those paths.
@@ -72,9 +72,24 @@ Windows prerequisite commits are `ee1d6b1341c7ce3e99f9f9338c276a084a095194`,
 `f2e428af37a28206dc5e9b3543bca896ae348c72`,
 `9c642f7fd350c34dfd350fa1f8855bde38b169d0` and
 `69311cabbd8e6aee184d28285944e3dc4641dda2`.
-At deployment verify they are ancestors of the approved policy commit. Its
-subsequent per-round ancestor/content guard replaces the duplicated long prompt,
-not those repairs or their preserved terminal/atomic-handoff safety contracts.
+Do not blindly retain an ancestry-only check across rewritten history: the
+`69311cab...` merge exists (PR #2726), but is not an ancestor of the inspected
+development snapshot `8da8a879cea682fff5ee034521151ac9b355218a`. The following
+paths compare **byte-for-byte equal** between those two commits:
+
+- `scripts/ci/ralph-admission.mjs`, `ralph-macos-ssh.mjs` and `ralph-macos-worker.mjs`
+- `scripts/ci/tests/test-ralph-macos-ssh.mjs`, `test-ralph-macos-worker.mjs`
+  and `test-ralph-local-session-completion.mjs`
+- `.copilot/skills/ralph-loop/operations.md` and `session-terminal-contract.md`
+
+The #2923 change adds separate PR admission to that preserved baseline; it does
+not replace terminal completion, remote attestation or atomic handoff. Its
+required source reviewers must inspect this compatibility transition and the
+unchanged lifecycle regression evidence before a maintainer approves the new
+merged policy pin. **Until that approval, keep the legacy workflow disabled;
+do not simply delete its prerequisites or substitute a random current SHA.**
+The approved replacement pin plus per-round ancestor/content guard then replaces
+the historical duplicated prompt/commit list, not any of its safety contracts.
 
 ## Recovery Planner Input
 
@@ -135,6 +150,11 @@ facts again before delivery. Independent new-issue work may proceed only after
 recovery dispositions and intended-file conflicts are checked; no global
 "all PRs must finish" requirement is implied.
 
+On the verified Windows authority, reserve eligible general PR candidates with
+[`reserve-local-pr`](pr-recovery-admission.md). Its explicit PR/head/work binding
+is distinct from new-issue admission. Only a newly created reservation permits
+first delivery; exact replay authorizes reconciliation, never a second kickoff.
+
 ## Rollout And Verification
 
 Run focused validation from the repository root:
@@ -142,7 +162,11 @@ Run focused validation from the repository root:
 ```bash
 node --test scripts/ci/tests/test-ralph-pr-recovery.mjs \
   scripts/ci/tests/test-ralph-automation.mjs \
-  scripts/ci/tests/test-ralph-round-cache.mjs
+  scripts/ci/tests/test-ralph-round-cache.mjs \
+  scripts/ci/tests/test-ralph-pr-admission.mjs \
+  scripts/ci/tests/test-ralph-macos-ssh.mjs \
+  scripts/ci/tests/test-ralph-local-session-completion.mjs \
+  scripts/ci/tests/test-ralph-macos-worker.mjs
 ```
 
 Update the existing disabled macOS workflow only after publication/approval and

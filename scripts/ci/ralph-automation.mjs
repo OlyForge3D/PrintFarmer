@@ -12,7 +12,7 @@ export const policyPaths = [
   'scripts/ci/ralph-automation.mjs', 'scripts/ci/ralph-pr-recovery.mjs',
   'scripts/ci/ralph-admission.mjs', 'scripts/ci/ralph-macos-ssh.mjs',
   'scripts/ci/ralph-round-cache.mjs', 'scripts/ci/ralph-github-snapshot.mjs',
-  'scripts/ci/verify-squad-verdict.mjs',
+  'scripts/ci/ralph-*.mjs', 'scripts/ci/verify-squad-verdict.mjs',
 ];
 
 export function resolveAutomationHost(config, { host, workflow, runtime, platform = process.platform, cwd = process.cwd() }) {
@@ -74,6 +74,10 @@ export async function runAutomationPreflight({ host, workflow, hostConfig, appro
   const config = JSON.parse(await readFile(path.join(cwd, policyDirectory, 'hosts.json'), 'utf8'));
   const runtime = JSON.parse(await readFile(hostConfig, 'utf8'));
   const profile = resolveAutomationHost(config, { host, workflow, runtime, platform, cwd });
+  resolveAutomationHost(config, {
+    host, workflow, platform, cwd: await realpath(cwd),
+    runtime: { ...runtime, worktreeRoot: await realpath(runtime.worktreeRoot) },
+  });
   await verifyAutomationCheckout({ cwd, approvedPolicy });
   return { profile, approvedPolicy, policy: `${policyDirectory}/automation.md`, dispatchAuthorized: false };
 }

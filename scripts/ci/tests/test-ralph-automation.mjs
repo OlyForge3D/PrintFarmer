@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { policyPaths, resolveAutomationHost, verifyAutomationCheckout } from '../ralph-automation.mjs';
+import { policyPaths, resolveAutomationHost, runAutomationPreflight, verifyAutomationCheckout } from '../ralph-automation.mjs';
 
 const exec = promisify(execFile);
 const config = JSON.parse(await readFile('.copilot/skills/ralph-loop/hosts.json', 'utf8'));
@@ -48,6 +48,24 @@ test('private host config cannot widen repository-controlled limits or review sc
   assert.equal(host.maxLocalSessions, 5);
   assert.equal(host.scope, 'mobile');
   assert.deepEqual(host.mergeHeldPrs, [2603]);
+});
+
+test('bootstrap rejects a worktree path symlink escaping its configured parent before running Git', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'ralph-location-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const outside = path.join(root, 'outside');
+  const worktrees = path.join(root, 'worktrees');
+  const policy = path.join(outside, '.copilot/skills/ralph-loop');
+  await mkdir(policy, { recursive: true });
+  await mkdir(worktrees);
+  await writeFile(path.join(policy, 'hosts.json'), JSON.stringify(config));
+  await symlink(outside, path.join(worktrees, 'round'), 'junction');
+  const hostConfig = path.join(root, 'private.json');
+  await writeFile(hostConfig, JSON.stringify({ ...runtime, worktreeRoot: worktrees, cacheDirectory: path.join(root, 'cache') }));
+  await assert.rejects(() => runAutomationPreflight({
+    host: 'macos-mobile', workflow, hostConfig, approvedPolicy: 'a'.repeat(40),
+    cwd: path.join(worktrees, 'round'), platform: 'darwin',
+  }), /isolated automation worktree/);
 });
 
 async function gitFixture(t) {

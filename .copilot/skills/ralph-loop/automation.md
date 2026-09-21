@@ -131,10 +131,11 @@ route to a different eligible implementer.
 Before any creation/resumption: re-fetch the PR/head, issues, newest comments,
 remote branches, ownership, queue, file conflicts and capacity. On Windows the
 existing issue reservation API rejects `linkedPr:true`; **do not lie by passing
-false** to reserve recovery. Reuse an already admitted owning session when
-supported, or report `PR recovery admission unsupported` until the authority can
-account the exact handoff. `account-local-session` can account an already live
-handoff; it does not authorize creating one without reservation.
+false** to reserve recovery. Use the explicit
+[`reserve-local-pr` contract](pr-recovery-admission.md) for replacement general
+PR owners on the existing Windows authority, or reuse an already admitted
+owning session when supported. `account-local-session` can account an already
+live handoff; it does not authorize creating one without reservation.
 On native macOS follow its existing claim-before-create protocol after proving
 sole local ownership and no remote conflict.
 
