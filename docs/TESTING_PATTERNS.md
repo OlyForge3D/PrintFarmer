@@ -23,6 +23,83 @@ Run `npm run typecheck:test` as well as focused Vitest tests: Vitest alone
 does not validate `satisfies Printer` assertions. Do not fix fixture errors by
 adding fields that the backend deliberately omits.
 
+### Typecheck cleanup contract audit (#2799)
+
+The historical diagnostic counts describe different compiler projects and
+different commits, not additive error totals. `typecheck:test` reports direct
+test/helper diagnostics separately from imported source diagnostics;
+`typecheck:app` checks the application project, including files not imported by
+tests. Record the SHA and all three counts together. File floors and
+`typecheck:src-coverage` must remain enabled when diagnostic debt is removed.
+
+The following contracts were traced on development
+`83f1419816cbcd038f0885ad74506b47599690f5`; already-merged fixes are retained,
+not reimplemented. Paths below are relative to the repository root.
+
+**Queue copies and ID.** `src/infra/Dtos/QueueDtos.cs` exposes flat job `id`,
+`copies`, `completedCopies`, `remainingCopies`. The analytics envelope in
+`src/infra/Dtos/PrintQueue/PrintQueueDtos.cs` instead contains `job.id`, with no
+second top-level `id`. React `PrintJob`, `QueuedPrintJobDto` and
+`QueuedPrintJobWithFileMetaDto` preserve that distinction.
+`src/tests/Farm.Web.Api.Tests/Contracts/PrintQueueContractTests.cs` checks real
+HTTP counts and omitted optional fields;
+`src/Web/ReactApp/src/services/__tests__/printJobQueueService.test.ts` verifies
+the flat enqueue response.
+
+**Printer URL, reachability, enums.** `src/infra/Dtos/PrinterDto.cs` and
+`CompletePrinterDto.cs` suppress `backendUrl`. `isOnline` is the wire field;
+optional `isReachable` is client-only. Existing string enum values are retained,
+including `ToolheadType.Physical`, rather than numeric fixture ordinals.
+Evidence: `src/Web/ReactApp/src/test/types/printerResponseContract.test.ts`,
+`enumWireContract.test.ts` in that directory, and
+`src/Web/ReactApp/src/features/slicer/utils/__tests__/profileMatcher.test.ts`.
+
+**Notification user.** `src/infra/Models/Notifications/Notification.cs` has
+non-null `Guid UserId`; `NotificationsController.GetNotificationsAsync` returns
+these records. `notificationsApi.getNotifications` passes them through and
+`NotificationDto.userId` is a required string, not a field to remove from
+fixtures. `src/Web/ReactApp/src/test/components/NotificationDrawer.test.tsx`
+uses typed notifications with `userId`.
+
+**Failure fields.** Main MVC and SignalR serializers omit nulls
+(`src/api/Startup/ControllerStartup.cs`, `SignalRStartup.cs`).
+Queue `FailureReason` is nullable C# and optional TypeScript.
+Slicer `SliceJobStatusResponse.failureReason` accepts omission and explicit
+null; its enum classification is distinct from queue free-text failure reasons.
+Do not globally replace optional fields with required nulls.
+`PrintQueueContractTests.cs` and `SliceJobContractTests.cs` under
+`src/tests/Farm.Web.Api.Tests/Contracts/` assert missing failure keys from actual
+HTTP responses.
+
+**NFC read time.** `src/infra/Services/NfcDevices/NfcTagService.cs`,
+`ProcessTagReadAsync`, emits `readAt`; `LinkNfcTagRequest.ReadAt` in
+`src/infra/Dtos/NfcDeviceDtos.cs` is optional for manual linking. Both NFC
+binding/pairing modals forward the scan timestamp; `LinkTagAsync` uses it for
+spool last-seen state. Event `readAt` remains required, request `readAt` optional.
+`src/Web/ReactApp/src/features/nfc/components/__tests__/NfcBindingModal.test.tsx`
+checks timestamp forwarding and an omitted spool ID.
+
+**File size.** `src/infra/Dtos/GcodeFileDtos.cs` exposes required `long FileSize`,
+serialized as numeric `fileSize`. `GcodeFileCard` and `GcodeFileBrowser` consume
+it. Analytics `QueueGcodeFileMetaDto.FileSizeBytes` is a different DTO and retains
+`fileSizeBytes`; do not rename either globally. Evidence:
+`src/Web/ReactApp/src/features/gcode/components/__tests__/GcodeFileCard.test.tsx`
+and `src/Web/ReactApp/src/features/fileBrowser/__tests__/fileBrowserViews.test.tsx`.
+
+**Slicer job counts.** `slicerRegistry.getSlicers` maps `/workers/` records into a
+discovery `SlicerDto` without `activeJobs`/`queuedJobs`; its callers must not
+invent required count fields. `SlicerServiceResponse` in
+`src/slicer/Farm.Slicer.Module/Contracts/SlicerDtos.cs` also has no such fields.
+Worker management's separate `WorkerResponse.ActiveJobs` in `WorkerDtos.cs` is
+real and retained. `src/Web/ReactApp/src/services/__tests__/slicerRegistry.test.ts`
+checks the exact mapped discovery shape; `workersService.test.ts` in that
+directory covers worker-management counts.
+
+Controller and SignalR serialization use camelCase names and string enums
+(`ControllerStartup.cs:28-36`, `SignalRStartup.cs:35-45`). These conclusions do
+not authorize changes to mobile DTOs, backend serialization, or worker contracts.
+Runtime tests alone do not prove fixture typings: run both compiler gates.
+
 ## Direct motion-control testing
 
 Current test entry points:
