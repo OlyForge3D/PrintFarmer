@@ -63,7 +63,7 @@ describe('PrinterTableView - maintenance button', () => {
     ['null', { progress: null }],
     ['negative', { progress: -1 }],
     ['unknown', { progress: Number.NaN }],
-  ])('keeps the missing-progress placeholder for %s progress', (_label, overrides) => {
+  ] as const)('keeps the missing-progress placeholder for %s progress', (_label, overrides) => {
     // Runtime JSON can contain null even though the API type only declares an optional number.
     const printer = { ...basePrinter, state: 'Printing', ...overrides } as Printer;
 
@@ -78,7 +78,7 @@ describe('PrinterTableView - maintenance button', () => {
     );
 
     const row = screen.getByRole('row', { name: /Printer 1/ });
-    expect(within(row).getByRole('cell', { name: '—', exact: true })).toBeInTheDocument();
+    expect(within(row).getByRole('cell', { name: '—' })).toBeInTheDocument();
     expect(within(row).queryByRole('progressbar')).not.toBeInTheDocument();
     expect(within(row).queryByText('0%')).not.toBeInTheDocument();
   });

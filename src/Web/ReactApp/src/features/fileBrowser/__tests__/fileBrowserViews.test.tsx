@@ -98,15 +98,13 @@ describe("ExplorerView", () => {
         onSelectAll={onSelectAll}
         onNavigate={vi.fn()}
         currentPath="/"
-        renderItemActions={() => null}
+        renderActions={() => null}
         sortBy="fileName"
         sortOrder="asc"
         onSort={onSort}
         page={1}
         totalPages={1}
         onPageChange={vi.fn()}
-        pageSize={25}
-        onPageSizeChange={vi.fn()}
         columns={columns}
       />,
     );
@@ -130,15 +128,13 @@ describe("ExplorerView", () => {
         onSelectAll={vi.fn()}
         onNavigate={vi.fn()}
         currentPath="/"
-        renderItemActions={() => null}
+        renderActions={() => null}
         sortBy="fileName"
         sortOrder="asc"
         onSort={vi.fn()}
         page={1}
         totalPages={1}
         onPageChange={vi.fn()}
-        pageSize={25}
-        onPageSizeChange={vi.fn()}
         columns={columns}
       />,
     );

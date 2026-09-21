@@ -14,11 +14,9 @@ vi.mock('react-router', async (importOriginal) => {
   const actual = await importOriginal<typeof import('react-router')>();
   return {
     ...actual,
-    Link: ({ state, ...props }: Record<string, unknown>) => React.createElement(actual.Link, {
-      ...props,
-      state,
-      'data-route-state': state ? JSON.stringify(state) : undefined,
-    }),
+    Link: ({ state, ...props }: React.ComponentProps<typeof actual.Link>) => (
+      <actual.Link {...props} state={state} data-route-state={state ? JSON.stringify(state) : undefined} />
+    ),
   };
 });
 

@@ -216,10 +216,11 @@ describe('PrinterSignalRService auto-dispatch updates', () => {
       await flushMicrotasks();
 
       expect(window.PrintFarmerDebug?.printerSignalR).toBeDefined();
-      expect(
-        (window.PrintFarmerDebug?.printerSignalR as { lastStatuses: Record<string, unknown> })
-          .lastStatuses['printer-1']
-      ).toBeDefined();
+      expect(window.PrintFarmerDebug?.printerSignalR).toMatchObject({
+        lastStatuses: {
+          'printer-1': { id: 'printer-1', state: 'Printing', isOnline: true },
+        },
+      });
       printerSignalRService.dispose();
     });
 

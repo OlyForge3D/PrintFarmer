@@ -1053,6 +1053,9 @@ describe('InstallerUpdatesExperience', () => {
     const observedReplica = observedReplicaSummary.closest('details');
     expect(observedReplica).not.toBeNull();
     await userEvent.setup().click(observedReplicaSummary);
+    if (identity.releaseId === null || identity.sourceCommit === null) {
+      throw new Error('The observed identity fixture must contain its release ID and source commit');
+    }
     expect(within(observedReplica!).getByText(identity.releaseId)).toBeVisible();
     const sourceCommit = within(observedReplica!).getByText('Source commit')
       .parentElement;

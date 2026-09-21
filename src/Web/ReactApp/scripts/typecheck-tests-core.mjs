@@ -160,13 +160,6 @@ export function validateBaseline(baseline) {
   }
 
   if (
-    !Number.isInteger(baseline.testDiagnosticCount) ||
-    baseline.testDiagnosticCount < 0
-  ) {
-    return "testDiagnosticCount must be a non-negative integer.";
-  }
-
-  if (
     !Number.isInteger(baseline.minimumTestFileCount) ||
     baseline.minimumTestFileCount < 1
   ) {
@@ -276,17 +269,9 @@ export function evaluate({
     showListFilesOutput = true;
   }
 
-  if (diagnostics.testDiagnostics.length !== baseline.testDiagnosticCount) {
-    const direction =
-      diagnostics.testDiagnostics.length > baseline.testDiagnosticCount
-        ? "Fix the errors; do not raise the exact count."
-        : "The exact count is stale; regenerate testDiagnosticCount in scripts/test-typecheck-baseline.json in the same commit.";
+  if (diagnostics.fileDiagnostics.length > 0) {
     failures.push(
-      // "exact count" (R6), not "exact snapshot": this is an exact
-      // diagnostic *count* match, not a diagnostic-identity/fingerprint
-      // match -- fixing one error while introducing a different one can
-      // leave the count, and therefore this gate, unchanged.
-      `Test type-check measured ${diagnostics.testDiagnostics.length} direct test diagnostic(s); expected exact count ${baseline.testDiagnosticCount}. ${direction}`,
+      `Test type-check measured ${diagnostics.testDiagnostics.length} direct test diagnostic(s) and ${diagnostics.fileDiagnostics.length - diagnostics.testDiagnostics.length} imported application diagnostic(s); expected zero diagnostics. Fix the errors.`,
     );
   }
 
@@ -300,7 +285,7 @@ export function evaluate({
 
   return {
     ok: true,
-    message: `Test type-check passed with ${diagnostics.testDiagnostics.length}/${baseline.testDiagnosticCount} baseline test diagnostic(s), ${diagnostics.fileDiagnostics.length - diagnostics.testDiagnostics.length} imported application diagnostic(s), and ${testFileCount} test file(s).`,
+    message: `Test type-check passed with 0 direct test diagnostic(s), 0 imported application diagnostic(s), and ${testFileCount} test file(s).`,
     showListFilesOutput: false,
   };
 }

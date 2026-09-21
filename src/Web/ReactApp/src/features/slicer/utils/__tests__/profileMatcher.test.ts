@@ -9,6 +9,7 @@ import {
 } from '../profileMatcher';
 import type { PrinterForSlicing } from '../../components/job/PrinterSlicerSelector';
 import type { MachineProfileListItem, PrinterModelProfilesDto } from '@/services/slicerProfilesService';
+import { ToolheadType } from '@/types/api';
 
 describe('profileMatcher', () => {
   describe('getPrimaryNozzleDiameter', () => {
@@ -298,14 +299,14 @@ describe('profileMatcher', () => {
       expect(result).toHaveLength(2);
     });
 
-    it('should handle numeric ToolheadType.Physical (0)', () => {
-      const printer = {
+    it('should handle serialized ToolheadType.Physical strings', () => {
+      const printer: PrinterForSlicing = {
         id: '1', name: 'P',
         toolheads: [
-          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4, toolheadType: 0 },
-          { id: 'th2', index: 1, isPrimary: false, nozzleDiameter: 0.4, toolheadType: 0 },
+          { id: 'th1', index: 0, isPrimary: true, nozzleDiameter: 0.4, toolheadType: ToolheadType.Physical },
+          { id: 'th2', index: 1, isPrimary: false, nozzleDiameter: 0.4, toolheadType: ToolheadType.Physical },
         ],
-      } as PrinterForSlicing;
+      };
       const result = getPhysicalToolheads(printer);
       expect(result).toHaveLength(2);
     });

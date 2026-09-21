@@ -373,7 +373,7 @@ test("a symlink-only walked file is reported as uncovered until one project list
 // end-to-end. The fixture lives entirely in a temp directory created and
 // torn down at test runtime -- it is never written under this repo's own
 // src/, so it cannot perturb the applicationDiagnosticCount /
-// minimumAppFileCount / testDiagnosticCount / minimumTestFileCount baselines
+// minimumAppFileCount / minimumTestFileCount baselines
 // those two other gates are pinned to. This mirrors the existing
 // hung-compiler CLI fixture precedent in test-typecheck-app.mjs (temp dir,
 // fake tsc stub, cleanup in a finally block).
