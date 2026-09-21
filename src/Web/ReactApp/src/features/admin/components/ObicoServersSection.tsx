@@ -112,7 +112,7 @@ export function ObicoServersSection() {
       if (result.healthy) {
         toast.success(`Server created and verified (${result.latencyMs}ms)`);
       } else {
-        toast.warning(`Server created but unreachable: ${result.message || 'Connection failed'}. Check the URL and ensure the Obico ML API is running.`);
+        toast.warning(`Server created but unreachable: ${result.errorMessage || 'Connection failed'}. Check the URL and ensure the Obico ML API is running.`);
       }
     } catch {
       toast.warning('Server created but connectivity check failed. Use the Test button to verify later.');
@@ -143,7 +143,7 @@ export function ObicoServersSection() {
         if (result.healthy) {
           toast.success(`Server updated and verified (${result.latencyMs}ms)`);
         } else {
-          toast.warning(`Server updated but unreachable at new URL: ${result.message || 'Connection failed'}`);
+          toast.warning(`Server updated but unreachable at new URL: ${result.errorMessage || 'Connection failed'}`);
         }
       } catch {
         toast.warning('Server updated but connectivity check failed. Use the Test button to verify.');
@@ -165,7 +165,7 @@ export function ObicoServersSection() {
       if (result.healthy) {
         toast.success(`Server is healthy (${result.latencyMs}ms)`);
       } else {
-        toast.error(`Server is unhealthy: ${result.message || 'Unknown error'}`);
+        toast.error(`Server is unhealthy: ${result.errorMessage || 'Unknown error'}`);
       }
     } finally {
       setTestingServerId(null);
@@ -185,7 +185,7 @@ export function ObicoServersSection() {
         const result = await testHealthMutation.mutateAsync(server.id);
         setHealthResults(prev => ({ ...prev, [server.id]: result }));
         if (!result.healthy) {
-          toast.warning(`Server enabled but unreachable: ${result.message || 'Connection failed'}. Print failure detection will not work until the server is reachable.`);
+          toast.warning(`Server enabled but unreachable: ${result.errorMessage || 'Connection failed'}. Print failure detection will not work until the server is reachable.`);
         }
       } catch {
         toast.warning('Server enabled but connectivity check failed.');

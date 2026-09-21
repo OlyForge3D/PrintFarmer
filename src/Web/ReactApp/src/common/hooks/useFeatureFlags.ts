@@ -13,6 +13,35 @@ export interface FeatureFlags {
   'orca.expandedDtos': boolean;
 }
 
+const defaultFeatureFlags: FeatureFlags = {
+  'orca.handcraftedEditors': true,
+  'orca.schemaEditor': true,
+  'orca.profileComparison': true,
+  'orca.inheritanceDiff': true,
+  'orca.importConflictResolver': true,
+  'orca.expandedDtos': true,
+};
+
+export function normalizeFeatureFlags(
+  flags: Record<string, boolean>,
+): FeatureFlags {
+  return {
+    'orca.handcraftedEditors':
+      flags['orca.handcraftedEditors'] ?? defaultFeatureFlags['orca.handcraftedEditors'],
+    'orca.schemaEditor':
+      flags['orca.schemaEditor'] ?? defaultFeatureFlags['orca.schemaEditor'],
+    'orca.profileComparison':
+      flags['orca.profileComparison'] ?? defaultFeatureFlags['orca.profileComparison'],
+    'orca.inheritanceDiff':
+      flags['orca.inheritanceDiff'] ?? defaultFeatureFlags['orca.inheritanceDiff'],
+    'orca.importConflictResolver':
+      flags['orca.importConflictResolver'] ??
+      defaultFeatureFlags['orca.importConflictResolver'],
+    'orca.expandedDtos':
+      flags['orca.expandedDtos'] ?? defaultFeatureFlags['orca.expandedDtos'],
+  };
+}
+
 /**
  * Hook to fetch all feature flags.
  * Caches results for 5 minutes.
@@ -20,7 +49,10 @@ export interface FeatureFlags {
 export function useFeatureFlags() {
   return useQuery<FeatureFlags>({
     queryKey: ['feature-flags'],
-    queryFn: () => apiClient.getFeatureFlags(),
+    queryFn: async () => {
+      const flags = await apiClient.getFeatureFlags();
+      return normalizeFeatureFlags(flags);
+    },
     staleTime: 300_000, // 5 min cache
   });
 }

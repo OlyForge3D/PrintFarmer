@@ -1811,7 +1811,9 @@ public class PrintJobManagementServiceHistorySeedingTests
         MethodInfo? acquireMethod = serviceType.GetMethod("AcquirePrinterHistorySyncLock", BindingFlags.NonPublic | BindingFlags.Static);
         Assert.NotNull(acquireMethod);
 
-        object? lockState = acquireMethod!.Invoke(null, [printerId]);
+        // AcquirePrinterHistorySyncLock now takes an explicit utcNow parameter (TimeProvider
+        // migration); the exact value is irrelevant to this reference-counting test.
+        object? lockState = acquireMethod!.Invoke(null, [printerId, DateTime.UtcNow]);
         Assert.NotNull(lockState);
         return lockState!;
     }
@@ -1822,7 +1824,9 @@ public class PrintJobManagementServiceHistorySeedingTests
         MethodInfo? releaseMethod = stateType.GetMethod("ReleaseReferenceAndMarkUsed", BindingFlags.Public | BindingFlags.Instance);
         Assert.NotNull(releaseMethod);
 
-        _ = releaseMethod!.Invoke(lockState, null);
+        // ReleaseReferenceAndMarkUsed now takes an explicit utcNow parameter (TimeProvider
+        // migration); the exact value is irrelevant to this reference-counting test.
+        _ = releaseMethod!.Invoke(lockState, [DateTime.UtcNow]);
     }
 
     private static SemaphoreSlim GetSemaphore(object lockState)

@@ -1136,7 +1136,7 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByRole('alert')).toBeVisible();
   });
 
-  it('does not show the legacy manual path for facility-only blockers', () => {
+  it('preserves multi-segment facility-only blockers without showing the legacy manual path', () => {
     const { rerender } = render(<TestInstallerUpdatesExperience inventory={inventory({
       eligibility: 'NotManaged',
       eligibilityReasons: ['ManagedEligibilityNotEstablished', 'ReadOnlyInventory'],
@@ -1145,13 +1145,15 @@ describe('InstallerUpdatesExperience', () => {
         state: 'Blocked',
         reasons: [
           'facility_unavailable:operator-configured-example',
-          'facility_unavailable:sql_server_visible_backup_path_mapping_unverified',
+          'facility_unavailable:sql_server_visible_backup_path_mapping_unverified:probe_exception:InvalidOperationException',
         ],
         hops: [],
       },
     })} observation="connected" />);
 
-    expect(screen.getByText(/facility_unavailable:operator-configured-example/)).toBeVisible();
+    expect(screen.getByText(
+      /facility_unavailable:operator-configured-example, facility_unavailable:sql_server_visible_backup_path_mapping_unverified:probe_exception:InvalidOperationException/,
+    )).toBeVisible();
     expect(screen.queryByText('Manual signed install required')).not.toBeInTheDocument();
     expect(screen.queryByText(/cannot establish managed eligibility/)).not.toBeInTheDocument();
 

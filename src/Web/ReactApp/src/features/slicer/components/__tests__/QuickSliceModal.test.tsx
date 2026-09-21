@@ -316,6 +316,7 @@ describe('QuickSliceModal', () => {
       await waitFor(() => {
         expect(mockSubmitJob).toHaveBeenCalled();
         const submittedRequest = mockSubmitJob.mock.calls.at(-1)?.[0];
+        expect(submittedRequest?.slicerProfileJson).toEqual(expect.any(String));
         expect(submittedRequest?.slicerProfileJson).not.toContain('curr_bed_type');
       });
     });

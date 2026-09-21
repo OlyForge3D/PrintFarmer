@@ -1141,8 +1141,6 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
     try {
       const { geometry, width, height } = await generateTextGeometry(textToolConfig);
       const blobUrl = geometryToStlBlobUrl(geometry);
-      // Dispose the transient geometry — it was only needed for STL serialization
-      geometry.dispose();
       blobUrlsRef.current.add(blobUrl);
 
       // Build rotation quaternion to align text extrusion (local +Z) with surface normal
@@ -1156,13 +1154,15 @@ export const SlicerWorkspace: React.FC<SlicerWorkspaceProps> = ({
         id: generateUUID(),
         fileName: `[text]_${textToolConfig.text.slice(0, 16).replace(/\s+/g, '_')}.stl`,
         url: blobUrl,
+        fileType: 'stl',
+        geometry,
         position: [point.x, point.y, point.z],
         rotation: [euler.x, euler.y, euler.z],
         scale: [1, 1, 1],
       };
 
       // Use a non-existent removedId to add without removing
-      onModelsReplace('__text_add__', [newModel]);
+      onModelsReplace('__text_add__', [{ ...newModel, geometry }]);
       toast.success(`Placed "${textToolConfig.text}" (${width.toFixed(1)}×${height.toFixed(1)} mm)`);
     } catch (err) {
       toast.error(`Failed to generate text: ${err instanceof Error ? err.message : String(err)}`);

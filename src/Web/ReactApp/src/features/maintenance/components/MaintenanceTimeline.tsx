@@ -173,7 +173,7 @@ function TimelineItem({ task, onTaskClick, onMarkComplete }: TimelineItemProps) 
             </p>
           </div>
           <Badge 
-            variant="outline" 
+            variant="default" 
             className={`text-xs shrink-0 ${priorityConfig.color}`}
           >
             {priorityConfig.label}

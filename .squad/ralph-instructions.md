@@ -44,8 +44,16 @@
 
 ## Ralph, Go!
 
-Read this file for your full instructions.  Follow ALL sections.
-MAXIMIZE PARALLELISM — spawn agents for ALL actionable issues simultaneously.
+Scheduled automations use `.copilot/skills/ralph-loop/automation.md` and its
+verified host profile, not this CLI issue-only prompt. Squad CLI 0.11.0 filters
+issues before reading this file; changing this prose cannot make
+`squad watch --execute` recover blocked-parent draft PRs. Use the checked-in
+bootstrap for the existing App automations; do not start a terminal watcher.
+
+If invoked interactively, scan existing PRs (including drafts) before new issues.
+Follow `.github/ralph-reference.md` and the shared recovery/ownership protocol.
+Parallelize only independent work; shared-file corrections and integration must
+have one verified owner. Unknown remote ownership blocks duplicate dispatch.
 
 ### Issue Selection
 

@@ -151,7 +151,7 @@ function parseNozzleDiameter(value: unknown): number | undefined {
   return undefined;
 }
 
-function getCustomProfileNozzleDiameter(profile: CustomProfile): number | undefined {
+function getCustomProfileNozzleDiameter(profile: { rawJson?: string }): number | undefined {
   if (!profile.rawJson) {
     return undefined;
   }
@@ -169,11 +169,14 @@ function getCustomProfileNozzleDiameter(profile: CustomProfile): number | undefi
 }
 
 function getMachineProfileNozzleDiameter(profile: OrcaMachineProfile | CustomProfile): number | undefined {
-  if ('nozzleDiameter' in profile) {
-    return parseNozzleDiameter(profile.nozzleDiameter);
+  if ('profileType' in profile) {
+    return getCustomProfileNozzleDiameter(profile);
   }
 
-  return getCustomProfileNozzleDiameter(profile);
+  if (profile.nozzleDiameter !== undefined) {
+    return parseNozzleDiameter(profile.nozzleDiameter);
+  }
+  return undefined;
 }
 
 function machineProfileMatchesNozzle(profile: OrcaMachineProfile | CustomProfile, selectedDiameter: number | undefined): boolean {
@@ -1087,7 +1090,12 @@ export const NewSliceJobPage: React.FC = () => {
           }
         } catch { /* ignore parse errors */ }
       }
-      return { ...custom, printerModel } as OrcaMachineProfile;
+      return {
+        name: custom.name,
+        manufacturer: '',
+        description: custom.description,
+        printerModel,
+      };
     }
     return null;
   }, [selectedMachineProfileId, machineProfilesData, customProfilesData]);

@@ -1,5 +1,22 @@
 # Ralph Reference
 
+## Shared Scheduled Automations
+
+The macOS-mobile and Windows-general scheduled instances use one checked-in
+[automation lifecycle](../.copilot/skills/ralph-loop/automation.md), with explicit
+[host profiles](../.copilot/skills/ralph-loop/hosts.json) and a pinned
+[bootstrap/deployment contract](../.copilot/skills/ralph-loop/bootstrap.md).
+Each round scans draft and non-draft PR recovery before new issues, records real
+host/session/head handoffs, and retains unknown remote ownership. Shared-file
+integration is serialized; cross-host overlap requires a verified sole owner.
+The Windows profile remains disabled until its live host configuration is verified.
+
+This is not an upstream CLI fix. In Squad CLI 0.11.0,
+`watch/capabilities/execute.ts` filters blocked/assigned issues and returns before
+loading repo instructions when no issues qualify. Its PR report does not dispatch
+recovery. Do not restart `squad watch --execute` as the scheduled automation
+entrypoint. No upstream fork or installed-package patch is part of this policy.
+
 ## Ralph — Work Monitor
 
 Ralph is a built-in squad member whose job is keeping tabs on work. **Ralph tracks and drives the work queue.** Always on the roster, one job: make sure the team never sits idle.
@@ -77,7 +94,7 @@ into "merged with no review".
 An unlabelled PR is not blocked, it is simply not Ralph's to merge: report it and
 leave it for a human. Dependabot and other bot PRs fall here.
 
-**Squad merge evidence:** For each non-draft, `squad`-labelled PR, run:
+**Squad evidence:** For each `squad`-labelled PR, including drafts requiring recovery, run:
 
 ```bash
 node scripts/ci/verify-squad-verdict.mjs \
@@ -169,7 +186,9 @@ finding ledger under [Findings and Reviewer Checkpoints](copilot-instructions.md
 Do not replace a rejecting reviewer just to obtain an approval.
 
 **Step 3 — Act on highest-priority item:**
-- Process one category at a time, highest priority first (untriaged > assigned > CI failures > review feedback > approved PRs)
+- Process existing PR recovery first (current review feedback > CI failures >
+  missing review > approved draft integration), then eligible new issue work.
+  Parent issue blocked/assigned state does not hide existing PR corrections.
 - Spawn agents as needed, collect results
 - **⚡ CRITICAL: After results are collected, DO NOT stop. DO NOT wait for user input. IMMEDIATELY go back to Step 1 and scan again.** This is a loop — Ralph keeps cycling until the board is clear or the user says "idle". Each cycle is one "round".
 - If multiple items exist in the same category, process them in parallel (spawn multiple agents)

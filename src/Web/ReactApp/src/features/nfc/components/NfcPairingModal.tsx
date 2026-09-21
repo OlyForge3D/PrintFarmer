@@ -96,6 +96,7 @@ export function NfcPairingModal({ session }: NfcPairingModalProps) {
     linkMutation.mutate({
       tagUid: event.tagUid,
       spoolId: selectedSpool.id,
+      readAt: event.readAt,
       printerId: event.printerId,
     });
   }, [event, selectedSpool, linkMutation]);

@@ -7,14 +7,25 @@ import {
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactElement } from "react";
+import type {
+  FilamentCoverageStatus,
+  FleetFilamentCoverage,
+} from "@/features/filament-coverage/types";
 import { QueueJobsTable } from "../QueueJobsTable";
 import { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority } from "@/types/api";
 import "@testing-library/jest-dom";
 
+interface MockFleetCoverageResult {
+  data: FleetFilamentCoverage;
+  isSuccess: boolean;
+  isLoading: boolean;
+  isError: boolean;
+}
+
 // Hoisted so the vi.mock factory below can safely reference it before imports resolve.
 const mockGetCoverage = vi.hoisted(() =>
-  vi.fn(() => ({
+  vi.fn<() => MockFleetCoverageResult>(() => ({
     data: { printers: [], evaluatedAtUtc: new Date().toISOString() },
     isSuccess: true,
     isLoading: false,
@@ -723,7 +734,9 @@ describe("QueueJobsTable — filament coverage badge", () => {
     },
   };
 
-  function fleetWithStatus(status: string) {
+  function fleetWithStatus(
+    status: FilamentCoverageStatus,
+  ): MockFleetCoverageResult {
     return {
       data: {
         printers: [

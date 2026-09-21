@@ -8,6 +8,12 @@ source: "Ralph workflow policy"
 
 ## Round Contract
 
+The shared scheduled entrypoint is [automation.md](automation.md), deployed with
+[bootstrap.md](bootstrap.md) and [hosts.json](hosts.json). Read it first. It governs
+both macOS-mobile and Windows-general instances, including PR-first recovery and
+host-specific capabilities. Missing/unverified host bindings fail closed.
+The remaining sections are conditional reference, not a second issue-first loop.
+
 This scheduled workflow performs **one round and exits**: no sleep, polling, implementation,
 or worktree mutation. Ralph is a monitor. It may only update issue labels/comments, make an
 authorized safe merge, and refresh `development` as documented below. One session per issue,
@@ -55,7 +61,8 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
    Classify from labels, paths, acceptance criteria, or Swift/Xcode signals—not owner identity.
    For every configured local or remote dispatch, use the exact admission command sequence in
    `operations.md`; no direct `create_session` or SSH delivery is permitted outside that sequence.
-4. Before admitting new work, apply `operations.md`'s reconciliation policy: establish one writer,
+4. Before admitting new work, apply `automation.md`'s PR-first recovery and
+   `operations.md`'s reconciliation policy: establish one writer,
    reconcile existing remote jobs by ID without new-issue eligibility, verify missing local
    sessions against archived/terminal history, and account live/resumed handoffs under new fences.
    Report ledger and effective union counts separately. Unsupported legacy-worker recovery retains
@@ -83,8 +90,9 @@ Never implement. Never dispatch mobile work from Windows except through the enab
 adapter. Never silently skip an issue. Never self-review or invent/substitute a reviewer/model. Apply the
 canonical risk-based scope in `.github/copilot-instructions.md` § `Risk-Based Review Scope`:
 standard review uses one qualified non-author reviewer from a different model family; high-risk
-review requires Bishop `claude-opus-5`, Hicks `gpt-5.6-sol`, and Vasquez
-`gemini-3.8-flash`, each medium. An unavailable required model is a blocker.
+review requires two qualified reviewers with distinct primary lenses. Use the
+configured exact model and supported effort for each selected reviewer.
+An unavailable required model is a blocker.
 If a required panel member authored a high-risk PR, block it; never substitute another roster
 member.
 Reviewers read only and never build, install, or test. End with the compact accounting report

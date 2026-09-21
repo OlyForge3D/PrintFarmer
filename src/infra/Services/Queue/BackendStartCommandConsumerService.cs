@@ -91,7 +91,10 @@ public sealed class BackendStartCommandConsumerService(
                     await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken).ConfigureAwait(false);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(
+                        TimeSpan.FromMilliseconds(250),
+                        _timeProvider,
+                        stoppingToken).ConfigureAwait(false);
                     continue;
                 }
 
@@ -126,7 +129,10 @@ public sealed class BackendStartCommandConsumerService(
                 return true;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+            await Task.Delay(
+                TimeSpan.FromMilliseconds(250),
+                _timeProvider,
+                stoppingToken).ConfigureAwait(false);
         }
 
         return false;
@@ -455,52 +461,161 @@ public sealed class BackendStartCommandConsumerService(
         }
     }
 
-    private async Task<bool> PersistDeadlineCancellationWithinDeadlineAsync(
+    /// <summary>
+    /// Internal (rather than private) so <c>Farm.Infrastructure.Tests</c> can drive the
+    /// concurrency-retry disposition logic directly, forcing a
+    /// <see cref="DbUpdateConcurrencyException"/> on the first save without needing to
+    /// reproduce the real iteration-deadline timing that triggers this path in production.
+    /// </summary>
+    internal async Task<bool> PersistDeadlineCancellationWithinDeadlineAsync(
         AppDbContext db,
         QueueDispatchOutbox evt,
         BedClearCommandStatus commandStatus,
         CancellationToken stoppingToken)
     {
+        const int maxConcurrencyAttempts = 3;
+        QueueDispatchOutbox originalEvent = evt;
+
+        // Capture the caller's intended disposition before any retry reload can
+        // discard it. The caller (the OperationCanceledException handler above)
+        // already set these fields on `evt` to reflect either a dead-letter or a
+        // rearmed-retry outcome; a concurrency retry reloads `evt` fresh from the
+        // database and would otherwise silently lose that disposition.
+        QueueOutboxEventStatus intendedStatus = evt.Status;
+        string? intendedLastError = evt.LastError;
+        DateTime? intendedRetryAfterUtc = evt.RetryAfterUtc;
+        DateTime? intendedCompletedAtUtc = evt.CompletedAtUtc;
+
         using var persistenceTimeout = new CancellationTokenSource(
             OutcomePersistenceDeadline,
             _timeProvider);
         using var persistenceDeadline = CancellationTokenSource.CreateLinkedTokenSource(
             stoppingToken,
             persistenceTimeout.Token);
-        try
+        for (int concurrencyAttempt = 1;
+             concurrencyAttempt <= maxConcurrencyAttempts;
+             concurrencyAttempt++)
         {
-            BedClearCommandRecord? command = await db.BedClearCommandRecords
-                .FirstOrDefaultAsync(
-                    candidate => candidate.OutboxEventId == evt.Id,
-                    persistenceDeadline.Token);
-            bool claimCommitted = command?.Status == BedClearCommandStatus.Claimed;
-            if (claimCommitted)
+            try
             {
-                await db.Entry(evt).ReloadAsync(persistenceDeadline.Token);
-                evt.Status = QueueOutboxEventStatus.Processing;
-                evt.FailureCode = UnknownOutcomeFailureCode;
-                evt.LastError =
-                    "Iteration deadline reached after dispatch claim acquisition; reconciliation is required.";
-                evt.RetryAfterUtc = null;
-            }
-            else if (command is not null)
-            {
-                command.Status = commandStatus;
-                command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
-            }
+                if (concurrencyAttempt > 1)
+                {
+                    db.ChangeTracker.Clear();
+                    evt = await db.QueueDispatchOutbox
+                        .SingleAsync(candidate => candidate.Id == evt.Id, persistenceDeadline.Token);
+                }
 
-            await db.SaveChangesAsync(persistenceDeadline.Token);
-            return claimCommitted;
+                BedClearCommandRecord? command = await db.BedClearCommandRecords
+                    .FirstOrDefaultAsync(
+                        candidate => candidate.OutboxEventId == evt.Id,
+                        persistenceDeadline.Token);
+                bool claimCommitted = command?.Status == BedClearCommandStatus.Claimed;
+                if (claimCommitted)
+                {
+                    await db.Entry(evt).ReloadAsync(persistenceDeadline.Token);
+                    evt.Status = QueueOutboxEventStatus.Processing;
+                    evt.FailureCode = UnknownOutcomeFailureCode;
+                    evt.LastError =
+                        "Iteration deadline reached after dispatch claim acquisition; reconciliation is required.";
+                    evt.RetryAfterUtc = null;
+
+                    // The caller (the OperationCanceledException handler above) may have
+                    // already set evt.CompletedAtUtc when it took the dead-letter path
+                    // (AttemptCount >= MaxAttempts) before this method discovered the
+                    // claim actually committed. A committed claim means the outcome is
+                    // UNKNOWN and pending reconciliation, not complete, so any such
+                    // caller-set completion timestamp must not leak onto this row.
+                    evt.CompletedAtUtc = null;
+                }
+                else if (command is not null)
+                {
+                    command.Status = commandStatus;
+                    command.UpdatedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
+
+                    // Re-apply the caller's intended outbox disposition onto the
+                    // (possibly just-reloaded) tracked entity. Without this, a
+                    // reload on a concurrency retry leaves `evt` holding its stale
+                    // pre-retry values, so SaveChangesAsync below persists the
+                    // command update but never writes the dead-letter/retry
+                    // disposition to the outbox row.
+                    evt.Status = intendedStatus;
+                    evt.LastError = intendedLastError;
+                    evt.RetryAfterUtc = intendedRetryAfterUtc;
+                    evt.CompletedAtUtc = intendedCompletedAtUtc;
+                }
+
+                await db.SaveChangesAsync(persistenceDeadline.Token);
+                if (!ReferenceEquals(evt, originalEvent))
+                {
+                    originalEvent.Status = evt.Status;
+                    originalEvent.FailureCode = evt.FailureCode;
+                    originalEvent.LastError = evt.LastError;
+                    originalEvent.RetryAfterUtc = evt.RetryAfterUtc;
+                    originalEvent.CompletedAtUtc = evt.CompletedAtUtc;
+                }
+
+                return claimCommitted;
+            }
+            catch (DbUpdateConcurrencyException ex)
+                when (concurrencyAttempt < maxConcurrencyAttempts)
+            {
+                logger.LogWarning(
+                    ex,
+                    "[BackendStartConsumer] Concurrency conflict persisting deadline disposition for EventId={EventId}; reloading and retrying ({Attempt}/{MaxAttempts})",
+                    evt.Id,
+                    concurrencyAttempt,
+                    maxConcurrencyAttempts);
+
+                // This delay must not let a persistence-deadline cancellation escape.
+                // A cancellation thrown here occurs INSIDE this catch clause, so the
+                // sibling `catch (OperationCanceledException)` below (attached to the
+                // same enclosing try) can never observe it -- C# does not let a catch
+                // block handle an exception raised by another catch block of the same
+                // try. Without this local try/catch, a persistence deadline that
+                // elapses during backoff propagates out of this method entirely and
+                // is caught only by ExecuteAsync's unqualified
+                // `catch (OperationCanceledException) { break; }`, which permanently
+                // stops the whole consumer loop instead of returning false for this
+                // one event as intended.
+                try
+                {
+                    await Task.Delay(
+                        TimeSpan.FromMilliseconds(100 * concurrencyAttempt),
+                        _timeProvider,
+                        persistenceDeadline.Token);
+                }
+                catch (OperationCanceledException) when (
+                    persistenceTimeout.IsCancellationRequested &&
+                    !stoppingToken.IsCancellationRequested)
+                {
+                    logger.LogWarning(
+                        "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId} during concurrency backoff; stale-lease recovery remains authoritative",
+                        evt.Id);
+                    return false;
+                }
+            }
+            catch (DbUpdateConcurrencyException ex)
+            {
+                logger.LogError(
+                    ex,
+                    "[BackendStartConsumer] Deadline disposition for EventId={EventId} could not be persisted after {MaxAttempts} concurrency attempts",
+                    evt.Id,
+                    maxConcurrencyAttempts);
+                throw;
+            }
+            catch (OperationCanceledException) when (
+                persistenceTimeout.IsCancellationRequested &&
+                !stoppingToken.IsCancellationRequested)
+            {
+                logger.LogWarning(
+                    "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
+                    evt.Id);
+                return false;
+            }
         }
-        catch (OperationCanceledException) when (
-            persistenceTimeout.IsCancellationRequested &&
-            !stoppingToken.IsCancellationRequested)
-        {
-            logger.LogWarning(
-                "[BackendStartConsumer] Pre-dispatch deadline disposition persistence timed out for EventId={EventId}; stale-lease recovery remains authoritative",
-                evt.Id);
-            return false;
-        }
+
+        throw new InvalidOperationException(
+            "Deadline disposition concurrency retry loop terminated unexpectedly.");
     }
 
     /// <summary>

@@ -20,14 +20,14 @@ export const predictionService = {
    * Get predicted completion time for a job
    */
   async getPrediction(jobId: string): Promise<CompletionPredictionDto> {
-    return apiClient.getPrediction(jobId);
+    return apiClient.getPrediction<CompletionPredictionDto>(jobId);
   },
 
   /**
    * Get recorded statistics for a completed job
    */
   async getStatistics(jobId: string): Promise<PrintJobStatisticsDto | null> {
-    return apiClient.getStatistics(jobId);
+    return apiClient.getStatistics<PrintJobStatisticsDto>(jobId);
   },
 
   /**
@@ -38,7 +38,7 @@ export const predictionService = {
     printerId?: string,
     minSampleSize?: number
   ): Promise<Record<string, DurationStatsDto>> {
-    return apiClient.getMaterialStats(material, printerId, minSampleSize);
+    return apiClient.getMaterialStats<DurationStatsDto>(material, printerId, minSampleSize);
   },
 
   /**
@@ -48,7 +48,7 @@ export const predictionService = {
     modelId: string,
     material?: string
   ): Promise<DurationStatsDto | null> {
-    return apiClient.getModelStats(modelId, material);
+    return apiClient.getModelStats<DurationStatsDto>(modelId, material);
   },
 
   /**

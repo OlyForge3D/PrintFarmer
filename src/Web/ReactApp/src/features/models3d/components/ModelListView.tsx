@@ -56,9 +56,9 @@ export const ModelListView: React.FC<ModelListViewProps> = ({
                 <div className="flex items-center gap-3 min-w-0">
                   {/* Thumbnail */}
                   <div className="w-12 h-12 shrink-0 rounded-sm bg-pf-bg-2 flex items-center justify-center border border-pf-border overflow-hidden">
-                    {model.thumbnailPath ? (
+                    {model.thumbnailUrl ? (
                       <img
-                        src={model.thumbnailPath}
+                        src={model.thumbnailUrl}
                         alt={model.fileName}
                         className="w-full h-full object-contain"
                       />
