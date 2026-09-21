@@ -151,7 +151,7 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
 
   it('aborts an in-flight fallback fetch when dispose() is called before it resolves', async () => {
     let capturedSignal: AbortSignal | undefined;
-    global.fetch = vi.fn((_url: string, init?: RequestInit) => {
+    global.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
       capturedSignal = init?.signal ?? undefined;
       return new Promise<never>((_resolve, reject) => {
         capturedSignal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
@@ -167,7 +167,7 @@ describe('GcodePreviewService.parseGCodeDetailed (no Worker — main-thread fall
 
   it('aborts an in-flight fallback fetch when the caller supersedes it via AbortSignal, not just dispose()', async () => {
     let capturedSignal: AbortSignal | undefined;
-    global.fetch = vi.fn((_url: string, init?: RequestInit) => {
+    global.fetch = vi.fn((_input: RequestInfo | URL, init?: RequestInit) => {
       capturedSignal = init?.signal ?? undefined;
       return new Promise<never>((_resolve, reject) => {
         capturedSignal?.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')));
