@@ -29,7 +29,7 @@ export const templateService = {
       method: 'GET',
       url,
     });
-    return response.data;
+    return response;
   },
 
   /**
@@ -40,7 +40,7 @@ export const templateService = {
       method: 'GET',
       url: '/project-templates/categories',
     });
-    return response.data;
+    return response;
   },
 
   /**
@@ -51,7 +51,7 @@ export const templateService = {
       method: 'GET',
       url: `/project-templates/${templateId}`,
     });
-    return response.data;
+    return response;
   },
 
   /**
@@ -65,7 +65,7 @@ export const templateService = {
       url: '/project-templates',
       data: request,
     });
-    return response.data;
+    return response;
   },
 
   /**

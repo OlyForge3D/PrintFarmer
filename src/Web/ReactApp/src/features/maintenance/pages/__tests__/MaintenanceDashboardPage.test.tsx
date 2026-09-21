@@ -83,10 +83,16 @@ vi.mock('../../components/LowStockAlert', () => ({
 vi.mock('../../components/ComponentReplacementHistory', () => ({
   ComponentReplacementHistory: () => <div data-testid="replacement-history-content">Replacement History</div>,
 }));
-vi.mock('../../components', () => ({
+vi.mock('../../components/MaintenanceTrendsChart', () => ({
   MaintenanceTrendsChart: () => <div data-testid="trends-chart-content">Trends Chart</div>,
+}));
+vi.mock('../../components/ComponentLifespanChart', () => ({
   ComponentLifespanChart: () => <div data-testid="lifespan-chart-content">Lifespan Chart</div>,
+}));
+vi.mock('../../components/MaintenanceCostAnalysis', () => ({
   MaintenanceCostAnalysis: () => <div data-testid="cost-analysis-content">Cost Analysis</div>,
+}));
+vi.mock('../../components/PrinterUptimeChart', () => ({
   PrinterUptimeChart: () => <div data-testid="uptime-chart-content">Uptime Chart</div>,
 }));
 vi.mock('../../components/MaintenanceReport', () => ({

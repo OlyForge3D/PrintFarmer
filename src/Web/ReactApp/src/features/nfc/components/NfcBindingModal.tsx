@@ -22,12 +22,14 @@ export function NfcBindingModal({ isOpen, onClose, event }: NfcBindingModalProps
 
   const handleSubmit = () => {
     if (!event?.tagUid || !selectedPrinterId) return;
+    const parsedSpoolId = parseSpoolId(spoolId);
 
     linkMutation.mutate(
       {
         tagUid: event.tagUid,
         printerId: selectedPrinterId,
-        spoolId: parseSpoolId(spoolId),
+        spoolId: parsedSpoolId,
+        readAt: event.readAt,
       },
       { onSuccess: () => onClose() }
     );

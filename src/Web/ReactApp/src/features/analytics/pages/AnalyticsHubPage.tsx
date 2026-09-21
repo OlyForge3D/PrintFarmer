@@ -30,7 +30,7 @@ interface SummaryMetric {
   hasError?: boolean;
 }
 
-const lensTabs: Array<{ id: AnalyticsLens; label: string; icon: JSX.Element }> = [
+const lensTabs: Array<{ id: AnalyticsLens; label: string; icon: React.ReactElement }> = [
   { id: 'production', label: 'Production', icon: <ChartIcon className="h-4 w-4" aria-hidden="true" /> },
   { id: 'cost', label: 'Cost', icon: <TrendingUpIcon className="h-4 w-4" aria-hidden="true" /> },
   { id: 'fleet', label: 'Fleet', icon: <PrinterIcon className="h-4 w-4" aria-hidden="true" /> },

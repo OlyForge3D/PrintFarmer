@@ -507,7 +507,7 @@ export function PartsInventoryTab() {
                   <span className={clsx('text-sm font-mono min-w-[2rem] text-center', isLow && 'text-pf-warning font-medium')}>
                     {comp.inStock}
                   </span>
-                  <Button variant="subtle" size="xs" onClick={() => adjustStock(comp, 1)} aria-label="Increase stock">
+                  <Button variant="subtle" size="sm" onClick={() => adjustStock(comp, 1)} aria-label="Increase stock">
                     <PlusIcon className="h-3.5 w-3.5" />
                   </Button>
                 </div>
@@ -560,7 +560,7 @@ export function PartsInventoryTab() {
                         <span className={clsx('font-mono min-w-[2rem] text-center', isLow && 'text-pf-warning font-medium')}>
                           {comp.inStock}
                         </span>
-                        <Button variant="subtle" size="xs" onClick={() => adjustStock(comp, 1)} aria-label="Increase stock">
+                        <Button variant="subtle" size="sm" onClick={() => adjustStock(comp, 1)} aria-label="Increase stock">
                           <PlusIcon className="h-3 w-3" />
                         </Button>
                       </div>
@@ -610,4 +610,3 @@ export function PartsInventoryTab() {
     </>
   );
 }
-

@@ -564,10 +564,11 @@ export class ApiClient {
       { validateStatus: (status) => [200, 409, 503].includes(status) },
     );
     if (response.status === 503) {
+      const detail = (response.data as { detail?: unknown } | undefined)?.detail;
       throw {
         message:
-          typeof response.data?.detail === "string"
-            ? response.data.detail
+          typeof detail === "string"
+            ? detail
             : "The host update subsystem is unavailable on this host.",
         statusCode: response.status,
         data: response.data,
@@ -783,14 +784,13 @@ export class ApiClient {
   // ============ Printer API methods ============
 
   async getPrinters(includeDisabled?: boolean, refresh = false): Promise<Printer[]> {
-    // Get lightweight list of all printers
+    // GET /printers returns CompletePrinterDto with configuration and live status.
     const params = includeDisabled ? { includeDisabled: true } : undefined;
-    const response = await this.client.get<PrinterFast[]>("/printers", {
+    const response = await this.client.get<Printer[]>("/printers", {
       params,
       ...(refresh ? { headers: { "Cache-Control": "no-cache" } } : {}),
     });
-    // Cast to Printer[] for compatibility; fast objects are subset of Printer
-    return response.data as unknown as Printer[];
+    return response.data;
   }
 
   async getPrintersFast(includeDisabled?: boolean): Promise<PrinterFast[]> {
@@ -3562,14 +3562,14 @@ export class ApiClient {
   }
 
   // ============ Prediction API methods ============
-  async getPrediction(jobId: string): Promise<Record<string, unknown>> {
-    const response = await this.client.get(`/predictions/jobs/${jobId}/completion`);
+  async getPrediction<T = Record<string, unknown>>(jobId: string): Promise<T> {
+    const response = await this.client.get<T>(`/predictions/jobs/${jobId}/completion`);
     return response.data;
   }
 
-  async getStatistics(jobId: string): Promise<Record<string, unknown> | null> {
+  async getStatistics<T = Record<string, unknown>>(jobId: string): Promise<T | null> {
     try {
-      const response = await this.client.get(`/predictions/jobs/${jobId}/statistics`);
+      const response = await this.client.get<T>(`/predictions/jobs/${jobId}/statistics`);
       return response.data;
     } catch (error: unknown) {
       if ((error as Record<string, unknown>).statusCode === 404) {
@@ -3579,24 +3579,24 @@ export class ApiClient {
     }
   }
 
-  async getMaterialStats(
+  async getMaterialStats<T = Record<string, unknown>>(
     material?: string,
     printerId?: string,
     minSampleSize?: number
-  ): Promise<Record<string, unknown>> {
+  ): Promise<Record<string, T>> {
     const params: Record<string, string> = {};
     if (material) params.material = material;
     if (printerId) params.printerId = printerId;
     if (minSampleSize) params.minSampleSize = minSampleSize.toString();
-    const response = await this.client.get('/predictions/stats/by-material', { params });
+    const response = await this.client.get<Record<string, T>>('/predictions/stats/by-material', { params });
     return response.data || {};
   }
 
-  async getModelStats(modelId: string, material?: string): Promise<Record<string, unknown> | null> {
+  async getModelStats<T = Record<string, unknown>>(modelId: string, material?: string): Promise<T | null> {
     try {
       const params: Record<string, string> = {};
       if (material) params.material = material;
-      const response = await this.client.get(`/predictions/stats/model/${modelId}`, { params });
+      const response = await this.client.get<T>(`/predictions/stats/model/${modelId}`, { params });
       return response.data;
     } catch (error: unknown) {
       if ((error as Record<string, unknown>).statusCode === 404) {
@@ -3606,7 +3606,7 @@ export class ApiClient {
     }
   }
 
-  async recordCompletion(jobId: string, request: Record<string, unknown>): Promise<void> {
+  async recordCompletion(jobId: string, request: object): Promise<void> {
     await this.client.post(`/predictions/jobs/${jobId}/completion-record`, request);
   }
 

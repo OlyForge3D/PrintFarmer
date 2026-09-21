@@ -152,7 +152,7 @@ function CostByPrinterTab({ data, loading }: { data?: CostByPrinter[]; loading: 
         {loading ? (
           <LoadingState />
         ) : data && data.length > 0 ? (
-          <DataTable columns={columns} data={data} getRowKey={(r: CostByPrinter) => r.printerId} sortable />
+          <DataTable columns={columns} data={data} getRowKey={(r: CostByPrinter) => r.printerId} />
         ) : (
           <EmptyState message="No printer cost data available" />
         )}
@@ -185,7 +185,7 @@ function CostByJobTab({ data, loading }: { data?: CostByJob[]; loading: boolean 
         {loading ? (
           <LoadingState />
         ) : data && data.length > 0 ? (
-          <DataTable columns={columns} data={data} getRowKey={(r: CostByJob) => r.jobId} sortable />
+          <DataTable columns={columns} data={data} getRowKey={(r: CostByJob) => r.jobId} />
         ) : (
           <EmptyState message="No job cost data available" />
         )}
@@ -209,7 +209,7 @@ function CostByMaterialTab({ data, loading }: { data?: CostByMaterial[]; loading
         {loading ? (
           <LoadingState />
         ) : data && data.length > 0 ? (
-          <DataTable columns={columns} data={data} getRowKey={(r: CostByMaterial) => r.materialType} sortable />
+          <DataTable columns={columns} data={data} getRowKey={(r: CostByMaterial) => r.materialType} />
         ) : (
           <EmptyState message="No material cost data available" />
         )}
@@ -245,3 +245,4 @@ const KpiCard: React.FC<KpiCardProps> = ({ label, value, loading, color }) => (
     )}
   </Card>
 );
+

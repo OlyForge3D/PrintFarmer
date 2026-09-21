@@ -1,4 +1,4 @@
-import { forwardRef, useImperativeHandle, ReactNode, type Ref } from 'react';
+import { useImperativeHandle, ReactNode, type Ref } from 'react';
 import { FileBrowserToolbar } from './FileBrowserToolbar';
 import { GridView } from './GridView';
 import { ExplorerView } from './ExplorerView';
@@ -16,14 +16,14 @@ interface FileBrowserProps<TDomain> {
   extraToolbarActions?: ReactNode;
   viewMode?: ViewMode;
   onViewModeChange?: (mode: ViewMode) => void;
+  ref?: Ref<FileBrowserHandle>;
 }
 
 export interface FileBrowserHandle {
   refetch: () => Promise<void>;
 }
 
-export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknown>>(
-  function FileBrowser<TDomain = unknown>({
+export function FileBrowser<TDomain>({
     config,
     sortOptions = [
       { value: 'name', label: 'Name' },
@@ -38,7 +38,8 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
     extraToolbarActions,
     viewMode,
     onViewModeChange,
-  }: FileBrowserProps<TDomain>, ref: Ref<FileBrowserHandle>) {
+    ref,
+  }: FileBrowserProps<TDomain>) {
     const browser = useFileBrowser({ ...config, viewMode, onViewModeChange });
 
     useImperativeHandle(ref, () => ({
@@ -119,5 +120,4 @@ export const FileBrowser = forwardRef<FileBrowserHandle, FileBrowserProps<unknow
         </div>
       </div>
     );
-  }
-);
+}

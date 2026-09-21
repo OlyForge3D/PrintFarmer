@@ -12,3 +12,13 @@ declare module '@/pages/*';
 
 // Provide minimal typings for injected globals used by context indirection.
 // Removed legacy window global context references (__PF_AUTH_CTX__, __PF_THEME_CTX__).
+
+// Compile-time constants injected by Vite's `define` (see vite.config.ts).
+// Duplicated from src/globals.d.ts so that tsconfig.test.json (which only picks up
+// src/types/**/*.d.ts and src/vite-env.d.ts) can resolve them when tests
+// transitively import src/common/utils/buildInfo.ts.
+declare const __GIT_HASH__: string;
+declare const __BUILD_TIME__: string;
+declare const __RELEASE_IDENTITY__:
+  | import('../common/utils/releaseIdentity').BuildReleaseIdentity
+  | null;

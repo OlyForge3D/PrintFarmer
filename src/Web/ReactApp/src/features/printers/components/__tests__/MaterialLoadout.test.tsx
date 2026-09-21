@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent, within, waitFor } from '@testing-library/react';
 import { MaterialLoadout } from '@/features/printers/components/MaterialLoadout';
 import { MmuProtocol } from '@/features/printers/constants/mmuProtocol';
+import type { MmuProtocolType } from '@/features/printers/constants/mmuProtocol';
 import type { MmuGate, MmuStatus, ToolheadDto } from '@/types/api';
 import { MmuGateStatus } from '@/types/api';
 
@@ -46,7 +47,10 @@ function gate(index: number, overrides: Partial<MmuGate> = {}): MmuGate {
   } as MmuGate;
 }
 
-function mmu(gates: MmuGate[], mmuType = MmuProtocol.Qidibox): MmuStatus {
+function mmu(
+  gates: MmuGate[],
+  mmuType: MmuProtocolType = MmuProtocol.Qidibox,
+): MmuStatus {
   return { enabled: true, mmuType, numGates: gates.length, gates } as MmuStatus;
 }
 

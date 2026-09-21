@@ -1120,7 +1120,7 @@ export const SettingsShell: React.FC<SettingsShellProps> = ({ routeScope }) => {
   const handleWorkspaceResultSelect = useCallback((item: SettingsCommandItem, queryText: string) => {
     const doNavigate = () => {
       if (item.onExecute) {
-        item.onExecute();
+        item.onExecute({ close: () => undefined });
         return;
       }
       if (item.href) {

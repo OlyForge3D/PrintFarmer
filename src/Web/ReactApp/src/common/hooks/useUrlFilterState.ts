@@ -20,7 +20,9 @@ type FilterValues<C extends ParamConfig> = {
 };
 
 type FilterSetters<C extends ParamConfig> = {
-  [K in keyof C as `set${Capitalize<string & K>}`]: (value: C[K]['defaultValue']) => void;
+  [K in keyof C as `set${Capitalize<string & K>}`]: (
+    value: C[K]['defaultValue'] extends boolean ? boolean : C[K]['defaultValue']
+  ) => void;
 };
 
 type UseUrlFilterStateReturn<C extends ParamConfig> = FilterValues<C> &

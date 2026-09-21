@@ -179,13 +179,13 @@ function ComponentDetailPanel({ data }: ComponentDetailPanelProps) {
       </div>
 
       {/* Active Schedules */}
-      {data.schedules.length > 0 && (
+      {data.tasks.length > 0 && (
         <div className="mb-6">
           <h4 className="font-medium text-pf-text-primary mb-3">
-            Active Schedules ({data.schedules.length})
+            Active Schedules ({data.tasks.length})
           </h4>
           <div className="space-y-2">
-            {data.schedules.map((schedule) => (
+            {data.tasks.map((schedule) => (
               <div
                 key={schedule.id}
                 className="flex items-center justify-between p-3 bg-pf-bg-2 rounded-lg"
@@ -261,7 +261,7 @@ function ComponentDetailPanel({ data }: ComponentDetailPanelProps) {
       )}
 
       {/* Empty State */}
-      {data.schedules.length === 0 && data.recentLogs.length === 0 && (
+      {data.tasks.length === 0 && data.recentLogs.length === 0 && (
         <div className="text-center py-8">
           <AlertIcon className="h-10 w-10 text-pf-text-tertiary mx-auto mb-3" />
           <p className="text-pf-text-secondary">No maintenance data for this component</p>

@@ -2,6 +2,22 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## React printer response contracts
+
+Printer read fixtures must not invent required connection fields.
+`GET /api/printers` returns `CompletePrinterDto`; `GET /api/printers/{id}`
+returns `PrinterDto`. Both suppress `backendUrl` during serialization and
+report reachability as `isOnline`, not `isReachable`. The latter is an optional
+client-side alias, not an API requirement. Null-valued fields are omitted by
+the controller serializer. `backend` and `motionType` use PascalCase string
+enum values (`Moonraker`, `PrusaLink`, `CoreXY`), never numeric ordinals.
+
+`src/test/types/printerResponseContract.test.ts` supplies compile-checked
+response examples; `src/test/services/api.test.ts` checks API pass-through.
+Run `npm run typecheck:test` as well as focused Vitest tests: Vitest alone
+does not validate `satisfies Printer` assertions. Do not fix fixture errors by
+adding fields that the backend deliberately omits.
+
 ## Direct motion-control testing
 
 Current test entry points:

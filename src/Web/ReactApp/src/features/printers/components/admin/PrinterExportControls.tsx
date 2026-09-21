@@ -12,7 +12,7 @@ export default function PrinterExportControls() {
   async function handleExport() {
     setExporting(true);
     try {
-      const stream = await apiClient.streamExportFile('printers/export');
+      const stream = await apiClient.streamExportFile();
       // streamExportFile handles saving on client; we just trigger it here
       await stream;
     } catch (err) {
@@ -24,7 +24,7 @@ export default function PrinterExportControls() {
 
   return (
     <div className="flex items-center gap-2">
-      <Button onClick={handleExport} disabled={exporting} variant="outline" size="sm">
+      <Button onClick={handleExport} disabled={exporting} variant="subtle" size="sm">
         {exporting ? 'Exporting…' : 'Export printers'}
       </Button>
     </div>

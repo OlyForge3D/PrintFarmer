@@ -174,7 +174,7 @@ describe('buildSettingCommandItems', () => {
   ];
 
   const groups: SettingGroupMetadata[] = [
-    { key: 'General', displayName: 'General' },
+    { key: 'General', displayName: 'General', order: 0 },
   ];
 
   it('emits one item per property with a field-scoped href', () => {

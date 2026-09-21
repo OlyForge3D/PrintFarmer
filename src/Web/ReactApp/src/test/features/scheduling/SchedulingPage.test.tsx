@@ -344,6 +344,6 @@ describe('SchedulingPage', () => {
       </TestWrapper>
     );
 
-    expect(screen.getByText(/Failed to load scheduled jobs/)).toBeInTheDocument();
+    expect(screen.getByText('Failed to load scheduled jobs: Failed to fetch')).toBeInTheDocument();
   });
 });
