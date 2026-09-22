@@ -308,6 +308,16 @@ rounds or initialization intents, reconcile them with retained real evidence
 before proceeding; never invent a replacement token, delete history or clear
 claims. Never run the old and renewed package concurrently.
 
+Runtime calls sharing a journal must be serialized and allowed to finish.
+Capture large output privately rather than terminating the command. A terminated
+process can leave a durable round even when its transaction lock is released.
+For a proven orphan lock, use the explicit paused-role, evidence-preserving
+recovery procedure in the [native role contract](../.copilot/skills/ralph-loop/native-roles.md);
+never remove a lock based on its age or silently reset a journal.
+Archived creator sessions are ancestry evidence, not task workers: a supported
+readback with an empty path does not require restoring their deleted worktrees.
+Retained mapped workers still require correlated terminal/retirement evidence.
+
 To upgrade a V1 mini setup, paste this after the new policy is reviewed/merged:
 
 ```text

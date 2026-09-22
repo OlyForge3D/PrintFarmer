@@ -443,6 +443,11 @@ documented cessation-based recovery when applicable. After exhaustion, report
 blocked with the retained attempt evidence. No polling, sleeps or schedule changes.
 Once acquired, complete exactly one role round using the returned token and
 fresh inventory/evidence; these retries do not authorize extra work rounds.
+Serialize runtime calls per journal and await completion. Never stop_bash, kill
+or timeout a runtime batch to shorten it; capture output privately and read the
+existing command instead. Use try/finally for ordinary-error end-round cleanup;
+uncertain writes still require reconciliation. Follow native-roles.md's explicit
+orphan-transaction recovery procedure; never clear a lock by age or PID alone.
 Inventory scope is Ralph-owned lineage across rounds, NOT all project sessions.
 For ready, supply ownershipScope:"ralph-owned-v1" and lineageChecked:true only
 after reconciling this worker's retained creation/delivery intents, mapped workers,
@@ -450,6 +455,9 @@ verified role roots and descendants through actual native readback/history.
 Normalize creator_session_id to session.creatorSessionId and retain ancestor
 readbacks. Unrelated maintainer and other-automation sessions consume no Ralph
 slots and need no terminal attestation. Do not adopt, archive or mutate them.
+Archived ancestry-only entries may have an empty path: use verified ID/creator
+relationships without roleObservation. Do not require an archived ancestor's
+deleted worktree; mapped workers still require live or retirement evidence.
 Every retained mapping, including terminal work, needs an explicit inventory
 entry. Owned ancestry must be complete and acyclic, without adopting unrelated
 ancestors. For archived/deleted terminal work without live readback, use the
@@ -474,8 +482,15 @@ receipt. The registered agent is Ralph Worker in RALPH-ASSIGNED-WORKER-V1 mode,
 not Squad, Dallas or another logical member name. It executes the named member's
 charter directly. No coordinator fan-out or unaccounted task agents.
 Pass nativeCapabilities from the actual exposed native tools/agents/models, never
-invent availability. Record every returned creation handle with record-creation,
-including partial failures, before attempting startup recovery. Never retry creation.
+invent availability.
+Read supported model/effort pairs from create_session's kickoff catalog, NOT the
+controller's current model_information. Include the resolved assignment model
+when advertised. A hand-written list containing only your own model is not a
+capability restriction. report-blocker requires the original assignmentId,
+generation AND taskDigest, a supported reasonCode, source and fresh observedAt.
+Fix malformed request fields; rejected blocker writes are not persisted blockers.
+Record every returned creation handle with record-creation, including partial
+failures, before attempting startup recovery. Never retry creation.
 Use startup-check on the same child and its actual startup-only ACK; send only the
 returned continuation once. A failed kickoff's requested model/effort is NOT proof
 of persisted configuration. Successful native creation establishes accepted settings,

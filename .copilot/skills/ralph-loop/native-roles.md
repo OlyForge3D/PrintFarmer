@@ -146,6 +146,28 @@ Only digests, never paths or tokens, reach the queue. Keep event IDs
 stable when reconciling a lost response. Every transition is a single-parent
 Git commit extending the observed queue head with `force:false`; conflicts
 require reread/revalidation, not stale-state overwrite.
+Runtime calls for one private journal MUST be serialized. Let each command
+finish, capturing its output to a private file; never use `stop_bash`, a shell
+timeout, or process termination to shorten a research-plan batch or stop verbose
+output. A background command is still running: read its completion instead of
+starting another call. Keep batches bounded and do not launch duplicate calls
+to obtain their output. Use `try/finally` in round drivers to attempt `end-round`
+with the acquired token after ordinary failures; an uncertain publication must
+still be reconciled before retrying or ending ownership.
+
+The process-local transaction lock records its PID, request and worktree context.
+Normal exit and handled SIGTERM/SIGINT release only that process's lock. This
+does NOT settle assignments, end the persistent round, roll back a remote write,
+or clear an interrupted `.pending` journal. SIGKILL/power loss can still leave
+the lock. Never steal it using age or a PID check alone. Under explicit maintainer
+recovery authorization, pause the affected role and verify the owning native
+invocation has ceased, all issued runtime commands/children have stopped, and
+no scheduled/manual caller remains. Preserve an exact private copy of the lock,
+journal and any pending write; quarantine only the proven orphan lock, retaining
+its identity and evidence. Do not discard `.pending` content or edit the journal.
+Then inspect/replay the mailbox and use the existing original-event or
+`recover-coordinator-round`/`reconcile-round` protocol. An unresolved pending
+write or uncertain remote publication remains blocked, not automatically retried.
 Exact already-committed events remain idempotent after their observation expires;
 retry the unchanged request/evidence with the original round token.
 The runtime checks the saved request digest and committed event before returning
@@ -238,6 +260,13 @@ Unrelated observations are excluded from the capacity inventory digest.
 Owned creator chains must be complete and acyclic through a root with no creator.
 Ancestor readbacks establish relationships only; unrelated ancestors and their
 other descendants are not adopted as work or required to be terminal.
+An archived creator's supported `get_session` readback may have `path:""`.
+For this ancestry-only entry, retain its verified ID and creator relationship
+(a verified root has no creator); a worktree path and `roleObservation` are NOT
+required. Do not manufacture a role exemption for an archived ancestor or restore
+its checkout merely to satisfy inventory. The actual mapped worker still needs
+its own live/retirement evidence. An archive response alone never proves that
+mapped task's completion. Missing or cyclic creator relationships still block.
 
 For a retained terminal worker archived/deleted after settlement, keep its ID,
 `assignmentCorrelation`, retained ancestry and `terminalVerified:true` entry.
@@ -433,6 +462,19 @@ the actual exposed app tools: `createSession:true`, `agents:["Ralph Worker"]`, a
 `models` mapping advertised model IDs to their supported reasoning-effort values.
 This is local-owner capability evidence, not an independent service identity.
 Do not invent support.
+Read the **create_session tool's kickoff model/effort catalog**, not the current
+controller's `model_information` line or its own selected model. The controller
+can create workers using other advertised models. Include the assignment's
+resolved model/effort when the tool actually advertises it; a self-created
+single-model list is not evidence of a platform limitation. Before reporting
+`capability-unavailable`, re-read the tool catalog and state the missing pair.
+
+`report-blocker` requires `data.assignmentId`, `data.generation`,
+`data.taskDigest` and a supported `data.reasonCode` from the original assignment,
+plus `evidence.source` and fresh `evidence.observedAt`. Never omit the task digest
+or translate request-shape validation errors into an assignment/platform blocker.
+Correct malformed observations while holding the same gate; do not keep retrying
+invented reason codes or silently exit claiming that a rejected blocker was saved.
 
 Under the consumer round token, `dispatch-plan` takes the exact assignment
 binding plus proposed opaque `correlation` and fresh complete task/capability
