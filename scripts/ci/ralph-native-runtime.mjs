@@ -271,6 +271,22 @@ export async function runNativeRequest(config, request, {
       await writeJournal(journalPath, journal);
       return { ...snapshot, dispatchAuthorized: false };
     }
+    if (request.type === 'abandon-acquisition') {
+      const acquisition = journal.events[request.data?.acquisitionId];
+      const owner = journal.roundOwners[request.roundId];
+      if (!owner || owner.publicationProtocol !== 'record-before-ref-v1' ||
+          !acquisition || acquisition.roundId !== request.roundId ||
+          !['begin-round', 'recover-coordinator-round'].includes(acquisition.type) ||
+          acquisition.data.invocationDigest !== owner.invocationDigest) fail('Exact recorded acquisition with durable pre-publication protocol required.');
+      if (snapshot.state.events[acquisition.id] ||
+          Object.values(snapshot.state.rounds).some((round) => round.invocationDigest === owner.invocationDigest)) fail('Acquisition was published; reconcile cessation, never abandon a published gate.');
+      if (owner.publication && snapshot.head === owner.publication.baseSha) fail('Publication may still land on its recorded base; retain the acquisition until outcome is proven.');
+      // readMailbox proved descent from the fsynced publication base. A delayed
+      // single-parent candidate cannot fast-forward over its sibling's advance.
+      owner.abandoned = true;
+      await writeJournal(journalPath, journal);
+      return { ...snapshot, acquisitionAbandoned: true, dispatchAuthorized: false, nativeCreateAllowed: false };
+    }
     const requestDigest = digest({
       type: request.type, roundId: request.roundId, data: request.data ?? {}, evidence: request.evidence,
     });
@@ -290,7 +306,7 @@ export async function runNativeRequest(config, request, {
     if (acquiring) {
       if (owner || saved || request.roundToken !== undefined) fail('Round acquisition already attempted; lost acquisition response requires reconciliation, not another token.');
       roundToken = randomBytes(32).toString('hex');
-      owner = { localContext: checked.localContext, tokenDigest: digest(roundToken) };
+      owner = { localContext: checked.localContext, tokenDigest: digest(roundToken), publicationProtocol: 'record-before-ref-v1' };
       owner.invocationDigest = digest(owner);
       journal.roundOwners[request.roundId] = owner;
     } else if (!owner || !/^[0-9a-f]{64}$/.test(request.roundToken ?? '') ||
@@ -315,7 +331,12 @@ export async function runNativeRequest(config, request, {
     journal.requestDigests[request.id] = requestDigest;
     applyEvent(snapshot.state, prepared.event, { now });
     await writeJournal(journalPath, journal);
-    const result = await publishEvent(config.control, prepared.event, api, snapshot);
+    const result = await publishEvent(config.control, prepared.event, api, snapshot, acquiring ? async ({ base, candidateSha }) => {
+      owner.publication = { baseSha: base.head, candidateSha };
+      journal.snapshot = base;
+      journal.observedEvents = base.state.events;
+      await writeJournal(journalPath, journal);
+    } : undefined);
     journal.observedEvents = result.state.events;
     journal.snapshot = { head: result.head, state: result.state };
     await writeJournal(journalPath, journal);

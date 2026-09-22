@@ -434,12 +434,13 @@ export async function initializeMailbox(config, migrationEvidenceDigest, api = g
   return { genesisSha: sha, activationAuthorized: false };
 }
 
-export async function publishEvent(config, event, api = githubApi, anchor) {
+export async function publishEvent(config, event, api = githubApi, anchor, beforePublish) {
   const snapshot = await readMailbox(config, api, anchor);
   const state = applyEvent(snapshot.state, event);
   if (state === snapshot.state) return { ...snapshot, replayed: true };
   const sha = await createRecord(config, { previousStateDigest: digest(snapshot.state), event }, [snapshot.head], api);
   await verifyControlRepository(config, api);
+  if (beforePublish) await beforePublish({ base: snapshot, candidateSha: sha });
   let uncertain = false;
   try {
     await api(`repos/${config.repository}/git/refs/${config.ref}`, 'PATCH', { sha, force: false });

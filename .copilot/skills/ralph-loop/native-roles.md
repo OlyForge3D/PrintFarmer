@@ -171,6 +171,21 @@ cessation blocks recovery. PID death is not worker completion. Transaction lock
 or `.pending` journal remnants require explicit
 inspection/recovery; never delete them merely because they are old.
 
+A cross-role mailbox head race can leave a local acquisition intent without a
+published gate or returned token. Do not retry it with a new token or delete the
+journal. Use `type:"abandon-acquisition"`, its original `roundId` and
+`data:{"acquisitionId":"<original-begin-event-id>"}`. This **local-only,
+non-authorizing** operation retains history and returns no token. The runtime
+records the exact one-parent candidate/base before attempting a ref update.
+Abandonment requires either that no ref update was ever attempted under this
+record-before-ref protocol, or verified mailbox descent beyond that base with
+the event absent from complete history. In the latter case any delayed candidate
+can no longer fast-forward. An unchanged head/network timeout remains uncertain;
+absence alone is insufficient. Published events, even if their rounds later
+ended, cannot be abandoned. After proven abandonment, use a NEW round/event ID;
+the old intent stays immutable and cannot be reused. If the old gate actually
+published, use cessation-based round recovery instead.
+
 ### Observations Available To The Controller
 
 Use `list_sessions_and_chats`, `get_sessions_status`, `get_session`, returned

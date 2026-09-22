@@ -346,6 +346,13 @@ The token is returned once, remains private, and is required for subsequent
 transitions. A lost acquisition response requires reconciliation, not another
 token. Native observations still establish actual work-session correlation and
 terminal evidence, not unexposed current workflow identity.
+If independent role packages race the mailbox head, the loser retains its
+acquisition intent. Follow the native contract's `abandon-acquisition` procedure:
+it records candidate/base before ref publication and permits non-authorizing
+local reconciliation only when a ref write was never attempted or verified
+sibling advancement makes the exact delayed candidate unable to fast-forward.
+A missing event on an unchanged base remains uncertain, not safe to discard.
+No journal deletion or token reissue is needed for a proven losing candidate.
 
 Before any cutover:
 

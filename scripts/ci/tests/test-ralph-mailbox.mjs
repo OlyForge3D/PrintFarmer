@@ -722,3 +722,85 @@ test('supplied workflow IDs cannot exempt work from readiness; observed bounded 
   session.roleObservation.noTaskExecutionVerified = false;
   assert.throws(prepare, /Pre-existing/);
 });
+
+test('cross-package acquisition race preserves sibling history and safely reconciles the impossible losing candidate', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, request } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const first = request(coordinator, 'begin-round'), sibling = request(consumer, 'begin-round');
+  let siblingResult;
+  f.github.race(async () => { siblingResult = await runNativeRequest(consumer, sibling, dependencies); });
+  await assert.rejects(runNativeRequest(coordinator, first, dependencies), /conflicted/);
+  assert.match(siblingResult.roundToken, /^[0-9a-f]{64}$/);
+  await assert.rejects(runNativeRequest(coordinator, first, dependencies), /already attempted/);
+  const reconcile = { ...first, type: 'abandon-acquisition', data: { acquisitionId: first.id } };
+  const writes = f.github.calls.filter((call) => call.method !== 'GET').length;
+  const result = await runNativeRequest(coordinator, reconcile, dependencies);
+  assert.equal(result.acquisitionAbandoned, true);
+  assert.equal(result.roundToken, undefined);
+  assert.equal(result.dispatchAuthorized, false);
+  assert.equal(f.github.calls.filter((call) => call.method !== 'GET').length, writes);
+  const journal = JSON.parse(await readFile(path.join(coordinator.stateDirectory, 'journal.json'), 'utf8'));
+  const candidate = journal.roundOwners[first.roundId].publication;
+  assert.equal(candidate.baseSha, coordinator.control.genesisSha);
+  assert.equal(journal.events[first.id].type, 'begin-round');
+  await assert.rejects(f.github.api(`repos/${baseControl.repository}/git/refs/${baseControl.ref}`, 'PATCH', {
+    sha: candidate.candidateSha, force: false,
+  }), /non-fast-forward/);
+  const nextRound = request(coordinator, 'begin-round');
+  const acquired = await runNativeRequest(coordinator, nextRound, dependencies);
+  assert.match(acquired.roundToken, /^[0-9a-f]{64}$/);
+  assert.equal(acquired.state.events[first.id], undefined);
+  assert.ok(acquired.state.events[sibling.id]);
+  await assert.rejects(runNativeRequest(coordinator, first, dependencies), /already attempted/);
+});
+
+test('delayed ref write is not absent evidence; committed and later ended acquisition can never be abandoned', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, request } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  let delayed;
+  const api = async (endpoint, method, body) => {
+    if (method === 'PATCH') {
+      delayed = () => f.github.api(endpoint, method, body);
+      throw new Error('network timeout while server is still processing');
+    }
+    return f.github.api(endpoint, method, body);
+  };
+  const begin = request(coordinator, 'begin-round');
+  await assert.rejects(runNativeRequest(coordinator, begin, { ...dependencies, api }), /acknowledgement lost/);
+  const abandon = { ...begin, type: 'abandon-acquisition', data: { acquisitionId: begin.id } };
+  await assert.rejects(runNativeRequest(coordinator, abandon, dependencies), /may still land/);
+  await delayed();
+  await assert.rejects(runNativeRequest(coordinator, abandon, dependencies), /was published/);
+  assert.equal((await runNativeRequest(coordinator, begin, dependencies)).roundToken, undefined);
+  await publishEvent(coordinator.control, event('end-round', 'coordinator', {}, 'mini', begin.roundId), f.github.api);
+  await assert.rejects(runNativeRequest(coordinator, abandon, dependencies), /was published/);
+});
+
+test('pre-ref failure can be reconciled from the durable protocol without deleting intent or accepting fabricated metadata', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, request } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const begin = request(coordinator, 'begin-round');
+  const api = (endpoint, method, body) => {
+    if (method === 'POST' && endpoint.endsWith('/git/trees')) throw new Error('tree creation unavailable');
+    return f.github.api(endpoint, method, body);
+  };
+  const writes = f.github.calls.filter((call) => call.method === 'PATCH').length;
+  await assert.rejects(runNativeRequest(coordinator, { ...begin, native: { actual: {} } }, dependencies), /Retired/);
+  await assert.rejects(runNativeRequest(coordinator, begin, { ...dependencies, api }), /tree creation/);
+  const abandon = { ...begin, type: 'abandon-acquisition', data: { acquisitionId: begin.id } };
+  await assert.rejects(runNativeRequest(coordinator, { ...abandon, roundId: 'wrong-round' }, dependencies), /Exact recorded/);
+  const reconciled = await runNativeRequest(coordinator, abandon, dependencies);
+  assert.equal(reconciled.roundToken, undefined);
+  assert.equal(reconciled.acquisitionAbandoned, true);
+  assert.equal(f.github.calls.filter((call) => call.method === 'PATCH').length, writes);
+  const journal = JSON.parse(await readFile(path.join(coordinator.stateDirectory, 'journal.json'), 'utf8'));
+  assert.equal(journal.roundOwners[begin.roundId].abandoned, true);
+  assert.equal(journal.roundOwners[begin.roundId].publication, undefined);
+  assert.ok(journal.events[begin.id]);
+  assert.match((await runNativeRequest(coordinator, request(coordinator, 'begin-round'), dependencies)).roundToken, /^[0-9a-f]{64}$/);
+});
