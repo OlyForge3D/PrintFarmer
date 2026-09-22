@@ -364,6 +364,32 @@ function artifacts(options, policy, deployment, previous) {
   if (bootstrap.includes('--approved-policy POLICY_COMMIT') || /<[^>]+>/.test(bootstrap)) {
     throw new Error('Bootstrap template substitution failed; no files written.');
   }
+  const researchTriage = options.role === 'coordinator' ? `
+Every round MUST explicitly enumerate open issues labeled go:needs-research that
+have no active research assignment and no blocking hold (status:blocked/blocked),
+and evaluate each as a research-reservation candidate via runtime
+type:"research-plan", per native-roles.md "Research Gates"/"Admission And
+Capacity" (owner, device, capacity/holds still apply; skip only for a concrete,
+reported reason). This step is mandatory even when go:yes issues or open PRs
+also exist; do not silently omit research-only backlog. Never treat go:yes/PR
+triage as satisfying this requirement.
+IMPORTANT: type:"research-plan" is a read-only, non-mutating disposition check
+only; it NEVER reserves, publishes or admits anything by itself, even when it
+returns action:"reserve-research". When it returns action:"reserve-research"
+for one or more eligible issues, and unused capacity/quota/overlap rules allow
+it (per "Admission And Capacity"), you MUST follow through in the SAME round by
+actually issuing the real admitting event, type:"reserve", purpose:"research",
+with a fresh assignmentId, workerId, and complete fresh evidence
+(repository, issue, headSha, title, labels, acceptanceCriteria, capabilities,
+files, claimsReconciled, holdsChecked, dependenciesReady, epicChildrenReady,
+analysisReady, filesComplete, reviewGatesChecked, issueState:"open",
+githubAssignees:[]), then publish it with assignmentId/generation/taskDigest,
+exactly as for any other admission. Enumerating candidates and reporting
+action:"reserve-research" without ever issuing the matching reserve/publish
+event for at least one eligible candidate (when capacity allows) is an
+incomplete round, not a valid settled outcome; report exactly why none were
+reserved (capacity, overlap, or a specific per-issue evidence gap) if you
+genuinely cannot admit any.` : '';
   const prompt = deployment ? `NATIVE-MAILBOX-ROLE-V2
 Run exactly one ${options.role} round, then exit. Private host config: ${JSON.stringify(options['host-config'])}.
 Approved outer/preflight policy commit: ${approved}. Worker ID: ${options['worker-id']}.
@@ -379,7 +405,7 @@ Consumer ready publishes finite durable capacity credits, NOT online presence.
 Coordinator can reserve against unused credits across later hourly rounds.
 Before each kickoff the consumer must refresh local inventory/tooling in its own
 round. Terminal reporting commits no future delivery; later coordinator settlement
-does not require sub-minute consumer timing. Follow native-roles.md exactly.
+does not require sub-minute consumer timing. Follow native-roles.md exactly.${researchTriage}
 This workflow may remain disabled pending native attestation, pinned private
 queue genesis and explicitly verified authority migration. No activation is
 implied by this saved prompt. No SSH, CLI worker or remote app session creation.
