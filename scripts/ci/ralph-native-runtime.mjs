@@ -15,6 +15,31 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const fail = (message) => { throw new Error(`Native Ralph blocked: ${message}`); };
 const exec = promisify(execFile);
 
+function windowsPowerShellModulePath() {
+  const userProfile = process.env.USERPROFILE;
+  const programFiles = process.env.ProgramFiles ?? 'C:\\Program Files';
+  const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+  return [
+    userProfile ? path.join(userProfile, 'Documents', 'WindowsPowerShell', 'Modules') : undefined,
+    path.join(programFiles, 'WindowsPowerShell', 'Modules'),
+    path.join(systemRoot, 'system32', 'WindowsPowerShell', 'v1.0', 'Modules'),
+  ].filter(Boolean).join(';');
+}
+
+function windowsPowerShellExecutable() {
+  const systemRoot = process.env.SystemRoot ?? 'C:\\Windows';
+  return path.join(systemRoot, 'system32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
+}
+
+function windowsPowerShellEnv(extra = {}) {
+  const env = { ...process.env };
+  const extraKeys = new Set(Object.keys(extra).map((key) => key.toLowerCase()));
+  for (const key of Object.keys(env)) {
+    if (key.toLowerCase() === 'psmodulepath' || extraKeys.has(key.toLowerCase())) delete env[key];
+  }
+  return { ...env, PSModulePath: windowsPowerShellModulePath(), ...extra };
+}
+
 async function privatePath(target, file = false) {
   if (!path.isAbsolute(target) || path.normalize(target) !== target || target === path.parse(target).root) fail('Normalized private absolute path required.');
   let current = path.parse(target).root;
@@ -33,8 +58,8 @@ async function privatePath(target, file = false) {
         (stat.uid !== process.getuid() || (stat.mode & (file ? 0o077 : 0o022)))) fail('Unsafe private state ownership/permissions.');
     if (current === target && process.platform === 'win32') {
       const script = `$ErrorActionPreference='Stop'; $s=[System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value; $a=Get-Acl -LiteralPath $env:RALPH_PRIVATE_CHECK_PATH; if($a.Owner -ne [System.Security.Principal.WindowsIdentity]::GetCurrent().Name){exit 1}; foreach($r in $a.Access){if($r.AccessControlType -eq 'Allow' -and $r.IdentityReference.Translate([System.Security.Principal.SecurityIdentifier]).Value -notin @($s,'S-1-5-18','S-1-5-32-544')){exit 1}}`;
-      await exec('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command', script], {
-        env: { ...process.env, RALPH_PRIVATE_CHECK_PATH: target }, timeout: 30_000,
+      await exec(windowsPowerShellExecutable(), ['-NoProfile', '-NonInteractive', '-Command', script], {
+        env: windowsPowerShellEnv({ RALPH_PRIVATE_CHECK_PATH: target }), timeout: 30_000,
       }).catch(() => fail('Private Windows ACL is not verified; provision permissions manually.'));
     }
   }
