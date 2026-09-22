@@ -394,6 +394,84 @@ reconciliation and a new nonconflicting reservation, never editing a live task.
 
 ## Consumer: Assigned Native Work Only
 
+### Validated Specialist Dispatch
+
+`RALPH-ASSIGNED-WORKER-V1` separates the registered native **Squad** agent from
+the issue's logical specialist. The consumer does not pass `Dallas`, `Lambert`,
+etc. as custom-agent names. Squad's bounded entrypoint performs the assigned
+member's work directly; its normal coordinator fan-out and fallback do not run.
+See [assigned-worker.md](assigned-worker.md).
+
+New reservation evidence must contain `scope` (`general`, `mobile`, `mixed` or
+`unknown`) and boolean `classificationComplete`. Unknown/incomplete/mixed work
+still counts mobile. Capabilities are tooling, not a substitute for classification.
+Omitted fields block before capacity is consumed. Never change a live binding's
+classification to recover credits.
+
+Both `ready` and kickoff evidence include `nativeCapabilities`, obtained from
+the actual exposed app tools: `createSession:true`, `agents:["Squad"]`, and
+`models` mapping advertised model IDs to their supported reasoning-effort values.
+Include `openPrSession:true` for PR recovery. This is local-owner capability
+evidence, not an independent service identity. Do not invent support.
+
+Under the consumer round token, `dispatch-plan` takes the exact assignment
+binding plus proposed opaque `correlation` and fresh complete task/capability
+evidence. It validates the owner and bounded entrypoint, loads the owner's
+charter, resolves model/effort and returns a **non-authorizing** plan.
+The macOS Dallas host override remains Astra/xhigh; otherwise explicit Squad
+overrides win, a configured model effort suffix is normalized, and unspecified
+effort is explicitly medium. Unsupported/conflicting values block, never fall back.
+Charters and the Squad entrypoint are approved controlled policy paths.
+
+The successful starting receipt recomputes and privately persists that plan.
+Only its `nativeCreateAllowed:true` response permits one call to the returned
+`dispatchPlan.nativeTool` using **exactly** `dispatchPlan.nativeArguments`.
+PR recovery uses `open_pr_session` on the existing PR, not a new branch.
+The packet, prompt, model settings and native IDs stay in the private journal;
+only digests reach the mailbox.
+
+Immediately persist the returned handle with `record-creation` (exact binding
+and correlation). Evidence includes `creationHandle`, `creationOutcome`
+(`succeeded` or `partial`), and `dispatchPlanDigest`. A successful call also
+requires `createRequestDigest` of the exact native arguments and
+`kickoffAccepted:true`. If readback is unavailable, omit `session`: the handle
+is retained and `reconciliationRequired:true` returned, never new-create permission.
+Then record actual normalized native readback (`session`, `repository`,
+`nativeReadbackVerified:true`). A runtime-ID alias change must resolve the retained
+`creationHandle`, identify it as `resolvedCreationHandle` and preserve the same
+project/worktree; it is not permission to replace the workspace.
+
+The worker initially returns startup-only ACK and stops. Submit `startup-check`
+with the exact binding, same session, plan digest and `startupAck`: packet
+`assignmentId`, `generation`, `taskDigest`, `correlation`, `member`,
+`charterSha256`, `substantiveWorkStarted:false`, `noChildren:true`, plus actual
+model/effort **only if exposed**. Include `configuration` with exact `model`,
+`reasoningEffort` and source `successful-native-create`, `native-readback`, or
+`owner-attestation`. Success of the exact native creation request establishes
+accepted settings, not independently observed runtime settings. A partial/failed
+kickoff cannot use that source; it requires actual readback or explicit attestation.
+If the app cannot expose/change lost configuration, report that platform limitation;
+never manufacture proof or silently use default settings.
+
+`startup-check` durably records a continuation intent before returning
+`continuationAllowed:true` and the substantive message. Send it once to that
+same session. Repeated checks return false; lost delivery is reconciled from
+actual history/ACK, never blindly resent. The first running receipt requires
+`continuationAck` with packet identity/member and `substantiveWorkStarted:true`.
+Subsequent status receipts retain the established mapping.
+
+For research/analysis completion, the consumer writes findings once to the issue
+and reads back the existing comment (recover an uncertain write by correlation,
+not another comment). Then obtain the same child's final ACK. New bounded-worker
+terminal evidence includes `artifactReadbackVerified:true`, `artifact` with
+`kind:"issue-comment"`, exact `url` and SHA-256 `bodyDigest`, and `finalAck` with
+packet identities/member, that `artifactUrl`, the `finalDeliveryCorrelation`,
+`noChildren:true`, `noPendingContinuation:true` and `noFutureDelivery:true`.
+Chat-only findings are not a durable research deliverable. Keep existing
+implementation/review gates and never close an implementation issue after research.
+
+### Ordinary Local Lifecycle
+
 Consumers do not globally triage, choose new issues, change worker assignment,
 grant replacements or independently claim the backlog. Inspect only assignments
 for their own worker ID and their Ralph-owned session lineage/history.
@@ -493,6 +571,40 @@ works **only** before the atomic starting receipt. If starting won the race,
 withdrawal is rejected and ownership remains. If withdrawal won, the consumer
 cannot obtain creation permission. Starting/running/uncertain work never uses
 this shortcut.
+
+### Renewal And Never-Delivered Reconciliation
+
+Before publishing ready after renewal, inspect reserved/published old-policy
+assignments; do not attempt starting with a mismatched policy and repeatedly
+revoke otherwise usable capacity. Starting/running/uncertain workers retain
+their original ownership and mappings; do not recreate them.
+
+The owning consumer's `prestart-proof` request takes the exact binding and fresh
+`authoritativeJournalRetained:true`, `protocolOnlyDeliveryAttested:true` evidence.
+Runtime verifies mailbox continuity, reserved/published state, zero receipts and
+no retained delivery intent for that assignment. It returns an opaque `proof`
+without creating work or mutating the mailbox. This proves no protocol-authorized
+delivery under the accepted local-owner trust, not absence of arbitrary activity
+outside that trust boundary. Idle/missing sessions or an empty coordinator journal
+are not substitutes.
+
+Commit the exact returned proof as `report-blocker` evidence (for example
+`task-changed` on old-policy work), then send that same proof to the coordinator
+through supported session messaging. Later `prestart-proof` calls return the
+retained proof with `alreadyReported:true` when that digest is already committed;
+forward it if needed, but do not report the blocker again. Coordinator `withdraw` evidence includes
+`prestartProof` plus fresh claims/no-delivery reconciliation. Runtime verifies
+its digest equals the consumer's committed blocker, and rechecks binding/state.
+Proof can cross hourly rounds: fresh coordinator observation still must find
+the same never-started binding and consumer proof. A racing start prevents
+withdrawal; a racing withdrawal prevents start. No new mailbox event format,
+history rewrite, Windows journal access from the mini or quota refund is needed.
+
+Publish fresh ready **after** recovery reports. Do not re-report an unchanged
+already-committed blocker on every round and revoke the replacement offer again.
+Settlement/withdrawal does not refund credits; the fresh inventory-derived offer
+does. Generate evidence timestamps with `new Date().toISOString()`, not GNU
+`date` formatting on macOS.
 
 ## Checks
 

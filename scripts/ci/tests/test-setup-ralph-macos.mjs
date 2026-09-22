@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmod, link, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -12,6 +13,7 @@ const exec = promisify(execFile);
 const policy = JSON.parse(await readFile('.copilot/skills/ralph-loop/hosts.json', 'utf8'));
 const bootstrap = await readFile('.copilot/skills/ralph-loop/bootstrap.md', 'utf8');
 const nativeRoles = await readFile('.copilot/skills/ralph-loop/native-roles.md', 'utf8');
+const squadAgent = await readFile('.github/agents/squad.agent.md', 'utf8');
 const workflow = 'aaaaaaaa-1111-4222-8333-444444444444';
 const otherWorkflow = '11111111-2222-4333-8444-555555555555';
 
@@ -21,16 +23,18 @@ async function fixture(t) {
   const repo = path.join(root, "repo with spaces and 'quote'");
   await mkdir(path.join(repo, '.copilot/skills/ralph-loop'), { recursive: true });
   await mkdir(path.join(repo, 'scripts/ci'), { recursive: true });
-  await mkdir(path.join(repo, '.github'), { recursive: true });
+  await mkdir(path.join(repo, '.github/agents'), { recursive: true });
   await mkdir(path.join(repo, '.squad'), { recursive: true });
   for (const [file, content] of [
     ['.copilot/skills/ralph-loop/hosts.json', JSON.stringify(policy)],
     ['.copilot/skills/ralph-loop/bootstrap.md', bootstrap],
     ['.copilot/skills/ralph-loop/native-roles.md', nativeRoles],
+    ['.github/agents/squad.agent.md', squadAgent],
     ['.github/copilot-instructions.md', 'approved\n'], ['.squad/config.json', '{}\n'],
     ['scripts/ci/ralph-automation.mjs', '// approved fixture\n'],
     ['scripts/ci/ralph-mailbox.mjs', '// approved fixture\n'],
     ['scripts/ci/ralph-native-runtime.mjs', '// approved fixture\n'],
+    ['scripts/ci/ralph-native-dispatch.mjs', '// approved fixture\n'],
     ['scripts/ci/resolve-ios-simulator.sh', '# approved fixture\n'],
     ['scripts/common-utils.sh', '# approved fixture\n'],
   ]) await writeFile(path.join(repo, file), content);
@@ -181,6 +185,12 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.match(settings.prompt, /Acquire a fresh atomic begin-round token/);
     assert.match(settings.prompt, /finite durable capacity credits, NOT online presence/);
     assert.match(settings.prompt, /does not require sub-minute consumer timing/);
+    assert.match(settings.prompt, /scope and classificationComplete/);
+    assert.match(settings.prompt, /new Date\(\)\.toISOString\(\)/);
+    assert.match(settings.prompt, /registered agent is Squad in RALPH-ASSIGNED-WORKER-V1/);
+    assert.match(settings.prompt, /record-creation/);
+    assert.match(settings.prompt, /startup-check/);
+    assert.match(settings.prompt, /prestart-proof/);
     assertNativePrompt(settings.prompt, role);
     assert.equal(await readFile(path.join(path.dirname(f.options['host-config']), 'workflow-prompt.txt'), 'utf8'), `${settings.prompt}\n`);
     assert.equal(host.executionTrust, 'local-owner-v1');
@@ -281,6 +291,35 @@ test('consumer renewal retains bounded recovery without coordinator label or res
     assert.equal(settings.enabled, false);
     assert.equal(await readFile(path.join(path.dirname(oldPath), 'workflow-prompt.txt'), 'utf8'), oldPrompt);
   }
+});
+
+test('legacy approval scope is a renewal baseline, not approval for the newly controlled Squad entrypoint', async (t) => {
+  const f = await fixture(t);
+  const options = await nativeOptions(f);
+  let review;
+  await f.run({ ...options, apply: true }, { confirm: async (value) => { review = value; return true; } });
+  const approvalPath = path.join(path.dirname(f.options['host-config']), 'policy-approval.json');
+  const legacy = JSON.parse(await readFile(approvalPath, 'utf8'));
+  legacy.controlledPaths = legacy.controlledPaths.filter((entry) =>
+    !['.github/agents/squad.agent.md', '.squad/agents/*/charter.md'].includes(entry));
+  legacy.controlledContentSha256 = createHash('sha256').update(JSON.stringify(
+    review.controlledFiles.filter((file) => file.path !== '.github/agents/squad.agent.md'),
+  )).digest('hex');
+  await writeFile(approvalPath, JSON.stringify(legacy), { mode: 0o600 });
+  await assert.rejects(f.run({ ...options, apply: true }), /interactive policy renewal/);
+  const newHost = path.join(f.root, 'expanded-scope', 'host.json');
+  let approvals = 0;
+  await f.run({ ...options, apply: true, 'renew-policy': true,
+    'previous-approval': approvalPath, 'previous-host-config': f.options['host-config'],
+    'host-config': newHost, 'cache-dir': path.join(f.root, 'expanded-cache') }, {
+    confirm: async (value) => {
+      approvals++;
+      assert.deepEqual(value.newlyControlledPaths, ['.github/agents/squad.agent.md', '.squad/agents/*/charter.md']);
+      return true;
+    },
+  });
+  assert.equal(approvals, 1);
+  assert.deepEqual(JSON.parse(await readFile(approvalPath, 'utf8')), legacy);
 });
 
 test('role registries cannot multiply quotas, mismatch platform or leak private fields', async (t) => {

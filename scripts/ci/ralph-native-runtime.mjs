@@ -10,6 +10,9 @@ import {
   taskFromEvidence, researchDisposition, validateControl, verifyControlRepository,
 } from './ralph-mailbox.mjs';
 import { runAutomationPreflight } from './ralph-automation.mjs';
+import {
+  buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup,
+} from './ralph-native-dispatch.mjs';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (message) => { throw new Error(`Native Ralph blocked: ${message}`); };
@@ -207,7 +210,7 @@ export function validateTriageEvidence(evidence) {
   return { owner: `squad:${[...normalizedOwners][0]}`, purpose };
 }
 
-export function prepareEvent(config, request, snapshot, journal, now = Date.now(), invocationDigest) {
+export function prepareEvent(config, request, snapshot, journal, now = Date.now(), invocationDigest, dispatchPlan) {
   if (!['coordinator', 'consumer'].includes(config.role) ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.roundId ?? '') ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.id ?? '')) fail('Exact role, round and event IDs required.');
@@ -236,6 +239,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
   } else if (event.type === 'reserve') {
     requireEvidence();
     validateTriageEvidence(evidence);
+    validateClassification(evidence);
     for (const key of ['claimsReconciled', 'holdsChecked', 'dependenciesReady', 'epicChildrenReady', 'analysisReady', 'filesComplete', 'reviewGatesChecked']) {
       if (evidence[key] !== true) fail(`Reservation requires ${key}.`);
     }
@@ -255,6 +259,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
     event.type = 'deliver';
   } else if (event.type === 'ready') {
     requireEvidence();
+    validateNativeCapabilities(evidence);
     if (evidence.complete !== true || evidence.queueChecked !== true || evidence.historyChecked !== true ||
         evidence.capabilitiesVerified !== true || !Array.isArray(evidence.sessions)) fail('Complete native inventory, queue/history and local tooling checks required.');
     const sessions = ownedSessionInventory(config, evidence, journal, snapshot.state, now);
@@ -287,7 +292,8 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         if (!prior || prior.assignmentId !== event.data.assignmentId || prior.startEventId !== request.id) fail('Existing delivery intent prevents another session kickoff.');
       } else {
         if (assignment.state !== 'published') fail('Only published assignment can start.');
-        map[correlation] = { assignmentId: event.data.assignmentId, startEventId: request.id };
+        if (!dispatchPlan) fail('Validated bounded specialist dispatch plan required before starting.');
+        map[correlation] = { assignmentId: event.data.assignmentId, startEventId: request.id, dispatchPlan };
         createAllowed = true;
       }
       event.type = 'accept';
@@ -301,12 +307,39 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
           !withinWorktreeRoot(config.worktreeRoot, evidence.session.worktreePath) ||
           (prior.sessionId && prior.sessionId !== evidence.session.id)) fail('Actual native session readback must match the immutable local mapping.');
       if (!prior.sessionId && evidence.kickoffDeliveryVerified !== true) fail('Lost kickoff needs proven correlated native delivery, not a guessed session.');
+      if (event.data.status === 'running' && prior.dispatchPlan && !prior.startupEvidenceDigest) {
+        fail('Record exact startup ACK/configuration before running; a workspace is not a worker.');
+      }
+      if (event.data.status === 'running' && prior.dispatchPlan && !prior.runningEvidenceDigest) {
+        const ack = evidence.continuationAck;
+        const packet = prior.dispatchPlan.packet;
+        if (!prior.continuationIntent || evidence.kickoffDeliveryVerified !== true ||
+            ack?.substantiveWorkStarted !== true ||
+            ['assignmentId', 'generation', 'taskDigest', 'correlation', 'member'].some((key) => ack[key] !== packet[key])) {
+          fail('Actual substantive continuation ACK must match the saved specialist binding.');
+        }
+        prior.runningEvidenceDigest = digest(ack);
+      }
       if (Object.entries(map).some(([otherCorrelation, entry]) => otherCorrelation !== correlation && entry.sessionId === evidence.session.id)) fail('Native session is already mapped to another assignment.');
       if (event.data.status === 'terminal-reported' &&
           (evidence.session.terminalVerified !== true || evidence.queueChecked !== true ||
             evidence.historyChecked !== true || evidence.artifactsVerified !== true ||
             evidence.noPendingContinuation !== true || evidence.noFutureDelivery !== true ||
             !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(evidence.finalDeliveryCorrelation ?? ''))) fail('Terminal report requires cessation, final delivery ACK, no future delivery commitment, queue/history and artifact evidence.');
+      if (event.data.status === 'terminal-reported' && prior.dispatchPlan &&
+          ['research', 'analysis'].includes(assignment.task.purpose)) {
+        const ack = evidence.finalAck;
+        const packet = prior.dispatchPlan.packet;
+        const artifact = evidence.artifact;
+        if (evidence.artifactReadbackVerified !== true || artifact?.kind !== 'issue-comment' ||
+            !new RegExp(`^https://github\\.com/OlyForge3D/PrintFarmer/issues/${assignment.task.issue}#issuecomment-[0-9]+$`).test(artifact.url ?? '') ||
+            !/^[0-9a-f]{64}$/.test(artifact.bodyDigest ?? '') ||
+            !ack || ['assignmentId', 'generation', 'taskDigest', 'correlation', 'member'].some((key) => ack[key] !== packet[key]) ||
+            ack.artifactUrl !== artifact.url || ack.finalDeliveryCorrelation !== evidence.finalDeliveryCorrelation ||
+            ack.noChildren !== true || ack.noPendingContinuation !== true || ack.noFutureDelivery !== true) {
+          fail('Research terminal receipt needs read-back issue findings and the same specialist final ACK, not chat-only completion.');
+        }
+      }
       prior.sessionId = evidence.session.id;
       prior.lastEvidenceDigest = digest(evidence);
       event.data = { ...event.data, evidenceDigest: digest(evidence) };
@@ -318,6 +351,14 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
   } else if (event.type === 'withdraw') {
     requireEvidence();
     if (evidence.claimsReconciled !== true || evidence.noNativeDeliveryVerified !== true) fail('Reconcile never-delivered reservation before withdrawal; no active-worker abandonment.');
+    const proof = evidence.prestartProof;
+    if (!assignment || !['reserved', 'published'].includes(assignment.state) || assignment.receipts.length ||
+        proof?.source !== 'native-runtime-prestart-proof-v1' ||
+        proof.assignmentId !== assignment.assignmentId || proof.generation !== assignment.generation ||
+        proof.taskDigest !== assignment.taskDigest || proof.workerId !== assignment.workerId ||
+        assignment.blocker?.evidenceDigest !== digest(proof)) {
+      fail('Exact consumer no-delivery proof committed by its blocker is required; coordinator absence is not proof.');
+    }
     event.data = { ...event.data, reconciliationDigest: digest(evidence) };
   } else if (event.type === 'release') {
     requireEvidence();
@@ -442,7 +483,111 @@ export async function runNativeRequest(config, request, {
       const assignment = existing.find((entry) => entry.state !== 'terminal') ?? existing.at(-1);
       return researchDisposition(request.evidence, assignment);
     }
-    const prepared = prepareEvent(config, request, snapshot, journal, now, owner.invocationDigest);
+    const assignment = snapshot.state.assignments[request.data?.assignmentId];
+    const local = journal.sessions[request.data?.correlation];
+    const requireBinding = () => {
+      if (config.role !== 'consumer' || !assignment || assignment.workerId !== config.workerId ||
+          request.data.generation !== assignment.generation || request.data.taskDigest !== assignment.taskDigest) {
+        fail('Exact locally owned assignment binding required.');
+      }
+      freshEvidence(request.evidence, now);
+    };
+    if (request.type === 'prestart-proof') {
+      requireBinding();
+      if (!['reserved', 'published'].includes(assignment.state) || assignment.receipts.length ||
+          Object.values(journal.sessions).some((entry) => entry.assignmentId === assignment.assignmentId) ||
+          request.evidence.authoritativeJournalRetained !== true ||
+          request.evidence.protocolOnlyDeliveryAttested !== true) {
+        fail('Continuous published/reserved history and intact consumer journal with no delivery intent required.');
+      }
+      journal.prestartProofs ??= {};
+      const retained = journal.prestartProofs[assignment.assignmentId];
+      if (retained && retained.generation === assignment.generation && retained.taskDigest === assignment.taskDigest &&
+          assignment.blocker?.evidenceDigest === digest(retained)) {
+        await writeJournal(journalPath, journal);
+        return { dispatchAuthorized: false, nativeCreateAllowed: false, alreadyReported: true, proof: retained };
+      }
+      const proof = {
+        source: 'native-runtime-prestart-proof-v1', observedAt: new Date(now).toISOString(),
+        assignmentId: assignment.assignmentId, generation: assignment.generation,
+        taskDigest: assignment.taskDigest, workerId: config.workerId,
+        mailboxHead: snapshot.head, consumerJournalDigest: digest(journal.sessions),
+      };
+      journal.prestartProofs[assignment.assignmentId] = proof;
+      await writeJournal(journalPath, journal);
+      return { dispatchAuthorized: false, nativeCreateAllowed: false, alreadyReported: false, proof };
+    }
+    if (['record-creation', 'startup-check'].includes(request.type)) {
+      requireBinding();
+      const evidence = request.evidence;
+      if (!local?.dispatchPlan || local.assignmentId !== assignment.assignmentId ||
+          !['starting', 'uncertain'].includes(assignment.state) ||
+          evidence.dispatchPlanDigest !== local.dispatchPlan.planDigest) fail('Exact native creation/readback and saved dispatch plan required.');
+      if (request.type === 'record-creation') {
+        if (!uuidPattern.test(evidence.creationHandle ?? '') ||
+            !['succeeded', 'partial'].includes(evidence.creationOutcome) ||
+            (local.creationHandle && local.creationHandle !== evidence.creationHandle) ||
+            (evidence.session && local.worktreePath && local.worktreePath !== evidence.session.worktreePath) ||
+            (evidence.session && local.sessionId && local.sessionId !== evidence.session.id &&
+              evidence.resolvedCreationHandle !== local.creationHandle) ||
+            (evidence.creationOutcome === 'succeeded' &&
+              (evidence.createRequestDigest !== digest(local.dispatchPlan.nativeArguments) || evidence.kickoffAccepted !== true)) ||
+            (local.creationOutcome === 'partial' && evidence.creationOutcome !== 'partial')) {
+          fail('Retain original creation handle/outcome; alias changes need readback of that handle, never replacement.');
+        }
+        local.creationHandle = evidence.creationHandle;
+        local.creationOutcome = evidence.creationOutcome;
+        if (!evidence.session) {
+          await writeJournal(journalPath, journal);
+          return { nativeCreateAllowed: false, creationHandle: local.creationHandle, reconciliationRequired: true };
+        }
+      }
+      if (!uuidPattern.test(evidence.session?.id ?? '') ||
+          evidence.nativeReadbackVerified !== true || evidence.repository !== 'OlyForge3D/PrintFarmer' ||
+          evidence.session.projectId !== config.projectId ||
+          !withinWorktreeRoot(config.worktreeRoot, evidence.session.worktreePath) ||
+          Object.entries(journal.sessions).some(([correlation, entry]) =>
+            correlation !== request.data.correlation && entry.sessionId === evidence.session.id)) {
+        fail('Fresh same-project isolated native readback required; never share a session between assignments.');
+      }
+      if (request.type === 'record-creation') {
+        local.sessionAliases = [...new Set([...(local.sessionAliases ?? []), local.sessionId, evidence.session.id].filter(Boolean))];
+        local.sessionId = evidence.session.id;
+        local.worktreePath = evidence.session.worktreePath;
+        local.creationEvidenceDigest = digest(evidence);
+        await writeJournal(journalPath, journal);
+        return { nativeCreateAllowed: false, sessionId: local.sessionId, creationHandle: local.creationHandle };
+      }
+      if (!local.creationHandle || local.sessionId !== evidence.session.id ||
+          local.worktreePath !== evidence.session.worktreePath ||
+          (local.creationOutcome !== 'succeeded' && evidence.configuration?.source === 'successful-native-create')) {
+        fail('Partial startup requires actual configuration readback or explicit owner attestation on the same child.');
+      }
+      validateStartup(local.dispatchPlan, evidence);
+      const continuationAllowed = !local.continuationIntent;
+      local.continuationIntent ??= { requestId: request.id, evidenceDigest: digest(evidence) };
+      local.startupEvidenceDigest = digest(evidence);
+      await writeJournal(journalPath, journal);
+      return {
+        nativeCreateAllowed: false, continuationAllowed, sessionId: local.sessionId,
+        ...(continuationAllowed ? { continuation: local.dispatchPlan.continuation } : {}),
+      };
+    }
+    let dispatchPlan;
+    if (request.type === 'dispatch-plan' ||
+        (request.type === 'receipt' && request.data?.status === 'starting')) {
+      requireBinding();
+      const { owner: member } = validateTriageEvidence(request.evidence);
+      if (assignment.policySha !== config.approvedPolicy ||
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.data.correlation ?? '')) {
+        fail('Matching policy and opaque correlation required before planning kickoff.');
+      }
+      dispatchPlan = await buildDispatchPlan({
+        config, evidence: request.evidence, assignment, correlation: request.data.correlation, owner: member, cwd,
+      });
+      if (request.type === 'dispatch-plan') return { dispatchAuthorized: false, nativeCreateAllowed: false, dispatchPlan };
+    }
+    const prepared = prepareEvent(config, request, snapshot, journal, now, owner.invocationDigest, dispatchPlan);
     if (saved) {
       if (digest({ ...prepared.event, observedAt: saved.observedAt }) !== digest(saved)) fail('Local event ID changed content.');
       prepared.event = saved;
@@ -463,6 +608,7 @@ export async function runNativeRequest(config, request, {
     await writeJournal(journalPath, journal);
     return {
       ...result, nativeCreateAllowed: prepared.createAllowed && !result.replayed,
+      ...(prepared.createAllowed && !result.replayed ? { dispatchPlan } : {}),
       ...(roundToken && !result.replayed ? { roundToken } : {}),
       message: 'A lost create/ack response NEVER authorizes another native creation. Keep local correlation and reconcile.',
     };

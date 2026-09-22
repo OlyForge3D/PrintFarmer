@@ -47,6 +47,40 @@ development helper installs/upgrades software, including when asked to verify.
 
 ## Start here: Copilot coordinates each device's local setup
 
+### Bounded Specialist Dispatch And Renewal
+
+The native agent is `Squad`; the assigned team member is separately resolved
+from the issue's canonical owner label and loaded charter. The
+`RALPH-ASSIGNED-WORKER-V1` entrypoint does that member's work in the reserved
+session, without coordinator fan-out, fallback workers or hidden research agents.
+The runtime generates exact native arguments and explicit model/effort before
+authorizing creation. macOS Dallas remains GPT-6 Astra/xhigh.
+
+The approval scope now includes the Squad agent entrypoint and member charters.
+Older receipts remain valid renewal baselines, but cannot silently approve the
+expanded scope. Review the displayed `newlyControlledPaths` and approve the
+candidate interactively in a new private package; preserve all original bindings,
+genesis and journals. Do not change live prompts as a shortcut.
+
+Re-run preflight **and runtime inspect after attestation edits**. Full registry
+validation rejects misplaced `ownerAttestation` metadata; it belongs at the host
+root. Before activating renewed roles, reconcile never-started old-policy work
+using the owning consumer's runtime-generated proof and coordinator withdrawal.
+Retain starting/running/uncertain workers; no replacement creation is implied.
+
+Partial startup must retain the returned handle before attempting readback.
+Recover only that workspace. Requested settings on a failed kickoff are not
+configuration proof. If supported native tools cannot read or restore a lost
+reasoning setting, explicit owner confirmation is still necessary; no helper
+can truthfully manufacture that platform capability.
+
+See [the native role contract](../.copilot/skills/ralph-loop/native-roles.md#validated-specialist-dispatch)
+for the exact requests and ACK fields. Research completion requires findings
+persisted once on the issue, readback, the worker's final ACK, terminal receipt
+and coordinator settlement. Only a fresh consumer offer replenishes capacity.
+Local fixture results do not establish production reliability: retain evidence
+of two unassisted scheduled lifecycles before calling a deployment operational.
+
 Install and sign in to GitHub CLI and the supported Copilot app/CLI yourself.
 The script checks `copilot --version`, but cannot prove app authentication,
 entitlement, model availability or native execution identity. Missing tools
