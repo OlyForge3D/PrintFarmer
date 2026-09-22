@@ -441,6 +441,11 @@ verified role roots and descendants through actual native readback/history.
 Normalize creator_session_id to session.creatorSessionId and retain ancestor
 readbacks. Unrelated maintainer and other-automation sessions consume no Ralph
 slots and need no terminal attestation. Do not adopt, archive or mutate them.
+Every retained mapping, including terminal work, needs an explicit inventory
+entry. Owned ancestry must be complete and acyclic, without adopting unrelated
+ancestors. For archived/deleted terminal work without live readback, use the
+native-roles.md retirementObservation contract: current verified cessation plus
+retained correlated terminal evidence, never omission, idle or absence alone.
 Missing creation ACKs, missing live mapped workers, resumed terminal workers and
 unmapped owned descendants still block; never hide them with an inventory filter.
 Do not submit this scoped evidence to an older runtime: follow the approved

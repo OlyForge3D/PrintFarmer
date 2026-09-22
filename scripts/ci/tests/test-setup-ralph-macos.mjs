@@ -132,6 +132,8 @@ function assertNativePrompt(prompt, role) {
   assert.match(prompt, /ownershipScope:"ralph-owned-v1" and lineageChecked:true/);
   assert.match(prompt, /Missing creation ACKs, missing live mapped workers, resumed terminal workers/);
   assert.match(prompt, /Unrelated maintainer and other-automation sessions consume no Ralph/);
+  assert.match(prompt, /Every retained mapping, including terminal work, needs an explicit inventory/);
+  assert.match(prompt, /retirementObservation contract: current verified cessation/);
   assert.match(prompt, /Only a successful\nruntime response with acquisitionAbandoned:true/);
   assert.match(prompt, /NEW round\/event IDs in this invocation/);
   assert.match(prompt, /THREE acquisition attempts total \(initial plus\ntwo retries\)/);

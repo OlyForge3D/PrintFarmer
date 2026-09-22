@@ -219,7 +219,10 @@ readback and ancestry. `complete`, `queueChecked` and `historyChecked` cover thi
 owned lineage, not the app's global session/message inventory. Project membership,
 a matching name, a workflow ID or an idle state does not establish ownership.
 Keep journal mappings across rounds, including terminal workers so later
-resumption remains detectable. Every unresolved local creation intent remains
+resumption remains detectable. Every retained mapping, including terminal workers,
+requires an explicit entry backed by current readback or verified cessation in each
+readiness inventory; omission blocks.
+Every unresolved local creation intent remains
 owned even when its native creation response was lost; a missing ID never makes
 that intent unrelated or authorizes another creation.
 
@@ -232,6 +235,22 @@ text, titles and guessed IDs may not. Reconcile all recorded intents and obtain
 missing ancestry before asserting `lineageChecked:true`. Broad native listings
 are discovery inputs, not evidence that every returned session belongs to Ralph.
 Unrelated observations are excluded from the capacity inventory digest.
+Owned creator chains must be complete and acyclic through a root with no creator.
+Ancestor readbacks establish relationships only; unrelated ancestors and their
+other descendants are not adopted as work or required to be terminal.
+
+For a retained terminal worker archived/deleted after settlement, keep its ID,
+`assignmentCorrelation`, retained ancestry and `terminalVerified:true` entry.
+When live session readback is unavailable, supply `session.retirementObservation`
+with fresh `observedAt`, a supported evidence `source`, `status:"archived"` or
+`"deleted"`, `liveChecked:true`, `cessationProven:true`,
+`noPendingContinuation:true`, `noFutureDelivery:true` and `terminalEvidenceDigest`.
+The digest must match the retained local delivery evidence and the assignment's
+final correlated terminal receipt/commitment. Current verified cessation plus
+that retained proof substitutes for live readback, never omission, idle, an archive
+label, missing history or a failed lookup alone. Do not archive/delete sessions to
+manufacture readiness. These are trusted-controller observations, not invented
+native API fields; if supported evidence cannot prove cessation, remain blocked.
 
 For owned role-session inventory exemptions, a workflow ID alone is ignored.
 Use `session.nativeReadbackVerified:true` and `session.roleObservation` with

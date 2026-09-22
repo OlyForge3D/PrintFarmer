@@ -92,7 +92,7 @@ function withinWorktreeRoot(root, target) {
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
-function ownedSessionInventory(config, evidence, journal, state) {
+function ownedSessionInventory(config, evidence, journal, state, now) {
   if (evidence.ownershipScope !== 'ralph-owned-v1' || evidence.lineageChecked !== true) {
     fail('Complete Ralph-owned lineage reconciliation required, not project-wide session ownership.');
   }
@@ -132,6 +132,9 @@ function ownedSessionInventory(config, evidence, journal, state) {
       if (role.noTaskExecutionVerified === true) roles.add(session.id);
     }
   }
+  for (const id of known.keys()) {
+    if (!sessions.has(id)) fail('Every retained Ralph native mapping needs fresh session evidence, including terminal assignments.');
+  }
   let changed = true;
   while (changed) {
     changed = false;
@@ -144,7 +147,35 @@ function ownedSessionInventory(config, evidence, journal, state) {
   }
   const ownedSessions = [...sessions.values()].filter((session) => ownedIds.has(session.id));
   for (const session of ownedSessions) {
+    const ancestry = new Set();
+    let ancestor = session;
+    while (ancestor) {
+      if (ancestry.has(ancestor.id)) fail('Cyclic Ralph-owned native ancestry blocks readiness.');
+      ancestry.add(ancestor.id);
+      if (ancestor.creatorSessionId === undefined) break;
+      ancestor = sessions.get(ancestor.creatorSessionId);
+      if (!ancestor) fail('Missing Ralph-owned native ancestor readback blocks readiness.');
+    }
     const mapping = known.get(session.id);
+    if (session.retirementObservation !== undefined) {
+      const observation = session.retirementObservation;
+      freshEvidence(observation, now);
+      const assignment = mapping && state.assignments[mapping.assignmentId];
+      const receipt = assignment?.receipts?.at(-1);
+      if (assignment?.state !== 'terminal' || session.terminalVerified !== true ||
+          !['archived', 'deleted'].includes(observation.status) ||
+          observation.liveChecked !== true || observation.cessationProven !== true ||
+          observation.noPendingContinuation !== true || observation.noFutureDelivery !== true ||
+          !Object.hasOwn(journal.sessions, session.assignmentCorrelation ?? '') ||
+          journal.sessions[session.assignmentCorrelation] !== mapping ||
+          !/^[0-9a-f]{64}$/.test(observation.terminalEvidenceDigest ?? '') ||
+          observation.terminalEvidenceDigest !== mapping.lastEvidenceDigest ||
+          receipt?.status !== 'terminal-reported' || receipt.correlation !== session.assignmentCorrelation ||
+          observation.terminalEvidenceDigest !== receipt.evidenceDigest ||
+          observation.terminalEvidenceDigest !== assignment.terminalCommitment) {
+        fail('Retired Ralph session needs current verified cessation and retained correlated terminal evidence; absence or idle alone is insufficient.');
+      }
+    }
     if (session.terminalVerified === true) continue;
     if (mapping) {
       if (state.assignments[mapping.assignmentId].state === 'terminal') {
@@ -226,7 +257,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
     requireEvidence();
     if (evidence.complete !== true || evidence.queueChecked !== true || evidence.historyChecked !== true ||
         evidence.capabilitiesVerified !== true || !Array.isArray(evidence.sessions)) fail('Complete native inventory, queue/history and local tooling checks required.');
-    const sessions = ownedSessionInventory(config, evidence, journal, snapshot.state);
+    const sessions = ownedSessionInventory(config, evidence, journal, snapshot.state, now);
     for (const entry of Object.values(snapshot.state.assignments).filter((item) => item.workerId === config.workerId && !['reserved', 'published', 'terminal'].includes(item.state))) {
       const local = map[entry.correlation];
       if (!local?.sessionId || !sessions.some((session) => session.id === local.sessionId &&

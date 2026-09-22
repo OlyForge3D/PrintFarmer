@@ -765,12 +765,90 @@ test('mapped workers across rounds cannot be omitted or dismissed with unrelated
   f.journal.sessions['previous-round'] = { assignmentId: 'earlier', sessionId: id };
   assert.equal(f.prepare().event.data.unassignedSessions, 0);
   f.request.evidence.sessions = [];
-  assert.throws(f.prepare, /Every live\/uncertain receipt/);
+  assert.throws(f.prepare, /Every retained Ralph native mapping/);
   f.request.evidence.sessions = [{ id, ownershipVerified: false }];
   assert.throws(f.prepare, /Every live\/uncertain receipt/);
   f.request.evidence.sessions = [{ id, ownershipVerified: true }];
   f.state.assignments.earlier.workerId = 'windows';
   assert.throws(f.prepare, /unresolved assignment ownership/);
+});
+
+test('terminal mappings require fresh readback and cannot conceal resumed workers', () => {
+  const id = 'dddddddd-1111-4222-8333-444444444444';
+  const f = ownedInventoryFixture();
+  f.state.assignments.earlier = { workerId: 'mini', state: 'terminal', correlation: 'previous-round' };
+  f.journal.sessions['previous-round'] = { assignmentId: 'earlier', sessionId: id };
+  assert.throws(f.prepare, /Every retained Ralph native mapping/);
+  f.request.evidence.sessions = [{ id, terminalVerified: true }];
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
+  f.request.evidence.sessions[0].terminalVerified = false;
+  assert.throws(f.prepare, /Resumed terminal/);
+});
+
+test('owned ancestry requires complete acyclic readbacks without adopting unrelated ancestors', () => {
+  const id = 'cccccccc-1111-4222-8333-444444444444';
+  const parent = 'dddddddd-1111-4222-8333-444444444444';
+  const root = 'eeeeeeee-1111-4222-8333-444444444444';
+  const sibling = 'ffffffff-1111-4222-8333-444444444444';
+  const f = ownedInventoryFixture();
+  const session = { ...roleSession(f.config, id), creatorSessionId: parent };
+  f.request.evidence.sessions = [session];
+  assert.throws(f.prepare, /Missing Ralph-owned native ancestor/);
+  f.request.evidence.sessions.push({ id: parent, creatorSessionId: root });
+  assert.throws(f.prepare, /Missing Ralph-owned native ancestor/);
+  f.request.evidence.sessions.push({ id: root }, { id: sibling, creatorSessionId: root, status: 'busy' });
+  const complete = f.prepare().event.data;
+  f.request.evidence.sessions.pop();
+  assert.deepEqual(f.prepare().event.data, complete);
+  f.request.evidence.sessions[2].creatorSessionId = parent;
+  assert.throws(f.prepare, /Cyclic Ralph-owned native ancestry/);
+  session.creatorSessionId = id;
+  assert.throws(f.prepare, /Cyclic Ralph-owned native ancestry/);
+  f.request.evidence.sessions = [{ id: sibling, creatorSessionId: parent, status: 'busy' }];
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
+});
+
+test('retired terminal workers require current cessation and retained correlated terminal evidence', () => {
+  const id = 'dddddddd-1111-4222-8333-444444444444';
+  const terminalEvidenceDigest = digest('retained final delivery ACK');
+  const f = ownedInventoryFixture();
+  f.state.assignments.earlier = { workerId: 'mini', state: 'terminal', correlation: 'previous-round',
+    terminalCommitment: terminalEvidenceDigest,
+    receipts: [{ status: 'terminal-reported', correlation: 'previous-round', evidenceDigest: terminalEvidenceDigest }] };
+  f.journal.sessions['previous-round'] = { assignmentId: 'earlier', sessionId: id, lastEvidenceDigest: terminalEvidenceDigest };
+  const observation = { observedAt: new Date(now).toISOString(), source: 'supported current cessation readback',
+    status: 'archived', liveChecked: true, cessationProven: true,
+    noPendingContinuation: true, noFutureDelivery: true, terminalEvidenceDigest };
+  const session = { id, assignmentCorrelation: 'previous-round', terminalVerified: true, retirementObservation: observation };
+  f.request.evidence.sessions = [session];
+  for (const status of ['archived', 'deleted']) {
+    observation.status = status;
+    assert.equal(f.prepare().event.data.unassignedSessions, 0);
+  }
+  for (const change of [
+    { status: 'idle' }, { liveChecked: false }, { cessationProven: false },
+    { noPendingContinuation: false }, { noFutureDelivery: false },
+    { terminalEvidenceDigest: undefined }, { terminalEvidenceDigest: digest('uncorrelated evidence') },
+  ]) {
+    session.retirementObservation = { ...observation, ...change };
+    assert.throws(f.prepare, /Retired Ralph session needs/);
+  }
+  session.retirementObservation = { ...observation, observedAt: new Date(now - 60_001).toISOString() };
+  assert.throws(f.prepare, /Fresh observations/);
+  session.retirementObservation = observation;
+  session.terminalVerified = false;
+  assert.throws(f.prepare, /Retired Ralph session needs/);
+  session.terminalVerified = true;
+  f.journal.sessions['previous-round'].lastEvidenceDigest = digest('different retained evidence');
+  assert.throws(f.prepare, /Retired Ralph session needs/);
+  f.journal.sessions['previous-round'].lastEvidenceDigest = terminalEvidenceDigest;
+  f.state.assignments.earlier.receipts[0].evidenceDigest = digest('different mailbox receipt');
+  assert.throws(f.prepare, /Retired Ralph session needs/);
+  f.state.assignments.earlier.receipts[0].evidenceDigest = terminalEvidenceDigest;
+  f.state.assignments.earlier.state = 'running';
+  assert.throws(f.prepare, /Retired Ralph session needs/);
+  f.request.evidence.sessions = [];
+  assert.throws(f.prepare, /Every retained Ralph native mapping/);
 });
 
 test('lost creation responses remain owned even before mailbox acceptance is observed', () => {

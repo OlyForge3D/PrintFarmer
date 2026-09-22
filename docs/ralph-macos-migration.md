@@ -482,6 +482,13 @@ ancestors. Retain unresolved create intents even without a returned native ID,
 and preserve terminal mappings to detect later resumption. Missing live workers,
 unknown owned descendants, lost ACKs and resumed terminal workers remain blockers.
 This does not relax task ownership, dependency, overlap or category quota checks.
+Every retained mapping needs an explicit fresh inventory entry, including terminal
+workers. Owned ancestry must be complete and acyclic, without adopting unrelated
+ancestors or requiring them to finish. Archived/deleted terminal workers may use
+current verified cessation plus retained correlated terminal evidence through
+`session.retirementObservation` as specified in the
+[native role contract](../.copilot/skills/ralph-loop/native-roles.md).
+Omission, idle, archive status or failed lookup alone never proves cessation.
 
 This scope correction changes controlled runtime/policy files. Existing packages
 must undergo the documented immutable policy review and explicit interactive
