@@ -438,6 +438,16 @@ This relies on GitHub's documented
 semantics, not an arbitrary expected-SHA parameter. Focused fixtures cover
 sibling conflicts, response loss and idempotent event recovery.
 
+Generated native-role prompts require bounded same-invocation recovery for a
+losing `begin-round` acquisition. Reconcile the original intent using
+`abandon-acquisition`; only the runtime's `acquisitionAbandoned:true` permits
+another acquisition with new round/event IDs and freshly read evidence.
+Allow at most three acquisition attempts (initial plus two retries), without
+polling or sleeps. Retain all intents. An uncertain or published acquisition,
+failed reconciliation, or exhausted budget stops the retry path; do not delete
+journals, force-release gates or retry native session creation. See the
+[native acquisition contract](../.copilot/skills/ralph-loop/native-roles.md).
+
 The private queue is the sole durable authority ledger. The coordinator persists
 a reservation commit before a distinct publication transition. Its private
 journal fsyncs event intent before network delivery. Assignment identity binds authority epoch, worker,
@@ -457,6 +467,22 @@ A lost response blocks redelivery until genuine native evidence reconciles it:
 there is no exposed idempotency key for native session creation.
 
 ### Asynchronous capacity and completion
+
+The generated coordinator prompt requires completing missing-label triage
+before admission, using current issue bodies, comments, linked evidence and the
+[canonical label vocabulary](../.copilot/skills/ralph-loop/operations.md#authoritative-label-vocabulary).
+Add justified missing type, priority and dispatch-owner labels through supported
+GitHub tools; preserve valid classifications, ownership and all holds. Do not
+blanket-label research issues as spikes or invent priorities to fill slots.
+Record a concise rationale/first step once, then re-read GitHub and evaluate
+same-round admission from the actual labels. Ambiguous classifications and failed
+writes require a specific blocker, not fabricated evidence. Consumers never
+perform this global triage. Substantial investigation still needs a reservation.
+
+Setup and renewal generate these directives; they do not update saved app
+workflows automatically. Existing installations need a supported native prompt
+update and readback, preserving their bindings, policy pin and schedule. Do not
+manually alter approval receipts or run generated prompts as shell commands.
 
 Consumer `ready` is a finite durable offer, not an online heartbeat. It atomically
 replaces that worker's remaining mobile/general credits from hard limits minus

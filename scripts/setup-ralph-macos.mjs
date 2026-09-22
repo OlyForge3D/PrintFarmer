@@ -365,6 +365,22 @@ function artifacts(options, policy, deployment, previous) {
     throw new Error('Bootstrap template substitution failed; no files written.');
   }
   const researchTriage = options.role === 'coordinator' ? `
+Before new admission, the coordinator MUST complete missing-label triage while
+holding its round gate, using native-roles.md and operations.md's authoritative
+label vocabulary. Read each candidate's current body, relevant comments, linked
+evidence, labels and ownership. Add a justified missing type:*, priority:p0-p3
+and dispatchable squad:* owner through supported GitHub tools; missing labels
+are triage work, not a permanent reason to skip an otherwise eligible issue.
+Preserve existing valid classifications and ownership, go:needs-research,
+go:no, explicit holds and status:needs-analysis. Never assign jpapiez, overwrite
+conflicting classifications, guess labels just to pass admission, or bulk-default
+every research issue to type:spike or a common priority. If evidence is ambiguous,
+report the specific unresolved classification instead of inventing it.
+Record the classification rationale and owner/first step once, without duplicate
+comments on unchanged rounds. Re-read GitHub after label changes and use the
+actual readback as fresh evidence for same-round research-plan/reserve; a failed
+write or mismatched readback blocks that candidate, not triage of other issues.
+This is metadata triage only, not unaccounted research or implementation.
 Every round MUST explicitly enumerate open issues labeled go:needs-research that
 have no active research assignment and no blocking hold (status:blocked/blocked),
 and evaluate each as a research-reservation candidate via runtime
@@ -401,6 +417,22 @@ All runtime commands use --host-config ${JSON.stringify(options['host-config'])}
 Workflow/project/environment IDs are owner-configured deployment assertions,
 NOT independently authenticated current execution facts. Use local-owner-v1.
 Acquire a fresh atomic begin-round token; the worktree path is NOT a round lock.
+For either role, a failed begin-round is not automatically an hour-long deferral.
+Reconcile the original acquisition using native-roles.md's abandon-acquisition
+procedure with its original roundId and data.acquisitionId. Only a successful
+runtime response with acquisitionAbandoned:true proves that intent cannot publish.
+After that proof, immediately re-read mailbox/current eligibility and attempt
+begin-round with NEW round/event IDs in this invocation; do not wait for the
+next scheduled run. Allow at most THREE acquisition attempts total (initial plus
+two retries), only after runtime-proven abandonment of each failed attempt.
+Keep the old journal/intents immutable. Never fabricate/reuse a token, delete
+locks or journals, force-update refs, or retry native session creation.
+An unchanged head, timeout, failed reconciliation, published acquisition or
+unproven outcome must STOP this retry path; retain evidence and use only the
+documented cessation-based recovery when applicable. After exhaustion, report
+blocked with the retained attempt evidence. No polling, sleeps or schedule changes.
+Once acquired, complete exactly one role round using the returned token and
+fresh inventory/evidence; these retries do not authorize extra work rounds.
 Consumer ready publishes finite durable capacity credits, NOT online presence.
 Coordinator can reserve against unused credits across later hourly rounds.
 Before each kickoff the consumer must refresh local inventory/tooling in its own
