@@ -2,13 +2,13 @@
 
 ## Shared Scheduled Automations
 
-New `NATIVE-MAILBOX-ROLE-V1` packages use the
+New `NATIVE-MAILBOX-ROLE-V2` packages use the
 [native coordinator/consumer contract](../.copilot/skills/ralph-loop/native-roles.md):
 one mini coordinator performs global triage and durable assignment, including
 bounded `go:needs-research`; device consumers pull only their assigned work and
 follow local native sessions. The private control repository is the sole
-reservation ledger. Setup stages disabled packages, not live takeover. Actual
-current invocation identity, approved policy, pinned genesis and reconciled
+reservation ledger. Setup stages disabled packages, not live takeover. Explicit
+local-owner trust, atomic round ownership, approved policy, pinned genesis and reconciled
 legacy authority migration are all required. No direct remote native creation,
 SSH worker dispatch or independent consumer backlog selection is introduced.
 
@@ -18,8 +18,9 @@ The macOS-mobile and Windows-general scheduled instances use one checked-in
 [bootstrap/deployment contract](../.copilot/skills/ralph-loop/bootstrap.md).
 Shared profiles define roles, not deployment workflow/project/environment IDs.
 Those bindings stay private. Filesystem preflight never authorizes dispatch;
-each round must reconcile its **current native execution identity** before any
-mutation, failing closed if supported tools cannot establish it. Use the
+each round acquires a unique token under atomic local/mailbox locking before any
+mutation. The app does not expose current-automation identity; configured IDs
+are deployment assertions, never fabricated execution proof. Use the
 [Mac mini setup guide](../docs/ralph-macos-migration.md) for unverified staging.
 macOS now has mixed eligibility with hard 1-mobile + 4-general work slots;
 Windows has 0-mobile + 5-general. Category slots cannot be borrowed. New Mac

@@ -17,12 +17,10 @@ explicit host bindings. Require its approved policy commit and successful
 policy/host configuration means **report the configuration blocker and exit**.
 Do not install, edit, downgrade or fetch a different runtime to bypass it.
 Filesystem preflight is non-authorizing and reports `nativeIdentityVerified:false`.
-Before any round mutation, compare the private host configuration with the
-**CURRENT executing automation's** actual workflow/project/app-host and isolated
-session path from supported native tools/runtime metadata, using
-[bootstrap.md's native identity gate](bootstrap.md#native-identity-gate).
-Missing, mismatched or unknown execution identity means report blocked and exit.
-Looking up some workflow with supplied IDs is not current execution evidence.
+Native roles use [the local-owner contract](bootstrap.md#local-owner-execution-contract):
+explicitly accepted deployment assertions, actual isolated Git-worktree checks
+and atomic persistent round acquisition. No supported in-session current-workflow
+identity API exists; do not invent metadata or use arbitrary lookups as proof.
 `verified:true` is a deployment attestation, not discovery or app authentication.
 
 This document governs both instances; [hosts.json](hosts.json) supplies only
@@ -51,10 +49,13 @@ unresolved conflicts instead of selecting a convenient weaker rule.
 
 The selected successor is one mini coordinator plus scheduled native consumers
 on each device, including a separate mini consumer. Packages carrying
-`NATIVE-MAILBOX-ROLE-V1` use the implemented private queue helpers and
+`NATIVE-MAILBOX-ROLE-V2` use the implemented private queue helpers and
 [native-roles.md](native-roles.md), not the legacy dispatcher below. They still
-require reviewed policy, actual native identity, pinned private queue genesis
+require reviewed policy, explicit local-owner acceptance, pinned private queue genesis
 and explicit legacy-authority migration before any work. Never combine paths.
+V1 packages must renew with consent; do not silently execute them under V2.
+The legacy dispatcher below remains historical and must not be activated as a
+substitute for the native role packages.
 
 The coordinator alone globally triages all issues: classify mobile/general and
 tooling requirements, validate type/priority/Squad owner labels (never personal

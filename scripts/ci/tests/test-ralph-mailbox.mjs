@@ -263,7 +263,7 @@ test('crashed round recovery requires exact old identity and does not clear rese
   assert.deepEqual(recovered.assignments, state.assignments);
   assert.throws(() => advance(state, { ...request, data: { ...request.data, oldRoundId: 'unknown' } }), /prior coordinator/);
   assert.throws(() => prepareEvent({ role: 'coordinator', control: baseControl }, {
-    ...request, native: { actual: { execution: {} } },
+    ...request,
     evidence: { source: 'native', observedAt: new Date(now).toISOString(), cessationProven: false },
   }, { state }, { sessions: {} }, now), /cessation/);
 });
@@ -477,13 +477,13 @@ test('consumer delivery intent requires exact live task; session mapping cannot 
   assert.equal(JSON.stringify(state).includes('sessionId'), false);
 });
 
-test('native runtime blocks unverified migration and unknown current invocation without queue writes', async () => {
+test('native runtime blocks unverified migration and unaccepted trust without queue writes', async () => {
   const f = githubFixture();
   const config = { control: baseControl, role: 'consumer', workerId: 'mini', host: 'macos-mobile' };
   await assert.rejects(runNativeRequest(config, {}, { api: f.api }), /Attested/);
   await assert.rejects(runNativeRequest({
     ...config, verified: true, migrationAttested: true, approvedPolicy: 'a'.repeat(40),
-  }, { approvedPolicy: 'a'.repeat(40), native: {} }, { api: f.api, preflight: async () => ({ expectedNativeIdentity: {} }) }), /CURRENT/);
+  }, { approvedPolicy: 'a'.repeat(40) }, { api: f.api }), /Attested/);
   assert.equal(f.calls.length, 0);
 });
 
@@ -506,23 +506,18 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'ralph native '));
   t.after(() => rm(root, { recursive: true, force: true }));
   const workflowId = 'aaaaaaaa-1111-4222-8333-444444444444', projectId = 'bbbbbbbb-1111-4222-8333-444444444444';
-  const actual = {
-    observedAt: new Date().toISOString(),
-    execution: { sessionId: 'cccccccc-1111-4222-8333-444444444444', workflowId, projectId, appHostId: 'local', worktreePath: '/worktree' },
-    workflow: { id: workflowId, projectId, appHostId: 'local' },
-    project: { id: projectId, repository: 'OlyForge3D/PrintFarmer' },
-  };
+  const observedAt = new Date().toISOString();
   const config = { control, role: 'consumer', workerId: 'mini', host: 'macos-mobile',
-    workflowId, verified: true, migrationAttested: true, approvedPolicy: 'a'.repeat(40),
+    workflowId, projectId, worktreeRoot: '/worktrees', executionTrust: 'local-owner-v1', verified: true, migrationAttested: true, approvedPolicy: 'a'.repeat(40),
     stateDirectory: path.join(root, 'native-state') };
-  const dependencies = { api: f.api, preflight: async () => ({ expectedNativeIdentity: actual.execution }) };
+  const dependencies = { api: f.api, preflight: async () => ({ localContext: { worktreePath: '/worktree', gitDirectory: '/git/worktrees/one' } }) };
   const request = {
     type: 'begin-round', id: 'runtime-begin', roundId: 'native-round', approvedPolicy: config.approvedPolicy,
-    native: { actual }, hostConfigPath: path.join(root, 'host.json'),
+    hostConfigPath: path.join(root, 'host.json'),
   };
-  await runNativeRequest(config, request, dependencies);
+  request.roundToken = (await runNativeRequest(config, request, dependencies)).roundToken;
   await runNativeRequest(config, { ...request, type: 'ready', id: 'runtime-ready', evidence: {
-    observedAt: actual.observedAt, source: 'native inventory', complete: true, queueChecked: true,
+    observedAt, source: 'native inventory', complete: true, queueChecked: true,
     historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
   } }, dependencies);
   await publishEvent(control, currentEvent('begin-round', 'coordinator', { invocationDigest: digest('coordinator') }), f.api);
@@ -534,7 +529,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   await publishEvent(control, currentEvent('publish', 'coordinator', binding(state, 1)), f.api);
   const start = { ...request, id: 'native-start', type: 'receipt',
     data: { ...binding(state, 1), status: 'starting', correlation: 'correlation-1' },
-    evidence: { ...evidence(), observedAt: actual.observedAt, source: 'native/GitHub', holdsChecked: true, ownershipReconciled: true } };
+    evidence: { ...evidence(), observedAt, source: 'native/GitHub', holdsChecked: true, ownershipReconciled: true } };
   assert.equal((await runNativeRequest(config, start, dependencies)).nativeCreateAllowed, true);
   assert.equal((await runNativeRequest(config, start, dependencies)).nativeCreateAllowed, false);
   const journal = JSON.parse(await readFile(path.join(root, 'native-state/journal.json'), 'utf8'));
@@ -542,7 +537,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const workerSession = 'dddddddd-1111-4222-8333-444444444444';
   const running = { ...request, id: 'native-running', type: 'receipt',
     data: { ...binding(state, 1), status: 'running', correlation: 'correlation-1' },
-    evidence: { observedAt: actual.observedAt, source: 'native readback', session: { id: workerSession },
+    evidence: { observedAt, source: 'native readback', session: { id: workerSession, projectId, worktreePath: '/worktrees/task' },
       assignmentCorrelation: 'correlation-1', repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true } };
   await runNativeRequest(config, running, dependencies);
   assert.equal(JSON.stringify((await readMailbox(control, f.api)).state).includes(workerSession), false);
@@ -553,7 +548,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const later = Date.now() + 120_000;
   const writes = f.calls.filter((call) => call.method !== 'GET').length;
   for (const original of [start, running, ended]) {
-    const replay = { ...original, native: { actual: { ...actual, observedAt: new Date(later).toISOString() } } };
+    const replay = { ...original };
     const result = await runNativeRequest(config, replay, { ...dependencies, now: later });
     assert.equal(result.replayed, true);
     assert.equal(result.nativeCreateAllowed, false);
@@ -563,4 +558,167 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   assert.equal(f.calls.filter((call) => call.method !== 'GET').length, writes);
   await mkdir(path.join(root, 'native-state/journal.lock'));
   await assert.rejects(runNativeRequest(config, { ...request, type: 'inspect' }, dependencies), /Unsafe|lock/);
+});
+
+async function runtimeFixture(t) {
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'ralph role lifecycle '));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const github = githubFixture();
+  const configFor = (role, workerId = 'mini') => ({
+    control: structuredClone(baseControl), role, workerId,
+    host: workerId === 'mini' ? 'macos-mobile' : 'windows-general',
+    workflowId: 'aaaaaaaa-1111-4222-8333-444444444444',
+    projectId: 'bbbbbbbb-1111-4222-8333-444444444444',
+    worktreeRoot: '/worktrees', verified: true, migrationAttested: true,
+    executionTrust: 'local-owner-v1', approvedPolicy: 'a'.repeat(40),
+    stateDirectory: path.join(root, `${role}-${workerId}`, 'native-state'),
+  });
+  const localContext = { worktreePath: '/worktrees/one', gitDirectory: '/git/worktrees/one' };
+  const dependencies = { api: github.api, preflight: async () => ({ localContext }), now };
+  const request = (config, type, extra = {}) => ({
+    type, id: `runtime-${++next}`, roundId: `${config.role}-${config.workerId}-${next}`,
+    approvedPolicy: config.approvedPolicy, hostConfigPath: path.join(path.dirname(config.stateDirectory), 'host.json'),
+    ...extra,
+  });
+  const fresh = (extra = {}) => ({ observedAt: new Date(now).toISOString(), source: 'fixture: retained tool observations and controlled delivery log', ...extra });
+  const coordinator = configFor('coordinator');
+  const initialize = request(coordinator, 'initialize', {
+    explicitInitializationApproval: true,
+    evidence: fresh({ legacyAuthoritiesReconciled: true, cessationOrFencedHandoffProven: true }),
+  });
+  return { github, configFor, coordinator, request, fresh, initialize, dependencies, localContext };
+}
+
+test('manual initializer and repeated coordinator/consumer lifecycles need no current-automation metadata', async (t) => {
+  for (const workerId of ['mini', 'windows']) {
+    const f = await runtimeFixture(t);
+    const { coordinator, dependencies, request, fresh } = f;
+    await assert.rejects(runNativeRequest(coordinator, { ...f.initialize, explicitInitializationApproval: false }, dependencies), /explicit owner approval/);
+    const initialized = await runNativeRequest(coordinator, f.initialize, dependencies);
+    assert.equal(initialized.activationAuthorized, false);
+    await assert.rejects(runNativeRequest(coordinator, f.initialize, dependencies), /intent already exists/);
+    coordinator.control.genesisSha = initialized.genesisSha;
+    const consumer = f.configFor('consumer', workerId);
+    consumer.control.genesisSha = initialized.genesisSha;
+    const acquire = async (config) => {
+      const begin = request(config, 'begin-round');
+      const result = await runNativeRequest(config, begin, dependencies);
+      assert.match(result.roundToken, /^[0-9a-f]{64}$/);
+      return { ...begin, roundToken: result.roundToken };
+    };
+    const c = await acquire(coordinator), w = await acquire(consumer);
+    const run = (config, round, type, extra = {}) => runNativeRequest(config, {
+      ...round, type, id: `lifecycle-${++next}`, ...extra,
+    }, dependencies);
+    const inventory = (sessions = []) => fresh({
+      complete: true, queueChecked: true, historyChecked: true,
+      capabilitiesVerified: true, capabilities: ['general'], sessions,
+    });
+    await run(consumer, w, 'ready', { evidence: inventory() });
+    const taskEvidence = fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true,
+      dependenciesReady: true, epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true,
+      ownershipReconciled: true });
+    await assert.rejects(run(consumer, w, 'reserve', {
+      data: { assignmentId: 'unauthorized', workerId }, evidence: taskEvidence,
+    }), /Only coordinator/);
+    const reserved = await run(coordinator, c, 'reserve', {
+      data: { assignmentId: 'assignment-1', workerId }, evidence: taskEvidence,
+    });
+    const taskBinding = binding(reserved.state, 1);
+    await run(coordinator, c, 'publish', { data: taskBinding, evidence: taskEvidence });
+    const startRequest = { ...w, type: 'receipt', id: `start-${++next}`,
+      data: { ...taskBinding, status: 'starting', correlation: 'delivery-one' }, evidence: taskEvidence };
+    assert.equal((await runNativeRequest(consumer, startRequest, dependencies)).nativeCreateAllowed, true);
+    assert.equal((await runNativeRequest(consumer, startRequest, dependencies)).nativeCreateAllowed, false);
+    const sessionId = 'cccccccc-1111-4222-8333-444444444444';
+    const session = { id: sessionId, projectId: consumer.projectId, worktreePath: '/worktrees/task' };
+    const delivered = fresh({ session, assignmentCorrelation: 'delivery-one',
+      repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true });
+    await run(consumer, w, 'receipt', {
+      data: { ...taskBinding, status: 'running', correlation: 'delivery-one' }, evidence: delivered,
+    });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' }, evidence: delivered,
+    }), /Terminal report/);
+    await run(consumer, w, 'end-round');
+    await run(coordinator, c, 'end-round');
+    const c2 = await acquire(coordinator), w2 = await acquire(consumer);
+    assert.notEqual(c.roundToken, c2.roundToken);
+    assert.notEqual(w.roundToken, w2.roundToken);
+    await assert.rejects(run(consumer, { ...w2, roundToken: w.roundToken }, 'ready', { evidence: inventory() }), /round token/);
+    const terminal = await run(consumer, w2, 'receipt', {
+      data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' },
+      evidence: { ...delivered, session: { ...session, terminalVerified: true },
+        queueChecked: true, historyChecked: true, artifactsVerified: true },
+    });
+    await run(consumer, w2, 'ready', { evidence: inventory([{ id: sessionId, terminalVerified: true }]) });
+    const receipt = terminal.state.assignments['assignment-1'].receipts.at(-1);
+    const released = await run(coordinator, c2, 'release', {
+      data: taskBinding, evidence: fresh({ consumerReceiptDigest: receipt.evidenceDigest,
+        taskDigest: taskBinding.taskDigest, ownershipReconciled: true, artifactsVerified: true, noPendingContinuation: true }),
+    });
+    assert.equal(released.state.assignments['assignment-1'].state, 'terminal');
+    await run(consumer, w2, 'end-round');
+    await run(coordinator, c2, 'end-round');
+    const journal = JSON.parse(await readFile(path.join(consumer.stateDirectory, 'journal.json'), 'utf8'));
+    assert.equal(journal.sessions['delivery-one'].sessionId, sessionId);
+    assert.equal(JSON.stringify(journal).includes(w.roundToken), false);
+    assert.equal(JSON.stringify(released.state).includes('/worktrees'), false);
+    assert.equal(JSON.stringify(released.state).includes(sessionId), false);
+  }
+});
+
+test('same-worktree races, lost acquisition ACK, wrong tokens/context and recovery retain exclusion', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator: config, dependencies, request, fresh } = f;
+  config.control.genesisSha = (await runNativeRequest(config, f.initialize, dependencies)).genesisSha;
+  const first = request(config, 'begin-round');
+  const competing = request(config, 'begin-round');
+  const results = await Promise.allSettled([
+    runNativeRequest(config, first, dependencies), runNativeRequest(config, competing, dependencies),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
+  const winner = [first, competing][winnerIndex], result = results[winnerIndex].value;
+  assert.equal((await runNativeRequest(config, winner, dependencies)).roundToken, undefined);
+  await assert.rejects(runNativeRequest(config, request(config, 'begin-round'), dependencies), /already has a round/);
+  const end = { ...winner, type: 'end-round', id: `end-${++next}` };
+  for (const token of [undefined, 'f'.repeat(64)]) {
+    await assert.rejects(runNativeRequest(config, { ...end, roundToken: token }, dependencies), /round token/);
+  }
+  await assert.rejects(runNativeRequest(config, { ...end, roundToken: result.roundToken }, {
+    ...dependencies, preflight: async () => ({ localContext: { ...f.localContext, worktreePath: '/worktrees/other' } }),
+  }), /matching worktree/);
+  const snapshot = await readMailbox(config.control, f.github.api);
+  const recovery = request(config, 'recover-coordinator-round', {
+    data: { oldRoundId: winner.roundId },
+    evidence: fresh({ priorInvocationDigest: snapshot.state.rounds.coordinator.invocationDigest,
+      cessationProven: false, liveChecked: true, queuedChecked: true, historyChecked: true }),
+  });
+  await assert.rejects(runNativeRequest(config, recovery, dependencies), /cessation/);
+  recovery.evidence.cessationProven = true;
+  const recovered = await runNativeRequest(config, recovery, dependencies);
+  assert.notEqual(recovered.roundToken, result.roundToken);
+  await assert.rejects(runNativeRequest(config, { ...end, roundToken: result.roundToken }, dependencies), /persistent role gate/);
+  await runNativeRequest(config, { ...recovery, type: 'end-round', id: `recovered-end-${++next}`,
+    roundToken: recovered.roundToken, data: {}, evidence: undefined }, dependencies);
+});
+
+test('supplied workflow IDs cannot exempt work from readiness; observed bounded role sessions can', () => {
+  const state = withRounds(), config = { role: 'consumer', workerId: 'mini', host: 'macos-mobile',
+    projectId: 'bbbbbbbb-1111-4222-8333-444444444444', worktreeRoot: '/worktrees', control: baseControl };
+  const session = { id: 'cccccccc-1111-4222-8333-444444444444', workflowId: 'aaaaaaaa-1111-4222-8333-444444444444' };
+  config.automationWorkflowIds = [session.workflowId];
+  const request = { ...event('ready', 'consumer'), evidence: {
+    observedAt: new Date(now).toISOString(), source: 'actual session observation', complete: true,
+    queueChecked: true, historyChecked: true, capabilitiesVerified: true, capabilities: ['general'], sessions: [session],
+  } };
+  const prepare = () => prepareEvent(config, request, { state }, { sessions: {} }, now);
+  assert.throws(prepare, /Pre-existing/);
+  session.nativeReadbackVerified = true;
+  session.roleObservation = { role: 'coordinator', workerId: 'mini', projectId: config.projectId,
+    worktreePath: '/worktrees/role', ownerConfiguredRoleVerified: true, noTaskExecutionVerified: true };
+  assert.equal(prepare().event.data.unassignedSessions, 0);
+  session.roleObservation.noTaskExecutionVerified = false;
+  assert.throws(prepare, /Pre-existing/);
 });

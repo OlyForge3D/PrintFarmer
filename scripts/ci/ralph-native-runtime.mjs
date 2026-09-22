@@ -1,4 +1,5 @@
 import { constants } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { lstat, mkdir, open, readFile, rename } from 'node:fs/promises';
@@ -8,7 +9,7 @@ import {
   applyEvent, digest, inventoryDigest, readMailbox, publishEvent, initializeMailbox,
   taskFromEvidence, researchDisposition, validateControl, verifyControlRepository,
 } from './ralph-mailbox.mjs';
-import { compareNativeAutomationIdentity, runAutomationPreflight } from './ralph-automation.mjs';
+import { runAutomationPreflight } from './ralph-automation.mjs';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (message) => { throw new Error(`Native Ralph blocked: ${message}`); };
@@ -59,6 +60,13 @@ function freshEvidence(evidence, now) {
       typeof evidence.source !== 'string' || !evidence.source.trim()) fail('Fresh observations from supported native/GitHub tools required.');
 }
 
+function withinWorktreeRoot(root, target) {
+  if (!path.isAbsolute(root ?? '') || !path.isAbsolute(target ?? '') ||
+      path.normalize(target) !== target) return false;
+  const relative = path.relative(root, target);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+}
+
 export function validateTriageEvidence(evidence) {
   const owners = 'dallas|ripley|drake|lambert|hudson|gorman|kane|ash|brett|parker|newt|copilot';
   const ownerPattern = new RegExp(`^squad:[^a-z]*(${owners})$`);
@@ -78,7 +86,7 @@ export function validateTriageEvidence(evidence) {
   return { owner: `squad:${[...normalizedOwners][0]}`, purpose };
 }
 
-export function prepareEvent(config, request, snapshot, journal, now = Date.now()) {
+export function prepareEvent(config, request, snapshot, journal, now = Date.now(), invocationDigest) {
   if (!['coordinator', 'consumer'].includes(config.role) ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.roundId ?? '') ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.id ?? '')) fail('Exact role, round and event IDs required.');
@@ -94,7 +102,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
   let createAllowed = false;
   const requireEvidence = () => freshEvidence(evidence, now);
   if (event.type === 'begin-round') {
-    event.data = { invocationDigest: digest(request.native.actual.execution) };
+    event.data = { invocationDigest };
   } else if (event.type === 'recover-coordinator-round' || event.type === 'reconcile-round') {
     requireEvidence();
     if (evidence.cessationProven !== true || evidence.liveChecked !== true ||
@@ -103,7 +111,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
           ? snapshot.state.rounds.coordinator?.invocationDigest
           : snapshot.state.rounds[`consumer:${event.data.workerId}`]?.invocationDigest)) fail('Proven correlated cessation required; idle, age and absence alone are insufficient.');
     event.data = { ...event.data, cessationEvidenceDigest: digest(evidence) };
-    if (event.type === 'recover-coordinator-round') event.data.invocationDigest = digest(request.native.actual.execution);
+    if (event.type === 'recover-coordinator-round') event.data.invocationDigest = invocationDigest;
   } else if (event.type === 'reserve') {
     requireEvidence();
     validateTriageEvidence(evidence);
@@ -125,10 +133,17 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
     if (evidence.complete !== true || evidence.queueChecked !== true || evidence.historyChecked !== true ||
         evidence.capabilitiesVerified !== true || !Array.isArray(evidence.sessions)) fail('Complete native inventory, queue/history and local tooling checks required.');
     const known = new Map(Object.values(map).filter((entry) => entry.sessionId).map((entry) => [entry.sessionId, entry]));
-    const automations = config.automationWorkflowIds ?? [config.workflowId];
     for (const session of evidence.sessions) {
       if (!uuidPattern.test(session.id ?? '')) fail('Malformed local native session identity.');
-      if (session.terminalVerified === true || (uuidPattern.test(session.workflowId ?? '') && automations.includes(session.workflowId))) continue;
+      if (session.terminalVerified === true) continue;
+      const role = session.roleObservation;
+      if (role && session.nativeReadbackVerified === true &&
+          role.projectId === config.projectId &&
+          ['coordinator', 'consumer'].includes(role.role) &&
+          (role.role !== 'coordinator' || config.host === 'macos-mobile') &&
+          role.workerId === config.workerId && role.ownerConfiguredRoleVerified === true &&
+          role.noTaskExecutionVerified === true &&
+          withinWorktreeRoot(config.worktreeRoot, role.worktreePath)) continue;
       const mapping = known.get(session.id);
       const owned = mapping && snapshot.state.assignments[mapping.assignmentId];
       if (!owned || owned.workerId !== config.workerId || owned.state === 'terminal') fail('Pre-existing/unassigned or resumed terminal native work blocks readiness; reconcile ownership first.');
@@ -165,6 +180,8 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
       if (!prior || prior.assignmentId !== event.data.assignmentId ||
           !uuidPattern.test(evidence.session?.id ?? '') || evidence.assignmentCorrelation !== correlation ||
           evidence.repository !== 'OlyForge3D/PrintFarmer' || evidence.nativeReadbackVerified !== true ||
+          evidence.session.projectId !== config.projectId ||
+          !withinWorktreeRoot(config.worktreeRoot, evidence.session.worktreePath) ||
           (prior.sessionId && prior.sessionId !== evidence.session.id)) fail('Actual native session readback must match the immutable local mapping.');
       if (!prior.sessionId && evidence.kickoffDeliveryVerified !== true) fail('Lost kickoff needs proven correlated native delivery, not a guessed session.');
       if (Object.entries(map).some(([otherCorrelation, entry]) => otherCorrelation !== correlation && entry.sessionId === evidence.session.id)) fail('Native session is already mapped to another assignment.');
@@ -197,6 +214,7 @@ export async function runNativeRequest(config, request, {
 } = {}) {
   validateControl(config.control);
   if (config.verified !== true || config.migrationAttested !== true ||
+      config.executionTrust !== 'local-owner-v1' ||
       config.approvedPolicy !== request.approvedPolicy ||
       (config.role === 'coordinator' && config.host !== 'macos-mobile') ||
       config.control.registry.workers.find((worker) => worker.workerId === config.workerId)?.host !== config.host) fail('Attested role, approved policy and reconciled migration are required.');
@@ -204,16 +222,12 @@ export async function runNativeRequest(config, request, {
     host: config.host, workflow: config.workflowId, hostConfig: request.hostConfigPath,
     approvedPolicy: config.approvedPolicy, cwd,
   });
-  compareNativeAutomationIdentity({ expected: checked.expectedNativeIdentity, actual: request.native?.actual, now });
+  if (!path.isAbsolute(checked.localContext?.worktreePath ?? '') ||
+      !path.isAbsolute(checked.localContext?.gitDirectory ?? '')) fail('Verified local worktree context required.');
+  if (request.native !== undefined) fail('Retired native.actual is not execution proof. Use the owner-configured role contract.');
   await verifyControlRepository(config.control, api);
-  if (request.type === 'initialize') {
-    if (config.role !== 'coordinator' || request.explicitInitializationApproval !== true) fail('Separate explicit owner approval for queue initialization required.');
-    freshEvidence(request.evidence, now);
-    if (request.evidence.legacyAuthoritiesReconciled !== true || request.evidence.cessationOrFencedHandoffProven !== true) fail('Legacy authority migration evidence required.');
-    return initializeMailbox(config.control, digest(request.evidence), api);
-  }
   const root = config.stateDirectory;
-  if (!path.isAbsolute(root ?? '') || path.dirname(root) !== path.dirname(request.hostConfigPath) || path.basename(root) !== 'native-state') fail('Private native-state must be beside the attested host config.');
+  if (!path.isAbsolute(root ?? '') || path.basename(root) !== 'native-state') fail('Approved private native-state path required; retain it across package renewals.');
   await privatePath(path.dirname(root));
   await privatePath(root);
   await mkdir(root, { recursive: true, mode: 0o700 });
@@ -221,6 +235,22 @@ export async function runNativeRequest(config, request, {
   await privatePath(lockPath, true);
   const lock = await open(lockPath, 'wx', 0o600).catch(() => fail('Private transaction lock exists; reconcile interrupted write, never steal by age.'));
   try {
+    if (request.type === 'initialize') {
+      if (config.role !== 'coordinator' || request.explicitInitializationApproval !== true) fail('Separate explicit owner approval for queue initialization required.');
+      freshEvidence(request.evidence, now);
+      if (request.evidence.legacyAuthoritiesReconciled !== true || request.evidence.cessationOrFencedHandoffProven !== true) fail('Legacy authority migration evidence required.');
+      const intentPath = path.join(root, 'initialization.json');
+      await privatePath(intentPath, true);
+      try {
+        await lstat(intentPath);
+        fail('Initialization intent already exists; inspect actual mailbox and reconcile, never blindly retry.');
+      } catch (error) { if (error.code !== 'ENOENT') throw error; }
+      const intent = { control: config.control, evidenceDigest: digest(request.evidence), localContext: checked.localContext };
+      await writeJournal(intentPath, intent);
+      const result = await initializeMailbox(config.control, intent.evidenceDigest, api);
+      await writeJournal(intentPath, { ...intent, result });
+      return result;
+    }
     const journalPath = path.join(root, 'journal.json');
     await privatePath(journalPath, true);
     let journal;
@@ -230,6 +260,7 @@ export async function runNativeRequest(config, request, {
       journal = { version: 1, controlDigest: digest(config.control), sessions: {}, events: {}, requestDigests: {}, observedEvents: {} };
     }
     if (journal.version !== 1 || journal.controlDigest !== digest(config.control)) fail('Private journal belongs to another immutable control configuration.');
+    journal.roundOwners ??= {};
     const snapshot = await readMailbox(config.control, api, journal.snapshot);
     for (const [id, value] of Object.entries(journal.observedEvents)) {
       if (snapshot.state.events[id] !== value) fail('Mailbox rewound or previously observed history changed.');
@@ -253,8 +284,19 @@ export async function runNativeRequest(config, request, {
       }
     }
     const round = snapshot.state.rounds[config.role === 'coordinator' ? 'coordinator' : `consumer:${config.workerId}`];
-    if (!['begin-round', 'recover-coordinator-round'].includes(request.type) &&
-        round?.invocationDigest !== digest(request.native.actual.execution)) fail('Current automation is not the invocation that owns this role gate.');
+    const acquiring = ['begin-round', 'recover-coordinator-round'].includes(request.type);
+    let roundToken;
+    let owner = journal.roundOwners[request.roundId];
+    if (acquiring) {
+      if (owner || saved || request.roundToken !== undefined) fail('Round acquisition already attempted; lost acquisition response requires reconciliation, not another token.');
+      roundToken = randomBytes(32).toString('hex');
+      owner = { localContext: checked.localContext, tokenDigest: digest(roundToken) };
+      owner.invocationDigest = digest(owner);
+      journal.roundOwners[request.roundId] = owner;
+    } else if (!owner || !/^[0-9a-f]{64}$/.test(request.roundToken ?? '') ||
+        owner.tokenDigest !== digest(request.roundToken) ||
+        digest(owner.localContext) !== digest(checked.localContext) ||
+        round?.invocationDigest !== owner.invocationDigest) fail('Locally acquired round token and matching worktree must own the persistent role gate.');
     if (request.type === 'research-plan') {
       if (config.role !== 'coordinator') fail('Only coordinator performs research triage.');
       freshEvidence(request.evidence, now);
@@ -263,7 +305,7 @@ export async function runNativeRequest(config, request, {
       const assignment = existing.find((entry) => entry.state !== 'terminal') ?? existing.at(-1);
       return researchDisposition(request.evidence, assignment);
     }
-    const prepared = prepareEvent(config, request, snapshot, journal, now);
+    const prepared = prepareEvent(config, request, snapshot, journal, now, owner.invocationDigest);
     if (saved) {
       if (digest({ ...prepared.event, observedAt: saved.observedAt }) !== digest(saved)) fail('Local event ID changed content.');
       prepared.event = saved;
@@ -279,6 +321,7 @@ export async function runNativeRequest(config, request, {
     await writeJournal(journalPath, journal);
     return {
       ...result, nativeCreateAllowed: prepared.createAllowed && !result.replayed,
+      ...(roundToken && !result.replayed ? { roundToken } : {}),
       message: 'A lost create/ack response NEVER authorizes another native creation. Keep local correlation and reconcile.',
     };
   } finally {

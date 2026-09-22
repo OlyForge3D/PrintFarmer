@@ -144,7 +144,9 @@ test('native packages stage coordinator and Windows consumer with distinct roles
     assert.equal(settings.enabled, false);
     assert.match(settings.prompt, /native-roles\.md/);
     assert.match(settings.prompt, /Do NOT follow the legacy/);
-    assert.match(settings.prompt, /Missing CURRENT native invocation identity means blocked/);
+    assert.match(settings.prompt, /owner-configured deployment assertions/);
+    assert.match(settings.prompt, /Acquire a fresh atomic begin-round token/);
+    assert.equal(host.executionTrust, 'local-owner-v1');
     assert.match(settings.name, new RegExp(role));
     const handoff = await readFile(path.join(path.dirname(f.options['host-config']), 'app-native-handoff.txt'), 'utf8');
     assert.match(handoff, /attestations are prerequisites for\ninitialization, not permission to write the queue/);
@@ -167,6 +169,43 @@ test('native setup rejects public/wrong/unwritable control repo and approval-tim
     f.state.control.id = 456; return true;
   } }), /changed during approval/);
   await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
+});
+
+test('consented native renewal preserves IDs, pinned authority and original journal without overwriting staged package', async (t) => {
+  const f = await fixture(t);
+  const roleOptions = await nativeOptions(f, 'coordinator');
+  await f.run({ ...roleOptions, apply: true });
+  const oldPath = f.options['host-config'], oldDirectory = path.dirname(oldPath);
+  const old = JSON.parse(await readFile(oldPath, 'utf8'));
+  delete old.executionTrust;
+  old.control.genesisSha = 'c'.repeat(40);
+  old.verified = true;
+  old.migrationAttested = true;
+  old.automationWorkflowIds.push(otherWorkflow);
+  await writeFile(oldPath, JSON.stringify(old), { mode: 0o600 });
+  await mkdir(old.stateDirectory, { mode: 0o700 });
+  const history = '{"claims":["retain"],"rounds":["do-not-reset"]}';
+  await writeFile(path.join(old.stateDirectory, 'journal.json'), history, { mode: 0o600 });
+  const oldFiles = new Map(await Promise.all((await readdir(oldDirectory))
+    .filter((file) => file !== 'native-state').map(async (file) => [file, await readFile(path.join(oldDirectory, file), 'utf8')])));
+  const updatedPath = path.join(f.root, 'renewed-package', 'host.json');
+  const renew = { ...roleOptions, apply: true, 'renew-policy': true,
+    'previous-approval': path.join(oldDirectory, 'policy-approval.json'),
+    'previous-host-config': oldPath, 'host-config': updatedPath, 'cache-dir': path.join(f.root, 'new-cache') };
+  let approvals = 0;
+  await f.run(renew, { confirm: async () => { approvals++; return true; } });
+  assert.equal(approvals, 1);
+  const updated = JSON.parse(await readFile(updatedPath, 'utf8'));
+  assert.equal(updated.verified, false);
+  assert.equal(updated.executionTrust, 'local-owner-v1');
+  for (const key of ['control', 'stateDirectory', 'automationWorkflowIds', 'migrationAttested',
+    'projectId', 'workflowId', 'appHostId', 'worktreeRoot', 'workerId', 'role']) assert.deepEqual(updated[key], old[key], key);
+  assert.equal(await readFile(path.join(old.stateDirectory, 'journal.json'), 'utf8'), history);
+  for (const [file, content] of oldFiles) assert.equal(await readFile(path.join(oldDirectory, file), 'utf8'), content);
+  const another = { ...renew, 'host-config': path.join(f.root, 'another-renewal', 'host.json') };
+  await assert.rejects(f.run({ ...another, 'workflow-id': otherWorkflow }), /cannot change workflowId/);
+  await assert.rejects(f.run({ ...another, 'mailbox-ref': 'heads/another' }), /cannot change control/);
+  await assert.rejects(f.run({ ...another, 'previous-host-config': undefined }), /requires --previous-host-config/);
 });
 
 test('role registries cannot multiply quotas, mismatch platform or leak private fields', async (t) => {
@@ -271,7 +310,7 @@ test('new destination identity needs no shared policy edit and stays unverified'
   assert.match(result.activationBlockers[0], /not attested/);
   const directory = path.dirname(f.options['host-config']);
   const prompt = await readFile(path.join(directory, 'workflow-prompt.txt'), 'utf8');
-  assert.match(prompt, /CURRENT executing automation/);
+  assert.match(prompt, /owner-configured deployment assertions/);
   assert.ok(prompt.includes(`WORKFLOW=${otherWorkflow}`));
   assert.ok(!prompt.includes(workflow));
   assert.equal(JSON.parse(await readFile(f.options['host-config'], 'utf8')).verified, false);

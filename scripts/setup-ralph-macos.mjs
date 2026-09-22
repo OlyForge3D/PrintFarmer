@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { createInterface } from 'node:readline/promises';
 import { pathToFileURL } from 'node:url';
-import { promisify } from 'node:util';
+import { isDeepStrictEqual, promisify } from 'node:util';
 
 const exec = promisify(execFile);
 const repository = 'OlyForge3D/PrintFarmer';
@@ -33,6 +33,7 @@ export const help = `Usage: node setup-ralph-macos.mjs [--dry-run | --apply] [--
   --approved-policy FULL_SHA     Optional exact candidate override (advanced)
   --renew-policy                 Explicitly review a policy approval renewal
   --previous-approval ABS_JSON    Read old approval; stage renewal in a NEW directory
+  --previous-host-config ABS_JSON Preserve native bindings/control/history on renewal
   --role coordinator|consumer   Stage the native mailbox role package (all five
   --worker-id ID                 role options required; coordinator lives on Mac)
   --worker-registry ABS_JSON    Private approved worker/writer registry
@@ -77,7 +78,7 @@ export function parseArgs(args) {
   const values = new Set([
     'repo', 'host-config', 'project-id', 'workflow-id', 'app-host-id',
     'worktree-root', 'cache-dir', 'github-login', 'approved-policy', 'previous-approval',
-    'role', 'worker-id', 'worker-registry', 'control-repo', 'mailbox-ref',
+    'role', 'worker-id', 'worker-registry', 'control-repo', 'mailbox-ref', 'previous-host-config',
   ]);
   for (let index = 0; index < args.length; index++) {
     const name = args[index].replace(/^--/, '');
@@ -94,7 +95,7 @@ export function parseArgs(args) {
   }
   if (options.apply && options['dry-run']) throw new Error('Choose --apply or --dry-run, not both.');
   for (const name of values) {
-    if (!['approved-policy', 'previous-approval', 'role', 'worker-id', 'worker-registry', 'control-repo', 'mailbox-ref'].includes(name) && !options[name]) throw new Error(`Missing --${name}; use --help.`);
+    if (!['approved-policy', 'previous-approval', 'previous-host-config', 'role', 'worker-id', 'worker-registry', 'control-repo', 'mailbox-ref'].includes(name) && !options[name]) throw new Error(`Missing --${name}; use --help.`);
   }
   for (const name of ['repo', 'host-config', 'worktree-root', 'cache-dir']) absolute(options[name], name);
   for (const name of ['project-id', 'workflow-id']) {
@@ -109,6 +110,14 @@ export function parseArgs(args) {
     throw new Error('Renewal requires both --renew-policy and --previous-approval, with --host-config in a NEW private directory.');
   }
   if (options['previous-approval']) absolute(options['previous-approval'], 'Previous approval');
+  if (options['previous-host-config']) {
+    absolute(options['previous-host-config'], 'Previous host config');
+    if (!options['renew-policy'] || !options.role ||
+        path.dirname(options['previous-host-config']) !== path.dirname(options['previous-approval']) ||
+        path.dirname(options['previous-host-config']) === path.dirname(options['host-config'])) {
+      throw new Error('Previous host config requires native policy renewal, its adjacent old approval, and a NEW output directory.');
+    }
+  }
   if (['role', 'worker-id', 'worker-registry', 'control-repo', 'mailbox-ref'].some((key) => options[key])) {
     if (!['role', 'worker-id', 'worker-registry', 'control-repo', 'mailbox-ref'].every((key) => options[key]) ||
         !['coordinator', 'consumer'].includes(options.role) ||
@@ -310,7 +319,7 @@ export async function validatePolicy(options, command, development) {
   if (options.role) {
     if (!prompt.includes('Read .copilot/skills/ralph-loop/automation.md')) throw new Error('Approved bootstrap lacks the exact role-routing boundary.');
     rolePrompt = await git(['show', `${approved}:${policyDirectory}/native-roles.md`]);
-    if (!rolePrompt.includes('NATIVE-MAILBOX-ROLE-V1')) throw new Error('Approved policy lacks the implemented native role contract.');
+    if (!rolePrompt.includes('NATIVE-MAILBOX-ROLE-V2')) throw new Error('Approved policy lacks the supported local-owner native role contract; renew the policy.');
     for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs']) {
       await git(['cat-file', '-e', `${approved}:scripts/ci/${file}`]);
     }
@@ -318,7 +327,7 @@ export async function validatePolicy(options, command, development) {
   return { profile, policyVersion: policy.policyVersion, prompt, rolePrompt, development: head, manifest };
 }
 
-function artifacts(options, policy, deployment) {
+function artifacts(options, policy, deployment, previous) {
   const workflow = options['workflow-id'];
   const approved = options['approved-policy'];
   const config = {
@@ -330,8 +339,21 @@ function artifacts(options, policy, deployment) {
     role: options.role, workerId: options['worker-id'], control: deployment.control,
     stateDirectory: path.join(path.dirname(options['host-config']), 'native-state'),
     approvedPolicy: approved, migrationAttested: false,
+    executionTrust: 'local-owner-v1',
     automationWorkflowIds: [workflow],
   });
+  if (previous) {
+    for (const key of ['host', 'role', 'workerId', 'workflowId', 'projectId', 'appHostId', 'worktreeRoot']) {
+      if (previous[key] !== config[key]) throw new Error(`Renewal cannot change ${key}; reconcile deployment changes separately.`);
+    }
+    const { genesisSha, ...oldControl } = previous.control;
+    if (!isDeepStrictEqual(oldControl, deployment.control)) throw new Error('Renewal cannot change control authority, registry or repository identity.');
+    if (genesisSha !== undefined && !shaPattern.test(genesisSha)) throw new Error('Invalid existing genesis; reconcile without replacing it.');
+    config.control = previous.control;
+    config.stateDirectory = absolute(previous.stateDirectory, 'Existing native state directory');
+    config.automationWorkflowIds = previous.automationWorkflowIds;
+    config.migrationAttested = previous.migrationAttested === true;
+  }
   const quote = config.host === 'windows-general' ? (value) => `'${value.replaceAll("'", "''")}'` : shellQuote;
   const command = `node scripts/ci/ralph-automation.mjs preflight --host ${config.host} --workflow ${quote(workflow)} --host-config ${quote(options['host-config'])} --approved-policy ${approved}`;
   const bootstrap = policy.prompt
@@ -342,7 +364,7 @@ function artifacts(options, policy, deployment) {
   if (bootstrap.includes('--approved-policy POLICY_COMMIT') || /<[^>]+>/.test(bootstrap)) {
     throw new Error('Bootstrap template substitution failed; no files written.');
   }
-  const prompt = deployment ? `NATIVE-MAILBOX-ROLE-V1
+  const prompt = deployment ? `NATIVE-MAILBOX-ROLE-V2
 Run exactly one ${options.role} round, then exit. Private host config: ${JSON.stringify(options['host-config'])}.
 Approved outer/preflight policy commit: ${approved}. Worker ID: ${options['worker-id']}.
 Do NOT follow the legacy host dispatcher instructions. Apply these guards FIRST:
@@ -350,7 +372,9 @@ ${bootstrap.split('Read .copilot/skills/ralph-loop/automation.md')[0]}
 After those guards and non-authorizing preflight, follow ONLY
 .copilot/skills/ralph-loop/native-roles.md, role ${options.role}.
 All runtime commands use --host-config ${JSON.stringify(options['host-config'])}.
-Missing CURRENT native invocation identity means blocked, not inferred identity.
+Workflow/project/environment IDs are owner-configured deployment assertions,
+NOT independently authenticated current execution facts. Use local-owner-v1.
+Acquire a fresh atomic begin-round token; the worktree path is NOT a round lock.
 This workflow may remain disabled pending native attestation, pinned private
 queue genesis and explicitly verified authority migration. No activation is
 implied by this saved prompt. No SSH, CLI worker or remote app session creation.
@@ -362,7 +386,7 @@ implied by this saved prompt. No SSH, CLI worker or remote app session creation.
     reasoning_effort: 'medium', interval: 'manual', cron_expression: '40 * * * *',
     prompt,
   };
-  const handoff = deployment ? `NATIVE-MAILBOX-ROLE-V1 setup only. Do not run the workflow prompt.
+  const handoff = deployment ? `NATIVE-MAILBOX-ROLE-V2 setup only. Do not run the workflow prompt.
 Use supported native tools ON THIS DEVICE to verify and save workflow-settings.json
 to the existing workflow ${workflow}, always enabled:false, and read it back.
 Verify project/environment/worktree bindings from actual native app records.
@@ -374,18 +398,27 @@ Coordinator performs global triage and reservation; consumers only assigned work
 Control repository ${deployment.control.repository} numeric ID ${deployment.control.repositoryId}
 was observed PRIVATE. No repo/ref/permission changes were made. Read current
 .copilot/skills/ralph-loop/native-roles.md for the exact initialization, native
-identity, local journal and reconciliation contracts.
+local-owner trust, local journal and reconciliation contracts.
 The owner explicitly accepts shared-writer trust: any approved private repo writer
 can technically impersonate a role. Do not describe this as independent authentication.
 No signing keys. Keep credentials, native session IDs, paths and prompts OFF the queue.
-Registry and bindings are unverified claims pending native/owner attestation.
+Registry and bindings are deployment assertions pending explicit owner acceptance.
+The app has NO supported in-session current-automation identity API. Do not invent
+native.actual or env metadata. Explicitly accept executionTrust:local-owner-v1:
+approved local code/config and the same local account/shared GitHub writers are
+trusted. Filesystem checks establish context/isolation, not unique invocation.
+The runtime atomically issues a one-time round token and persists its digest;
+same-worktree competitors cannot reacquire it. Lost acquisition requires recovery.
 After native bindings and all old authorities/Windows ledgers/workers are reconciled
 with proven terminal or explicitly fenced handoff evidence, the owner may attest
 migrationAttested:true and verified:true. These attestations are prerequisites for
 initialization, not permission to write the queue. The owner must separately
-authorize a current native coordinator invocation to initialize the private queue.
+authorize manual coordinator initialization from an approved isolated worktree,
+using the supported terminal and runtime initialize request; no workflow run or
+current-automation association is required. Follow native-roles.md's exact request.
 Pin its returned genesis SHA in EVERY role's private control config before ordinary
 rounds. Never initialize on an existing ref or retry uncertain init.
+${previous ? 'RENEWAL: existing control/genesis, migration attestation and native-state path were retained. Old package/approval/journal/claims were NOT modified or copied. verified remains false until explicit acceptance of this new contract. Reconcile old active rounds; do not reset state or invent tokens.' : ''}
 Do not fabricate evidence, infer cessation from disabled schedules or copy ledgers.
 Keep source and destination schedules and Reaper disabled. Activation and any live
 queue initialization/write require separate explicit authorization.
@@ -436,16 +469,12 @@ policy comparisons and untracked checks, quoting 'scripts/ci/ralph-*.mjs' as a G
 pathspec. Then run ONLY this non-dispatching preflight at that worktree's root:
 ${command}
 Preflight fetches origin; it must return dispatchAuthorized:false and
-nativeIdentityVerified:false. A manually created verification session is NOT an
-automation invocation; it cannot satisfy the current-execution identity gate.
+nativeIdentityVerified:false. This does not authenticate a current automation.
 Do not follow the generated prompt into a round. A successful preflight is NOT
 proof of native identity or ownership; retain the attestation evidence separately.
-At every subsequently authorized automation invocation, supported native tools or
-runtime metadata MUST identify the CURRENT executing automation, its workflow,
-project, environment and isolated worktree. Looking up a supplied workflow alone
-is insufficient. Missing current-execution association means report blocked and
-exit, even with verified:true. Follow bootstrap.md's fresh identity-check contract;
-it compares observations but cannot authenticate caller-provided JSON by itself.
+The legacy dispatcher must remain disabled. Stage explicit native coordinator/
+consumer packages for owner-configured role execution; current-automation identity
+is not exposed by the supported app and must never be fabricated.
 
 CUTOVER: cold cache only; never copy session DBs, worktrees, ledgers or caches.
 Keep old Ralph disabled and retain all historical state. Reaper remains disabled
@@ -500,6 +529,7 @@ export async function setup(options, {
 } = {}) {
   if (platform !== 'darwin' && !(platform === 'win32' && options.role === 'consumer')) throw new Error('Run destination setup on macOS, or native consumer setup on Windows.');
   if (platform === 'win32' && options.clone) throw new Error('Register/clone the Windows project through supported native setup first; this helper will only read an existing Windows checkout.');
+  if (options.role && options['renew-policy'] && !options['previous-host-config']) throw new Error('Native renewal requires --previous-host-config to preserve authority, bindings and native history.');
   if (Number(nodeVersion.split('.')[0]) < 20) throw new Error('Node >=20 is required; install it manually.');
   const directory = path.dirname(options['host-config']);
   const directories = [options.repo, options['worktree-root'], options['cache-dir'], directory];
@@ -514,6 +544,21 @@ export async function setup(options, {
     throw new Error('Cache must be new or empty. Choose a new cold-cache path; do not delete/copy an existing cache.');
   }
   await checkPath(options['host-config'], 'file');
+  let previous, previousContent;
+  if (options['previous-host-config']) {
+    await checkPath(options['previous-host-config'], 'file');
+    await outsideCheckout(path.dirname(options['previous-host-config']));
+    previousContent = await readFile(options['previous-host-config'], 'utf8');
+    await checkOutputs(new Map([[options['previous-host-config'], previousContent]]));
+    previous = JSON.parse(previousContent);
+    if (!previous.control || !previous.stateDirectory) throw new Error('Existing native package required for preservation-first renewal.');
+    if (path.basename(previous.stateDirectory) !== 'native-state' ||
+        directories.some((target) => overlaps(target, previous.stateDirectory))) {
+      throw new Error('Retained native-state must be disjoint from the new package, checkout, worktrees and cold cache.');
+    }
+    await checkPath(previous.stateDirectory);
+    await outsideCheckout(previous.stateDirectory);
+  }
   const blockers = [];
   const probe = async (action, remediation) => {
     try { return await action(); }
@@ -638,7 +683,7 @@ export async function setup(options, {
       : `git -C ${shellQuote(options.repo)} show ${approved}:${policyDirectory}/automation.md`,
     authorizes: 'Only these immutable policy contents. NOT native identity attestation, cutover, a Ralph round or schedule activation.',
   };
-  const files = artifacts(options, policy, deployment);
+  const files = artifacts(options, policy, deployment, previous);
   if (files.size !== 4 || files.has(approvalPath)) throw new Error('Host config filename conflicts with a generated handoff filename.');
   await checkOutputs(files);
   if (needsApproval && !options.apply) {
@@ -650,6 +695,7 @@ export async function setup(options, {
   }
   if (needsApproval && await confirm(review) !== true) throw new Error('Policy approval refused; no approval, config or handoff files written.');
   const ensureUnchanged = async () => {
+    if (previous && await readFile(options['previous-host-config'], 'utf8') !== previousContent) throw new Error('Existing host config changed during renewal; refusing stale preservation.');
     if (deployment) {
       const metadata = JSON.parse(await command('gh', ['api', '--hostname', 'github.com', `repos/${deployment.control.repository}`]));
       if (metadata.id !== deployment.control.repositoryId || metadata.full_name !== deployment.control.repository ||
@@ -709,10 +755,10 @@ export async function setup(options, {
     files: [...files.keys()], development: policy.development,
     activationBlockers: [
       'Native app bindings, sign-in/model availability and sole-owner/terminal handoff are not attested. Config remains verified:false; no preflight/round/schedule executed.',
-      'Every round requires supported native proof of its CURRENT execution identity. Unavailable or mismatched identity blocks mutations; configuration strings are not proof.',
+      'Explicit local-owner-v1 acceptance is required. Configuration IDs are deployment assertions, not independent current-execution identity. Every round needs an atomically acquired token.',
       ...(deployment ? ['Before first ready, verify both mini coordinator/consumer workflow IDs natively and put both in automationWorkflowIds in each mini package; Windows lists only its verified local consumer. Unverified IDs cannot exempt sessions.'] : []),
       deployment
-        ? 'Native role package staged only: private queue genesis, reconciled legacy authority migration and actual runtime invocation identity are required. No queue writes or activation performed.'
+        ? 'Native role package staged only: pinned private queue genesis, reconciled legacy authority migration and local-owner acceptance are required. No queue writes or activation performed.'
         : 'Legacy package cannot activate the new coordinator/consumer architecture. Use --role with explicit private control repository and worker registry.',
     ],
   };
