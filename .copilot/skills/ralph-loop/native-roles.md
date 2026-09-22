@@ -414,10 +414,12 @@ reconciliation and a new nonconflicting reservation, never editing a live task.
 
 ### Validated Specialist Dispatch
 
-`RALPH-ASSIGNED-WORKER-V1` separates the registered native **Squad** agent from
-the issue's logical specialist. The consumer does not pass `Dallas`, `Lambert`,
-etc. as custom-agent names. Squad's bounded entrypoint performs the assigned
-member's work directly; its normal coordinator fan-out and fallback do not run.
+`RALPH-ASSIGNED-WORKER-V1` separates the PrintFarmer-owned native **Ralph Worker**
+agent from the issue's logical Squad specialist. The consumer does not pass
+`Squad`, `Dallas`, `Lambert`, etc. as custom-agent names. Ralph Worker performs
+the assigned member's work directly using that member's charter; it does not
+invoke Squad or run coordinator fan-out and fallback. Squad's distribution-owned
+agent is unchanged and is not a dependency of this bounded entrypoint.
 See [assigned-worker.md](assigned-worker.md).
 
 New reservation evidence must contain `scope` (`general`, `mobile`, `mixed` or
@@ -427,7 +429,7 @@ Omitted fields block before capacity is consumed. Never change a live binding's
 classification to recover credits.
 
 Both `ready` and kickoff evidence include `nativeCapabilities`, obtained from
-the actual exposed app tools: `createSession:true`, `agents:["Squad"]`, and
+the actual exposed app tools: `createSession:true`, `agents:["Ralph Worker"]`, and
 `models` mapping advertised model IDs to their supported reasoning-effort values.
 This is local-owner capability evidence, not an independent service identity.
 Do not invent support.
@@ -439,7 +441,7 @@ charter, resolves model/effort and returns a **non-authorizing** plan.
 The macOS Dallas host override remains Astra/xhigh; otherwise explicit Squad
 overrides win, a configured model effort suffix is normalized, and unspecified
 effort is explicitly medium. Unsupported/conflicting values block, never fall back.
-Charters and the Squad entrypoint are approved controlled policy paths.
+Charters and the Ralph Worker entrypoint are approved controlled policy paths.
 
 The successful starting receipt recomputes and privately persists that plan.
 Only its `nativeCreateAllowed:true` response permits one call to the returned
@@ -449,7 +451,7 @@ new isolated worktree; **never the native PR-opening tool**, whose implicit reus
 or mutate an unrelated native session. Fresh evidence includes `prState:"open"`,
 `prHeadRepository:"OlyForge3D/PrintFarmer"`, `prHeadRef`, `prHeadSha` matching the
 task, and `prWorkerPolicyDigest`. Compute that digest from the immutable PR head:
-the SHA-256 text hashes of `.github/agents/squad.agent.md`, this member's charter,
+the SHA-256 text hashes of `.github/agents/ralph-worker.agent.md`, this member's charter,
 and `.copilot/skills/ralph-loop/assigned-worker.md`, serialized as
 `{agentSha256,contractSha256,charterSha256}` in that order using mailbox `digest`.
 Normalize CRLF to LF for these policy-text hashes (and `charterSha256`) on both

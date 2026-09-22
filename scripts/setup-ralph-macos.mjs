@@ -17,7 +17,7 @@ const policyPaths = [
   policyDirectory, '.github/copilot-instructions.md', '.squad/config.json',
   'scripts/ci/ralph-*.mjs', 'scripts/ci/verify-squad-verdict.mjs',
 ];
-const specialistPolicyPaths = ['.github/agents/squad.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md'];
+const specialistPolicyPaths = ['.github/agents/ralph-worker.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md'];
 const resolverPaths = ['scripts/ci/resolve-ios-simulator.sh', 'scripts/common-utils.sh'];
 const shaPattern = /^[0-9a-f]{40}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -328,9 +328,9 @@ export async function validatePolicy(options, command, development) {
     for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs']) {
       await git(['cat-file', '-e', `${approved}:scripts/ci/${file}`]);
     }
-    const squadAgent = await git(['show', `${approved}:.github/agents/squad.agent.md`]);
-    if (!/^name: Squad$/m.test(squadAgent) || !squadAgent.includes('RALPH-ASSIGNED-WORKER-V1')) {
-      throw new Error('Approved Squad agent lacks the bounded specialist entrypoint.');
+    const workerAgent = await git(['show', `${approved}:.github/agents/ralph-worker.agent.md`]);
+    if (!/^name: Ralph Worker$/m.test(workerAgent) || !workerAgent.includes('RALPH-ASSIGNED-WORKER-V1')) {
+      throw new Error('Approved Ralph Worker agent lacks the bounded specialist entrypoint.');
     }
   }
   return { profile, policyVersion: policy.policyVersion, prompt, rolePrompt, development: head, manifest };
@@ -470,8 +470,9 @@ Coordinator verifies the committed proof digest, then withdraws only that bindin
 Do not repeatedly revoke a refreshed offer for the same already-reported blocker.
 Publish fresh ready AFTER recovery reports; do not infer credits from revoked offers.
 For kickoff use dispatch-plan and the plan returned by the successful starting
-receipt. The registered agent is Squad in RALPH-ASSIGNED-WORKER-V1 mode, not Dallas
-or another logical member name. No coordinator fan-out or unaccounted task agents.
+receipt. The registered agent is Ralph Worker in RALPH-ASSIGNED-WORKER-V1 mode,
+not Squad, Dallas or another logical member name. It executes the named member's
+charter directly. No coordinator fan-out or unaccounted task agents.
 Pass nativeCapabilities from the actual exposed native tools/agents/models, never
 invent availability. Record every returned creation handle with record-creation,
 including partial failures, before attempting startup recovery. Never retry creation.
@@ -770,7 +771,7 @@ export async function setup(options, {
   const saved = await readApproval(previousPath);
   const savedIncludesSpecialists = saved?.record.controlledPaths.includes(specialistPolicyPaths[0]);
   if (saved && !savedIncludesSpecialists && !options['renew-policy']) {
-    throw new Error('Saved scope predates bounded Squad dispatch; interactive policy renewal is required.');
+    throw new Error('Saved scope predates Ralph Worker dispatch; interactive policy renewal is required.');
   }
   if (options['renew-policy'] && !saved) throw new Error('--previous-approval does not exist; cannot review a renewal without its baseline.');
   if (options['renew-policy'] && await statIfExists(directory)) {

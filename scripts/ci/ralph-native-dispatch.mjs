@@ -16,9 +16,9 @@ export function validateClassification(evidence) {
 export function validateNativeCapabilities(evidence) {
   const native = evidence?.nativeCapabilities;
   if (native?.createSession !== true || !Array.isArray(native.agents) ||
-      !native.agents.includes('Squad') || !native.models || typeof native.models !== 'object' ||
+      !native.agents.includes('Ralph Worker') || !native.models || typeof native.models !== 'object' ||
       Array.isArray(native.models)) {
-    fail('Supported create_session, registered Squad agent and advertised model/effort capabilities required.');
+    fail('Supported create_session, registered Ralph Worker agent and advertised model/effort capabilities required.');
   }
   return native;
 }
@@ -34,13 +34,13 @@ export async function buildDispatchPlan({ config, evidence, assignment, correlat
     readFile(path.join(cwd, '.squad/config.json'), 'utf8').then(JSON.parse),
     readFile(path.join(cwd, '.copilot/skills/ralph-loop/hosts.json'), 'utf8').then(JSON.parse),
     readFile(path.join(cwd, charterPath), 'utf8'),
-    readFile(path.join(cwd, '.github/agents/squad.agent.md'), 'utf8'),
+    readFile(path.join(cwd, '.github/agents/ralph-worker.agent.md'), 'utf8'),
     readFile(path.join(cwd, '.copilot/skills/ralph-loop/assigned-worker.md'), 'utf8'),
     config.host === 'macos-mobile'
       ? readFile(path.join(cwd, '.copilot/skills/ralph-loop/macos-kickoff.md'), 'utf8') : '',
   ]);
-  if (!/^name: Squad$/m.test(agent) || !agent.includes('RALPH-ASSIGNED-WORKER-V1') || !charter.trim()) {
-    fail('Registered Squad bounded-worker entrypoint and nonempty specialist charter required.');
+  if (!/^name: Ralph Worker$/m.test(agent) || !agent.includes('RALPH-ASSIGNED-WORKER-V1') || !charter.trim()) {
+    fail('Registered Ralph Worker entrypoint and nonempty specialist charter required.');
   }
   const workerPolicyDigest = digest({
     agentSha256: policyTextDigest(agent), contractSha256: policyTextDigest(workerContract), charterSha256: policyTextDigest(charter),
@@ -102,7 +102,7 @@ ${clauses}`;
     project_id: config.projectId, workspace_type: 'worktree',
     base_branch: packet.sourceRef, coordinate_with_creator: true, notify_on_idle: 'once',
     name: `${member} ${packet.purpose} ${packet.issue ?? packet.pr}`.slice(0, 40),
-    kickoff: { agent: 'Squad', model, reasoning_effort: effort, mode: 'autopilot', prompt },
+    kickoff: { agent: 'Ralph Worker', model, reasoning_effort: effort, mode: 'autopilot', prompt },
   };
   const nativeTool = 'create_session';
   const nativeArguments = createSession;

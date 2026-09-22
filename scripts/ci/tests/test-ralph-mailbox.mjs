@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -24,7 +24,7 @@ const baseControl = {
 };
 const now = Date.now();
 const nativeCapabilities = {
-  createSession: true, openPrSession: true, agents: ['Squad'],
+  createSession: true, openPrSession: true, agents: ['Ralph Worker'],
   models: { 'gpt-6-astra': ['medium', 'xhigh', 'max'], 'claude-opus-4.7': ['medium', 'xhigh'] },
 };
 let next = 0;
@@ -70,7 +70,7 @@ test('policy-text hashes agree across Windows CRLF checkouts and Git LF blobs wi
   assert.notEqual(policyTextDigest('name: Squad'), policyTextDigest('name: Squad\n'));
 });
 
-test('dispatch separates native Squad agent, charter owner, category and explicit host model', async () => {
+test('dispatch separates native Ralph Worker agent, Squad charter owner, category and explicit host model', async () => {
   const source = { ...evidence(), labels: ['squad:dallas', 'go:needs-research', 'type:bug', 'priority:p1'] };
   const task = taskFromEvidence(source);
   const assignment = { assignmentId: 'research-1', generation: 1, task, taskDigest: digest(task) };
@@ -78,7 +78,7 @@ test('dispatch separates native Squad agent, charter owner, category and explici
   const args = { config, assignment, correlation: 'correlation-1', owner: 'squad:dallas', evidence: source, cwd: process.cwd() };
   const plan = await buildDispatchPlan(args);
   assert.equal(plan.nativeTool, 'create_session');
-  assert.equal(plan.nativeArguments.kickoff.agent, 'Squad');
+  assert.equal(plan.nativeArguments.kickoff.agent, 'Ralph Worker');
   assert.equal(plan.nativeArguments.kickoff.model, 'gpt-6-astra');
   assert.equal(plan.nativeArguments.kickoff.reasoning_effort, 'xhigh');
   assert.equal(plan.packet.member, 'dallas');
@@ -89,7 +89,8 @@ test('dispatch separates native Squad agent, charter owner, category and explici
   assert.match(plan.continuation, /no implementation, edits, commits, PRs/);
   assert.match(plan.continuation, /When your work is complete/);
   for (const change of [
-    { agents: ['Dallas'] }, { models: { 'gpt-6-astra': ['medium'] } }, { createSession: false },
+    { agents: ['Squad'] }, { agents: ['Dallas'] }, { agents: [] },
+    { models: { 'gpt-6-astra': ['medium'] } }, { createSession: false },
   ]) await assert.rejects(buildDispatchPlan({
     ...args, evidence: { ...source, nativeCapabilities: { ...nativeCapabilities, ...change } },
   }), /blocked/);
@@ -130,6 +131,39 @@ test('dispatch separates native Squad agent, charter owner, category and explici
     { configuration: { ...ack.configuration, reasoningEffort: 'medium' } },
     { configuration: { ...ack.configuration, source: 'failed-create-request' } },
   ]) assert.throws(() => validateStartup(plan, { ...ack, ...change }), /ACK|model\/effort/);
+});
+
+test('bounded dispatch uses only the PrintFarmer worker, not a Squad coordinator installation', async (t) => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'ralph-worker-policy-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const agentPath = '.github/agents/ralph-worker.agent.md';
+  for (const file of [
+    '.squad/config.json', '.squad/agents/dallas/charter.md',
+    '.copilot/skills/ralph-loop/hosts.json', '.copilot/skills/ralph-loop/macos-kickoff.md',
+    '.copilot/skills/ralph-loop/assigned-worker.md', agentPath,
+  ]) {
+    await mkdir(path.dirname(path.join(cwd, file)), { recursive: true });
+    await writeFile(path.join(cwd, file), await readFile(file));
+  }
+  const source = { ...evidence(), labels: ['squad:dallas', 'go:needs-research', 'type:bug', 'priority:p1'] };
+  const task = taskFromEvidence(source);
+  const args = {
+    cwd, config: { host: 'macos-mobile', projectId: 'project-fixture', approvedPolicy: 'a'.repeat(40) },
+    assignment: { assignmentId: 'research-worker', generation: 1, task, taskDigest: digest(task) },
+    correlation: 'worker-correlation', owner: 'squad:dallas', evidence: source,
+  };
+  const plan = await buildDispatchPlan(args);
+  assert.equal(plan.nativeArguments.kickoff.agent, 'Ralph Worker');
+  const worker = await readFile(path.join(cwd, agentPath), 'utf8');
+  assert.match(worker, /Do not invoke Squad, another custom agent, task agents or child sessions/);
+  await writeFile(path.join(cwd, '.github/agents/squad.agent.md'), 'unrelated distribution update\n');
+  assert.deepEqual(await buildDispatchPlan(args), plan);
+  await writeFile(path.join(cwd, agentPath), `${worker}\nChanged worker policy.\n`);
+  assert.notEqual((await buildDispatchPlan(args)).packet.workerPolicyDigest, plan.packet.workerPolicyDigest);
+  await writeFile(path.join(cwd, agentPath), worker.replace('name: Ralph Worker', 'name: Squad'));
+  await assert.rejects(buildDispatchPlan(args), /Registered Ralph Worker entrypoint/);
+  await rm(path.join(cwd, agentPath));
+  await assert.rejects(buildDispatchPlan(args), { code: 'ENOENT' });
 });
 function advance(state, value) { return applyEvent(state, value, { now }); }
 function withRounds() {
@@ -860,7 +894,7 @@ test('two research lifecycles select the specialist, persist findings, settle an
   }
   assert.equal(nativeCalls.length, 2);
   assert.ok(nativeCalls.every(({ arguments: args }) =>
-    args.kickoff.agent === 'Squad' && args.kickoff.model === 'gpt-6-astra' && args.kickoff.reasoning_effort === 'xhigh'));
+    args.kickoff.agent === 'Ralph Worker' && args.kickoff.model === 'gpt-6-astra' && args.kickoff.reasoning_effort === 'xhigh'));
   const mailbox = await readMailbox(coordinator.control, f.github.api);
   assert.deepEqual(mailbox.state.rounds, {});
   assert.equal(JSON.stringify(mailbox).includes('charterSha256'), false);

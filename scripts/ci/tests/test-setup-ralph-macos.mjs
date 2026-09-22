@@ -7,13 +7,13 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
 import { confirmPolicy, help, parseArgs, runCommand, setup, validatePolicy } from '../../setup-ralph-macos.mjs';
-import { resolveAutomationHost } from '../ralph-automation.mjs';
+import { policyPaths, resolveAutomationHost } from '../ralph-automation.mjs';
 
 const exec = promisify(execFile);
 const policy = JSON.parse(await readFile('.copilot/skills/ralph-loop/hosts.json', 'utf8'));
 const bootstrap = await readFile('.copilot/skills/ralph-loop/bootstrap.md', 'utf8');
 const nativeRoles = await readFile('.copilot/skills/ralph-loop/native-roles.md', 'utf8');
-const squadAgent = await readFile('.github/agents/squad.agent.md', 'utf8');
+const workerAgent = await readFile('.github/agents/ralph-worker.agent.md', 'utf8');
 const workflow = 'aaaaaaaa-1111-4222-8333-444444444444';
 const otherWorkflow = '11111111-2222-4333-8444-555555555555';
 
@@ -29,7 +29,7 @@ async function fixture(t) {
     ['.copilot/skills/ralph-loop/hosts.json', JSON.stringify(policy)],
     ['.copilot/skills/ralph-loop/bootstrap.md', bootstrap],
     ['.copilot/skills/ralph-loop/native-roles.md', nativeRoles],
-    ['.github/agents/squad.agent.md', squadAgent],
+    ['.github/agents/ralph-worker.agent.md', workerAgent],
     ['.github/copilot-instructions.md', 'approved\n'], ['.squad/config.json', '{}\n'],
     ['scripts/ci/ralph-automation.mjs', '// approved fixture\n'],
     ['scripts/ci/ralph-mailbox.mjs', '// approved fixture\n'],
@@ -187,7 +187,15 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.match(settings.prompt, /does not require sub-minute consumer timing/);
     assert.match(settings.prompt, /scope and classificationComplete/);
     assert.match(settings.prompt, /new Date\(\)\.toISOString\(\)/);
-    assert.match(settings.prompt, /registered agent is Squad in RALPH-ASSIGNED-WORKER-V1/);
+    assert.match(settings.prompt, /registered agent is Ralph Worker in RALPH-ASSIGNED-WORKER-V1/);
+    assert.match(settings.prompt, /not Squad, Dallas or another logical member name/);
+    const approval = JSON.parse(await readFile(path.join(path.dirname(f.options['host-config']), 'policy-approval.json'), 'utf8'));
+    assert.ok(approval.controlledPaths.includes('.github/agents/ralph-worker.agent.md'));
+    assert.ok(!approval.controlledPaths.includes('.github/agents/squad.agent.md'));
+    assert.ok(policyPaths.includes('.github/agents/ralph-worker.agent.md'));
+    assert.ok(!policyPaths.includes('.github/agents/squad.agent.md'));
+    assert.match(bootstrap, /\.github\/agents\/ralph-worker\.agent\.md/);
+    assert.doesNotMatch(bootstrap, /\.github\/agents\/squad\.agent\.md/);
     assert.match(settings.prompt, /record-creation/);
     assert.match(settings.prompt, /startup-check/);
     assert.match(settings.prompt, /prestart-proof/);
@@ -213,6 +221,23 @@ test('native prompt generation rejects a pin without the owned-lineage contract 
   const options = await nativeOptions(f);
   await assert.rejects(f.run({ ...options, 'approved-policy': f.state.development, apply: true }), /lacks Ralph-owned lineage inventory/);
   await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
+});
+
+test('native prompt generation rejects missing or invalid Ralph Worker definitions before writing', async (t) => {
+  for (const contents of [undefined, '---\nname: Squad\n---\nRALPH-ASSIGNED-WORKER-V1\n', '---\nname: Ralph Worker\n---\n']) {
+    const f = await fixture(t);
+    const agentPath = path.join(f.repo, '.github/agents/ralph-worker.agent.md');
+    if (contents === undefined) await rm(agentPath);
+    else await writeFile(agentPath, contents);
+    await f.git(['add', '.']);
+    await f.git(['commit', '-qm', 'Invalid worker definition']);
+    f.state.development = await f.git(['rev-parse', 'HEAD']);
+    f.state.comparison = { status: 'identical', merge_base_commit: { sha: f.state.development }, files: [] };
+    const options = await nativeOptions(f);
+    await assert.rejects(f.run({ ...options, 'approved-policy': f.state.development, apply: true }),
+      /ralph-worker\.agent\.md|Approved Ralph Worker agent lacks/);
+    await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
+  }
 });
 
 test('native setup rejects public/wrong/unwritable control repo and approval-time changes', async (t) => {
@@ -293,7 +318,7 @@ test('consumer renewal retains bounded recovery without coordinator label or res
   }
 });
 
-test('legacy approval scope is a renewal baseline, not approval for the newly controlled Squad entrypoint', async (t) => {
+test('legacy approval scope is a renewal baseline, not approval for the newly controlled Ralph Worker entrypoint', async (t) => {
   const f = await fixture(t);
   const options = await nativeOptions(f);
   let review;
@@ -301,9 +326,9 @@ test('legacy approval scope is a renewal baseline, not approval for the newly co
   const approvalPath = path.join(path.dirname(f.options['host-config']), 'policy-approval.json');
   const legacy = JSON.parse(await readFile(approvalPath, 'utf8'));
   legacy.controlledPaths = legacy.controlledPaths.filter((entry) =>
-    !['.github/agents/squad.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md'].includes(entry));
+    !['.github/agents/ralph-worker.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md'].includes(entry));
   legacy.controlledContentSha256 = createHash('sha256').update(JSON.stringify(
-    review.controlledFiles.filter((file) => file.path !== '.github/agents/squad.agent.md'),
+    review.controlledFiles.filter((file) => file.path !== '.github/agents/ralph-worker.agent.md'),
   )).digest('hex');
   await writeFile(approvalPath, JSON.stringify(legacy), { mode: 0o600 });
   await assert.rejects(f.run({ ...options, apply: true }), /interactive policy renewal/);
@@ -314,7 +339,7 @@ test('legacy approval scope is a renewal baseline, not approval for the newly co
     'host-config': newHost, 'cache-dir': path.join(f.root, 'expanded-cache') }, {
     confirm: async (value) => {
       approvals++;
-      assert.deepEqual(value.newlyControlledPaths, ['.github/agents/squad.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md']);
+      assert.deepEqual(value.newlyControlledPaths, ['.github/agents/ralph-worker.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md']);
       return true;
     },
   });

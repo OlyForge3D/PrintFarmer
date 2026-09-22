@@ -16,8 +16,8 @@ Verify the charter SHA-256 against the packet before acknowledging startup.
 Hash policy text with CRLF normalized to LF, without trimming; Windows checkout
 line endings must not change charter or worker-policy identity. Task/receipt JSON
 digests are not normalized.
-Act as that member in this session; the native agent name remains `Squad`.
-Do not switch to coordinator mode or reinterpret the issue's owner.
+Act as that member in this session; the native agent name is `Ralph Worker`.
+Do not invoke Squad, switch to coordinator mode or reinterpret the issue's owner.
 If your actual model is exposed and differs from the packet, report blocked.
 Report unavailable configuration fields honestly; never claim a requested
 reasoning effort is a runtime observation.

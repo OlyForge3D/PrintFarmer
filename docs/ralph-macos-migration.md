@@ -49,14 +49,19 @@ development helper installs/upgrades software, including when asked to verify.
 
 ### Bounded Specialist Dispatch And Renewal
 
-The native agent is `Squad`; the assigned team member is separately resolved
-from the issue's canonical owner label and loaded charter. The
+The native agent is the PrintFarmer-owned `Ralph Worker`, defined in
+`.github/agents/ralph-worker.agent.md`; the assigned Squad team member is
+separately resolved from the issue's canonical owner label and loaded charter. The
 `RALPH-ASSIGNED-WORKER-V1` entrypoint does that member's work in the reserved
 session, without coordinator fan-out, fallback workers or hidden research agents.
 The runtime generates exact native arguments and explicit model/effort before
 authorizing creation. macOS Dallas remains GPT-6 Astra/xhigh.
+Squad's distribution-owned agent is unchanged and is not invoked by the worker.
+Native capability readback must advertise `Ralph Worker` before dispatch;
+its file's presence alone does not prove registration. If unavailable, report
+blocked rather than substituting Squad or the default agent.
 
-The approval scope now includes the Squad agent entrypoint, member charters and
+The approval scope now includes the Ralph Worker entrypoint, member charters and
 issue-lifecycle contract.
 Older receipts remain valid renewal baselines, but cannot silently approve the
 expanded scope. Review the displayed `newlyControlledPaths` and approve the
