@@ -9,7 +9,7 @@ import {
   publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository,
 } from '../ralph-mailbox.mjs';
 import { prepareEvent, runNativeRequest, validateTriageEvidence } from '../ralph-native-runtime.mjs';
-import { buildDispatchPlan, validateClassification, validateStartup } from '../ralph-native-dispatch.mjs';
+import { buildDispatchPlan, validateClassification, validateStartup, validatePacketAck } from '../ralph-native-dispatch.mjs';
 
 const registry = {
   version: 1, authorityId: 'primary', epoch: 1, writers: ['fixture-owner'],
@@ -87,19 +87,33 @@ test('dispatch separates native Squad agent, charter owner, category and explici
   ]) await assert.rejects(buildDispatchPlan({
     ...args, evidence: { ...source, nativeCapabilities: { ...nativeCapabilities, ...change } },
   }), /blocked/);
-  const prEvidence = { ...source, pr: 12 };
+  const prEvidence = { ...source, pr: 12, prState: 'open', prHeadRepository: 'OlyForge3D/PrintFarmer',
+    prHeadRef: 'fix/existing-pr', prHeadSha: task.headSha, prWorkerPolicyDigest: plan.packet.workerPolicyDigest };
   const prTask = taskFromEvidence(prEvidence);
   const prPlan = await buildDispatchPlan({ ...args, evidence: prEvidence,
     assignment: { ...assignment, task: prTask, taskDigest: digest(prTask) } });
-  assert.equal(prPlan.nativeTool, 'open_pr_session');
-  assert.equal(prPlan.nativeArguments.pr_number, 12);
-  assert.equal(prPlan.nativeArguments.base_branch, undefined);
+  assert.equal(prPlan.nativeTool, 'create_session');
+  assert.equal(prPlan.nativeArguments.workspace_type, 'worktree');
+  assert.equal(prPlan.nativeArguments.base_branch, 'fix/existing-pr');
+  assert.match(prPlan.continuation, /HEAD:refs\/heads\/fix\/existing-pr/);
+  for (const change of [
+    { prState: 'closed' }, { prHeadRepository: 'someone/fork' }, { prHeadSha: 'b'.repeat(40) },
+    { prHeadRef: '--force' }, { prHeadRef: 'bad..ref' }, { prWorkerPolicyDigest: undefined },
+  ]) await assert.rejects(buildDispatchPlan({ ...args, evidence: { ...prEvidence, ...change },
+    assignment: { ...assignment, task: prTask, taskDigest: digest(prTask) } }), /New PR recovery/);
   const ack = {
     dispatchPlanDigest: plan.planDigest,
-    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true },
+    session: { branch: 'fixture-worker' },
+    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true,
+      initialHeadSha: plan.packet.headSha, actualBranch: 'fixture-worker' },
     configuration: { source: 'successful-native-create', model: 'gpt-6-astra', reasoningEffort: 'xhigh' },
   };
   validateStartup(plan, ack);
+  for (const key of Object.keys(plan.packet)) {
+    assert.throws(() => validatePacketAck(plan.packet, { ...plan.packet, [key]: 'mismatch' }), /Packet ACK/);
+  }
+  assert.throws(() => validateStartup(plan, { ...ack,
+    startupAck: { ...ack.startupAck, initialHeadSha: 'b'.repeat(40) } }), /Initial worker HEAD/);
   for (const change of [
     { startupAck: { ...ack.startupAck, member: 'lambert' } },
     { startupAck: { ...ack.startupAck, actualReasoningEffort: 'medium' } },
@@ -249,24 +263,51 @@ test('research gate is actionable, quota-accounted, cannot authorize implementat
     assert.throws(() => taskFromEvidence({ ...evidence(), labels: ['go:needs-research', label] }), /hold/);
     assert.equal(researchDisposition({ labels: ['go:needs-research', label] }).action, 'blocked');
   }
-  const research = { issue: 1, labels: ['go:needs-research'] };
+  const research = { issue: 1, issueState: 'open', githubAssignees: [], labels: ['go:needs-research', 'squad:dallas'] };
   assert.equal(researchDisposition(research).action, 'reserve-research');
   assert.equal(researchDisposition(research, { task, state: 'running' }).action, 'follow-existing-research');
   assert.equal(researchDisposition(research, { task, state: 'terminal' }).action, 'retain-research-gate');
   const findings = {
     summary: 'Verified findings', acceptanceCriteria: ['Concrete implementation acceptance'],
-    remainingBlockers: [], exitCriteriaMet: true, approvalRequired: false, implementationPlanVerified: true,
-    implementationIssue: 2, researchPrUrl: 'https://github.com/OlyForge3D/PrintFarmer/pull/3',
-    researchPrMerged: true, researchHeadSha: 'a'.repeat(40),
+    remainingResearchBlockers: [], exitCriteriaMet: true, approvalRequired: false, implementationPlanVerified: true,
+    researchQuestionsAnswered: true, issueEvidenceReadback: true, issueDescriptionUpdated: true,
+    issueCommentUrl: 'https://github.com/OlyForge3D/PrintFarmer/issues/1#issuecomment-123',
+    repositoryFilesChanged: false, implementationOwner: 'squad:lambert', implementationReady: true,
+    implementationBlockers: [],
   };
   const proposal = researchDisposition({ ...research, findings }, { task, state: 'terminal' });
   assert.equal(proposal.action, 'propose-implementation-readiness');
   assert.equal(proposal.closeIssue, false);
   assert.equal(proposal.mutationAuthorized, false);
-  assert.equal(proposal.issue, 2);
-  for (const change of [{ approvalRequired: true }, { remainingBlockers: ['decision needed'] }, { researchPrMerged: false }, { exitCriteriaMet: false }]) {
+  assert.equal(proposal.issue, 1);
+  assert.equal(proposal.implementationIssue, 1);
+  assert.deepEqual(proposal.removeLabels, ['go:needs-research', 'squad:dallas']);
+  assert.deepEqual(proposal.addLabels, ['go:yes', 'squad:lambert']);
+  for (const change of [
+    { approvalRequired: true }, { remainingResearchBlockers: ['decision needed'] }, { exitCriteriaMet: false },
+    { issueDescriptionUpdated: false }, { issueEvidenceReadback: false }, { researchQuestionsAnswered: false },
+    { issueCommentUrl: 'https://github.com/OlyForge3D/PrintFarmer/issues/2#issuecomment-123' },
+  ]) {
     assert.equal(researchDisposition({ ...research, findings: { ...findings, ...change } }, { task, state: 'terminal' }).action, 'retain-research-gate');
   }
+  const blockedImplementation = researchDisposition({ ...research, findings: {
+    ...findings, implementationReady: false, implementationBlockers: ['Waiting on a prerequisite'],
+  } }, { task, state: 'terminal' });
+  assert.equal(blockedImplementation.action, 'propose-research-complete');
+  assert.ok(blockedImplementation.removeLabels.includes('go:needs-research'));
+  assert.ok(!blockedImplementation.addLabels.includes('go:yes'));
+  assert.equal(researchDisposition({ ...research, issueState: 'closed', findings }, { task, state: 'terminal' }).action, 'blocked');
+  const repositoryResearch = { ...findings, repositoryFilesChanged: true };
+  assert.equal(researchDisposition({ ...research, findings: repositoryResearch }, { task, state: 'terminal' }).action, 'retain-research-gate');
+  assert.equal(researchDisposition({ ...research, findings: { ...repositoryResearch,
+    researchPrUrl: 'https://github.com/OlyForge3D/PrintFarmer/pull/3',
+    researchPrMerged: true, researchHeadSha: 'a'.repeat(40),
+  } }, { task, state: 'terminal' }).action, 'propose-implementation-readiness');
+  const child = researchDisposition({ ...research, findings: { ...findings, implementationIssue: 2 } }, { task, state: 'terminal' });
+  assert.equal(child.issue, 1);
+  assert.equal(child.implementationIssue, 2);
+  assert.deepEqual(child.removeLabels, ['go:needs-research']);
+  assert.deepEqual(child.addLabels, []);
   let state = withRounds();
   for (let issue = 1; issue <= 4; issue++) {
     state = ready(state);
@@ -640,6 +681,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
 });
 
 async function fixtureStartup(config, round, plan, data, session, dependencies) {
+  session = { ...session, branch: session.branch ?? 'fixture-worker' };
   const evidence = {
     observedAt: new Date(dependencies.now ?? Date.now()).toISOString(), source: 'fixture native successful create and ACK',
     session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true,
@@ -654,7 +696,8 @@ async function fixtureStartup(config, round, plan, data, session, dependencies) 
   });
   const ack = {
     configuration: { source: 'successful-native-create', model: plan.packet.model, reasoningEffort: plan.packet.reasoningEffort },
-    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true, actualModel: plan.packet.model },
+    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true, actualModel: plan.packet.model,
+      initialHeadSha: plan.packet.headSha, actualBranch: session.branch },
   };
   const allowed = await run('startup-check', ack);
   assert.equal(allowed.continuationAllowed, true);
@@ -731,16 +774,38 @@ test('two research lifecycles select the specialist, persist findings, settle an
     assert.deepEqual(plan, preview.dispatchPlan);
     nativeCalls.push({ tool: plan.nativeTool, arguments: plan.nativeArguments });
     const session = { id: `cccccccc-1111-4222-8333-444444444${issue}`,
-      projectId: consumer.projectId, worktreePath: `/worktrees/research-${issue}` };
+      projectId: consumer.projectId, worktreePath: `/worktrees/research-${issue}`, branch: `research-${issue}` };
+    await run(consumer, w, 'record-creation', { data, evidence: fresh({
+      session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true,
+      creationHandle: session.id, creationOutcome: 'succeeded', dispatchPlanDigest: plan.planDigest,
+      createRequestDigest: digest(plan.nativeArguments), kickoffAccepted: true,
+    }) });
+    const premature = fresh({ session: { ...session, terminalVerified: true },
+      repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, assignmentCorrelation: correlation,
+      queueChecked: true, historyChecked: true, artifactsVerified: true,
+      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}` });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: premature,
+    }), /acknowledged startup/);
+    await run(consumer, w, 'receipt', { data: { ...data, status: 'uncertain' }, evidence: premature });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: premature,
+    }), /acknowledged startup/);
     const continuationAck = await fixtureStartup(consumer, w, plan, data, session, dependencies);
     const delivered = fresh({ session, assignmentCorrelation: correlation, repository: 'OlyForge3D/PrintFarmer',
       nativeReadbackVerified: true, kickoffDeliveryVerified: true, continuationAck });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'running' }, evidence: { ...delivered,
+        continuationAck: { ...continuationAck, policySha: 'b'.repeat(40) } },
+    }), /Packet ACK/);
     await run(consumer, w, 'receipt', { data: { ...data, status: 'running' }, evidence: delivered });
     const artifact = { kind: 'issue-comment', url: `https://github.com/OlyForge3D/PrintFarmer/issues/${issue}#issuecomment-123`,
       bodyDigest: digest({ findings: 'fixture: concrete findings', issue }) };
     const terminalEvidence = { ...delivered, session: { ...session, terminalVerified: true },
       queueChecked: true, historyChecked: true, artifactsVerified: true,
-      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}` };
+      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}`,
+      finalAck: { ...plan.packet, noChildren: true, noPendingContinuation: true,
+        noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}` } };
     await assert.rejects(run(consumer, w, 'receipt', {
       data: { ...data, status: 'terminal-reported' }, evidence: terminalEvidence,
     }), /read-back issue findings/);
@@ -758,6 +823,23 @@ test('two research lifecycles select the specialist, persist findings, settle an
     });
     assert.equal(settled.state.assignments[bound.assignmentId].state, 'terminal');
     assert.equal(settled.state.availability.mini.remaining.general, 3);
+    const disposition = await run(coordinator, c, 'research-plan', {
+      evidence: fresh({ ...taskEvidence, findings: {
+        summary: 'Root cause confirmed; implementation is still outstanding.',
+        acceptanceCriteria: ['Mapper must emit six targets after implementation'],
+        remainingResearchBlockers: [], researchQuestionsAnswered: true,
+        exitCriteriaMet: true, approvalRequired: false, implementationPlanVerified: true,
+        issueCommentUrl: artifact.url, issueEvidenceReadback: true, issueDescriptionUpdated: true,
+        repositoryFilesChanged: false, implementationOwner: 'squad:lambert',
+        implementationReady: true, implementationBlockers: [],
+      } }),
+    });
+    assert.equal(disposition.action, 'propose-implementation-readiness');
+    assert.equal(disposition.issue, issue);
+    assert.deepEqual(disposition.removeLabels, ['go:needs-research', 'squad:dallas']);
+    assert.deepEqual(disposition.addLabels, ['go:yes', 'squad:lambert']);
+    assert.equal(disposition.closeIssue, false);
+    assert.equal(disposition.mutationAuthorized, false);
     sessions.push({ ...session, terminalVerified: true });
     const renewed = await run(consumer, w, 'ready', { evidence: inventory() });
     assert.deepEqual(renewed.state.availability.mini.remaining, { mobile: 1, general: 4 });
@@ -865,7 +947,7 @@ test('partial native creation retains the handle before readback and never adopt
   const journal = JSON.parse(await readFile(path.join(consumer.stateDirectory, 'journal.json'), 'utf8'));
   assert.equal(journal.sessions[data.correlation].creationHandle, creation.creationHandle);
   assert.equal(journal.sessions[data.correlation].sessionId, undefined);
-  const session = { id: creation.creationHandle, projectId: consumer.projectId, worktreePath: '/worktrees/partial' };
+  const session = { id: creation.creationHandle, projectId: consumer.projectId, worktreePath: '/worktrees/partial', branch: 'partial-worker' };
   const readback = { ...creation, session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true };
   await run(consumer, w, 'record-creation', { data, evidence: readback });
   const alias = { ...session, id: 'bbbbbbbb-1111-4222-8333-444444444444' };
@@ -877,7 +959,8 @@ test('partial native creation retains the handle before readback and never adopt
   });
   const ack = {
     ...readback, session: alias,
-    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true, actualModel: 'gpt-6-astra' },
+    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true, actualModel: 'gpt-6-astra',
+      initialHeadSha: plan.packet.headSha, actualBranch: session.branch },
     configuration: { source: 'successful-native-create', model: 'gpt-6-astra', reasoningEffort: 'xhigh' },
   };
   await assert.rejects(run(consumer, w, 'startup-check', { data, evidence: ack }), /Partial startup/);
@@ -960,7 +1043,9 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
       data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' },
       evidence: { ...delivered, session: { ...session, terminalVerified: true },
         queueChecked: true, historyChecked: true, artifactsVerified: true,
-        noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one' },
+        noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one',
+        finalAck: { ...started.dispatchPlan.packet, noChildren: true, noPendingContinuation: true,
+          noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one' } },
     });
     await run(consumer, w2, 'ready', { evidence: inventory([{ id: sessionId, terminalVerified: true }]) });
     const receipt = terminal.state.assignments['assignment-1'].receipts.at(-1);
@@ -1525,6 +1610,8 @@ test('native asynchronous hourly rounds admit locally and settle days later with
   const terminal = await run(consumer, w, 'receipt', { ...terminalRequest, evidence: {
     ...terminalRequest.evidence, noPendingContinuation: true, noFutureDelivery: true,
     finalDeliveryCorrelation: 'follow-up-one',
+    finalAck: { ...authorized.dispatchPlan.packet, noChildren: true, noPendingContinuation: true,
+      noFutureDelivery: true, finalDeliveryCorrelation: 'follow-up-one' },
   } });
   const receiptDigest = terminal.state.assignments['assignment-1'].receipts.at(-1).evidenceDigest;
   await run(consumer, w, 'end-round');

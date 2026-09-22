@@ -13,7 +13,7 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const appHostPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 export const policyPaths = [
   policyDirectory, '.github/copilot-instructions.md', '.squad/config.json',
-  '.github/agents/squad.agent.md', '.squad/agents/*/charter.md',
+  '.github/agents/squad.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md',
   'scripts/ci/ralph-automation.mjs', 'scripts/ci/ralph-pr-recovery.mjs',
   'scripts/ci/ralph-admission.mjs', 'scripts/ci/ralph-macos-ssh.mjs',
   'scripts/ci/ralph-round-cache.mjs', 'scripts/ci/ralph-github-snapshot.mjs',

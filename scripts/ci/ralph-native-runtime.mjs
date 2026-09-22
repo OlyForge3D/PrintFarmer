@@ -11,7 +11,7 @@ import {
 } from './ralph-mailbox.mjs';
 import { runAutomationPreflight } from './ralph-automation.mjs';
 import {
-  buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup,
+  buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
 } from './ralph-native-dispatch.mjs';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -314,10 +314,10 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         const ack = evidence.continuationAck;
         const packet = prior.dispatchPlan.packet;
         if (!prior.continuationIntent || evidence.kickoffDeliveryVerified !== true ||
-            ack?.substantiveWorkStarted !== true ||
-            ['assignmentId', 'generation', 'taskDigest', 'correlation', 'member'].some((key) => ack[key] !== packet[key])) {
+            ack?.substantiveWorkStarted !== true) {
           fail('Actual substantive continuation ACK must match the saved specialist binding.');
         }
+        validatePacketAck(packet, ack);
         prior.runningEvidenceDigest = digest(ack);
       }
       if (Object.entries(map).some(([otherCorrelation, entry]) => otherCorrelation !== correlation && entry.sessionId === evidence.session.id)) fail('Native session is already mapped to another assignment.');
@@ -327,6 +327,18 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
             evidence.noPendingContinuation !== true || evidence.noFutureDelivery !== true ||
             !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(evidence.finalDeliveryCorrelation ?? ''))) fail('Terminal report requires cessation, final delivery ACK, no future delivery commitment, queue/history and artifact evidence.');
       if (event.data.status === 'terminal-reported' && prior.dispatchPlan &&
+          (!prior.startupEvidenceDigest || !prior.continuationIntent || !prior.runningEvidenceDigest)) {
+        fail('Completed terminal work requires acknowledged startup and substantive continuation; uncertain pre-start work remains owned.');
+      }
+      if (event.data.status === 'terminal-reported' && prior.dispatchPlan) {
+        validatePacketAck(prior.dispatchPlan.packet, evidence.finalAck);
+        if (evidence.finalAck.noChildren !== true || evidence.finalAck.noPendingContinuation !== true ||
+            evidence.finalAck.noFutureDelivery !== true ||
+            evidence.finalAck.finalDeliveryCorrelation !== evidence.finalDeliveryCorrelation) {
+          fail('Exact worker final ACK with no children, continuation or future delivery required.');
+        }
+      }
+      if (event.data.status === 'terminal-reported' && prior.dispatchPlan &&
           ['research', 'analysis'].includes(assignment.task.purpose)) {
         const ack = evidence.finalAck;
         const packet = prior.dispatchPlan.packet;
@@ -334,11 +346,12 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         if (evidence.artifactReadbackVerified !== true || artifact?.kind !== 'issue-comment' ||
             !new RegExp(`^https://github\\.com/OlyForge3D/PrintFarmer/issues/${assignment.task.issue}#issuecomment-[0-9]+$`).test(artifact.url ?? '') ||
             !/^[0-9a-f]{64}$/.test(artifact.bodyDigest ?? '') ||
-            !ack || ['assignmentId', 'generation', 'taskDigest', 'correlation', 'member'].some((key) => ack[key] !== packet[key]) ||
+            !ack ||
             ack.artifactUrl !== artifact.url || ack.finalDeliveryCorrelation !== evidence.finalDeliveryCorrelation ||
             ack.noChildren !== true || ack.noPendingContinuation !== true || ack.noFutureDelivery !== true) {
           fail('Research terminal receipt needs read-back issue findings and the same specialist final ACK, not chat-only completion.');
         }
+        validatePacketAck(packet, ack);
       }
       prior.sessionId = evidence.session.id;
       prior.lastEvidenceDigest = digest(evidence);

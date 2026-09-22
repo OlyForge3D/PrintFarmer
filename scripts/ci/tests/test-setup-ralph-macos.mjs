@@ -301,7 +301,7 @@ test('legacy approval scope is a renewal baseline, not approval for the newly co
   const approvalPath = path.join(path.dirname(f.options['host-config']), 'policy-approval.json');
   const legacy = JSON.parse(await readFile(approvalPath, 'utf8'));
   legacy.controlledPaths = legacy.controlledPaths.filter((entry) =>
-    !['.github/agents/squad.agent.md', '.squad/agents/*/charter.md'].includes(entry));
+    !['.github/agents/squad.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md'].includes(entry));
   legacy.controlledContentSha256 = createHash('sha256').update(JSON.stringify(
     review.controlledFiles.filter((file) => file.path !== '.github/agents/squad.agent.md'),
   )).digest('hex');
@@ -314,7 +314,7 @@ test('legacy approval scope is a renewal baseline, not approval for the newly co
     'host-config': newHost, 'cache-dir': path.join(f.root, 'expanded-cache') }, {
     confirm: async (value) => {
       approvals++;
-      assert.deepEqual(value.newlyControlledPaths, ['.github/agents/squad.agent.md', '.squad/agents/*/charter.md']);
+      assert.deepEqual(value.newlyControlledPaths, ['.github/agents/squad.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md']);
       return true;
     },
   });

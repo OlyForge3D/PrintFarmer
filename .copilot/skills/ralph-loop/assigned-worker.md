@@ -20,7 +20,10 @@ Report unavailable configuration fields honestly; never claim a requested
 reasoning effort is a runtime observation.
 
 First return a **startup-only ACK** with all packet identities, charter digest,
-actual exposed model/effort, and `substantiveWorkStarted:false`. Stop until the
+the entire packet echoed unchanged, actual exposed model/effort, `initialHeadSha`
+and `actualBranch` read from Git, `noChildren:true` and
+`substantiveWorkStarted:false`. If the initial HEAD differs from `headSha`, stop.
+Stop until the
 owning consumer supplies the runtime-generated continuation. A kickoff request
 or workspace handle alone is not a successful startup.
 
@@ -34,10 +37,16 @@ The consumer commissions reviews under the existing review contract.
 
 For research/analysis, investigate only the assigned questions and files.
 Do not implement, commit, open a PR, close the issue, or change lifecycle labels.
+Every startup, substantive-continuation and final ACK echoes the entire packet,
+including policy, charter, configured model/effort, repository and source ref.
+Configured settings in the packet are distinct from exposed actual observations.
 Return findings with source locations, acceptance-criterion dispositions,
 remaining blockers, proposed implementation and exact assignment correlation.
 The consumer persists the findings once on the existing issue through supported
-GitHub tools and reads them back. Research does not imply implementation readiness.
+GitHub tools and reads them back. The coordinator appends a concise research
+summary, decision, implementation steps and a link to the issue description,
+without overwriting the original report. Research does not imply implementation
+readiness or that the bug is fixed. Investigation-only work needs no research PR.
 
 After the consumer acknowledges that durable delivery, return a final ACK naming
 the delivery correlation and artifact reference, with explicit confirmation of

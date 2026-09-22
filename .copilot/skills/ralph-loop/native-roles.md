@@ -311,24 +311,42 @@ The task classifier enforces research-only admission while the label remains.
 Consumers may investigate and document the assigned findings, not implement the
 feature or independently transition global labels.
 
-Research reports need concrete findings, linked evidence, acceptance criteria and
-remaining blockers. Respect the documented research-PR/implementation-issue
-pattern: verify the research PR actually merged and its exact head, and identify
-the implementation issue/plan before proposing readiness. `research-plan` retains
-the gate for inconclusive findings, open blockers or required approval; active
-research also retains ownership. Its completed-research evidence includes
-`findings.summary`, `acceptanceCriteria`, `remainingBlockers`, `exitCriteriaMet`,
-`approvalRequired`, `implementationPlanVerified`, `implementationIssue`,
-`researchPrUrl`, `researchPrMerged` and `researchHeadSha`.
+Research reports need concrete findings, linked evidence, recommended decisions
+and separate research/implementation blockers. **No merged research PR is required
+for investigation-only work.** The consumer persists full findings in one
+correlated issue comment and reads it back. The coordinator appends a concise
+research summary, decision, implementation plan and comment link to the original
+issue description, preserving the report and acceptance criteria. Re-read before
+editing and verify the result; never overwrite a concurrent maintainer update.
 
-Only a verified terminal research assignment with complete exit evidence can
-produce a **proposal** to remove `go:needs-research` and add `go:yes`. Re-read the
-target issue's holds, labels and evidence before applying it through supported
-GitHub tools. Follow any issue-specific human approval requirement. Never close
-an implementation issue because research finished. If a separate implementation
-child is required, link it and preserve the original research evidence.
-A research-only PR must reference, not `Closes`, the still-unresolved
-implementation issue; merging research must not accidentally auto-close it.
+After a verified terminal research assignment, `research-plan` can propose
+removing `go:needs-research` when the **research questions** are answered. The bug
+and its implementation acceptance criteria need not already be fixed. Required
+findings fields are `summary`, nonempty `acceptanceCriteria`,
+`remainingResearchBlockers:[]`, `researchQuestionsAnswered:true`,
+`exitCriteriaMet:true`, `approvalRequired:false`, `implementationPlanVerified:true`,
+`issueCommentUrl`, `issueEvidenceReadback:true`, `issueDescriptionUpdated:true`,
+`repositoryFilesChanged`, `implementationOwner`, `implementationReady` and
+`implementationBlockers`. Readback assertions refer to actual GitHub artifacts.
+
+Only if `repositoryFilesChanged:true` also verify `researchPrUrl`,
+`researchPrMerged:true` and exact `researchHeadSha`. The research-PR/implementation-issue
+pattern is conditional on actual repository artifacts, not a mandatory ceremony.
+Investigation-only work sets `repositoryFilesChanged:false`, with no PR fields.
+Keep the original issue as the implementation issue by default. If a separate
+child is explicitly required, link it and supply `implementationIssue`; never
+invent a child simply to remove a research label.
+
+The coordinator alone applies the proposal after refreshing holds, ownership,
+dependencies, labels and artifact evidence. A ready same-issue handoff removes
+`go:needs-research`, changes the owner from researcher to implementation specialist
+where appropriate, and adds `go:yes`. If research is resolved but implementation
+has outstanding dependencies, remove the research label without adding readiness;
+do not repeatedly dispatch the completed investigation. Apply any child readiness
+separately after checking that child's actual state. Inconclusive research,
+unresolved research decisions or required approval retain the research gate.
+Never close an implementation issue because research finished. A research-only
+PR references, not `Closes`, an unresolved implementation issue.
 
 ### Admission And Capacity
 
@@ -411,8 +429,8 @@ classification to recover credits.
 Both `ready` and kickoff evidence include `nativeCapabilities`, obtained from
 the actual exposed app tools: `createSession:true`, `agents:["Squad"]`, and
 `models` mapping advertised model IDs to their supported reasoning-effort values.
-Include `openPrSession:true` for PR recovery. This is local-owner capability
-evidence, not an independent service identity. Do not invent support.
+This is local-owner capability evidence, not an independent service identity.
+Do not invent support.
 
 Under the consumer round token, `dispatch-plan` takes the exact assignment
 binding plus proposed opaque `correlation` and fresh complete task/capability
@@ -426,7 +444,26 @@ Charters and the Squad entrypoint are approved controlled policy paths.
 The successful starting receipt recomputes and privately persists that plan.
 Only its `nativeCreateAllowed:true` response permits one call to the returned
 `dispatchPlan.nativeTool` using **exactly** `dispatchPlan.nativeArguments`.
-PR recovery uses `open_pr_session` on the existing PR, not a new branch.
+New PR recovery uses `create_session` at the verified existing PR head ref in a
+new isolated worktree; **never `open_pr_session`**, whose implicit reuse can adopt
+or mutate an unrelated native session. Fresh evidence includes `prState:"open"`,
+`prHeadRepository:"OlyForge3D/PrintFarmer"`, `prHeadRef`, `prHeadSha` matching the
+task, and `prWorkerPolicyDigest`. Compute that digest from the immutable PR head:
+the SHA-256 text hashes of `.github/agents/squad.agent.md`, this member's charter,
+and `.copilot/skills/ralph-loop/assigned-worker.md`, serialized as
+`{agentSha256,contractSha256,charterSha256}` in that order using mailbox `digest`.
+It must match the approved local worker policy. An older branch without this
+bounded entrypoint needs policy reconciliation by its existing owner, not a
+blind kickoff using its old coordinator instructions. Forks and unverifiable
+head policy block new admission.
+
+The packet binds the original PR branch and head. Startup ACK must report the
+actual initial Git HEAD and the actual branch matching native readback. Head
+movement blocks before substantive work. The new worktree is only a repair
+workspace: preserve the published PR, use explicit normal fast-forward
+`git push origin HEAD:refs/heads/<verified-pr-head-ref>` after fresh ownership/head
+checks, and never force-push or open another PR. Existing mapped workers continue
+in place; they do not need a new reservation or session.
 The packet, prompt, model settings and native IDs stay in the private journal;
 only digests reach the mailbox.
 
@@ -444,7 +481,9 @@ project/worktree; it is not permission to replace the workspace.
 The worker initially returns startup-only ACK and stops. Submit `startup-check`
 with the exact binding, same session, plan digest and `startupAck`: packet
 `assignmentId`, `generation`, `taskDigest`, `correlation`, `member`,
-`charterSha256`, `substantiveWorkStarted:false`, `noChildren:true`, plus actual
+`charterSha256` and **every other packet field unchanged**, including policy,
+repository/head/ref, purpose/category and configured model/effort. Also require
+`initialHeadSha`, `actualBranch`, `substantiveWorkStarted:false`, `noChildren:true`, plus actual
 model/effort **only if exposed**. Include `configuration` with exact `model`,
 `reasoningEffort` and source `successful-native-create`, `native-readback`, or
 `owner-attestation`. Success of the exact native creation request establishes
@@ -457,8 +496,13 @@ never manufacture proof or silently use default settings.
 `continuationAllowed:true` and the substantive message. Send it once to that
 same session. Repeated checks return false; lost delivery is reconciled from
 actual history/ACK, never blindly resent. The first running receipt requires
-`continuationAck` with packet identity/member and `substantiveWorkStarted:true`.
+`continuationAck` with the complete packet and `substantiveWorkStarted:true`.
 Subsequent status receipts retain the established mapping.
+Completed terminal work requires that acknowledged startup and substantive start,
+plus a final ACK echoing the complete packet and cessation commitments. Neither
+`starting -> terminal-reported` nor `starting -> uncertain -> terminal-reported`
+can masquerade as completed work. Uncertain pre-start work remains owned for
+recovery, not released by a success-shaped terminal report.
 
 For research/analysis completion, the consumer writes findings once to the issue
 and reads back the existing comment (recover an uncertain write by correlation,

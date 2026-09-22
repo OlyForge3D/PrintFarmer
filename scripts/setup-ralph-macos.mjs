@@ -17,7 +17,7 @@ const policyPaths = [
   policyDirectory, '.github/copilot-instructions.md', '.squad/config.json',
   'scripts/ci/ralph-*.mjs', 'scripts/ci/verify-squad-verdict.mjs',
 ];
-const specialistPolicyPaths = ['.github/agents/squad.agent.md', '.squad/agents/*/charter.md'];
+const specialistPolicyPaths = ['.github/agents/squad.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md'];
 const resolverPaths = ['scripts/ci/resolve-ios-simulator.sh', 'scripts/common-utils.sh'];
 const shaPattern = /^[0-9a-f]{40}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -192,7 +192,7 @@ function isControlled(file, includeSpecialists = true) {
   return file === policyDirectory || file.startsWith(`${policyDirectory}/`) ||
     ['.github/copilot-instructions.md', '.squad/config.json', 'scripts/ci/verify-squad-verdict.mjs', ...resolverPaths].includes(file) ||
     /^scripts\/ci\/ralph-.*\.mjs$/.test(file) ||
-    (includeSpecialists && (file === '.github/agents/squad.agent.md' || /^\.squad\/agents\/[^/]+\/charter\.md$/.test(file)));
+    (includeSpecialists && (specialistPolicyPaths.includes(file) || /^\.squad\/agents\/[^/]+\/charter\.md$/.test(file)));
 }
 
 function manifestFromFiles(files) {
@@ -482,6 +482,13 @@ not independently observed runtime settings; preserve that evidence distinction.
 On research completion, persist findings once on the issue and read back the comment,
 obtain the same child's explicit final-delivery ACK, then terminal-report and settle.
 Do not leave findings only in chat or label research as completed implementation.
+Coordinator appends a concise summary/decision/implementation plan and the findings
+link to the original issue description without replacing its report. Once research
+questions are answered, coordinator removes go:needs-research and selects the
+implementation owner; add go:yes only after separate implementation prerequisites.
+Investigation-only work does NOT require a merged research PR or a new issue.
+Only research that actually changes repository files needs reviewed merged PR
+evidence. Use native-roles.md's current research-plan findings fields and readbacks.
 Coordinator can reserve against unused credits across later hourly rounds.
 Before each kickoff the consumer must refresh local inventory/tooling in its own
 round. Terminal reporting commits no future delivery; later coordinator settlement

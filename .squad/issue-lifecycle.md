@@ -421,10 +421,26 @@ Re-reviewed → Approved → Merged → Issue closed
 
 ### Pattern 3: Research-Then-Implement
 ```
-Issue created → Labeled `go:needs-research` → Research agent spawned → 
-Research documented → Research PR merged → Implementation issue created → 
-Implementation agent spawned → Feature built → PR merged
+Issue created → Labeled `go:needs-research` → Accounted research assignment →
+Findings recorded on the issue → Coordinator updates description and clears research gate →
+Implementation owner/readiness selected → Implementation dispatched → Fix PR merged
 ```
+
+Investigation-only research does **not** require a research PR or a separate
+implementation issue. Persist full findings in a correlated comment; append the
+decision, implementation plan and evidence link to the original description.
+Preserve the original problem statement and acceptance criteria.
+
+The coordinator owns `go:needs-research` removal after verifying durable findings,
+the worker's final delivery and resolution of research questions. Research
+completion does not mean implementation acceptance criteria already pass.
+Change the owner to the implementation specialist where necessary; add `go:yes`
+only when implementation prerequisites are satisfied. Dependency-blocked
+implementation must not cause the same completed research to be dispatched again.
+
+When explicitly scoped research changes repository files, those changes still
+need a reviewed, merged PR. Create/link an implementation child only when the
+issue actually requires one. Research alone never closes an implementation issue.
 
 ### Pattern 4: Parallel Multi-Agent (Future, #525)
 ```

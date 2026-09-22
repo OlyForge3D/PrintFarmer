@@ -56,7 +56,8 @@ session, without coordinator fan-out, fallback workers or hidden research agents
 The runtime generates exact native arguments and explicit model/effort before
 authorizing creation. macOS Dallas remains GPT-6 Astra/xhigh.
 
-The approval scope now includes the Squad agent entrypoint and member charters.
+The approval scope now includes the Squad agent entrypoint, member charters and
+issue-lifecycle contract.
 Older receipts remain valid renewal baselines, but cannot silently approve the
 expanded scope. Review the displayed `newlyControlledPaths` and approve the
 candidate interactively in a new private package; preserve all original bindings,
@@ -78,6 +79,12 @@ See [the native role contract](../.copilot/skills/ralph-loop/native-roles.md#val
 for the exact requests and ACK fields. Research completion requires findings
 persisted once on the issue, readback, the worker's final ACK, terminal receipt
 and coordinator settlement. Only a fresh consumer offer replenishes capacity.
+The coordinator appends a summary and implementation plan to the original issue
+description and owns label transitions. Investigation-only research needs no
+merged research PR: resolved research clears `go:needs-research`; `go:yes` is a
+separate implementation-readiness decision. Research completion does not mean
+the underlying bug is already fixed. Repository-changing research still needs
+its reviewed, merged PR.
 Local fixture results do not establish production reliability: retain evidence
 of two unassisted scheduled lifecycles before calling a deployment operational.
 
