@@ -253,6 +253,10 @@ control repository/ref/registry/genesis, migration attestation and original
 Old approval, config, history, session mappings and claims remain untouched.
 It does not copy or reset the native journal. New `verified:false` requires
 explicit acceptance of the V2 trust contract and disabled workflow readback.
+Renewal `workflow-settings.json` contains only `workflow_id`, the new `prompt`
+and `enabled:false`. Applying it through supported `save_workflow` preserves the
+live workflow name/model/effort/schedule/project/environment/workspace settings;
+read those back before and after, rather than restoring fresh-install defaults.
 Do not reinitialize a mailbox that already exists. If old packages have pending
 rounds or initialization intents, reconcile them with retained real evidence
 before proceeding; never invent a replacement token, delete history or clear

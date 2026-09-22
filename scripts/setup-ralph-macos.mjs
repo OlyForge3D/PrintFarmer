@@ -379,7 +379,9 @@ This workflow may remain disabled pending native attestation, pinned private
 queue genesis and explicitly verified authority migration. No activation is
 implied by this saved prompt. No SSH, CLI worker or remote app session creation.
 ` : bootstrap;
-  const settings = {
+  const settings = previous ? {
+    workflow_id: workflow, enabled: false, prompt,
+  } : {
     name: deployment ? `Ralph ${options.role} - ${options['worker-id']} - PrintFarmer` : 'Ralph macOS - PrintFarmer', project_id: config.projectId,
     host_id: config.appHostId, workflow_id: workflow, enabled: false,
     workspace_type: 'worktree', mode: 'autopilot', model: 'gpt-5.6-luna',
@@ -418,7 +420,7 @@ using the supported terminal and runtime initialize request; no workflow run or
 current-automation association is required. Follow native-roles.md's exact request.
 Pin its returned genesis SHA in EVERY role's private control config before ordinary
 rounds. Never initialize on an existing ref or retry uncertain init.
-${previous ? 'RENEWAL: existing control/genesis, migration attestation and native-state path were retained. Old package/approval/journal/claims were NOT modified or copied. verified remains false until explicit acceptance of this new contract. Reconcile old active rounds; do not reset state or invent tokens.' : ''}
+${previous ? 'RENEWAL: settings are a prompt-only disabled update to the SAME workflow. Omitted settings preserve the live name/model/effort/schedule/project/environment/workspace; read them back, never apply fresh-install defaults. Existing control/genesis, migration attestation and native-state path were retained. Old package/approval/journal/claims were NOT modified or copied. verified remains false until explicit acceptance of this new contract. Reconcile old active rounds; do not reset state or invent tokens.' : ''}
 Do not fabricate evidence, infer cessation from disabled schedules or copy ledgers.
 Keep source and destination schedules and Reaper disabled. Activation and any live
 queue initialization/write require separate explicit authorization.

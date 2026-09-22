@@ -198,6 +198,10 @@ test('consented native renewal preserves IDs, pinned authority and original jour
   const updated = JSON.parse(await readFile(updatedPath, 'utf8'));
   assert.equal(updated.verified, false);
   assert.equal(updated.executionTrust, 'local-owner-v1');
+  const settings = JSON.parse(await readFile(path.join(path.dirname(updatedPath), 'workflow-settings.json'), 'utf8'));
+  assert.deepEqual(Object.keys(settings).sort(), ['enabled', 'prompt', 'workflow_id']);
+  assert.equal(settings.workflow_id, old.workflowId);
+  assert.equal(settings.enabled, false);
   for (const key of ['control', 'stateDirectory', 'automationWorkflowIds', 'migrationAttested',
     'projectId', 'workflowId', 'appHostId', 'worktreeRoot', 'workerId', 'role']) assert.deepEqual(updated[key], old[key], key);
   assert.equal(await readFile(path.join(old.stateDirectory, 'journal.json'), 'utf8'), history);
