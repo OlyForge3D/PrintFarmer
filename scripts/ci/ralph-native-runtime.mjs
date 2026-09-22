@@ -92,6 +92,71 @@ function withinWorktreeRoot(root, target) {
   return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
 }
 
+function ownedSessionInventory(config, evidence, journal, state) {
+  if (evidence.ownershipScope !== 'ralph-owned-v1' || evidence.lineageChecked !== true) {
+    fail('Complete Ralph-owned lineage reconciliation required, not project-wide session ownership.');
+  }
+  const known = new Map();
+  for (const entry of Object.values(journal.sessions)) {
+    const assignment = state.assignments[entry.assignmentId];
+    if (!assignment || assignment.workerId !== config.workerId) fail('Recorded Ralph delivery intent has unresolved assignment ownership.');
+    if (!uuidPattern.test(entry.sessionId ?? '')) fail('Recorded Ralph creation intent lacks correlated native delivery; reconcile the lost acknowledgement.');
+    if (known.has(entry.sessionId)) fail('Duplicate Ralph native session mapping.');
+    known.set(entry.sessionId, entry);
+  }
+  const sessions = new Map();
+  const ownedIds = new Set(known.keys());
+  const roles = new Set();
+  for (const session of evidence.sessions) {
+    if (!uuidPattern.test(session.id ?? '') || sessions.has(session.id) ||
+        (session.creatorSessionId !== undefined && !uuidPattern.test(session.creatorSessionId))) {
+      fail('Malformed or duplicate native session lineage.');
+    }
+    sessions.set(session.id, session);
+    if (session.assignmentCorrelation !== undefined &&
+        Object.hasOwn(journal.sessions, session.assignmentCorrelation)) {
+      if (journal.sessions[session.assignmentCorrelation].sessionId !== session.id) {
+        fail('Observed Ralph correlation conflicts with its immutable native mapping.');
+      }
+      ownedIds.add(session.id);
+    }
+    const role = session.roleObservation;
+    if (role?.workerId === config.workerId && role.projectId === config.projectId) {
+      if (session.nativeReadbackVerified !== true || role.ownerConfiguredRoleVerified !== true ||
+          !['coordinator', 'consumer'].includes(role.role) ||
+          (role.role === 'coordinator' && config.host !== 'macos-mobile') ||
+          !withinWorktreeRoot(config.worktreeRoot, role.worktreePath)) {
+        fail('Ralph role lineage requires actual owner-configured native readback.');
+      }
+      ownedIds.add(session.id);
+      if (role.noTaskExecutionVerified === true) roles.add(session.id);
+    }
+  }
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const session of sessions.values()) {
+      if (!ownedIds.has(session.id) && ownedIds.has(session.creatorSessionId)) {
+        ownedIds.add(session.id);
+        changed = true;
+      }
+    }
+  }
+  const ownedSessions = [...sessions.values()].filter((session) => ownedIds.has(session.id));
+  for (const session of ownedSessions) {
+    const mapping = known.get(session.id);
+    if (session.terminalVerified === true) continue;
+    if (mapping) {
+      if (state.assignments[mapping.assignmentId].state === 'terminal') {
+        fail('Resumed terminal Ralph native work blocks readiness; reconcile ownership first.');
+      }
+    } else if (!roles.has(session.id)) {
+      fail('Unmapped Ralph-owned session or descendant blocks readiness; reconcile its assignment first.');
+    }
+  }
+  return ownedSessions;
+}
+
 export function validateTriageEvidence(evidence) {
   const owners = 'dallas|ripley|drake|lambert|hudson|gorman|kane|ash|brett|parker|newt|copilot';
   const ownerPattern = new RegExp(`^squad:[^a-z]*(${owners})$`);
@@ -161,29 +226,14 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
     requireEvidence();
     if (evidence.complete !== true || evidence.queueChecked !== true || evidence.historyChecked !== true ||
         evidence.capabilitiesVerified !== true || !Array.isArray(evidence.sessions)) fail('Complete native inventory, queue/history and local tooling checks required.');
-    const known = new Map(Object.values(map).filter((entry) => entry.sessionId).map((entry) => [entry.sessionId, entry]));
-    for (const session of evidence.sessions) {
-      if (!uuidPattern.test(session.id ?? '')) fail('Malformed local native session identity.');
-      if (session.terminalVerified === true) continue;
-      const role = session.roleObservation;
-      if (role && session.nativeReadbackVerified === true &&
-          role.projectId === config.projectId &&
-          ['coordinator', 'consumer'].includes(role.role) &&
-          (role.role !== 'coordinator' || config.host === 'macos-mobile') &&
-          role.workerId === config.workerId && role.ownerConfiguredRoleVerified === true &&
-          role.noTaskExecutionVerified === true &&
-          withinWorktreeRoot(config.worktreeRoot, role.worktreePath)) continue;
-      const mapping = known.get(session.id);
-      const owned = mapping && snapshot.state.assignments[mapping.assignmentId];
-      if (!owned || owned.workerId !== config.workerId || owned.state === 'terminal') fail('Pre-existing/unassigned or resumed terminal native work blocks readiness; reconcile ownership first.');
-    }
+    const sessions = ownedSessionInventory(config, evidence, journal, snapshot.state);
     for (const entry of Object.values(snapshot.state.assignments).filter((item) => item.workerId === config.workerId && !['reserved', 'published', 'terminal'].includes(item.state))) {
       const local = map[entry.correlation];
-      if (!local?.sessionId || !evidence.sessions.some((session) => session.id === local.sessionId &&
+      if (!local?.sessionId || !sessions.some((session) => session.id === local.sessionId &&
           (entry.state === 'terminal-reported' ? session.terminalVerified === true : session.ownershipVerified === true))) fail('Every live/uncertain receipt needs fresh correlated native evidence.');
     }
     event.data = {
-      inventoryDigest: digest(evidence), assignmentInventoryDigest: admissionInventoryDigest(snapshot.state, config.workerId),
+      inventoryDigest: digest({ ...evidence, sessions }), assignmentInventoryDigest: admissionInventoryDigest(snapshot.state, config.workerId),
       unassignedSessions: 0, capabilities: evidence.capabilities, policySha: config.approvedPolicy,
       previousCapacityDigest: digest(snapshot.state.availability?.[config.workerId] ?? {}),
       inventoryObservedAt: evidence.observedAt,

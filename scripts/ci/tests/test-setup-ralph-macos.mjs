@@ -128,6 +128,10 @@ test('native role dry-run probes exact private repo without queue/native writes'
 });
 
 function assertNativePrompt(prompt, role) {
+  assert.match(prompt, /Inventory scope is Ralph-owned lineage across rounds, NOT all project sessions/);
+  assert.match(prompt, /ownershipScope:"ralph-owned-v1" and lineageChecked:true/);
+  assert.match(prompt, /Missing creation ACKs, missing live mapped workers, resumed terminal workers/);
+  assert.match(prompt, /Unrelated maintainer and other-automation sessions consume no Ralph/);
   assert.match(prompt, /Only a successful\nruntime response with acquisitionAbandoned:true/);
   assert.match(prompt, /NEW round\/event IDs in this invocation/);
   assert.match(prompt, /THREE acquisition attempts total \(initial plus\ntwo retries\)/);
@@ -185,6 +189,18 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.ok(result.activationBlockers.some((blocker) => blocker.includes('automationWorkflowIds') && blocker.includes('both mini')));
     if (windows) assert.equal(f.calls.some((call) => ['xcode-select', 'xcodebuild', 'xcrun', 'bash', 'python3'].includes(call.tool)), false);
   }
+});
+
+test('native prompt generation rejects a pin without the owned-lineage contract before writing', async (t) => {
+  const f = await fixture(t);
+  await writeFile(path.join(f.repo, '.copilot/skills/ralph-loop/native-roles.md'), 'NATIVE-MAILBOX-ROLE-V2\nLegacy project-wide inventory.\n');
+  await f.git(['add', '.']);
+  await f.git(['commit', '-qm', 'Legacy inventory contract']);
+  f.state.development = await f.git(['rev-parse', 'HEAD']);
+  f.state.comparison = { status: 'identical', merge_base_commit: { sha: f.state.development }, files: [] };
+  const options = await nativeOptions(f);
+  await assert.rejects(f.run({ ...options, 'approved-policy': f.state.development, apply: true }), /lacks Ralph-owned lineage inventory/);
+  await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
 });
 
 test('native setup rejects public/wrong/unwritable control repo and approval-time changes', async (t) => {

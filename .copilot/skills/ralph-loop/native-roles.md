@@ -193,8 +193,14 @@ creation handles and supported session history for actual inventory/correlation.
 Do not assume these expose native workflow identity or a complete pending-input
 queue. `queueChecked` means **reconciled controller delivery records plus worker
 acknowledgments** under the same trusted-owner boundary, not an invented queue API.
-Before readiness/cutover, the owner must account for pre-existing/unassigned work
-and known manually queued input. During operation the owning consumer is the
+Before cutover, reconcile historical Ralph authorities/workers and known manually
+queued input to those workers. During operation inventory is **Ralph-owned
+lineage across rounds**, not every session in the app project. The coordinator
+tracks its mailbox assignments; each consumer reconciles its durable delivery
+intents, mapped workers and their descendants. Unrelated maintainer sessions and
+other automations are not Ralph's work, consume no Ralph slots and require no
+terminal attestation. Do not archive, adopt or mutate them to clear readiness.
+The owning consumer is the
 single sender for its mapped task session. Retain each intended/sent delivery's
 correlation and returned acceptance in private records BEFORE/AFTER sending.
 The worker's correlated terminal acknowledgment must identify the final delivery
@@ -207,13 +213,35 @@ not proof that the app's unseen global queue is empty.
 queue API, infer completion from missing/delayed history, or turn idle alone into
 terminal evidence. Persist received ACKs locally because history may lag.
 
-For role-session inventory exemptions, a workflow ID alone is ignored.
+For `ready`, supply `ownershipScope:"ralph-owned-v1"` and `lineageChecked:true`
+only after reconciling retained creation/delivery records with actual native
+readback and ancestry. `complete`, `queueChecked` and `historyChecked` cover this
+owned lineage, not the app's global session/message inventory. Project membership,
+a matching name, a workflow ID or an idle state does not establish ownership.
+Keep journal mappings across rounds, including terminal workers so later
+resumption remains detectable. Every unresolved local creation intent remains
+owned even when its native creation response was lost; a missing ID never makes
+that intent unrelated or authorizes another creation.
+
+The runtime scopes a supplied inventory to recorded worker IDs/correlations,
+verified local role roots, and transitive descendants. Normalize actual native
+`creator_session_id` to `session.creatorSessionId`, retaining intermediate
+ancestor readbacks even when idle/archived. A locally retained creation response
+or correlated delivery ACK may establish `session.assignmentCorrelation`; issue
+text, titles and guessed IDs may not. Reconcile all recorded intents and obtain
+missing ancestry before asserting `lineageChecked:true`. Broad native listings
+are discovery inputs, not evidence that every returned session belongs to Ralph.
+Unrelated observations are excluded from the capacity inventory digest.
+
+For owned role-session inventory exemptions, a workflow ID alone is ignored.
 Use `session.nativeReadbackVerified:true` and `session.roleObservation` with
 `role`, `workerId`, `projectId`, `worktreePath`,
 `ownerConfiguredRoleVerified:true`, `noTaskExecutionVerified:true` only after
 actual session readback and its known owner-configured prompt/history establish
 bounded role-only work. These are trusted controller observations, not app API
-fields or independent attestation. Unknown purpose/session blocks readiness.
+fields or independent attestation. Unknown **Ralph-owned** purpose/session blocks
+readiness; an unrelated project's/session's existence does not. A role exemption
+never overrides a recorded task mapping, including a resumed terminal worker.
 Never exempt task work merely because a name or supplied workflow ID matches.
 Only coordinator/consumer session work is exempt, not substantial research.
 
@@ -349,11 +377,16 @@ reconciliation and a new nonconflicting reservation, never editing a live task.
 
 Consumers do not globally triage, choose new issues, change worker assignment,
 grant replacements or independently claim the backlog. Inspect only assignments
-for their own worker ID, plus their real existing local sessions/history.
-Publish `ready` only after complete fresh native/queued/history inventory and
-verified tooling. Every pre-existing nonterminal session must map to an admitted
-assignment, except explicitly verified role automations. Unmapped or uncertain
-work blocks readiness and new admission, never causes deletion.
+for their own worker ID and their Ralph-owned session lineage/history.
+Publish `ready` only after complete fresh owned native/queued/history inventory
+and verified tooling. Every nonterminal owned task or descendant must map to an
+admitted assignment, except explicitly verified role automations. Unmapped or
+uncertain **owned** work blocks readiness and new admission, never causes deletion.
+Missing live mapped workers, unacknowledged creation intents and resumed terminal
+workers remain blockers across invocations. Do not filter them out as unrelated.
+Independent manual/acceptance/other-automation sessions outside this lineage do
+not block readiness. This changes neither shared mailbox quotas nor issue/PR/file
+overlap and live ownership checks before reservation, publication and kickoff.
 If inventory/tooling cannot be reconciled, send `unavailable` with fresh retained
 evidence and `data.reasonCode` of `inventory-unreconciled`,
 `capability-unavailable` or `owner-paused`. This revokes remaining offer credits,

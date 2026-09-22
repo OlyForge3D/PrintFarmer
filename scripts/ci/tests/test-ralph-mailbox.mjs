@@ -268,18 +268,21 @@ test('crashed round recovery requires exact old identity and does not clear rese
   }, { state }, { sessions: {} }, now), /cessation/);
 });
 
+const ownedScope = { ownershipScope: 'ralph-owned-v1', lineageChecked: true };
+
 test('resumed terminal native sessions block readiness rather than escaping quota', () => {
   const state = withRounds();
   state.assignments.old = { workerId: 'mini', state: 'terminal' };
   const id = 'dddddddd-1111-4222-8333-444444444444';
   const request = { ...event('ready', 'consumer'), evidence: {
+    ...ownedScope,
     observedAt: new Date(now).toISOString(), source: 'native', complete: true,
     queueChecked: true, historyChecked: true, capabilitiesVerified: true,
     capabilities: ['general'], sessions: [{ id, ownershipVerified: true }],
   } };
   assert.throws(() => prepareEvent({ role: 'consumer', workerId: 'mini', control: baseControl }, request, { state }, {
     sessions: { old: { assignmentId: 'old', sessionId: id } },
-  }, now), /resumed terminal/);
+  }, now), /Resumed terminal/);
 });
 
 test('round gates persist through uncertainty, wrong role/generation and changed replay fail', () => {
@@ -517,6 +520,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   };
   request.roundToken = (await runNativeRequest(config, request, dependencies)).roundToken;
   await runNativeRequest(config, { ...request, type: 'ready', id: 'runtime-ready', evidence: {
+    ...ownedScope,
     observedAt, source: 'native inventory', complete: true, queueChecked: true,
     historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
   } }, dependencies);
@@ -528,6 +532,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const state = (await readMailbox(control, f.api)).state;
   await publishEvent(control, currentEvent('publish', 'coordinator', binding(state, 1)), f.api);
   await runNativeRequest(config, { ...request, type: 'ready', id: 'runtime-admission-ready', evidence: {
+    ...ownedScope,
     observedAt, source: 'native inventory after publication', complete: true, queueChecked: true,
     historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
   } }, dependencies);
@@ -615,6 +620,7 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
       ...round, type, id: `lifecycle-${++next}`, ...extra,
     }, dependencies);
     const inventory = (sessions = []) => fresh({
+      ...ownedScope,
       complete: true, queueChecked: true, historyChecked: true,
       capabilitiesVerified: true, capabilities: ['general'], sessions,
     });
@@ -710,23 +716,115 @@ test('same-worktree races, lost acquisition ACK, wrong tokens/context and recove
     roundToken: recovered.roundToken, data: {}, evidence: undefined }, dependencies);
 });
 
-test('supplied workflow IDs cannot exempt work from readiness; observed bounded role sessions can', () => {
+function ownedInventoryFixture(sessions = []) {
   const state = withRounds(), config = { role: 'consumer', workerId: 'mini', host: 'macos-mobile',
-    projectId: 'bbbbbbbb-1111-4222-8333-444444444444', worktreeRoot: '/worktrees', control: baseControl };
-  const session = { id: 'cccccccc-1111-4222-8333-444444444444', workflowId: 'aaaaaaaa-1111-4222-8333-444444444444' };
-  config.automationWorkflowIds = [session.workflowId];
+    projectId: 'bbbbbbbb-1111-4222-8333-444444444444', worktreeRoot: '/worktrees', control: baseControl, approvedPolicy: 'a'.repeat(40) };
+  const journal = { sessions: {} };
   const request = { ...event('ready', 'consumer'), evidence: {
-    observedAt: new Date(now).toISOString(), source: 'actual session observation', complete: true,
-    queueChecked: true, historyChecked: true, capabilitiesVerified: true, capabilities: ['general'], sessions: [session],
+    ...ownedScope, observedAt: new Date(now).toISOString(), source: 'actual session observation', complete: true,
+    queueChecked: true, historyChecked: true, capabilitiesVerified: true, capabilities: ['general'], sessions,
   } };
-  const prepare = () => prepareEvent(config, request, { state }, { sessions: {} }, now);
-  assert.throws(prepare, /Pre-existing/);
-  session.nativeReadbackVerified = true;
-  session.roleObservation = { role: 'coordinator', workerId: 'mini', projectId: config.projectId,
-    worktreePath: '/worktrees/role', ownerConfiguredRoleVerified: true, noTaskExecutionVerified: true };
-  assert.equal(prepare().event.data.unassignedSessions, 0);
+  return { state, config, journal, request, prepare: () => prepareEvent(config, request, { state }, journal, now) };
+}
+
+function roleSession(config, id) {
+  return { id, nativeReadbackVerified: true,
+    roleObservation: { role: 'consumer', workerId: 'mini', projectId: config.projectId,
+      worktreePath: '/worktrees/role', ownerConfiguredRoleVerified: true, noTaskExecutionVerified: true } };
+}
+
+test('unrelated busy, idle and other-automation sessions do not block or alter owned capacity evidence', () => {
+  const session = { id: 'cccccccc-1111-4222-8333-444444444444', workflowId: 'aaaaaaaa-1111-4222-8333-444444444444' };
+  const f = ownedInventoryFixture();
+  const empty = f.prepare().event.data;
+  f.config.automationWorkflowIds = [session.workflowId];
+  f.request.evidence.sessions = [
+    { ...session, status: 'busy', projectId: f.config.projectId },
+    { id: 'dddddddd-1111-4222-8333-444444444444', status: 'idle', creatorSessionId: session.id },
+    { id: 'eeeeeeee-1111-4222-8333-444444444444', roleObservation: {
+      workerId: 'independent-acceptance', projectId: f.config.projectId } },
+  ];
+  assert.deepEqual(f.prepare().event.data, empty);
+  const offered = advance(f.state, f.prepare().event);
+  assert.equal(offered.availability.mini.remaining.general, 4);
+  assert.equal(offered.availability.mini.remaining.mobile, 1);
+});
+
+test('explicit scoped completeness and lineage reconciliation are required', () => {
+  for (const change of [{ ownershipScope: undefined }, { ownershipScope: 'all-project' }, { lineageChecked: false }]) {
+    const f = ownedInventoryFixture();
+    Object.assign(f.request.evidence, change);
+    assert.throws(f.prepare, /Ralph-owned lineage reconciliation/);
+  }
+});
+
+test('mapped workers across rounds cannot be omitted or dismissed with unrelated project work', () => {
+  const id = 'dddddddd-1111-4222-8333-444444444444';
+  const f = ownedInventoryFixture([{ id, ownershipVerified: true }]);
+  f.state.assignments.earlier = { workerId: 'mini', state: 'running', correlation: 'previous-round' };
+  f.journal.sessions['previous-round'] = { assignmentId: 'earlier', sessionId: id };
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
+  f.request.evidence.sessions = [];
+  assert.throws(f.prepare, /Every live\/uncertain receipt/);
+  f.request.evidence.sessions = [{ id, ownershipVerified: false }];
+  assert.throws(f.prepare, /Every live\/uncertain receipt/);
+  f.request.evidence.sessions = [{ id, ownershipVerified: true }];
+  f.state.assignments.earlier.workerId = 'windows';
+  assert.throws(f.prepare, /unresolved assignment ownership/);
+});
+
+test('lost creation responses remain owned even before mailbox acceptance is observed', () => {
+  const f = ownedInventoryFixture();
+  f.state.assignments.pending = { workerId: 'mini', state: 'published' };
+  f.journal.sessions.pending = { assignmentId: 'pending', startEventId: 'persisted-create-intent' };
+  assert.throws(f.prepare, /creation intent lacks correlated native delivery/);
+});
+
+test('owned descendants are transitive and cannot be hidden by idle roles or a terminal ancestor', () => {
+  const parent = 'cccccccc-1111-4222-8333-444444444444';
+  const child = 'dddddddd-1111-4222-8333-444444444444';
+  const grandchild = 'eeeeeeee-1111-4222-8333-444444444444';
+  const f = ownedInventoryFixture();
+  f.request.evidence.sessions = [
+    { id: grandchild, creatorSessionId: child },
+    { id: child, creatorSessionId: parent, terminalVerified: true },
+    roleSession(f.config, parent),
+  ];
+  assert.throws(f.prepare, /Unmapped Ralph-owned session or descendant/);
+  f.request.evidence.sessions[0].terminalVerified = true;
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
+  f.request.evidence.sessions[0].terminalVerified = false;
+  f.request.evidence.sessions[2] = { id: parent, terminalVerified: true };
+  f.journal.sessions.old = { assignmentId: 'old', sessionId: parent };
+  f.state.assignments.old = { workerId: 'mini', state: 'terminal' };
+  assert.throws(f.prepare, /Unmapped Ralph-owned session or descendant/);
+});
+
+test('role observations exempt only bounded roles, never mapped tasks or conflicting correlations', () => {
+  const id = 'cccccccc-1111-4222-8333-444444444444';
+  const f = ownedInventoryFixture();
+  const session = roleSession(f.config, id);
+  f.request.evidence.sessions = [session];
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
   session.roleObservation.noTaskExecutionVerified = false;
-  assert.throws(prepare, /Pre-existing/);
+  assert.throws(f.prepare, /Unmapped Ralph-owned/);
+  session.roleObservation.noTaskExecutionVerified = true;
+  session.nativeReadbackVerified = false;
+  assert.throws(f.prepare, /actual owner-configured native readback/);
+  session.nativeReadbackVerified = true;
+  f.state.assignments.old = { workerId: 'mini', state: 'terminal' };
+  f.journal.sessions.old = { assignmentId: 'old', sessionId: id };
+  assert.throws(f.prepare, /Resumed terminal/);
+  session.id = 'dddddddd-1111-4222-8333-444444444444';
+  session.assignmentCorrelation = 'old';
+  assert.throws(f.prepare, /conflicts with its immutable native mapping/);
+});
+
+test('duplicate or malformed native ancestry cannot certify complete owned inventory', () => {
+  const id = 'cccccccc-1111-4222-8333-444444444444';
+  for (const sessions of [[{ id }, { id }], [{ id, creatorSessionId: 'not-a-native-id' }]]) {
+    assert.throws(ownedInventoryFixture(sessions).prepare, /Malformed or duplicate/);
+  }
 });
 
 test('cross-package acquisition race preserves sibling history and safely reconciles the impossible losing candidate', async (t) => {
@@ -973,6 +1071,7 @@ test('native asynchronous hourly rounds admit locally and settle days later with
   consumer.control.genesisSha = coordinator.control.genesisSha;
   const fresh = (extra) => f.fresh({ ...extra, observedAt: new Date(Date.now()).toISOString() });
   const inventory = (sessions = []) => fresh({
+    ...ownedScope,
     complete: true, queueChecked: true, historyChecked: true, capabilitiesVerified: true,
     capabilities: ['general'], sessions,
   });
@@ -1009,13 +1108,13 @@ test('native asynchronous hourly rounds admit locally and settle days later with
   await run(consumer, w, 'ready', { evidence: inventory() });
   delay(4);
   await assert.rejects(start(), /Fresh complete/);
-  await assert.rejects(run(consumer, w, 'ready', {
+  await run(consumer, w, 'ready', {
     evidence: inventory([{ id: 'cccccccc-1111-4222-8333-444444444444', ownershipVerified: true }]),
-  }), /Pre-existing/);
-  await run(consumer, w, 'unavailable', { data: { reasonCode: 'inventory-unreconciled' },
-    evidence: fresh({ source: 'fixture: unassigned session observed; retained hold' }) });
+  });
+  await run(consumer, w, 'unavailable', { data: { reasonCode: 'capability-unavailable' },
+    evidence: fresh({ source: 'fixture: required local tooling unavailable; retained hold' }) });
   await assert.rejects(start(), /Current-round local admission/);
-  // The independent work is now genuinely reconciled; no TTL/assignment is reset.
+  // Tooling is restored; no TTL/assignment is reset.
   await run(consumer, w, 'ready', { evidence: inventory() });
   const authorized = await start();
   assert.equal(authorized.nativeCreateAllowed, true);
