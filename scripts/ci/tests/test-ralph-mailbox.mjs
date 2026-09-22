@@ -1281,6 +1281,27 @@ test('retired terminal workers require current cessation and retained correlated
   assert.throws(f.prepare, /Every retained Ralph native mapping/);
 });
 
+test('archived ancestry-only creator needs no live worktree or role exemption', () => {
+  const f = ownedInventoryFixture();
+  const id = 'cccccccc-1111-4222-8333-444444444444';
+  const parent = 'dddddddd-1111-4222-8333-444444444444';
+  f.state.assignments.earlier = { workerId: 'mini', state: 'terminal' };
+  f.journal.sessions['previous-round'] = { assignmentId: 'earlier', sessionId: id };
+  const worker = { id, creatorSessionId: parent, assignmentCorrelation: 'previous-round', terminalVerified: true };
+  f.request.evidence.sessions = [
+    worker,
+    { id: parent, archived: true, path: '', nativeReadbackVerified: true },
+  ];
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
+  worker.terminalVerified = false;
+  assert.throws(f.prepare, /Resumed terminal/);
+  worker.terminalVerified = true;
+  f.request.evidence.sessions.pop();
+  assert.throws(f.prepare, /Missing Ralph-owned native ancestor/);
+  f.request.evidence.sessions.push({ id: parent, archived: true, path: '', creatorSessionId: id });
+  assert.throws(f.prepare, /Cyclic Ralph-owned native ancestry/);
+});
+
 test('lost creation responses remain owned even before mailbox acceptance is observed', () => {
   const f = ownedInventoryFixture();
   f.state.assignments.pending = { workerId: 'mini', state: 'published' };

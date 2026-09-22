@@ -10,6 +10,7 @@ import {
   taskFromEvidence, researchDisposition, validateControl, verifyControlRepository,
 } from './ralph-mailbox.mjs';
 import { runAutomationPreflight } from './ralph-automation.mjs';
+import { acquireTransactionLock } from './ralph-native-lock.mjs';
 import {
   buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
 } from './ralph-native-dispatch.mjs';
@@ -408,7 +409,10 @@ export async function runNativeRequest(config, request, {
   await mkdir(root, { recursive: true, mode: 0o700 });
   const lockPath = path.join(root, 'journal.lock');
   await privatePath(lockPath, true);
-  const lock = await open(lockPath, 'wx', 0o600).catch(() => fail('Private transaction lock exists; reconcile interrupted write, never steal by age.'));
+  const releaseLock = await acquireTransactionLock(lockPath, {
+    role: config.role, workerId: config.workerId, requestType: request.type,
+    requestId: request.id, roundId: request.roundId, localContext: checked.localContext,
+  });
   try {
     if (request.type === 'initialize') {
       if (config.role !== 'coordinator' || request.explicitInitializationApproval !== true) fail('Separate explicit owner approval for queue initialization required.');
@@ -626,9 +630,7 @@ export async function runNativeRequest(config, request, {
       message: 'A lost create/ack response NEVER authorizes another native creation. Keep local correlation and reconcile.',
     };
   } finally {
-    await lock.close();
-    const { unlink } = await import('node:fs/promises');
-    await unlink(lockPath);
+    await releaseLock();
   }
 }
 

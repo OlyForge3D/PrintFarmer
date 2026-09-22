@@ -443,6 +443,11 @@ documented cessation-based recovery when applicable. After exhaustion, report
 blocked with the retained attempt evidence. No polling, sleeps or schedule changes.
 Once acquired, complete exactly one role round using the returned token and
 fresh inventory/evidence; these retries do not authorize extra work rounds.
+Serialize runtime calls per journal and await completion. Never stop_bash, kill
+or timeout a runtime batch to shorten it; capture output privately and read the
+existing command instead. Use try/finally for ordinary-error end-round cleanup;
+uncertain writes still require reconciliation. Follow native-roles.md's explicit
+orphan-transaction recovery procedure; never clear a lock by age or PID alone.
 Inventory scope is Ralph-owned lineage across rounds, NOT all project sessions.
 For ready, supply ownershipScope:"ralph-owned-v1" and lineageChecked:true only
 after reconciling this worker's retained creation/delivery intents, mapped workers,
@@ -450,6 +455,9 @@ verified role roots and descendants through actual native readback/history.
 Normalize creator_session_id to session.creatorSessionId and retain ancestor
 readbacks. Unrelated maintainer and other-automation sessions consume no Ralph
 slots and need no terminal attestation. Do not adopt, archive or mutate them.
+Archived ancestry-only entries may have an empty path: use verified ID/creator
+relationships without roleObservation. Do not require an archived ancestor's
+deleted worktree; mapped workers still require live or retirement evidence.
 Every retained mapping, including terminal work, needs an explicit inventory
 entry. Owned ancestry must be complete and acyclic, without adopting unrelated
 ancestors. For archived/deleted terminal work without live readback, use the
