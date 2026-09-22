@@ -9,11 +9,13 @@ source: "Ralph workflow policy"
 ## Round Contract
 
 **Native role packages take a separate entrypoint.** When the approved saved
-prompt contains `NATIVE-MAILBOX-ROLE-V1`, follow [native-roles.md](native-roles.md)
+prompt contains `NATIVE-MAILBOX-ROLE-V2`, follow [native-roles.md](native-roles.md)
 instead of the legacy first-actions/dispatch loop below. The mini coordinator
 alone triages all issues (including quota-accounted `go:needs-research`); device
 consumers only accept assigned work and follow its native local lifecycle.
-Require the private queue/genesis, native identity and migration attestations.
+Require the private queue/genesis, explicit local-owner trust and migration
+attestations, actual isolated-worktree checks and atomic round token. V1 packages
+need consented policy renewal, not invented current-automation metadata.
 Do not run both dispatch paths, invent a fallback or enable any schedule.
 
 The shared scheduled entrypoint is [automation.md](automation.md), deployed with

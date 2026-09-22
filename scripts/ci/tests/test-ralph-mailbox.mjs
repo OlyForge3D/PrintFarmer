@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  applyEvent, digest, initialState, initializeMailbox, inventoryDigest,
+  applyEvent, digest, initialState, initializeMailbox, inventoryDigest, admissionInventoryDigest,
   publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository,
 } from '../ralph-mailbox.mjs';
 import { prepareEvent, runNativeRequest, validateTriageEvidence } from '../ralph-native-runtime.mjs';
@@ -263,7 +263,7 @@ test('crashed round recovery requires exact old identity and does not clear rese
   assert.deepEqual(recovered.assignments, state.assignments);
   assert.throws(() => advance(state, { ...request, data: { ...request.data, oldRoundId: 'unknown' } }), /prior coordinator/);
   assert.throws(() => prepareEvent({ role: 'coordinator', control: baseControl }, {
-    ...request, native: { actual: { execution: {} } },
+    ...request,
     evidence: { source: 'native', observedAt: new Date(now).toISOString(), cessationProven: false },
   }, { state }, { sessions: {} }, now), /cessation/);
 });
@@ -477,13 +477,13 @@ test('consumer delivery intent requires exact live task; session mapping cannot 
   assert.equal(JSON.stringify(state).includes('sessionId'), false);
 });
 
-test('native runtime blocks unverified migration and unknown current invocation without queue writes', async () => {
+test('native runtime blocks unverified migration and unaccepted trust without queue writes', async () => {
   const f = githubFixture();
   const config = { control: baseControl, role: 'consumer', workerId: 'mini', host: 'macos-mobile' };
   await assert.rejects(runNativeRequest(config, {}, { api: f.api }), /Attested/);
   await assert.rejects(runNativeRequest({
     ...config, verified: true, migrationAttested: true, approvedPolicy: 'a'.repeat(40),
-  }, { approvedPolicy: 'a'.repeat(40), native: {} }, { api: f.api, preflight: async () => ({ expectedNativeIdentity: {} }) }), /CURRENT/);
+  }, { approvedPolicy: 'a'.repeat(40) }, { api: f.api }), /Attested/);
   assert.equal(f.calls.length, 0);
 });
 
@@ -506,23 +506,18 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'ralph native '));
   t.after(() => rm(root, { recursive: true, force: true }));
   const workflowId = 'aaaaaaaa-1111-4222-8333-444444444444', projectId = 'bbbbbbbb-1111-4222-8333-444444444444';
-  const actual = {
-    observedAt: new Date().toISOString(),
-    execution: { sessionId: 'cccccccc-1111-4222-8333-444444444444', workflowId, projectId, appHostId: 'local', worktreePath: '/worktree' },
-    workflow: { id: workflowId, projectId, appHostId: 'local' },
-    project: { id: projectId, repository: 'OlyForge3D/PrintFarmer' },
-  };
+  const observedAt = new Date().toISOString();
   const config = { control, role: 'consumer', workerId: 'mini', host: 'macos-mobile',
-    workflowId, verified: true, migrationAttested: true, approvedPolicy: 'a'.repeat(40),
+    workflowId, projectId, worktreeRoot: '/worktrees', executionTrust: 'local-owner-v1', verified: true, migrationAttested: true, approvedPolicy: 'a'.repeat(40),
     stateDirectory: path.join(root, 'native-state') };
-  const dependencies = { api: f.api, preflight: async () => ({ expectedNativeIdentity: actual.execution }) };
+  const dependencies = { api: f.api, preflight: async () => ({ localContext: { worktreePath: '/worktree', gitDirectory: '/git/worktrees/one' } }) };
   const request = {
     type: 'begin-round', id: 'runtime-begin', roundId: 'native-round', approvedPolicy: config.approvedPolicy,
-    native: { actual }, hostConfigPath: path.join(root, 'host.json'),
+    hostConfigPath: path.join(root, 'host.json'),
   };
-  await runNativeRequest(config, request, dependencies);
+  request.roundToken = (await runNativeRequest(config, request, dependencies)).roundToken;
   await runNativeRequest(config, { ...request, type: 'ready', id: 'runtime-ready', evidence: {
-    observedAt: actual.observedAt, source: 'native inventory', complete: true, queueChecked: true,
+    observedAt, source: 'native inventory', complete: true, queueChecked: true,
     historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
   } }, dependencies);
   await publishEvent(control, currentEvent('begin-round', 'coordinator', { invocationDigest: digest('coordinator') }), f.api);
@@ -532,9 +527,13 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   }), f.api);
   const state = (await readMailbox(control, f.api)).state;
   await publishEvent(control, currentEvent('publish', 'coordinator', binding(state, 1)), f.api);
+  await runNativeRequest(config, { ...request, type: 'ready', id: 'runtime-admission-ready', evidence: {
+    observedAt, source: 'native inventory after publication', complete: true, queueChecked: true,
+    historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
+  } }, dependencies);
   const start = { ...request, id: 'native-start', type: 'receipt',
     data: { ...binding(state, 1), status: 'starting', correlation: 'correlation-1' },
-    evidence: { ...evidence(), observedAt: actual.observedAt, source: 'native/GitHub', holdsChecked: true, ownershipReconciled: true } };
+    evidence: { ...evidence(), observedAt, source: 'native/GitHub', holdsChecked: true, ownershipReconciled: true } };
   assert.equal((await runNativeRequest(config, start, dependencies)).nativeCreateAllowed, true);
   assert.equal((await runNativeRequest(config, start, dependencies)).nativeCreateAllowed, false);
   const journal = JSON.parse(await readFile(path.join(root, 'native-state/journal.json'), 'utf8'));
@@ -542,7 +541,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const workerSession = 'dddddddd-1111-4222-8333-444444444444';
   const running = { ...request, id: 'native-running', type: 'receipt',
     data: { ...binding(state, 1), status: 'running', correlation: 'correlation-1' },
-    evidence: { observedAt: actual.observedAt, source: 'native readback', session: { id: workerSession },
+    evidence: { observedAt, source: 'native readback', session: { id: workerSession, projectId, worktreePath: '/worktrees/task' },
       assignmentCorrelation: 'correlation-1', repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true } };
   await runNativeRequest(config, running, dependencies);
   assert.equal(JSON.stringify((await readMailbox(control, f.api)).state).includes(workerSession), false);
@@ -553,7 +552,7 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const later = Date.now() + 120_000;
   const writes = f.calls.filter((call) => call.method !== 'GET').length;
   for (const original of [start, running, ended]) {
-    const replay = { ...original, native: { actual: { ...actual, observedAt: new Date(later).toISOString() } } };
+    const replay = { ...original };
     const result = await runNativeRequest(config, replay, { ...dependencies, now: later });
     assert.equal(result.replayed, true);
     assert.equal(result.nativeCreateAllowed, false);
@@ -563,4 +562,551 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   assert.equal(f.calls.filter((call) => call.method !== 'GET').length, writes);
   await mkdir(path.join(root, 'native-state/journal.lock'));
   await assert.rejects(runNativeRequest(config, { ...request, type: 'inspect' }, dependencies), /Unsafe|lock/);
+});
+
+async function runtimeFixture(t) {
+  const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'ralph role lifecycle '));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const github = githubFixture();
+  const configFor = (role, workerId = 'mini') => ({
+    control: structuredClone(baseControl), role, workerId,
+    host: workerId === 'mini' ? 'macos-mobile' : 'windows-general',
+    workflowId: 'aaaaaaaa-1111-4222-8333-444444444444',
+    projectId: 'bbbbbbbb-1111-4222-8333-444444444444',
+    worktreeRoot: '/worktrees', verified: true, migrationAttested: true,
+    executionTrust: 'local-owner-v1', approvedPolicy: 'a'.repeat(40),
+    stateDirectory: path.join(root, `${role}-${workerId}`, 'native-state'),
+  });
+  const localContext = { worktreePath: '/worktrees/one', gitDirectory: '/git/worktrees/one' };
+  const dependencies = { api: github.api, preflight: async () => ({ localContext }), now };
+  const request = (config, type, extra = {}) => ({
+    type, id: `runtime-${++next}`, roundId: `${config.role}-${config.workerId}-${next}`,
+    approvedPolicy: config.approvedPolicy, hostConfigPath: path.join(path.dirname(config.stateDirectory), 'host.json'),
+    ...extra,
+  });
+  const fresh = (extra = {}) => ({ observedAt: new Date(now).toISOString(), source: 'fixture: retained tool observations and controlled delivery log', ...extra });
+  const coordinator = configFor('coordinator');
+  const initialize = request(coordinator, 'initialize', {
+    explicitInitializationApproval: true,
+    evidence: fresh({ legacyAuthoritiesReconciled: true, cessationOrFencedHandoffProven: true }),
+  });
+  return { github, configFor, coordinator, request, fresh, initialize, dependencies, localContext };
+}
+
+test('manual initializer and repeated coordinator/consumer lifecycles need no current-automation metadata', async (t) => {
+  for (const workerId of ['mini', 'windows']) {
+    const f = await runtimeFixture(t);
+    const { coordinator, dependencies, request, fresh } = f;
+    await assert.rejects(runNativeRequest(coordinator, { ...f.initialize, explicitInitializationApproval: false }, dependencies), /explicit owner approval/);
+    const initialized = await runNativeRequest(coordinator, f.initialize, dependencies);
+    assert.equal(initialized.activationAuthorized, false);
+    await assert.rejects(runNativeRequest(coordinator, f.initialize, dependencies), /intent already exists/);
+    coordinator.control.genesisSha = initialized.genesisSha;
+    const consumer = f.configFor('consumer', workerId);
+    consumer.control.genesisSha = initialized.genesisSha;
+    const acquire = async (config) => {
+      const begin = request(config, 'begin-round');
+      const result = await runNativeRequest(config, begin, dependencies);
+      assert.match(result.roundToken, /^[0-9a-f]{64}$/);
+      return { ...begin, roundToken: result.roundToken };
+    };
+    const c = await acquire(coordinator), w = await acquire(consumer);
+    const run = (config, round, type, extra = {}) => runNativeRequest(config, {
+      ...round, type, id: `lifecycle-${++next}`, ...extra,
+    }, dependencies);
+    const inventory = (sessions = []) => fresh({
+      complete: true, queueChecked: true, historyChecked: true,
+      capabilitiesVerified: true, capabilities: ['general'], sessions,
+    });
+    await run(consumer, w, 'ready', { evidence: inventory() });
+    const taskEvidence = fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true,
+      dependenciesReady: true, epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true,
+      ownershipReconciled: true });
+    await assert.rejects(run(consumer, w, 'reserve', {
+      data: { assignmentId: 'unauthorized', workerId }, evidence: taskEvidence,
+    }), /Only coordinator/);
+    const reserved = await run(coordinator, c, 'reserve', {
+      data: { assignmentId: 'assignment-1', workerId }, evidence: taskEvidence,
+    });
+    const taskBinding = binding(reserved.state, 1);
+    await run(coordinator, c, 'publish', { data: taskBinding, evidence: taskEvidence });
+    await run(consumer, w, 'ready', { evidence: inventory() });
+    const startRequest = { ...w, type: 'receipt', id: `start-${++next}`,
+      data: { ...taskBinding, status: 'starting', correlation: 'delivery-one' }, evidence: taskEvidence };
+    assert.equal((await runNativeRequest(consumer, startRequest, dependencies)).nativeCreateAllowed, true);
+    assert.equal((await runNativeRequest(consumer, startRequest, dependencies)).nativeCreateAllowed, false);
+    const sessionId = 'cccccccc-1111-4222-8333-444444444444';
+    const session = { id: sessionId, projectId: consumer.projectId, worktreePath: '/worktrees/task' };
+    const delivered = fresh({ session, assignmentCorrelation: 'delivery-one',
+      repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true });
+    await run(consumer, w, 'receipt', {
+      data: { ...taskBinding, status: 'running', correlation: 'delivery-one' }, evidence: delivered,
+    });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' }, evidence: delivered,
+    }), /Terminal report/);
+    await run(consumer, w, 'end-round');
+    await run(coordinator, c, 'end-round');
+    const c2 = await acquire(coordinator), w2 = await acquire(consumer);
+    assert.notEqual(c.roundToken, c2.roundToken);
+    assert.notEqual(w.roundToken, w2.roundToken);
+    await assert.rejects(run(consumer, { ...w2, roundToken: w.roundToken }, 'ready', { evidence: inventory() }), /round token/);
+    const terminal = await run(consumer, w2, 'receipt', {
+      data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' },
+      evidence: { ...delivered, session: { ...session, terminalVerified: true },
+        queueChecked: true, historyChecked: true, artifactsVerified: true,
+        noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one' },
+    });
+    await run(consumer, w2, 'ready', { evidence: inventory([{ id: sessionId, terminalVerified: true }]) });
+    const receipt = terminal.state.assignments['assignment-1'].receipts.at(-1);
+    const released = await run(coordinator, c2, 'release', {
+      data: taskBinding, evidence: fresh({ consumerReceiptDigest: receipt.evidenceDigest,
+        taskDigest: taskBinding.taskDigest, ownershipReconciled: true, artifactsVerified: true, noPendingContinuation: true }),
+    });
+    assert.equal(released.state.assignments['assignment-1'].state, 'terminal');
+    await run(consumer, w2, 'end-round');
+    await run(coordinator, c2, 'end-round');
+    const journal = JSON.parse(await readFile(path.join(consumer.stateDirectory, 'journal.json'), 'utf8'));
+    assert.equal(journal.sessions['delivery-one'].sessionId, sessionId);
+    assert.equal(JSON.stringify(journal).includes(w.roundToken), false);
+    assert.equal(JSON.stringify(released.state).includes('/worktrees'), false);
+    assert.equal(JSON.stringify(released.state).includes(sessionId), false);
+  }
+});
+
+test('same-worktree races, lost acquisition ACK, wrong tokens/context and recovery retain exclusion', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator: config, dependencies, request, fresh } = f;
+  config.control.genesisSha = (await runNativeRequest(config, f.initialize, dependencies)).genesisSha;
+  const first = request(config, 'begin-round');
+  const competing = request(config, 'begin-round');
+  const results = await Promise.allSettled([
+    runNativeRequest(config, first, dependencies), runNativeRequest(config, competing, dependencies),
+  ]);
+  assert.equal(results.filter((result) => result.status === 'fulfilled').length, 1);
+  const winnerIndex = results.findIndex((result) => result.status === 'fulfilled');
+  const winner = [first, competing][winnerIndex], result = results[winnerIndex].value;
+  assert.equal((await runNativeRequest(config, winner, dependencies)).roundToken, undefined);
+  await assert.rejects(runNativeRequest(config, request(config, 'begin-round'), dependencies), /already has a round/);
+  const end = { ...winner, type: 'end-round', id: `end-${++next}` };
+  for (const token of [undefined, 'f'.repeat(64)]) {
+    await assert.rejects(runNativeRequest(config, { ...end, roundToken: token }, dependencies), /round token/);
+  }
+  await assert.rejects(runNativeRequest(config, { ...end, roundToken: result.roundToken }, {
+    ...dependencies, preflight: async () => ({ localContext: { ...f.localContext, worktreePath: '/worktrees/other' } }),
+  }), /matching worktree/);
+  const snapshot = await readMailbox(config.control, f.github.api);
+  const recovery = request(config, 'recover-coordinator-round', {
+    data: { oldRoundId: winner.roundId },
+    evidence: fresh({ priorInvocationDigest: snapshot.state.rounds.coordinator.invocationDigest,
+      cessationProven: false, liveChecked: true, queuedChecked: true, historyChecked: true }),
+  });
+  await assert.rejects(runNativeRequest(config, recovery, dependencies), /cessation/);
+  recovery.evidence.cessationProven = true;
+  const recovered = await runNativeRequest(config, recovery, dependencies);
+  assert.notEqual(recovered.roundToken, result.roundToken);
+  await assert.rejects(runNativeRequest(config, { ...end, roundToken: result.roundToken }, dependencies), /persistent role gate/);
+  await runNativeRequest(config, { ...recovery, type: 'end-round', id: `recovered-end-${++next}`,
+    roundToken: recovered.roundToken, data: {}, evidence: undefined }, dependencies);
+});
+
+test('supplied workflow IDs cannot exempt work from readiness; observed bounded role sessions can', () => {
+  const state = withRounds(), config = { role: 'consumer', workerId: 'mini', host: 'macos-mobile',
+    projectId: 'bbbbbbbb-1111-4222-8333-444444444444', worktreeRoot: '/worktrees', control: baseControl };
+  const session = { id: 'cccccccc-1111-4222-8333-444444444444', workflowId: 'aaaaaaaa-1111-4222-8333-444444444444' };
+  config.automationWorkflowIds = [session.workflowId];
+  const request = { ...event('ready', 'consumer'), evidence: {
+    observedAt: new Date(now).toISOString(), source: 'actual session observation', complete: true,
+    queueChecked: true, historyChecked: true, capabilitiesVerified: true, capabilities: ['general'], sessions: [session],
+  } };
+  const prepare = () => prepareEvent(config, request, { state }, { sessions: {} }, now);
+  assert.throws(prepare, /Pre-existing/);
+  session.nativeReadbackVerified = true;
+  session.roleObservation = { role: 'coordinator', workerId: 'mini', projectId: config.projectId,
+    worktreePath: '/worktrees/role', ownerConfiguredRoleVerified: true, noTaskExecutionVerified: true };
+  assert.equal(prepare().event.data.unassignedSessions, 0);
+  session.roleObservation.noTaskExecutionVerified = false;
+  assert.throws(prepare, /Pre-existing/);
+});
+
+test('cross-package acquisition race preserves sibling history and safely reconciles the impossible losing candidate', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, request } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const first = request(coordinator, 'begin-round'), sibling = request(consumer, 'begin-round');
+  let siblingResult;
+  f.github.race(async () => { siblingResult = await runNativeRequest(consumer, sibling, dependencies); });
+  await assert.rejects(runNativeRequest(coordinator, first, dependencies), /conflicted/);
+  assert.match(siblingResult.roundToken, /^[0-9a-f]{64}$/);
+  await assert.rejects(runNativeRequest(coordinator, first, dependencies), /already attempted/);
+  const reconcile = { ...first, type: 'abandon-acquisition', data: { acquisitionId: first.id } };
+  const writes = f.github.calls.filter((call) => call.method !== 'GET').length;
+  const result = await runNativeRequest(coordinator, reconcile, dependencies);
+  assert.equal(result.acquisitionAbandoned, true);
+  assert.equal(result.roundToken, undefined);
+  assert.equal(result.dispatchAuthorized, false);
+  assert.equal(f.github.calls.filter((call) => call.method !== 'GET').length, writes);
+  const journal = JSON.parse(await readFile(path.join(coordinator.stateDirectory, 'journal.json'), 'utf8'));
+  const candidate = journal.roundOwners[first.roundId].publication;
+  assert.equal(candidate.baseSha, coordinator.control.genesisSha);
+  assert.equal(journal.events[first.id].type, 'begin-round');
+  await assert.rejects(f.github.api(`repos/${baseControl.repository}/git/refs/${baseControl.ref}`, 'PATCH', {
+    sha: candidate.candidateSha, force: false,
+  }), /non-fast-forward/);
+  const nextRound = request(coordinator, 'begin-round');
+  const acquired = await runNativeRequest(coordinator, nextRound, dependencies);
+  assert.match(acquired.roundToken, /^[0-9a-f]{64}$/);
+  assert.equal(acquired.state.events[first.id], undefined);
+  assert.ok(acquired.state.events[sibling.id]);
+  await assert.rejects(runNativeRequest(coordinator, first, dependencies), /already attempted/);
+});
+
+test('delayed ref write is not absent evidence; committed and later ended acquisition can never be abandoned', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, request } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  let delayed;
+  const api = async (endpoint, method, body) => {
+    if (method === 'PATCH') {
+      delayed = () => f.github.api(endpoint, method, body);
+      throw new Error('network timeout while server is still processing');
+    }
+    return f.github.api(endpoint, method, body);
+  };
+  const begin = request(coordinator, 'begin-round');
+  await assert.rejects(runNativeRequest(coordinator, begin, { ...dependencies, api }), /acknowledgement lost/);
+  const abandon = { ...begin, type: 'abandon-acquisition', data: { acquisitionId: begin.id } };
+  await assert.rejects(runNativeRequest(coordinator, abandon, dependencies), /may still land/);
+  await delayed();
+  await assert.rejects(runNativeRequest(coordinator, abandon, dependencies), /was published/);
+  assert.equal((await runNativeRequest(coordinator, begin, dependencies)).roundToken, undefined);
+  await publishEvent(coordinator.control, event('end-round', 'coordinator', {}, 'mini', begin.roundId), f.github.api);
+  await assert.rejects(runNativeRequest(coordinator, abandon, dependencies), /was published/);
+});
+
+test('pre-ref failure can be reconciled from the durable protocol without deleting intent or accepting fabricated metadata', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, request } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const begin = request(coordinator, 'begin-round');
+  const api = (endpoint, method, body) => {
+    if (method === 'POST' && endpoint.endsWith('/git/trees')) throw new Error('tree creation unavailable');
+    return f.github.api(endpoint, method, body);
+  };
+  const writes = f.github.calls.filter((call) => call.method === 'PATCH').length;
+  await assert.rejects(runNativeRequest(coordinator, { ...begin, native: { actual: {} } }, dependencies), /Retired/);
+  await assert.rejects(runNativeRequest(coordinator, begin, { ...dependencies, api }), /tree creation/);
+  const abandon = { ...begin, type: 'abandon-acquisition', data: { acquisitionId: begin.id } };
+  await assert.rejects(runNativeRequest(coordinator, { ...abandon, roundId: 'wrong-round' }, dependencies), /Exact recorded/);
+  const reconciled = await runNativeRequest(coordinator, abandon, dependencies);
+  assert.equal(reconciled.roundToken, undefined);
+  assert.equal(reconciled.acquisitionAbandoned, true);
+  assert.equal(f.github.calls.filter((call) => call.method === 'PATCH').length, writes);
+  const journal = JSON.parse(await readFile(path.join(coordinator.stateDirectory, 'journal.json'), 'utf8'));
+  assert.equal(journal.roundOwners[begin.roundId].abandoned, true);
+  assert.equal(journal.roundOwners[begin.roundId].publication, undefined);
+  assert.ok(journal.events[begin.id]);
+  assert.match((await runNativeRequest(coordinator, request(coordinator, 'begin-round'), dependencies)).roundToken, /^[0-9a-f]{64}$/);
+});
+
+test('historical event replay keeps the exact pre-offer state digest', () => {
+  const clock = Date.parse('2026-09-01T00:00:00Z');
+  let state = initialState(registry), sequence = 0;
+  const put = (type, role, data) => {
+    state = applyEvent(state, {
+      id: `legacy-${++sequence}`, type, authorityId: 'primary', epoch: 1, role,
+      ...(role === 'consumer' ? { workerId: 'mini' } : {}), roundId: role,
+      observedAt: new Date(clock).toISOString(), data,
+    }, { replay: true });
+  };
+  put('begin-round', 'coordinator', { invocationDigest: digest('coordinator') });
+  put('begin-round', 'consumer', { invocationDigest: digest('consumer') });
+  const reconcile = () => put('ready', 'consumer', {
+    inventoryDigest: digest('inventory'), assignmentInventoryDigest: inventoryDigest(state, 'mini'),
+    unassignedSessions: 0, capabilities: ['general', 'ios'],
+  });
+  reconcile();
+  const task = taskFromEvidence({
+    issue: 1, headSha: 'a'.repeat(40), title: 'Legacy general task',
+    labels: ['squad:copilot', 'type:bug', 'priority:p1'], acceptanceCriteria: ['Inspect only'],
+    files: ['src/legacy'], filesComplete: true, scope: 'general', classificationComplete: true,
+    capabilities: ['general'],
+  });
+  put('reserve', 'coordinator', {
+    assignmentId: 'legacy-assignment', workerId: 'mini', generation: 1,
+    task, eligibilityDigest: digest('eligible'), policySha: 'b'.repeat(40),
+  });
+  const bound = { assignmentId: 'legacy-assignment', generation: 1, taskDigest: digest(task) };
+  put('publish', 'coordinator', bound);
+  for (const status of ['starting', 'running', 'terminal-reported']) {
+    put('receipt', 'consumer', { ...bound, status, correlation: 'legacy-delivery', evidenceDigest: digest(status) });
+  }
+  reconcile();
+  put('release', 'coordinator', { ...bound, terminalEvidenceDigest: digest('terminal') });
+  put('end-round', 'consumer', {});
+  put('end-round', 'coordinator', {});
+  assert.equal(sequence, 12);
+  // Captured by running this history at 1039d637 before the additive protocol.
+  assert.equal(digest(state), 'b4a1a28b8433e0d19d0ba48c7dbad43ebae65ae3570d14bb21b30ef62d419fc1');
+});
+
+function capacityOffer(state, workerId = 'mini') {
+  return event('offer-capacity', 'consumer', {
+    inventoryDigest: digest('reconciled local observations'),
+    assignmentInventoryDigest: admissionInventoryDigest(state, workerId),
+    unassignedSessions: 0, capabilities: registry.workers.find((entry) => entry.workerId === workerId).capabilities,
+    policySha: 'b'.repeat(40), previousCapacityDigest: digest(state.availability?.[workerId] ?? {}),
+    inventoryObservedAt: new Date(now).toISOString(),
+  }, workerId);
+}
+function offeredReservation(state, issue, workerId = 'mini', mobile = false) {
+  return event('reserve', 'coordinator', {
+    assignmentId: `assignment-${issue}`, workerId, generation: 1,
+    offerId: state.availability[workerId].offerId, policySha: 'b'.repeat(40),
+    task: taskFromEvidence(evidence(issue, mobile)), eligibilityDigest: digest('fresh eligibility'),
+  });
+}
+
+test('one finite offer admits a delayed four-general batch, never borrows, refunds or replays credits', () => {
+  let state = withRounds(), clock = now;
+  const put = (value) => {
+    const observedAt = new Date(clock).toISOString();
+    state = applyEvent(state, {
+      ...value, observedAt,
+      data: value.type === 'offer-capacity' ? { ...value.data, inventoryObservedAt: observedAt } : value.data,
+    }, { now: clock });
+  };
+  const offer = capacityOffer(state);
+  put(offer);
+  clock += 3 * 60 * 60_000;
+  for (let issue = 1; issue <= 4; issue++) {
+    put(offeredReservation(state, issue));
+    clock += 5 * 60_000;
+    put(event('deliver', 'coordinator', binding(state, issue)));
+  }
+  assert.deepEqual(state.availability.mini.remaining, { mobile: 1, general: 0 });
+  assert.throws(() => put(offeredReservation(state, 5)), /exhausted/);
+  assert.equal(applyEvent(state, offer, { now: clock }), state);
+  put(event('withdraw', 'coordinator', { ...binding(state, 1), reconciliationDigest: digest('never delivered') }));
+  assert.equal(state.availability.mini.remaining.general, 0);
+  assert.throws(() => put(offeredReservation(state, 5)), /exhausted/);
+  const staleReservation = offeredReservation(state, 5);
+  const refreshed = capacityOffer(state);
+  put(refreshed);
+  assert.deepEqual(state.availability.mini.remaining, { mobile: 1, general: 1 });
+  assert.throws(() => put(staleReservation), /Current worker capacity offer/);
+  put(offeredReservation(state, 5));
+  assert.equal(state.availability.mini.remaining.general, 0);
+  put(offeredReservation(state, 6, 'mini', true));
+  assert.deepEqual(state.availability.mini.remaining, { mobile: 0, general: 0 });
+  assert.throws(() => put(offeredReservation(state, 7, 'mini', true)), /exhausted/);
+  put(capacityOffer(state, 'windows'));
+  assert.throws(() => put(offeredReservation(state, 8, 'windows', true)), /exhausted/);
+});
+
+test('offers are bound to worker, registry, policy and exact refresh inventory; revocation retains assignments', () => {
+  let state = withRounds();
+  state = advance(state, capacityOffer(state));
+  const reservation = offeredReservation(state, 1);
+  assert.throws(() => advance(state, { ...reservation, data: { ...reservation.data, policySha: 'c'.repeat(40) } }), /policy binding/);
+  assert.throws(() => advance(state, { ...reservation, data: { ...reservation.data, workerId: 'windows' } }), /capacity offer/);
+  const changedRegistry = structuredClone(state);
+  changedRegistry.registry.epoch++;
+  assert.throws(() => advance(changedRegistry, { ...reservation, epoch: 2 }), /policy binding/);
+  const staleRefresh = capacityOffer(state);
+  state = advance(state, reservation);
+  assert.throws(() => advance(state, staleRefresh), /Complete reconciled/);
+  const beforeRevocation = capacityOffer(state);
+  state = advance(state, event('unavailable', 'consumer', {
+    reasonCode: 'inventory-unreconciled', evidenceDigest: digest('observed unknown work'),
+  }));
+  assert.equal(state.availability.mini.revoked, true);
+  assert.throws(() => advance(state, beforeRevocation), /Capacity changed/);
+  assert.equal(state.assignments['assignment-1'].state, 'reserved');
+  assert.throws(() => advance(state, { ...reservation, id: 'new-reservation' }), /reuse/);
+  const other = { ...reservation, id: 'another-reservation', data: { ...reservation.data, assignmentId: 'assignment-2' } };
+  assert.throws(() => advance(state, other), /capacity offer/);
+});
+
+test('native asynchronous hourly rounds admit locally and settle days later without synchronized readiness', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const f = await runtimeFixture(t);
+  const dependencies = { ...f.dependencies };
+  delete dependencies.now;
+  const { coordinator } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const fresh = (extra) => f.fresh({ ...extra, observedAt: new Date(Date.now()).toISOString() });
+  const inventory = (sessions = []) => fresh({
+    complete: true, queueChecked: true, historyChecked: true, capabilitiesVerified: true,
+    capabilities: ['general'], sessions,
+  });
+  const taskEvidence = () => fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true,
+    dependenciesReady: true, epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true,
+    ownershipReconciled: true });
+  const acquire = async (config) => {
+    const request = f.request(config, 'begin-round');
+    const result = await runNativeRequest(config, request, dependencies);
+    return { ...request, roundToken: result.roundToken };
+  };
+  const run = (config, round, type, extra = {}) => runNativeRequest(config, {
+    ...round, type, id: `delayed-${++next}`, ...extra,
+  }, dependencies);
+  const delay = (minutes) => t.mock.timers.tick(minutes * 60_000);
+  let w = await acquire(consumer);
+  await run(consumer, w, 'ready', { evidence: inventory() });
+  await run(consumer, w, 'end-round');
+  delay(67);
+  let c = await acquire(coordinator);
+  const reserved = await run(coordinator, c, 'reserve', {
+    data: { assignmentId: 'assignment-1', workerId: 'mini' }, evidence: taskEvidence(),
+  });
+  const bound = binding(reserved.state, 1);
+  delay(8);
+  await run(coordinator, c, 'publish', { data: bound, evidence: taskEvidence() });
+  await run(coordinator, c, 'end-round');
+  delay(71);
+  w = await acquire(consumer);
+  const start = () => run(consumer, w, 'receipt', {
+    data: { ...bound, status: 'starting', correlation: 'delayed-delivery' }, evidence: taskEvidence(),
+  });
+  await assert.rejects(start(), /Current-round local admission/);
+  await run(consumer, w, 'ready', { evidence: inventory() });
+  delay(4);
+  await assert.rejects(start(), /Fresh complete/);
+  await assert.rejects(run(consumer, w, 'ready', {
+    evidence: inventory([{ id: 'cccccccc-1111-4222-8333-444444444444', ownershipVerified: true }]),
+  }), /Pre-existing/);
+  await run(consumer, w, 'unavailable', { data: { reasonCode: 'inventory-unreconciled' },
+    evidence: fresh({ source: 'fixture: unassigned session observed; retained hold' }) });
+  await assert.rejects(start(), /Current-round local admission/);
+  // The independent work is now genuinely reconciled; no TTL/assignment is reset.
+  await run(consumer, w, 'ready', { evidence: inventory() });
+  const authorized = await start();
+  assert.equal(authorized.nativeCreateAllowed, true);
+  delay(9);
+  const rawReadback = {
+    id: 'cccccccc-1111-4222-8333-444444444444', project_id: consumer.projectId,
+    project_repo: 'OlyForge3D/PrintFarmer', path: '/worktrees/delayed-task',
+    branch: 'test-only-general', activity: { status: 'idle' },
+  };
+  const session = { id: rawReadback.id, projectId: rawReadback.project_id, worktreePath: rawReadback.path };
+  const delivered = () => fresh({ session, repository: rawReadback.project_repo,
+    nativeReadbackVerified: true, kickoffDeliveryVerified: true, assignmentCorrelation: 'delayed-delivery' });
+  await run(consumer, w, 'receipt', {
+    data: { ...bound, status: 'running', correlation: 'delayed-delivery' }, evidence: delivered(),
+  });
+  await run(consumer, w, 'end-round');
+  delay(3 * 60 + 11);
+  w = await acquire(consumer);
+  await run(consumer, w, 'receipt', {
+    data: { ...bound, status: 'running', correlation: 'delayed-delivery' },
+    evidence: { ...delivered(), source: 'fixture: same mapped child acknowledged recorded follow-up' },
+  });
+  const terminalRequest = {
+    data: { ...bound, status: 'terminal-reported', correlation: 'delayed-delivery' },
+    evidence: { ...delivered(), session: { ...session, terminalVerified: true },
+      queueChecked: true, historyChecked: true, artifactsVerified: true },
+  };
+  await assert.rejects(run(consumer, w, 'receipt', terminalRequest), /final delivery ACK/);
+  const terminal = await run(consumer, w, 'receipt', { ...terminalRequest, evidence: {
+    ...terminalRequest.evidence, noPendingContinuation: true, noFutureDelivery: true,
+    finalDeliveryCorrelation: 'follow-up-one',
+  } });
+  const receiptDigest = terminal.state.assignments['assignment-1'].receipts.at(-1).evidenceDigest;
+  await run(consumer, w, 'end-round');
+  delay(2 * 24 * 60 + 17);
+  c = await acquire(coordinator);
+  const result = await run(coordinator, c, 'release', {
+    data: bound, evidence: fresh({ consumerReceiptDigest: receiptDigest, taskDigest: bound.taskDigest,
+      ownershipReconciled: true, artifactsVerified: true, noPendingContinuation: true }),
+  });
+  assert.equal(result.state.assignments['assignment-1'].state, 'terminal');
+  assert.equal(result.state.availability.mini.remaining.general, 3);
+  await run(coordinator, c, 'end-round');
+  const replay = await readMailbox(coordinator.control, f.github.api);
+  assert.deepEqual(replay.state, (await runNativeRequest(coordinator, {
+    approvedPolicy: coordinator.approvedPolicy, type: 'inspect',
+  }, dependencies)).state);
+  assert.equal(JSON.stringify(replay.state).includes(rawReadback.id), false);
+});
+
+test('terminal commitments survive delay but observed resumption and uncertain delivery retain ownership', () => {
+  let state = withRounds();
+  state = advance(state, capacityOffer(state));
+  state = advance(state, offeredReservation(state, 1));
+  state = advance(state, event('deliver', 'coordinator', binding(state, 1)));
+  state = advance(state, capacityOffer(state));
+  state = advance(state, event('accept', 'consumer', {
+    ...binding(state, 1), status: 'starting', correlation: 'one', evidenceDigest: digest('intent'), policySha: 'b'.repeat(40),
+  }));
+  const settle = () => advance(state, event('settle', 'coordinator', {
+    ...binding(state, 1), terminalEvidenceDigest: digest('coordinator reconciliation'),
+  }));
+  assert.throws(settle, /terminal report/);
+  state = advance(state, event('receipt', 'consumer', {
+    ...binding(state, 1), status: 'uncertain', correlation: 'one', evidenceDigest: digest('lost acknowledgment'),
+  }));
+  assert.throws(settle, /terminal report/);
+  const terminal = () => event('terminal-receipt', 'consumer', {
+    ...binding(state, 1), status: 'terminal-reported', correlation: 'one', evidenceDigest: digest('final ACK/no future sends'),
+  });
+  state = advance(state, terminal());
+  state = advance(state, event('unavailable', 'consumer', {
+    reasonCode: 'owner-paused', evidenceDigest: digest('no further assignments offered'),
+  }));
+  assert.equal(state.readiness.mini, undefined);
+  assert.equal(settle().assignments['assignment-1'].state, 'terminal');
+  const beforeBlocker = capacityOffer(state);
+  state = advance(state, event('report-blocker', 'consumer', {
+    ...binding(state, 1), reasonCode: 'delivery-uncertain', evidenceDigest: digest('observed external resumption'),
+  }));
+  assert.throws(settle, /Unblocked durable/);
+  assert.throws(() => advance(state, beforeBlocker), /Complete reconciled/);
+  assert.equal(state.availability.mini.revoked, true);
+  assert.throws(() => advance(state, event('receipt', 'consumer', {
+    ...binding(state, 1), status: 'running', correlation: 'one', evidenceDigest: digest('resumed'),
+  })), /transition/);
+  state = advance(state, terminal());
+  state = settle();
+  assert.equal(state.assignments['assignment-1'].state, 'terminal');
+});
+
+test('local admission rechecks capability shrink, policy, receipt inventory and generation before creation', () => {
+  let state = withRounds();
+  state = advance(state, capacityOffer(state));
+  state = advance(state, offeredReservation(state, 1));
+  state = advance(state, event('deliver', 'coordinator', binding(state, 1)));
+  const noTooling = capacityOffer(state);
+  noTooling.data.capabilities = [];
+  state = advance(state, noTooling);
+  const acceptance = event('accept', 'consumer', {
+    ...binding(state, 1), status: 'starting', correlation: 'one',
+    evidenceDigest: digest('observed live admission'), policySha: 'b'.repeat(40),
+  });
+  assert.throws(() => advance(state, acceptance), /required capabilities/);
+  state = advance(state, capacityOffer(state));
+  assert.throws(() => advance(state, { ...acceptance, data: { ...acceptance.data, policySha: 'c'.repeat(40) } }), /matching policy/);
+  assert.throws(() => advance(state, { ...acceptance, data: { ...acceptance.data, generation: 2 } }), /binding mismatch/);
+  state = advance(state, event('report-blocker', 'consumer', {
+    ...binding(state, 1), reasonCode: 'held', evidenceDigest: digest('hold observed'),
+  }));
+  assert.throws(() => advance(state, acceptance), /Current-round local admission/);
+  const oldObservation = capacityOffer(state);
+  oldObservation.data.inventoryObservedAt = new Date(now - 59_000).toISOString();
+  state = advance(state, oldObservation);
+  assert.throws(() => applyEvent(state, { ...acceptance, observedAt: new Date(now + 2_000).toISOString() },
+    { now: now + 2_000 }), /Fresh complete/);
+  state = advance(state, capacityOffer(state));
+  assert.equal(advance(state, acceptance).assignments['assignment-1'].state, 'starting');
+});
+
+test('internal mailbox event names cannot bypass native evidence preparation', () => {
+  for (const type of ['accept', 'offer-capacity', 'deliver', 'terminal-receipt', 'settle']) {
+    assert.throws(() => prepareEvent({ role: 'consumer', workerId: 'mini', control: baseControl },
+      event(type, 'consumer'), { state: withRounds() }, { sessions: {} }, now), /internal mailbox/);
+  }
 });

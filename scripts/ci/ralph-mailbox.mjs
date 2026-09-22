@@ -80,6 +80,10 @@ export function inventoryDigest(state, workerId) {
     .map(([id, entry]) => [id, entry.generation, entry.state, entry.correlation ?? '', entry.taskDigest]));
 }
 
+export function admissionInventoryDigest(state, workerId) {
+  return digest(Object.entries(state.assignments).filter(([, entry]) => entry.workerId === workerId));
+}
+
 function validateTask(task) {
   exact(task, ['issue', 'pr', 'headSha', 'requirementsDigest', 'fileKeys', 'category', 'capabilities', 'purpose']);
   if ((!Number.isSafeInteger(task.issue) || task.issue < 1) &&
@@ -145,30 +149,70 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
         if (!old || old.roundId !== data.oldRoundId || !digestPattern.test(data.cessationEvidenceDigest ?? '')) fail('Exact old consumer round and proven cessation evidence required.');
         delete state.rounds[roundKey('consumer', data.workerId)];
         delete state.readiness[data.workerId];
+        if (state.availability) state.availability[data.workerId] = { offerId: event.id, revoked: true };
         break;
       }
+      case 'offer-capacity':
       case 'ready': {
         consumer();
-        exact(data, ['inventoryDigest', 'assignmentInventoryDigest', 'unassignedSessions', 'capabilities']);
+        exact(data, ['inventoryDigest', 'assignmentInventoryDigest', 'unassignedSessions', 'capabilities',
+          ...(event.type === 'offer-capacity' ? ['policySha', 'previousCapacityDigest', 'inventoryObservedAt'] : [])]);
         const worker = workerFor(state, event.workerId);
         if (!digestPattern.test(data.inventoryDigest ?? '') || data.unassignedSessions !== 0 ||
-            data.assignmentInventoryDigest !== inventoryDigest(state, event.workerId) ||
+            data.assignmentInventoryDigest !== (event.type === 'offer-capacity'
+              ? admissionInventoryDigest(state, event.workerId) : inventoryDigest(state, event.workerId)) ||
             !Array.isArray(data.capabilities) || data.capabilities.some((capability) => !worker.capabilities.includes(capability))) fail('Complete reconciled local inventory and verified capabilities required.');
-        state.readiness[event.workerId] = { ...data, observedAt: event.observedAt };
+        state.readiness[event.workerId] = {
+          ...data, observedAt: event.type === 'offer-capacity' ? data.inventoryObservedAt : event.observedAt,
+        };
+        if (event.type === 'offer-capacity') {
+          fresh(data.inventoryObservedAt, Date.parse(event.observedAt));
+          if (!shaPattern.test(data.policySha ?? '')) fail('Approved policy binding required for capacity offer.');
+          if (data.previousCapacityDigest !== digest(state.availability?.[event.workerId] ?? {})) fail('Capacity changed after observation; reconcile before replacing its offer.');
+          const owned = Object.values(state.assignments).filter((entry) => entry.workerId === event.workerId && liveStates.has(entry.state));
+          const limits = hostLimits(worker.host);
+          state.availability ??= {};
+          state.availability[event.workerId] = {
+            offerId: event.id, roundId: event.roundId, policySha: data.policySha,
+            registryDigest: digest(state.registry), capabilities: data.capabilities,
+            remaining: Object.fromEntries(['mobile', 'general'].map((category) => [
+              category, Math.max(0, limits[category] - owned.filter((entry) => entry.task.category === category).length),
+            ])),
+          };
+        }
+        break;
+      }
+      case 'unavailable': {
+        consumer();
+        exact(data, ['reasonCode', 'evidenceDigest']);
+        if (!['inventory-unreconciled', 'capability-unavailable', 'owner-paused'].includes(data.reasonCode) ||
+            !digestPattern.test(data.evidenceDigest ?? '')) fail('Known unavailability reason and evidence required.');
+        state.availability ??= {};
+        state.availability[event.workerId] = { offerId: event.id, revoked: true };
+        delete state.readiness[event.workerId];
         break;
       }
       case 'reserve': {
         coordinator();
-        exact(data, ['assignmentId', 'workerId', 'task', 'generation', 'eligibilityDigest', 'policySha']);
+        exact(data, ['assignmentId', 'workerId', 'task', 'generation', 'eligibilityDigest', 'policySha', 'offerId']);
         identifier(data.assignmentId);
         if (data.generation !== 1 || state.assignments[data.assignmentId] ||
             !digestPattern.test(data.eligibilityDigest ?? '') || !shaPattern.test(data.policySha ?? '')) fail('New exact reservation required; never reuse assignment IDs.');
         validateTask(data.task);
         const worker = workerFor(state, data.workerId);
-        const ready = state.readiness[data.workerId];
-        fresh(ready?.observedAt, Date.parse(event.observedAt));
-        if (ready.assignmentInventoryDigest !== inventoryDigest(state, data.workerId)) fail('Consumer must reconcile all current assignments before more admission.');
-        if (data.task.capabilities.some((capability) => !ready.capabilities.includes(capability))) fail('Consumer lacks freshly verified required tooling.');
+        const offer = state.availability?.[data.workerId];
+        if (data.offerId !== undefined) {
+          if (!offer || offer.revoked || offer.offerId !== data.offerId || offer.policySha !== data.policySha ||
+              offer.registryDigest !== digest(state.registry)) fail('Current worker capacity offer and approved policy binding required.');
+          if (offer.remaining[data.task.category] < 1) fail('Finite category offer exhausted; no borrowing or automatic credit refund.');
+          if (data.task.capabilities.some((capability) => !offer.capabilities.includes(capability))) fail('Task exceeds offered capabilities.');
+        } else {
+          // Preserve the exact reducer for previously committed V1/V2 events.
+          const ready = state.readiness[data.workerId];
+          fresh(ready?.observedAt, Date.parse(event.observedAt));
+          if (ready.assignmentInventoryDigest !== inventoryDigest(state, data.workerId)) fail('Consumer must reconcile all current assignments before more admission.');
+          if (data.task.capabilities.some((capability) => !ready.capabilities.includes(capability))) fail('Consumer lacks freshly verified required tooling.');
+        }
         const active = Object.values(state.assignments).filter((entry) => liveStates.has(entry.state));
         if (active.some((entry) =>
           (data.task.issue && entry.task.issue === data.task.issue) ||
@@ -180,23 +224,39 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
         state.assignments[data.assignmentId] = {
           ...data, taskDigest: digest(data.task), state: 'reserved', receipts: [],
         };
+        if (data.offerId !== undefined) offer.remaining[data.task.category]--;
         break;
       }
+      case 'deliver':
       case 'publish': {
         coordinator();
         exact(data, ['assignmentId', 'generation', 'taskDigest']);
         const assignment = getAssignment();
         if (assignment.state !== 'reserved') fail('Only a durable reservation can be published.');
-        fresh(state.readiness[assignment.workerId]?.observedAt, Date.parse(event.observedAt));
+        if (event.type === 'publish') fresh(state.readiness[assignment.workerId]?.observedAt, Date.parse(event.observedAt));
         assignment.state = 'published';
         break;
       }
+      case 'accept':
+      case 'terminal-receipt':
       case 'receipt': {
         consumer();
-        exact(data, ['assignmentId', 'generation', 'taskDigest', 'status', 'correlation', 'evidenceDigest']);
+        exact(data, ['assignmentId', 'generation', 'taskDigest', 'status', 'correlation', 'evidenceDigest',
+          ...(event.type === 'accept' ? ['policySha'] : [])]);
         const assignment = getAssignment();
         identifier(data.correlation);
         if (!digestPattern.test(data.evidenceDigest ?? '')) fail('Local evidence digest required.');
+        if (event.type === 'accept') {
+          const offer = state.availability?.[event.workerId];
+          const ready = state.readiness[event.workerId];
+          if (data.status !== 'starting' || !offer || offer.revoked || offer.roundId !== event.roundId ||
+              offer.policySha !== data.policySha || assignment.policySha !== data.policySha ||
+              offer.registryDigest !== digest(state.registry)) fail('Current-round local admission and matching policy required.');
+          fresh(ready?.observedAt, Date.parse(event.observedAt));
+          if (ready.assignmentInventoryDigest !== admissionInventoryDigest(state, event.workerId) ||
+              assignment.task.capabilities.some((capability) => !offer.capabilities.includes(capability))) fail('Fresh exact local inventory and required capabilities must admit kickoff.');
+        }
+        if (event.type === 'terminal-receipt' && data.status !== 'terminal-reported') fail('Durable terminal commitment required.');
         const transitions = {
           published: ['starting', 'uncertain'], starting: ['running', 'uncertain', 'terminal-reported'],
           running: ['running', 'review', 'recovery', 'uncertain', 'terminal-reported'],
@@ -210,6 +270,10 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
         assignment.correlation = data.correlation;
         assignment.state = data.status;
         assignment.receipts.push({ ...data, observedAt: event.observedAt });
+        if (event.type === 'terminal-receipt') {
+          assignment.terminalCommitment = data.evidenceDigest;
+          delete assignment.blocker;
+        } else if (event.type === 'accept') delete assignment.blocker;
         break;
       }
       case 'report-blocker': {
@@ -219,6 +283,7 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
         if (!liveStates.has(assignment.state) || !digestPattern.test(data.evidenceDigest ?? '') ||
             !['task-changed', 'held', 'capability-unavailable', 'native-evidence-missing', 'delivery-uncertain', 'scope-expanded', 'dependency-blocked'].includes(data.reasonCode)) fail('Known live assignment and nonsecret blocker code required.');
         assignment.blocker = { reasonCode: data.reasonCode, evidenceDigest: data.evidenceDigest, observedAt: event.observedAt };
+        if (state.availability) state.availability[event.workerId] = { offerId: event.id, revoked: true };
         break;
       }
       case 'withdraw': {
@@ -231,14 +296,19 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
         assignment.terminalEvidenceDigest = data.reconciliationDigest;
         break;
       }
+      case 'settle':
       case 'release': {
         coordinator();
         exact(data, ['assignmentId', 'generation', 'taskDigest', 'terminalEvidenceDigest']);
         const assignment = getAssignment();
         if (assignment.state !== 'terminal-reported' || !digestPattern.test(data.terminalEvidenceDigest ?? '')) fail('Correlated terminal report and independent native reconciliation required.');
-        fresh(state.readiness[assignment.workerId]?.observedAt, Date.parse(event.observedAt));
-        if (state.readiness[assignment.workerId].assignmentInventoryDigest !== inventoryDigest(state, assignment.workerId)) fail('Consumer must reconcile latest terminal receipt before release.');
-        fresh(assignment.receipts.at(-1)?.observedAt, Date.parse(event.observedAt));
+        if (event.type === 'settle') {
+          if (assignment.blocker || assignment.terminalCommitment !== assignment.receipts.at(-1)?.evidenceDigest) fail('Unblocked durable terminal commitment required; old receipts need consumer reconciliation.');
+        } else {
+          fresh(state.readiness[assignment.workerId]?.observedAt, Date.parse(event.observedAt));
+          if (state.readiness[assignment.workerId].assignmentInventoryDigest !== inventoryDigest(state, assignment.workerId)) fail('Consumer must reconcile latest terminal receipt before release.');
+          fresh(assignment.receipts.at(-1)?.observedAt, Date.parse(event.observedAt));
+        }
         assignment.state = 'terminal';
         assignment.terminalEvidenceDigest = data.terminalEvidenceDigest;
         break;
@@ -434,12 +504,13 @@ export async function initializeMailbox(config, migrationEvidenceDigest, api = g
   return { genesisSha: sha, activationAuthorized: false };
 }
 
-export async function publishEvent(config, event, api = githubApi, anchor) {
+export async function publishEvent(config, event, api = githubApi, anchor, beforePublish) {
   const snapshot = await readMailbox(config, api, anchor);
   const state = applyEvent(snapshot.state, event);
   if (state === snapshot.state) return { ...snapshot, replayed: true };
   const sha = await createRecord(config, { previousStateDigest: digest(snapshot.state), event }, [snapshot.head], api);
   await verifyControlRepository(config, api);
+  if (beforePublish) await beforePublish({ base: snapshot, candidateSha: sha });
   let uncertain = false;
   try {
     await api(`repos/${config.repository}/git/refs/${config.ref}`, 'PATCH', { sha, force: false });

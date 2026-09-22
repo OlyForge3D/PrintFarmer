@@ -20,6 +20,9 @@ The private GitHub queue helpers implement durable reservations, round gates,
 opaque receipts and native-session correlation. These are implemented packages,
 **not an activated deployment**: policy review, native attestation, legacy
 authority reconciliation and explicit queue initialization are still required.
+V2 corrects V1's requirement for a nonexistent current-automation identity API.
+It uses explicit local-owner/shared-writer trust, real isolated-worktree checks
+and atomic persistent round ownership, not fabricated app metadata.
 
 Run [setup-ralph-macos.mjs](../scripts/setup-ralph-macos.mjs) **on the destination
 device**, not against source-host deployments. The historical filename is retained
@@ -38,7 +41,7 @@ development helper installs/upgrades software, including when asked to verify.
 | --- | --- |
 | `clone-pending` | Read-only preliminary checks passed; no clone, policy or simulator validation yet. |
 | `approval-required` | Exact candidate and controlled scope/changes displayed; no prompts/writes or repository simulator execution. |
-| `validated-not-attested` | Local prerequisites and policy validated; nothing written. Native identity remains unverified. |
+| `validated-not-attested` | Local prerequisites and policy validated; nothing written. Deployment acceptance remains pending. |
 | `staged-unverified` | Private candidate files staged. **Migration is incomplete.** No native attestation, preflight, handoff or activation performed. |
 | Nonzero exit | A prerequisite, trust, path or overwrite check failed. Read the remediation; do not weaken it. |
 
@@ -82,7 +85,8 @@ Use a temporary prompt "Setup pending: report blocked and exit. No mutations."
 Use save_workflow (interval manual with the explicit cron) or the native editor.
 Do not call run_workflow. Read back the saved settings and disabled state.
 Inspect an app-created isolated destination session with get_session; report its
-actual worktree parent, project ID and native environment ID. Do not infer current
+actual worktree parent and project ID. Get environment selection from the workflow
+record/editor, not from get_session if that field is absent. Do not infer current
 automation execution from a manual setup session or an arbitrary workflow lookup.
 Carry the discovered repo path, project/workflow UUIDs, app-host ID and worktree
 parent forward yourself; do not ask me to transcribe IDs. Verify the intended gh
@@ -128,10 +132,14 @@ separate explicit maintainer attestation; policy approval does not grant it.
 Keep migrationAttested:false until all old authorities and workers are reconciled.
 Do not initialize a mailbox as part of this setup. Actual genesis must be pinned
 in every private role package only after separately authorized initialization.
-A setup chat is not a current automation invocation. When a round is separately
-authorized, supported native current-execution identity must be available or it
-must stop before mutations. No arbitrary workflow lookup can substitute.
-Report staged/incomplete wherever identity, ownership or initialization checks
+Explicitly accept executionTrust:local-owner-v1 before setting verified:true.
+Configured workflow/project/environment IDs are deployment assertions, not
+independently authenticated current execution facts. There is no supported
+in-session current-automation identity API. Do not invent native.actual or env
+metadata. Authorized manual initialization runs in an approved isolated worktree;
+ordinary coordinator AND consumer rounds acquire an atomic runtime roundToken.
+No external per-round observer is needed. Unknown work/delivery remains held.
+Report staged/incomplete wherever deployment, ownership or initialization checks
 remain unresolved. No session DB/ledger/cache export, token copying, source-host
 changes, Reaper activation, recurring process or schedule enablement.
 If a required native binding cannot be established, report that exact blocker.
@@ -204,7 +212,8 @@ blocks, its partial/new directory is retained for inspection, never deleted.
 Output beside `host.json`:
 
 - `host.json`: destination role/bindings, observed numeric private-repo identity,
-  registry, `verified:false`, `migrationAttested:false`; no invented genesis.
+  registry, `executionTrust:"local-owner-v1"`, `verified:false`,
+  `migrationAttested:false`; no invented genesis.
 - `workflow-settings.json`: supported `save_workflow` input values, `enabled:false`.
 - `workflow-prompt.txt`: approved template with destination bindings and one
   identical commit pin for the outer guard and `--approved-policy`.
@@ -226,6 +235,7 @@ nonexistent** private output directory and add:
 ```text
 --renew-policy
 --previous-approval "/absolute/private/ralph-mini/policy-approval.json"
+--previous-host-config "/absolute/private/ralph-mini/host.json"
 --apply
 ```
 
@@ -234,6 +244,39 @@ Approve interactively again. Old receipts, attested config and handoff files
 remain untouched. Copilot must save the new package to the **same disabled**
 destination workflow and read it back; new host config stays `verified:false`
 pending separate attestation. No policy renewal activates anything.
+For **existing native packages**, always include `--previous-host-config`.
+Read its actual saved bindings into the filled command rather than rediscovering
+new IDs. Choose a new empty observation cache and new package directory only.
+The helper preserves existing workflow/project/environment/worker/role bindings,
+control repository/ref/registry/genesis, migration attestation and original
+`stateDirectory`; it rejects a changed authority or deployment identity.
+Old approval, config, history, session mappings and claims remain untouched.
+It does not copy or reset the native journal. New `verified:false` requires
+explicit acceptance of the V2 trust contract and disabled workflow readback.
+Renewal `workflow-settings.json` contains only `workflow_id`, the new `prompt`
+and `enabled:false`. Applying it through supported `save_workflow` preserves the
+live workflow name/model/effort/schedule/project/environment/workspace settings;
+read those back before and after, rather than restoring fresh-install defaults.
+Do not reinitialize a mailbox that already exists. If old packages have pending
+rounds or initialization intents, reconcile them with retained real evidence
+before proceeding; never invent a replacement token, delete history or clear
+claims. Never run the old and renewed package concurrently.
+
+To upgrade a V1 mini setup, paste this after the new policy is reviewed/merged:
+
+```text
+Upgrade my EXISTING DISABLED native Ralph packages to V2 on THIS device.
+Read their existing private config and approval as data; preserve all bindings,
+control/ref/genesis, migration evidence, journal path, history and claims.
+Use setup-ralph-macos.mjs with --renew-policy, --previous-approval and
+--previous-host-config, a NEW package directory and NEW cold observation cache.
+Do not create another workflow, reset a journal, initialize or write a mailbox,
+migrate authority or enable/run any workflow. Discover the merged policy candidate
+and show its exact scope/change summary; get my interactive approval, no manual
+SHA fishing. Keep the old package intact. Explain local-owner-v1 before requesting
+separate verification acceptance. Save the new prompt only to the same disabled
+workflow with permission; read it back. Report remaining destination checks.
+```
 
 On macOS files use `0600`; new directories use `0700`.
 Existing output directories must be owned by you and not group/world-writable.
@@ -293,14 +336,23 @@ worktree, after the saved bootstrap's origin/fetch/policy guards. It returns
 `dispatchAuthorized:false` and `nativeIdentityVerified:false`. This is expected:
 successful file checks are not independent native app identity verification.
 
-Every authorized **automation invocation** must separately establish its
-**current executing workflow/project/app-host/session association** through
-supported native tools/runtime metadata. A manual chat or lookup of a supplied
-workflow ID is insufficient. If the app cannot expose current execution identity,
-the round is blocked; do not fabricate it. See the
-[native identity gate](../.copilot/skills/ralph-loop/bootstrap.md#native-identity-gate)
-and its `identity-check` comparison contract. Caller-supplied JSON is not
-authenticated evidence; the controller must acquire genuine fresh native facts.
+Every authorized role execution uses the
+[local-owner contract](../.copilot/skills/ralph-loop/bootstrap.md#local-owner-execution-contract).
+Deployment IDs are explicitly accepted assertions. The runtime checks actual
+filesystem/Git isolation and approved content, then atomically obtains a random
+round token plus persistent mailbox role gate. The path alone is not exclusion;
+two callers in the same worktree cannot independently acquire the same role.
+The token is returned once, remains private, and is required for subsequent
+transitions. A lost acquisition response requires reconciliation, not another
+token. Native observations still establish actual work-session correlation and
+terminal evidence, not unexposed current workflow identity.
+If independent role packages race the mailbox head, the loser retains its
+acquisition intent. Follow the native contract's `abandon-acquisition` procedure:
+it records candidate/base before ref publication and permits non-authorizing
+local reconciliation only when a ref write was never attempted or verified
+sibling advancement makes the exact delayed candidate unable to fast-forward.
+A missing event on an unchanged base remains uncertain, not safe to discard.
+No journal deletion or token reissue is needed for a proven losing candidate.
 
 Before any cutover:
 
@@ -396,13 +448,46 @@ Even in the private repository, exclude native session IDs, private paths,
 credentials and prompts. Publish opaque assignment correlations and lifecycle
 receipts; the consumer keeps the actual native-session mapping locally.
 
-Each role needs a persistent round gate bound to its actual native invocation;
+Each role needs a persistent round gate bound to its atomic runtime acquisition;
 native scheduling is not assumed single-instance. Transaction locks alone do
 not span native tool calls. A competing round exits, and elapsed time alone
 cannot reclaim an uncertain round. Persist consumer delivery intent before
 creating a session and correlate the actual native session response afterward.
 A lost response blocks redelivery until genuine native evidence reconciles it:
 there is no exposed idempotency key for native session creation.
+
+### Asynchronous capacity and completion
+
+Consumer `ready` is a finite durable offer, not an online heartbeat. It atomically
+replaces that worker's remaining mobile/general credits from hard limits minus
+all outstanding assignments. Coordinator reservations consume those credits;
+one mini offer permits four general assignments without intervening consumer
+rounds. Offline workers can receive only unused pre-offered credits. No timer,
+withdrawal, release or duplicate replay refunds them. `unavailable` and blockers
+revoke unused credits, not ownership. New offers require actual reconciliation.
+
+Offers bind worker, authority/registry, capabilities and approved policy; a changed
+pin cannot spend an old offer. Outstanding work remains owned during renewal.
+New acceptance requires same-policy, current-round local inventory and capability
+revalidation within 60 seconds. Other assignment/receipt/blocker changes require
+another real local recheck. This local bound never requires separately scheduled
+coordinator/consumer rounds to start within a minute of one another.
+
+For example, mini may offer at 10:45, coordinator reserve at 11:48 and publish at
+11:56, and mini accept at 12:49 after fresh local checks. Kickoff/readback may take
+minutes; its starting reservation already holds the slot. A subsequent consumer
+round follows the same session and records its final ACK plus sole-sender
+no-future-delivery commitment. The coordinator may settle days later with fresh
+artifact/delivery reconciliation and no consumer readiness refresh. Known
+resumption, reassignment or uncertain delivery blocks release; elapsed time never
+proves cessation. The consumer needs a later reconciled offer to reuse freed
+capacity. No polling, synchronized schedules or longer TTL is required.
+
+Old history hashes and genesis remain unchanged: new semantics use additive
+mailbox events behind the existing public requests. Old terminal receipts must
+be re-observed and upgraded to an explicit final-delivery commitment before
+delayed settlement; old reservations under a different policy need safe
+never-delivered withdrawal/re-reservation, never replacement of an active worker.
 
 The explicitly accepted provenance contract trusts authorized writers of the
 private control repository as the same
@@ -436,10 +521,10 @@ Repository creation alone does not authorize mailbox writes. Only after legacy
 authority reconciliation and native binding verification may the owner attest
 `migrationAttested:true` and `verified:true` in the private configuration.
 These are prerequisites, not queue-write authorization. With separate explicit
-owner approval, run one controlled native
-coordinator invocation with fresh current-execution evidence. Its normalized
+owner approval, use a manual setup session/terminal in an approved isolated
+worktree with the coordinator package. Its normalized
 private runtime request uses `type:"initialize"`,
-`explicitInitializationApproval:true`, the approved policy and `native.actual`,
+`explicitInitializationApproval:true` and the approved policy,
 plus fresh `evidence` containing `source`, `observedAt`,
 `legacyAuthoritiesReconciled:true` and `cessationOrFencedHandoffProven:true`.
 Populate these from retained real evidence, never assertions of convenience.
@@ -459,9 +544,147 @@ not another initializer run. No other content, branch or repository is created
 as a fallback. Pin the verified returned `genesisSha` in all private role
 configurations. Initialization does not enable any workflow.
 
-If supported native tools cannot prove the current executing coordinator,
-initialization and all rounds stay blocked. No synthetic native observations or
-direct manual shell bypass are provided.
+This supported manual bootstrap uses the same policy/isolation/private-repository
+and migration checks as normal rounds; it does not bypass them or require an
+unavailable current-automation API. The runtime persists initialization intent
+before network writes. An existing or uncertain queue requires read-only
+inspection and explicit reconciliation, not repeated initialization.
+
+## Capability evidence and destination acceptance
+
+The V2 contract deliberately distinguishes observed capabilities from assertions.
+The following evidence was obtained on the development Mac using supported tools,
+not by accessing internal app databases. It is **not a mini/Windows production
+acceptance report**.
+
+| Operation | Evidence | Limit |
+| --- | --- | --- |
+| Project/worktree discovery | Real `list_projects`, `get_session`, `list_sessions_and_chats` returned repository/project/path/session type. Git verified this session's registered linked worktree. | No current workflow/environment association returned by `get_session`. IDs are deployment assertions. |
+| Saved workflow readback | Real `list_workflows` returned projectId, hostId, prompt, model/effort, cron, disabled state and latestRun.sessionId. | Historical/external run correlation, not authenticated current execution. Saving/running workflows was not exercised. |
+| Native kickoff | Real harmless `create_session` returned a handle; session readback matched project/repository/isolated path; worker returned the exact kickoff correlation. | No real task or mailbox assignment created. Native creation has no exposed idempotency key. |
+| Follow-up | Real `send_session_message` to the same handle returned acceptance; worker acknowledged the new correlation and retained the original. | Acceptance alone is not delivery; retain the worker ACK. |
+| Status/history | Real status inventory showed the bounded child idle. Supported local history returned kickoff+reply; cloud history returned no rows and later history lagged. | Idle/history absence is never terminal or global queue-empty proof. |
+| Interactive terminal | This child context's output reads failed `Terminal not found or not running`. A separate parent-chat canvas returned actual TTY detection and a harmless non-approval input roundtrip. | Works in some app contexts, not verified on mini/Windows. If actual open/read fails, use the user's local interactive Terminal. Neither probe was human policy consent; never pipe/type approval for them. |
+| Init, reservations, two-device lifecycle, round exclusion/recovery | Focused Node tests exercise manual initialization, hours-delayed independent rounds, finite offers, live local acceptance and days-delayed terminal settlement without `native.actual`. Real local files/locks and Git checks are exercised. | GitHub mailbox transport and native lifecycle observations are simulated. No live mailbox write or timer tested; modeled time is not destination evidence. |
+| Mini, Windows and scheduled execution | Not run. | **NOT VERIFIED**: destination permissions, ACLs, tooling, saved prompt execution and lifecycle need separately authorized acceptance. |
+
+`queueChecked` and `noPendingContinuation` refer to the **owning consumer's
+retained delivery records and worker ACKs**, not an unsupported global pending
+queue query. The consumer is the single sender for managed sessions. Known
+external intervention or lost delivery evidence holds capacity. Under the
+accepted trusted-owner boundary, the owner must not queue unrecorded work into
+managed sessions. Completion uses actual correlated terminal ACKs plus current
+session/artifact observations; delayed history can be reconciled from retained
+ACKs rather than requiring impossible global queue-emptiness proof.
+
+Before calling a destination operational, with separate approval for each live
+step:
+
+1. Discover/read back its real project, disabled role workflows, environment and
+   isolated worktree. Confirm interactive policy consent in its local terminal.
+   Renew existing packages as above, preserving IDs, genesis, state and claims.
+2. Run policy/isolation preflight in that destination's isolated worktree.
+   Verify platform, private permissions/Windows ACLs, tooling and explicit owner
+   acceptance; reconcile existing ownership and migration evidence.
+3. Inspect the actual private repository/ref/history read-only. Only if empty
+   and separately authorized, initialize once through the manual runtime path;
+   pin the verified genesis in all packages. Never assume the repository is empty.
+4. Separately authorize a bounded controlled round: each consumer acquires
+   `begin-round`, retains its token, inventories known work/deliveries and publishes
+   `ready`; coordinator acquires its gate and reserves/publishes one harmless
+   eligible assignment. Consumer obtains one creation authorization, records the
+   actual native handle/ACK and follows that exact session.
+5. End/restart both role rounds with new tokens while preserving assignment
+   ownership. Reconcile a correlated terminal ACK, all owned deliveries and
+   artifacts and sole-sender no-future-delivery commitment, then let a later
+   coordinator release without a synchronized consumer refresh. Demonstrate
+   competitor rejection and lost-response holds without repeating native creation.
+6. Inspect actual scheduled-context behavior separately before schedule activation.
+   No production-ready claim until these destination checks pass. Unavailable
+   observations get an exact blocker, never a fabricated successful boolean.
+
+### Next bounded acceptance: mini general only
+
+This is an approval plan, **not execution authorization**. Windows, mobile/Xcode
+and timer firing remain separate, explicitly unverified follow-ons, not
+prerequisites to demonstrate the core mini general path.
+
+Approved-but-unmerged code cannot pass the unchanged production ancestry/content
+guards. Do not forge origin, weaken the pin, mock preflight or enable a bypass.
+First finish required source checks and exact-head reviews, then obtain separate
+source-merge approval. Merge is not activation or destination acceptance. On mini,
+discover the merged candidate and obtain the maintainer's real interactive
+consent using the documented setup/renewal commands above.
+
+The production control repository was observed to have no branches during
+planning; recheck read-only before any later decision. Its initializer cannot
+create a nondefault smoke ref while empty. **Do not initialize production main
+for testing.** Approval must instead name a separate private test repository,
+its harmless seed commit and a new absent `heads/smoke-native-2939` ref. Verify
+canonical numeric identity/private access and absence of the test ref, then
+initialize only that ref. If this scope is not approved or prerequisites fail,
+stop before initialization, not after changing production state.
+
+Approval must explicitly cover these writes:
+
+- Creating/seeding that private test repository and creating/non-force-updating
+  its named smoke ref, with no production repository/ref writes.
+- New TEST ONLY private mini package/config/cache/journal/evidence files and two
+  disabled manual workflows (coordinator and consumer); existing packages,
+  workflow IDs/history and production claims remain untouched.
+- One real explicitly designated smoke-only eligible issue, or creation/labels
+  for `TEST ONLY: Ralph native lifecycle acceptance`, with bounded read-only
+  analysis, no personal assignee and no real issue ownership mutation.
+- Manual runs of those disabled workflows, app-created role/task sessions and
+  worktrees, one correlated follow-up to the same child, and archival only of
+  verified clean terminal smoke sessions.
+
+Prerequisites on mini: actual project/environment selection and saved workflow
+readback; private path ownership/permissions; real registered isolated worktrees;
+Node/Git/GitHub tooling; complete native inventory and original-owner
+reconciliation; exact policy consent and shared-writer/local-owner acceptance.
+The registry's required Windows entry is a deployment declaration only: issue
+no Windows offer, start no Windows workflow and claim no verified Windows
+execution. Permit only the named smoke issue; no global backlog mutations.
+
+Save test workflows with `enabled:false`, `interval:"manual"` and
+`clear_cron_expression:true`; read these back. Fresh setup artifacts contain
+production cadence defaults: do not apply their full settings to a manual smoke.
+Use `run_workflow` on these disabled workflows only after approval. If the app
+refuses disabled manual execution, retain the exact error and stop; do not
+silently enable a schedule.
+
+1. In the approved isolated mini setup worktree, submit the corrected manual
+   `initialize` request above; retain its intent/result and pin the test genesis.
+2. Manually run the disabled consumer workflow. Its real app-created session
+   acquires a round, inventories local work, publishes `ready` and ends.
+3. At a later independent invocation, manually run the coordinator workflow:
+   acquire, reconcile, reserve/publish only the designated issue, then end.
+4. Run the consumer independently: acquire a new token, recheck local inventory
+   and tooling with `ready`, then recheck the issue and submit starting `receipt`.
+   Only its first creation authorization may create the bounded child. Retain
+   actual returned handle/readback/kickoff ACK, report running and end.
+5. A later consumer run follows that same child with one recorded correlation,
+   reconciles its final ACK, all owned deliveries and clean artifacts, reports
+   terminal with `noPendingContinuation`, `noFutureDelivery` and
+   `finalDeliveryCorrelation`, and ends.
+6. A later coordinator run reconciles and releases the exact terminal binding.
+   Do not refresh consumer readiness to satisfy release. Read back ended gates,
+   terminal assignment, unchanged production refs and disabled manual workflows.
+
+External `run_workflow` results plus `get_session` establish actual run-session,
+project and worktree correlation; filesystem/Git and saved workflow readback
+establish the remaining configured environment checks. Retain those raw private
+responses. They are not in-session authenticated workflow identity. Retain the
+policy receipt, test genesis/history, journals and delivery ACKs. Manual runs
+demonstrate app-created workflow execution, **not timer firing**.
+
+On uncertainty retain the original gate/claim/intent and report the exact
+blocker; never force-release or retry native creation. Keep disabled test
+workflows and test ref/packages for audit. Deleting refs/workflows/packages,
+closing the smoke issue or enabling any schedule requires separately named
+approval. This sequence must run on the destination before any operational
+acceptance claim.
 
 ## Focused development checks
 

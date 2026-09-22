@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import test from 'node:test';
-import { compareNativeAutomationIdentity, policyPaths, resolveAutomationHost, runAutomationPreflight, verifyAutomationCheckout } from '../ralph-automation.mjs';
+import { inspectLocalWorktree, policyPaths, resolveAutomationHost, runAutomationPreflight, verifyAutomationCheckout } from '../ralph-automation.mjs';
 
 const exec = promisify(execFile);
 const config = JSON.parse(await readFile('.copilot/skills/ralph-loop/hosts.json', 'utf8'));
@@ -66,35 +66,16 @@ test('shared roles carry no deployment identity and permit a new private mini UU
   assert.throws(() => resolveAutomationHost(pinned, hostInput), /private host configuration/);
 });
 
-test('native comparison requires fresh CURRENT execution, not arbitrary workflow lookup or matching config strings', () => {
-  const now = Date.now();
-  const expected = {
-    workflowId: workflow, projectId: runtime.projectId, appHostId: runtime.appHostId,
-    worktreePath: '/test/worktrees/round-one',
-  };
-  const actual = {
-    observedAt: new Date(now).toISOString(),
-    execution: { ...expected, sessionId: 'dddddddd-1111-4222-8333-444444444444' },
-    workflow: { id: workflow, projectId: runtime.projectId, appHostId: runtime.appHostId },
-    project: { id: runtime.projectId, repository: 'OlyForge3D/PrintFarmer' },
-  };
-  const result = compareNativeAutomationIdentity({ expected, actual, now });
-  assert.equal(result.bindingsMatch, true);
-  assert.equal(result.dispatchAuthorized, false);
-  assert.equal(result.observationAuthentication, 'controller-native-tools-required');
-  for (const override of [
-    { execution: undefined }, { execution: { ...actual.execution, workflowId: undefined } },
-    { execution: { ...actual.execution, workflowId: 'eeeeeeee-1111-4222-8333-444444444444' } },
-    { execution: { ...actual.execution, projectId: workflow } },
-    { execution: { ...actual.execution, appHostId: 'another-host' } },
-    { execution: { ...actual.execution, worktreePath: '/test/main' } },
-    { workflow: { ...actual.workflow, projectId: workflow } },
-    { workflow: { ...actual.workflow, appHostId: 'another-host' } },
-    { project: { ...actual.project, repository: 'attacker/fork' } },
-    { project: undefined }, { observedAt: new Date(now - 60_001).toISOString() },
-    { observedAt: new Date(now + 1).toISOString() }, { observedAt: 'unknown' },
-  ]) assert.throws(() => compareNativeAutomationIdentity({ expected, actual: { ...actual, ...override }, now }));
-  assert.throws(() => compareNativeAutomationIdentity({ expected, actual: runtime, now }));
+test('filesystem context requires real linked worktree, not a nested standalone repo or claimed native identity', async (t) => {
+  const f = await gitFixture(t);
+  await assert.rejects(inspectLocalWorktree(f.cwd), /linked isolated/);
+  const linked = path.join(f.root, 'linked');
+  await f.git(f.cwd, ['worktree', 'add', '-q', '--detach', linked]);
+  const actual = await inspectLocalWorktree(linked);
+  assert.equal(actual.worktreePath, await realpath(linked));
+  assert.notEqual(actual.gitDirectory, path.join(linked, '.git'));
+  assert.equal(actual.workflowId, undefined);
+  assert.equal(actual.sessionId, undefined);
 });
 
 test('unverified Windows instance, wrong workflow/platform and main-checkout paths fail closed', () => {
@@ -201,6 +182,8 @@ test('CLI preflight remains explicitly non-authorizing after all filesystem chec
   await f.git(f.cwd, ['commit', '-qm', 'Role-only host fixture']);
   await f.git(f.cwd, ['push', '-q']);
   const approvedPolicy = (await f.git(f.cwd, ['rev-parse', 'HEAD'])).trim();
+  const linked = path.join(f.root, 'linked');
+  await f.git(f.cwd, ['worktree', 'add', '-q', '--detach', linked]);
   const hostConfig = path.join(f.root, 'host.json');
   await writeFile(hostConfig, JSON.stringify({ ...runtime, worktreeRoot: f.root, cacheDirectory: path.join(f.root, 'cache') }));
   const bin = path.join(f.root, 'bin');
@@ -220,17 +203,17 @@ else {
     '--input-type=module', '-e',
     `import { runAutomationPreflight } from ${JSON.stringify(new URL('../ralph-automation.mjs', import.meta.url).href)};
 console.log(JSON.stringify(await runAutomationPreflight(${JSON.stringify({
-      host: 'macos-mobile', workflow, hostConfig, approvedPolicy, cwd: f.cwd, platform: 'darwin',
+      host: 'macos-mobile', workflow, hostConfig, approvedPolicy, cwd: linked, platform: 'darwin',
     })})));`,
   ], { env: { ...process.env, PATH: `${bin}${path.delimiter}${process.env.PATH}` } });
   const result = JSON.parse(output.stdout);
   assert.equal(result.nativeIdentityVerified, false);
   assert.equal(result.dispatchAuthorized, false);
-  assert.equal(result.expectedNativeIdentity.workflowId, workflow);
-  assert.equal(result.expectedNativeIdentity.projectId, runtime.projectId);
-  assert.equal(result.expectedNativeIdentity.appHostId, runtime.appHostId);
-  assert.equal(result.expectedNativeIdentity.worktreePath, await realpath(f.cwd));
-  assert.match(result.nextStep, /CURRENT native executing automation/);
+  assert.equal(result.deploymentAssertions.workflowId, workflow);
+  assert.equal(result.deploymentAssertions.projectId, runtime.projectId);
+  assert.equal(result.deploymentAssertions.appHostId, runtime.appHostId);
+  assert.equal(result.localContext.worktreePath, await realpath(linked));
+  assert.match(result.nextStep, /owner-configured assertions/);
 });
 
 test('common policy retains actual handoff, host ownership, dependency and merge protections', async () => {

@@ -5,7 +5,7 @@ description: Sole mini coordinator and native local consumers using a private Gi
 
 ## Binding And Trust
 
-NATIVE-MAILBOX-ROLE-V1. This contract replaces legacy independent host dispatch
+NATIVE-MAILBOX-ROLE-V2. This contract replaces legacy independent host dispatch
 **only for explicitly attested native role packages**. Never combine the old
 dispatcher with this role. Run one round and exit, no sleep or self-scheduling.
 No SSH workers, CLI workers or cross-host native session creation.
@@ -14,11 +14,13 @@ Use the saved package's single approved commit for all origin, fetched/current
 controlled-policy, ancestry and untracked-file checks in
 [bootstrap.md](bootstrap.md). Do not execute helpers before those checks pass.
 The native runtime also calls the existing non-authorizing filesystem preflight.
-Then obtain genuine fresh observations of THIS executing automation through
-supported app tools/runtime metadata. Normalize them to the existing
-`identity-check` contract. Arbitrary workflow lookup or copied prompt/config
-values are insufficient. Unavailable current-invocation association blocks
-all queue mutations and native work; report the missing capability.
+The maintainer explicitly accepts `executionTrust:"local-owner-v1"`: the local
+owner/config and approved shared GitHub writers are trusted. Workflow, project,
+environment and worker IDs are deployment assertions, **not** independently
+authenticated current execution facts. Supported tools expose no in-session
+current-automation association. Never synthesize `native.actual`, undocumented
+environment variables or app database access. Real filesystem/repository checks
+establish isolation and approved content; atomic round tokens establish ownership.
 Acquire `begin-round` before **any** triage-label, claim or native-work mutation;
 the role gate covers the entire round, not just individual queue writes.
 
@@ -40,7 +42,8 @@ Never describe this as independent coordinator authentication.
 Stage a distinct coordinator and consumer workflow/package on the mini, and a
 consumer package on Windows. Each package's `host.json` contains `role`,
 `workerId`, exact native bindings, `approvedPolicy`, `control`, `stateDirectory`,
-`automationWorkflowIds`, `verified:false` and `migrationAttested:false`.
+`automationWorkflowIds`, `executionTrust:"local-owner-v1"`, `verified:false` and
+`migrationAttested:false`.
 Mini coordinator and mini consumer MUST have distinct native workflow IDs.
 After native verification, include both known mini automation workflow IDs in
 each mini package's private `automationWorkflowIds`; never exempt arbitrary work
@@ -73,8 +76,9 @@ controllers, Windows ledger and every historical worker under original
 ownership. Require terminal evidence or an explicitly authorized fenced
 handoff, preserve history, and never infer cessation from disabled schedules.
 Only after explicit owner attestation may `verified` and `migrationAttested`
-become true. A separate authorized current native coordinator invocation may
-request `initialize`, supplying fresh migration evidence and
+become true. A separately owner-authorized **manual setup session or terminal**
+in an approved isolated worktree with the coordinator package may request
+`initialize`, supplying fresh migration evidence and
 `explicitInitializationApproval:true`. An existing ref is never replaced.
 For an empty private repository the initializer verifies the actual default
 branch and creates `mailbox.json` through the Contents API without an update
@@ -82,6 +86,33 @@ SHA, then verifies the exact root commit. It never overwrites an existing file.
 On populated repositories it creates only a new explicitly selected ref.
 Pin the returned `genesisSha` in every private package before ordinary rounds.
 An uncertain initialization must be inspected, never blindly retried.
+The runtime writes `native-state/initialization.json` before any initialization
+write. A repeated attempt is blocked, including after a lost response. Inspect
+this intent and the actual repository/ref; adopt only a verified matching genesis
+after explicit owner reconciliation. Never erase an intent or create a second
+authority to bypass uncertainty.
+
+After explicit permission for this exact initialization, prepare a private JSON
+request using the approved pin and actual migration observations:
+
+```json
+{
+  "type": "initialize",
+  "approvedPolicy": "<approved-full-SHA>",
+  "explicitInitializationApproval": true,
+  "evidence": {
+    "source": "<retained migration/handoff evidence reference>",
+    "observedAt": "<fresh ISO timestamp>",
+    "legacyAuthoritiesReconciled": true,
+    "cessationOrFencedHandoffProven": true
+  }
+}
+```
+
+Use the runtime command below in a supported terminal. Those booleans summarize
+real retained evidence, not permission to assert it without inspection. No
+workflow run, current session ID or `native.actual` is needed. An existing queue
+is read and reconciled under its existing genesis; **do not initialize it again**.
 
 No schedules, permissions, accounts, source configuration or Reaper are changed
 by this procedure. Enabling any role is a separate owner decision.
@@ -101,16 +132,22 @@ Get-Content -Raw -LiteralPath 'C:\private\request.json' |
   node scripts/ci/ralph-native-runtime.mjs --host-config 'C:\private\host.json'
 ```
 
-Requests contain `approvedPolicy`, `native.actual` (the fresh normalized native
-identity contract), `type`, a unique opaque `id`, `roundId`, `data` and, when
+Requests contain `approvedPolicy`, `type`, a unique opaque `id`, `roundId`, `data` and, when
 required, `evidence`. `inspect` returns queue state without authorizing dispatch.
 `begin-round` obtains the persistent gate for the exact role; `end-round`
-releases it. Different native invocations cannot share the gate. Keep event IDs
+releases it. `begin-round` has no caller token: under the atomic local transaction
+lock, the runtime creates a random token and persists its digest/context before
+publishing acquisition. Only the successful first response contains `roundToken`.
+Supply it on every subsequent transition (including `research-plan`, recovery of
+a consumer, and `end-round`). Keep it in private session artifacts, never mailbox,
+issue or PR content. The same path or caller-selected round ID is not ownership.
+Same-worktree concurrent callers cannot independently acquire/reuse the gate.
+Only digests, never paths or tokens, reach the queue. Keep event IDs
 stable when reconciling a lost response. Every transition is a single-parent
 Git commit extending the observed queue head with `force:false`; conflicts
 require reread/revalidation, not stale-state overwrite.
 Exact already-committed events remain idempotent after their observation expires;
-retry the unchanged request/evidence with fresh `native.actual` observations.
+retry the unchanged request/evidence with the original round token.
 The runtime checks the saved request digest and committed event before returning
 a non-authorizing replay, even after the original role round ended.
 This never permits a stale new transition. Records over 1 MiB are rejected before
@@ -124,13 +161,69 @@ event intent before network writes and retains verified queue checkpoints and
 native mappings. Worker receipts are evidence, not another reservation authority.
 No native API can be called as an alternative to a failed reservation.
 
-Round gates do not expire by time. A crashed gate stays blocked. A new verified
-coordinator invocation can submit `recover-coordinator-round` only with the
+Round gates do not expire by time. A crashed gate stays blocked. A new owner-authorized coordinator execution can submit `recover-coordinator-round` only with the
 exact prior invocation digest and proven cessation/live/queue/history evidence.
 The coordinator may `reconcile-round` for a consumer using the same proven
-old-round evidence, not a heartbeat timeout. Unknown current/old identity blocks
-recovery. Transaction lock or `.pending` journal remnants require explicit
+old-round evidence, not a heartbeat timeout. Recovery atomically returns a NEW
+round token once; it does not revive the old token. The private journal retains
+each acquisition's filesystem context and digest for correlation. Unknown
+cessation blocks recovery. PID death is not worker completion. Transaction lock
+or `.pending` journal remnants require explicit
 inspection/recovery; never delete them merely because they are old.
+
+A cross-role mailbox head race can leave a local acquisition intent without a
+published gate or returned token. Do not retry it with a new token or delete the
+journal. Use `type:"abandon-acquisition"`, its original `roundId` and
+`data:{"acquisitionId":"<original-begin-event-id>"}`. This **local-only,
+non-authorizing** operation retains history and returns no token. The runtime
+records the exact one-parent candidate/base before attempting a ref update.
+Abandonment requires either that no ref update was ever attempted under this
+record-before-ref protocol, or verified mailbox descent beyond that base with
+the event absent from complete history. In the latter case any delayed candidate
+can no longer fast-forward. An unchanged head/network timeout remains uncertain;
+absence alone is insufficient. Published events, even if their rounds later
+ended, cannot be abandoned. After proven abandonment, use a NEW round/event ID;
+the old intent stays immutable and cannot be reused. If the old gate actually
+published, use cessation-based round recovery instead.
+
+### Observations Available To The Controller
+
+Use `list_sessions_and_chats`, `get_sessions_status`, `get_session`, returned
+creation handles and supported session history for actual inventory/correlation.
+Do not assume these expose native workflow identity or a complete pending-input
+queue. `queueChecked` means **reconciled controller delivery records plus worker
+acknowledgments** under the same trusted-owner boundary, not an invented queue API.
+Before readiness/cutover, the owner must account for pre-existing/unassigned work
+and known manually queued input. During operation the owning consumer is the
+single sender for its mapped task session. Retain each intended/sent delivery's
+correlation and returned acceptance in private records BEFORE/AFTER sending.
+The worker's correlated terminal acknowledgment must identify the final delivery
+it handled and confirm no worker-initiated children/continuations remain.
+All controller-owned deliveries must be acknowledged; uncertain send/ACK retains
+the slot. Known external intervention requires reconciliation. The owner agrees
+not to queue unrecorded work into managed sessions; this is a coordination boundary,
+not proof that the app's unseen global queue is empty.
+`noPendingContinuation` has this same bounded meaning. Never require a nonexistent
+queue API, infer completion from missing/delayed history, or turn idle alone into
+terminal evidence. Persist received ACKs locally because history may lag.
+
+For role-session inventory exemptions, a workflow ID alone is ignored.
+Use `session.nativeReadbackVerified:true` and `session.roleObservation` with
+`role`, `workerId`, `projectId`, `worktreePath`,
+`ownerConfiguredRoleVerified:true`, `noTaskExecutionVerified:true` only after
+actual session readback and its known owner-configured prompt/history establish
+bounded role-only work. These are trusted controller observations, not app API
+fields or independent attestation. Unknown purpose/session blocks readiness.
+Never exempt task work merely because a name or supplied workflow ID matches.
+Only coordinator/consumer session work is exempt, not substantial research.
+
+For completion, require the correlated worker's explicit terminal report,
+delivered-message accounting, current session readback and pushed/clean artifact
+evidence. If queue/history or cessation cannot be established, report uncertain
+and retain the slot. Do not translate app `idle` into `terminalVerified:true`.
+`historyChecked` may reconcile retained request/response/ACK records with supported
+history when available; a delayed history index is not itself a missing delivery
+when the actual correlated ACK was retained. Never use absent rows as evidence.
 
 Queue history must extend the pinned genesis and every locally observed
 checkpoint. Rewind, discontinuity, malformed content, altered task bindings and
@@ -192,13 +285,33 @@ implementation issue; merging research must not accidentally auto-close it.
 
 ### Admission And Capacity
 
-Reconcile consumer readiness and all assignment receipts before admission.
-`ready` is valid for 60 seconds and binds the exact assignment inventory.
-After a reservation changes that inventory, more admission requires renewed
-consumer reconciliation. Unreachable/stale consumers receive no new work;
-all their reservations remain counted. Do not claim a missing worker is idle.
-One-shot schedules must be coordinated so fresh consumer observations exist;
-do not weaken freshness or add a polling loop to make a schedule appear ready.
+Reconcile the durable ledger and consumer capacity offers before reservation.
+`ready` publishes a **finite willingness to receive queued assignments**, not a
+heartbeat or proof the device is online. From freshly reconciled local evidence
+the runtime computes unused mobile/general credits: hard category limits minus
+all nonterminal assignments, including reserved, published and uncertain work.
+The offer binds its event ID, worker, authority/registry, approved policy and
+verified capabilities. A fresh offer atomically REPLACES remaining credits; it
+never adds them. Concurrent assignment/receipt/blocker or offer/revocation changes
+invalidate the captured replacement, requiring reread and real reconciliation.
+
+Coordinator reservations consume credits atomically with global overlap/quota
+checks. One mini offer can fund four general reservations without interleaved
+consumer rounds. Neither release, withdrawal, duplicate replay nor elapsed time
+refunds a credit. Only another reconciled consumer offer can replenish capacity.
+An offline device may receive **only its unused pre-offered credits**; those
+reservations stay counted indefinitely. Missing/offline never means idle.
+`unavailable` or an assignment blocker revokes remaining credits without changing
+any reservation. A new policy pin requires a matching new offer; incompatible
+registry/authority configuration cannot reuse old offers/history.
+
+Independent hourly schedules may be arbitrarily offset. Offers, publication and
+durable terminal commitments do not expire between role rounds. The 60-second
+bound still applies to NEW event evidence and the consumer's own same-round
+inventory immediately before starting; it is not a cross-workflow rendezvous.
+An expired local observation requires a genuine local recheck, not a restamped
+cache. A slower/failed round exits or retains its gate on uncertainty; never
+synchronize devices by sleeps, fast manual choreography or polling.
 
 Reserve with `data.assignmentId`, `data.workerId` and fresh `evidence` containing:
 `repository`, issue and/or PR number, exact `headSha`, title, labels,
@@ -241,14 +354,29 @@ Publish `ready` only after complete fresh native/queued/history inventory and
 verified tooling. Every pre-existing nonterminal session must map to an admitted
 assignment, except explicitly verified role automations. Unmapped or uncertain
 work blocks readiness and new admission, never causes deletion.
+If inventory/tooling cannot be reconciled, send `unavailable` with fresh retained
+evidence and `data.reasonCode` of `inventory-unreconciled`,
+`capability-unavailable` or `owner-paused`. This revokes remaining offer credits,
+not reservations. Report a binding-specific blocker for any affected terminal
+assignment before a coordinator can settle it. Do not leave known resumption or
+uncertain delivery represented by an unchallenged terminal commitment.
 
 Read assignment task requirements from the actual issue/PR and approved policy
 as data. Refresh holds/ownership/head/files and recompute task identity before
-kickoff. To start a published assignment submit `receipt` with the exact
+kickoff. In this consumer round publish `ready` against the CURRENT ledger/local
+inventory, even when the assignment was reserved under an older offer. This
+refresh preserves outstanding assignments and excludes their occupied slots
+from the replacement offer. Then submit `receipt` with the exact
 `assignmentId`, `generation`, `taskDigest`, `status:"starting"` and new opaque
 `correlation`, plus complete current task evidence, `holdsChecked:true` and
 `ownershipReconciled:true`. This persists local delivery intent and queue receipt
-BEFORE a native call.
+BEFORE a native call. Admission requires that current-round observation to be
+at most 60 seconds old, the complete assignment/receipt/blocker inventory to
+still match, all required local capabilities to be present, and the reservation
+and consumer to have the same policy pin. A newer offer does not invalidate an
+older reservation under that pin. If a policy renewal changed the pin, reconcile
+and withdraw only proven never-delivered work before reserving it under the new
+policy; running/uncertain mappings remain owned, never restarted.
 Publication and kickoff both recheck that the issue is open, unassigned to a
 person, and retains valid triage labels. `status:blocked` and `blocked` are holds,
 not permission to proceed when cached eligibility says ready.
@@ -261,6 +389,11 @@ tool; never substitute a fresh branch for owned recovery. A lost response or
 session and deliver only once, then submit `receipt` status `running` with fresh
 `evidence.session.id`, `assignmentCorrelation`, `repository`,
 `nativeReadbackVerified:true` and `kickoffDeliveryVerified:true`.
+Normalize actual `get_session.project_id` to `session.projectId` and actual
+`get_session.path` to `session.worktreePath`; both must match the configured
+project and isolated-worktree parent. Normalize `project_repo` to `repository`.
+Retain the returned creation handle and readback identity together; do not assume
+all app session IDs and underlying CLI history IDs are interchangeable.
 The actual ID is retained locally, never serialized into the queue.
 
 If kickoff/ack is lost, inspect native inventory, queued delivery and history for
@@ -272,16 +405,31 @@ findings or start a replacement as a shortcut.
 
 `running`, `review`, `recovery`, `uncertain` and `terminal-reported` receipts bind
 the same correlation/native session. Terminal reporting additionally requires
-verified cessation, queue/history and task artifact evidence. Consumer reports
-never release capacity. After fresh readiness plus terminal receipt, coordinator
+verified cessation, queue/history and task artifact evidence,
+`noPendingContinuation:true`, `noFutureDelivery:true`, and
+`finalDeliveryCorrelation` identifying the worker's final acknowledged delivery.
+These summarize retained real ACKs and the sole sender's commitment to send
+**nothing further** to that mapped execution. They are not app API fields or
+proof of the app's global queues. Consumer reports never release capacity.
+The durable commitment is one-way: no starting/running transition may resume it.
+Coordinator
 `release` requires the exact consumer receipt digest, task digest, verified
 ownership/artifacts and no pending continuation. Until then all slots remain
 reserved. Discoveries, new prerequisites and expanded scope go back to the
 coordinator before work expands.
-If a terminal receipt has aged out before coordinator reconciliation, re-observe
-the same native session and submit a new `terminal-reported` receipt, then refresh
-readiness. This refresh still requires all terminal evidence; it cannot restart
-work or release a slot by itself.
+A later coordinator may settle that commitment hours/days later without consumer
+readiness or another terminal timestamp. Its own reconciliation evidence is
+fresh; any observed resumed/reassigned session or unaccounted delivery blocks
+release. A reported blocker revokes settlement until the consumer genuinely
+reconciles and issues a new complete terminal commitment. Legacy terminal
+receipts without this commitment need that one-time reconciliation; never promote
+an old idle/history observation automatically.
+
+The mailbox uses additive `offer-capacity`, `deliver`, `accept`,
+`terminal-receipt` and `settle` events internally. Keep using the public runtime
+requests `ready`, `publish`, `receipt` and `release`; internal event names are
+rejected as requests. Historical events retain their original reducer and
+hashes. No genesis replacement or history rewrite is needed.
 
 For a published assignment blocked before kickoff, use `report-blocker` with
 the exact binding, fresh evidence and one nonsecret `reasonCode`:

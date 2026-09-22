@@ -31,11 +31,10 @@ Run node scripts/ci/ralph-automation.mjs preflight --host HOST --workflow WORKFL
 --host-config HOST_CONFIG --approved-policy POLICY_COMMIT.
 Read .copilot/skills/ralph-loop/automation.md and the returned host profile.
 Preflight is filesystem/configuration validation only, never dispatch authority.
-Obtain fresh native identity for THIS CURRENT executing automation, its workflow
-and project through supported app tools/runtime metadata. Never infer execution
-identity from this prompt, private config or lookup of an arbitrary workflow.
-If native tools cannot identify the current execution, report blocked and exit.
-Run the identity-check contract below using these fresh native observations.
+Workflow/project/environment IDs are owner-configured deployment assertions.
+Copilot does not expose a supported in-session current-automation identity API.
+Never invent native.actual or require undocumented metadata. Native roles use
+explicit local-owner-v1 acceptance and atomic round acquisition described below.
 Follow that common policy and its conditional references for exactly one round.
 No schedules, saved prompts, host config or deployed workers may be changed here.
 ```
@@ -76,64 +75,41 @@ existing Windows-owned admission ledger and its remote records, and reconcile
 the old mobile-dispatch overlap before activating its profile. Preserve its
 process-only SSH configuration; never install/restart the worker from a round.
 
-## Native Identity Gate
+## Local Owner Execution Contract
 
 `preflight` validates local config shape, its CLI workflow binding and approved
 Git content. It always returns `dispatchAuthorized:false`,
-`nativeIdentityVerified:false` and `expectedNativeIdentity`. Neither matching
+`nativeIdentityVerified:false`, `localContext` and `deploymentAssertions`. Neither matching
 supplied strings nor `verified:true` proves app identity.
 
-Before **any round mutation**, the controller must obtain the current executing
-automation identity from supported native app tools/runtime metadata, then read
-that workflow and project live. `list_workflows` alone proves only that a workflow
-exists; it does not establish that this session is executing it. `get_session`
-and execution metadata must actually expose the association; if unavailable,
-unknown, incomplete or inconsistent, report blocked and exit. Do not substitute
-a manual chat's prompt, user-supplied IDs or a private file as execution evidence.
+The old `native.actual` / `identity-check` contract required an API the supported
+app does not expose. It is retired, not emulated. A workflow lookup proves saved
+configuration, not which workflow launched this session. No environment variable,
+private app database, CLI RPC or external per-round babysitter replaces it.
 
-Normalize those observations into this shape in a private session artifact.
-`expected` is the exact preflight `expectedNativeIdentity`; `execution` is the
-**current** native automation invocation, not the workflow selected for lookup.
-Use the actual fields returned by the supported tool, not invented endpoints.
+For native roles, the maintainer explicitly accepts `executionTrust:"local-owner-v1"`
+and verifies the package before setting `verified:true`. Approved local code,
+private owner-controlled configuration and accepted GitHub writers are the trust
+boundary. The bootstrap validates the actual origin, approved code, host platform
+and canonical **registered linked Git worktree**, beneath the configured parent.
+`localContext` is filesystem context/isolation evidence, never invocation proof.
 
-```json
-{
-  "expected": {
-    "workflowId": "<destination-workflow-uuid>",
-    "projectId": "<destination-project-uuid>",
-    "appHostId": "<destination-native-environment-id>",
-    "worktreePath": "<current-canonical-isolated-worktree>"
-  },
-  "actual": {
-    "observedAt": "<fresh-ISO-timestamp>",
-    "execution": {
-      "sessionId": "<current-native-session-uuid>",
-      "workflowId": "<native-current-execution-workflow-uuid>",
-      "projectId": "<native-current-execution-project-uuid>",
-      "appHostId": "<native-current-execution-environment-id>",
-      "worktreePath": "<native-current-canonical-isolated-worktree>"
-    },
-    "workflow": {
-      "id": "<native-workflow-uuid>",
-      "projectId": "<native-workflow-project-uuid>",
-      "appHostId": "<native-workflow-environment-id>"
-    },
-    "project": {
-      "id": "<native-project-uuid>",
-      "repository": "OlyForge3D/PrintFarmer"
-    }
-  }
-}
-```
+Before **any round mutation**, the runtime atomically acquires the persistent
+mailbox role gate and returns a random `roundToken` exactly once. Preserve it
+privately for that round. A second execution in the same worktree cannot acquire
+the occupied gate or recover a token by replaying `begin-round`. All transitions
+need the token, matching filesystem context and mailbox ownership. Event IDs
+deduplicate lost acknowledgments; replay never reauthorizes native creation.
+Different sequential rounds acquire different tokens. Lost acquisition responses
+require proven cessation and explicit recovery, never age-based lock stealing.
+Tokens are capabilities within the trusted local account, not protection against
+another process already holding that account's files and GitHub credentials.
 
-Run `node scripts/ci/ralph-automation.mjs identity-check < native-observations.json`.
-It rejects missing/mismatched identity and observations older than 60 seconds or
-from the future. It is a **comparison helper, not an app authentication service**:
-the controller is responsible for genuine fresh native provenance. JSON supplied
-by a user, issue, prompt or persisted config is not that provenance. Its
-`bindingsMatch:true` still returns `dispatchAuthorized:false`; it never admits,
-dispatches or bypasses the single-controller, ownership and live-action gates.
-Refresh current execution observations on each round; do not reuse attestation.
+Supported `list_projects`, `get_session` and session inventory remain useful for
+setup and work-session correlation. `run_workflow` can externally return run IDs,
+but is not required by an ordinary round. Their outputs must be recorded as
+observed, not expanded into fields they do not return. See
+[native-roles.md](native-roles.md) for bootstrap, recovery and evidence limitations.
 
 The new policy commit must retain the existing admission repairs. The historical
 Windows prerequisite commits are `ee1d6b1341c7ce3e99f9f9338c276a084a095194`,
