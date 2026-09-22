@@ -482,8 +482,15 @@ receipt. The registered agent is Ralph Worker in RALPH-ASSIGNED-WORKER-V1 mode,
 not Squad, Dallas or another logical member name. It executes the named member's
 charter directly. No coordinator fan-out or unaccounted task agents.
 Pass nativeCapabilities from the actual exposed native tools/agents/models, never
-invent availability. Record every returned creation handle with record-creation,
-including partial failures, before attempting startup recovery. Never retry creation.
+invent availability.
+Read supported model/effort pairs from create_session's kickoff catalog, NOT the
+controller's current model_information. Include the resolved assignment model
+when advertised. A hand-written list containing only your own model is not a
+capability restriction. report-blocker requires the original assignmentId,
+generation AND taskDigest, a supported reasonCode, source and fresh observedAt.
+Fix malformed request fields; rejected blocker writes are not persisted blockers.
+Record every returned creation handle with record-creation, including partial
+failures, before attempting startup recovery. Never retry creation.
 Use startup-check on the same child and its actual startup-only ACK; send only the
 returned continuation once. A failed kickoff's requested model/effort is NOT proof
 of persisted configuration. Successful native creation establishes accepted settings,

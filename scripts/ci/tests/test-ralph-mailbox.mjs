@@ -652,6 +652,9 @@ test('native role contract separates central triage from local consumers and doc
     'Never close', 'appropriate Squad owner', 'normal category capacity',
     'source-only', 'nativeCreateAllowed:true', 'lost response',
     'never serialized into the queue', 'before **any** triage-label',
+    "create_session tool's kickoff model/effort catalog",
+    'single-model list is not evidence',
+    '`data.taskDigest`',
   ]) assert.ok(contract.includes(phrase), phrase);
 });
 

@@ -462,6 +462,19 @@ the actual exposed app tools: `createSession:true`, `agents:["Ralph Worker"]`, a
 `models` mapping advertised model IDs to their supported reasoning-effort values.
 This is local-owner capability evidence, not an independent service identity.
 Do not invent support.
+Read the **create_session tool's kickoff model/effort catalog**, not the current
+controller's `model_information` line or its own selected model. The controller
+can create workers using other advertised models. Include the assignment's
+resolved model/effort when the tool actually advertises it; a self-created
+single-model list is not evidence of a platform limitation. Before reporting
+`capability-unavailable`, re-read the tool catalog and state the missing pair.
+
+`report-blocker` requires `data.assignmentId`, `data.generation`,
+`data.taskDigest` and a supported `data.reasonCode` from the original assignment,
+plus `evidence.source` and fresh `evidence.observedAt`. Never omit the task digest
+or translate request-shape validation errors into an assignment/platform blocker.
+Correct malformed observations while holding the same gate; do not keep retrying
+invented reason codes or silently exit claiming that a rejected blocker was saved.
 
 Under the consumer round token, `dispatch-plan` takes the exact assignment
 binding plus proposed opaque `correlation` and fresh complete task/capability
