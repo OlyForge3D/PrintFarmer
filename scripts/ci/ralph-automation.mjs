@@ -5,6 +5,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { planPrRecovery } from './ralph-pr-recovery.mjs';
 import { assessHostCapacity } from './ralph-host-capacity.mjs';
+import { validateControl } from './ralph-mailbox.mjs';
 
 const exec = promisify(execFile);
 const policyDirectory = '.copilot/skills/ralph-loop';
@@ -12,6 +13,7 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{1
 const appHostPattern = /^[a-zA-Z0-9][a-zA-Z0-9._:-]{0,127}$/;
 export const policyPaths = [
   policyDirectory, '.github/copilot-instructions.md', '.squad/config.json',
+  '.github/agents/ralph-worker.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md',
   'scripts/ci/ralph-automation.mjs', 'scripts/ci/ralph-pr-recovery.mjs',
   'scripts/ci/ralph-admission.mjs', 'scripts/ci/ralph-macos-ssh.mjs',
   'scripts/ci/ralph-round-cache.mjs', 'scripts/ci/ralph-github-snapshot.mjs',
@@ -40,6 +42,17 @@ export function resolveAutomationHost(config, { host, workflow, runtime, platfor
   if (runtime?.host !== host || runtime.workflowId !== workflow || runtime.verified !== true ||
       !appHostPattern.test(runtime.appHostId ?? '') || !uuidPattern.test(runtime.projectId ?? '')) {
     throw new Error('A verified private host configuration matching this automation is required.');
+  }
+  if (runtime.role !== undefined || runtime.control !== undefined) {
+    validateControl(runtime.control);
+    if (!['coordinator', 'consumer'].includes(runtime.role) ||
+        (runtime.role === 'coordinator' && host !== 'macos-mobile') ||
+        runtime.control.registry.workers.find((worker) => worker.workerId === runtime.workerId)?.host !== host ||
+        runtime.executionTrust !== 'local-owner-v1' ||
+        !/^[0-9a-f]{40}$/.test(runtime.approvedPolicy ?? '') ||
+        typeof runtime.migrationAttested !== 'boolean') {
+      throw new Error('Invalid native role, worker, policy or trust configuration.');
+    }
   }
   const paths = platform === 'win32' ? path.win32 : path.posix;
   if (!paths.isAbsolute(runtime.worktreeRoot ?? '') || !paths.isAbsolute(runtime.cacheDirectory ?? '')) {
@@ -101,6 +114,9 @@ export async function runAutomationPreflight({ host, workflow, hostConfig, appro
   if (!path.isAbsolute(hostConfig ?? '')) throw new Error('--host-config must name the approved private absolute JSON path.');
   const config = JSON.parse(await readFile(path.join(cwd, policyDirectory, 'hosts.json'), 'utf8'));
   const runtime = JSON.parse(await readFile(hostConfig, 'utf8'));
+  if (runtime.role !== undefined && runtime.approvedPolicy !== approvedPolicy) {
+    throw new Error('Native host configuration and command policy pins must match.');
+  }
   const profile = resolveAutomationHost(config, { host, workflow, runtime, platform, cwd });
   resolveAutomationHost(config, {
     host, workflow, platform, cwd: await realpath(cwd),

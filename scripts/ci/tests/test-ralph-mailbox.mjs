@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,7 @@ import {
   publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository,
 } from '../ralph-mailbox.mjs';
 import { prepareEvent, runNativeRequest, validateTriageEvidence } from '../ralph-native-runtime.mjs';
+import { buildDispatchPlan, validateClassification, validateStartup, validatePacketAck, policyTextDigest } from '../ralph-native-dispatch.mjs';
 
 const registry = {
   version: 1, authorityId: 'primary', epoch: 1, writers: ['fixture-owner'],
@@ -22,6 +23,10 @@ const baseControl = {
   registry, sharedWriterTrustAccepted: true,
 };
 const now = Date.now();
+const nativeCapabilities = {
+  createSession: true, openPrSession: true, agents: ['Ralph Worker'],
+  models: { 'gpt-6-astra': ['medium', 'xhigh', 'max'], 'claude-opus-4.7': ['medium', 'xhigh'] },
+};
 let next = 0;
 function event(type, role = 'coordinator', data = {}, workerId = 'mini', roundId) {
   return {
@@ -39,6 +44,126 @@ const evidence = (issue = 1, mobile = false) => ({
   acceptanceCriteria: ['Implement assigned task'], files: [`${mobile ? 'mobile' : 'src'}/task-${issue}`],
   filesComplete: true, scope: mobile ? 'mobile' : 'general', classificationComplete: true,
   capabilities: [mobile ? 'ios' : 'general'],
+  nativeCapabilities,
+});
+
+test('classification requires explicit inputs without weakening conservative mobile accounting', () => {
+  const general = evidence();
+  for (const missing of ['scope', 'classificationComplete']) {
+    const incomplete = { ...general };
+    delete incomplete[missing];
+    assert.throws(() => validateClassification(incomplete), /Explicit scope/);
+  }
+  for (const change of [
+    { scope: 'unknown', classificationComplete: false },
+    { scope: 'mixed' }, { files: ['mobile/View.swift'] }, { classificationComplete: false },
+  ]) {
+    validateClassification({ ...general, ...change });
+    assert.equal(taskFromEvidence({ ...general, ...change }).category, 'mobile');
+  }
+  assert.equal(taskFromEvidence(general).category, 'general');
+});
+
+test('policy-text hashes agree across Windows CRLF checkouts and Git LF blobs without trimming content', () => {
+  assert.equal(policyTextDigest('name: Squad\r\nrole: worker\r\n'), policyTextDigest('name: Squad\nrole: worker\n'));
+  assert.notEqual(policyTextDigest('name: Squad \n'), policyTextDigest('name: Squad\n'));
+  assert.notEqual(policyTextDigest('name: Squad'), policyTextDigest('name: Squad\n'));
+});
+
+test('dispatch separates native Ralph Worker agent, Squad charter owner, category and explicit host model', async () => {
+  const source = { ...evidence(), labels: ['squad:dallas', 'go:needs-research', 'type:bug', 'priority:p1'] };
+  const task = taskFromEvidence(source);
+  const assignment = { assignmentId: 'research-1', generation: 1, task, taskDigest: digest(task) };
+  const config = { host: 'macos-mobile', projectId: 'project-fixture', approvedPolicy: 'a'.repeat(40) };
+  const args = { config, assignment, correlation: 'correlation-1', owner: 'squad:dallas', evidence: source, cwd: process.cwd() };
+  const plan = await buildDispatchPlan(args);
+  assert.equal(plan.nativeTool, 'create_session');
+  assert.equal(plan.nativeArguments.kickoff.agent, 'Ralph Worker');
+  assert.equal(plan.nativeArguments.kickoff.model, 'gpt-6-astra');
+  assert.equal(plan.nativeArguments.kickoff.reasoning_effort, 'xhigh');
+  assert.equal(plan.packet.member, 'dallas');
+  assert.equal(plan.packet.category, 'general');
+  assert.equal(plan.packet.charterPath, '.squad/agents/dallas/charter.md');
+  assert.match(plan.nativeArguments.kickoff.prompt, /^RALPH-ASSIGNED-WORKER-V1/);
+  assert.match(plan.nativeArguments.kickoff.prompt, /startup-only ACK/);
+  assert.match(plan.continuation, /no implementation, edits, commits, PRs/);
+  assert.match(plan.continuation, /When your work is complete/);
+  for (const change of [
+    { agents: ['Squad'] }, { agents: ['Dallas'] }, { agents: [] },
+    { models: { 'gpt-6-astra': ['medium'] } }, { createSession: false },
+  ]) await assert.rejects(buildDispatchPlan({
+    ...args, evidence: { ...source, nativeCapabilities: { ...nativeCapabilities, ...change } },
+  }), /blocked/);
+  const prEvidence = { ...source, pr: 12, prState: 'open', prHeadRepository: 'OlyForge3D/PrintFarmer',
+    prHeadRef: 'fix/existing-pr', prHeadSha: task.headSha, prWorkerPolicyDigest: plan.packet.workerPolicyDigest };
+  const prTask = taskFromEvidence(prEvidence);
+  const prPlan = await buildDispatchPlan({ ...args, evidence: prEvidence,
+    assignment: { ...assignment, task: prTask, taskDigest: digest(prTask) } });
+  assert.equal(prPlan.nativeTool, 'create_session');
+  assert.equal(prPlan.nativeArguments.workspace_type, 'worktree');
+  assert.equal(prPlan.nativeArguments.base_branch, 'fix/existing-pr');
+  assert.match(prPlan.continuation, /HEAD:refs\/heads\/fix\/existing-pr/);
+  for (const change of [
+    { prState: 'closed' }, { prHeadRepository: 'someone/fork' }, { prHeadSha: 'b'.repeat(40) },
+    { prHeadRef: '--force' }, { prHeadRef: 'bad..ref' }, { prWorkerPolicyDigest: undefined },
+  ]) await assert.rejects(buildDispatchPlan({ ...args, evidence: { ...prEvidence, ...change },
+    assignment: { ...assignment, task: prTask, taskDigest: digest(prTask) } }), /New PR recovery/);
+  const ack = {
+    dispatchPlanDigest: plan.planDigest,
+    session: { branch: 'fixture-worker' },
+    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true,
+      initialHeadSha: plan.packet.headSha, actualBranch: 'fixture-worker' },
+    configuration: { source: 'successful-native-create', model: 'gpt-6-astra', reasoningEffort: 'xhigh' },
+  };
+  validateStartup(plan, ack);
+  const prAck = { ...ack, dispatchPlanDigest: prPlan.planDigest, currentPrHeadSha: prPlan.packet.headSha,
+    startupAck: { ...ack.startupAck, ...prPlan.packet } };
+  validateStartup(prPlan, prAck);
+  assert.throws(() => validateStartup(prPlan, { ...prAck, currentPrHeadSha: 'b'.repeat(40) }), /Fresh PR head/);
+  for (const key of Object.keys(plan.packet)) {
+    assert.throws(() => validatePacketAck(plan.packet, { ...plan.packet, [key]: 'mismatch' }), /Packet ACK/);
+  }
+  assert.throws(() => validateStartup(plan, { ...ack,
+    startupAck: { ...ack.startupAck, initialHeadSha: 'b'.repeat(40) } }), /Initial worker HEAD/);
+  for (const change of [
+    { startupAck: { ...ack.startupAck, member: 'lambert' } },
+    { startupAck: { ...ack.startupAck, actualReasoningEffort: 'medium' } },
+    { configuration: { ...ack.configuration, reasoningEffort: 'medium' } },
+    { configuration: { ...ack.configuration, source: 'failed-create-request' } },
+  ]) assert.throws(() => validateStartup(plan, { ...ack, ...change }), /ACK|model\/effort/);
+});
+
+test('bounded dispatch uses only the PrintFarmer worker, not a Squad coordinator installation', async (t) => {
+  const cwd = await mkdtemp(path.join(os.tmpdir(), 'ralph-worker-policy-'));
+  t.after(() => rm(cwd, { recursive: true, force: true }));
+  const agentPath = '.github/agents/ralph-worker.agent.md';
+  for (const file of [
+    '.squad/config.json', '.squad/agents/dallas/charter.md',
+    '.copilot/skills/ralph-loop/hosts.json', '.copilot/skills/ralph-loop/macos-kickoff.md',
+    '.copilot/skills/ralph-loop/assigned-worker.md', agentPath,
+  ]) {
+    await mkdir(path.dirname(path.join(cwd, file)), { recursive: true });
+    await writeFile(path.join(cwd, file), await readFile(file));
+  }
+  const source = { ...evidence(), labels: ['squad:dallas', 'go:needs-research', 'type:bug', 'priority:p1'] };
+  const task = taskFromEvidence(source);
+  const args = {
+    cwd, config: { host: 'macos-mobile', projectId: 'project-fixture', approvedPolicy: 'a'.repeat(40) },
+    assignment: { assignmentId: 'research-worker', generation: 1, task, taskDigest: digest(task) },
+    correlation: 'worker-correlation', owner: 'squad:dallas', evidence: source,
+  };
+  const plan = await buildDispatchPlan(args);
+  assert.equal(plan.nativeArguments.kickoff.agent, 'Ralph Worker');
+  const worker = await readFile(path.join(cwd, agentPath), 'utf8');
+  assert.match(worker, /Do not invoke Squad, another custom agent, task agents or child sessions/);
+  await writeFile(path.join(cwd, '.github/agents/squad.agent.md'), 'unrelated distribution update\n');
+  assert.deepEqual(await buildDispatchPlan(args), plan);
+  await writeFile(path.join(cwd, agentPath), `${worker}\nChanged worker policy.\n`);
+  assert.notEqual((await buildDispatchPlan(args)).packet.workerPolicyDigest, plan.packet.workerPolicyDigest);
+  await writeFile(path.join(cwd, agentPath), worker.replace('name: Ralph Worker', 'name: Squad'));
+  await assert.rejects(buildDispatchPlan(args), /Registered Ralph Worker entrypoint/);
+  await rm(path.join(cwd, agentPath));
+  await assert.rejects(buildDispatchPlan(args), { code: 'ENOENT' });
 });
 function advance(state, value) { return applyEvent(state, value, { now }); }
 function withRounds() {
@@ -182,24 +307,51 @@ test('research gate is actionable, quota-accounted, cannot authorize implementat
     assert.throws(() => taskFromEvidence({ ...evidence(), labels: ['go:needs-research', label] }), /hold/);
     assert.equal(researchDisposition({ labels: ['go:needs-research', label] }).action, 'blocked');
   }
-  const research = { issue: 1, labels: ['go:needs-research'] };
+  const research = { issue: 1, issueState: 'open', githubAssignees: [], labels: ['go:needs-research', 'squad:dallas'] };
   assert.equal(researchDisposition(research).action, 'reserve-research');
   assert.equal(researchDisposition(research, { task, state: 'running' }).action, 'follow-existing-research');
   assert.equal(researchDisposition(research, { task, state: 'terminal' }).action, 'retain-research-gate');
   const findings = {
     summary: 'Verified findings', acceptanceCriteria: ['Concrete implementation acceptance'],
-    remainingBlockers: [], exitCriteriaMet: true, approvalRequired: false, implementationPlanVerified: true,
-    implementationIssue: 2, researchPrUrl: 'https://github.com/OlyForge3D/PrintFarmer/pull/3',
-    researchPrMerged: true, researchHeadSha: 'a'.repeat(40),
+    remainingResearchBlockers: [], exitCriteriaMet: true, approvalRequired: false, implementationPlanVerified: true,
+    researchQuestionsAnswered: true, issueEvidenceReadback: true, issueDescriptionUpdated: true,
+    issueCommentUrl: 'https://github.com/OlyForge3D/PrintFarmer/issues/1#issuecomment-123',
+    repositoryFilesChanged: false, implementationOwner: 'squad:lambert', implementationReady: true,
+    implementationBlockers: [],
   };
   const proposal = researchDisposition({ ...research, findings }, { task, state: 'terminal' });
   assert.equal(proposal.action, 'propose-implementation-readiness');
   assert.equal(proposal.closeIssue, false);
   assert.equal(proposal.mutationAuthorized, false);
-  assert.equal(proposal.issue, 2);
-  for (const change of [{ approvalRequired: true }, { remainingBlockers: ['decision needed'] }, { researchPrMerged: false }, { exitCriteriaMet: false }]) {
+  assert.equal(proposal.issue, 1);
+  assert.equal(proposal.implementationIssue, 1);
+  assert.deepEqual(proposal.removeLabels, ['go:needs-research', 'squad:dallas']);
+  assert.deepEqual(proposal.addLabels, ['go:yes', 'squad:lambert']);
+  for (const change of [
+    { approvalRequired: true }, { remainingResearchBlockers: ['decision needed'] }, { exitCriteriaMet: false },
+    { issueDescriptionUpdated: false }, { issueEvidenceReadback: false }, { researchQuestionsAnswered: false },
+    { issueCommentUrl: 'https://github.com/OlyForge3D/PrintFarmer/issues/2#issuecomment-123' },
+  ]) {
     assert.equal(researchDisposition({ ...research, findings: { ...findings, ...change } }, { task, state: 'terminal' }).action, 'retain-research-gate');
   }
+  const blockedImplementation = researchDisposition({ ...research, findings: {
+    ...findings, implementationReady: false, implementationBlockers: ['Waiting on a prerequisite'],
+  } }, { task, state: 'terminal' });
+  assert.equal(blockedImplementation.action, 'propose-research-complete');
+  assert.ok(blockedImplementation.removeLabels.includes('go:needs-research'));
+  assert.ok(!blockedImplementation.addLabels.includes('go:yes'));
+  assert.equal(researchDisposition({ ...research, issueState: 'closed', findings }, { task, state: 'terminal' }).action, 'blocked');
+  const repositoryResearch = { ...findings, repositoryFilesChanged: true };
+  assert.equal(researchDisposition({ ...research, findings: repositoryResearch }, { task, state: 'terminal' }).action, 'retain-research-gate');
+  assert.equal(researchDisposition({ ...research, findings: { ...repositoryResearch,
+    researchPrUrl: 'https://github.com/OlyForge3D/PrintFarmer/pull/3',
+    researchPrMerged: true, researchHeadSha: 'a'.repeat(40),
+  } }, { task, state: 'terminal' }).action, 'propose-implementation-readiness');
+  const child = researchDisposition({ ...research, findings: { ...findings, implementationIssue: 2 } }, { task, state: 'terminal' });
+  assert.equal(child.issue, 1);
+  assert.equal(child.implementationIssue, 2);
+  assert.deepEqual(child.removeLabels, ['go:needs-research']);
+  assert.deepEqual(child.addLabels, []);
   let state = withRounds();
   for (let issue = 1; issue <= 4; issue++) {
     state = ready(state);
@@ -268,7 +420,7 @@ test('crashed round recovery requires exact old identity and does not clear rese
   }, { state }, { sessions: {} }, now), /cessation/);
 });
 
-const ownedScope = { ownershipScope: 'ralph-owned-v1', lineageChecked: true };
+const ownedScope = { ownershipScope: 'ralph-owned-v1', lineageChecked: true, nativeCapabilities };
 
 test('resumed terminal native sessions block readiness rather than escaping quota', () => {
   const state = withRounds();
@@ -473,7 +625,7 @@ test('consumer delivery intent requires exact live task; session mapping cannot 
   const config = { role: 'consumer', workerId: 'mini', control: baseControl };
   const request = { ...event('receipt', 'consumer', { ...binding(state, 1), status: 'starting', correlation: 'opaque' }),
     evidence: { ...evidence(), observedAt: new Date(now).toISOString(), source: 'native/live', holdsChecked: true, ownershipReconciled: true } };
-  assert.equal(prepareEvent(config, request, { state }, journal, now).createAllowed, true);
+  assert.equal(prepareEvent(config, request, { state }, journal, now, undefined, { version: 1 }).createAllowed, true);
   assert.equal(prepareEvent(config, request, { state }, journal, now).createAllowed, false);
   assert.throws(() => prepareEvent(config, { ...request, evidence: { ...request.evidence, title: 'Changed task' } }, { state }, journal, now), /changed/);
   assert.throws(() => prepareEvent(config, { ...request, id: 'different-event' }, { state }, journal, now), /delivery intent/);
@@ -492,6 +644,8 @@ test('native runtime blocks unverified migration and unaccepted trust without qu
 
 test('native role contract separates central triage from local consumers and documents research exit', async () => {
   const contract = await readFile('.copilot/skills/ralph-loop/native-roles.md', 'utf8');
+  assert.doesNotMatch(contract, /open_pr_session|via the PR-session tool/);
+  assert.match(contract, /exactly `dispatchPlan.nativeTool` and `dispatchPlan.nativeArguments`/);
   for (const phrase of [
     'coordinator alone scans all issues/PRs', 'Consumers do not globally triage',
     'go:needs-research', 'go:no', 'research-PR/implementation-issue',
@@ -539,7 +693,8 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   const start = { ...request, id: 'native-start', type: 'receipt',
     data: { ...binding(state, 1), status: 'starting', correlation: 'correlation-1' },
     evidence: { ...evidence(), observedAt, source: 'native/GitHub', holdsChecked: true, ownershipReconciled: true } };
-  assert.equal((await runNativeRequest(config, start, dependencies)).nativeCreateAllowed, true);
+  const started = await runNativeRequest(config, start, dependencies);
+  assert.equal(started.nativeCreateAllowed, true);
   assert.equal((await runNativeRequest(config, start, dependencies)).nativeCreateAllowed, false);
   const journal = JSON.parse(await readFile(path.join(root, 'native-state/journal.json'), 'utf8'));
   assert.equal(journal.sessions['correlation-1'].startEventId, 'native-start');
@@ -548,6 +703,8 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
     data: { ...binding(state, 1), status: 'running', correlation: 'correlation-1' },
     evidence: { observedAt, source: 'native readback', session: { id: workerSession, projectId, worktreePath: '/worktrees/task' },
       assignmentCorrelation: 'correlation-1', repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true } };
+  running.evidence.continuationAck = await fixtureStartup(config, request, started.dispatchPlan,
+    start.data, running.evidence.session, dependencies);
   await runNativeRequest(config, running, dependencies);
   assert.equal(JSON.stringify((await readMailbox(control, f.api)).state).includes(workerSession), false);
   await assert.rejects(runNativeRequest(config, { ...running, id: 'replacement',
@@ -568,6 +725,32 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   await mkdir(path.join(root, 'native-state/journal.lock'));
   await assert.rejects(runNativeRequest(config, { ...request, type: 'inspect' }, dependencies), /Unsafe|lock/);
 });
+
+async function fixtureStartup(config, round, plan, data, session, dependencies) {
+  session = { ...session, branch: session.branch ?? 'fixture-worker' };
+  const evidence = {
+    observedAt: new Date(dependencies.now ?? Date.now()).toISOString(), source: 'fixture native successful create and ACK',
+    session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true,
+    dispatchPlanDigest: plan.planDigest,
+  };
+  const run = (type, extra) => runNativeRequest(config, {
+    ...round, type, id: `startup-${++next}`, data, evidence: { ...evidence, ...extra },
+  }, dependencies);
+  await run('record-creation', {
+    creationHandle: session.id, creationOutcome: 'succeeded',
+    createRequestDigest: digest(plan.nativeArguments), kickoffAccepted: true,
+  });
+  const ack = {
+    configuration: { source: 'successful-native-create', model: plan.packet.model, reasoningEffort: plan.packet.reasoningEffort },
+    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true, actualModel: plan.packet.model,
+      initialHeadSha: plan.packet.headSha, actualBranch: session.branch },
+  };
+  const allowed = await run('startup-check', ack);
+  assert.equal(allowed.continuationAllowed, true);
+  assert.equal(allowed.continuation, plan.continuation);
+  assert.equal((await run('startup-check', ack)).continuationAllowed, false);
+  return { ...plan.packet, substantiveWorkStarted: true };
+}
 
 async function runtimeFixture(t) {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'ralph role lifecycle '));
@@ -597,6 +780,249 @@ async function runtimeFixture(t) {
   });
   return { github, configFor, coordinator, request, fresh, initialize, dependencies, localContext };
 }
+
+test('two research lifecycles select the specialist, persist findings, settle and replenish capacity', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, fresh } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const acquire = async (config) => {
+    const request = f.request(config, 'begin-round');
+    return { ...request, roundToken: (await runNativeRequest(config, request, dependencies)).roundToken };
+  };
+  const run = (config, round, type, extra = {}) => runNativeRequest(config, {
+    ...round, type, id: `research-cycle-${++next}`, ...extra,
+  }, dependencies);
+  const sessions = [], nativeCalls = [];
+  const inventory = () => fresh({ ...ownedScope, complete: true, queueChecked: true, historyChecked: true,
+    capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions });
+  for (const issue of [100, 101]) {
+    const c = await acquire(coordinator), w = await acquire(consumer);
+    await run(consumer, w, 'ready', { evidence: inventory() });
+    const taskEvidence = fresh({ ...evidence(issue), labels: ['squad:dallas', 'go:needs-research', 'type:bug', 'priority:p1'],
+      claimsReconciled: true, holdsChecked: true, dependenciesReady: true, epicChildrenReady: true,
+      analysisReady: true, reviewGatesChecked: true, ownershipReconciled: true });
+    const reserved = await run(coordinator, c, 'reserve', {
+      data: { assignmentId: `assignment-${issue}`, workerId: 'mini' }, evidence: taskEvidence,
+    });
+    const bound = binding(reserved.state, issue), correlation = `delivery-${issue}`;
+    assert.equal(reserved.state.assignments[bound.assignmentId].task.category, 'general');
+    assert.equal(reserved.state.availability.mini.remaining.mobile, 1);
+    await run(coordinator, c, 'publish', { data: bound, evidence: taskEvidence });
+    const data = { ...bound, correlation };
+    const preview = await run(consumer, w, 'dispatch-plan', { data, evidence: taskEvidence });
+    assert.equal(preview.nativeCreateAllowed, false);
+    await run(consumer, w, 'ready', { evidence: inventory() });
+    const start = await run(consumer, w, 'receipt', { data: { ...data, status: 'starting' }, evidence: taskEvidence });
+    assert.equal(start.nativeCreateAllowed, true);
+    const plan = start.dispatchPlan;
+    assert.deepEqual(plan, preview.dispatchPlan);
+    nativeCalls.push({ tool: plan.nativeTool, arguments: plan.nativeArguments });
+    const session = { id: `cccccccc-1111-4222-8333-444444444${issue}`,
+      projectId: consumer.projectId, worktreePath: `/worktrees/research-${issue}`, branch: `research-${issue}` };
+    await run(consumer, w, 'record-creation', { data, evidence: fresh({
+      session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true,
+      creationHandle: session.id, creationOutcome: 'succeeded', dispatchPlanDigest: plan.planDigest,
+      createRequestDigest: digest(plan.nativeArguments), kickoffAccepted: true,
+    }) });
+    const premature = fresh({ session: { ...session, terminalVerified: true },
+      repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, assignmentCorrelation: correlation,
+      queueChecked: true, historyChecked: true, artifactsVerified: true,
+      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}` });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: premature,
+    }), /acknowledged startup/);
+    await run(consumer, w, 'receipt', { data: { ...data, status: 'uncertain' }, evidence: premature });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: premature,
+    }), /acknowledged startup/);
+    const continuationAck = await fixtureStartup(consumer, w, plan, data, session, dependencies);
+    const delivered = fresh({ session, assignmentCorrelation: correlation, repository: 'OlyForge3D/PrintFarmer',
+      nativeReadbackVerified: true, kickoffDeliveryVerified: true, continuationAck });
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'running' }, evidence: { ...delivered,
+        continuationAck: { ...continuationAck, policySha: 'b'.repeat(40) } },
+    }), /Packet ACK/);
+    await run(consumer, w, 'receipt', { data: { ...data, status: 'running' }, evidence: delivered });
+    const artifact = { kind: 'issue-comment', url: `https://github.com/OlyForge3D/PrintFarmer/issues/${issue}#issuecomment-123`,
+      bodyDigest: digest({ findings: 'fixture: concrete findings', issue }) };
+    const terminalEvidence = { ...delivered, session: { ...session, terminalVerified: true },
+      queueChecked: true, historyChecked: true, artifactsVerified: true,
+      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}`,
+      finalAck: { ...plan.packet, noChildren: true, noPendingContinuation: true,
+        noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}` } };
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: terminalEvidence,
+    }), /read-back issue findings/);
+    const terminal = await run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: {
+        ...terminalEvidence, artifactReadbackVerified: true, artifact,
+        finalAck: { ...plan.packet, artifactUrl: artifact.url, finalDeliveryCorrelation: `final-${issue}`,
+          noChildren: true, noPendingContinuation: true, noFutureDelivery: true },
+      },
+    });
+    const entry = terminal.state.assignments[bound.assignmentId];
+    const settled = await run(coordinator, c, 'release', {
+      data: bound, evidence: fresh({ consumerReceiptDigest: entry.receipts.at(-1).evidenceDigest,
+        taskDigest: bound.taskDigest, ownershipReconciled: true, artifactsVerified: true, noPendingContinuation: true }),
+    });
+    assert.equal(settled.state.assignments[bound.assignmentId].state, 'terminal');
+    assert.equal(settled.state.availability.mini.remaining.general, 3);
+    const disposition = await run(coordinator, c, 'research-plan', {
+      evidence: fresh({ ...taskEvidence, findings: {
+        summary: 'Root cause confirmed; implementation is still outstanding.',
+        acceptanceCriteria: ['Mapper must emit six targets after implementation'],
+        remainingResearchBlockers: [], researchQuestionsAnswered: true,
+        exitCriteriaMet: true, approvalRequired: false, implementationPlanVerified: true,
+        issueCommentUrl: artifact.url, issueEvidenceReadback: true, issueDescriptionUpdated: true,
+        repositoryFilesChanged: false, implementationOwner: 'squad:lambert',
+        implementationReady: true, implementationBlockers: [],
+      } }),
+    });
+    assert.equal(disposition.action, 'propose-implementation-readiness');
+    assert.equal(disposition.issue, issue);
+    assert.deepEqual(disposition.removeLabels, ['go:needs-research', 'squad:dallas']);
+    assert.deepEqual(disposition.addLabels, ['go:yes', 'squad:lambert']);
+    assert.equal(disposition.closeIssue, false);
+    assert.equal(disposition.mutationAuthorized, false);
+    sessions.push({ ...session, terminalVerified: true });
+    const renewed = await run(consumer, w, 'ready', { evidence: inventory() });
+    assert.deepEqual(renewed.state.availability.mini.remaining, { mobile: 1, general: 4 });
+    await run(consumer, w, 'end-round');
+    await run(coordinator, c, 'end-round');
+  }
+  assert.equal(nativeCalls.length, 2);
+  assert.ok(nativeCalls.every(({ arguments: args }) =>
+    args.kickoff.agent === 'Ralph Worker' && args.kickoff.model === 'gpt-6-astra' && args.kickoff.reasoning_effort === 'xhigh'));
+  const mailbox = await readMailbox(coordinator.control, f.github.api);
+  assert.deepEqual(mailbox.state.rounds, {});
+  assert.equal(JSON.stringify(mailbox).includes('charterSha256'), false);
+  assert.equal(JSON.stringify(mailbox).includes('/worktrees/'), false);
+});
+
+test('old-policy prestart proof comes from the consumer journal and is bound to its committed blocker', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, fresh } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const acquire = async (config) => {
+    const request = f.request(config, 'begin-round');
+    return { ...request, roundToken: (await runNativeRequest(config, request, dependencies)).roundToken };
+  };
+  const run = (config, round, type, extra = {}) => runNativeRequest(config, { ...round, type,
+    id: `renewal-proof-${++next}`, ...extra }, dependencies);
+  let c = await acquire(coordinator), w = await acquire(consumer);
+  const inventory = fresh({ ...ownedScope, complete: true, queueChecked: true, historyChecked: true,
+    capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [] });
+  await run(consumer, w, 'ready', { evidence: inventory });
+  const taskEvidence = fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true, dependenciesReady: true,
+    epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true, ownershipReconciled: true });
+  const reserved = await run(coordinator, c, 'reserve', {
+    data: { assignmentId: 'assignment-1', workerId: 'mini' }, evidence: taskEvidence,
+  });
+  const bound = binding(reserved.state, 1);
+  await run(coordinator, c, 'publish', { data: bound, evidence: taskEvidence });
+  await run(consumer, w, 'end-round'); await run(coordinator, c, 'end-round');
+  coordinator.approvedPolicy = consumer.approvedPolicy = 'b'.repeat(40);
+  c = await acquire(coordinator); w = await acquire(consumer);
+  await assert.rejects(run(consumer, w, 'dispatch-plan', { data: { ...bound, correlation: 'old-task' },
+    evidence: taskEvidence }), /Matching policy/);
+  const proofRequest = { data: bound, evidence: fresh({ authoritativeJournalRetained: true, protocolOnlyDeliveryAttested: true }) };
+  await assert.rejects(run(coordinator, c, 'prestart-proof', proofRequest), /locally owned/);
+  const { proof } = await run(consumer, w, 'prestart-proof', proofRequest);
+  const withdrawal = { data: bound, evidence: fresh({ claimsReconciled: true, noNativeDeliveryVerified: true, prestartProof: proof }) };
+  await assert.rejects(run(coordinator, c, 'withdraw', withdrawal), /committed by its blocker/);
+  await run(consumer, w, 'report-blocker', { data: { ...bound, reasonCode: 'task-changed' }, evidence: proof });
+  const repeatProof = await run(consumer, w, 'prestart-proof', proofRequest);
+  assert.equal(repeatProof.alreadyReported, true);
+  assert.deepEqual(repeatProof.proof, proof);
+  await assert.rejects(run(coordinator, c, 'withdraw', { ...withdrawal,
+    evidence: { ...withdrawal.evidence, prestartProof: { ...proof, workerId: 'windows' } } }), /consumer no-delivery proof/);
+  const withdrawn = await run(coordinator, c, 'withdraw', withdrawal);
+  assert.equal(withdrawn.state.assignments['assignment-1'].disposition, 'withdrawn-before-delivery');
+  const refreshed = await run(consumer, w, 'ready', { evidence: inventory });
+  assert.deepEqual(refreshed.state.availability.mini.remaining, { mobile: 1, general: 4 });
+  await run(consumer, w, 'end-round'); await run(coordinator, c, 'end-round');
+});
+
+test('partial native creation retains the handle before readback and never adopts requested effort as actual', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, fresh } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const acquire = async (config) => {
+    const request = f.request(config, 'begin-round');
+    return { ...request, roundToken: (await runNativeRequest(config, request, dependencies)).roundToken };
+  };
+  const c = await acquire(coordinator), w = await acquire(consumer);
+  const run = (config, round, type, extra) => runNativeRequest(config, {
+    ...round, type, id: `partial-${++next}`, ...extra,
+  }, dependencies);
+  const inventory = fresh({ ...ownedScope, complete: true, queueChecked: true, historyChecked: true,
+    capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [] });
+  await run(consumer, w, 'ready', { evidence: inventory });
+  const taskEvidence = fresh({ ...evidence(), labels: ['squad:dallas', 'type:bug', 'priority:p1'],
+    claimsReconciled: true, holdsChecked: true, dependenciesReady: true, epicChildrenReady: true,
+    analysisReady: true, reviewGatesChecked: true, ownershipReconciled: true });
+  const incomplete = { ...taskEvidence };
+  delete incomplete.classificationComplete;
+  await assert.rejects(run(coordinator, c, 'reserve', {
+    data: { assignmentId: 'assignment-1', workerId: 'mini' }, evidence: incomplete,
+  }), /Explicit scope/);
+  const reserved = await run(coordinator, c, 'reserve', {
+    data: { assignmentId: 'assignment-1', workerId: 'mini' }, evidence: taskEvidence,
+  });
+  const bound = binding(reserved.state, 1);
+  await run(coordinator, c, 'publish', { data: bound, evidence: taskEvidence });
+  await run(consumer, w, 'ready', { evidence: inventory });
+  const data = { ...bound, correlation: 'partial-child' };
+  const started = await run(consumer, w, 'receipt', {
+    data: { ...data, status: 'starting' }, evidence: taskEvidence,
+  });
+  const plan = started.dispatchPlan;
+  const creation = fresh({
+    dispatchPlanDigest: plan.planDigest, creationHandle: 'aaaaaaaa-1111-4222-8333-444444444444',
+    creationOutcome: 'partial',
+  });
+  const retained = await run(consumer, w, 'record-creation', { data, evidence: creation });
+  assert.equal(retained.reconciliationRequired, true);
+  assert.equal(retained.nativeCreateAllowed, false);
+  const journal = JSON.parse(await readFile(path.join(consumer.stateDirectory, 'journal.json'), 'utf8'));
+  assert.equal(journal.sessions[data.correlation].creationHandle, creation.creationHandle);
+  assert.equal(journal.sessions[data.correlation].sessionId, undefined);
+  const session = { id: creation.creationHandle, projectId: consumer.projectId, worktreePath: '/worktrees/partial', branch: 'partial-worker' };
+  const readback = { ...creation, session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true };
+  await run(consumer, w, 'record-creation', { data, evidence: readback });
+  const alias = { ...session, id: 'bbbbbbbb-1111-4222-8333-444444444444' };
+  await assert.rejects(run(consumer, w, 'record-creation', {
+    data, evidence: { ...readback, session: alias },
+  }), /Retain original/);
+  await run(consumer, w, 'record-creation', {
+    data, evidence: { ...readback, session: alias, resolvedCreationHandle: creation.creationHandle },
+  });
+  const ack = {
+    ...readback, session: alias,
+    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true, actualModel: 'gpt-6-astra',
+      initialHeadSha: plan.packet.headSha, actualBranch: session.branch },
+    configuration: { source: 'successful-native-create', model: 'gpt-6-astra', reasoningEffort: 'xhigh' },
+  };
+  await assert.rejects(run(consumer, w, 'startup-check', { data, evidence: ack }), /Partial startup/);
+  await assert.rejects(run(consumer, w, 'startup-check', { data, evidence: {
+    ...ack, configuration: { ...ack.configuration, source: 'native-readback', reasoningEffort: 'medium' },
+  } }), /model\/effort/);
+  const authorized = { ...ack, configuration: { ...ack.configuration, source: 'owner-attestation' } };
+  assert.equal((await run(consumer, w, 'startup-check', { data, evidence: authorized })).continuationAllowed, true);
+  assert.equal((await run(consumer, w, 'startup-check', { data, evidence: authorized })).continuationAllowed, false);
+  await assert.rejects(run(consumer, w, 'receipt', {
+    data: { ...data, status: 'starting' }, evidence: taskEvidence,
+  }), /delivery intent/);
+  await assert.rejects(run(consumer, w, 'prestart-proof', {
+    data, evidence: fresh({ authoritativeJournalRetained: true, protocolOnlyDeliveryAttested: true }),
+  }), /no delivery intent/);
+});
 
 test('manual initializer and repeated coordinator/consumer lifecycles need no current-automation metadata', async (t) => {
   for (const workerId of ['mini', 'windows']) {
@@ -639,12 +1065,14 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
     await run(consumer, w, 'ready', { evidence: inventory() });
     const startRequest = { ...w, type: 'receipt', id: `start-${++next}`,
       data: { ...taskBinding, status: 'starting', correlation: 'delivery-one' }, evidence: taskEvidence };
-    assert.equal((await runNativeRequest(consumer, startRequest, dependencies)).nativeCreateAllowed, true);
+    const started = await runNativeRequest(consumer, startRequest, dependencies);
+    assert.equal(started.nativeCreateAllowed, true);
     assert.equal((await runNativeRequest(consumer, startRequest, dependencies)).nativeCreateAllowed, false);
     const sessionId = 'cccccccc-1111-4222-8333-444444444444';
     const session = { id: sessionId, projectId: consumer.projectId, worktreePath: '/worktrees/task' };
     const delivered = fresh({ session, assignmentCorrelation: 'delivery-one',
       repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true });
+    delivered.continuationAck = await fixtureStartup(consumer, w, started.dispatchPlan, startRequest.data, session, dependencies);
     await run(consumer, w, 'receipt', {
       data: { ...taskBinding, status: 'running', correlation: 'delivery-one' }, evidence: delivered,
     });
@@ -661,7 +1089,9 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
       data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' },
       evidence: { ...delivered, session: { ...session, terminalVerified: true },
         queueChecked: true, historyChecked: true, artifactsVerified: true,
-        noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one' },
+        noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one',
+        finalAck: { ...started.dispatchPlan.packet, noChildren: true, noPendingContinuation: true,
+          noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one' } },
     });
     await run(consumer, w2, 'ready', { evidence: inventory([{ id: sessionId, terminalVerified: true }]) });
     const receipt = terminal.state.assignments['assignment-1'].receipts.at(-1);
@@ -1203,8 +1633,10 @@ test('native asynchronous hourly rounds admit locally and settle days later with
     branch: 'test-only-general', activity: { status: 'idle' },
   };
   const session = { id: rawReadback.id, projectId: rawReadback.project_id, worktreePath: rawReadback.path };
+  const continuationAck = await fixtureStartup(consumer, w, authorized.dispatchPlan,
+    { ...bound, correlation: 'delayed-delivery' }, session, dependencies);
   const delivered = () => fresh({ session, repository: rawReadback.project_repo,
-    nativeReadbackVerified: true, kickoffDeliveryVerified: true, assignmentCorrelation: 'delayed-delivery' });
+    nativeReadbackVerified: true, kickoffDeliveryVerified: true, assignmentCorrelation: 'delayed-delivery', continuationAck });
   await run(consumer, w, 'receipt', {
     data: { ...bound, status: 'running', correlation: 'delayed-delivery' }, evidence: delivered(),
   });
@@ -1224,6 +1656,8 @@ test('native asynchronous hourly rounds admit locally and settle days later with
   const terminal = await run(consumer, w, 'receipt', { ...terminalRequest, evidence: {
     ...terminalRequest.evidence, noPendingContinuation: true, noFutureDelivery: true,
     finalDeliveryCorrelation: 'follow-up-one',
+    finalAck: { ...authorized.dispatchPlan.packet, noChildren: true, noPendingContinuation: true,
+      noFutureDelivery: true, finalDeliveryCorrelation: 'follow-up-one' },
   } });
   const receiptDigest = terminal.state.assignments['assignment-1'].receipts.at(-1).evidenceDigest;
   await run(consumer, w, 'end-round');

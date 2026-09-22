@@ -18,6 +18,31 @@ const hostInput = {
   host: 'macos-mobile', workflow, runtime, platform: 'darwin', cwd: '/test/worktrees/round-one',
 };
 
+test('native preflight validates full registry after attestation, not just deployment IDs', () => {
+  const native = {
+    ...runtime, role: 'consumer', workerId: 'mini', approvedPolicy: 'a'.repeat(40),
+    executionTrust: 'local-owner-v1', migrationAttested: true,
+    ownerAttestation: { verifiedBy: 'fixture' },
+    control: {
+      repository: 'fixture/private-control', repositoryId: 123, ref: 'heads/main',
+      sharedWriterTrustAccepted: true,
+      registry: {
+        version: 1, authorityId: 'primary', epoch: 1, writers: ['fixture-owner'],
+        workers: [
+          { workerId: 'mini', host: 'macos-mobile', capabilities: ['general', 'ios'] },
+          { workerId: 'windows', host: 'windows-general', capabilities: ['general'] },
+        ],
+      },
+    },
+  };
+  assert.equal(resolveAutomationHost(config, { ...hostInput, runtime: native }).host, 'macos-mobile');
+  const malformed = structuredClone(native);
+  malformed.control.registry.workers[0].ownerAttestation = malformed.ownerAttestation;
+  delete malformed.ownerAttestation;
+  assert.throws(() => resolveAutomationHost(config, { ...hostInput, runtime: malformed }), /Unexpected fields/);
+  assert.throws(() => resolveAutomationHost(config, { ...hostInput, runtime: { ...native, workerId: 'windows' } }), /Invalid native role/);
+});
+
 test('shared host mapping preserves mobile ownership, capacity, hold and explicit model override', () => {
   const host = resolveAutomationHost(config, hostInput);
   assert.equal(host.scope, 'mixed');

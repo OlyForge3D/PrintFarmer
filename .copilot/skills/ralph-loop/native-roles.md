@@ -311,24 +311,42 @@ The task classifier enforces research-only admission while the label remains.
 Consumers may investigate and document the assigned findings, not implement the
 feature or independently transition global labels.
 
-Research reports need concrete findings, linked evidence, acceptance criteria and
-remaining blockers. Respect the documented research-PR/implementation-issue
-pattern: verify the research PR actually merged and its exact head, and identify
-the implementation issue/plan before proposing readiness. `research-plan` retains
-the gate for inconclusive findings, open blockers or required approval; active
-research also retains ownership. Its completed-research evidence includes
-`findings.summary`, `acceptanceCriteria`, `remainingBlockers`, `exitCriteriaMet`,
-`approvalRequired`, `implementationPlanVerified`, `implementationIssue`,
-`researchPrUrl`, `researchPrMerged` and `researchHeadSha`.
+Research reports need concrete findings, linked evidence, recommended decisions
+and separate research/implementation blockers. **No merged research PR is required
+for investigation-only work.** The consumer persists full findings in one
+correlated issue comment and reads it back. The coordinator appends a concise
+research summary, decision, implementation plan and comment link to the original
+issue description, preserving the report and acceptance criteria. Re-read before
+editing and verify the result; never overwrite a concurrent maintainer update.
 
-Only a verified terminal research assignment with complete exit evidence can
-produce a **proposal** to remove `go:needs-research` and add `go:yes`. Re-read the
-target issue's holds, labels and evidence before applying it through supported
-GitHub tools. Follow any issue-specific human approval requirement. Never close
-an implementation issue because research finished. If a separate implementation
-child is required, link it and preserve the original research evidence.
-A research-only PR must reference, not `Closes`, the still-unresolved
-implementation issue; merging research must not accidentally auto-close it.
+After a verified terminal research assignment, `research-plan` can propose
+removing `go:needs-research` when the **research questions** are answered. The bug
+and its implementation acceptance criteria need not already be fixed. Required
+findings fields are `summary`, nonempty `acceptanceCriteria`,
+`remainingResearchBlockers:[]`, `researchQuestionsAnswered:true`,
+`exitCriteriaMet:true`, `approvalRequired:false`, `implementationPlanVerified:true`,
+`issueCommentUrl`, `issueEvidenceReadback:true`, `issueDescriptionUpdated:true`,
+`repositoryFilesChanged`, `implementationOwner`, `implementationReady` and
+`implementationBlockers`. Readback assertions refer to actual GitHub artifacts.
+
+Only if `repositoryFilesChanged:true` also verify `researchPrUrl`,
+`researchPrMerged:true` and exact `researchHeadSha`. The research-PR/implementation-issue
+pattern is conditional on actual repository artifacts, not a mandatory ceremony.
+Investigation-only work sets `repositoryFilesChanged:false`, with no PR fields.
+Keep the original issue as the implementation issue by default. If a separate
+child is explicitly required, link it and supply `implementationIssue`; never
+invent a child simply to remove a research label.
+
+The coordinator alone applies the proposal after refreshing holds, ownership,
+dependencies, labels and artifact evidence. A ready same-issue handoff removes
+`go:needs-research`, changes the owner from researcher to implementation specialist
+where appropriate, and adds `go:yes`. If research is resolved but implementation
+has outstanding dependencies, remove the research label without adding readiness;
+do not repeatedly dispatch the completed investigation. Apply any child readiness
+separately after checking that child's actual state. Inconclusive research,
+unresolved research decisions or required approval retain the research gate.
+Never close an implementation issue because research finished. A research-only
+PR references, not `Closes`, an unresolved implementation issue.
 
 ### Admission And Capacity
 
@@ -394,6 +412,116 @@ reconciliation and a new nonconflicting reservation, never editing a live task.
 
 ## Consumer: Assigned Native Work Only
 
+### Validated Specialist Dispatch
+
+`RALPH-ASSIGNED-WORKER-V1` separates the PrintFarmer-owned native **Ralph Worker**
+agent from the issue's logical Squad specialist. The consumer does not pass
+`Squad`, `Dallas`, `Lambert`, etc. as custom-agent names. Ralph Worker performs
+the assigned member's work directly using that member's charter; it does not
+invoke Squad or run coordinator fan-out and fallback. Squad's distribution-owned
+agent is unchanged and is not a dependency of this bounded entrypoint.
+See [assigned-worker.md](assigned-worker.md).
+
+New reservation evidence must contain `scope` (`general`, `mobile`, `mixed` or
+`unknown`) and boolean `classificationComplete`. Unknown/incomplete/mixed work
+still counts mobile. Capabilities are tooling, not a substitute for classification.
+Omitted fields block before capacity is consumed. Never change a live binding's
+classification to recover credits.
+
+Both `ready` and kickoff evidence include `nativeCapabilities`, obtained from
+the actual exposed app tools: `createSession:true`, `agents:["Ralph Worker"]`, and
+`models` mapping advertised model IDs to their supported reasoning-effort values.
+This is local-owner capability evidence, not an independent service identity.
+Do not invent support.
+
+Under the consumer round token, `dispatch-plan` takes the exact assignment
+binding plus proposed opaque `correlation` and fresh complete task/capability
+evidence. It validates the owner and bounded entrypoint, loads the owner's
+charter, resolves model/effort and returns a **non-authorizing** plan.
+The macOS Dallas host override remains Astra/xhigh; otherwise explicit Squad
+overrides win, a configured model effort suffix is normalized, and unspecified
+effort is explicitly medium. Unsupported/conflicting values block, never fall back.
+Charters and the Ralph Worker entrypoint are approved controlled policy paths.
+
+The successful starting receipt recomputes and privately persists that plan.
+Only its `nativeCreateAllowed:true` response permits one call to the returned
+`dispatchPlan.nativeTool` using **exactly** `dispatchPlan.nativeArguments`.
+New PR recovery uses `create_session` at the verified existing PR head ref in a
+new isolated worktree; **never the native PR-opening tool**, whose implicit reuse can adopt
+or mutate an unrelated native session. Fresh evidence includes `prState:"open"`,
+`prHeadRepository:"OlyForge3D/PrintFarmer"`, `prHeadRef`, `prHeadSha` matching the
+task, and `prWorkerPolicyDigest`. Compute that digest from the immutable PR head:
+the SHA-256 text hashes of `.github/agents/ralph-worker.agent.md`, this member's charter,
+and `.copilot/skills/ralph-loop/assigned-worker.md`, serialized as
+`{agentSha256,contractSha256,charterSha256}` in that order using mailbox `digest`.
+Normalize CRLF to LF for these policy-text hashes (and `charterSha256`) on both
+hosts; do not trim content or normalize task/receipt JSON.
+It must match the approved local worker policy. An older branch without this
+bounded entrypoint needs policy reconciliation by its existing owner, not a
+blind kickoff using its old coordinator instructions. Forks and unverifiable
+head policy block new admission.
+
+The packet binds the original PR branch and head. Startup ACK must report the
+actual initial Git HEAD and the actual branch matching native readback. Head
+movement blocks before substantive work; `startup-check` also requires
+`currentPrHeadSha` from fresh GitHub readback equal to the assigned head.
+The new worktree is only a repair
+workspace: preserve the published PR, use explicit normal fast-forward
+`git push origin HEAD:refs/heads/<verified-pr-head-ref>` after fresh ownership/head
+checks, and never force-push or open another PR. Existing mapped workers continue
+in place; they do not need a new reservation or session.
+The packet, prompt, model settings and native IDs stay in the private journal;
+only digests reach the mailbox.
+
+Immediately persist the returned handle with `record-creation` (exact binding
+and correlation). Evidence includes `creationHandle`, `creationOutcome`
+(`succeeded` or `partial`), and `dispatchPlanDigest`. A successful call also
+requires `createRequestDigest` of the exact native arguments and
+`kickoffAccepted:true`. If readback is unavailable, omit `session`: the handle
+is retained and `reconciliationRequired:true` returned, never new-create permission.
+Then record actual normalized native readback (`session`, `repository`,
+`nativeReadbackVerified:true`). A runtime-ID alias change must resolve the retained
+`creationHandle`, identify it as `resolvedCreationHandle` and preserve the same
+project/worktree; it is not permission to replace the workspace.
+
+The worker initially returns startup-only ACK and stops. Submit `startup-check`
+with the exact binding, same session, plan digest and `startupAck`: packet
+`assignmentId`, `generation`, `taskDigest`, `correlation`, `member`,
+`charterSha256` and **every other packet field unchanged**, including policy,
+repository/head/ref, purpose/category and configured model/effort. Also require
+`initialHeadSha`, `actualBranch`, `substantiveWorkStarted:false`, `noChildren:true`, plus actual
+model/effort **only if exposed**. Include `configuration` with exact `model`,
+`reasoningEffort` and source `successful-native-create`, `native-readback`, or
+`owner-attestation`. Success of the exact native creation request establishes
+accepted settings, not independently observed runtime settings. A partial/failed
+kickoff cannot use that source; it requires actual readback or explicit attestation.
+If the app cannot expose/change lost configuration, report that platform limitation;
+never manufacture proof or silently use default settings.
+
+`startup-check` durably records a continuation intent before returning
+`continuationAllowed:true` and the substantive message. Send it once to that
+same session. Repeated checks return false; lost delivery is reconciled from
+actual history/ACK, never blindly resent. The first running receipt requires
+`continuationAck` with the complete packet and `substantiveWorkStarted:true`.
+Subsequent status receipts retain the established mapping.
+Completed terminal work requires that acknowledged startup and substantive start,
+plus a final ACK echoing the complete packet and cessation commitments. Neither
+`starting -> terminal-reported` nor `starting -> uncertain -> terminal-reported`
+can masquerade as completed work. Uncertain pre-start work remains owned for
+recovery, not released by a success-shaped terminal report.
+
+For research/analysis completion, the consumer writes findings once to the issue
+and reads back the existing comment (recover an uncertain write by correlation,
+not another comment). Then obtain the same child's final ACK. New bounded-worker
+terminal evidence includes `artifactReadbackVerified:true`, `artifact` with
+`kind:"issue-comment"`, exact `url` and SHA-256 `bodyDigest`, and `finalAck` with
+packet identities/member, that `artifactUrl`, the `finalDeliveryCorrelation`,
+`noChildren:true`, `noPendingContinuation:true` and `noFutureDelivery:true`.
+Chat-only findings are not a durable research deliverable. Keep existing
+implementation/review gates and never close an implementation issue after research.
+
+### Ordinary Local Lifecycle
+
 Consumers do not globally triage, choose new issues, change worker assignment,
 grant replacements or independently claim the backlog. Inspect only assignments
 for their own worker ID and their Ralph-owned session lineage/history.
@@ -434,13 +562,17 @@ person, and retains valid triage labels. `status:blocked` and `blocked` are hold
 not permission to proceed when cached eligibility says ready.
 
 Only a response with `nativeCreateAllowed:true` permits one local supported
-`create_session`/`open_pr_session` call for that assignment. Carry the opaque
-correlation in its kickoff. Preserve existing PR branches via the PR-session
-tool; never substitute a fresh branch for owned recovery. A lost response or
-`false` never permits another creation. Read back the returned actual native
-session and deliver only once, then submit `receipt` status `running` with fresh
-`evidence.session.id`, `assignmentCorrelation`, `repository`,
-`nativeReadbackVerified:true` and `kickoffDeliveryVerified:true`.
+call using exactly `dispatchPlan.nativeTool` and `dispatchPlan.nativeArguments`.
+New assignments, including PR repair, use guaranteed-new `create_session`
+worktrees; preserve the existing published PR branch as specified by the plan,
+never adopt another native PR session. A lost response or `false` never permits
+another creation. Persist the handle with `record-creation` before readback.
+Follow the validated specialist startup-only ACK, `startup-check` and single
+continuation sequence above; a workspace handle does not authorize direct work.
+Only after the complete substantive continuation ACK submit `receipt` status
+`running`, including `continuationAck`, fresh `evidence.session.id`,
+`assignmentCorrelation`, `repository`, `nativeReadbackVerified:true` and
+`kickoffDeliveryVerified:true`.
 Normalize actual `get_session.project_id` to `session.projectId` and actual
 `get_session.path` to `session.worktreePath`; both must match the configured
 project and isolated-worktree parent. Normalize `project_repo` to `repository`.
@@ -493,6 +625,40 @@ works **only** before the atomic starting receipt. If starting won the race,
 withdrawal is rejected and ownership remains. If withdrawal won, the consumer
 cannot obtain creation permission. Starting/running/uncertain work never uses
 this shortcut.
+
+### Renewal And Never-Delivered Reconciliation
+
+Before publishing ready after renewal, inspect reserved/published old-policy
+assignments; do not attempt starting with a mismatched policy and repeatedly
+revoke otherwise usable capacity. Starting/running/uncertain workers retain
+their original ownership and mappings; do not recreate them.
+
+The owning consumer's `prestart-proof` request takes the exact binding and fresh
+`authoritativeJournalRetained:true`, `protocolOnlyDeliveryAttested:true` evidence.
+Runtime verifies mailbox continuity, reserved/published state, zero receipts and
+no retained delivery intent for that assignment. It returns an opaque `proof`
+without creating work or mutating the mailbox. This proves no protocol-authorized
+delivery under the accepted local-owner trust, not absence of arbitrary activity
+outside that trust boundary. Idle/missing sessions or an empty coordinator journal
+are not substitutes.
+
+Commit the exact returned proof as `report-blocker` evidence (for example
+`task-changed` on old-policy work), then send that same proof to the coordinator
+through supported session messaging. Later `prestart-proof` calls return the
+retained proof with `alreadyReported:true` when that digest is already committed;
+forward it if needed, but do not report the blocker again. Coordinator `withdraw` evidence includes
+`prestartProof` plus fresh claims/no-delivery reconciliation. Runtime verifies
+its digest equals the consumer's committed blocker, and rechecks binding/state.
+Proof can cross hourly rounds: fresh coordinator observation still must find
+the same never-started binding and consumer proof. A racing start prevents
+withdrawal; a racing withdrawal prevents start. No new mailbox event format,
+history rewrite, Windows journal access from the mini or quota refund is needed.
+
+Publish fresh ready **after** recovery reports. Do not re-report an unchanged
+already-committed blocker on every round and revoke the replacement offer again.
+Settlement/withdrawal does not refund credits; the fresh inventory-derived offer
+does. Generate evidence timestamps with `new Date().toISOString()`, not GNU
+`date` formatting on macOS.
 
 ## Checks
 

@@ -353,6 +353,10 @@ export function researchDisposition(evidence, assignment) {
   if (labels.some((label) => heldLabels.has(label))) {
     return { ...result, action: 'blocked', reason: 'Respect go:no and explicit human holds.' };
   }
+  if (evidence.issueState?.toLowerCase() !== 'open' || !Array.isArray(evidence.githubAssignees) ||
+      evidence.githubAssignees.length) {
+    return { ...result, action: 'blocked', reason: 'Fresh open, unassigned issue evidence required before research triage.' };
+  }
   if (!labels.includes('go:needs-research')) return { ...result, action: 'normal-triage' };
   if (!assignment) return { ...result, action: 'reserve-research', reason: 'Bounded research needs normal owner/device selection and quota reservation.' };
   if (assignment.task?.purpose !== 'research' || assignment.task.issue !== evidence.issue) fail('Research result must belong to the exact research assignment.');
@@ -362,18 +366,36 @@ export function researchDisposition(evidence, assignment) {
   if (!findings || typeof findings.summary !== 'string' || !findings.summary.trim() ||
       !Array.isArray(findings.acceptanceCriteria) || !findings.acceptanceCriteria.length ||
       findings.acceptanceCriteria.some((item) => typeof item !== 'string' || !item.trim()) ||
-      !Array.isArray(findings.remainingBlockers) || findings.remainingBlockers.length ||
+      !Array.isArray(findings.remainingResearchBlockers) || findings.remainingResearchBlockers.length ||
       findings.exitCriteriaMet !== true || findings.approvalRequired !== false ||
-      findings.implementationPlanVerified !== true ||
-      !Number.isSafeInteger(findings.implementationIssue) || findings.implementationIssue < 1 ||
-      !/^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/pull\/[1-9][0-9]*$/.test(findings.researchPrUrl ?? '') ||
-      findings.researchPrMerged !== true || !shaPattern.test(findings.researchHeadSha ?? '')) {
-    return { ...result, action: 'retain-research-gate', reason: 'Findings, exit criteria, merged research evidence or implementation readiness are incomplete/awaiting approval.' };
+      findings.researchQuestionsAnswered !== true || findings.implementationPlanVerified !== true ||
+      findings.issueEvidenceReadback !== true || findings.issueDescriptionUpdated !== true ||
+      !new RegExp(`^https://github\\.com/OlyForge3D/PrintFarmer/issues/${evidence.issue}#issuecomment-[0-9]+$`).test(findings.issueCommentUrl ?? '') ||
+      typeof findings.repositoryFilesChanged !== 'boolean' ||
+      !/^squad:(dallas|ripley|drake|lambert|hudson|gorman|kane|ash|brett|parker|newt|copilot)$/.test(findings.implementationOwner ?? '') ||
+      typeof findings.implementationReady !== 'boolean' || !Array.isArray(findings.implementationBlockers) ||
+      findings.implementationBlockers.some((item) => typeof item !== 'string' || !item.trim()) ||
+      (findings.implementationIssue !== undefined &&
+        (!Number.isSafeInteger(findings.implementationIssue) || findings.implementationIssue < 1))) {
+    return { ...result, action: 'retain-research-gate', reason: 'Durable issue findings, research exit criteria, owner or implementation plan are incomplete/awaiting approval.' };
   }
+  if (findings.repositoryFilesChanged &&
+      (!/^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/pull\/[1-9][0-9]*$/.test(findings.researchPrUrl ?? '') ||
+        findings.researchPrMerged !== true || !shaPattern.test(findings.researchHeadSha ?? ''))) {
+    return { ...result, action: 'retain-research-gate', reason: 'Research changed repository files: verify its reviewed, merged PR before readiness.' };
+  }
+  const sameIssue = findings.implementationIssue === undefined || findings.implementationIssue === evidence.issue;
+  const ready = findings.implementationReady && findings.implementationBlockers.length === 0;
+  const oldOwners = evidence.labels.filter((label) => label.toLowerCase().startsWith('squad:') &&
+    label.toLowerCase() !== findings.implementationOwner);
   return {
-    ...result, action: 'propose-implementation-readiness', issue: findings.implementationIssue,
-    removeLabels: ['go:needs-research'], addLabels: ['go:yes'],
-    reason: 'Refresh target labels/holds and linked evidence before applying this proposal; research completion never closes the implementation issue.',
+    ...result, action: ready ? 'propose-implementation-readiness' : 'propose-research-complete', issue: evidence.issue,
+    implementationIssue: findings.implementationIssue ?? evidence.issue,
+    removeLabels: ['go:needs-research', ...(!ready && labels.includes('go:yes') ? ['go:yes'] : []),
+      ...(sameIssue ? oldOwners : [])],
+    addLabels: sameIssue ? [...(ready ? ['go:yes'] : []),
+      ...(!labels.includes(findings.implementationOwner) ? [findings.implementationOwner] : [])] : [],
+    reason: 'Coordinator must refresh and update the original issue, preserving its report. Research completion is not a bug fix; separately verify implementation prerequisites and any explicitly linked child.',
   };
 }
 

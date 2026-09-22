@@ -21,6 +21,7 @@ Before executing repository code, verify origin is OlyForge3D/PrintFarmer on
 github.com, fetch origin development, verify POLICY_COMMIT is an ancestor of
 the exact fetched FETCH_HEAD SHA, and verify both current and that fetched SHA's versions of
 .copilot/skills/ralph-loop, .github/copilot-instructions.md, .squad/config.json,
+.github/agents/ralph-worker.agent.md, '.squad/agents/*/charter.md', .squad/issue-lifecycle.md,
 and scripts/ci/ralph-*.mjs plus scripts/ci/verify-squad-verdict.mjs are identical
 to POLICY_COMMIT (git diff --exit-code; quote 'scripts/ci/ralph-*.mjs' as a Git
 pathspec). Reject all untracked files in those paths, including ignored files,

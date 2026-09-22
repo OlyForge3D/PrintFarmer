@@ -17,6 +17,7 @@ const policyPaths = [
   policyDirectory, '.github/copilot-instructions.md', '.squad/config.json',
   'scripts/ci/ralph-*.mjs', 'scripts/ci/verify-squad-verdict.mjs',
 ];
+const specialistPolicyPaths = ['.github/agents/ralph-worker.agent.md', '.squad/agents/*/charter.md', '.squad/issue-lifecycle.md'];
 const resolverPaths = ['scripts/ci/resolve-ios-simulator.sh', 'scripts/common-utils.sh'];
 const shaPattern = /^[0-9a-f]{40}$/;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -187,10 +188,11 @@ export async function runCommand(tool, args, { cwd, env = {} } = {}) {
   }
 }
 
-function isControlled(file) {
+function isControlled(file, includeSpecialists = true) {
   return file === policyDirectory || file.startsWith(`${policyDirectory}/`) ||
     ['.github/copilot-instructions.md', '.squad/config.json', 'scripts/ci/verify-squad-verdict.mjs', ...resolverPaths].includes(file) ||
-    /^scripts\/ci\/ralph-.*\.mjs$/.test(file);
+    /^scripts\/ci\/ralph-.*\.mjs$/.test(file) ||
+    (includeSpecialists && (specialistPolicyPaths.includes(file) || /^\.squad\/agents\/[^/]+\/charter\.md$/.test(file)));
 }
 
 function manifestFromFiles(files) {
@@ -205,13 +207,13 @@ async function developmentHead(command) {
   return head.sha;
 }
 
-async function policyManifest(repo, commit, command) {
+async function policyManifest(repo, commit, command, includeSpecialists = true) {
   const listing = await command('git', ['ls-tree', '-r', '-z', '--full-tree', commit], { cwd: repo });
   const files = listing.split('\0').filter(Boolean).map((entry) => {
     const match = entry.match(/^([0-7]{6}) (blob|tree|commit) ([0-9a-f]{40})\t([\s\S]+)$/);
     if (!match) throw new Error('Invalid controlled Git tree entry.');
     return { mode: match[1], sha: match[3], path: match[4] };
-  }).filter((file) => isControlled(file.path));
+  }).filter((file) => isControlled(file.path, includeSpecialists));
   return manifestFromFiles(files);
 }
 
@@ -227,7 +229,8 @@ async function readApproval(file) {
   if (record?.schemaVersion !== 1 || record.repository !== repository || record.baseBranch !== 'development' ||
       !shaPattern.test(record.approvedCommit ?? '') || !/^[0-9a-f]{64}$/.test(record.controlledContentSha256 ?? '') ||
       !Number.isFinite(Date.parse(record.approvedAt)) ||
-      JSON.stringify(record.controlledPaths) !== JSON.stringify([...policyPaths, ...resolverPaths])) {
+      ![ [...policyPaths, ...resolverPaths], [...policyPaths, ...specialistPolicyPaths, ...resolverPaths] ]
+        .some((scope) => JSON.stringify(record.controlledPaths) === JSON.stringify(scope))) {
     throw new Error('Policy approval receipt has invalid identity, scope or content metadata.');
   }
   return { record, content };
@@ -259,12 +262,12 @@ export async function validatePolicy(options, command, development) {
   }
   await git(['cat-file', '-e', `${approved}^{commit}`]);
   await git(['merge-base', '--is-ancestor', approved, 'HEAD']);
-  const flags = await git(['ls-files', '-v', '--', ...policyPaths, ...resolverPaths]);
+  const flags = await git(['ls-files', '-v', '--', ...policyPaths, ...specialistPolicyPaths, ...resolverPaths]);
   if (flags.split('\n').some((line) => /^[a-zS] /.test(line))) {
     throw new Error('Policy/resolver index entries use assume-unchanged or skip-worktree flags; remove those flags explicitly before validation.');
   }
-  await git(['diff', '--quiet', '--no-ext-diff', '--no-textconv', approved, '--', ...policyPaths, ...resolverPaths]);
-  const untracked = await git(['ls-files', '--others', '--', ...policyPaths, ...resolverPaths]);
+  await git(['diff', '--quiet', '--no-ext-diff', '--no-textconv', approved, '--', ...policyPaths, ...specialistPolicyPaths, ...resolverPaths]);
+  const untracked = await git(['ls-files', '--others', '--', ...policyPaths, ...specialistPolicyPaths, ...resolverPaths]);
   if (untracked) throw new Error('Untracked (including ignored) policy/resolver files are not trusted.');
   const head = development ?? await developmentHead(command);
   const comparison = await api(`compare/${approved}...${head}`);
@@ -321,8 +324,13 @@ export async function validatePolicy(options, command, development) {
     rolePrompt = await git(['show', `${approved}:${policyDirectory}/native-roles.md`]);
     if (!rolePrompt.includes('NATIVE-MAILBOX-ROLE-V2')) throw new Error('Approved policy lacks the supported local-owner native role contract; renew the policy.');
     if (!rolePrompt.includes('ownershipScope:"ralph-owned-v1"')) throw new Error('Approved policy lacks Ralph-owned lineage inventory; review and renew the policy before generating native prompts.');
-    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs']) {
+    if (!rolePrompt.includes('RALPH-ASSIGNED-WORKER-V1')) throw new Error('Approved policy lacks bounded specialist dispatch; renew before generating native prompts.');
+    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs']) {
       await git(['cat-file', '-e', `${approved}:scripts/ci/${file}`]);
+    }
+    const workerAgent = await git(['show', `${approved}:.github/agents/ralph-worker.agent.md`]);
+    if (!/^name: Ralph Worker$/m.test(workerAgent) || !workerAgent.includes('RALPH-ASSIGNED-WORKER-V1')) {
+      throw new Error('Approved Ralph Worker agent lacks the bounded specialist entrypoint.');
     }
   }
   return { profile, policyVersion: policy.policyVersion, prompt, rolePrompt, development: head, manifest };
@@ -397,7 +405,8 @@ for one or more eligible issues, and unused capacity/quota/overlap rules allow
 it (per "Admission And Capacity"), you MUST follow through in the SAME round by
 actually issuing the real admitting event, type:"reserve", purpose:"research",
 with a fresh assignmentId, workerId, and complete fresh evidence
-(repository, issue, headSha, title, labels, acceptanceCriteria, capabilities,
+(repository, issue, headSha, title, labels, acceptanceCriteria, capabilities, scope,
+classificationComplete,
 files, claimsReconciled, holdsChecked, dependenciesReady, epicChildrenReady,
 analysisReady, filesComplete, reviewGatesChecked, issueState:"open",
 githubAssignees:[]), then publish it with assignmentId/generation/taskDigest,
@@ -451,6 +460,36 @@ unmapped owned descendants still block; never hide them with an inventory filter
 Do not submit this scoped evidence to an older runtime: follow the approved
 native-roles.md contract and policy guards before any operation.
 Consumer ready publishes finite durable capacity credits, NOT online presence.
+Use Node new Date().toISOString() for observedAt; never GNU date format strings
+on macOS. Always supply explicit scope and classificationComplete for reservation;
+general capability alone is NOT general quota classification. Unknown/mixed work
+still counts mobile. Do not reclassify existing reservations to reclaim credit.
+Before ready, reconcile never-started old-policy assignments using prestart-proof;
+send the exact generated proof through report-blocker and to the coordinator.
+Coordinator verifies the committed proof digest, then withdraws only that binding.
+Do not repeatedly revoke a refreshed offer for the same already-reported blocker.
+Publish fresh ready AFTER recovery reports; do not infer credits from revoked offers.
+For kickoff use dispatch-plan and the plan returned by the successful starting
+receipt. The registered agent is Ralph Worker in RALPH-ASSIGNED-WORKER-V1 mode,
+not Squad, Dallas or another logical member name. It executes the named member's
+charter directly. No coordinator fan-out or unaccounted task agents.
+Pass nativeCapabilities from the actual exposed native tools/agents/models, never
+invent availability. Record every returned creation handle with record-creation,
+including partial failures, before attempting startup recovery. Never retry creation.
+Use startup-check on the same child and its actual startup-only ACK; send only the
+returned continuation once. A failed kickoff's requested model/effort is NOT proof
+of persisted configuration. Successful native creation establishes accepted settings,
+not independently observed runtime settings; preserve that evidence distinction.
+On research completion, persist findings once on the issue and read back the comment,
+obtain the same child's explicit final-delivery ACK, then terminal-report and settle.
+Do not leave findings only in chat or label research as completed implementation.
+Coordinator appends a concise summary/decision/implementation plan and the findings
+link to the original issue description without replacing its report. Once research
+questions are answered, coordinator removes go:needs-research and selects the
+implementation owner; add go:yes only after separate implementation prerequisites.
+Investigation-only work does NOT require a merged research PR or a new issue.
+Only research that actually changes repository files needs reviewed merged PR
+evidence. Use native-roles.md's current research-plan findings fields and readbacks.
 Coordinator can reserve against unused credits across later hourly rounds.
 Before each kickoff the consumer must refresh local inventory/tooling in its own
 round. Terminal reporting commits no future delivery; later coordinator settlement
@@ -502,7 +541,10 @@ using the supported terminal and runtime initialize request; no workflow run or
 current-automation association is required. Follow native-roles.md's exact request.
 Pin its returned genesis SHA in EVERY role's private control config before ordinary
 rounds. Never initialize on an existing ref or retry uncertain init.
-${previous ? 'RENEWAL: settings are a prompt-only disabled update to the SAME workflow. Omitted settings preserve the live name/model/effort/schedule/project/environment/workspace; read them back, never apply fresh-install defaults. Existing control/genesis, migration attestation and native-state path were retained. Old package/approval/journal/claims were NOT modified or copied. verified remains false until explicit acceptance of this new contract. Reconcile old active rounds; do not reset state or invent tokens.' : ''}
+${previous ? 'RENEWAL: settings are a prompt-only disabled update to the SAME workflow. Omitted settings preserve the live name/model/effort/schedule/project/environment/workspace; read them back, never apply fresh-install defaults. Existing control/genesis, migration attestation and native-state path were retained. Old package/approval/journal/claims were NOT modified or copied. verified remains false until explicit acceptance of this new contract. Reconcile old active rounds and never-started old-policy assignments using consumer prestart-proof; preserve starting/running/uncertain workers. Do not reset state or invent tokens.' : ''}
+After any attestation edit, run non-authorizing preflight AND runtime inspect again.
+Full control/registry validation is mandatory; ownerAttestation belongs at the host
+root, never inside registry workers. Do not infer readiness from generated files.
 Do not fabricate evidence, infer cessation from disabled schedules or copy ledgers.
 Keep source and destination schedules and Reaper disabled. Activation and any live
 queue initialization/write require separate explicit authorization.
@@ -727,6 +769,10 @@ export async function setup(options, {
     throw new Error('Renewal must use a NEW --host-config directory; existing approval and generated files are never overwritten.');
   }
   const saved = await readApproval(previousPath);
+  const savedIncludesSpecialists = saved?.record.controlledPaths.includes(specialistPolicyPaths[0]);
+  if (saved && !savedIncludesSpecialists && !options['renew-policy']) {
+    throw new Error('Saved scope predates Ralph Worker dispatch; interactive policy renewal is required.');
+  }
   if (options['renew-policy'] && !saved) throw new Error('--previous-approval does not exist; cannot review a renewal without its baseline.');
   if (options['renew-policy'] && await statIfExists(directory)) {
     throw new Error('Renewal requires a nonexistent output directory; preserve previous packages and choose a new path.');
@@ -743,12 +789,12 @@ export async function setup(options, {
     throw new Error(`Policy validation blocked: ${error.message} The exact candidate must exist in a matching checkout; fetch/update your isolated checkout manually if needed, never reset dirty work. ${saved && !options['renew-policy'] ? 'Saved approval cannot be reused. For an actual controlled-policy revision, review with --renew-policy --previous-approval and a NEW --host-config directory; renewal cannot bypass failed trust checks.' : ''}`);
   }
   if (saved) {
-    const previous = await policyManifest(options.repo, saved.record.approvedCommit, command);
+    const previous = await policyManifest(options.repo, saved.record.approvedCommit, command, savedIncludesSpecialists);
     if (previous.digest !== saved.record.controlledContentSha256) throw new Error('Saved approval digest does not match its immutable Git commit.');
   }
   const needsApproval = !saved || Boolean(options['renew-policy']);
   const changes = saved ? await command('git', [
-    'diff', '--no-ext-diff', '--no-textconv', '--stat', saved.record.approvedCommit, approved, '--', ...policyPaths, ...resolverPaths,
+    'diff', '--no-ext-diff', '--no-textconv', '--stat', saved.record.approvedCommit, approved, '--', ...policyPaths, ...specialistPolicyPaths, ...resolverPaths,
   ], { cwd: options.repo }) : 'Initial approval: all listed controlled files are in scope.';
   const review = {
     repository, baseBranch: 'development', exactCommit: approved,
@@ -756,14 +802,15 @@ export async function setup(options, {
     observedDevelopment: development,
     previousApproval: saved?.record.approvedCommit,
     controlledContentSha256: policy.manifest.digest,
-    controlledPaths: [...policyPaths, ...resolverPaths],
+    controlledPaths: [...policyPaths, ...specialistPolicyPaths, ...resolverPaths],
+    newlyControlledPaths: saved && !savedIncludesSpecialists ? specialistPolicyPaths : [],
     controlledFiles: policy.manifest.files,
     changeSummary: changes.split('\n'),
     mobileRole: policy.profile,
     policyVersion: policy.policyVersion,
     ...(deployment ? { nativeRole: options.role, workerId: options['worker-id'], control: deployment.control } : {}),
     reviewCommand: saved
-      ? `git -C ${shellQuote(options.repo)} diff --no-ext-diff --no-textconv ${saved.record.approvedCommit} ${approved} -- ${[...policyPaths, ...resolverPaths].map(shellQuote).join(' ')}`
+      ? `git -C ${shellQuote(options.repo)} diff --no-ext-diff --no-textconv ${saved.record.approvedCommit} ${approved} -- ${[...policyPaths, ...specialistPolicyPaths, ...resolverPaths].map(shellQuote).join(' ')}`
       : `git -C ${shellQuote(options.repo)} show ${approved}:${policyDirectory}/automation.md`,
     authorizes: 'Only these immutable policy contents. NOT native identity attestation, cutover, a Ralph round or schedule activation.',
   };
@@ -798,7 +845,7 @@ export async function setup(options, {
   await ensureUnchanged();
   const receipt = needsApproval ? {
     schemaVersion: 1, repository, baseBranch: 'development', approvedCommit: approved,
-    controlledContentSha256: policy.manifest.digest, controlledPaths: [...policyPaths, ...resolverPaths],
+    controlledContentSha256: policy.manifest.digest, controlledPaths: [...policyPaths, ...specialistPolicyPaths, ...resolverPaths],
     approvedAt: new Date().toISOString(), githubLogin: options['github-login'],
   } : saved.record;
   files.set(approvalPath, needsApproval ? `${JSON.stringify(receipt, undefined, 2)}\n` : saved.content);
