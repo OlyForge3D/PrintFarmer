@@ -127,8 +127,35 @@ test('native role dry-run probes exact private repo without queue/native writes'
   await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
 });
 
-test('native packages stage coordinator and Windows consumer with distinct roles, no guessed genesis', async (t) => {
-  for (const [role, windows] of [['coordinator', false], ['consumer', true]]) {
+function assertNativePrompt(prompt, role) {
+  assert.match(prompt, /Only a successful\nruntime response with acquisitionAbandoned:true/);
+  assert.match(prompt, /NEW round\/event IDs in this invocation/);
+  assert.match(prompt, /THREE acquisition attempts total \(initial plus\ntwo retries\)/);
+  assert.match(prompt, /only after runtime-proven abandonment of each failed attempt/);
+  assert.match(prompt, /Keep the old journal\/intents immutable/);
+  assert.match(prompt, /unchanged head, timeout, failed reconciliation, published acquisition or\nunproven outcome must STOP/);
+  assert.match(prompt, /No polling, sleeps or schedule changes/);
+  assert.match(prompt, /complete exactly one role round/);
+  if (role === 'coordinator') {
+    assert.match(prompt, /MUST complete missing-label triage while\nholding its round gate/);
+    assert.match(prompt, /Read each candidate's current body/);
+    assert.match(prompt, /Add a justified missing type:\*, priority:p0-p3/);
+    assert.match(prompt, /Preserve existing valid classifications and ownership, go:needs-research,\ngo:no, explicit holds and status:needs-analysis/);
+    assert.match(prompt, /Never assign jpapiez, overwrite\nconflicting classifications, guess labels/);
+    assert.match(prompt, /evidence is ambiguous,\nreport the specific unresolved classification/);
+    assert.match(prompt, /Re-read GitHub after label changes/);
+    assert.match(prompt, /actual readback as fresh evidence for same-round research-plan\/reserve/);
+    assert.match(prompt, /metadata triage only, not unaccounted research or implementation/);
+    assert.match(prompt, /type:"research-plan" is a read-only, non-mutating disposition check/);
+    assert.match(prompt, /type:"reserve", purpose:"research"/);
+    assert.match(prompt, /then publish it with assignmentId\/generation\/taskDigest/);
+  } else {
+    assert.doesNotMatch(prompt, /missing-label triage|Add a justified missing|research-reservation candidate|type:"reserve", purpose:"research"/);
+  }
+}
+
+test('native packages stage coordinator and both consumers with role-specific triage and bounded recovery', async (t) => {
+  for (const [role, windows] of [['coordinator', false], ['consumer', false], ['consumer', true]]) {
     const f = await fixture(t);
     const options = await nativeOptions(f, role, windows);
     const result = await f.run({ ...options, apply: true }, { platform: windows ? 'win32' : 'darwin' });
@@ -148,6 +175,8 @@ test('native packages stage coordinator and Windows consumer with distinct roles
     assert.match(settings.prompt, /Acquire a fresh atomic begin-round token/);
     assert.match(settings.prompt, /finite durable capacity credits, NOT online presence/);
     assert.match(settings.prompt, /does not require sub-minute consumer timing/);
+    assertNativePrompt(settings.prompt, role);
+    assert.equal(await readFile(path.join(path.dirname(f.options['host-config']), 'workflow-prompt.txt'), 'utf8'), `${settings.prompt}\n`);
     assert.equal(host.executionTrust, 'local-owner-v1');
     assert.match(settings.name, new RegExp(role));
     const handoff = await readFile(path.join(path.dirname(f.options['host-config']), 'app-native-handoff.txt'), 'utf8');
@@ -204,6 +233,7 @@ test('consented native renewal preserves IDs, pinned authority and original jour
   assert.deepEqual(Object.keys(settings).sort(), ['enabled', 'prompt', 'workflow_id']);
   assert.equal(settings.workflow_id, old.workflowId);
   assert.equal(settings.enabled, false);
+  assertNativePrompt(settings.prompt, 'coordinator');
   for (const key of ['control', 'stateDirectory', 'automationWorkflowIds', 'migrationAttested',
     'projectId', 'workflowId', 'appHostId', 'worktreeRoot', 'workerId', 'role']) assert.deepEqual(updated[key], old[key], key);
   assert.equal(await readFile(path.join(old.stateDirectory, 'journal.json'), 'utf8'), history);
@@ -212,6 +242,27 @@ test('consented native renewal preserves IDs, pinned authority and original jour
   await assert.rejects(f.run({ ...another, 'workflow-id': otherWorkflow }), /cannot change workflowId/);
   await assert.rejects(f.run({ ...another, 'mailbox-ref': 'heads/another' }), /cannot change control/);
   await assert.rejects(f.run({ ...another, 'previous-host-config': undefined }), /requires --previous-host-config/);
+});
+
+test('consumer renewal retains bounded recovery without coordinator label or research triage', async (t) => {
+  for (const windows of [false, true]) {
+    const f = await fixture(t);
+    const options = await nativeOptions(f, 'consumer', windows);
+    const dependencies = { platform: windows ? 'win32' : 'darwin' };
+    await f.run({ ...options, apply: true }, dependencies);
+    const oldPath = f.options['host-config'];
+    const oldPrompt = await readFile(path.join(path.dirname(oldPath), 'workflow-prompt.txt'), 'utf8');
+    const newPath = path.join(f.root, 'renewed-consumer', 'host.json');
+    await f.run({ ...options, apply: true, 'renew-policy': true,
+      'previous-approval': path.join(path.dirname(oldPath), 'policy-approval.json'),
+      'previous-host-config': oldPath, 'host-config': newPath,
+      'cache-dir': path.join(f.root, 'renewed-cache') }, dependencies);
+    const settings = JSON.parse(await readFile(path.join(path.dirname(newPath), 'workflow-settings.json'), 'utf8'));
+    assertNativePrompt(settings.prompt, 'consumer');
+    assert.equal(settings.workflow_id, workflow);
+    assert.equal(settings.enabled, false);
+    assert.equal(await readFile(path.join(path.dirname(oldPath), 'workflow-prompt.txt'), 'utf8'), oldPrompt);
+  }
 });
 
 test('role registries cannot multiply quotas, mismatch platform or leak private fields', async (t) => {
@@ -298,6 +349,7 @@ test('apply is repeatable, writes only private 0600 unverified artifacts and pre
   assert.ok(settings.prompt.includes(`POLICY_COMMIT=${f.approved}`));
   assert.ok(settings.prompt.includes(`--approved-policy ${f.approved}`));
   assert.ok(settings.prompt.includes("'\\''config/host.json'"));
+  assert.doesNotMatch(settings.prompt, /THREE acquisition attempts|missing-label triage|research-reservation candidate/);
   const before = await Promise.all(result.files.map(async (file) => [await readFile(file, 'utf8'), (await lstat(file)).mtimeMs]));
   await f.run({ apply: true });
   const after = await Promise.all(result.files.map(async (file) => [await readFile(file, 'utf8'), (await lstat(file)).mtimeMs]));

@@ -763,6 +763,38 @@ test('cross-package acquisition race preserves sibling history and safely reconc
   await assert.rejects(runNativeRequest(coordinator, first, dependencies), /already attempted/);
 });
 
+test('consumer losing to coordinator can abandon and complete a fresh round without waiting for a schedule', async (t) => {
+  const f = await runtimeFixture(t);
+  const { coordinator, dependencies, request } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const first = request(consumer, 'begin-round');
+  const sibling = request(coordinator, 'begin-round');
+  f.github.race(() => runNativeRequest(coordinator, sibling, dependencies));
+  await assert.rejects(runNativeRequest(consumer, first, dependencies), /conflicted/);
+  const abandoned = await runNativeRequest(consumer, {
+    ...first, type: 'abandon-acquisition', data: { acquisitionId: first.id },
+  }, dependencies);
+  assert.equal(abandoned.acquisitionAbandoned, true);
+  assert.equal(abandoned.roundToken, undefined);
+  const next = request(consumer, 'begin-round');
+  assert.notEqual(next.id, first.id);
+  assert.notEqual(next.roundId, first.roundId);
+  const acquired = await runNativeRequest(consumer, next, dependencies);
+  assert.match(acquired.roundToken, /^[0-9a-f]{64}$/);
+  const finished = await runNativeRequest(consumer, {
+    ...request(consumer, 'end-round'), roundId: next.roundId, roundToken: acquired.roundToken,
+  }, dependencies);
+  assert.equal(finished.state.rounds['consumer:mini'], undefined);
+  assert.ok(finished.state.rounds.coordinator);
+  assert.equal(finished.state.events[first.id], undefined);
+  assert.ok(finished.state.events[sibling.id]);
+  const journal = JSON.parse(await readFile(path.join(consumer.stateDirectory, 'journal.json'), 'utf8'));
+  assert.equal(journal.roundOwners[first.roundId].abandoned, true);
+  assert.ok(journal.events[first.id]);
+});
+
 test('delayed ref write is not absent evidence; committed and later ended acquisition can never be abandoned', async (t) => {
   const f = await runtimeFixture(t);
   const { coordinator, dependencies, request } = f;
