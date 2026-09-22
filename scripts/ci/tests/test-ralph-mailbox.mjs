@@ -9,7 +9,7 @@ import {
   publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository,
 } from '../ralph-mailbox.mjs';
 import { prepareEvent, runNativeRequest, validateTriageEvidence } from '../ralph-native-runtime.mjs';
-import { buildDispatchPlan, validateClassification, validateStartup, validatePacketAck } from '../ralph-native-dispatch.mjs';
+import { buildDispatchPlan, validateClassification, validateStartup, validatePacketAck, policyTextDigest } from '../ralph-native-dispatch.mjs';
 
 const registry = {
   version: 1, authorityId: 'primary', epoch: 1, writers: ['fixture-owner'],
@@ -62,6 +62,12 @@ test('classification requires explicit inputs without weakening conservative mob
     assert.equal(taskFromEvidence({ ...general, ...change }).category, 'mobile');
   }
   assert.equal(taskFromEvidence(general).category, 'general');
+});
+
+test('policy-text hashes agree across Windows CRLF checkouts and Git LF blobs without trimming content', () => {
+  assert.equal(policyTextDigest('name: Squad\r\nrole: worker\r\n'), policyTextDigest('name: Squad\nrole: worker\n'));
+  assert.notEqual(policyTextDigest('name: Squad \n'), policyTextDigest('name: Squad\n'));
+  assert.notEqual(policyTextDigest('name: Squad'), policyTextDigest('name: Squad\n'));
 });
 
 test('dispatch separates native Squad agent, charter owner, category and explicit host model', async () => {
@@ -604,6 +610,8 @@ test('native runtime blocks unverified migration and unaccepted trust without qu
 
 test('native role contract separates central triage from local consumers and documents research exit', async () => {
   const contract = await readFile('.copilot/skills/ralph-loop/native-roles.md', 'utf8');
+  assert.doesNotMatch(contract, /open_pr_session|via the PR-session tool/);
+  assert.match(contract, /exactly `dispatchPlan.nativeTool` and `dispatchPlan.nativeArguments`/);
   for (const phrase of [
     'coordinator alone scans all issues/PRs', 'Consumers do not globally triage',
     'go:needs-research', 'go:no', 'research-PR/implementation-issue',

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { digest, taskFromEvidence } from './ralph-mailbox.mjs';
 
 const fail = (message) => { throw new Error(`Native dispatch blocked: ${message}`); };
-const sha256 = (text) => createHash('sha256').update(text).digest('hex');
+export const policyTextDigest = (text) => createHash('sha256').update(text.replaceAll('\r\n', '\n')).digest('hex');
 
 export function validateClassification(evidence) {
   if (!['general', 'mobile', 'mixed', 'unknown'].includes(evidence?.scope) ||
@@ -43,7 +43,7 @@ export async function buildDispatchPlan({ config, evidence, assignment, correlat
     fail('Registered Squad bounded-worker entrypoint and nonempty specialist charter required.');
   }
   const workerPolicyDigest = digest({
-    agentSha256: sha256(agent), contractSha256: sha256(workerContract), charterSha256: sha256(charter),
+    agentSha256: policyTextDigest(agent), contractSha256: policyTextDigest(workerContract), charterSha256: policyTextDigest(charter),
   });
   if (assignment.task.pr && (evidence.prState !== 'open' ||
       evidence.prHeadRepository !== 'OlyForge3D/PrintFarmer' ||
@@ -69,7 +69,7 @@ export async function buildDispatchPlan({ config, evidence, assignment, correlat
   const packet = {
     assignmentId: assignment.assignmentId, generation: assignment.generation,
     taskDigest: assignment.taskDigest, correlation, policySha: config.approvedPolicy,
-    member, charterPath, charterSha256: sha256(charter), model, reasoningEffort: effort,
+    member, charterPath, charterSha256: policyTextDigest(charter), model, reasoningEffort: effort,
     purpose: assignment.task.purpose, category: assignment.task.category,
     issue: assignment.task.issue, pr: assignment.task.pr,
     repository: 'OlyForge3D/PrintFarmer', headSha: assignment.task.headSha,

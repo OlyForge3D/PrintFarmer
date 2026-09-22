@@ -445,13 +445,15 @@ The successful starting receipt recomputes and privately persists that plan.
 Only its `nativeCreateAllowed:true` response permits one call to the returned
 `dispatchPlan.nativeTool` using **exactly** `dispatchPlan.nativeArguments`.
 New PR recovery uses `create_session` at the verified existing PR head ref in a
-new isolated worktree; **never `open_pr_session`**, whose implicit reuse can adopt
+new isolated worktree; **never the native PR-opening tool**, whose implicit reuse can adopt
 or mutate an unrelated native session. Fresh evidence includes `prState:"open"`,
 `prHeadRepository:"OlyForge3D/PrintFarmer"`, `prHeadRef`, `prHeadSha` matching the
 task, and `prWorkerPolicyDigest`. Compute that digest from the immutable PR head:
 the SHA-256 text hashes of `.github/agents/squad.agent.md`, this member's charter,
 and `.copilot/skills/ralph-loop/assigned-worker.md`, serialized as
 `{agentSha256,contractSha256,charterSha256}` in that order using mailbox `digest`.
+Normalize CRLF to LF for these policy-text hashes (and `charterSha256`) on both
+hosts; do not trim content or normalize task/receipt JSON.
 It must match the approved local worker policy. An older branch without this
 bounded entrypoint needs policy reconciliation by its existing owner, not a
 blind kickoff using its old coordinator instructions. Forks and unverifiable
@@ -558,13 +560,17 @@ person, and retains valid triage labels. `status:blocked` and `blocked` are hold
 not permission to proceed when cached eligibility says ready.
 
 Only a response with `nativeCreateAllowed:true` permits one local supported
-`create_session`/`open_pr_session` call for that assignment. Carry the opaque
-correlation in its kickoff. Preserve existing PR branches via the PR-session
-tool; never substitute a fresh branch for owned recovery. A lost response or
-`false` never permits another creation. Read back the returned actual native
-session and deliver only once, then submit `receipt` status `running` with fresh
-`evidence.session.id`, `assignmentCorrelation`, `repository`,
-`nativeReadbackVerified:true` and `kickoffDeliveryVerified:true`.
+call using exactly `dispatchPlan.nativeTool` and `dispatchPlan.nativeArguments`.
+New assignments, including PR repair, use guaranteed-new `create_session`
+worktrees; preserve the existing published PR branch as specified by the plan,
+never adopt another native PR session. A lost response or `false` never permits
+another creation. Persist the handle with `record-creation` before readback.
+Follow the validated specialist startup-only ACK, `startup-check` and single
+continuation sequence above; a workspace handle does not authorize direct work.
+Only after the complete substantive continuation ACK submit `receipt` status
+`running`, including `continuationAck`, fresh `evidence.session.id`,
+`assignmentCorrelation`, `repository`, `nativeReadbackVerified:true` and
+`kickoffDeliveryVerified:true`.
 Normalize actual `get_session.project_id` to `session.projectId` and actual
 `get_session.path` to `session.worktreePath`; both must match the configured
 project and isolated-worktree parent. Normalize `project_repo` to `repository`.
