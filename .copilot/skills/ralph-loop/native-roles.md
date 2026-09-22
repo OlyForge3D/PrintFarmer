@@ -459,7 +459,9 @@ head policy block new admission.
 
 The packet binds the original PR branch and head. Startup ACK must report the
 actual initial Git HEAD and the actual branch matching native readback. Head
-movement blocks before substantive work. The new worktree is only a repair
+movement blocks before substantive work; `startup-check` also requires
+`currentPrHeadSha` from fresh GitHub readback equal to the assigned head.
+The new worktree is only a repair
 workspace: preserve the published PR, use explicit normal fast-forward
 `git push origin HEAD:refs/heads/<verified-pr-head-ref>` after fresh ownership/head
 checks, and never force-push or open another PR. Existing mapped workers continue

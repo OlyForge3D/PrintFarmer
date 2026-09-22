@@ -109,6 +109,10 @@ test('dispatch separates native Squad agent, charter owner, category and explici
     configuration: { source: 'successful-native-create', model: 'gpt-6-astra', reasoningEffort: 'xhigh' },
   };
   validateStartup(plan, ack);
+  const prAck = { ...ack, dispatchPlanDigest: prPlan.planDigest, currentPrHeadSha: prPlan.packet.headSha,
+    startupAck: { ...ack.startupAck, ...prPlan.packet } };
+  validateStartup(prPlan, prAck);
+  assert.throws(() => validateStartup(prPlan, { ...prAck, currentPrHeadSha: 'b'.repeat(40) }), /Fresh PR head/);
   for (const key of Object.keys(plan.packet)) {
     assert.throws(() => validatePacketAck(plan.packet, { ...plan.packet, [key]: 'mismatch' }), /Packet ACK/);
   }

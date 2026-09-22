@@ -128,6 +128,9 @@ export function validateStartup(plan, evidence) {
   if (ack.initialHeadSha !== packet.headSha ||
       typeof evidence.session?.branch !== 'string' || !evidence.session.branch ||
       ack.actualBranch !== evidence.session.branch) fail('Initial worker HEAD/branch must match the packet and native readback; reconcile movement before work.');
+  if (packet.pr && evidence.currentPrHeadSha !== packet.headSha) {
+    fail('Fresh PR head changed or is unavailable at startup; reconcile before substantive delivery.');
+  }
   const configuration = evidence.configuration;
   if (!['successful-native-create', 'native-readback', 'owner-attestation'].includes(configuration?.source) ||
       configuration.model !== packet.model || configuration.reasoningEffort !== packet.reasoningEffort ||
