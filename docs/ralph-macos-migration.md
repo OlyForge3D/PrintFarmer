@@ -468,6 +468,33 @@ there is no exposed idempotency key for native session creation.
 
 ### Asynchronous capacity and completion
 
+Native inventory covers **Ralph-owned lineage across rounds**, not all sessions
+in the destination project. Consumers reconcile their private recorded delivery
+intents, assignment-backed workers and descendants; the coordinator tracks those
+assignments through the shared mailbox. Independent maintainer and separate
+automation/acceptance sessions neither consume Ralph credits nor require terminal
+attestation. Do not delete or adopt unrelated sessions to unblock admission.
+
+`ready` requires `ownershipScope:"ralph-owned-v1"` and `lineageChecked:true`
+backed by actual readback, retained creation/ACK records and ancestry. Normalize
+native `creator_session_id` to `session.creatorSessionId`; include intermediate
+ancestors. Retain unresolved create intents even without a returned native ID,
+and preserve terminal mappings to detect later resumption. Missing live workers,
+unknown owned descendants, lost ACKs and resumed terminal workers remain blockers.
+This does not relax task ownership, dependency, overlap or category quota checks.
+Every retained mapping needs an explicit fresh inventory entry, including terminal
+workers. Owned ancestry must be complete and acyclic, without adopting unrelated
+ancestors or requiring them to finish. Archived/deleted terminal workers may use
+current verified cessation plus retained correlated terminal evidence through
+`session.retirementObservation` as specified in the
+[native role contract](../.copilot/skills/ralph-loop/native-roles.md).
+Omission, idle, archive status or failed lookup alone never proves cessation.
+
+This scope correction changes controlled runtime/policy files. Existing packages
+must undergo the documented immutable policy review and explicit interactive
+renewal before adopting it. Do not merely filter old-runtime evidence or patch
+a live prompt to bypass the prior inventory contract.
+
 The generated coordinator prompt requires completing missing-label triage
 before admission, using current issue bodies, comments, linked evidence and the
 [canonical label vocabulary](../.copilot/skills/ralph-loop/operations.md#authoritative-label-vocabulary).

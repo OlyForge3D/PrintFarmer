@@ -320,6 +320,7 @@ export async function validatePolicy(options, command, development) {
     if (!prompt.includes('Read .copilot/skills/ralph-loop/automation.md')) throw new Error('Approved bootstrap lacks the exact role-routing boundary.');
     rolePrompt = await git(['show', `${approved}:${policyDirectory}/native-roles.md`]);
     if (!rolePrompt.includes('NATIVE-MAILBOX-ROLE-V2')) throw new Error('Approved policy lacks the supported local-owner native role contract; renew the policy.');
+    if (!rolePrompt.includes('ownershipScope:"ralph-owned-v1"')) throw new Error('Approved policy lacks Ralph-owned lineage inventory; review and renew the policy before generating native prompts.');
     for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs']) {
       await git(['cat-file', '-e', `${approved}:scripts/ci/${file}`]);
     }
@@ -433,6 +434,22 @@ documented cessation-based recovery when applicable. After exhaustion, report
 blocked with the retained attempt evidence. No polling, sleeps or schedule changes.
 Once acquired, complete exactly one role round using the returned token and
 fresh inventory/evidence; these retries do not authorize extra work rounds.
+Inventory scope is Ralph-owned lineage across rounds, NOT all project sessions.
+For ready, supply ownershipScope:"ralph-owned-v1" and lineageChecked:true only
+after reconciling this worker's retained creation/delivery intents, mapped workers,
+verified role roots and descendants through actual native readback/history.
+Normalize creator_session_id to session.creatorSessionId and retain ancestor
+readbacks. Unrelated maintainer and other-automation sessions consume no Ralph
+slots and need no terminal attestation. Do not adopt, archive or mutate them.
+Every retained mapping, including terminal work, needs an explicit inventory
+entry. Owned ancestry must be complete and acyclic, without adopting unrelated
+ancestors. For archived/deleted terminal work without live readback, use the
+native-roles.md retirementObservation contract: current verified cessation plus
+retained correlated terminal evidence, never omission, idle or absence alone.
+Missing creation ACKs, missing live mapped workers, resumed terminal workers and
+unmapped owned descendants still block; never hide them with an inventory filter.
+Do not submit this scoped evidence to an older runtime: follow the approved
+native-roles.md contract and policy guards before any operation.
 Consumer ready publishes finite durable capacity credits, NOT online presence.
 Coordinator can reserve against unused credits across later hourly rounds.
 Before each kickoff the consumer must refresh local inventory/tooling in its own
