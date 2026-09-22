@@ -11,6 +11,11 @@ reservation ledger. Setup stages disabled packages, not live takeover. Explicit
 local-owner trust, atomic round ownership, approved policy, pinned genesis and reconciled
 legacy authority migration are all required. No direct remote native creation,
 SSH worker dispatch or independent consumer backlog selection is introduced.
+Consumer readiness offers bounded durable credits, not device liveness; offline
+devices receive only unused pre-offered credits. Independent hourly rounds need
+no sub-minute coordination. Each kickoff still requires fresh current-round
+local inventory/tooling checks. Final sole-sender delivery commitments allow
+later coordinator settlement without expiring reservations or refunding credits.
 
 The macOS-mobile and Windows-general scheduled instances use one checked-in
 [automation lifecycle](../.copilot/skills/ralph-loop/automation.md), with explicit

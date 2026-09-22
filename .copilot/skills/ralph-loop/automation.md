@@ -71,6 +71,11 @@ discoveries and blockers to the coordinator, never independently triage the
 global board, select new issues or reassign authority. Changed scope or a new
 session requires coordinator reconciliation and applicable capacity. Existing
 hold, epic, no-duplicate and source-only review rules remain in force.
+Native `ready` publishes finite durable willingness to receive queued work, not
+online presence. Coordinator spends credits across asynchronous rounds; consumers
+perform fresh same-round local admission before kickoff. Terminal commitments
+permit later settlement without synchronizing hourly schedules. Follow the native
+contract, not the legacy inactive-observation TTL below.
 
 See the [setup design](../../../docs/ralph-macos-migration.md#coordinator-and-consumer-contracts)
 for mailbox provenance, persistent role-round gates and native lost-ack recovery.

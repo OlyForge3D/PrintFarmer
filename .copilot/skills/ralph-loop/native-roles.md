@@ -285,13 +285,33 @@ implementation issue; merging research must not accidentally auto-close it.
 
 ### Admission And Capacity
 
-Reconcile consumer readiness and all assignment receipts before admission.
-`ready` is valid for 60 seconds and binds the exact assignment inventory.
-After a reservation changes that inventory, more admission requires renewed
-consumer reconciliation. Unreachable/stale consumers receive no new work;
-all their reservations remain counted. Do not claim a missing worker is idle.
-One-shot schedules must be coordinated so fresh consumer observations exist;
-do not weaken freshness or add a polling loop to make a schedule appear ready.
+Reconcile the durable ledger and consumer capacity offers before reservation.
+`ready` publishes a **finite willingness to receive queued assignments**, not a
+heartbeat or proof the device is online. From freshly reconciled local evidence
+the runtime computes unused mobile/general credits: hard category limits minus
+all nonterminal assignments, including reserved, published and uncertain work.
+The offer binds its event ID, worker, authority/registry, approved policy and
+verified capabilities. A fresh offer atomically REPLACES remaining credits; it
+never adds them. Concurrent assignment/receipt/blocker or offer/revocation changes
+invalidate the captured replacement, requiring reread and real reconciliation.
+
+Coordinator reservations consume credits atomically with global overlap/quota
+checks. One mini offer can fund four general reservations without interleaved
+consumer rounds. Neither release, withdrawal, duplicate replay nor elapsed time
+refunds a credit. Only another reconciled consumer offer can replenish capacity.
+An offline device may receive **only its unused pre-offered credits**; those
+reservations stay counted indefinitely. Missing/offline never means idle.
+`unavailable` or an assignment blocker revokes remaining credits without changing
+any reservation. A new policy pin requires a matching new offer; incompatible
+registry/authority configuration cannot reuse old offers/history.
+
+Independent hourly schedules may be arbitrarily offset. Offers, publication and
+durable terminal commitments do not expire between role rounds. The 60-second
+bound still applies to NEW event evidence and the consumer's own same-round
+inventory immediately before starting; it is not a cross-workflow rendezvous.
+An expired local observation requires a genuine local recheck, not a restamped
+cache. A slower/failed round exits or retains its gate on uncertainty; never
+synchronize devices by sleeps, fast manual choreography or polling.
 
 Reserve with `data.assignmentId`, `data.workerId` and fresh `evidence` containing:
 `repository`, issue and/or PR number, exact `headSha`, title, labels,
@@ -334,14 +354,29 @@ Publish `ready` only after complete fresh native/queued/history inventory and
 verified tooling. Every pre-existing nonterminal session must map to an admitted
 assignment, except explicitly verified role automations. Unmapped or uncertain
 work blocks readiness and new admission, never causes deletion.
+If inventory/tooling cannot be reconciled, send `unavailable` with fresh retained
+evidence and `data.reasonCode` of `inventory-unreconciled`,
+`capability-unavailable` or `owner-paused`. This revokes remaining offer credits,
+not reservations. Report a binding-specific blocker for any affected terminal
+assignment before a coordinator can settle it. Do not leave known resumption or
+uncertain delivery represented by an unchallenged terminal commitment.
 
 Read assignment task requirements from the actual issue/PR and approved policy
 as data. Refresh holds/ownership/head/files and recompute task identity before
-kickoff. To start a published assignment submit `receipt` with the exact
+kickoff. In this consumer round publish `ready` against the CURRENT ledger/local
+inventory, even when the assignment was reserved under an older offer. This
+refresh preserves outstanding assignments and excludes their occupied slots
+from the replacement offer. Then submit `receipt` with the exact
 `assignmentId`, `generation`, `taskDigest`, `status:"starting"` and new opaque
 `correlation`, plus complete current task evidence, `holdsChecked:true` and
 `ownershipReconciled:true`. This persists local delivery intent and queue receipt
-BEFORE a native call.
+BEFORE a native call. Admission requires that current-round observation to be
+at most 60 seconds old, the complete assignment/receipt/blocker inventory to
+still match, all required local capabilities to be present, and the reservation
+and consumer to have the same policy pin. A newer offer does not invalidate an
+older reservation under that pin. If a policy renewal changed the pin, reconcile
+and withdraw only proven never-delivered work before reserving it under the new
+policy; running/uncertain mappings remain owned, never restarted.
 Publication and kickoff both recheck that the issue is open, unassigned to a
 person, and retains valid triage labels. `status:blocked` and `blocked` are holds,
 not permission to proceed when cached eligibility says ready.
@@ -370,16 +405,31 @@ findings or start a replacement as a shortcut.
 
 `running`, `review`, `recovery`, `uncertain` and `terminal-reported` receipts bind
 the same correlation/native session. Terminal reporting additionally requires
-verified cessation, queue/history and task artifact evidence. Consumer reports
-never release capacity. After fresh readiness plus terminal receipt, coordinator
+verified cessation, queue/history and task artifact evidence,
+`noPendingContinuation:true`, `noFutureDelivery:true`, and
+`finalDeliveryCorrelation` identifying the worker's final acknowledged delivery.
+These summarize retained real ACKs and the sole sender's commitment to send
+**nothing further** to that mapped execution. They are not app API fields or
+proof of the app's global queues. Consumer reports never release capacity.
+The durable commitment is one-way: no starting/running transition may resume it.
+Coordinator
 `release` requires the exact consumer receipt digest, task digest, verified
 ownership/artifacts and no pending continuation. Until then all slots remain
 reserved. Discoveries, new prerequisites and expanded scope go back to the
 coordinator before work expands.
-If a terminal receipt has aged out before coordinator reconciliation, re-observe
-the same native session and submit a new `terminal-reported` receipt, then refresh
-readiness. This refresh still requires all terminal evidence; it cannot restart
-work or release a slot by itself.
+A later coordinator may settle that commitment hours/days later without consumer
+readiness or another terminal timestamp. Its own reconciliation evidence is
+fresh; any observed resumed/reassigned session or unaccounted delivery blocks
+release. A reported blocker revokes settlement until the consumer genuinely
+reconciles and issues a new complete terminal commitment. Legacy terminal
+receipts without this commitment need that one-time reconciliation; never promote
+an old idle/history observation automatically.
+
+The mailbox uses additive `offer-capacity`, `deliver`, `accept`,
+`terminal-receipt` and `settle` events internally. Keep using the public runtime
+requests `ready`, `publish`, `receipt` and `release`; internal event names are
+rejected as requests. Historical events retain their original reducer and
+hashes. No genesis replacement or history rewrite is needed.
 
 For a published assignment blocked before kickoff, use `report-blocker` with
 the exact binding, fresh evidence and one nonsecret `reasonCode`:

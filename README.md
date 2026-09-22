@@ -195,7 +195,7 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 **Operations:**
 - **[Deployment Guide](./docs/DEPLOYMENT.md)** - Docker, environments, configuration
 - **[Worker Authentication](./docs/WORKER_AUTHENTICATION.md)** - Slicer registry, service, and job-route credentials
-- **[Ralph Native Role Setup](./docs/ralph-macos-migration.md)** - Mini coordinator, native Mac/Windows consumers, owner-approved local execution, atomic round ownership and preservation-first package renewal
+- **[Ralph Native Role Setup](./docs/ralph-macos-migration.md)** - Mini coordinator, native Mac/Windows consumers, finite capacity offers across asynchronous rounds, fresh local admission and preservation-first package renewal
 - **[Development Guide](./docs/DEVELOPMENT.md)** - Code style, testing, contribution workflow
 - **[Troubleshooting Guide](./docs/TROUBLESHOOTING.md)** - Common issues and solutions
 

@@ -146,6 +146,8 @@ test('native packages stage coordinator and Windows consumer with distinct roles
     assert.match(settings.prompt, /Do NOT follow the legacy/);
     assert.match(settings.prompt, /owner-configured deployment assertions/);
     assert.match(settings.prompt, /Acquire a fresh atomic begin-round token/);
+    assert.match(settings.prompt, /finite durable capacity credits, NOT online presence/);
+    assert.match(settings.prompt, /does not require sub-minute consumer timing/);
     assert.equal(host.executionTrust, 'local-owner-v1');
     assert.match(settings.name, new RegExp(role));
     const handoff = await readFile(path.join(path.dirname(f.options['host-config']), 'app-native-handoff.txt'), 'utf8');

@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  applyEvent, digest, initialState, initializeMailbox, inventoryDigest,
+  applyEvent, digest, initialState, initializeMailbox, inventoryDigest, admissionInventoryDigest,
   publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository,
 } from '../ralph-mailbox.mjs';
 import { prepareEvent, runNativeRequest, validateTriageEvidence } from '../ralph-native-runtime.mjs';
@@ -527,6 +527,10 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
   }), f.api);
   const state = (await readMailbox(control, f.api)).state;
   await publishEvent(control, currentEvent('publish', 'coordinator', binding(state, 1)), f.api);
+  await runNativeRequest(config, { ...request, type: 'ready', id: 'runtime-admission-ready', evidence: {
+    observedAt, source: 'native inventory after publication', complete: true, queueChecked: true,
+    historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
+  } }, dependencies);
   const start = { ...request, id: 'native-start', type: 'receipt',
     data: { ...binding(state, 1), status: 'starting', correlation: 'correlation-1' },
     evidence: { ...evidence(), observedAt, source: 'native/GitHub', holdsChecked: true, ownershipReconciled: true } };
@@ -626,6 +630,7 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
     });
     const taskBinding = binding(reserved.state, 1);
     await run(coordinator, c, 'publish', { data: taskBinding, evidence: taskEvidence });
+    await run(consumer, w, 'ready', { evidence: inventory() });
     const startRequest = { ...w, type: 'receipt', id: `start-${++next}`,
       data: { ...taskBinding, status: 'starting', correlation: 'delivery-one' }, evidence: taskEvidence };
     assert.equal((await runNativeRequest(consumer, startRequest, dependencies)).nativeCreateAllowed, true);
@@ -649,7 +654,8 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
     const terminal = await run(consumer, w2, 'receipt', {
       data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' },
       evidence: { ...delivered, session: { ...session, terminalVerified: true },
-        queueChecked: true, historyChecked: true, artifactsVerified: true },
+        queueChecked: true, historyChecked: true, artifactsVerified: true,
+        noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one' },
     });
     await run(consumer, w2, 'ready', { evidence: inventory([{ id: sessionId, terminalVerified: true }]) });
     const receipt = terminal.state.assignments['assignment-1'].receipts.at(-1);
@@ -803,4 +809,304 @@ test('pre-ref failure can be reconciled from the durable protocol without deleti
   assert.equal(journal.roundOwners[begin.roundId].publication, undefined);
   assert.ok(journal.events[begin.id]);
   assert.match((await runNativeRequest(coordinator, request(coordinator, 'begin-round'), dependencies)).roundToken, /^[0-9a-f]{64}$/);
+});
+
+test('historical event replay keeps the exact pre-offer state digest', () => {
+  const clock = Date.parse('2026-09-01T00:00:00Z');
+  let state = initialState(registry), sequence = 0;
+  const put = (type, role, data) => {
+    state = applyEvent(state, {
+      id: `legacy-${++sequence}`, type, authorityId: 'primary', epoch: 1, role,
+      ...(role === 'consumer' ? { workerId: 'mini' } : {}), roundId: role,
+      observedAt: new Date(clock).toISOString(), data,
+    }, { replay: true });
+  };
+  put('begin-round', 'coordinator', { invocationDigest: digest('coordinator') });
+  put('begin-round', 'consumer', { invocationDigest: digest('consumer') });
+  const reconcile = () => put('ready', 'consumer', {
+    inventoryDigest: digest('inventory'), assignmentInventoryDigest: inventoryDigest(state, 'mini'),
+    unassignedSessions: 0, capabilities: ['general', 'ios'],
+  });
+  reconcile();
+  const task = taskFromEvidence({
+    issue: 1, headSha: 'a'.repeat(40), title: 'Legacy general task',
+    labels: ['squad:copilot', 'type:bug', 'priority:p1'], acceptanceCriteria: ['Inspect only'],
+    files: ['src/legacy'], filesComplete: true, scope: 'general', classificationComplete: true,
+    capabilities: ['general'],
+  });
+  put('reserve', 'coordinator', {
+    assignmentId: 'legacy-assignment', workerId: 'mini', generation: 1,
+    task, eligibilityDigest: digest('eligible'), policySha: 'b'.repeat(40),
+  });
+  const bound = { assignmentId: 'legacy-assignment', generation: 1, taskDigest: digest(task) };
+  put('publish', 'coordinator', bound);
+  for (const status of ['starting', 'running', 'terminal-reported']) {
+    put('receipt', 'consumer', { ...bound, status, correlation: 'legacy-delivery', evidenceDigest: digest(status) });
+  }
+  reconcile();
+  put('release', 'coordinator', { ...bound, terminalEvidenceDigest: digest('terminal') });
+  put('end-round', 'consumer', {});
+  put('end-round', 'coordinator', {});
+  assert.equal(sequence, 12);
+  // Captured by running this history at 1039d637 before the additive protocol.
+  assert.equal(digest(state), 'b4a1a28b8433e0d19d0ba48c7dbad43ebae65ae3570d14bb21b30ef62d419fc1');
+});
+
+function capacityOffer(state, workerId = 'mini') {
+  return event('offer-capacity', 'consumer', {
+    inventoryDigest: digest('reconciled local observations'),
+    assignmentInventoryDigest: admissionInventoryDigest(state, workerId),
+    unassignedSessions: 0, capabilities: registry.workers.find((entry) => entry.workerId === workerId).capabilities,
+    policySha: 'b'.repeat(40), previousCapacityDigest: digest(state.availability?.[workerId] ?? {}),
+    inventoryObservedAt: new Date(now).toISOString(),
+  }, workerId);
+}
+function offeredReservation(state, issue, workerId = 'mini', mobile = false) {
+  return event('reserve', 'coordinator', {
+    assignmentId: `assignment-${issue}`, workerId, generation: 1,
+    offerId: state.availability[workerId].offerId, policySha: 'b'.repeat(40),
+    task: taskFromEvidence(evidence(issue, mobile)), eligibilityDigest: digest('fresh eligibility'),
+  });
+}
+
+test('one finite offer admits a delayed four-general batch, never borrows, refunds or replays credits', () => {
+  let state = withRounds(), clock = now;
+  const put = (value) => {
+    const observedAt = new Date(clock).toISOString();
+    state = applyEvent(state, {
+      ...value, observedAt,
+      data: value.type === 'offer-capacity' ? { ...value.data, inventoryObservedAt: observedAt } : value.data,
+    }, { now: clock });
+  };
+  const offer = capacityOffer(state);
+  put(offer);
+  clock += 3 * 60 * 60_000;
+  for (let issue = 1; issue <= 4; issue++) {
+    put(offeredReservation(state, issue));
+    clock += 5 * 60_000;
+    put(event('deliver', 'coordinator', binding(state, issue)));
+  }
+  assert.deepEqual(state.availability.mini.remaining, { mobile: 1, general: 0 });
+  assert.throws(() => put(offeredReservation(state, 5)), /exhausted/);
+  assert.equal(applyEvent(state, offer, { now: clock }), state);
+  put(event('withdraw', 'coordinator', { ...binding(state, 1), reconciliationDigest: digest('never delivered') }));
+  assert.equal(state.availability.mini.remaining.general, 0);
+  assert.throws(() => put(offeredReservation(state, 5)), /exhausted/);
+  const staleReservation = offeredReservation(state, 5);
+  const refreshed = capacityOffer(state);
+  put(refreshed);
+  assert.deepEqual(state.availability.mini.remaining, { mobile: 1, general: 1 });
+  assert.throws(() => put(staleReservation), /Current worker capacity offer/);
+  put(offeredReservation(state, 5));
+  assert.equal(state.availability.mini.remaining.general, 0);
+  put(offeredReservation(state, 6, 'mini', true));
+  assert.deepEqual(state.availability.mini.remaining, { mobile: 0, general: 0 });
+  assert.throws(() => put(offeredReservation(state, 7, 'mini', true)), /exhausted/);
+  put(capacityOffer(state, 'windows'));
+  assert.throws(() => put(offeredReservation(state, 8, 'windows', true)), /exhausted/);
+});
+
+test('offers are bound to worker, registry, policy and exact refresh inventory; revocation retains assignments', () => {
+  let state = withRounds();
+  state = advance(state, capacityOffer(state));
+  const reservation = offeredReservation(state, 1);
+  assert.throws(() => advance(state, { ...reservation, data: { ...reservation.data, policySha: 'c'.repeat(40) } }), /policy binding/);
+  assert.throws(() => advance(state, { ...reservation, data: { ...reservation.data, workerId: 'windows' } }), /capacity offer/);
+  const changedRegistry = structuredClone(state);
+  changedRegistry.registry.epoch++;
+  assert.throws(() => advance(changedRegistry, { ...reservation, epoch: 2 }), /policy binding/);
+  const staleRefresh = capacityOffer(state);
+  state = advance(state, reservation);
+  assert.throws(() => advance(state, staleRefresh), /Complete reconciled/);
+  const beforeRevocation = capacityOffer(state);
+  state = advance(state, event('unavailable', 'consumer', {
+    reasonCode: 'inventory-unreconciled', evidenceDigest: digest('observed unknown work'),
+  }));
+  assert.equal(state.availability.mini.revoked, true);
+  assert.throws(() => advance(state, beforeRevocation), /Capacity changed/);
+  assert.equal(state.assignments['assignment-1'].state, 'reserved');
+  assert.throws(() => advance(state, { ...reservation, id: 'new-reservation' }), /reuse/);
+  const other = { ...reservation, id: 'another-reservation', data: { ...reservation.data, assignmentId: 'assignment-2' } };
+  assert.throws(() => advance(state, other), /capacity offer/);
+});
+
+test('native asynchronous hourly rounds admit locally and settle days later without synchronized readiness', async (t) => {
+  t.mock.timers.enable({ apis: ['Date'], now });
+  const f = await runtimeFixture(t);
+  const dependencies = { ...f.dependencies };
+  delete dependencies.now;
+  const { coordinator } = f;
+  coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
+  const consumer = f.configFor('consumer');
+  consumer.control.genesisSha = coordinator.control.genesisSha;
+  const fresh = (extra) => f.fresh({ ...extra, observedAt: new Date(Date.now()).toISOString() });
+  const inventory = (sessions = []) => fresh({
+    complete: true, queueChecked: true, historyChecked: true, capabilitiesVerified: true,
+    capabilities: ['general'], sessions,
+  });
+  const taskEvidence = () => fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true,
+    dependenciesReady: true, epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true,
+    ownershipReconciled: true });
+  const acquire = async (config) => {
+    const request = f.request(config, 'begin-round');
+    const result = await runNativeRequest(config, request, dependencies);
+    return { ...request, roundToken: result.roundToken };
+  };
+  const run = (config, round, type, extra = {}) => runNativeRequest(config, {
+    ...round, type, id: `delayed-${++next}`, ...extra,
+  }, dependencies);
+  const delay = (minutes) => t.mock.timers.tick(minutes * 60_000);
+  let w = await acquire(consumer);
+  await run(consumer, w, 'ready', { evidence: inventory() });
+  await run(consumer, w, 'end-round');
+  delay(67);
+  let c = await acquire(coordinator);
+  const reserved = await run(coordinator, c, 'reserve', {
+    data: { assignmentId: 'assignment-1', workerId: 'mini' }, evidence: taskEvidence(),
+  });
+  const bound = binding(reserved.state, 1);
+  delay(8);
+  await run(coordinator, c, 'publish', { data: bound, evidence: taskEvidence() });
+  await run(coordinator, c, 'end-round');
+  delay(71);
+  w = await acquire(consumer);
+  const start = () => run(consumer, w, 'receipt', {
+    data: { ...bound, status: 'starting', correlation: 'delayed-delivery' }, evidence: taskEvidence(),
+  });
+  await assert.rejects(start(), /Current-round local admission/);
+  await run(consumer, w, 'ready', { evidence: inventory() });
+  delay(4);
+  await assert.rejects(start(), /Fresh complete/);
+  await assert.rejects(run(consumer, w, 'ready', {
+    evidence: inventory([{ id: 'cccccccc-1111-4222-8333-444444444444', ownershipVerified: true }]),
+  }), /Pre-existing/);
+  await run(consumer, w, 'unavailable', { data: { reasonCode: 'inventory-unreconciled' },
+    evidence: fresh({ source: 'fixture: unassigned session observed; retained hold' }) });
+  await assert.rejects(start(), /Current-round local admission/);
+  // The independent work is now genuinely reconciled; no TTL/assignment is reset.
+  await run(consumer, w, 'ready', { evidence: inventory() });
+  const authorized = await start();
+  assert.equal(authorized.nativeCreateAllowed, true);
+  delay(9);
+  const rawReadback = {
+    id: 'cccccccc-1111-4222-8333-444444444444', project_id: consumer.projectId,
+    project_repo: 'OlyForge3D/PrintFarmer', path: '/worktrees/delayed-task',
+    branch: 'test-only-general', activity: { status: 'idle' },
+  };
+  const session = { id: rawReadback.id, projectId: rawReadback.project_id, worktreePath: rawReadback.path };
+  const delivered = () => fresh({ session, repository: rawReadback.project_repo,
+    nativeReadbackVerified: true, kickoffDeliveryVerified: true, assignmentCorrelation: 'delayed-delivery' });
+  await run(consumer, w, 'receipt', {
+    data: { ...bound, status: 'running', correlation: 'delayed-delivery' }, evidence: delivered(),
+  });
+  await run(consumer, w, 'end-round');
+  delay(3 * 60 + 11);
+  w = await acquire(consumer);
+  await run(consumer, w, 'receipt', {
+    data: { ...bound, status: 'running', correlation: 'delayed-delivery' },
+    evidence: { ...delivered(), source: 'fixture: same mapped child acknowledged recorded follow-up' },
+  });
+  const terminalRequest = {
+    data: { ...bound, status: 'terminal-reported', correlation: 'delayed-delivery' },
+    evidence: { ...delivered(), session: { ...session, terminalVerified: true },
+      queueChecked: true, historyChecked: true, artifactsVerified: true },
+  };
+  await assert.rejects(run(consumer, w, 'receipt', terminalRequest), /final delivery ACK/);
+  const terminal = await run(consumer, w, 'receipt', { ...terminalRequest, evidence: {
+    ...terminalRequest.evidence, noPendingContinuation: true, noFutureDelivery: true,
+    finalDeliveryCorrelation: 'follow-up-one',
+  } });
+  const receiptDigest = terminal.state.assignments['assignment-1'].receipts.at(-1).evidenceDigest;
+  await run(consumer, w, 'end-round');
+  delay(2 * 24 * 60 + 17);
+  c = await acquire(coordinator);
+  const result = await run(coordinator, c, 'release', {
+    data: bound, evidence: fresh({ consumerReceiptDigest: receiptDigest, taskDigest: bound.taskDigest,
+      ownershipReconciled: true, artifactsVerified: true, noPendingContinuation: true }),
+  });
+  assert.equal(result.state.assignments['assignment-1'].state, 'terminal');
+  assert.equal(result.state.availability.mini.remaining.general, 3);
+  await run(coordinator, c, 'end-round');
+  const replay = await readMailbox(coordinator.control, f.github.api);
+  assert.deepEqual(replay.state, (await runNativeRequest(coordinator, {
+    approvedPolicy: coordinator.approvedPolicy, type: 'inspect',
+  }, dependencies)).state);
+  assert.equal(JSON.stringify(replay.state).includes(rawReadback.id), false);
+});
+
+test('terminal commitments survive delay but observed resumption and uncertain delivery retain ownership', () => {
+  let state = withRounds();
+  state = advance(state, capacityOffer(state));
+  state = advance(state, offeredReservation(state, 1));
+  state = advance(state, event('deliver', 'coordinator', binding(state, 1)));
+  state = advance(state, capacityOffer(state));
+  state = advance(state, event('accept', 'consumer', {
+    ...binding(state, 1), status: 'starting', correlation: 'one', evidenceDigest: digest('intent'), policySha: 'b'.repeat(40),
+  }));
+  const settle = () => advance(state, event('settle', 'coordinator', {
+    ...binding(state, 1), terminalEvidenceDigest: digest('coordinator reconciliation'),
+  }));
+  assert.throws(settle, /terminal report/);
+  state = advance(state, event('receipt', 'consumer', {
+    ...binding(state, 1), status: 'uncertain', correlation: 'one', evidenceDigest: digest('lost acknowledgment'),
+  }));
+  assert.throws(settle, /terminal report/);
+  const terminal = () => event('terminal-receipt', 'consumer', {
+    ...binding(state, 1), status: 'terminal-reported', correlation: 'one', evidenceDigest: digest('final ACK/no future sends'),
+  });
+  state = advance(state, terminal());
+  state = advance(state, event('unavailable', 'consumer', {
+    reasonCode: 'owner-paused', evidenceDigest: digest('no further assignments offered'),
+  }));
+  assert.equal(state.readiness.mini, undefined);
+  assert.equal(settle().assignments['assignment-1'].state, 'terminal');
+  const beforeBlocker = capacityOffer(state);
+  state = advance(state, event('report-blocker', 'consumer', {
+    ...binding(state, 1), reasonCode: 'delivery-uncertain', evidenceDigest: digest('observed external resumption'),
+  }));
+  assert.throws(settle, /Unblocked durable/);
+  assert.throws(() => advance(state, beforeBlocker), /Complete reconciled/);
+  assert.equal(state.availability.mini.revoked, true);
+  assert.throws(() => advance(state, event('receipt', 'consumer', {
+    ...binding(state, 1), status: 'running', correlation: 'one', evidenceDigest: digest('resumed'),
+  })), /transition/);
+  state = advance(state, terminal());
+  state = settle();
+  assert.equal(state.assignments['assignment-1'].state, 'terminal');
+});
+
+test('local admission rechecks capability shrink, policy, receipt inventory and generation before creation', () => {
+  let state = withRounds();
+  state = advance(state, capacityOffer(state));
+  state = advance(state, offeredReservation(state, 1));
+  state = advance(state, event('deliver', 'coordinator', binding(state, 1)));
+  const noTooling = capacityOffer(state);
+  noTooling.data.capabilities = [];
+  state = advance(state, noTooling);
+  const acceptance = event('accept', 'consumer', {
+    ...binding(state, 1), status: 'starting', correlation: 'one',
+    evidenceDigest: digest('observed live admission'), policySha: 'b'.repeat(40),
+  });
+  assert.throws(() => advance(state, acceptance), /required capabilities/);
+  state = advance(state, capacityOffer(state));
+  assert.throws(() => advance(state, { ...acceptance, data: { ...acceptance.data, policySha: 'c'.repeat(40) } }), /matching policy/);
+  assert.throws(() => advance(state, { ...acceptance, data: { ...acceptance.data, generation: 2 } }), /binding mismatch/);
+  state = advance(state, event('report-blocker', 'consumer', {
+    ...binding(state, 1), reasonCode: 'held', evidenceDigest: digest('hold observed'),
+  }));
+  assert.throws(() => advance(state, acceptance), /Current-round local admission/);
+  const oldObservation = capacityOffer(state);
+  oldObservation.data.inventoryObservedAt = new Date(now - 59_000).toISOString();
+  state = advance(state, oldObservation);
+  assert.throws(() => applyEvent(state, { ...acceptance, observedAt: new Date(now + 2_000).toISOString() },
+    { now: now + 2_000 }), /Fresh complete/);
+  state = advance(state, capacityOffer(state));
+  assert.equal(advance(state, acceptance).assignments['assignment-1'].state, 'starting');
+});
+
+test('internal mailbox event names cannot bypass native evidence preparation', () => {
+  for (const type of ['accept', 'offer-capacity', 'deliver', 'terminal-receipt', 'settle']) {
+    assert.throws(() => prepareEvent({ role: 'consumer', workerId: 'mini', control: baseControl },
+      event(type, 'consumer'), { state: withRounds() }, { sessions: {} }, now), /internal mailbox/);
+  }
 });

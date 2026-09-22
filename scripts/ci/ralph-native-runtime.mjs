@@ -6,7 +6,7 @@ import { lstat, mkdir, open, readFile, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
-  applyEvent, digest, inventoryDigest, readMailbox, publishEvent, initializeMailbox,
+  applyEvent, digest, admissionInventoryDigest, readMailbox, publishEvent, initializeMailbox,
   taskFromEvidence, researchDisposition, validateControl, verifyControlRepository,
 } from './ralph-mailbox.mjs';
 import { runAutomationPreflight } from './ralph-automation.mjs';
@@ -119,15 +119,19 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
       if (evidence[key] !== true) fail(`Reservation requires ${key}.`);
     }
     if (evidence.repository !== 'OlyForge3D/PrintFarmer') fail('Wrong target repository.');
+    const offer = snapshot.state.availability?.[request.data.workerId];
+    if (!offer) fail('Consumer must publish a finite capacity offer before new reservations.');
     event.data = {
       assignmentId: request.data.assignmentId, workerId: request.data.workerId, generation: 1,
       task: taskFromEvidence(evidence), eligibilityDigest: digest(evidence), policySha: config.approvedPolicy,
+      offerId: offer.offerId,
     };
   } else if (event.type === 'publish') {
     requireEvidence();
     validateTriageEvidence(evidence);
     if (!assignment || evidence.holdsChecked !== true || evidence.ownershipReconciled !== true ||
         digest(taskFromEvidence(evidence)) !== assignment.taskDigest) fail('Recheck exact task, holds and ownership immediately before publication.');
+    event.type = 'deliver';
   } else if (event.type === 'ready') {
     requireEvidence();
     if (evidence.complete !== true || evidence.queueChecked !== true || evidence.historyChecked !== true ||
@@ -154,9 +158,15 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
           (entry.state === 'terminal-reported' ? session.terminalVerified === true : session.ownershipVerified === true))) fail('Every live/uncertain receipt needs fresh correlated native evidence.');
     }
     event.data = {
-      inventoryDigest: digest(evidence), assignmentInventoryDigest: inventoryDigest(snapshot.state, config.workerId),
-      unassignedSessions: 0, capabilities: evidence.capabilities,
+      inventoryDigest: digest(evidence), assignmentInventoryDigest: admissionInventoryDigest(snapshot.state, config.workerId),
+      unassignedSessions: 0, capabilities: evidence.capabilities, policySha: config.approvedPolicy,
+      previousCapacityDigest: digest(snapshot.state.availability?.[config.workerId] ?? {}),
+      inventoryObservedAt: evidence.observedAt,
     };
+    event.type = 'offer-capacity';
+  } else if (event.type === 'unavailable') {
+    requireEvidence();
+    event.data = { ...event.data, evidenceDigest: digest(evidence) };
   } else if (event.type === 'receipt') {
     if (!assignment || assignment.workerId !== config.workerId) fail('Consumer does not own this assignment.');
     const correlation = event.data.correlation;
@@ -174,7 +184,8 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         map[correlation] = { assignmentId: event.data.assignmentId, startEventId: request.id };
         createAllowed = true;
       }
-      event.data = { ...event.data, evidenceDigest: digest(map[correlation]) };
+      event.type = 'accept';
+      event.data = { ...event.data, evidenceDigest: digest(map[correlation]), policySha: config.approvedPolicy };
     } else {
       requireEvidence();
       if (!prior || prior.assignmentId !== event.data.assignmentId ||
@@ -187,10 +198,13 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
       if (Object.entries(map).some(([otherCorrelation, entry]) => otherCorrelation !== correlation && entry.sessionId === evidence.session.id)) fail('Native session is already mapped to another assignment.');
       if (event.data.status === 'terminal-reported' &&
           (evidence.session.terminalVerified !== true || evidence.queueChecked !== true ||
-            evidence.historyChecked !== true || evidence.artifactsVerified !== true)) fail('Terminal report requires cessation, queue/history and artifact evidence.');
+            evidence.historyChecked !== true || evidence.artifactsVerified !== true ||
+            evidence.noPendingContinuation !== true || evidence.noFutureDelivery !== true ||
+            !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(evidence.finalDeliveryCorrelation ?? ''))) fail('Terminal report requires cessation, final delivery ACK, no future delivery commitment, queue/history and artifact evidence.');
       prior.sessionId = evidence.session.id;
       prior.lastEvidenceDigest = digest(evidence);
       event.data = { ...event.data, evidenceDigest: digest(evidence) };
+      if (event.data.status === 'terminal-reported') event.type = 'terminal-receipt';
     }
   } else if (event.type === 'report-blocker') {
     requireEvidence();
@@ -205,7 +219,8 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         evidence.taskDigest !== assignment.taskDigest || evidence.ownershipReconciled !== true ||
         evidence.artifactsVerified !== true || evidence.noPendingContinuation !== true) fail('Coordinator must reconcile the actual consumer terminal receipt and task artifacts.');
     event.data = { ...event.data, terminalEvidenceDigest: digest(evidence) };
-  }
+    event.type = 'settle';
+  } else if (event.type !== 'end-round') fail('Unknown public runtime transition; internal mailbox events are not requests.');
   return { event, createAllowed };
 }
 

@@ -375,6 +375,11 @@ All runtime commands use --host-config ${JSON.stringify(options['host-config'])}
 Workflow/project/environment IDs are owner-configured deployment assertions,
 NOT independently authenticated current execution facts. Use local-owner-v1.
 Acquire a fresh atomic begin-round token; the worktree path is NOT a round lock.
+Consumer ready publishes finite durable capacity credits, NOT online presence.
+Coordinator can reserve against unused credits across later hourly rounds.
+Before each kickoff the consumer must refresh local inventory/tooling in its own
+round. Terminal reporting commits no future delivery; later coordinator settlement
+does not require sub-minute consumer timing. Follow native-roles.md exactly.
 This workflow may remain disabled pending native attestation, pinned private
 queue genesis and explicitly verified authority migration. No activation is
 implied by this saved prompt. No SSH, CLI worker or remote app session creation.
@@ -397,6 +402,8 @@ Before first ready, natively verify BOTH mini workflow IDs and include both in
 automationWorkflowIds in EACH mini package. Windows lists only its verified local
 consumer. Never exempt ordinary work or supplied/unverified IDs from inventory.
 Coordinator performs global triage and reservation; consumers only assigned work.
+Hourly roles need no synchronized launch. ready offers bounded durable credits,
+not device liveness; new kickoff still requires fresh same-round local admission.
 Control repository ${deployment.control.repository} numeric ID ${deployment.control.repositoryId}
 was observed PRIVATE. No repo/ref/permission changes were made. Read current
 .copilot/skills/ralph-loop/native-roles.md for the exact initialization, native

@@ -456,6 +456,39 @@ creating a session and correlate the actual native session response afterward.
 A lost response blocks redelivery until genuine native evidence reconciles it:
 there is no exposed idempotency key for native session creation.
 
+### Asynchronous capacity and completion
+
+Consumer `ready` is a finite durable offer, not an online heartbeat. It atomically
+replaces that worker's remaining mobile/general credits from hard limits minus
+all outstanding assignments. Coordinator reservations consume those credits;
+one mini offer permits four general assignments without intervening consumer
+rounds. Offline workers can receive only unused pre-offered credits. No timer,
+withdrawal, release or duplicate replay refunds them. `unavailable` and blockers
+revoke unused credits, not ownership. New offers require actual reconciliation.
+
+Offers bind worker, authority/registry, capabilities and approved policy; a changed
+pin cannot spend an old offer. Outstanding work remains owned during renewal.
+New acceptance requires same-policy, current-round local inventory and capability
+revalidation within 60 seconds. Other assignment/receipt/blocker changes require
+another real local recheck. This local bound never requires separately scheduled
+coordinator/consumer rounds to start within a minute of one another.
+
+For example, mini may offer at 10:45, coordinator reserve at 11:48 and publish at
+11:56, and mini accept at 12:49 after fresh local checks. Kickoff/readback may take
+minutes; its starting reservation already holds the slot. A subsequent consumer
+round follows the same session and records its final ACK plus sole-sender
+no-future-delivery commitment. The coordinator may settle days later with fresh
+artifact/delivery reconciliation and no consumer readiness refresh. Known
+resumption, reassignment or uncertain delivery blocks release; elapsed time never
+proves cessation. The consumer needs a later reconciled offer to reuse freed
+capacity. No polling, synchronized schedules or longer TTL is required.
+
+Old history hashes and genesis remain unchanged: new semantics use additive
+mailbox events behind the existing public requests. Old terminal receipts must
+be re-observed and upgraded to an explicit final-delivery commitment before
+delayed settlement; old reservations under a different policy need safe
+never-delivered withdrawal/re-reservation, never replacement of an active worker.
+
 The explicitly accepted provenance contract trusts authorized writers of the
 private control repository as the same
 owner's agents. Each publisher verifies its actual authenticated GitHub principal
@@ -531,8 +564,8 @@ acceptance report**.
 | Native kickoff | Real harmless `create_session` returned a handle; session readback matched project/repository/isolated path; worker returned the exact kickoff correlation. | No real task or mailbox assignment created. Native creation has no exposed idempotency key. |
 | Follow-up | Real `send_session_message` to the same handle returned acceptance; worker acknowledged the new correlation and retained the original. | Acceptance alone is not delivery; retain the worker ACK. |
 | Status/history | Real status inventory showed the bounded child idle. Supported local history returned kickoff+reply; cloud history returned no rows and later history lagged. | Idle/history absence is never terminal or global queue-empty proof. |
-| Interactive terminal | Terminal canvas open was accepted, but output reads failed `Terminal not found or not running`. | Canvas interactivity **NOT VERIFIED**. Use the user's actual local interactive Terminal with a filled command; never pipe/type approval for them. |
-| Init, reservations, two-device lifecycle, round exclusion/recovery | Focused Node tests exercise manual initialization through readiness, reservation, publication, acceptance, terminal reporting/release and subsequent rounds, without `native.actual`. Real local files/locks and Git checks are exercised. | GitHub mailbox transport and native lifecycle observations in these tests are simulated. No live mailbox write tested. |
+| Interactive terminal | This child context's output reads failed `Terminal not found or not running`. A separate parent-chat canvas returned actual TTY detection and a harmless non-approval input roundtrip. | Works in some app contexts, not verified on mini/Windows. If actual open/read fails, use the user's local interactive Terminal. Neither probe was human policy consent; never pipe/type approval for them. |
+| Init, reservations, two-device lifecycle, round exclusion/recovery | Focused Node tests exercise manual initialization, hours-delayed independent rounds, finite offers, live local acceptance and days-delayed terminal settlement without `native.actual`. Real local files/locks and Git checks are exercised. | GitHub mailbox transport and native lifecycle observations are simulated. No live mailbox write or timer tested; modeled time is not destination evidence. |
 | Mini, Windows and scheduled execution | Not run. | **NOT VERIFIED**: destination permissions, ACLs, tooling, saved prompt execution and lifecycle need separately authorized acceptance. |
 
 `queueChecked` and `noPendingContinuation` refer to the **owning consumer's
@@ -563,11 +596,95 @@ step:
    actual native handle/ACK and follows that exact session.
 5. End/restart both role rounds with new tokens while preserving assignment
    ownership. Reconcile a correlated terminal ACK, all owned deliveries and
-   artifacts, refresh readiness, then let coordinator release. Demonstrate
+   artifacts and sole-sender no-future-delivery commitment, then let a later
+   coordinator release without a synchronized consumer refresh. Demonstrate
    competitor rejection and lost-response holds without repeating native creation.
 6. Inspect actual scheduled-context behavior separately before schedule activation.
    No production-ready claim until these destination checks pass. Unavailable
    observations get an exact blocker, never a fabricated successful boolean.
+
+### Next bounded acceptance: mini general only
+
+This is an approval plan, **not execution authorization**. Windows, mobile/Xcode
+and timer firing remain separate, explicitly unverified follow-ons, not
+prerequisites to demonstrate the core mini general path.
+
+Approved-but-unmerged code cannot pass the unchanged production ancestry/content
+guards. Do not forge origin, weaken the pin, mock preflight or enable a bypass.
+First finish required source checks and exact-head reviews, then obtain separate
+source-merge approval. Merge is not activation or destination acceptance. On mini,
+discover the merged candidate and obtain the maintainer's real interactive
+consent using the documented setup/renewal commands above.
+
+The production control repository was observed to have no branches during
+planning; recheck read-only before any later decision. Its initializer cannot
+create a nondefault smoke ref while empty. **Do not initialize production main
+for testing.** Approval must instead name a separate private test repository,
+its harmless seed commit and a new absent `heads/smoke-native-2939` ref. Verify
+canonical numeric identity/private access and absence of the test ref, then
+initialize only that ref. If this scope is not approved or prerequisites fail,
+stop before initialization, not after changing production state.
+
+Approval must explicitly cover these writes:
+
+- Creating/seeding that private test repository and creating/non-force-updating
+  its named smoke ref, with no production repository/ref writes.
+- New TEST ONLY private mini package/config/cache/journal/evidence files and two
+  disabled manual workflows (coordinator and consumer); existing packages,
+  workflow IDs/history and production claims remain untouched.
+- One real explicitly designated smoke-only eligible issue, or creation/labels
+  for `TEST ONLY: Ralph native lifecycle acceptance`, with bounded read-only
+  analysis, no personal assignee and no real issue ownership mutation.
+- Manual runs of those disabled workflows, app-created role/task sessions and
+  worktrees, one correlated follow-up to the same child, and archival only of
+  verified clean terminal smoke sessions.
+
+Prerequisites on mini: actual project/environment selection and saved workflow
+readback; private path ownership/permissions; real registered isolated worktrees;
+Node/Git/GitHub tooling; complete native inventory and original-owner
+reconciliation; exact policy consent and shared-writer/local-owner acceptance.
+The registry's required Windows entry is a deployment declaration only: issue
+no Windows offer, start no Windows workflow and claim no verified Windows
+execution. Permit only the named smoke issue; no global backlog mutations.
+
+Save test workflows with `enabled:false`, `interval:"manual"` and
+`clear_cron_expression:true`; read these back. Fresh setup artifacts contain
+production cadence defaults: do not apply their full settings to a manual smoke.
+Use `run_workflow` on these disabled workflows only after approval. If the app
+refuses disabled manual execution, retain the exact error and stop; do not
+silently enable a schedule.
+
+1. In the approved isolated mini setup worktree, submit the corrected manual
+   `initialize` request above; retain its intent/result and pin the test genesis.
+2. Manually run the disabled consumer workflow. Its real app-created session
+   acquires a round, inventories local work, publishes `ready` and ends.
+3. At a later independent invocation, manually run the coordinator workflow:
+   acquire, reconcile, reserve/publish only the designated issue, then end.
+4. Run the consumer independently: acquire a new token, recheck local inventory
+   and tooling with `ready`, then recheck the issue and submit starting `receipt`.
+   Only its first creation authorization may create the bounded child. Retain
+   actual returned handle/readback/kickoff ACK, report running and end.
+5. A later consumer run follows that same child with one recorded correlation,
+   reconciles its final ACK, all owned deliveries and clean artifacts, reports
+   terminal with `noPendingContinuation`, `noFutureDelivery` and
+   `finalDeliveryCorrelation`, and ends.
+6. A later coordinator run reconciles and releases the exact terminal binding.
+   Do not refresh consumer readiness to satisfy release. Read back ended gates,
+   terminal assignment, unchanged production refs and disabled manual workflows.
+
+External `run_workflow` results plus `get_session` establish actual run-session,
+project and worktree correlation; filesystem/Git and saved workflow readback
+establish the remaining configured environment checks. Retain those raw private
+responses. They are not in-session authenticated workflow identity. Retain the
+policy receipt, test genesis/history, journals and delivery ACKs. Manual runs
+demonstrate app-created workflow execution, **not timer firing**.
+
+On uncertainty retain the original gate/claim/intent and report the exact
+blocker; never force-release or retry native creation. Keep disabled test
+workflows and test ref/packages for audit. Deleting refs/workflows/packages,
+closing the smoke issue or enabling any schedule requires separately named
+approval. This sequence must run on the destination before any operational
+acceptance claim.
 
 ## Focused development checks
 
