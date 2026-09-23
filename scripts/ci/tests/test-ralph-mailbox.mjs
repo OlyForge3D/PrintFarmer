@@ -6,9 +6,9 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   applyEvent, digest, initialState, initializeMailbox, inventoryDigest, admissionInventoryDigest,
-  publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository,
+  publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository, localInventoryFreshness,
 } from '../ralph-mailbox.mjs';
-import { prepareEvent, runNativeRequest, validateTriageEvidence } from '../ralph-native-runtime.mjs';
+import { prepareEvent, runNativeRequest, validateTriageEvidence, readResearchArtifact } from '../ralph-native-runtime.mjs';
 import { buildDispatchPlan, validateClassification, validateStartup, validatePacketAck, policyTextDigest } from '../ralph-native-dispatch.mjs';
 
 const registry = {
@@ -23,6 +23,21 @@ const baseControl = {
   registry, sharedWriterTrustAccepted: true,
 };
 const now = Date.now();
+test('local kickoff freshness identifies the saved inventory clock without extending its boundary', () => {
+  for (const [ageMs, refreshRequired] of [[0, false], [60_000, false], [60_001, true], [-1, true]]) {
+    const observedAt = new Date(now - ageMs).toISOString();
+    assert.deepEqual(localInventoryFreshness({ readiness: { mini: { observedAt } } }, 'mini', now), {
+      observedAt, ageMs, maxAgeMs: 60_000, refreshRequired,
+    });
+  }
+  for (const observedAt of [undefined, 'invalid']) {
+    assert.deepEqual(localInventoryFreshness({ readiness: { mini: { observedAt } } }, 'mini', now), {
+      observedAt, ageMs: undefined, maxAgeMs: 60_000, refreshRequired: true,
+    });
+  }
+  assert.equal(localInventoryFreshness({}, 'mini', now).refreshRequired, true);
+});
+
 const nativeCapabilities = {
   createSession: true, openPrSession: true, agents: ['Ralph Worker'],
   models: { 'gpt-6-astra': ['medium', 'xhigh', 'max'], 'claude-opus-4.7': ['medium', 'xhigh'] },
@@ -125,6 +140,12 @@ test('dispatch separates native Ralph Worker agent, Squad charter owner, categor
   }
   assert.throws(() => validateStartup(plan, { ...ack,
     startupAck: { ...ack.startupAck, initialHeadSha: 'b'.repeat(40) } }), /Initial worker HEAD/);
+  for (const branch of [undefined, '']) {
+    assert.throws(() => validateStartup(plan, { ...ack, session: { branch } }),
+      /requires evidence.session.branch.*same child/);
+  }
+  assert.throws(() => validateStartup(plan, { ...ack, session: { branch: 'different-worker' } }),
+    /actualBranch differs from native session.branch/);
   for (const change of [
     { startupAck: { ...ack.startupAck, member: 'lambert' } },
     { startupAck: { ...ack.startupAck, actualReasoningEffort: 'medium' } },
@@ -192,7 +213,7 @@ function binding(state, issue) {
 }
 
 export function githubFixture() {
-  const blobs = new Map(), trees = new Map(), commits = new Map(), refs = new Map();
+  const blobs = new Map(), trees = new Map(), commits = new Map(), refs = new Map(), comments = new Map();
   const calls = [];
   let count = 0;
   const sha = (value) => createHash('sha1').update(value).digest('hex');
@@ -214,6 +235,7 @@ export function githubFixture() {
   let losePatchResponse = false;
   const api = async (endpoint, method = 'GET', body) => {
     calls.push({ endpoint, method, body });
+    if (comments.has(endpoint) && method === 'GET') return structuredClone(comments.get(endpoint));
     const suffix = endpoint.replace('repos/fixture/private-control', '');
     if (endpoint === 'user') return { login: 'fixture-owner' };
     if (suffix === '') return structuredClone(metadata);
@@ -265,7 +287,7 @@ export function githubFixture() {
     }
     throw new Error(`Unexpected ${method} ${endpoint}`);
   };
-  return { api, metadata, calls, refs, commits, blobs, putRecord,
+  return { api, metadata, calls, refs, commits, blobs, comments, putRecord,
     race: (hook) => { beforePatch = hook; }, loseResponse: () => { losePatchResponse = true; } };
 }
 
@@ -784,7 +806,8 @@ async function runtimeFixture(t) {
   return { github, configFor, coordinator, request, fresh, initialize, dependencies, localContext };
 }
 
-test('two research lifecycles select the specialist, persist findings, settle and replenish capacity', async (t) => {
+for (const lineageMode of ['record-lineage', 'automatic-ready']) {
+test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings and replenish capacity`, async (t) => {
   const f = await runtimeFixture(t);
   const { coordinator, dependencies, fresh } = f;
   coordinator.control.genesisSha = (await runNativeRequest(coordinator, f.initialize, dependencies)).genesisSha;
@@ -798,11 +821,26 @@ test('two research lifecycles select the specialist, persist findings, settle an
     ...round, type, id: `research-cycle-${++next}`, ...extra,
   }, dependencies);
   const sessions = [], nativeCalls = [];
+  const creatorId = 'aaaaaaaa-2222-4333-8444-555555555555';
+  if (lineageMode === 'automatic-ready') sessions.push(roleSession(consumer, creatorId));
   const inventory = () => fresh({ ...ownedScope, complete: true, queueChecked: true, historyChecked: true,
     capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions });
   for (const issue of [100, 101]) {
     const c = await acquire(coordinator), w = await acquire(consumer);
+    if (issue === 100 && lineageMode === 'record-lineage') {
+      await run(consumer, w, 'record-lineage', { evidence: fresh({
+        observations: [{ session: { id: creatorId }, nativeReadbackVerified: true,
+          observedAt: new Date(now - 86_400_000).toISOString(), source: 'retained native creator readback' }],
+      }) });
+    } else if (issue === 101) {
+      const inspected = await run(consumer, w, 'inspect');
+      assert.equal(inspected.retainedLineage[creatorId].source,
+        lineageMode === 'record-lineage' ? 'retained native creator readback' : inventory().source);
+      assert.equal(inspected.retainedLineage[creatorId].observedAt,
+        new Date(lineageMode === 'record-lineage' ? now - 86_400_000 : now).toISOString());
+    }
     await run(consumer, w, 'ready', { evidence: inventory() });
+    if (issue === 100 && lineageMode === 'automatic-ready') sessions.splice(0, 1);
     const taskEvidence = fresh({ ...evidence(issue), labels: ['squad:dallas', 'go:needs-research', 'type:bug', 'priority:p1'],
       claimsReconciled: true, holdsChecked: true, dependenciesReady: true, epicChildrenReady: true,
       analysisReady: true, reviewGatesChecked: true, ownershipReconciled: true });
@@ -848,22 +886,56 @@ test('two research lifecycles select the specialist, persist findings, settle an
         continuationAck: { ...continuationAck, policySha: 'b'.repeat(40) } },
     }), /Packet ACK/);
     await run(consumer, w, 'receipt', { data: { ...data, status: 'running' }, evidence: delivered });
-    const artifact = { kind: 'issue-comment', url: `https://github.com/OlyForge3D/PrintFarmer/issues/${issue}#issuecomment-123`,
-      bodyDigest: digest({ findings: 'fixture: concrete findings', issue }) };
+    const artifactUrl = `https://github.com/OlyForge3D/PrintFarmer/issues/${issue}#issuecomment-123`;
+    const commentEndpoint = 'repos/OlyForge3D/PrintFarmer/issues/comments/123';
+    const body = `Concrete findings for issue ${issue}.\n`;
+    f.github.comments.set(commentEndpoint, { id: 123, html_url: artifactUrl,
+      issue_url: `https://api.github.com/repos/OlyForge3D/PrintFarmer/issues/${issue}`, body });
+    const readback = await run(consumer, w, 'artifact-readback', { data: { ...data, artifactUrl }, evidence: fresh() });
+    assert.equal(readback.dispatchAuthorized, false);
+    const artifact = readback.artifact;
+    const finalDeliveryCorrelation = readback.finalDeliveryCorrelation;
+    assert.match(finalDeliveryCorrelation, /^final-[0-9a-f]{58}$/);
+    assert.equal((await run(consumer, w, 'artifact-readback', {
+      data: { ...data, artifactUrl }, evidence: fresh(),
+    })).finalDeliveryCorrelation, finalDeliveryCorrelation);
+    assert.equal(artifact.bodyDigest, createHash('sha256').update(body).digest('hex'));
     const terminalEvidence = { ...delivered, session: { ...session, terminalVerified: true },
       queueChecked: true, historyChecked: true, artifactsVerified: true,
-      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}`,
+      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation,
       finalAck: { ...plan.packet, noChildren: true, noPendingContinuation: true,
-        noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}` } };
+        noFutureDelivery: true, finalDeliveryCorrelation } };
     await assert.rejects(run(consumer, w, 'receipt', {
       data: { ...data, status: 'terminal-reported' }, evidence: terminalEvidence,
     }), /read-back issue findings/);
-    const terminal = await run(consumer, w, 'receipt', {
-      data: { ...data, status: 'terminal-reported' }, evidence: {
+    const completeEvidence = {
         ...terminalEvidence, artifactReadbackVerified: true, artifact,
-        finalAck: { ...plan.packet, artifactUrl: artifact.url, finalDeliveryCorrelation: `final-${issue}`,
+        finalAck: { ...plan.packet, artifactUrl: artifact.url, artifactBodyDigest: artifact.bodyDigest,
+          artifactReadbackVerified: true, finalDeliveryCorrelation,
           noChildren: true, noPendingContinuation: true, noFutureDelivery: true },
-      },
+    };
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' },
+      evidence: { ...completeEvidence, finalDeliveryCorrelation: `${finalDeliveryCorrelation}x`,
+        finalAck: { ...completeEvidence.finalAck, finalDeliveryCorrelation: `${finalDeliveryCorrelation}x` } },
+    }), /finalDeliveryCorrelation must be a 1-64 character opaque ID.*same child ACK/);
+    for (const ack of [{ artifactBodyDigest: undefined }, { artifactReadbackVerified: false },
+      { artifactBodyDigest: createHash('sha256').update(body + '\n').digest('hex') }]) {
+      await assert.rejects(run(consumer, w, 'receipt', {
+        data: { ...data, status: 'terminal-reported' },
+        evidence: { ...completeEvidence, finalAck: { ...completeEvidence.finalAck, ...ack } },
+      }), /read-back issue findings/);
+    }
+    f.github.comments.get(commentEndpoint).body = body + '\n';
+    assert.notEqual((await run(consumer, w, 'artifact-readback', {
+      data: { ...data, artifactUrl }, evidence: fresh(),
+    })).finalDeliveryCorrelation, finalDeliveryCorrelation);
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: completeEvidence,
+    }), /artifact bytes changed/);
+    f.github.comments.get(commentEndpoint).body = body;
+    const terminal = await run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' }, evidence: completeEvidence,
     });
     const entry = terminal.state.assignments[bound.assignmentId];
     const settled = await run(coordinator, c, 'release', {
@@ -889,7 +961,7 @@ test('two research lifecycles select the specialist, persist findings, settle an
     assert.deepEqual(disposition.addLabels, ['go:yes', 'squad:lambert']);
     assert.equal(disposition.closeIssue, false);
     assert.equal(disposition.mutationAuthorized, false);
-    sessions.push({ ...session, terminalVerified: true });
+    sessions.push({ ...session, creatorSessionId: creatorId, nativeReadbackVerified: true, terminalVerified: true });
     const renewed = await run(consumer, w, 'ready', { evidence: inventory() });
     assert.deepEqual(renewed.state.availability.mini.remaining, { mobile: 1, general: 4 });
     await run(consumer, w, 'end-round');
@@ -903,6 +975,7 @@ test('two research lifecycles select the specialist, persist findings, settle an
   assert.equal(JSON.stringify(mailbox).includes('charterSha256'), false);
   assert.equal(JSON.stringify(mailbox).includes('/worktrees/'), false);
 });
+}
 
 test('old-policy prestart proof comes from the consumer journal and is bound to its committed blocker', async (t) => {
   const f = await runtimeFixture(t);
@@ -1236,7 +1309,7 @@ test('owned ancestry requires complete acyclic readbacks without adopting unrela
   f.request.evidence.sessions[2].creatorSessionId = parent;
   assert.throws(f.prepare, /Cyclic Ralph-owned native ancestry/);
   session.creatorSessionId = id;
-  assert.throws(f.prepare, /Cyclic Ralph-owned native ancestry/);
+  assert.throws(f.prepare, /Conflicting retained native ancestry/);
   f.request.evidence.sessions = [{ id: sibling, creatorSessionId: parent, status: 'busy' }];
   assert.equal(f.prepare().event.data.unassignedSessions, 0);
 });
@@ -1300,9 +1373,29 @@ test('archived ancestry-only creator needs no live worktree or role exemption', 
   assert.throws(f.prepare, /Resumed terminal/);
   worker.terminalVerified = true;
   f.request.evidence.sessions.pop();
-  assert.throws(f.prepare, /Missing Ralph-owned native ancestor/);
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
   f.request.evidence.sessions.push({ id: parent, archived: true, path: '', creatorSessionId: id });
-  assert.throws(f.prepare, /Cyclic Ralph-owned native ancestry/);
+  assert.throws(f.prepare, /Conflicting retained native ancestry/);
+});
+
+test('research artifact hashes parsed JSON body bytes including real newlines and Unicode', async () => {
+  const assignment = { task: { issue: 123, purpose: 'research' } };
+  const url = 'https://github.com/OlyForge3D/PrintFarmer/issues/123#issuecomment-456';
+  const comment = { id: 456, html_url: url,
+    issue_url: 'https://api.github.com/repos/OlyForge3D/PrintFarmer/issues/123', body: 'Findings: \u00e9\r\n\n' };
+  const api = async (endpoint) => {
+    assert.equal(endpoint, 'repos/OlyForge3D/PrintFarmer/issues/comments/456');
+    return JSON.parse(JSON.stringify(comment));
+  };
+  const artifact = await readResearchArtifact(assignment, url, api);
+  assert.equal(artifact.bodyBytes, Buffer.byteLength(comment.body, 'utf8'));
+  assert.equal(artifact.bodyDigest, createHash('sha256').update(comment.body, 'utf8').digest('hex'));
+  for (const body of [undefined, '', ' \n']) {
+    await assert.rejects(readResearchArtifact(assignment, url, async () => ({ ...comment, body })), /invalid research artifact/);
+  }
+  await assert.rejects(readResearchArtifact(assignment, url.replace('/123#', '/124#'), api), /assigned issue/);
+  await assert.rejects(readResearchArtifact(assignment, url, async () => ({ ...comment, id: 457 })), /invalid research artifact/);
+  await assert.rejects(readResearchArtifact(assignment, url, async () => { throw new Error('GitHub unavailable'); }), /GitHub unavailable/);
 });
 
 test('lost creation responses remain owned even before mailbox acceptance is observed', () => {
@@ -1355,7 +1448,7 @@ test('role observations exempt only bounded roles, never mapped tasks or conflic
 test('duplicate or malformed native ancestry cannot certify complete owned inventory', () => {
   const id = 'cccccccc-1111-4222-8333-444444444444';
   for (const sessions of [[{ id }, { id }], [{ id, creatorSessionId: 'not-a-native-id' }]]) {
-    assert.throws(ownedInventoryFixture(sessions).prepare, /Malformed or duplicate/);
+    assert.throws(ownedInventoryFixture(sessions).prepare, /Malformed.*native/);
   }
 });
 
@@ -1639,7 +1732,16 @@ test('native asynchronous hourly rounds admit locally and settle days later with
   await assert.rejects(start(), /Current-round local admission/);
   await run(consumer, w, 'ready', { evidence: inventory() });
   delay(4);
-  await assert.rejects(start(), /Fresh complete/);
+  const preview = await run(consumer, w, 'dispatch-plan', {
+    data: { ...bound, correlation: 'delayed-delivery' }, evidence: taskEvidence(),
+  });
+  assert.equal(preview.nativeCreateAllowed, false);
+  assert.deepEqual(preview.inventoryFreshness, {
+    observedAt: new Date(Date.now() - 240_000).toISOString(),
+    ageMs: 240_000, maxAgeMs: 60_000, refreshRequired: true,
+  });
+  await assert.rejects(start(), /Local kickoff inventory.*ageMs=240000.*publish ready.*changing receipt evidence.observedAt does not refresh ready/);
+  await assert.rejects(start(), /Local kickoff inventory/);
   await run(consumer, w, 'ready', {
     evidence: inventory([{ id: 'cccccccc-1111-4222-8333-444444444444', ownershipVerified: true }]),
   });
@@ -1766,7 +1868,7 @@ test('local admission rechecks capability shrink, policy, receipt inventory and 
   oldObservation.data.inventoryObservedAt = new Date(now - 59_000).toISOString();
   state = advance(state, oldObservation);
   assert.throws(() => applyEvent(state, { ...acceptance, observedAt: new Date(now + 2_000).toISOString() },
-    { now: now + 2_000 }), /Fresh complete/);
+    { now: now + 2_000 }), /Local kickoff inventory.*ageMs=61000/);
   state = advance(state, capacityOffer(state));
   assert.equal(advance(state, acceptance).assignments['assignment-1'].state, 'starting');
 });

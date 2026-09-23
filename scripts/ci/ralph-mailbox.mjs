@@ -7,6 +7,7 @@ const shaPattern = /^[0-9a-f]{40}$/;
 const digestPattern = /^[0-9a-f]{64}$/;
 const heldLabels = new Set(['go:no', 'status:on-hold', 'on-hold', 'status:blocked', 'blocked', 'status:wontfix', 'do-not-merge']);
 const maxRecordBytes = 1024 * 1024;
+const maxObservationAgeMs = 60_000;
 const liveStates = new Set(['reserved', 'published', 'starting', 'running', 'review', 'recovery', 'uncertain', 'terminal-reported']);
 const fail = (message) => { throw new Error(`Mailbox blocked: ${message}`); };
 export const digest = (value) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
@@ -19,9 +20,19 @@ function identifier(value) {
   if (typeof value !== 'string' || !idPattern.test(value)) fail('Invalid opaque identifier.');
   return value;
 }
-function fresh(value, now, age = 60_000) {
+function fresh(value, now, age = maxObservationAgeMs) {
   const parsed = Date.parse(value);
   if (!Number.isFinite(parsed) || parsed > now || now - parsed > age) fail('Fresh complete observations required.');
+}
+
+export function localInventoryFreshness(state, workerId, now) {
+  const observedAt = state.readiness?.[workerId]?.observedAt;
+  const parsed = Date.parse(observedAt);
+  const ageMs = Number.isFinite(parsed) ? now - parsed : undefined;
+  return {
+    observedAt, ageMs, maxAgeMs: maxObservationAgeMs,
+    refreshRequired: ageMs === undefined || ageMs < 0 || ageMs > maxObservationAgeMs,
+  };
 }
 
 export function validateRegistry(registry) {
@@ -252,7 +263,10 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
           if (data.status !== 'starting' || !offer || offer.revoked || offer.roundId !== event.roundId ||
               offer.policySha !== data.policySha || assignment.policySha !== data.policySha ||
               offer.registryDigest !== digest(state.registry)) fail('Current-round local admission and matching policy required.');
-          fresh(ready?.observedAt, Date.parse(event.observedAt));
+          const inventory = localInventoryFreshness(state, event.workerId, Date.parse(event.observedAt));
+          if (inventory.refreshRequired) {
+            fail(`Local kickoff inventory expired or invalid (ready observedAt=${inventory.observedAt ?? 'missing'}, ageMs=${inventory.ageMs ?? 'unknown'}, maxAgeMs=${inventory.maxAgeMs}). Re-read native inventory and publish ready immediately before starting; changing receipt evidence.observedAt does not refresh ready.`);
+          }
           if (ready.assignmentInventoryDigest !== admissionInventoryDigest(state, event.workerId) ||
               assignment.task.capabilities.some((capability) => !offer.capabilities.includes(capability))) fail('Fresh exact local inventory and required capabilities must admit kickoff.');
         }

@@ -268,6 +268,29 @@ its checkout merely to satisfy inventory. The actual mapped worker still needs
 its own live/retirement evidence. An archive response alone never proves that
 mapped task's completion. Missing or cyclic creator relationships still block.
 
+The runtime retains verified creator relationships in private
+`journal.nativeLineage` and returns them in `inspect.retainedLineage`. Successful
+`ready` calls automatically retain supplied ancestry entries marked
+`nativeReadbackVerified:true`, with the inventory's source and observation time.
+It stores only ID/creator/source/time, never liveness, terminal flags or role
+exemptions. Later inventories automatically resolve missing ancestry-only
+entries from these records; do not revoke capacity merely because a creator's
+app record disappeared. Fresh mapped-worker, descendant and delivery checks
+remain mandatory. Conflicting parent/root observations and cycles fail closed.
+
+Before a creator can disappear, persist its complete verified chain using
+`type:"record-lineage"` under the consumer's acquired gate. Supply fresh
+`evidence.source`/`observedAt` and `evidence.observations`, each containing
+`session:{id,creatorSessionId?}`, `nativeReadbackVerified:true`, and the original
+readback's `source`/`observedAt`. Omit the creator only for a verified root,
+not because a particular tool omitted the field. Reconcile native listings,
+creation responses and readbacks first. Historical supported readbacks can be
+recorded with their original timestamps; never relabel them as fresh.
+This local-only operation issues no capacity or mailbox event. It is also the
+migration path for existing packages with retained native evidence but no
+`nativeLineage`; do not edit the journal or fabricate unavailable ancestry.
+If an ancestor is still unknown, the runtime names its missing ID.
+
 For a retained terminal worker archived/deleted after settlement, keep its ID,
 `assignmentCorrelation`, retained ancestry and `terminalVerified:true` entry.
 When live session readback is unavailable, supply `session.retirementObservation`
@@ -485,6 +508,16 @@ overrides win, a configured model effort suffix is normalized, and unspecified
 effort is explicitly medium. Unsupported/conflicting values block, never fall back.
 Charters and the Ralph Worker entrypoint are approved controlled policy paths.
 
+`dispatch-plan.inventoryFreshness` reports the **saved ready inventory's** original
+observation time, age, 60-second maximum and `refreshRequired`. This diagnostic is
+not admission: all current-round, policy, inventory, capability and quota checks
+still apply. Finish task/capability preparation first, then obtain actual fresh
+native inventory, publish `ready`, and immediately submit the starting receipt.
+If kickoff inventory expires, perform one bounded fresh native readback/`ready`
+before retrying. Changing the receipt's task-evidence timestamp cannot refresh
+saved readiness; never adjust clocks or re-stamp stale observations. If the bounded
+refresh fails, retain the exact inventory-age error and report blocked.
+
 The successful starting receipt recomputes and privately persists that plan.
 Only its `nativeCreateAllowed:true` response permits one call to the returned
 `dispatchPlan.nativeTool` using **exactly** `dispatchPlan.nativeArguments`.
@@ -527,7 +560,13 @@ Then record actual normalized native readback (`session`, `repository`,
 project/worktree; it is not permission to replace the workspace.
 
 The worker initially returns startup-only ACK and stops. Submit `startup-check`
-with the exact binding, same session, plan digest and `startupAck`: packet
+with the exact binding, same session, plan digest and `startupAck`.
+`evidence.session` must include actual native-readback `id`, normalized
+`projectId`, `worktreePath`, and **`branch`**. Preserve the branch returned by
+`get_session`; the create result's handle/path alone is not a complete startup
+readback. A missing branch is malformed evidence, not proof of worker movement:
+correct the observation on the same child, never recreate it.
+The `startupAck` must contain packet
 `assignmentId`, `generation`, `taskDigest`, `correlation`, `member`,
 `charterSha256` and **every other packet field unchanged**, including policy,
 repository/head/ref, purpose/category and configured model/effort. Also require
@@ -554,13 +593,28 @@ recovery, not released by a success-shaped terminal report.
 
 For research/analysis completion, the consumer writes findings once to the issue
 and reads back the existing comment (recover an uncertain write by correlation,
-not another comment). Then obtain the same child's final ACK. New bounded-worker
+not another comment). Use gated consumer `type:"artifact-readback"` with
+`data.assignmentId`, `generation`, `taskDigest`, `artifactUrl`, and fresh
+`evidence.source`/`observedAt`. The runtime retrieves that issue's comment through
+GitHub, hashes the exact parsed JSON `body` UTF-8 bytes, and returns `artifact`,
+`artifactReadbackVerified:true` and a deterministic, valid-length
+`finalDeliveryCorrelation` without a mailbox write. Use that correlation
+unchanged in the same-child ACK request and terminal evidence; do not concatenate
+assignment IDs or suffixes. It binds the assignment generation/task and exact
+artifact, remains stable on repeated readback, and changes if the artifact changes.
+Never rewrite a returned worker ACK to repair an invalid correlation; obtain an
+actual same-child artifact-only correction. Do not hash
+`gh --jq .body` or `jq -r` output: their formatter adds a newline.
+Then obtain the same child's final ACK. New bounded-worker
 terminal evidence includes `artifactReadbackVerified:true`, `artifact` with
 `kind:"issue-comment"`, exact `url` and SHA-256 `bodyDigest`, and `finalAck` with
-packet identities/member, that `artifactUrl`, the `finalDeliveryCorrelation`,
+packet identities/member, that `artifactUrl`, matching `artifactBodyDigest`,
+`artifactReadbackVerified:true`, the `finalDeliveryCorrelation`,
 `noChildren:true`, `noPendingContinuation:true` and `noFutureDelivery:true`.
 Chat-only findings are not a durable research deliverable. Keep existing
 implementation/review gates and never close an implementation issue after research.
+Terminal submission independently fetches and hashes the live comment again;
+changed bytes or a missing/mismatched worker artifact ACK block the receipt.
 
 ### Ordinary Local Lifecycle
 

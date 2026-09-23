@@ -52,7 +52,11 @@ without overwriting the original report. Research does not imply implementation
 readiness or that the bug is fixed. Investigation-only work needs no research PR.
 
 After the consumer acknowledges that durable delivery, return a final ACK naming
-the delivery correlation and artifact reference, with explicit confirmation of
+the delivery correlation and artifact reference. For research/analysis, read the
+persisted comment and include `artifactUrl`, `artifactBodyDigest` and
+`artifactReadbackVerified:true` only after verifying its findings and exact body.
+Hash the UTF-8 string from the parsed API JSON `body` field, not shell-formatted
+`gh --jq`/`jq -r` output with an extra newline. Explicitly confirm
 no children, no pending continuation and no future delivery. Then stop. Idle
 status alone is not terminal evidence. The consumer records the terminal receipt;
 the coordinator reconciles and settles it. A later fresh consumer offer, not

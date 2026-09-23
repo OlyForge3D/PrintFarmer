@@ -318,6 +318,27 @@ Archived creator sessions are ancestry evidence, not task workers: a supported
 readback with an empty path does not require restoring their deleted worktrees.
 Retained mapped workers still require correlated terminal/retirement evidence.
 
+Verified ancestry now persists in the original private journal, not the app's
+continued retention of old creator sessions. `inspect.retainedLineage` exposes
+relationship-only records; `ready` reuses them for missing ancestors while still
+requiring current worker evidence. Existing packages can import actual retained
+native readbacks using the gated `record-lineage` operation and original
+timestamps. Unknown or conflicting ancestry still blocks; see the native role
+contract for the request format. Renewal keeps these records with the journal.
+
+Use the runtime's `artifact-readback` operation for research comment identity.
+It hashes the parsed GitHub JSON `body` string, including its actual whitespace,
+without a shell formatter's extra newline. The worker must acknowledge that
+exact digest, and terminal submission independently checks the live comment.
+Use the returned `finalDeliveryCorrelation` unchanged for the final ACK; the
+runtime generates a deterministic ID within the protocol's 64-character limit.
+
+For `Local kickoff inventory expired or invalid`, inspect the saved ready clock
+in `dispatch-plan.inventoryFreshness`, not just the task-evidence timestamp.
+Complete preparation before a fresh native readback, publish `ready`, then submit
+starting immediately. One bounded readback/ready refresh is allowed; repeatedly
+changing receipt timestamps cannot repair stale saved inventory.
+
 To upgrade a V1 mini setup, paste this after the new policy is reviewed/merged:
 
 ```text
