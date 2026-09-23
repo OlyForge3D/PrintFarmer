@@ -13,6 +13,9 @@ import { runAutomationPreflight } from './ralph-automation.mjs';
 import { acquireTransactionLock } from './ralph-native-lock.mjs';
 import { retainNativeLineage, resolveNativeLineage } from './ralph-native-lineage.mjs';
 import {
+  deletionLedger, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, requireCleanupRole,
+} from './ralph-native-cleanup.mjs';
+import {
   buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
 } from './ralph-native-dispatch.mjs';
 
@@ -109,6 +112,16 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
     if (known.has(entry.sessionId)) fail('Duplicate Ralph native session mapping.');
     known.set(entry.sessionId, entry);
   }
+  // A journal-verified deletion of a settled mapped worker retires that mapping
+  // without new live evidence; any reappearance under a known ID fails closed.
+  const { bySession: deletions, identifiers: deletionIds } = deletionLedger(journal, state);
+  const deleted = new Set([...deletions.values()].filter((record) => record.status === 'deleted').map((record) => record.sessionId));
+  for (const session of evidence.sessions) {
+    if (deleted.has(deletionIds.get(session?.id))) {
+      fail(`Deleted Ralph worker ${deletionIds.get(session.id)} reappeared in native inventory; omit only verified deletions and reconcile any reappearance.`);
+    }
+    if (deleted.has(deletionIds.get(session?.creatorSessionId))) fail('Descendant of a deleted Ralph worker blocks readiness.');
+  }
   const sessions = resolveNativeLineage(evidence.sessions, journal.nativeLineage, new Set(known.keys()), now);
   const ownedIds = new Set(known.keys());
   const roles = new Set();
@@ -133,7 +146,7 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
     }
   }
   for (const id of known.keys()) {
-    if (!sessions.has(id)) fail('Every retained Ralph native mapping needs fresh session evidence, including terminal assignments.');
+    if (!sessions.has(id) && !deleted.has(id)) fail('Every retained Ralph native mapping needs fresh session evidence, including terminal assignments.');
   }
   let changed = true;
   while (changed) {
@@ -540,6 +553,20 @@ export async function runNativeRequest(config, request, {
       await writeJournal(journalPath, journal);
       return { dispatchAuthorized: false, nativeCreateAllowed: false, retainedLineage: journal.nativeLineage };
     }
+    if (['cleanup-plan', 'record-deletion-intent', 'record-deletion-result'].includes(request.type)) {
+      requireCleanupRole(config);
+      freshEvidence(request.evidence, now);
+      const context = {
+        config, evidence: request.evidence, journal, state: snapshot.state, now,
+        readArtifact: (entry, url) => readResearchArtifact(entry, url, api),
+      };
+      if (request.type === 'cleanup-plan') return planWorkerCleanup({ ...context, roundId: request.roundId });
+      const result = request.type === 'record-deletion-intent'
+        ? await recordDeletionIntent({ request, ...context })
+        : recordDeletionResult({ request, ...context });
+      await writeJournal(journalPath, journal);
+      return result;
+    }
     if (request.type === 'artifact-readback') {
       requireBinding();
       const artifact = await readResearchArtifact(assignment, request.data.artifactUrl, api);
@@ -655,6 +682,7 @@ export async function runNativeRequest(config, request, {
       if (artifact.bodyDigest !== request.evidence.artifact.bodyDigest) {
         fail('Research artifact bytes changed or were hashed incorrectly; obtain the same worker ACK for the exact API body.');
       }
+      local.terminalArtifact = { url: artifact.url, bodyDigest: artifact.bodyDigest };
     }
     if (saved) {
       if (digest({ ...prepared.event, observedAt: saved.observedAt }) !== digest(saved)) fail('Local event ID changed content.');
