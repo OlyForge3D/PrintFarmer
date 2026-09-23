@@ -331,6 +331,12 @@ It hashes the parsed GitHub JSON `body` string, including its actual whitespace,
 without a shell formatter's extra newline. The worker must acknowledge that
 exact digest, and terminal submission independently checks the live comment.
 
+For `Local kickoff inventory expired or invalid`, inspect the saved ready clock
+in `dispatch-plan.inventoryFreshness`, not just the task-evidence timestamp.
+Complete preparation before a fresh native readback, publish `ready`, then submit
+starting immediately. One bounded readback/ready refresh is allowed; repeatedly
+changing receipt timestamps cannot repair stale saved inventory.
+
 To upgrade a V1 mini setup, paste this after the new policy is reviewed/merged:
 
 ```text

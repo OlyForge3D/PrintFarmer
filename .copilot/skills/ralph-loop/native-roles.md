@@ -508,6 +508,16 @@ overrides win, a configured model effort suffix is normalized, and unspecified
 effort is explicitly medium. Unsupported/conflicting values block, never fall back.
 Charters and the Ralph Worker entrypoint are approved controlled policy paths.
 
+`dispatch-plan.inventoryFreshness` reports the **saved ready inventory's** original
+observation time, age, 60-second maximum and `refreshRequired`. This diagnostic is
+not admission: all current-round, policy, inventory, capability and quota checks
+still apply. Finish task/capability preparation first, then obtain actual fresh
+native inventory, publish `ready`, and immediately submit the starting receipt.
+If kickoff inventory expires, perform one bounded fresh native readback/`ready`
+before retrying. Changing the receipt's task-evidence timestamp cannot refresh
+saved readiness; never adjust clocks or re-stamp stale observations. If the bounded
+refresh fails, retain the exact inventory-age error and report blocked.
+
 The successful starting receipt recomputes and privately persists that plan.
 Only its `nativeCreateAllowed:true` response permits one call to the returned
 `dispatchPlan.nativeTool` using **exactly** `dispatchPlan.nativeArguments`.

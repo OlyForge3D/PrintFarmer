@@ -516,8 +516,15 @@ Investigation-only work does NOT require a merged research PR or a new issue.
 Only research that actually changes repository files needs reviewed merged PR
 evidence. Use native-roles.md's current research-plan findings fields and readbacks.
 Coordinator can reserve against unused credits across later hourly rounds.
-Before each kickoff the consumer must refresh local inventory/tooling in its own
-round. Terminal reporting commits no future delivery; later coordinator settlement
+Before each kickoff, finish task/capability/dispatch preparation, then re-read
+native inventory/tooling, publish ready in this consumer round, and immediately
+submit the starting receipt. dispatch-plan.inventoryFreshness describes the
+SAVED ready clock; the plan alone never refreshes it or authorizes creation.
+If local kickoff inventory expires, repeat actual native readback and ready once
+before retrying start. Never adjust clocks or re-stamp stale observations:
+changing receipt evidence.observedAt does not refresh saved readiness.
+If that bounded refresh fails, report the exact inventory age and stop.
+Terminal reporting commits no future delivery; later coordinator settlement
 does not require sub-minute consumer timing. Follow native-roles.md exactly.${researchTriage}
 This workflow may remain disabled pending native attestation, pinned private
 queue genesis and explicitly verified authority migration. No activation is

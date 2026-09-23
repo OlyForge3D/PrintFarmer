@@ -7,7 +7,7 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   applyEvent, digest, admissionInventoryDigest, readMailbox, publishEvent, initializeMailbox,
-  taskFromEvidence, researchDisposition, validateControl, verifyControlRepository, githubApi,
+  taskFromEvidence, researchDisposition, validateControl, verifyControlRepository, githubApi, localInventoryFreshness,
 } from './ralph-mailbox.mjs';
 import { runAutomationPreflight } from './ralph-automation.mjs';
 import { acquireTransactionLock } from './ralph-native-lock.mjs';
@@ -635,7 +635,10 @@ export async function runNativeRequest(config, request, {
       dispatchPlan = await buildDispatchPlan({
         config, evidence: request.evidence, assignment, correlation: request.data.correlation, owner: member, cwd,
       });
-      if (request.type === 'dispatch-plan') return { dispatchAuthorized: false, nativeCreateAllowed: false, dispatchPlan };
+      if (request.type === 'dispatch-plan') return {
+        dispatchAuthorized: false, nativeCreateAllowed: false, dispatchPlan,
+        inventoryFreshness: localInventoryFreshness(snapshot.state, config.workerId, now),
+      };
     }
     const prepared = prepareEvent(config, request, snapshot, journal, now, owner.invocationDigest, dispatchPlan);
     if (request.type === 'receipt' && request.data?.status === 'terminal-reported' &&

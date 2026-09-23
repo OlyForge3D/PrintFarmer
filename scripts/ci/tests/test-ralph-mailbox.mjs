@@ -6,7 +6,7 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   applyEvent, digest, initialState, initializeMailbox, inventoryDigest, admissionInventoryDigest,
-  publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository,
+  publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository, localInventoryFreshness,
 } from '../ralph-mailbox.mjs';
 import { prepareEvent, runNativeRequest, validateTriageEvidence, readResearchArtifact } from '../ralph-native-runtime.mjs';
 import { buildDispatchPlan, validateClassification, validateStartup, validatePacketAck, policyTextDigest } from '../ralph-native-dispatch.mjs';
@@ -23,6 +23,21 @@ const baseControl = {
   registry, sharedWriterTrustAccepted: true,
 };
 const now = Date.now();
+test('local kickoff freshness identifies the saved inventory clock without extending its boundary', () => {
+  for (const [ageMs, refreshRequired] of [[0, false], [60_000, false], [60_001, true], [-1, true]]) {
+    const observedAt = new Date(now - ageMs).toISOString();
+    assert.deepEqual(localInventoryFreshness({ readiness: { mini: { observedAt } } }, 'mini', now), {
+      observedAt, ageMs, maxAgeMs: 60_000, refreshRequired,
+    });
+  }
+  for (const observedAt of [undefined, 'invalid']) {
+    assert.deepEqual(localInventoryFreshness({ readiness: { mini: { observedAt } } }, 'mini', now), {
+      observedAt, ageMs: undefined, maxAgeMs: 60_000, refreshRequired: true,
+    });
+  }
+  assert.equal(localInventoryFreshness({}, 'mini', now).refreshRequired, true);
+});
+
 const nativeCapabilities = {
   createSession: true, openPrSession: true, agents: ['Ralph Worker'],
   models: { 'gpt-6-astra': ['medium', 'xhigh', 'max'], 'claude-opus-4.7': ['medium', 'xhigh'] },
@@ -1698,7 +1713,16 @@ test('native asynchronous hourly rounds admit locally and settle days later with
   await assert.rejects(start(), /Current-round local admission/);
   await run(consumer, w, 'ready', { evidence: inventory() });
   delay(4);
-  await assert.rejects(start(), /Fresh complete/);
+  const preview = await run(consumer, w, 'dispatch-plan', {
+    data: { ...bound, correlation: 'delayed-delivery' }, evidence: taskEvidence(),
+  });
+  assert.equal(preview.nativeCreateAllowed, false);
+  assert.deepEqual(preview.inventoryFreshness, {
+    observedAt: new Date(Date.now() - 240_000).toISOString(),
+    ageMs: 240_000, maxAgeMs: 60_000, refreshRequired: true,
+  });
+  await assert.rejects(start(), /Local kickoff inventory.*ageMs=240000.*publish ready.*changing receipt evidence.observedAt does not refresh ready/);
+  await assert.rejects(start(), /Local kickoff inventory/);
   await run(consumer, w, 'ready', {
     evidence: inventory([{ id: 'cccccccc-1111-4222-8333-444444444444', ownershipVerified: true }]),
   });
@@ -1825,7 +1849,7 @@ test('local admission rechecks capability shrink, policy, receipt inventory and 
   oldObservation.data.inventoryObservedAt = new Date(now - 59_000).toISOString();
   state = advance(state, oldObservation);
   assert.throws(() => applyEvent(state, { ...acceptance, observedAt: new Date(now + 2_000).toISOString() },
-    { now: now + 2_000 }), /Fresh complete/);
+    { now: now + 2_000 }), /Local kickoff inventory.*ageMs=61000/);
   state = advance(state, capacityOffer(state));
   assert.equal(advance(state, acceptance).assignments['assignment-1'].state, 'starting');
 });
