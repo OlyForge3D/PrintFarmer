@@ -61,3 +61,8 @@ no children, no pending continuation and no future delivery. Then stop. Idle
 status alone is not terminal evidence. The consumer records the terminal receipt;
 the coordinator reconciles and settles it. A later fresh consumer offer, not
 settlement alone, replenishes capacity.
+
+After settlement the owning macOS consumer may delete this session and worktree
+through its journaled cleanup; it deletes only a clean, fully pushed worktree whose
+PR is merged or closed, or research whose artifact is verified. Leave nothing
+uncommitted or unpushed, and never archive or delete any session yourself.

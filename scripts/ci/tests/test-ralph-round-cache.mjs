@@ -441,7 +441,7 @@ test('reports compact unchanged and changed fixture output', () => {
   assert.ok(changed.length < 80);
 });
 
-test('cleanup candidates are report-only and fail closed for uncertainty or post-merge work', () => {
+test('cleanup candidates only classify and fail closed for uncertainty or post-merge work', () => {
   const safe = {
     session: { active: false },
     worktree: { inspected: true, dirty: false, untracked: false },
@@ -518,7 +518,12 @@ test('dispatcher routes only to self-contained policies and retains gates', asyn
   for (const reference of [
     'two host-scoped Ralph instances', 'delete_item', 'earlier-round children', 'post-merge',
     'confirmed-action handoff', 'explicitly confirms each exact',
+    'standing, narrowly scoped maintainer', 'The coordinator never deletes', 'cleanup-plan',
+    'record-deletion-intent', 'record-deletion-result', 'never call `delete_item` twice',
+    'At most five deletions per round, oldest settled first', 'Sessions retained', '🧹 Ready to reap',
+    'Open PR: never deleted', '15-minute settling time', 'Windows consumers stay report-only',
   ]) assert.match(cleanup, new RegExp(reference.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i'));
+  assert.doesNotMatch(cleanup, /Cleanup is report-only|never invokes `delete_item`/i);
   assert.match(prePr, /\.github\/copilot-instructions\.md.*Risk-Based Review Scope/is);
   assert.match(prePr,
     /standard\s+and\s+documentation-only\s+changes,\s+dispatch\s+one\s+qualified\s+non-author\s+reviewer/i);

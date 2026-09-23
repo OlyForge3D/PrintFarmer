@@ -40,7 +40,8 @@ Windows profile is not permission to assume Windows workers have stopped.
 Use [operations.md](operations.md) for vocabulary, dependencies and the existing
 admission/terminal APIs; [pr-merge.md](pr-merge.md) for trusted merge gates;
 [session-terminal-contract.md](session-terminal-contract.md) for delivery;
-[cleanup.md](cleanup.md) for report-only retention. This policy supersedes legacy
+[cleanup.md](cleanup.md) for retention reporting and the macOS consumer's
+journaled deletion of its own settled workers. This policy supersedes legacy
 issue-first ordering and machine-local copies, not stronger safety checks.
 Preserve profile-specific explicit kickoff clauses and model overrides. Report
 unresolved conflicts instead of selecting a convenient weaker rule.
@@ -259,5 +260,6 @@ unaccounted. Distinguish plan candidates from accepted delivery. Include
 before/after ledger and effective union counts, dependency changes, review/CI
 SHA evidence, retained claims, configuration limitations, remaining backlog,
 `Sessions retained`, `🧹 Ready to reap` and `⚠️ Unpushed work`.
-Cleanup is report-only; never archive/delete. Never declare the board clear with
+Cleanup is report-only except the macOS consumer's journaled deletion of its own
+settled, clean workers in [cleanup.md](cleanup.md); otherwise never archive/delete. Never declare the board clear with
 unknown ownership or incomplete coverage. Exit; the next schedule is the next round.

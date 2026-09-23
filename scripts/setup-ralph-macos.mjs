@@ -325,7 +325,8 @@ export async function validatePolicy(options, command, development) {
     if (!rolePrompt.includes('NATIVE-MAILBOX-ROLE-V2')) throw new Error('Approved policy lacks the supported local-owner native role contract; renew the policy.');
     if (!rolePrompt.includes('ownershipScope:"ralph-owned-v1"')) throw new Error('Approved policy lacks Ralph-owned lineage inventory; review and renew the policy before generating native prompts.');
     if (!rolePrompt.includes('RALPH-ASSIGNED-WORKER-V1')) throw new Error('Approved policy lacks bounded specialist dispatch; renew before generating native prompts.');
-    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs']) {
+    if (!rolePrompt.includes('RALPH-WORKER-CLEANUP-V1')) throw new Error('Approved policy lacks owning-consumer worker cleanup; review and renew the policy before generating native prompts.');
+    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs', 'ralph-native-cleanup.mjs']) {
       await git(['cat-file', '-e', `${approved}:scripts/ci/${file}`]);
     }
     const workerAgent = await git(['show', `${approved}:.github/agents/ralph-worker.agent.md`]);
@@ -416,6 +417,38 @@ event for at least one eligible candidate (when capacity allows) is an
 incomplete round, not a valid settled outcome; report exactly why none were
 reserved (capacity, overlap, or a specific per-issue evidence gap) if you
 genuinely cannot admit any.` : '';
+  const workerCleanup = options.role === 'consumer' && config.host === 'macos-mobile' ? `
+Worker cleanup (RALPH-WORKER-CLEANUP-V1): this macOS consumer deletes ONLY its
+own mapped workers whose assignments the coordinator already settled, per
+cleanup.md and native-roles.md "Owning-Consumer Worker Cleanup". It is standing,
+narrowly scoped maintainer authorization for delete_item; never archive_session.
+Before ready, inspect every pending deletion intent (cleanup-plan's pending list)
+with record-deletion-result; never call delete_item again for a pending intent.
+Omit workers already recorded as deleted from the ready inventory; if a recorded
+deleted session ID or alias reappears, readiness fails closed: stop and report it.
+After admission/kickoff work and before end-round, run the read-only runtime
+type:"cleanup-plan" with this run's callingSessionId, mainCheckoutPath and one
+fresh candidate per mapped worker: get_session live state (explicit busy,
+pendingInput, agentMerge, automation booleans; project_session_id as an alias,
+never as sessionId), worktree git status --porcelain, unpushed and ahead counts,
+origin branch, and gh pr list --head <branch> --state all. Then, for EACH eligible
+item in plan order (at most five, oldest settled first):
+1. record-deletion-intent with data.sessionId and fresh evidence; proceed only on
+   its deleteAllowed:true response.
+2. Call delete_item exactly once with the returned nativeArguments.
+3. Read back get_session for the session ID and every alias, and check whether
+   the worktree directory still exists.
+4. record-deletion-result with lookups, worktree and the observed deleteOutcome.
+A lost, failed or unconfirmed result stays pending; never retry. Never delete
+role sessions, Ralph/Reaper-named sessions, the main checkout, this session,
+unmapped/maintainer sessions or other workers' sessions.
+Always report "Sessions retained" and "🧹 Ready to reap" with each reason,
+pending intent and deletion result, even when empty.` : `
+Worker cleanup is report-only for this ${options.role} role: NEVER call
+delete_item or archive_session and never submit cleanup-plan,
+record-deletion-intent or record-deletion-result. Only the owning macOS
+consumer deletes its own settled workers. Always report "Sessions retained" and
+"🧹 Ready to reap" with reasons, even when empty.`;
   const prompt = deployment ? `NATIVE-MAILBOX-ROLE-V2
 Run exactly one ${options.role} round, then exit. Private host config: ${JSON.stringify(options['host-config'])}.
 Approved outer/preflight policy commit: ${approved}. Worker ID: ${options['worker-id']}.
@@ -530,7 +563,7 @@ before retrying start. Never adjust clocks or re-stamp stale observations:
 changing receipt evidence.observedAt does not refresh saved readiness.
 If that bounded refresh fails, report the exact inventory age and stop.
 Terminal reporting commits no future delivery; later coordinator settlement
-does not require sub-minute consumer timing. Follow native-roles.md exactly.${researchTriage}
+does not require sub-minute consumer timing. Follow native-roles.md exactly.${researchTriage}${workerCleanup}
 This workflow may remain disabled pending native attestation, pinned private
 queue genesis and explicitly verified authority migration. No activation is
 implied by this saved prompt. No SSH, CLI worker or remote app session creation.

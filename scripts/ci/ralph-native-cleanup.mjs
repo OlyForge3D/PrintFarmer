@@ -227,7 +227,7 @@ export async function planWorkerCleanup({ config, evidence, journal, state, now,
     const record = bySession.get(id);
     if (record?.status === 'deleted') { deleted.push({ sessionId: id, assignmentId: mapping.assignmentId, confirmedAt: record.confirmedAt }); continue; }
     if (record) {
-      pending.push({ sessionId: id, assignmentId: mapping.assignmentId, reasons: ['unconfirmed deletion: inspect get_session and the worktree with record-deletion-result; never retry delete_item'] });
+      pending.push({ sessionId: id, assignmentId: mapping.assignmentId, aliases: record.aliases, worktreePath: record.worktreePath, reasons: ['unconfirmed deletion: inspect get_session and the worktree with record-deletion-result; never retry delete_item'] });
       continue;
     }
     const proof = terminalProof(state, journal, correlation, mapping);

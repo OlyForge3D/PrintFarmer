@@ -95,6 +95,9 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
   `.copilot/skills/ralph-loop/pr-merge.md`; it is the sole scheduled-Ralph authority.
 - **Cleanup candidates:** read `.copilot/skills/ralph-loop/cleanup.md` and use
   `assessCleanupCandidate` while reusing that round's session inventory and PR results.
+  Only the macOS consumer deletes, and only its own settled, clean, mapped workers through
+  the runtime's `cleanup-plan` → `record-deletion-intent` → `delete_item` →
+  `record-deletion-result` sequence; never `archive_session`. The coordinator never deletes.
 
 ## Non-Negotiable Gates
 

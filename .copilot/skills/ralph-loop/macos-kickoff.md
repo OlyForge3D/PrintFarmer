@@ -11,6 +11,12 @@ Put any extra lifecycle requirements before the closing clause; keep it last.
 Use the **merge** option in the sync clause, consistent with the repository's
 current no-rebase policy. Do not resync a green PR merely for `BEHIND`.
 
+After the coordinator settles your assignment, the owning consumer may delete this
+session and its worktree through its journaled cleanup (see `cleanup.md`), once the
+worktree is clean, every commit is pushed and any PR is merged or closed with its
+branch retained. That is why pushing first matters. The worker never archives or
+deletes any session itself.
+
 ## Verbatim sync clause
 
 BEFORE YOU OPEN YOUR PULL REQUEST, SYNC TO THE CURRENT BASE. Run `git fetch
