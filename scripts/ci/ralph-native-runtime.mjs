@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { lstat, mkdir, open, readFile, rename } from 'node:fs/promises';
@@ -7,10 +7,11 @@ import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   applyEvent, digest, admissionInventoryDigest, readMailbox, publishEvent, initializeMailbox,
-  taskFromEvidence, researchDisposition, validateControl, verifyControlRepository,
+  taskFromEvidence, researchDisposition, validateControl, verifyControlRepository, githubApi,
 } from './ralph-mailbox.mjs';
 import { runAutomationPreflight } from './ralph-automation.mjs';
 import { acquireTransactionLock } from './ralph-native-lock.mjs';
+import { retainNativeLineage, resolveNativeLineage } from './ralph-native-lineage.mjs';
 import {
   buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
 } from './ralph-native-dispatch.mjs';
@@ -108,15 +109,10 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
     if (known.has(entry.sessionId)) fail('Duplicate Ralph native session mapping.');
     known.set(entry.sessionId, entry);
   }
-  const sessions = new Map();
+  const sessions = resolveNativeLineage(evidence.sessions, journal.nativeLineage, new Set(known.keys()), now);
   const ownedIds = new Set(known.keys());
   const roles = new Set();
-  for (const session of evidence.sessions) {
-    if (!uuidPattern.test(session.id ?? '') || sessions.has(session.id) ||
-        (session.creatorSessionId !== undefined && !uuidPattern.test(session.creatorSessionId))) {
-      fail('Malformed or duplicate native session lineage.');
-    }
-    sessions.set(session.id, session);
+  for (const session of sessions.values()) {
     if (session.assignmentCorrelation !== undefined &&
         Object.hasOwn(journal.sessions, session.assignmentCorrelation)) {
       if (journal.sessions[session.assignmentCorrelation].sessionId !== session.id) {
@@ -150,15 +146,18 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
     }
   }
   const ownedSessions = [...sessions.values()].filter((session) => ownedIds.has(session.id));
+  const lineageIds = new Set();
   for (const session of ownedSessions) {
     const ancestry = new Set();
     let ancestor = session;
     while (ancestor) {
       if (ancestry.has(ancestor.id)) fail('Cyclic Ralph-owned native ancestry blocks readiness.');
       ancestry.add(ancestor.id);
+      lineageIds.add(ancestor.id);
       if (ancestor.creatorSessionId === undefined) break;
-      ancestor = sessions.get(ancestor.creatorSessionId);
-      if (!ancestor) fail('Missing Ralph-owned native ancestor readback blocks readiness.');
+      const parentId = ancestor.creatorSessionId;
+      ancestor = sessions.get(parentId);
+      if (!ancestor) fail(`Missing Ralph-owned native ancestor readback ${parentId} blocks readiness; record verified ancestry before retrying.`);
     }
     const mapping = known.get(session.id);
     if (session.retirementObservation !== undefined) {
@@ -189,7 +188,25 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
       fail('Unmapped Ralph-owned session or descendant blocks readiness; reconcile its assignment first.');
     }
   }
+  journal.nativeLineage = retainNativeLineage(journal.nativeLineage,
+    evidence.sessions.filter((session) => lineageIds.has(session.id) && session.nativeReadbackVerified === true)
+      .map((session) => ({ session, nativeReadbackVerified: true, source: evidence.source, observedAt: evidence.observedAt })), now);
   return ownedSessions;
+}
+
+export async function readResearchArtifact(assignment, url, api = githubApi) {
+  const match = /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/issues\/([0-9]+)#issuecomment-([0-9]+)$/.exec(url ?? '');
+  if (!assignment || !['research', 'analysis'].includes(assignment.task.purpose) ||
+      match?.[1] !== String(assignment.task.issue)) fail('Research artifact must belong to the assigned issue.');
+  const comment = await api(`repos/OlyForge3D/PrintFarmer/issues/comments/${match[2]}`);
+  if (String(comment.id) !== match[2] || comment.html_url !== url ||
+      comment.issue_url !== `https://api.github.com/repos/OlyForge3D/PrintFarmer/issues/${assignment.task.issue}` ||
+      typeof comment.body !== 'string' || !comment.body.trim()) fail('GitHub returned an invalid research artifact readback.');
+  return {
+    kind: 'issue-comment', url,
+    bodyDigest: createHash('sha256').update(comment.body, 'utf8').digest('hex'),
+    bodyBytes: Buffer.byteLength(comment.body, 'utf8'),
+  };
 }
 
 export function validateTriageEvidence(evidence) {
@@ -348,7 +365,8 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
             !new RegExp(`^https://github\\.com/OlyForge3D/PrintFarmer/issues/${assignment.task.issue}#issuecomment-[0-9]+$`).test(artifact.url ?? '') ||
             !/^[0-9a-f]{64}$/.test(artifact.bodyDigest ?? '') ||
             !ack ||
-            ack.artifactUrl !== artifact.url || ack.finalDeliveryCorrelation !== evidence.finalDeliveryCorrelation ||
+            ack.artifactUrl !== artifact.url || ack.artifactBodyDigest !== artifact.bodyDigest ||
+            ack.artifactReadbackVerified !== true || ack.finalDeliveryCorrelation !== evidence.finalDeliveryCorrelation ||
             ack.noChildren !== true || ack.noPendingContinuation !== true || ack.noFutureDelivery !== true) {
           fail('Research terminal receipt needs read-back issue findings and the same specialist final ACK, not chat-only completion.');
         }
@@ -448,7 +466,7 @@ export async function runNativeRequest(config, request, {
     journal.snapshot = snapshot;
     if (request.type === 'inspect') {
       await writeJournal(journalPath, journal);
-      return { ...snapshot, dispatchAuthorized: false };
+      return { ...snapshot, retainedLineage: retainNativeLineage(journal.nativeLineage, [], now), dispatchAuthorized: false };
     }
     if (request.type === 'abandon-acquisition') {
       const acquisition = journal.events[request.data?.acquisitionId];
@@ -509,6 +527,21 @@ export async function runNativeRequest(config, request, {
       }
       freshEvidence(request.evidence, now);
     };
+    if (request.type === 'record-lineage') {
+      if (config.role !== 'consumer') fail('Only the consumer records native ancestry.');
+      freshEvidence(request.evidence, now);
+      if (!Array.isArray(request.evidence.observations) || !request.evidence.observations.length) {
+        fail('Verified native ancestry observations required.');
+      }
+      journal.nativeLineage = retainNativeLineage(journal.nativeLineage, request.evidence.observations, now);
+      await writeJournal(journalPath, journal);
+      return { dispatchAuthorized: false, nativeCreateAllowed: false, retainedLineage: journal.nativeLineage };
+    }
+    if (request.type === 'artifact-readback') {
+      requireBinding();
+      const artifact = await readResearchArtifact(assignment, request.data.artifactUrl, api);
+      return { dispatchAuthorized: false, nativeCreateAllowed: false, artifactReadbackVerified: true, artifact };
+    }
     if (request.type === 'prestart-proof') {
       requireBinding();
       if (!['reserved', 'published'].includes(assignment.state) || assignment.receipts.length ||
@@ -605,6 +638,13 @@ export async function runNativeRequest(config, request, {
       if (request.type === 'dispatch-plan') return { dispatchAuthorized: false, nativeCreateAllowed: false, dispatchPlan };
     }
     const prepared = prepareEvent(config, request, snapshot, journal, now, owner.invocationDigest, dispatchPlan);
+    if (request.type === 'receipt' && request.data?.status === 'terminal-reported' &&
+        local?.dispatchPlan && ['research', 'analysis'].includes(assignment?.task.purpose)) {
+      const artifact = await readResearchArtifact(assignment, request.evidence?.artifact?.url, api);
+      if (artifact.bodyDigest !== request.evidence.artifact.bodyDigest) {
+        fail('Research artifact bytes changed or were hashed incorrectly; obtain the same worker ACK for the exact API body.');
+      }
+    }
     if (saved) {
       if (digest({ ...prepared.event, observedAt: saved.observedAt }) !== digest(saved)) fail('Local event ID changed content.');
       prepared.event = saved;

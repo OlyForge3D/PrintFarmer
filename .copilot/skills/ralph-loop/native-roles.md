@@ -268,6 +268,29 @@ its checkout merely to satisfy inventory. The actual mapped worker still needs
 its own live/retirement evidence. An archive response alone never proves that
 mapped task's completion. Missing or cyclic creator relationships still block.
 
+The runtime retains verified creator relationships in private
+`journal.nativeLineage` and returns them in `inspect.retainedLineage`. Successful
+`ready` calls automatically retain supplied ancestry entries marked
+`nativeReadbackVerified:true`, with the inventory's source and observation time.
+It stores only ID/creator/source/time, never liveness, terminal flags or role
+exemptions. Later inventories automatically resolve missing ancestry-only
+entries from these records; do not revoke capacity merely because a creator's
+app record disappeared. Fresh mapped-worker, descendant and delivery checks
+remain mandatory. Conflicting parent/root observations and cycles fail closed.
+
+Before a creator can disappear, persist its complete verified chain using
+`type:"record-lineage"` under the consumer's acquired gate. Supply fresh
+`evidence.source`/`observedAt` and `evidence.observations`, each containing
+`session:{id,creatorSessionId?}`, `nativeReadbackVerified:true`, and the original
+readback's `source`/`observedAt`. Omit the creator only for a verified root,
+not because a particular tool omitted the field. Reconcile native listings,
+creation responses and readbacks first. Historical supported readbacks can be
+recorded with their original timestamps; never relabel them as fresh.
+This local-only operation issues no capacity or mailbox event. It is also the
+migration path for existing packages with retained native evidence but no
+`nativeLineage`; do not edit the journal or fabricate unavailable ancestry.
+If an ancestor is still unknown, the runtime names its missing ID.
+
 For a retained terminal worker archived/deleted after settlement, keep its ID,
 `assignmentCorrelation`, retained ancestry and `terminalVerified:true` entry.
 When live session readback is unavailable, supply `session.retirementObservation`
@@ -554,13 +577,22 @@ recovery, not released by a success-shaped terminal report.
 
 For research/analysis completion, the consumer writes findings once to the issue
 and reads back the existing comment (recover an uncertain write by correlation,
-not another comment). Then obtain the same child's final ACK. New bounded-worker
+not another comment). Use gated consumer `type:"artifact-readback"` with
+`data.assignmentId`, `generation`, `taskDigest`, `artifactUrl`, and fresh
+`evidence.source`/`observedAt`. The runtime retrieves that issue's comment through
+GitHub, hashes the exact parsed JSON `body` UTF-8 bytes, and returns `artifact`
+and `artifactReadbackVerified:true` without a mailbox write. Do not hash
+`gh --jq .body` or `jq -r` output: their formatter adds a newline.
+Then obtain the same child's final ACK. New bounded-worker
 terminal evidence includes `artifactReadbackVerified:true`, `artifact` with
 `kind:"issue-comment"`, exact `url` and SHA-256 `bodyDigest`, and `finalAck` with
-packet identities/member, that `artifactUrl`, the `finalDeliveryCorrelation`,
+packet identities/member, that `artifactUrl`, matching `artifactBodyDigest`,
+`artifactReadbackVerified:true`, the `finalDeliveryCorrelation`,
 `noChildren:true`, `noPendingContinuation:true` and `noFutureDelivery:true`.
 Chat-only findings are not a durable research deliverable. Keep existing
 implementation/review gates and never close an implementation issue after research.
+Terminal submission independently fetches and hashes the live comment again;
+changed bytes or a missing/mismatched worker artifact ACK block the receipt.
 
 ### Ordinary Local Lifecycle
 

@@ -458,6 +458,12 @@ slots and need no terminal attestation. Do not adopt, archive or mutate them.
 Archived ancestry-only entries may have an empty path: use verified ID/creator
 relationships without roleObservation. Do not require an archived ancestor's
 deleted worktree; mapped workers still require live or retirement evidence.
+Use inspect.retainedLineage before treating a missing creator lookup as blocked.
+The runtime automatically retains verified ancestry on successful ready and
+fills missing ancestry-only entries across rounds. Persist native creator chains
+with record-lineage as soon as observed, using original source/timestamps per
+native-roles.md; do not edit journals or mark historical observations fresh.
+Retained ancestry never substitutes for fresh mapped-worker or delivery evidence.
 Every retained mapping, including terminal work, needs an explicit inventory
 entry. Owned ancestry must be complete and acyclic, without adopting unrelated
 ancestors. For archived/deleted terminal work without live readback, use the
@@ -496,6 +502,10 @@ returned continuation once. A failed kickoff's requested model/effort is NOT pro
 of persisted configuration. Successful native creation establishes accepted settings,
 not independently observed runtime settings; preserve that evidence distinction.
 On research completion, persist findings once on the issue and read back the comment,
+using runtime artifact-readback with the exact assignment binding and artifactUrl.
+Use its SHA-256 of parsed API body bytes; never hash gh --jq or jq -r stdout.
+The same-child final ACK must include artifactUrl, artifactBodyDigest and
+artifactReadbackVerified:true. Terminal submission rechecks live body bytes.
 obtain the same child's explicit final-delivery ACK, then terminal-report and settle.
 Do not leave findings only in chat or label research as completed implementation.
 Coordinator appends a concise summary/decision/implementation plan and the findings

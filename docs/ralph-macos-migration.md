@@ -318,6 +318,19 @@ Archived creator sessions are ancestry evidence, not task workers: a supported
 readback with an empty path does not require restoring their deleted worktrees.
 Retained mapped workers still require correlated terminal/retirement evidence.
 
+Verified ancestry now persists in the original private journal, not the app's
+continued retention of old creator sessions. `inspect.retainedLineage` exposes
+relationship-only records; `ready` reuses them for missing ancestors while still
+requiring current worker evidence. Existing packages can import actual retained
+native readbacks using the gated `record-lineage` operation and original
+timestamps. Unknown or conflicting ancestry still blocks; see the native role
+contract for the request format. Renewal keeps these records with the journal.
+
+Use the runtime's `artifact-readback` operation for research comment identity.
+It hashes the parsed GitHub JSON `body` string, including its actual whitespace,
+without a shell formatter's extra newline. The worker must acknowledge that
+exact digest, and terminal submission independently checks the live comment.
+
 To upgrade a V1 mini setup, paste this after the new policy is reviewed/merged:
 
 ```text
