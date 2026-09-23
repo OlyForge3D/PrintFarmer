@@ -894,21 +894,31 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
     const readback = await run(consumer, w, 'artifact-readback', { data: { ...data, artifactUrl }, evidence: fresh() });
     assert.equal(readback.dispatchAuthorized, false);
     const artifact = readback.artifact;
+    const finalDeliveryCorrelation = readback.finalDeliveryCorrelation;
+    assert.match(finalDeliveryCorrelation, /^final-[0-9a-f]{58}$/);
+    assert.equal((await run(consumer, w, 'artifact-readback', {
+      data: { ...data, artifactUrl }, evidence: fresh(),
+    })).finalDeliveryCorrelation, finalDeliveryCorrelation);
     assert.equal(artifact.bodyDigest, createHash('sha256').update(body).digest('hex'));
     const terminalEvidence = { ...delivered, session: { ...session, terminalVerified: true },
       queueChecked: true, historyChecked: true, artifactsVerified: true,
-      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}`,
+      noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation,
       finalAck: { ...plan.packet, noChildren: true, noPendingContinuation: true,
-        noFutureDelivery: true, finalDeliveryCorrelation: `final-${issue}` } };
+        noFutureDelivery: true, finalDeliveryCorrelation } };
     await assert.rejects(run(consumer, w, 'receipt', {
       data: { ...data, status: 'terminal-reported' }, evidence: terminalEvidence,
     }), /read-back issue findings/);
     const completeEvidence = {
         ...terminalEvidence, artifactReadbackVerified: true, artifact,
         finalAck: { ...plan.packet, artifactUrl: artifact.url, artifactBodyDigest: artifact.bodyDigest,
-          artifactReadbackVerified: true, finalDeliveryCorrelation: `final-${issue}`,
+          artifactReadbackVerified: true, finalDeliveryCorrelation,
           noChildren: true, noPendingContinuation: true, noFutureDelivery: true },
     };
+    await assert.rejects(run(consumer, w, 'receipt', {
+      data: { ...data, status: 'terminal-reported' },
+      evidence: { ...completeEvidence, finalDeliveryCorrelation: `${finalDeliveryCorrelation}x`,
+        finalAck: { ...completeEvidence.finalAck, finalDeliveryCorrelation: `${finalDeliveryCorrelation}x` } },
+    }), /finalDeliveryCorrelation must be a 1-64 character opaque ID.*same child ACK/);
     for (const ack of [{ artifactBodyDigest: undefined }, { artifactReadbackVerified: false },
       { artifactBodyDigest: createHash('sha256').update(body + '\n').digest('hex') }]) {
       await assert.rejects(run(consumer, w, 'receipt', {
@@ -917,6 +927,9 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
       }), /read-back issue findings/);
     }
     f.github.comments.get(commentEndpoint).body = body + '\n';
+    assert.notEqual((await run(consumer, w, 'artifact-readback', {
+      data: { ...data, artifactUrl }, evidence: fresh(),
+    })).finalDeliveryCorrelation, finalDeliveryCorrelation);
     await assert.rejects(run(consumer, w, 'receipt', {
       data: { ...data, status: 'terminal-reported' }, evidence: completeEvidence,
     }), /artifact bytes changed/);

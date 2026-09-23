@@ -506,6 +506,8 @@ of persisted configuration. Successful native creation establishes accepted sett
 not independently observed runtime settings; preserve that evidence distinction.
 On research completion, persist findings once on the issue and read back the comment,
 using runtime artifact-readback with the exact assignment binding and artifactUrl.
+Use its returned finalDeliveryCorrelation unchanged for the same-child final ACK
+and terminal evidence; never build long IDs by concatenating packet fields.
 Use its SHA-256 of parsed API body bytes; never hash gh --jq or jq -r stdout.
 The same-child final ACK must include artifactUrl, artifactBodyDigest and
 artifactReadbackVerified:true. Terminal submission rechecks live body bytes.

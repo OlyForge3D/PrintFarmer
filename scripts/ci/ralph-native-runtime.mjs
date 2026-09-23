@@ -342,8 +342,11 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
       if (event.data.status === 'terminal-reported' &&
           (evidence.session.terminalVerified !== true || evidence.queueChecked !== true ||
             evidence.historyChecked !== true || evidence.artifactsVerified !== true ||
-            evidence.noPendingContinuation !== true || evidence.noFutureDelivery !== true ||
-            !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(evidence.finalDeliveryCorrelation ?? ''))) fail('Terminal report requires cessation, final delivery ACK, no future delivery commitment, queue/history and artifact evidence.');
+            evidence.noPendingContinuation !== true || evidence.noFutureDelivery !== true)) fail('Terminal report requires cessation, final delivery ACK, no future delivery commitment, queue/history and artifact evidence.');
+      if (event.data.status === 'terminal-reported' &&
+          !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(evidence.finalDeliveryCorrelation ?? '')) {
+        fail('finalDeliveryCorrelation must be a 1-64 character opaque ID; use artifact-readback.finalDeliveryCorrelation and obtain the same child ACK. Never rewrite an ACK.');
+      }
       if (event.data.status === 'terminal-reported' && prior.dispatchPlan &&
           (!prior.startupEvidenceDigest || !prior.continuationIntent || !prior.runningEvidenceDigest)) {
         fail('Completed terminal work requires acknowledged startup and substantive continuation; uncertain pre-start work remains owned.');
@@ -540,7 +543,12 @@ export async function runNativeRequest(config, request, {
     if (request.type === 'artifact-readback') {
       requireBinding();
       const artifact = await readResearchArtifact(assignment, request.data.artifactUrl, api);
-      return { dispatchAuthorized: false, nativeCreateAllowed: false, artifactReadbackVerified: true, artifact };
+      const finalDeliveryCorrelation = `final-${digest({
+        assignmentId: assignment.assignmentId, generation: assignment.generation,
+        taskDigest: assignment.taskDigest, artifact,
+      }).slice(0, 58)}`;
+      return { dispatchAuthorized: false, nativeCreateAllowed: false,
+        artifactReadbackVerified: true, artifact, finalDeliveryCorrelation };
     }
     if (request.type === 'prestart-proof') {
       requireBinding();

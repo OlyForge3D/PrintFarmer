@@ -596,8 +596,14 @@ and reads back the existing comment (recover an uncertain write by correlation,
 not another comment). Use gated consumer `type:"artifact-readback"` with
 `data.assignmentId`, `generation`, `taskDigest`, `artifactUrl`, and fresh
 `evidence.source`/`observedAt`. The runtime retrieves that issue's comment through
-GitHub, hashes the exact parsed JSON `body` UTF-8 bytes, and returns `artifact`
-and `artifactReadbackVerified:true` without a mailbox write. Do not hash
+GitHub, hashes the exact parsed JSON `body` UTF-8 bytes, and returns `artifact`,
+`artifactReadbackVerified:true` and a deterministic, valid-length
+`finalDeliveryCorrelation` without a mailbox write. Use that correlation
+unchanged in the same-child ACK request and terminal evidence; do not concatenate
+assignment IDs or suffixes. It binds the assignment generation/task and exact
+artifact, remains stable on repeated readback, and changes if the artifact changes.
+Never rewrite a returned worker ACK to repair an invalid correlation; obtain an
+actual same-child artifact-only correction. Do not hash
 `gh --jq .body` or `jq -r` output: their formatter adds a newline.
 Then obtain the same child's final ACK. New bounded-worker
 terminal evidence includes `artifactReadbackVerified:true`, `artifact` with

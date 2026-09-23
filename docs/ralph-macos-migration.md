@@ -330,6 +330,8 @@ Use the runtime's `artifact-readback` operation for research comment identity.
 It hashes the parsed GitHub JSON `body` string, including its actual whitespace,
 without a shell formatter's extra newline. The worker must acknowledge that
 exact digest, and terminal submission independently checks the live comment.
+Use the returned `finalDeliveryCorrelation` unchanged for the final ACK; the
+runtime generates a deterministic ID within the protocol's 64-character limit.
 
 For `Local kickoff inventory expired or invalid`, inspect the saved ready clock
 in `dispatch-plan.inventoryFreshness`, not just the task-evidence timestamp.
