@@ -867,7 +867,11 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
       // blocks readiness, and is resolved by inspection alone, never a second delete_item.
       assert.deepEqual(inspected.deletions.pending.map((item) => [item.sessionId, item.worktreePath]),
         [[deleted.session.id, deleted.session.worktreePath]]);
-      await assert.rejects(run(consumer, w, 'ready', { evidence: inventory() }), /Every retained Ralph native mapping/);
+      await assert.rejects(run(consumer, w, 'ready', { evidence: inventory() }), /pending Ralph worker deletion intent blocks readiness/);
+      sessions.push({ ...deleted.session, creatorSessionId: creatorId, nativeReadbackVerified: true, terminalVerified: true });
+      await assert.rejects(run(consumer, w, 'ready', { evidence: inventory() }), /pending Ralph worker deletion intent blocks readiness/,
+        'valid live evidence cannot bypass an unresolved deletion intent');
+      sessions.pop();
       await assert.rejects(cleanup(consumer, w, 'record-deletion-intent', { evidence: deleted.evidence() }), /already pending/);
       assert.equal((await cleanup(consumer, w, 'record-deletion-result', { evidence: lookup(true, true) })).confirmed, true);
       const confirmed = await run(consumer, w, 'inspect');
@@ -1446,7 +1450,8 @@ test('a journal-verified deletion retires a settled mapped worker without live e
   const id = 'dddddddd-1111-4222-8333-444444444444';
   const projectAlias = 'eeeeeeee-1111-4222-8333-444444444444';
   const terminalEvidence = { assignmentCorrelation: 'previous-round',
-    session: { id, worktreePath: '/worktrees/deleted', terminalVerified: true }, noFutureDelivery: true };
+    session: { id, worktreePath: '/worktrees/deleted', terminalVerified: true }, noFutureDelivery: true,
+    runtimeIdentity: { sessionId: id, creationHandle: null, aliases: [] } };
   const terminalEvidenceDigest = digest(terminalEvidence);
   const f = ownedInventoryFixture();
   f.state.assignments.earlier = { assignmentId: 'earlier', workerId: 'mini', state: 'terminal', correlation: 'previous-round',
@@ -1468,7 +1473,10 @@ test('a journal-verified deletion retires a settled mapped worker without live e
   f.journal.deletions = { [id]: { ...pending, status: 'deleted' } };
   assert.throws(f.prepare, /deletion record lacks recomputable/);
   f.journal.deletions = { [id]: pending };
-  assert.throws(f.prepare, /Every retained Ralph native mapping/);
+  assert.throws(f.prepare, /pending Ralph worker deletion intent blocks readiness/);
+  f.request.evidence.sessions = [{ id, terminalVerified: true, nativeReadbackVerified: true }];
+  assert.throws(f.prepare, /pending Ralph worker deletion intent blocks readiness/);
+  f.request.evidence.sessions = [];
   f.journal.deletions[id] = record;
   assert.equal(f.prepare().event.data.unassignedSessions, 0);
   for (const reappeared of [{ id, terminalVerified: true }, { id: projectAlias }, { id,

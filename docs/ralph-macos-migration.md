@@ -585,7 +585,8 @@ other worker with a reason. For each eligible worker, the consumer:
 4. Records the facts with `record-deletion-result`.
 
 Any unconfirmed result stays pending and is never retried. The next round lists it
-in `inspect`'s `deletions.pending` and resolves it before `ready`. A recorded
+in `inspect`'s `deletions.pending` and resolves it before `ready`; any pending
+intent blocks readiness until it is confirmed. A recorded
 deletion keeps its recomputable not-found and absent-worktree proof, and retires the
 mapping from later readiness without live evidence. If the session reappears,
 readiness fails closed. Workers settled before this change have no retained

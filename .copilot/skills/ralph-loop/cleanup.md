@@ -33,7 +33,8 @@ A mapped worker is eligible only when the runtime's read-only `cleanup-plan` ret
 - **Owned and settled.** Its journal mapping belongs to this consumer's worker ID, the mailbox
   assignment is coordinator-settled (`terminal`), and the retained local evidence digest equals the
   correlated `terminal-reported` receipt and terminal commitment. The delete target (session ID,
-  worktree, correlation) must match the terminal evidence retained at that receipt, so a mapping
+  worktree, correlation and every recorded alias) must match the terminal evidence committed at
+  that receipt, so a mapping
   recorded before #2954 is retained for manual cleanup instead.
 - **Ceased.** The same-worker final ACK already proved no children, continuation, or future
   delivery. A fresh `get_session` shows the worker is not busy and has no pending input, active
@@ -60,7 +61,7 @@ session ID and every returned alias (for example the `project_session_id`) and c
 directory; submit those facts with `record-deletion-result`. The deletion is recorded only when
 every identifier is not found and the worktree is absent, confirmed by the runtime's own check. A
 lost, failed, or unconfirmed result stays pending. The next round lists it in `inspect`'s
-`deletions.pending` and resolves it before `ready`; never call `delete_item` twice for the same
+`deletions.pending` and resolves it before `ready`, which any pending intent blocks; never call `delete_item` twice for the same
 intent. Once recorded, the runtime retires that mapping from later readiness without live
 evidence, and any reappearance under a known identifier fails closed.
 

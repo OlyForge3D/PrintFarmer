@@ -13,7 +13,7 @@ import { runAutomationPreflight } from './ralph-automation.mjs';
 import { acquireTransactionLock } from './ralph-native-lock.mjs';
 import { retainNativeLineage, resolveNativeLineage } from './ralph-native-lineage.mjs';
 import {
-  defaultCleanupProbe, deletionLedger, pendingSummary, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, requireCleanupRole,
+  defaultCleanupProbe, deletionLedger, pendingSummary, terminalIdentity, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, requireCleanupRole,
 } from './ralph-native-cleanup.mjs';
 import {
   buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
@@ -116,6 +116,9 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
   // without new live evidence; any reappearance under a known ID fails closed.
   const { bySession: deletions, identifiers: deletionIds } = deletionLedger(journal, state);
   const deleted = new Set([...deletions.values()].filter((record) => record.status === 'deleted').map((record) => record.sessionId));
+  if (deleted.size !== deletions.size) {
+    fail('A pending Ralph worker deletion intent blocks readiness; resolve it with record-deletion-result (never retry delete_item) or stop and report it.');
+  }
   for (const session of evidence.sessions) {
     if (deleted.has(deletionIds.get(session?.id))) {
       fail(`Deleted Ralph worker ${deletionIds.get(session.id)} reappeared in native inventory; omit only verified deletions and reconcile any reappearance.`);
@@ -388,10 +391,15 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         }
         validatePacketAck(packet, ack);
       }
+      // The terminal commitment also covers the runtime-known identifier set, so a
+      // later deletion cannot be narrowed by editing mutable mapping aliases (#2954).
+      const committed = event.data.status === 'terminal-reported'
+        ? JSON.parse(JSON.stringify({ ...evidence, runtimeIdentity: terminalIdentity(prior, evidence.session.id) }))
+        : evidence;
       prior.sessionId = evidence.session.id;
-      prior.lastEvidenceDigest = digest(evidence);
-      if (event.data.status === 'terminal-reported') prior.terminalEvidence = JSON.parse(JSON.stringify(evidence));
-      event.data = { ...event.data, evidenceDigest: digest(evidence) };
+      prior.lastEvidenceDigest = digest(committed);
+      if (event.data.status === 'terminal-reported') prior.terminalEvidence = committed;
+      event.data = { ...event.data, evidenceDigest: digest(committed) };
       if (event.data.status === 'terminal-reported') event.type = 'terminal-receipt';
     }
   } else if (event.type === 'report-blocker') {

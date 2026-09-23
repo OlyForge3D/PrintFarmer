@@ -740,9 +740,10 @@ it only works for sessions the calling run created, and that creator run is gone
 All three requests run under the consumer's acquired round token and fresh
 `evidence.source`/`observedAt`. At the start of each consumer round, before `ready`,
 read `deletions.pending` from `type:"inspect"` (it lists every intent retained from
-any earlier round) and inspect each one with `record-deletion-result`. A pending
-intent blocks `ready` until it is confirmed, because its mapping then has neither
-live evidence nor a recorded deletion; if it stays unconfirmed, stop and report it.
+any earlier round) and inspect each one with `record-deletion-result`. Any pending
+intent blocks `ready` until it is confirmed, even when valid live evidence for that
+worker is supplied. If it stays unconfirmed, stop and report it for owner
+reconciliation; never retry `delete_item` or edit the journal.
 After the round's admission/kickoff work and before `end-round`, submit
 `type:"cleanup-plan"` (read-only) with evidence:
 
@@ -772,7 +773,10 @@ clean/pushed claim cannot make a worker eligible. A failed lookup retains the wo
 The delete target is anchored to the settled terminal commitment. At the
 `terminal-reported` receipt the runtime retains the full terminal evidence in the
 mapping, and cleanup requires its digest to equal `assignment.terminalCommitment`
-and its session ID, worktree path and correlation to equal the mapping's. A mapping
+and its session ID, worktree path and correlation to equal the mapping's. The
+committed evidence also carries a runtime-added `runtimeIdentity` (session ID,
+creation handle and every recorded alias), so removing or replacing a recorded alias
+before intent retains the worker with a manual-cleanup reason. A mapping
 recorded before #2954 has no retained terminal evidence, so it is retained with a
 "clean up manually" reason and is never auto-deleted.
 

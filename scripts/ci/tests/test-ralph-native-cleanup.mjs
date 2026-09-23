@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { digest } from '../ralph-mailbox.mjs';
 import {
-  defaultCleanupProbe, deletedWorkerIds, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, reapSettleMs,
+  defaultCleanupProbe, deletedWorkerIds, terminalIdentity, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, reapSettleMs,
 } from '../ralph-native-cleanup.mjs';
 
 const now = Date.parse('2026-09-01T12:00:00Z');
@@ -28,16 +28,17 @@ function world(workers) {
   const state = { assignments: {} }, journal = { sessions: {} };
   for (const worker of workers) {
     const { n } = worker, correlation = `delivery-${n}`;
+    const mapping = { assignmentId: `assignment-${n}`, sessionId: id(n), worktreePath: `/worktrees/w-${n}`, ...worker.mapping };
     const terminalEvidence = { assignmentCorrelation: correlation,
-      session: { id: id(n), projectId, worktreePath: `/worktrees/w-${n}`, terminalVerified: true } };
+      session: { id: id(n), projectId, worktreePath: `/worktrees/w-${n}`, terminalVerified: true },
+      runtimeIdentity: terminalIdentity(mapping, id(n)) };
     const evidenceDigest = digest(terminalEvidence);
     state.assignments[`assignment-${n}`] = {
       assignmentId: `assignment-${n}`, workerId: worker.workerId ?? 'mini', state: worker.state ?? 'terminal',
       task: { purpose: worker.purpose ?? 'implementation', issue: 900 + n }, terminalCommitment: evidenceDigest,
       receipts: [{ status: 'terminal-reported', correlation, evidenceDigest, observedAt: worker.receiptAt ?? settledAt }],
     };
-    journal.sessions[correlation] = { assignmentId: `assignment-${n}`, sessionId: id(n),
-      worktreePath: `/worktrees/w-${n}`, lastEvidenceDigest: evidenceDigest, terminalEvidence, ...worker.mapping };
+    journal.sessions[correlation] = { ...mapping, lastEvidenceDigest: evidenceDigest, terminalEvidence };
   }
   return { state, journal, present: new Set() };
 }
@@ -451,4 +452,24 @@ test('default probe reads real git state without hooks and resolves symlinks can
   assert.deepEqual(await defaultCleanupProbe.worktree(path.join(root, 'missing')), { exists: false });
   await mkdir(path.join(root, 'plain'));
   assert.equal((await defaultCleanupProbe.worktree(path.join(root, 'plain'))).gitPresent, false);
+});
+
+test('the committed identifier set cannot be narrowed or replaced before intent', async () => {
+  for (const source of ['sessionAliases', 'creationHandle']) {
+    const aliasValue = source === 'sessionAliases' ? [alias(1)] : alias(1);
+    for (const change of [(mapping) => { delete mapping[source]; },
+      (mapping) => { mapping[source] = source === 'sessionAliases' ? [alias(2)] : alias(2); }]) {
+      const w = world([{ n: 1, mapping: { [source]: aliasValue } }]);
+      assert.equal((await planWorkerCleanup(context(w, [candidate(1)]))).eligible.length, 1, source);
+      change(w.journal.sessions['delivery-1']);
+      const plan = await planWorkerCleanup(context(w, [candidate(1)]));
+      assert.match(plan.retained[0].reasons[0], /identifiers differ from the terminal commitment/, source);
+      await assert.rejects(recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) }), /not eligible/);
+    }
+    const w = world([{ n: 1, mapping: { [source]: aliasValue } }]);
+    await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+    assert.deepEqual(w.journal.deletions[id(1)].aliases, [alias(1)]);
+    w.journal.deletions[id(1)].aliases = [];
+    await assert.rejects(planWorkerCleanup(context(w, [])), /deletion record/);
+  }
 });

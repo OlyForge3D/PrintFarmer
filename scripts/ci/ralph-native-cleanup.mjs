@@ -53,14 +53,24 @@ export function terminalProof(state, journal, correlation, mapping) {
       bound.assignmentCorrelation !== correlation) {
     return { reason: 'retained terminal evidence names a different session, worktree or correlation' };
   }
+  const identity = bound.runtimeIdentity;
+  if (!identity || identity.sessionId !== mapping.sessionId || !Array.isArray(identity.aliases) ||
+      JSON.stringify(identity) !== JSON.stringify(terminalIdentity(mapping, mapping.sessionId))) {
+    return { reason: 'mapping identifiers differ from the terminal commitment; clean up manually' };
+  }
   const settledFrom = Date.parse(receipt.observedAt);
   if (!Number.isFinite(settledFrom)) return { reason: 'terminal receipt time is unknown' };
   return { assignment, receipt, terminalEvidenceDigest: mapping.lastEvidenceDigest, settledFrom };
 }
 
-function knownAliases(mapping) {
+function knownAliases(mapping, sessionId = mapping.sessionId) {
   return [...new Set([...(mapping.sessionAliases ?? []), mapping.creationHandle]
-    .filter((id) => uuidPattern.test(id ?? '') && id !== mapping.sessionId))];
+    .filter((id) => uuidPattern.test(id ?? '') && id !== sessionId))].sort();
+}
+
+// Committed into the terminal receipt digest at terminal-reported time.
+export function terminalIdentity(mapping, sessionId) {
+  return { sessionId, creationHandle: mapping.creationHandle ?? null, aliases: knownAliases(mapping, sessionId) };
 }
 
 // Validates every retained deletion record against its immutable mapping and
@@ -82,7 +92,8 @@ export function deletionLedger(journal, state) {
       fail('Retained deletion record no longer matches its immutable Ralph mapping.');
     }
     const proof = terminalProof(state, journal, record.correlation, mapping);
-    if (proof.reason || proof.terminalEvidenceDigest !== record.terminalEvidenceDigest) {
+    if (proof.reason || proof.terminalEvidenceDigest !== record.terminalEvidenceDigest ||
+        mapping.terminalEvidence.runtimeIdentity.aliases.some((alias) => !record.aliases.includes(alias))) {
       fail('Retained deletion record lacks matching settled terminal evidence.');
     }
     if (record.worktreePath !== mapping.worktreePath || !Number.isFinite(Date.parse(record.intentAt)) ||
