@@ -739,24 +739,42 @@ it only works for sessions the calling run created, and that creator run is gone
 
 All three requests run under the consumer's acquired round token and fresh
 `evidence.source`/`observedAt`. At the start of each consumer round, before `ready`,
-inspect every pending intent returned by a previous plan with
-`record-deletion-result`. After the round's admission/kickoff work and before
-`end-round`, submit `type:"cleanup-plan"` (read-only) with evidence:
+read `deletions.pending` from `type:"inspect"` (it lists every intent retained from
+any earlier round) and inspect each one with `record-deletion-result`. A pending
+intent blocks `ready` until it is confirmed, because its mapping then has neither
+live evidence nor a recorded deletion; if it stays unconfirmed, stop and report it.
+After the round's admission/kickoff work and before `end-round`, submit
+`type:"cleanup-plan"` (read-only) with evidence:
 
 - `callingSessionId`: this run's own session ID; `mainCheckoutPath`: the main
   checkout path; optional `maxDeletions` 1-5 (default 5).
 - `candidates`: one entry per mapped worker to consider, keyed by the exact
   recorded `sessionId`. A known alternate identifier such as `project_session_id`
   goes in `aliases`, never in `sessionId`; an alias must not match another mapping.
-- `live` from `get_session`: `found`, `name`, `worktreePath` (normalized `path`),
-  `branch`, and explicit booleans `busy`, `pendingInput`, `agentMerge`, `automation`.
-- `worktree`: `path`, `branch`, `exists`, `gitPresent`, `porcelainEmpty` (tracked and
-  untracked), `unpushedCommits`, `commitsAheadOfDevelopment`, `remoteBranchExists`.
-- `prsChecked:true` and `prs` from `gh pr list --head <branch> --state all`, each with
-  `state`, `mergedAt`/`closedAt`, `mergeCommitOnDevelopment`, `headPreservedAfterMerge`,
-  `commitsAfterMerge` and, for closed-unmerged, `closureReason`.
-- `artifactUrl` for no-PR research/analysis; the runtime re-reads it and compares it
-  with the retained terminal artifact when one exists.
+- `live` from `get_session`: `found`, `name`, `projectId`, `worktreePath` (normalized
+  `path`), `branch`, and explicit booleans `busy`, `pendingInput`, `agentMerge`,
+  `automation`.
+- `closureReason` for a closed-unmerged PR, and `artifactUrl` for no-PR
+  research/analysis; the runtime re-reads the artifact and compares it with the
+  retained terminal artifact when one exists.
+
+The runtime, not the caller, reads the git and GitHub facts. It canonicalizes the
+recorded worktree path (`realpath`, case-folded) and requires it to stay inside the
+configured worktree root with no symlink redirection and no overlap with the main
+checkout. It then reads `HEAD`, the branch and `git status --porcelain` (tracked and
+untracked) with hooks and fsmonitor disabled. From GitHub it reads every PR for that
+exact head branch and repository, the remote branch ref, and the head's commit
+comparison with `development`. Pushed means the remote ref equals the local `HEAD`,
+or, without a remote branch, that GitHub knows the local `HEAD`. Any caller-supplied
+`worktree`, `prs` or `prsChecked` field is ignored, so an omitted open PR or a false
+clean/pushed claim cannot make a worker eligible. A failed lookup retains the worker.
+
+The delete target is anchored to the settled terminal commitment. At the
+`terminal-reported` receipt the runtime retains the full terminal evidence in the
+mapping, and cleanup requires its digest to equal `assignment.terminalCommitment`
+and its session ID, worktree path and correlation to equal the mapping's. A mapping
+recorded before #2954 has no retained terminal evidence, so it is retained with a
+"clean up manually" reason and is never auto-deleted.
 
 The plan returns `eligible` (bounded, oldest settled first, `deleteAllowed:false`),
 `retained` and `pending` with reasons, and `deleted`. Every mapped worker without
@@ -773,7 +791,10 @@ Then call `get_session` for the session ID and every returned alias, check wheth
 the worktree directory exists, and submit `type:"record-deletion-result"` with
 `data.sessionId`, `lookups:[{id,notFound}]`, `worktree:{path,absent}` and the
 observed `deleteOutcome`. The runtime records the deletion only when every
-identifier is not found and the recorded worktree path is absent. Anything else
+identifier is not found, the caller reports the recorded worktree path absent, and
+its own `lstat` of that path also finds nothing. It stores that confirmation with a
+digest; every later read recomputes it, so a record flipped to `deleted` without
+matching not-found lookups for every identifier fails closed. Anything else
 stays pending with its inspection retained; re-inspect it on later rounds and
 report it. Never retry `delete_item` or edit the journal to clear a pending intent.
 

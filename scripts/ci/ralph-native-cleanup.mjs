@@ -1,4 +1,7 @@
+import { execFile } from 'node:child_process';
+import { lstat, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { digest } from './ralph-mailbox.mjs';
 import { assessCleanupCandidate } from './ralph-round-cache.mjs';
 
@@ -11,7 +14,7 @@ export const reapSettleMs = 15 * 60 * 1000;
 export const defaultMaxDeletions = 5;
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const digestPattern = /^[0-9a-f]{64}$/;
-const rolePrefix = /^\s*(ralph|reaper)\b/i;
+const rolePrefix = /^\s*(ralph|reaper)/i;
 const fail = (message) => { throw new Error(`Native Ralph blocked: ${message}`); };
 
 function withinRoot(root, target) {
@@ -41,6 +44,14 @@ export function terminalProof(state, journal, correlation, mapping) {
       mapping.lastEvidenceDigest !== receipt.evidenceDigest ||
       mapping.lastEvidenceDigest !== assignment.terminalCommitment) {
     return { reason: 'retained correlated terminal evidence does not match the settled receipt' };
+  }
+  const bound = mapping.terminalEvidence;
+  if (!bound || digest(bound) !== assignment.terminalCommitment) {
+    return { reason: 'terminal session binding is not retained (mapping predates #2954); clean up manually' };
+  }
+  if (bound.session?.id !== mapping.sessionId || bound.session?.worktreePath !== mapping.worktreePath ||
+      bound.assignmentCorrelation !== correlation) {
+    return { reason: 'retained terminal evidence names a different session, worktree or correlation' };
   }
   const settledFrom = Date.parse(receipt.observedAt);
   if (!Number.isFinite(settledFrom)) return { reason: 'terminal receipt time is unknown' };
@@ -74,10 +85,27 @@ export function deletionLedger(journal, state) {
     if (proof.reason || proof.terminalEvidenceDigest !== record.terminalEvidenceDigest) {
       fail('Retained deletion record lacks matching settled terminal evidence.');
     }
+    if (record.worktreePath !== mapping.worktreePath || !Number.isFinite(Date.parse(record.intentAt)) ||
+        !digestPattern.test(record.planEvidenceDigest ?? '') || typeof record.intentRequestId !== 'string') {
+      fail('Retained deletion record intent is incomplete.');
+    }
+    if (record.status === 'deleted' && !confirmationProven(record)) {
+      fail('Retained deletion record lacks recomputable not-found and absent-worktree confirmation.');
+    }
     bySession.set(sessionId, record);
     for (const id of [sessionId, ...record.aliases]) claim(id, sessionId);
   }
   return { bySession, identifiers };
+}
+
+function confirmationProven(record) {
+  const proof = record.confirmation;
+  const lookups = Array.isArray(proof?.lookups) ? proof.lookups : [];
+  return Boolean(proof) && digest(proof) === record.resultEvidenceDigest &&
+    Date.parse(record.confirmedAt) >= Date.parse(record.intentAt) &&
+    Date.parse(proof.observedAt) >= Date.parse(record.intentAt) &&
+    proof.worktree?.path === record.worktreePath && proof.worktree.absent === true && proof.runtimeWorktreeAbsent === true &&
+    [record.sessionId, ...record.aliases].every((id) => lookups.some((lookup) => lookup?.id === id && lookup.notFound === true));
 }
 
 export function deletedWorkerIds(journal, state) {
@@ -96,39 +124,117 @@ function validateEvidenceShape(config, evidence) {
   return max;
 }
 
-function prReasons(candidate, proof, now) {
-  const { worktree, prs } = candidate;
+const repository = 'OlyForge3D/PrintFarmer';
+const shaPattern = /^[0-9a-f]{40}$/;
+const branchPattern = /^[A-Za-z0-9][A-Za-z0-9._/-]*$/;
+const fold = (value) => value.normalize('NFC').toLowerCase();
+const git = promisify(execFile);
+
+// Runtime-owned local readback of the recorded worktree. Canonical paths defeat
+// symlink/case aliases; fsmonitor and hooks are disabled so a worker-controlled
+// config cannot run code during inspection.
+export const defaultCleanupProbe = {
+  async canonical(target) {
+    try { return await realpath(target); } catch { return undefined; }
+  },
+  async absent(target) {
+    try { await lstat(target); return false; } catch (error) { return error.code === 'ENOENT'; }
+  },
+  async worktree(target) {
+    const canonicalPath = await defaultCleanupProbe.canonical(target);
+    if (!canonicalPath) return { exists: false };
+    const gitPresent = await lstat(path.join(target, '.git')).then(() => true, () => false);
+    if (!gitPresent) return { exists: true, canonicalPath, gitPresent };
+    const run = async (args) => (await git('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
+      '-C', target, ...args], { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })).stdout;
+    try {
+      const [headSha, branch, porcelain] = await Promise.all([run(['rev-parse', '--verify', 'HEAD']),
+        run(['symbolic-ref', '--quiet', '--short', 'HEAD']), run(['status', '--porcelain=v1', '--untracked-files=all'])]);
+      return { exists: true, canonicalPath, gitPresent, headSha: headSha.trim(), branch: branch.trim(), porcelain };
+    } catch { return { exists: true, canonicalPath, gitPresent, gitFailed: true }; }
+  },
+};
+
+const within = (root, target) => {
+  const relative = path.relative(root, target);
+  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+};
+
+// Canonical containment: inside the configured worktree root with no symlink
+// redirection, and never the main checkout, its ancestor or its descendant.
+async function pathReasons(config, worktreePath, facts, evidence, probe) {
+  const root = await probe.canonical(config.worktreeRoot);
+  const main = await probe.canonical(evidence.mainCheckoutPath) ?? evidence.mainCheckoutPath;
+  const actual = facts.canonicalPath;
+  if (!root || !actual) return ['canonical worktree path is unknown'];
+  const [froot, fmain, factual] = [fold(root), fold(main), fold(actual)];
+  const overlapsMain = (value) => value === fmain || within(value, fmain) || within(fmain, value);
+  if (!within(froot, factual) || path.relative(froot, factual) !== path.relative(fold(config.worktreeRoot), fold(worktreePath)) ||
+      overlapsMain(factual) || overlapsMain(fold(worktreePath)) || fold(worktreePath) === fold(evidence.mainCheckoutPath)) {
+    return ['canonical worktree path escapes the isolated worktree root or aliases the main checkout'];
+  }
+  return [];
+}
+
+// Runtime-owned GitHub readback bound to this repository, branch and local HEAD.
+async function prFacts(api, branch, headSha) {
+  const pulls = await api(`repos/${repository}/pulls?head=${encodeURIComponent(`OlyForge3D:${branch}`)}&state=all&per_page=100`);
+  const refs = await api(`repos/${repository}/git/matching-refs/heads/${branch}`);
+  if (!Array.isArray(pulls) || !Array.isArray(refs)) throw new Error('unexpected GitHub response');
+  const prs = pulls.filter((pr) => pr?.head?.ref === branch && pr?.head?.repo?.full_name === repository);
+  if (prs.length !== pulls.length) throw new Error('PR lookup returned another head');
+  const remote = refs.find((ref) => ref?.ref === `refs/heads/${branch}`)?.object?.sha;
+  const known = async (sha) => {
+    try { return await api(`repos/${repository}/compare/development...${sha}`); } catch { return undefined; }
+  };
+  const contained = async (sha) => {
+    try { return ['identical', 'ahead'].includes((await api(`repos/${repository}/compare/${sha}...development`))?.status); }
+    catch { return false; }
+  };
+  return { prs, remote, local: await known(headSha), contained };
+}
+
+async function prReasons(candidate, proof, facts, context) {
   const reasons = [];
   let pr;
   let clock = proof.settledFrom;
-  if (candidate.prsChecked !== true || !Array.isArray(prs)) return { reasons: ['PR lookup by head branch is incomplete'] };
-  if (prs.some((item) => item?.state === 'OPEN')) return { reasons: ['open PR is never deleted'] };
-  if (prs.length > 1) return { reasons: ['multiple PRs for the branch need human review'] };
+  let github;
+  try { github = await prFacts(context.api, facts.branch, facts.headSha); }
+  catch { return { reasons: ['runtime PR/branch lookup by head branch failed'] }; }
+  const pushed = github.remote ? github.remote === facts.headSha : Boolean(github.local);
+  if (!pushed) reasons.push('WARNING: unpushed commits or unknown upstream');
+  const done = (result) => ({ pushed, ...result });
+  const { prs } = github;
+  if (prs.some((item) => item.state === 'open')) return done({ reasons: ['open PR is never deleted'] });
+  if (prs.length > 1) return done({ reasons: ['multiple PRs for the branch need human review'] });
   if (prs.length === 1) {
-    pr = prs[0];
-    if (!['MERGED', 'CLOSED'].includes(pr.state)) return { reasons: [`PR state ${pr.state} is not terminal`] };
-    const at = Date.parse(pr.state === 'MERGED' ? pr.mergedAt : pr.closedAt);
-    if (!Number.isFinite(at) || at > now) reasons.push('PR merge/close time is unknown');
+    const item = prs[0];
+    pr = { state: item.merged_at ? 'MERGED' : 'CLOSED', closureReason: candidate.closureReason };
+    const at = Date.parse(item.merged_at ?? item.closed_at);
+    if (!Number.isFinite(at) || at > context.now) reasons.push('PR merge/close time is unknown');
     else clock = Math.max(clock, at);
-    if (pr.state === 'CLOSED' && worktree?.remoteBranchExists !== true) reasons.push('origin branch for closed PR is absent');
-  } else if (!Number.isInteger(worktree?.commitsAheadOfDevelopment) || worktree.commitsAheadOfDevelopment < 0) {
-    reasons.push('commits ahead of origin/development are unknown');
-  } else if (worktree.commitsAheadOfDevelopment > 0) {
-    reasons.push(worktree.unpushedCommits === 0
-      ? 'no PR with pushed commits needs human review'
-      : 'WARNING: no PR with unpushed commits');
+    const preserved = item.head?.sha === facts.headSha && (!github.remote || github.remote === item.head.sha);
+    pr.headPreservedAfterMerge = preserved;
+    pr.commitsAfterMerge = preserved ? [] : ['local or remote head differs from the PR head'];
+    if (pr.state === 'MERGED') {
+      pr.mergeCommitOnDevelopment = shaPattern.test(item.merge_commit_sha ?? '') && await github.contained(item.merge_commit_sha);
+    } else if (!github.remote) reasons.push('origin branch for closed PR is absent');
+  } else if (!Number.isInteger(github.local?.ahead_by)) {
+    if (pushed) reasons.push('commits ahead of origin/development are unknown');
+  } else if (github.local.ahead_by > 0) {
+    reasons.push('no PR with pushed commits needs human review');
   } else if (!['research', 'analysis'].includes(proof.assignment.task?.purpose)) {
     reasons.push('no-PR work without commits is deletable only for research/analysis');
   }
-  return { reasons, pr, clock };
+  return done({ reasons, pr, clock });
 }
 
 async function evaluate(config, candidate, mapping, correlation, proof, context) {
-  const { evidence, now, readArtifact } = context;
+  const { evidence, now, readArtifact, probe } = context;
   const reasons = [];
   const live = candidate.live ?? {};
-  const worktree = candidate.worktree ?? {};
   if (live.found !== true) reasons.push('fresh get_session readback is missing');
+  if (config.projectId && live.projectId !== config.projectId) reasons.push('live session is not in the configured project');
   if (typeof live.name !== 'string' || rolePrefix.test(live.name)) reasons.push('role-named or unnamed session is never deleted');
   for (const [flag, reason] of [['busy', 'session is busy or activity is unknown'],
     ['pendingInput', 'session has pending input or it is unknown'],
@@ -136,17 +242,27 @@ async function evaluate(config, candidate, mapping, correlation, proof, context)
     if (live[flag] !== false) reasons.push(reason);
   }
   const worktreePath = mapping.worktreePath;
-  if (!withinRoot(config.worktreeRoot, worktreePath) || worktreePath === evidence.mainCheckoutPath ||
-      live.worktreePath !== worktreePath || worktree.path !== worktreePath) {
+  if (!withinRoot(config.worktreeRoot, worktreePath) || live.worktreePath !== worktreePath) {
     reasons.push('worktree path does not match the recorded isolated worker worktree');
   }
-  if (typeof live.branch !== 'string' || !live.branch || worktree.branch !== live.branch) reasons.push('worker branch readback does not match');
-  if (worktree.exists !== true || worktree.gitPresent !== true) reasons.push('worktree or its .git is missing');
-  if (worktree.unpushedCommits !== 0) reasons.push('WARNING: unpushed commits or unknown upstream');
-  const { reasons: prIssues, pr, clock } = prReasons(candidate, proof, now);
-  reasons.push(...prIssues);
+  const facts = await probe.worktree(worktreePath);
+  if (facts.exists !== true || facts.gitPresent !== true) reasons.push('worktree or its .git is missing');
+  else reasons.push(...await pathReasons(config, worktreePath, facts, evidence, probe));
+  const gitKnown = facts.gitPresent === true && !facts.gitFailed && shaPattern.test(facts.headSha ?? '') &&
+    branchPattern.test(facts.branch ?? '') && !/(?:\.\.|\/\/|\.lock(?:\/|$)|\/$|\.$)/.test(facts.branch) &&
+    typeof facts.porcelain === 'string';
+  if (facts.gitPresent === true && !gitKnown) reasons.push('runtime git readback of the worktree failed');
+  if (gitKnown && live.branch !== facts.branch) reasons.push('worker branch readback does not match');
+  const clean = gitKnown && facts.porcelain === '';
+  let pr, clock, pushed = false;
+  if (gitKnown) {
+    const result = await prReasons(candidate, proof, facts, context);
+    reasons.push(...result.reasons);
+    ({ pr, clock } = result);
+    pushed = result.pushed === true;
+  }
   let noPrDeliverable = { completed: false, verified: false };
-  if (!pr && !prIssues.length) {
+  if (gitKnown && !pr && !reasons.length) {
     try {
       const artifact = await readArtifact(proof.assignment, candidate.artifactUrl);
       const retained = mapping.terminalArtifact;
@@ -157,27 +273,27 @@ async function evaluate(config, candidate, mapping, correlation, proof, context)
   }
   const assessment = assessCleanupCandidate({
     session: { active: !['busy', 'pendingInput', 'agentMerge', 'automation'].every((flag) => live[flag] === false) },
-    worktree: { inspected: worktree.exists === true && worktree.gitPresent === true,
-      dirty: worktree.porcelainEmpty !== true, untracked: worktree.porcelainEmpty !== true },
-    finalReport: { workingTreeClean: worktree.porcelainEmpty === true, allCommitsPushed: worktree.unpushedCommits === 0,
+    worktree: { inspected: gitKnown, dirty: !clean, untracked: !clean },
+    finalReport: { workingTreeClean: clean, allCommitsPushed: pushed,
       closedWithoutMerge: pr?.state === 'CLOSED', closureReason: pr?.closureReason },
     settledAt: Number.isFinite(clock) ? new Date(clock).toISOString() : undefined,
     pr: pr && { state: pr.state, mergeCommitVerifiedOnDevelopment: pr.mergeCommitOnDevelopment === true,
       headPreservedAfterMerge: pr.headPreservedAfterMerge === true, linkedIssueDispositionVerified: true,
-      commitsAfterMergeKnown: Array.isArray(pr.commitsAfterMerge), commitsAfterMerge: pr.commitsAfterMerge },
+      commitsAfterMergeKnown: true, commitsAfterMerge: pr.commitsAfterMerge },
     noPrDeliverable,
   }, { now, settlingMs: reapSettleMs });
   for (const reason of assessment.reasons) if (!reasons.includes(reason)) reasons.push(reason);
   return {
     sessionId: mapping.sessionId, aliases: candidate.aliases, assignmentId: mapping.assignmentId, correlation,
-    terminalEvidenceDigest: proof.terminalEvidenceDigest, worktreePath,
+    terminalEvidenceDigest: proof.terminalEvidenceDigest, worktreePath, headSha: facts.headSha,
     settledAt: Number.isFinite(clock) ? new Date(clock).toISOString() : undefined, reasons,
   };
 }
 
 // Read-only. Every mapped worker of this consumer is either eligible, retained
 // with reasons, pending an unconfirmed deletion, or already deleted.
-export async function planWorkerCleanup({ config, evidence, journal, state, now, readArtifact, roundId }) {
+export async function planWorkerCleanup({ config, evidence, journal, state, now, readArtifact, roundId, api,
+  probe = defaultCleanupProbe }) {
   requireCleanupRole(config);
   const max = validateEvidenceShape(config, evidence);
   const { bySession, identifiers } = deletionLedger(journal, state);
@@ -227,7 +343,7 @@ export async function planWorkerCleanup({ config, evidence, journal, state, now,
     const record = bySession.get(id);
     if (record?.status === 'deleted') { deleted.push({ sessionId: id, assignmentId: mapping.assignmentId, confirmedAt: record.confirmedAt }); continue; }
     if (record) {
-      pending.push({ sessionId: id, assignmentId: mapping.assignmentId, aliases: record.aliases, worktreePath: record.worktreePath, reasons: ['unconfirmed deletion: inspect get_session and the worktree with record-deletion-result; never retry delete_item'] });
+      pending.push({ ...pendingSummary(record), reasons: ['unconfirmed deletion: inspect get_session and the worktree with record-deletion-result; never retry delete_item'] });
       continue;
     }
     const proof = terminalProof(state, journal, correlation, mapping);
@@ -238,7 +354,7 @@ export async function planWorkerCleanup({ config, evidence, journal, state, now,
     }
     const candidate = supplied.get(id);
     if (!candidate) { retained.push({ sessionId: id, assignmentId: mapping.assignmentId, reasons: ['no fresh cleanup evidence supplied'] }); continue; }
-    const result = await evaluate(config, candidate, mapping, correlation, proof, { evidence, now, readArtifact });
+    const result = await evaluate(config, candidate, mapping, correlation, proof, { evidence, now, readArtifact, api, probe });
     (result.reasons.length ? retained : eligible).push(result);
   }
   eligible.sort((left, right) => Date.parse(left.settledAt) - Date.parse(right.settledAt) || left.sessionId.localeCompare(right.sessionId));
@@ -275,7 +391,12 @@ export async function recordDeletionIntent({ request, ...context }) {
     message: 'Call delete_item exactly once, then record-deletion-result. A lost or failed response NEVER authorizes another delete_item.' };
 }
 
-export function recordDeletionResult({ config, request, evidence, journal, state, now }) {
+export function pendingSummary(record) {
+  return { sessionId: record.sessionId, assignmentId: record.assignmentId, aliases: record.aliases,
+    worktreePath: record.worktreePath, intentAt: record.intentAt };
+}
+
+export async function recordDeletionResult({ config, request, evidence, journal, state, now, probe = defaultCleanupProbe }) {
   requireCleanupRole(config);
   const sessionId = request.data?.sessionId;
   deletionLedger(journal, state);
@@ -284,7 +405,11 @@ export function recordDeletionResult({ config, request, evidence, journal, state
   if (record.status === 'deleted') {
     return { dispatchAuthorized: false, deleteAllowed: false, confirmed: true, alreadyRecorded: true, sessionId };
   }
-  if (!Array.isArray(evidence.lookups)) fail('Post-delete get_session lookups are required.');
+  if (!Array.isArray(evidence?.lookups)) fail('Post-delete get_session lookups are required.');
+  const observed = Date.parse(evidence.observedAt);
+  if (!Number.isFinite(observed) || observed < Date.parse(record.intentAt) || observed > now + 5 * 60_000) {
+    fail('Post-delete evidence needs an observedAt time after the recorded intent.');
+  }
   const lookups = new Map();
   for (const lookup of evidence.lookups) {
     if (!uuidPattern.test(lookup?.id ?? '') || lookups.has(lookup.id) || typeof lookup.notFound !== 'boolean') {
@@ -293,21 +418,27 @@ export function recordDeletionResult({ config, request, evidence, journal, state
     lookups.set(lookup.id, lookup.notFound);
   }
   const identifiers = [sessionId, ...record.aliases];
+  const runtimeWorktreeAbsent = await probe.absent(record.worktreePath);
+  const confirmation = { observedAt: evidence.observedAt, source: evidence.source,
+    lookups: identifiers.map((id) => ({ id, notFound: lookups.get(id) === true })),
+    worktree: { path: evidence.worktree?.path, absent: evidence.worktree?.absent === true },
+    runtimeWorktreeAbsent, deleteOutcome: evidence.deleteOutcome };
   const confirmed = identifiers.every((id) => lookups.get(id) === true) &&
-    evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true;
-  const inspection = { observedAt: evidence.observedAt, evidenceDigest: digest(evidence), requestId: request.id,
-    deleteOutcome: evidence.deleteOutcome, confirmed };
+    evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent === true;
+  const inspection = { observedAt: evidence.observedAt, evidenceDigest: digest(confirmation), requestId: request.id,
+    deleteOutcome: evidence.deleteOutcome, runtimeWorktreeAbsent, confirmed };
   if (!confirmed) {
     record.inspections = [...(record.inspections ?? []), inspection].slice(-20);
     return { dispatchAuthorized: false, deleteAllowed: false, confirmed: false, pending: true, sessionId,
       stillPresent: identifiers.filter((id) => lookups.get(id) === false),
       unchecked: identifiers.filter((id) => !lookups.has(id)),
-      worktreeAbsent: evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true,
+      worktreeAbsent: evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent,
       message: 'Deletion is unconfirmed and remains pending. Inspect again on a later round; never retry delete_item.' };
   }
   record.status = 'deleted';
   record.confirmedAt = new Date(now).toISOString();
-  record.resultEvidenceDigest = inspection.evidenceDigest;
+  record.confirmation = confirmation;
+  record.resultEvidenceDigest = digest(confirmation);
   record.inspections = [...(record.inspections ?? []), inspection].slice(-20);
   return { dispatchAuthorized: false, deleteAllowed: false, confirmed: true, sessionId };
 }

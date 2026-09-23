@@ -150,7 +150,11 @@ function assertWorkerCleanupPrompt(prompt, role, windows) {
     assert.match(prompt, /A lost, failed or unconfirmed result stays pending; never retry/);
     assert.match(prompt, /Omit workers already recorded as deleted from the ready inventory/);
     assert.match(prompt, /reappears, readiness fails closed/);
-    assert.match(prompt, /project_session_id as an alias,\nnever as sessionId/);
+    assert.match(prompt, /aliases \(project_session_id, never\s+as sessionId\)/);
+    assert.match(prompt, /deletions\.pending/);
+    assert.match(prompt, /caller-supplied git or PR claims are ignored/);
+    assert.ok(prompt.search(/Before ready, inspect every pending deletion intent/) < prompt.search(/type:"cleanup-plan"/),
+      'pending deletions are resolved before ready and before any new plan');
   } else {
     assert.match(prompt, /Worker cleanup is report-only for this/);
     assert.match(prompt, /NEVER call\ndelete_item or archive_session/);

@@ -422,16 +422,22 @@ Worker cleanup (RALPH-WORKER-CLEANUP-V1): this macOS consumer deletes ONLY its
 own mapped workers whose assignments the coordinator already settled, per
 cleanup.md and native-roles.md "Owning-Consumer Worker Cleanup". It is standing,
 narrowly scoped maintainer authorization for delete_item; never archive_session.
-Before ready, inspect every pending deletion intent (cleanup-plan's pending list)
-with record-deletion-result; never call delete_item again for a pending intent.
+Before ready, inspect every pending deletion intent (the type:"inspect"
+response's deletions.pending, retained from any earlier round) with
+record-deletion-result; never call delete_item again for a pending intent. A
+pending intent blocks readiness until its not-found and absent-worktree proof is
+recorded; if it stays unconfirmed, stop and report it.
 Omit workers already recorded as deleted from the ready inventory; if a recorded
 deleted session ID or alias reappears, readiness fails closed: stop and report it.
 After admission/kickoff work and before end-round, run the read-only runtime
 type:"cleanup-plan" with this run's callingSessionId, mainCheckoutPath and one
-fresh candidate per mapped worker: get_session live state (explicit busy,
-pendingInput, agentMerge, automation booleans; project_session_id as an alias,
-never as sessionId), worktree git status --porcelain, unpushed and ahead counts,
-origin branch, and gh pr list --head <branch> --state all. Then, for EACH eligible
+fresh candidate per mapped worker: sessionId, aliases (project_session_id, never
+as sessionId), live get_session facts (found, name, projectId, worktreePath,
+branch and explicit busy, pendingInput, agentMerge, automation booleans), plus
+closureReason for a closed-unmerged PR and artifactUrl for no-PR research. The
+runtime itself reads the recorded worktree's git status, HEAD and branch and the
+GitHub PR, branch and commit state; caller-supplied git or PR claims are ignored.
+Then, for EACH eligible
 item in plan order (at most five, oldest settled first):
 1. record-deletion-intent with data.sessionId and fresh evidence; proceed only on
    its deleteAllowed:true response.

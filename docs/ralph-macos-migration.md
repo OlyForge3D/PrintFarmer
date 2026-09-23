@@ -573,8 +573,9 @@ Worker sessions no longer accumulate indefinitely. Once the coordinator settles 
 assignment, the macOS consumer that owns the mapped worker can delete it with
 `delete_item`. This is a standing, narrowly scoped maintainer authorization that
 the approved policy package delivers. Each consumer round runs the read-only
-`cleanup-plan` runtime request with fresh `get_session`, `git` and PR evidence. The
-plan returns at most five eligible workers, oldest settled first, and retains every
+`cleanup-plan` runtime request with fresh `get_session` evidence. The runtime reads
+the worktree's `git` state and the branch's GitHub PR state itself and ignores any
+caller-supplied claims about them. The plan returns at most five eligible workers, oldest settled first, and retains every
 other worker with a reason. For each eligible worker, the consumer:
 
 1. Journals `record-deletion-intent` before making any tool call.
@@ -583,9 +584,12 @@ other worker with a reason. For each eligible worker, the consumer:
    worktree directory is gone.
 4. Records the facts with `record-deletion-result`.
 
-Any unconfirmed result stays pending and is never retried. A recorded deletion
-retires the mapping from later readiness without live evidence. If the session
-reappears, readiness fails closed.
+Any unconfirmed result stays pending and is never retried. The next round lists it
+in `inspect`'s `deletions.pending` and resolves it before `ready`. A recorded
+deletion keeps its recomputable not-found and absent-worktree proof, and retires the
+mapping from later readiness without live evidence. If the session reappears,
+readiness fails closed. Workers settled before this change have no retained
+terminal session binding, so they are retained with a manual-cleanup reason.
 
 The coordinator, Windows consumers and every non-Ralph session stay report-only;
 porting the old Session Reaper is a separate follow-up. The

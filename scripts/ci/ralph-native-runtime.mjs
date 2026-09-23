@@ -13,7 +13,7 @@ import { runAutomationPreflight } from './ralph-automation.mjs';
 import { acquireTransactionLock } from './ralph-native-lock.mjs';
 import { retainNativeLineage, resolveNativeLineage } from './ralph-native-lineage.mjs';
 import {
-  deletionLedger, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, requireCleanupRole,
+  defaultCleanupProbe, deletionLedger, pendingSummary, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, requireCleanupRole,
 } from './ralph-native-cleanup.mjs';
 import {
   buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
@@ -390,6 +390,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
       }
       prior.sessionId = evidence.session.id;
       prior.lastEvidenceDigest = digest(evidence);
+      if (event.data.status === 'terminal-reported') prior.terminalEvidence = JSON.parse(JSON.stringify(evidence));
       event.data = { ...event.data, evidenceDigest: digest(evidence) };
       if (event.data.status === 'terminal-reported') event.type = 'terminal-receipt';
     }
@@ -420,7 +421,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
 }
 
 export async function runNativeRequest(config, request, {
-  api, cwd = process.cwd(), now = Date.now(), preflight = runAutomationPreflight,
+  api, cwd = process.cwd(), now = Date.now(), preflight = runAutomationPreflight, cleanupProbe = defaultCleanupProbe,
 } = {}) {
   validateControl(config.control);
   if (config.verified !== true || config.migrationAttested !== true ||
@@ -482,7 +483,13 @@ export async function runNativeRequest(config, request, {
     journal.snapshot = snapshot;
     if (request.type === 'inspect') {
       await writeJournal(journalPath, journal);
-      return { ...snapshot, retainedLineage: retainNativeLineage(journal.nativeLineage, [], now), dispatchAuthorized: false };
+      let deletions;
+      try {
+        const records = [...deletionLedger(journal, snapshot.state).bySession.values()];
+        deletions = { pending: records.filter((record) => record.status === 'pending').map(pendingSummary),
+          deleted: records.filter((record) => record.status === 'deleted').map(pendingSummary) };
+      } catch (error) { deletions = { error: error.message }; }
+      return { ...snapshot, retainedLineage: retainNativeLineage(journal.nativeLineage, [], now), deletions, dispatchAuthorized: false };
     }
     if (request.type === 'abandon-acquisition') {
       const acquisition = journal.events[request.data?.acquisitionId];
@@ -557,13 +564,13 @@ export async function runNativeRequest(config, request, {
       requireCleanupRole(config);
       freshEvidence(request.evidence, now);
       const context = {
-        config, evidence: request.evidence, journal, state: snapshot.state, now,
-        readArtifact: (entry, url) => readResearchArtifact(entry, url, api),
+        config, evidence: request.evidence, journal, state: snapshot.state, now, api: api ?? githubApi,
+        probe: cleanupProbe, readArtifact: (entry, url) => readResearchArtifact(entry, url, api),
       };
       if (request.type === 'cleanup-plan') return planWorkerCleanup({ ...context, roundId: request.roundId });
       const result = request.type === 'record-deletion-intent'
         ? await recordDeletionIntent({ request, ...context })
-        : recordDeletionResult({ request, ...context });
+        : await recordDeletionResult({ request, ...context });
       await writeJournal(journalPath, journal);
       return result;
     }

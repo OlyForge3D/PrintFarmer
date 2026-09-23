@@ -32,14 +32,16 @@ A mapped worker is eligible only when the runtime's read-only `cleanup-plan` ret
 
 - **Owned and settled.** Its journal mapping belongs to this consumer's worker ID, the mailbox
   assignment is coordinator-settled (`terminal`), and the retained local evidence digest equals the
-  correlated `terminal-reported` receipt and terminal commitment. The runtime keeps that proof in
-  the journal before any delete; deletion never clears or blocks readiness by itself.
+  correlated `terminal-reported` receipt and terminal commitment. The delete target (session ID,
+  worktree, correlation) must match the terminal evidence retained at that receipt, so a mapping
+  recorded before #2954 is retained for manual cleanup instead.
 - **Ceased.** The same-worker final ACK already proved no children, continuation, or future
   delivery. A fresh `get_session` shows the worker is not busy and has no pending input, active
   Agent merge, or attached automation. Unknown is not false.
-- **Clean.** The recorded worktree exists, contains `.git`, has empty `git status --porcelain`
-  (tracked and untracked), and has no unpushed commits.
-- **PR state** (from `gh pr list --head <branch> --state all`), with a 15-minute settling time
+- **Clean.** The recorded worktree resolves canonically inside the worktree root (no symlink or
+  case alias of the main checkout), contains `.git`, has empty `git status --porcelain` (tracked
+  and untracked), and its `HEAD` is on GitHub. The runtime reads these facts itself.
+- **PR state**, read by the runtime from GitHub for the exact head branch, with a 15-minute settling time
   measured from the later of the terminal receipt and the PR merge/close:
   - Merged: merge commit contained in `origin/development`, HEAD preserved, no commits after merge.
   - Closed-unmerged: `origin/<branch>` exists, nothing unpushed, closure reason recorded.
@@ -56,8 +58,9 @@ For each eligible item, in plan order: `record-deletion-intent` journals the int
 the single `delete_item` call; make exactly that call; then read back `get_session` for the mapped
 session ID and every returned alias (for example the `project_session_id`) and check the worktree
 directory; submit those facts with `record-deletion-result`. The deletion is recorded only when
-every identifier is not found and the worktree is absent. A lost, failed, or unconfirmed result
-stays pending and is inspected again on later rounds; never call `delete_item` twice for the same
+every identifier is not found and the worktree is absent, confirmed by the runtime's own check. A
+lost, failed, or unconfirmed result stays pending. The next round lists it in `inspect`'s
+`deletions.pending` and resolves it before `ready`; never call `delete_item` twice for the same
 intent. Once recorded, the runtime retires that mapping from later readiness without live
 evidence, and any reappearance under a known identifier fails closed.
 
