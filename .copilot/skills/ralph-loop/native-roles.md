@@ -243,7 +243,10 @@ a matching name, a workflow ID or an idle state does not establish ownership.
 Keep journal mappings across rounds, including terminal workers so later
 resumption remains detectable. Every retained mapping, including terminal workers,
 requires an explicit entry backed by current readback or verified cessation in each
-readiness inventory; omission blocks.
+readiness inventory; omission blocks. The sole exception is a mapped worker whose
+deletion the consumer recorded through `record-deletion-result` (see "Owning-Consumer
+Worker Cleanup"): omit it, because any inventory entry for its session ID or a known
+alias is treated as reappearance and fails closed.
 Every unresolved local creation intent remains
 owned even when its native creation response was lost; a missing ID never makes
 that intent unrelated or authorizes another creation.
@@ -300,8 +303,9 @@ with fresh `observedAt`, a supported evidence `source`, `status:"archived"` or
 The digest must match the retained local delivery evidence and the assignment's
 final correlated terminal receipt/commitment. Current verified cessation plus
 that retained proof substitutes for live readback, never omission, idle, an archive
-label, missing history or a failed lookup alone. Do not archive/delete sessions to
-manufacture readiness. These are trusted-controller observations, not invented
+label, missing history or a failed lookup alone. A pending, unconfirmed deletion
+intent still needs this live or retirement evidence until `record-deletion-result`
+confirms it. Do not archive/delete sessions to manufacture readiness. These are trusted-controller observations, not invented
 native API fields; if supported evidence cannot prove cessation, remain blocked.
 
 For owned role-session inventory exemptions, a workflow ID alone is ignored.
@@ -721,6 +725,89 @@ works **only** before the atomic starting receipt. If starting won the race,
 withdrawal is rejected and ownership remains. If withdrawal won, the consumer
 cannot obtain creation permission. Starting/running/uncertain work never uses
 this shortcut.
+
+### Owning-Consumer Worker Cleanup
+
+`RALPH-WORKER-CLEANUP-V1`. Only the macOS consumer deletes, and only its own mapped
+workers whose assignments the coordinator already settled. The runtime rejects all
+three cleanup requests from the coordinator and from Windows hosts. This is the
+standing, narrowly scoped maintainer authorization for `delete_item` delivered by
+the personally approved package; it does not extend to role sessions, unrelated
+maintainer sessions, other workers or other hosts. Never call `archive_session`:
+it only works for sessions the calling run created, and that creator run is gone.
+`cleanup.md` gives the eligibility rules in prose.
+
+All three requests run under the consumer's acquired round token and fresh
+`evidence.source`/`observedAt`. At the start of each consumer round, before `ready`,
+read `deletions.pending` from `type:"inspect"` (it lists every intent retained from
+any earlier round) and inspect each one with `record-deletion-result`. Any pending
+intent blocks `ready` until it is confirmed, even when valid live evidence for that
+worker is supplied. If it stays unconfirmed, stop and report it for owner
+reconciliation; never retry `delete_item` or edit the journal.
+After the round's admission/kickoff work and before `end-round`, submit
+`type:"cleanup-plan"` (read-only) with evidence:
+
+- `callingSessionId`: this run's own session ID; `mainCheckoutPath`: the main
+  checkout path; optional `maxDeletions` 1-5 (default 5).
+- `candidates`: one entry per mapped worker to consider, keyed by the exact
+  recorded `sessionId`. A known alternate identifier such as `project_session_id`
+  goes in `aliases`, never in `sessionId`; an alias must not match another mapping.
+- `live` from `get_session`: `found`, `name`, `projectId`, `worktreePath` (normalized
+  `path`), `branch`, and explicit booleans `busy`, `pendingInput`, `agentMerge`,
+  `automation`.
+- `closureReason` for a closed-unmerged PR, and `artifactUrl` for no-PR
+  research/analysis; the runtime re-reads the artifact and compares it with the
+  retained terminal artifact when one exists.
+
+The runtime, not the caller, reads the git and GitHub facts. It canonicalizes the
+recorded worktree path (`realpath`, case-folded) and requires it to stay inside the
+configured worktree root with no symlink redirection and no overlap with the main
+checkout. It then reads `HEAD`, the branch and `git status --porcelain` (tracked and
+untracked) with hooks and fsmonitor disabled. From GitHub it reads every PR for that
+exact head branch and repository, the remote branch ref, and the head's commit
+comparison with `development`. Pushed means the remote ref equals the local `HEAD`,
+or, without a remote branch, that GitHub knows the local `HEAD`. Any caller-supplied
+`worktree`, `prs` or `prsChecked` field is ignored, so an omitted open PR or a false
+clean/pushed claim cannot make a worker eligible. A failed lookup retains the worker.
+
+The delete target is anchored to the settled terminal commitment. At the
+`terminal-reported` receipt the runtime retains the full terminal evidence in the
+mapping, and cleanup requires its digest to equal `assignment.terminalCommitment`
+and its session ID, worktree path and correlation to equal the mapping's. The
+committed evidence also carries a runtime-added `runtimeIdentity` (session ID,
+creation handle and every recorded alias), so removing or replacing a recorded alias
+before intent retains the worker with a manual-cleanup reason. A mapping
+recorded before #2954 has no retained terminal evidence, so it is retained with a
+"clean up manually" reason and is never auto-deleted.
+
+The plan returns `eligible` (bounded, oldest settled first, `deleteAllowed:false`),
+`retained` and `pending` with reasons, and `deleted`. Every mapped worker without
+candidate evidence is retained. Unmapped, role, Ralph/Reaper-named, calling and
+main-checkout sessions are never eligible.
+
+For each eligible item in order, submit `type:"record-deletion-intent"` with
+`data.sessionId` and the same kind of fresh evidence. The runtime re-plans, journals
+the intent (session ID, aliases, assignment, correlation, terminal digest and
+worktree) with fsync, and only then returns `deleteAllowed:true`, `nativeTool` and
+`nativeArguments`. Make exactly that one `delete_item` call. A lost intent response,
+a second intent for the same session, or a failed call never authorizes another.
+Then call `get_session` for the session ID and every returned alias, check whether
+the worktree directory exists, and submit `type:"record-deletion-result"` with
+`data.sessionId`, `lookups:[{id,notFound}]`, `worktree:{path,absent}` and the
+observed `deleteOutcome`. The runtime records the deletion only when every
+identifier is not found, the caller reports the recorded worktree path absent, and
+its own `lstat` of that path also finds nothing. It stores that confirmation with a
+digest; every later read recomputes it, so a record flipped to `deleted` without
+matching not-found lookups for every identifier fails closed. Anything else
+stays pending with its inspection retained; re-inspect it on later rounds and
+report it. Never retry `delete_item` or edit the journal to clear a pending intent.
+
+A recorded deletion keeps the mapping, its terminal proof and retained ancestry.
+Later `ready` calls accept that mapping without live evidence. If the session ID or
+a known alias reappears in any inventory, or a descendant names it as creator,
+readiness fails closed until the owner reconciles it. Report `Sessions retained`
+and `🧹 Ready to reap` every round, including empty headings, with each reason and
+deletion result.
 
 ### Renewal And Never-Delivered Reconciliation
 

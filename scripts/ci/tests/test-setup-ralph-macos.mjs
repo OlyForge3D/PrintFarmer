@@ -35,6 +35,7 @@ async function fixture(t) {
     ['scripts/ci/ralph-mailbox.mjs', '// approved fixture\n'],
     ['scripts/ci/ralph-native-runtime.mjs', '// approved fixture\n'],
     ['scripts/ci/ralph-native-dispatch.mjs', '// approved fixture\n'],
+    ['scripts/ci/ralph-native-cleanup.mjs', '// approved fixture\n'],
     ['scripts/ci/resolve-ios-simulator.sh', '# approved fixture\n'],
     ['scripts/common-utils.sh', '# approved fixture\n'],
   ]) await writeFile(path.join(repo, file), content);
@@ -131,7 +132,38 @@ test('native role dry-run probes exact private repo without queue/native writes'
   await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
 });
 
-function assertNativePrompt(prompt, role) {
+function assertWorkerCleanupPrompt(prompt, role, windows) {
+  assert.match(prompt, /"Sessions retained" and\s+"🧹 Ready to reap"/);
+  if (role === 'consumer' && !windows) {
+    assert.match(prompt, /Worker cleanup \(RALPH-WORKER-CLEANUP-V1\)/);
+    assert.match(prompt, /never archive_session/);
+    const steps = [
+      /type:"cleanup-plan"/,
+      /1\. record-deletion-intent with data\.sessionId/,
+      /2\. Call delete_item exactly once with the returned nativeArguments/,
+      /3\. Read back get_session for the session ID and every alias, and check whether\s+the worktree directory still exists/,
+      /4\. record-deletion-result with lookups, worktree/,
+    ].map((pattern) => prompt.search(pattern));
+    assert.ok(steps.every((index) => index >= 0), 'cleanup steps present');
+    assert.deepEqual([...steps].sort((a, b) => a - b), steps, 'cleanup steps are ordered');
+    assert.match(prompt, /Before ready, inspect every pending deletion intent/);
+    assert.match(prompt, /A lost, failed or unconfirmed result stays pending; never retry/);
+    assert.match(prompt, /Omit workers already recorded as deleted from the ready inventory/);
+    assert.match(prompt, /reappears, readiness fails closed/);
+    assert.match(prompt, /aliases \(project_session_id, never\s+as sessionId\)/);
+    assert.match(prompt, /deletions\.pending/);
+    assert.match(prompt, /caller-supplied git or PR claims are ignored/);
+    assert.ok(prompt.search(/Before ready, inspect every pending deletion intent/) < prompt.search(/type:"cleanup-plan"/),
+      'pending deletions are resolved before ready and before any new plan');
+  } else {
+    assert.match(prompt, /Worker cleanup is report-only for this/);
+    assert.match(prompt, /NEVER call\ndelete_item or archive_session/);
+    assert.doesNotMatch(prompt, /RALPH-WORKER-CLEANUP-V1|Call delete_item exactly once|1\. record-deletion-intent/);
+  }
+}
+
+function assertNativePrompt(prompt, role, windows = false) {
+  assertWorkerCleanupPrompt(prompt, role, windows);
   assert.match(prompt, /Inventory scope is Ralph-owned lineage across rounds, NOT all project sessions/);
   assert.match(prompt, /ownershipScope:"ralph-owned-v1" and lineageChecked:true/);
   assert.match(prompt, /Missing creation ACKs, missing live mapped workers, resumed terminal workers/);
@@ -199,7 +231,7 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.match(settings.prompt, /record-creation/);
     assert.match(settings.prompt, /startup-check/);
     assert.match(settings.prompt, /prestart-proof/);
-    assertNativePrompt(settings.prompt, role);
+    assertNativePrompt(settings.prompt, role, windows);
     assert.equal(await readFile(path.join(path.dirname(f.options['host-config']), 'workflow-prompt.txt'), 'utf8'), `${settings.prompt}\n`);
     assert.equal(host.executionTrust, 'local-owner-v1');
     assert.match(settings.name, new RegExp(role));
@@ -221,6 +253,25 @@ test('native prompt generation rejects a pin without the owned-lineage contract 
   const options = await nativeOptions(f);
   await assert.rejects(f.run({ ...options, 'approved-policy': f.state.development, apply: true }), /lacks Ralph-owned lineage inventory/);
   await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
+});
+
+test('native prompt generation rejects a pin without owning-consumer worker cleanup before writing', async (t) => {
+  for (const change of ['marker', 'module']) {
+    const f = await fixture(t);
+    if (change === 'marker') {
+      await writeFile(path.join(f.repo, '.copilot/skills/ralph-loop/native-roles.md'), nativeRoles.replaceAll('RALPH-WORKER-CLEANUP-V1', 'RALPH-WORKER-CLEANUP-UNAPPROVED'));
+    } else {
+      await rm(path.join(f.repo, 'scripts/ci/ralph-native-cleanup.mjs'));
+    }
+    await f.git(['add', '-A']);
+    await f.git(['commit', '-qm', 'Policy without worker cleanup']);
+    f.state.development = await f.git(['rev-parse', 'HEAD']);
+    f.state.comparison = { status: 'identical', merge_base_commit: { sha: f.state.development }, files: [] };
+    const options = await nativeOptions(f);
+    await assert.rejects(f.run({ ...options, 'approved-policy': f.state.development, apply: true }),
+      change === 'marker' ? /lacks owning-consumer worker cleanup/ : (error) => { assert.match(String(error.stderr ?? error.message), /ralph-native-cleanup\.mjs/); return true; });
+    await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
+  }
 });
 
 test('native prompt generation rejects missing or invalid Ralph Worker definitions before writing', async (t) => {
@@ -311,7 +362,7 @@ test('consumer renewal retains bounded recovery without coordinator label or res
       'previous-host-config': oldPath, 'host-config': newPath,
       'cache-dir': path.join(f.root, 'renewed-cache') }, dependencies);
     const settings = JSON.parse(await readFile(path.join(path.dirname(newPath), 'workflow-settings.json'), 'utf8'));
-    assertNativePrompt(settings.prompt, 'consumer');
+    assertNativePrompt(settings.prompt, 'consumer', windows);
     assert.equal(settings.workflow_id, workflow);
     assert.equal(settings.enabled, false);
     assert.equal(await readFile(path.join(path.dirname(oldPath), 'workflow-prompt.txt'), 'utf8'), oldPrompt);

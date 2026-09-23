@@ -567,6 +567,38 @@ current verified cessation plus retained correlated terminal evidence through
 [native role contract](../.copilot/skills/ralph-loop/native-roles.md).
 Omission, idle, archive status or failed lookup alone never proves cessation.
 
+### Owning-consumer worker cleanup
+
+Worker sessions no longer accumulate indefinitely. Once the coordinator settles an
+assignment, the macOS consumer that owns the mapped worker can delete it with
+`delete_item`. This is a standing, narrowly scoped maintainer authorization that
+the approved policy package delivers. Each consumer round runs the read-only
+`cleanup-plan` runtime request with fresh `get_session` evidence. The runtime reads
+the worktree's `git` state and the branch's GitHub PR state itself and ignores any
+caller-supplied claims about them. The plan returns at most five eligible workers, oldest settled first, and retains every
+other worker with a reason. For each eligible worker, the consumer:
+
+1. Journals `record-deletion-intent` before making any tool call.
+2. Calls `delete_item` exactly once.
+3. Reads back `get_session` for the session ID and every alias, and checks that the
+   worktree directory is gone.
+4. Records the facts with `record-deletion-result`.
+
+Any unconfirmed result stays pending and is never retried. The next round lists it
+in `inspect`'s `deletions.pending` and resolves it before `ready`; any pending
+intent blocks readiness until it is confirmed. A recorded
+deletion keeps its recomputable not-found and absent-worktree proof, and retires the
+mapping from later readiness without live evidence. If the session reappears,
+readiness fails closed. Workers settled before this change have no retained
+terminal session binding, so they are retained with a manual-cleanup reason.
+
+The coordinator, Windows consumers and every non-Ralph session stay report-only;
+porting the old Session Reaper is a separate follow-up. The
+[cleanup rules](../.copilot/skills/ralph-loop/cleanup.md) and
+[native role contract](../.copilot/skills/ralph-loop/native-roles.md) define
+eligibility and the request fields. Adopting this change requires the usual
+policy review and explicit interactive renewal of existing packages.
+
 This scope correction changes controlled runtime/policy files. Existing packages
 must undergo the documented immutable policy review and explicit interactive
 renewal before adopting it. Do not merely filter old-runtime evidence or patch
@@ -826,5 +858,6 @@ node --test scripts/ci/tests/test-setup-ralph-macos.mjs \
   scripts/ci/tests/test-ralph-automation.mjs \
   scripts/ci/tests/test-ralph-host-capacity.mjs \
   scripts/ci/tests/test-ralph-mailbox.mjs \
+  scripts/ci/tests/test-ralph-native-cleanup.mjs \
   scripts/ci/tests/test-ralph-github-snapshot.mjs
 ```
