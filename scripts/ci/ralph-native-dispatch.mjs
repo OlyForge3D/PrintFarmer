@@ -125,9 +125,15 @@ export function validateStartup(plan, evidence) {
   const packet = plan.packet;
   validatePacketAck(packet, ack);
   if (ack.substantiveWorkStarted !== false || ack.noChildren !== true) fail('Startup-only ACK with no children required.');
-  if (ack.initialHeadSha !== packet.headSha ||
-      typeof evidence.session?.branch !== 'string' || !evidence.session.branch ||
-      ack.actualBranch !== evidence.session.branch) fail('Initial worker HEAD/branch must match the packet and native readback; reconcile movement before work.');
+  if (ack.initialHeadSha !== packet.headSha) {
+    fail('Initial worker HEAD must match the packet; reconcile movement on the same child before work.');
+  }
+  if (typeof evidence.session?.branch !== 'string' || !evidence.session.branch) {
+    fail('startup-check requires evidence.session.branch from native readback; correct the missing observation on the same child, not a replacement creation.');
+  }
+  if (ack.actualBranch !== evidence.session.branch) {
+    fail('Worker ACK actualBranch differs from native session.branch; reconcile movement on the same child before work.');
+  }
   if (packet.pr && evidence.currentPrHeadSha !== packet.headSha) {
     fail('Fresh PR head changed or is unavailable at startup; reconcile before substantive delivery.');
   }

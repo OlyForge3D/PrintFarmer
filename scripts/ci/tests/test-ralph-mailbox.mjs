@@ -140,6 +140,12 @@ test('dispatch separates native Ralph Worker agent, Squad charter owner, categor
   }
   assert.throws(() => validateStartup(plan, { ...ack,
     startupAck: { ...ack.startupAck, initialHeadSha: 'b'.repeat(40) } }), /Initial worker HEAD/);
+  for (const branch of [undefined, '']) {
+    assert.throws(() => validateStartup(plan, { ...ack, session: { branch } }),
+      /requires evidence.session.branch.*same child/);
+  }
+  assert.throws(() => validateStartup(plan, { ...ack, session: { branch: 'different-worker' } }),
+    /actualBranch differs from native session.branch/);
   for (const change of [
     { startupAck: { ...ack.startupAck, member: 'lambert' } },
     { startupAck: { ...ack.startupAck, actualReasoningEffort: 'medium' } },

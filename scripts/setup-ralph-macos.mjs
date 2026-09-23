@@ -498,7 +498,10 @@ Fix malformed request fields; rejected blocker writes are not persisted blockers
 Record every returned creation handle with record-creation, including partial
 failures, before attempting startup recovery. Never retry creation.
 Use startup-check on the same child and its actual startup-only ACK; send only the
-returned continuation once. A failed kickoff's requested model/effort is NOT proof
+returned continuation once. Include native readback session.id, projectId,
+worktreePath AND branch in startup-check evidence. Missing branch is malformed
+evidence: correct it from get_session on the SAME child, never recreate.
+A failed kickoff's requested model/effort is NOT proof
 of persisted configuration. Successful native creation establishes accepted settings,
 not independently observed runtime settings; preserve that evidence distinction.
 On research completion, persist findings once on the issue and read back the comment,

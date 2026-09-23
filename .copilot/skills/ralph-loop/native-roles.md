@@ -560,7 +560,13 @@ Then record actual normalized native readback (`session`, `repository`,
 project/worktree; it is not permission to replace the workspace.
 
 The worker initially returns startup-only ACK and stops. Submit `startup-check`
-with the exact binding, same session, plan digest and `startupAck`: packet
+with the exact binding, same session, plan digest and `startupAck`.
+`evidence.session` must include actual native-readback `id`, normalized
+`projectId`, `worktreePath`, and **`branch`**. Preserve the branch returned by
+`get_session`; the create result's handle/path alone is not a complete startup
+readback. A missing branch is malformed evidence, not proof of worker movement:
+correct the observation on the same child, never recreate it.
+The `startupAck` must contain packet
 `assignmentId`, `generation`, `taskDigest`, `correlation`, `member`,
 `charterSha256` and **every other packet field unchanged**, including policy,
 repository/head/ref, purpose/category and configured model/effort. Also require
