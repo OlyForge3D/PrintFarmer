@@ -249,10 +249,10 @@ export async function planWorkerCleanup({ config, evidence, journal, state, now,
 }
 
 export async function recordDeletionIntent({ request, ...context }) {
+  requireCleanupRole(context.config);
   const sessionId = request.data?.sessionId;
   const { journal, state } = context;
-  journal.deletions ??= {};
-  const existing = journal.deletions[sessionId];
+  const existing = journal.deletions?.[sessionId];
   if (existing) {
     deletionLedger(journal, state);
     fail(existing.status === 'deleted'
@@ -262,6 +262,7 @@ export async function recordDeletionIntent({ request, ...context }) {
   const plan = await planWorkerCleanup({ ...context, roundId: request.roundId });
   const item = plan.eligible.find((entry) => entry.sessionId === sessionId);
   if (!item) fail('Session is not eligible for deletion in a fresh cleanup plan.');
+  journal.deletions ??= {};
   journal.deletions[sessionId] = {
     status: 'pending', sessionId, aliases: item.aliases, correlation: item.correlation,
     assignmentId: item.assignmentId, terminalEvidenceDigest: item.terminalEvidenceDigest,

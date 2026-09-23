@@ -964,6 +964,41 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
     sessions.push({ ...session, creatorSessionId: creatorId, nativeReadbackVerified: true, terminalVerified: true });
     const renewed = await run(consumer, w, 'ready', { evidence: inventory() });
     assert.deepEqual(renewed.state.availability.mini.remaining, { mobile: 1, general: 4 });
+    if (issue === 100) {
+      const later = now + 16 * 60_000;
+      const cleanupEvidence = (at, extra = {}) => ({ observedAt: new Date(at).toISOString(),
+        source: 'fixture get_session, git status/rev-list and gh pr list readback',
+        callingSessionId: creatorId, mainCheckoutPath: '/Volumes/data/src/pfarm1', candidates: [{
+          sessionId: session.id,
+          live: { found: true, name: 'research 100', worktreePath: session.worktreePath, branch: session.branch,
+            busy: false, pendingInput: false, agentMerge: false, automation: false },
+          worktree: { path: session.worktreePath, branch: session.branch, exists: true, gitPresent: true,
+            porcelainEmpty: true, unpushedCommits: 0, commitsAheadOfDevelopment: 0, remoteBranchExists: false },
+          prsChecked: true, prs: [], artifactUrl,
+        }], ...extra });
+      const cleanup = (config, round, type, extra) => runNativeRequest(config, {
+        ...round, type, id: `cleanup-${++next}`, data: { sessionId: session.id }, ...extra,
+      }, { ...dependencies, now: later });
+      await assert.rejects(cleanup(coordinator, c, 'cleanup-plan', { evidence: cleanupEvidence(later) }), /coordinator never deletes/);
+      const early = await run(consumer, w, 'cleanup-plan', { evidence: cleanupEvidence(now) });
+      assert.deepEqual(early.eligible, []);
+      assert.ok(early.retained[0].reasons.includes('settling period has not elapsed'));
+      const plan = await cleanup(consumer, w, 'cleanup-plan', { evidence: cleanupEvidence(later) });
+      assert.deepEqual(plan.eligible.map((item) => item.sessionId), [session.id]);
+      assert.equal(plan.deleteAllowed, false);
+      const intent = await cleanup(consumer, w, 'record-deletion-intent', { evidence: cleanupEvidence(later) });
+      assert.equal(intent.deleteAllowed, true);
+      assert.deepEqual({ tool: intent.nativeTool, arguments: intent.nativeArguments }, { tool: 'delete_item', arguments: { id: session.id } });
+      await assert.rejects(cleanup(consumer, w, 'record-deletion-intent', { evidence: cleanupEvidence(later) }), /already pending/);
+      const lookup = (notFound, absent) => ({ observedAt: new Date(later).toISOString(), source: 'fixture get_session and worktree stat',
+        lookups: [{ id: session.id, notFound }], worktree: { path: session.worktreePath, absent }, deleteOutcome: 'unknown' });
+      assert.equal((await cleanup(consumer, w, 'record-deletion-result', { evidence: lookup(true, false) })).pending, true);
+      assert.equal((await cleanup(consumer, w, 'record-deletion-result', { evidence: lookup(true, true) })).confirmed, true);
+      await assert.rejects(run(consumer, w, 'ready', { evidence: inventory() }), /reappeared/);
+      sessions.pop();
+      const afterDeletion = await run(consumer, w, 'ready', { evidence: inventory() });
+      assert.deepEqual(afterDeletion.state.availability.mini.remaining, { mobile: 1, general: 4 });
+    }
     await run(consumer, w, 'end-round');
     await run(coordinator, c, 'end-round');
   }
@@ -1376,6 +1411,41 @@ test('archived ancestry-only creator needs no live worktree or role exemption', 
   assert.equal(f.prepare().event.data.unassignedSessions, 0);
   f.request.evidence.sessions.push({ id: parent, archived: true, path: '', creatorSessionId: id });
   assert.throws(f.prepare, /Conflicting retained native ancestry/);
+});
+
+test('a journal-verified deletion retires a settled mapped worker without live evidence and fails closed on reappearance', () => {
+  const id = 'dddddddd-1111-4222-8333-444444444444';
+  const projectAlias = 'eeeeeeee-1111-4222-8333-444444444444';
+  const terminalEvidenceDigest = digest('retained final delivery ACK');
+  const f = ownedInventoryFixture();
+  f.state.assignments.earlier = { assignmentId: 'earlier', workerId: 'mini', state: 'terminal', correlation: 'previous-round',
+    terminalCommitment: terminalEvidenceDigest,
+    receipts: [{ status: 'terminal-reported', correlation: 'previous-round', evidenceDigest: terminalEvidenceDigest,
+      observedAt: new Date(now - 3_600_000).toISOString() }] };
+  f.journal.sessions['previous-round'] = { assignmentId: 'earlier', sessionId: id, lastEvidenceDigest: terminalEvidenceDigest,
+    worktreePath: '/worktrees/deleted' };
+  const record = { status: 'deleted', sessionId: id, aliases: [projectAlias], correlation: 'previous-round',
+    assignmentId: 'earlier', terminalEvidenceDigest, worktreePath: '/worktrees/deleted', inspections: [] };
+  assert.throws(f.prepare, /Every retained Ralph native mapping/);
+  f.journal.deletions = { [id]: { ...record, status: 'pending' } };
+  assert.throws(f.prepare, /Every retained Ralph native mapping/);
+  f.journal.deletions[id] = record;
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
+  for (const reappeared of [{ id, terminalVerified: true }, { id: projectAlias }, { id,
+    retirementObservation: { status: 'deleted' } }]) {
+    f.request.evidence.sessions = [reappeared];
+    assert.throws(f.prepare, /Deleted Ralph worker .* reappeared/);
+  }
+  f.request.evidence.sessions = [{ id: 'ffffffff-1111-4222-8333-444444444444', creatorSessionId: id }];
+  assert.throws(f.prepare, /Descendant of a deleted Ralph worker/);
+  f.request.evidence.sessions = [];
+  for (const change of [{ terminalEvidenceDigest: digest('forged') }, { sessionId: projectAlias }, { correlation: 'other' }]) {
+    f.journal.deletions[id] = { ...record, ...change };
+    assert.throws(f.prepare, /deletion record/);
+  }
+  f.journal.deletions[id] = record;
+  f.state.assignments.earlier.state = 'terminal-reported';
+  assert.throws(f.prepare, /deletion record/);
 });
 
 test('research artifact hashes parsed JSON body bytes including real newlines and Unicode', async () => {
