@@ -4,6 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { digest } from './ralph-mailbox.mjs';
 import { assessCleanupCandidate } from './ralph-round-cache.mjs';
+import { canonicalPath, strictlyWithin } from './ralph-worktree-path.mjs';
 
 // Owning-consumer deletion of its own settled Ralph workers (#2954). The plan is
 // read-only; deletion intent is journaled before delete_item and a retirement is
@@ -19,11 +20,7 @@ const digestPattern = /^[0-9a-f]{64}$/;
 const rolePrefix = /^\s*(ralph|reaper)/i;
 const fail = (message) => { throw new Error(`Native Ralph blocked: ${message}`); };
 
-function withinRoot(root, target) {
-  if (!path.isAbsolute(root ?? '') || !path.isAbsolute(target ?? '') || path.normalize(target) !== target) return false;
-  const relative = path.relative(root, target);
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-}
+const normalizedAbsolute = (target) => path.isAbsolute(target ?? '') && path.normalize(target) === target;
 
 export function requireCleanupRole(config) {
   if (config.role !== 'consumer' || typeof config.host !== 'string' || !config.host.startsWith('macos-')) {
@@ -169,7 +166,8 @@ const git = promisify(execFile);
 
 // Runtime-owned local readback of the recorded worktree. Canonical paths defeat
 // symlink/case aliases; fsmonitor and hooks are disabled so a worker-controlled
-// config cannot run code during inspection.
+// config cannot run code during inspection. The target is re-resolved after
+// inspection; a path that changed identity meanwhile reports no canonicalPath.
 export const defaultCleanupProbe = {
   async canonical(target) {
     try { return await realpath(target); } catch { return undefined; }
@@ -180,34 +178,40 @@ export const defaultCleanupProbe = {
   async worktree(target) {
     const canonicalPath = await defaultCleanupProbe.canonical(target);
     if (!canonicalPath) return { exists: false };
-    const gitPresent = await lstat(path.join(target, '.git')).then(() => true, () => false);
+    const gitEntry = await lstat(path.join(canonicalPath, '.git')).catch(() => undefined);
+    const gitPresent = Boolean(gitEntry);
     if (!gitPresent) return { exists: true, canonicalPath, gitPresent };
+    // A linked worktree's .git is a file; a directory is a main checkout.
+    if (gitEntry.isDirectory()) return { exists: true, canonicalPath, gitPresent, gitDirectory: true };
     const run = async (args) => (await git('git', ['-c', 'core.fsmonitor=false', '-c', 'core.hooksPath=/dev/null',
-      '-C', target, ...args], { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })).stdout;
+      '-C', canonicalPath, ...args], { encoding: 'utf8', timeout: 60_000, maxBuffer: 8 * 1024 * 1024 })).stdout;
+    let facts;
     try {
       const [headSha, branch, porcelain] = await Promise.all([run(['rev-parse', '--verify', 'HEAD']),
         run(['symbolic-ref', '--quiet', '--short', 'HEAD']), run(['status', '--porcelain=v1', '--untracked-files=all'])]);
-      return { exists: true, canonicalPath, gitPresent, headSha: headSha.trim(), branch: branch.trim(), porcelain };
-    } catch { return { exists: true, canonicalPath, gitPresent, gitFailed: true }; }
+      facts = { exists: true, canonicalPath, gitPresent, headSha: headSha.trim(), branch: branch.trim(), porcelain };
+    } catch { facts = { exists: true, canonicalPath, gitPresent, gitFailed: true }; }
+    return await defaultCleanupProbe.canonical(target) === canonicalPath ? facts : { exists: true, gitPresent, gitFailed: true };
   },
 };
 
-const within = (root, target) => {
-  const relative = path.relative(root, target);
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-};
+const within = (root, target) => strictlyWithin(root, target);
 
-// Canonical containment: inside the configured worktree root with no symlink
-// redirection, and never the main checkout, its ancestor or its descendant.
-async function pathReasons(config, worktreePath, facts, evidence, probe) {
+// Canonical containment: inside the canonical worktree root, its final
+// component not a symlink redirecting to another directory, and never the main
+// checkout, its ancestor or its descendant. The root and the recorded path may
+// each be spelled through a symlinked alias; only realpath forms are compared.
+async function pathReasons(config, worktreePath, actual, evidence, probe) {
   const root = await probe.canonical(config.worktreeRoot);
   const main = await probe.canonical(evidence.mainCheckoutPath) ?? evidence.mainCheckoutPath;
-  const actual = facts.canonicalPath;
-  if (!root || !actual) return ['canonical worktree path is unknown'];
-  const [froot, fmain, factual] = [fold(root), fold(main), fold(actual)];
+  const parent = await probe.canonical(path.dirname(worktreePath));
+  if (!root || !actual || !parent) return ['canonical worktree path is unknown'];
+  // Containment compares realpath forms exactly; only the main-checkout overlap
+  // (a rejection) also folds case, which can only retain more.
+  const fmain = fold(main);
   const overlapsMain = (value) => value === fmain || within(value, fmain) || within(fmain, value);
-  if (!within(froot, factual) || path.relative(froot, factual) !== path.relative(fold(config.worktreeRoot), fold(worktreePath)) ||
-      overlapsMain(factual) || overlapsMain(fold(worktreePath)) || fold(worktreePath) === fold(evidence.mainCheckoutPath)) {
+  if (!within(root, actual) || actual !== path.join(parent, path.basename(worktreePath)) ||
+      overlapsMain(fold(actual)) || overlapsMain(fold(worktreePath)) || fold(worktreePath) === fold(evidence.mainCheckoutPath)) {
     return ['canonical worktree path escapes the isolated worktree root or aliases the main checkout'];
   }
   return [];
@@ -278,13 +282,29 @@ async function evaluate(config, candidate, mapping, correlation, proof, context)
     ['agentMerge', 'Agent merge is active or unknown'], ['automation', 'session automation is attached or unknown']]) {
     if (live[flag] !== false) reasons.push(reason);
   }
+  // Identity is the recorded canonical path, immutable: the native app may
+  // report the worker through a symlinked alias, but the recorded path itself is
+  // never re-resolved into a different worktree.
   const worktreePath = mapping.worktreePath;
-  if (!withinRoot(config.worktreeRoot, worktreePath) || live.worktreePath !== worktreePath) {
+  const canonical = normalizedAbsolute(worktreePath) ? await probe.canonical(worktreePath) : undefined;
+  const liveCanonical = normalizedAbsolute(live.worktreePath) ? await probe.canonical(live.worktreePath) : undefined;
+  if (!normalizedAbsolute(worktreePath) || !(live.worktreePath === worktreePath || liveCanonical === worktreePath)) {
     reasons.push('worktree path does not match the recorded isolated worker worktree');
   }
-  const facts = await probe.worktree(worktreePath);
-  if (facts.exists !== true || facts.gitPresent !== true) reasons.push('worktree or its .git is missing');
-  else reasons.push(...await pathReasons(config, worktreePath, facts, evidence, probe));
+  let facts = { exists: false };
+  const escaped = canonical ? await pathReasons(config, worktreePath, canonical, evidence, probe) : [];
+  const drifted = canonical !== undefined && canonical !== worktreePath;
+  if (escaped.length) reasons.push(...escaped);
+  if (drifted) reasons.push('recorded worktree no longer resolves to its recorded canonical path; clean up manually');
+  else if (!escaped.length && canonical) {
+    facts = await probe.worktree(canonical);
+    if (facts.exists === true && facts.canonicalPath !== canonical) {
+      reasons.push('worktree identity changed during inspection');
+      facts = { exists: true, gitPresent: facts.gitPresent, gitFailed: true };
+    }
+  }
+  if (!escaped.length && !drifted && (facts.exists !== true || facts.gitPresent !== true)) reasons.push('worktree or its .git is missing');
+  else if (facts.gitDirectory === true) reasons.push('canonical worktree path escapes the isolated worktree root or aliases the main checkout');
   const gitKnown = facts.gitPresent === true && !facts.gitFailed && shaPattern.test(facts.headSha ?? '') &&
     branchPattern.test(facts.branch ?? '') && !/(?:\.\.|\/\/|\.lock(?:\/|$)|\/$|\.$)/.test(facts.branch) &&
     typeof facts.porcelain === 'string';
@@ -468,13 +488,17 @@ export async function recordDeletionResult({ config, request, evidence, journal,
     .map((id) => [id, lookupOutcome(lookups.get(id), sessionId)]));
   const retired = identifiers.every((id) => outcomes.has(id) && outcomes.get(id) !== 'unconfirmed');
   const runtimeWorktreeAbsent = await probe.absent(record.worktreePath);
+  // The caller may report the absent worktree by its native alias spelling.
+  const reportedPath = normalizedAbsolute(evidence.worktree?.path) &&
+    await canonicalPath(evidence.worktree.path).catch(() => undefined) === record.worktreePath
+    ? record.worktreePath : evidence.worktree?.path;
   const confirmation = { observedAt: evidence.observedAt, source: evidence.source,
     lookups: identifiers.map((id) => (lookups.has(id) ? { ...lookups.get(id), outcome: outcomes.get(id) } : { id, outcome: 'unchecked' })),
-    worktree: { path: evidence.worktree?.path, absent: evidence.worktree?.absent === true },
+    worktree: { path: reportedPath, absent: evidence.worktree?.absent === true },
     runtimeWorktreeAbsent, deleteOutcome: evidence.deleteOutcome,
     outcome: retired ? retirementOutcome([...outcomes.values()]) : 'unconfirmed' };
   const confirmed = retired &&
-    evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent === true;
+    reportedPath === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent === true;
   const inspection = { observedAt: evidence.observedAt, evidenceDigest: digest(confirmation), requestId: request.id,
     deleteOutcome: evidence.deleteOutcome, runtimeWorktreeAbsent, outcome: confirmation.outcome, confirmed };
   if (!confirmed) {
@@ -482,7 +506,7 @@ export async function recordDeletionResult({ config, request, evidence, journal,
     return { dispatchAuthorized: false, deleteAllowed: false, confirmed: false, pending: true, sessionId,
       stillPresent: identifiers.filter((id) => outcomes.get(id) === 'unconfirmed'),
       unchecked: identifiers.filter((id) => !lookups.has(id)),
-      worktreeAbsent: evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent,
+      worktreeAbsent: reportedPath === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent,
       message: 'Deletion is unconfirmed and remains pending. Inspect again on a later round; never retry delete_item.' };
   }
   record.status = 'deleted';

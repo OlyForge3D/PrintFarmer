@@ -326,7 +326,7 @@ export async function validatePolicy(options, command, development) {
     if (!rolePrompt.includes('ownershipScope:"ralph-owned-v1"')) throw new Error('Approved policy lacks Ralph-owned lineage inventory; review and renew the policy before generating native prompts.');
     if (!rolePrompt.includes('RALPH-ASSIGNED-WORKER-V1')) throw new Error('Approved policy lacks bounded specialist dispatch; renew before generating native prompts.');
     if (!rolePrompt.includes('RALPH-WORKER-CLEANUP-V1')) throw new Error('Approved policy lacks owning-consumer worker cleanup; review and renew the policy before generating native prompts.');
-    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs', 'ralph-native-cleanup.mjs']) {
+    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs', 'ralph-native-cleanup.mjs', 'ralph-worktree-path.mjs']) {
       await git(['cat-file', '-e', `${approved}:scripts/ci/${file}`]);
     }
     const workerAgent = await git(['show', `${approved}:.github/agents/ralph-worker.agent.md`]);
@@ -497,6 +497,8 @@ Inventory scope is Ralph-owned lineage across rounds, NOT all project sessions.
 For ready, supply ownershipScope:"ralph-owned-v1" and lineageChecked:true only
 after reconciling this worker's retained creation/delivery intents, mapped workers,
 verified role roots and descendants through actual native readback/history.
+Report every worktreePath exactly as get_session returns it; the runtime compares
+realpath forms, so a symlinked alias of worktreeRoot is the same worktree.
 Normalize creator_session_id to session.creatorSessionId and retain ancestor
 readbacks. Unrelated maintainer and other-automation sessions consume no Ralph
 slots and need no terminal attestation. Do not adopt, archive or mutate them.
@@ -524,8 +526,26 @@ on macOS. Always supply explicit scope and classificationComplete for reservatio
 general capability alone is NOT general quota classification. Unknown/mixed work
 still counts mobile. Do not reclassify existing reservations to reclaim credit.
 Before ready, reconcile never-started old-policy assignments using prestart-proof;
-send the exact generated proof through report-blocker and to the coordinator.
-Coordinator verifies the committed proof digest, then withdraws only that binding.
+submit the exact generated proof as report-blocker evidence. The runtime publishes
+it in the mailbox blocker; never relay it through the owner or a session message.
+Coordinator withdraws only that binding from the published blocker alone.
+TASK PACKETS (#2958): coordinator reserve re-reads the live GitHub issue and
+publishes the exact normalized task packet (title, labels, acceptanceCriteria,
+files, scope, classification, capabilities, headSha, body digest) with the digests.
+Consumers submit dispatch-plan and starting evidence WITHOUT task facts: only
+observedAt, source, holdsChecked, ownershipReconciled and nativeCapabilities.
+The runtime verifies the packet against requirementsDigest/fileKeys/taskDigest
+and a fresh GitHub readback. A missing packet (native-evidence-missing), a changed
+title/labels/body (task-changed) or a new hold (held) fails closed: report-blocker
+with prestart-proof so the coordinator withdraws and re-reserves. Never ask the
+owner to relay coordinator evidence and never re-author task facts.
+Packet acceptanceCriteria, scope and files are public text: reserve rejects
+local paths, native IDs/UUIDs and credentials. startup-check re-reads the issue
+before the first continuation; task-changed or held there means keep the child
+startup-only and report-blocker. For existing-PR recovery the runtime reads
+prWorkerPolicyDigest from the PR head on GitHub; never compute or supply it.
+A pre-#2958 digest-only blocker gets a fresh prestart-proof (alreadyReported
+false): report-blocker with it so the full proof is published.
 Do not repeatedly revoke a refreshed offer for the same already-reported blocker.
 Publish fresh ready AFTER recovery reports; do not infer credits from revoked offers.
 For kickoff use dispatch-plan and the plan returned by the successful starting
@@ -546,6 +566,11 @@ Use startup-check on the same child and its actual startup-only ACK; send only t
 returned continuation once. Include native readback session.id, projectId,
 worktreePath AND branch in startup-check evidence. Missing branch is malformed
 evidence: correct it from get_session on the SAME child, never recreate.
+Pass the native worktreePath verbatim, never realpath it yourself: the runtime
+canonicalizes symlinked aliases of worktreeRoot, stores the canonical path and
+rejects escapes and main-checkout aliases. If startup-check says to submit
+record-creation first, resubmit record-creation with the original creation handle
+and the SAME child's readback in this or a later round, then startup-check again.
 A failed kickoff's requested model/effort is NOT proof
 of persisted configuration. Successful native creation establishes accepted settings,
 not independently observed runtime settings; preserve that evidence distinction.
@@ -556,6 +581,16 @@ and terminal evidence; never build long IDs by concatenating packet fields.
 Use its SHA-256 of parsed API body bytes; never hash gh --jq or jq -r stdout.
 The same-child final ACK must include artifactUrl, artifactBodyDigest and
 artifactReadbackVerified:true. Terminal submission rechecks live body bytes.
+Implementation work reads back its same-repository PR the same way (artifactUrl
+is the PR URL); the final ACK echoes artifactUrl, artifactHeadSha and
+artifactReadbackVerified:true, and the terminal receipt publishes that artifact.
+Coordinator release re-reads the published artifact itself: an open PR stays
+retained, a merged PR needs Closes #issue and a REVIEWED/APPROVE (owner)
+squad/pre-pr-verdict at that exact head from a trusted squad-review-verdict run,
+a closed unmerged PR needs closureReason. Settle binds the terminal receipt and
+artifact digests, so a replacement receipt after verification rejects it.
+An issue worker's initial HEAD may be a newer development commit; report it as
+startupAck.initialHeadSha and the runtime verifies descent on GitHub.
 obtain the same child's explicit final-delivery ACK, then terminal-report and settle.
 Do not leave findings only in chat or label research as completed implementation.
 Coordinator appends a concise summary/decision/implementation plan and the findings
@@ -646,7 +681,8 @@ Use list_projects, list_workflows, get_session and live session inventory to ver
 repository, actual destination project/workflow/environment and the disabled state.
 Use the native automation editor/environment picker if the tools cannot discover an
 environment ID. Do not infer that source ID "local" denotes this destination.
-Verify an app-created isolated worktree's actual parent equals worktreeRoot.
+Verify an app-created isolated worktree's canonical (realpath) parent equals worktreeRoot;
+the app may report it through a symlinked alias of that directory.
 Confirm Copilot app sign-in/entitlement and selected model availability natively.
 Verify repository access uses the intended account ${options['github-login']}.
 No app database edits, undocumented endpoints, exported sessions or token copying.

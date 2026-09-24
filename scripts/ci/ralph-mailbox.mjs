@@ -108,6 +108,101 @@ function validateTask(task) {
       !Array.isArray(task.capabilities) || task.capabilities.some((key) => !idPattern.test(key))) fail('Exact task/head, complete file digests and requirements required.');
 }
 
+export const taskPacketVersion = 'ralph-task-packet-v1';
+export const prestartProofSource = 'native-runtime-prestart-proof-v1';
+const repositoryName = 'OlyForge3D/PrintFarmer';
+const maxPacketBytes = 64 * 1024;
+const packetKeys = ['version', 'repository', 'issue', 'pr', 'purpose', 'headSha', 'title', 'labels',
+  'acceptanceCriteria', 'files', 'scope', 'classificationComplete', 'capabilities', 'sourceBodySha256'];
+const text = (value, max) => typeof value === 'string' && value.length <= max && !/[\u0000]/.test(value);
+// Coordinator-authored free text is not verified against public GitHub facts, so it
+// must not carry local paths, native/session UUIDs or recognizable credentials.
+const privateTextPattern = new RegExp([
+  /(?:^|[^A-Za-z0-9._-])\/(?:Users|home|root|private|var\/folders|Volumes)\//.source,
+  /(?:^|[^A-Za-z0-9._-])~[\\/]/.source, /(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]/.source,
+  /(?:^|[^A-Za-z0-9\\])\\\\[A-Za-z0-9._-]+[\\/]/.source, /(?:^|[^A-Za-z0-9:\\/])\/\/[A-Za-z0-9._-]+\//.source,
+  /\.printfarmer-ralph/.source, /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/.source,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,})/.source,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/.source,
+].join('|'), 'i');
+
+export function hasHeldLabel(labels) {
+  return Array.isArray(labels) && labels.some((label) => heldLabels.has(String(label).toLowerCase()));
+}
+
+// The exact normalized facts behind a reservation's digests. Only public issue
+// facts and repository-relative paths are allowed: never local paths or native IDs.
+export function validateTaskPacket(packet) {
+  exact(packet, packetKeys);
+  if (packet.version !== taskPacketVersion || packet.repository !== repositoryName ||
+      !['research', 'analysis', 'implementation', 'recovery'].includes(packet.purpose) ||
+      !shaPattern.test(packet.headSha ?? '') || !digestPattern.test(packet.sourceBodySha256 ?? '') ||
+      (packet.issue !== undefined && (!Number.isSafeInteger(packet.issue) || packet.issue < 1)) ||
+      (packet.pr !== undefined && (!Number.isSafeInteger(packet.pr) || packet.pr < 1)) ||
+      (packet.issue === undefined && packet.pr === undefined) ||
+      !text(packet.title, 1024) || !text(packet.scope, 64) ||
+      typeof packet.classificationComplete !== 'boolean' ||
+      !Array.isArray(packet.labels) || packet.labels.some((label) => !text(label, 256)) ||
+      !Array.isArray(packet.acceptanceCriteria) || packet.acceptanceCriteria.some((item) => !text(item, 8192)) ||
+      !Array.isArray(packet.capabilities) || packet.capabilities.some((key) => typeof key !== 'string' || !idPattern.test(key)) ||
+      !Array.isArray(packet.files) || !packet.files.length ||
+      packet.files.some((file) => !text(file, 1024) || /^(?:[A-Za-z]:|~|[\\/])/.test(file) ||
+        /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(file)) ||
+      Buffer.byteLength(JSON.stringify(packet)) > maxPacketBytes) fail('Invalid task packet: exact public task facts and repository-relative files only.');
+  if ([...packet.acceptanceCriteria, packet.scope, ...packet.files].some((value) => privateTextPattern.test(value))) {
+    fail('Invalid task packet: acceptance criteria, scope and files must not contain local paths, native IDs or credentials.');
+  }
+  return packet;
+}
+
+export function taskPacketFromEvidence(evidence, sourceBodySha256) {
+  const task = taskFromEvidence(evidence);
+  const packet = {
+    version: taskPacketVersion, repository: repositoryName,
+    ...(evidence.issue ? { issue: evidence.issue } : {}), ...(evidence.pr ? { pr: evidence.pr } : {}),
+    purpose: task.purpose, headSha: evidence.headSha, title: evidence.title,
+    labels: [...evidence.labels], acceptanceCriteria: [...evidence.acceptanceCriteria], files: [...evidence.files],
+    scope: evidence.scope, classificationComplete: evidence.classificationComplete,
+    capabilities: [...evidence.capabilities], sourceBodySha256,
+  };
+  validateTaskPacket(packet);
+  if (digest(taskFromPacket(packet)) !== digest(task)) fail('Task packet cannot reproduce its task identity.');
+  return packet;
+}
+
+export function taskFromPacket(packet) {
+  validateTaskPacket(packet);
+  const { version, sourceBodySha256, repository, ...facts } = packet;
+  return taskFromEvidence({ ...facts, filesComplete: true });
+}
+
+function validatePrestartProof(proof, assignment, workerId, evidenceDigest) {
+  exact(proof, ['source', 'observedAt', 'assignmentId', 'generation', 'taskDigest', 'workerId', 'mailboxHead', 'consumerJournalDigest']);
+  if (proof.source !== prestartProofSource || !Number.isFinite(Date.parse(proof.observedAt)) ||
+      proof.assignmentId !== assignment.assignmentId || proof.generation !== assignment.generation ||
+      proof.taskDigest !== assignment.taskDigest || proof.workerId !== workerId || assignment.workerId !== workerId ||
+      !shaPattern.test(proof.mailboxHead ?? '') || !digestPattern.test(proof.consumerJournalDigest ?? '') ||
+      digest(proof) !== evidenceDigest || !['reserved', 'published'].includes(assignment.state) ||
+      assignment.receipts.length) fail('Published prestart proof must be the exact never-started proof committed by this blocker.');
+}
+
+export function validateTerminalArtifact(artifact, task) {
+  const subject = task.issue ?? task.pr;
+  if (artifact?.kind === 'issue-comment') {
+    exact(artifact, ['kind', 'url', 'bodyDigest']);
+    if (!new RegExp(`^https://github\\.com/${repositoryName}/issues/${subject}#issuecomment-[0-9]+$`).test(artifact.url ?? '') ||
+        !digestPattern.test(artifact.bodyDigest ?? '')) fail('Issue-comment artifact must be a read-back comment on the assigned issue.');
+  } else if (artifact?.kind === 'pull-request') {
+    exact(artifact, ['kind', 'url', 'number', 'headSha']);
+    if (!['implementation', 'recovery'].includes(task.purpose) || !Number.isSafeInteger(artifact.number) || artifact.number < 1 ||
+        artifact.url !== `https://github.com/${repositoryName}/pull/${artifact.number}` ||
+        (task.pr !== undefined && artifact.number !== task.pr) || !shaPattern.test(artifact.headSha ?? '')) {
+      fail('Pull-request artifact must be the exact same-repository PR and head for implementation work.');
+    }
+  } else fail('Unknown terminal artifact kind.');
+  return artifact;
+}
+
 export function applyEvent(previous, event, { now = Date.now(), replay = false } = {}) {
   exact(event, ['id', 'type', 'authorityId', 'epoch', 'role', 'workerId', 'roundId', 'observedAt', 'data']);
   identifier(event.id); identifier(event.roundId);
@@ -205,11 +300,15 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
       }
       case 'reserve': {
         coordinator();
-        exact(data, ['assignmentId', 'workerId', 'task', 'generation', 'eligibilityDigest', 'policySha', 'offerId']);
+        exact(data, ['assignmentId', 'workerId', 'task', 'generation', 'eligibilityDigest', 'policySha', 'offerId', 'taskPacket']);
         identifier(data.assignmentId);
         if (data.generation !== 1 || state.assignments[data.assignmentId] ||
             !digestPattern.test(data.eligibilityDigest ?? '') || !shaPattern.test(data.policySha ?? '')) fail('New exact reservation required; never reuse assignment IDs.');
         validateTask(data.task);
+        // Optional and versioned: historical packetless reservations replay unchanged.
+        if (data.taskPacket !== undefined && digest(taskFromPacket(data.taskPacket)) !== digest(data.task)) {
+          fail('task-packet-tampered: published task packet does not reproduce the reserved task digest.');
+        }
         const worker = workerFor(state, data.workerId);
         const offer = state.availability?.[data.workerId];
         if (data.offerId !== undefined) {
@@ -253,9 +352,10 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
       case 'receipt': {
         consumer();
         exact(data, ['assignmentId', 'generation', 'taskDigest', 'status', 'correlation', 'evidenceDigest',
-          ...(event.type === 'accept' ? ['policySha'] : [])]);
+          ...(event.type === 'accept' ? ['policySha'] : []), ...(event.type === 'terminal-receipt' ? ['artifact'] : [])]);
         const assignment = getAssignment();
         identifier(data.correlation);
+        if (data.artifact !== undefined) validateTerminalArtifact(data.artifact, assignment.task);
         if (!digestPattern.test(data.evidenceDigest ?? '')) fail('Local evidence digest required.');
         if (event.type === 'accept') {
           const offer = state.availability?.[event.workerId];
@@ -283,20 +383,24 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
         if (assignment.correlation && assignment.correlation !== data.correlation) fail('A replacement session requires a new reservation.');
         assignment.correlation = data.correlation;
         assignment.state = data.status;
-        assignment.receipts.push({ ...data, observedAt: event.observedAt });
+        const { artifact, ...receipt } = data;
+        assignment.receipts.push({ ...receipt, observedAt: event.observedAt });
         if (event.type === 'terminal-receipt') {
           assignment.terminalCommitment = data.evidenceDigest;
+          if (artifact !== undefined) assignment.terminalArtifact = artifact;
           delete assignment.blocker;
         } else if (event.type === 'accept') delete assignment.blocker;
         break;
       }
       case 'report-blocker': {
         consumer();
-        exact(data, ['assignmentId', 'generation', 'taskDigest', 'reasonCode', 'evidenceDigest']);
+        exact(data, ['assignmentId', 'generation', 'taskDigest', 'reasonCode', 'evidenceDigest', 'prestartProof']);
         const assignment = getAssignment();
         if (!liveStates.has(assignment.state) || !digestPattern.test(data.evidenceDigest ?? '') ||
             !['task-changed', 'held', 'capability-unavailable', 'native-evidence-missing', 'delivery-uncertain', 'scope-expanded', 'dependency-blocked'].includes(data.reasonCode)) fail('Known live assignment and nonsecret blocker code required.');
-        assignment.blocker = { reasonCode: data.reasonCode, evidenceDigest: data.evidenceDigest, observedAt: event.observedAt };
+        if (data.prestartProof !== undefined) validatePrestartProof(data.prestartProof, assignment, event.workerId, data.evidenceDigest);
+        assignment.blocker = { reasonCode: data.reasonCode, evidenceDigest: data.evidenceDigest, observedAt: event.observedAt,
+          ...(data.prestartProof !== undefined ? { prestartProof: data.prestartProof } : {}) };
         if (state.availability) state.availability[event.workerId] = { offerId: event.id, revoked: true };
         break;
       }
@@ -313,9 +417,16 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
       case 'settle':
       case 'release': {
         coordinator();
-        exact(data, ['assignmentId', 'generation', 'taskDigest', 'terminalEvidenceDigest']);
+        exact(data, ['assignmentId', 'generation', 'taskDigest', 'terminalEvidenceDigest', 'terminalReceiptDigest', 'terminalArtifactDigest']);
         const assignment = getAssignment();
         if (assignment.state !== 'terminal-reported' || !digestPattern.test(data.terminalEvidenceDigest ?? '')) fail('Correlated terminal report and independent native reconciliation required.');
+        // Packet-bound settlement names the exact terminal receipt and artifact the
+        // coordinator verified; a replacement receipt published meanwhile rejects it.
+        if ((assignment.taskPacket || data.terminalReceiptDigest !== undefined || data.terminalArtifactDigest !== undefined) &&
+            (data.terminalReceiptDigest !== assignment.terminalCommitment ||
+              data.terminalArtifactDigest !== digest(assignment.terminalArtifact ?? null))) {
+          fail('artifact-changed: the terminal receipt or artifact changed after coordinator verification; re-read and reconcile before settlement.');
+        }
         if (event.type === 'settle') {
           if (assignment.blocker || assignment.terminalCommitment !== assignment.receipts.at(-1)?.evidenceDigest) fail('Unblocked durable terminal commitment required; old receipts need consumer reconciliation.');
         } else {

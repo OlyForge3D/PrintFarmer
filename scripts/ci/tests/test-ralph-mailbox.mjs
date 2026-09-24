@@ -6,10 +6,13 @@ import path from 'node:path';
 import test from 'node:test';
 import {
   applyEvent, digest, initialState, initializeMailbox, inventoryDigest, admissionInventoryDigest,
-  publishEvent, readMailbox, researchDisposition, taskFromEvidence, validateRegistry, verifyControlRepository, localInventoryFreshness,
+  publishEvent, readMailbox, researchDisposition, taskFromEvidence, taskPacketFromEvidence, taskFromPacket, validateTaskPacket, validateRegistry, verifyControlRepository, localInventoryFreshness,
 } from '../ralph-mailbox.mjs';
 import { prepareEvent, runNativeRequest, validateTriageEvidence, readResearchArtifact } from '../ralph-native-runtime.mjs';
 import { buildDispatchPlan, validateClassification, validateStartup, validatePacketAck, policyTextDigest } from '../ralph-native-dispatch.mjs';
+import {
+  githubFixture, registerTaskSubject, registerIssueComment, registerPullRequest, setVerdictStatus,
+} from './fixtures/ralph-github-fixture.mjs';
 
 const registry = {
   version: 1, authorityId: 'primary', epoch: 1, writers: ['fixture-owner'],
@@ -210,85 +213,6 @@ function reserve(state, issue, worker = 'mini', mobile = false) {
 function binding(state, issue) {
   const entry = state.assignments[`assignment-${issue}`];
   return { assignmentId: `assignment-${issue}`, generation: entry.generation, taskDigest: entry.taskDigest };
-}
-
-export function githubFixture() {
-  const blobs = new Map(), trees = new Map(), commits = new Map(), refs = new Map(), comments = new Map();
-  const calls = [];
-  let count = 0;
-  const sha = (value) => createHash('sha1').update(value).digest('hex');
-  const metadata = {
-    id: 123, full_name: 'fixture/private-control', private: true, visibility: 'private',
-    archived: false, disabled: false, permissions: { push: true }, default_branch: 'main',
-  };
-  const putRecord = (record, parents = []) => {
-    const content = JSON.stringify(record);
-    const blobSha = sha(`blob ${Buffer.byteLength(content)}\0${content}`);
-    blobs.set(blobSha, { sha: blobSha, encoding: 'base64', size: Buffer.byteLength(content), content: Buffer.from(content).toString('base64') });
-    const treeSha = sha(`tree-${++count}`);
-    trees.set(treeSha, { sha: treeSha, truncated: false, tree: [{ path: 'mailbox.json', type: 'blob', mode: '100644', sha: blobSha }] });
-    const commitSha = sha(`commit-${++count}`);
-    commits.set(commitSha, { sha: commitSha, tree: { sha: treeSha }, parents: parents.map((parent) => ({ sha: parent })) });
-    return commitSha;
-  };
-  let beforePatch;
-  let losePatchResponse = false;
-  const api = async (endpoint, method = 'GET', body) => {
-    calls.push({ endpoint, method, body });
-    if (comments.has(endpoint) && method === 'GET') return structuredClone(comments.get(endpoint));
-    const suffix = endpoint.replace('repos/fixture/private-control', '');
-    if (endpoint === 'user') return { login: 'fixture-owner' };
-    if (suffix === '') return structuredClone(metadata);
-    if (suffix === '/collaborators/fixture-owner/permission') return { permission: 'admin', user: { login: 'fixture-owner' } };
-    if (suffix === '/branches?per_page=1') return refs.size ? [{ name: 'main' }] : [];
-    if (suffix === '/contents/mailbox.json' && method === 'PUT') {
-      assert.equal(body.sha, undefined);
-      assert.equal(body.branch, 'main');
-      if (refs.size) throw new Error('create-only conflict');
-      const commitSha = putRecord(JSON.parse(Buffer.from(body.content, 'base64')));
-      refs.set('heads/main', commitSha);
-      return { commit: { sha: commitSha } };
-    }
-    if (suffix.startsWith('/git/ref/')) {
-      const ref = suffix.slice('/git/ref/'.length);
-      if (!refs.has(ref)) throw new Error('404 ref');
-      return { ref: `refs/${ref}`, object: { sha: refs.get(ref), type: 'commit' } };
-    }
-    if (suffix === '/git/trees' && method === 'POST') {
-      const record = JSON.parse(body.tree[0].content);
-      const commitSha = putRecord(record);
-      return trees.get(commits.get(commitSha).tree.sha);
-    }
-    if (suffix === '/git/commits' && method === 'POST') {
-      const commitSha = sha(`commit-${++count}`);
-      const commit = { sha: commitSha, tree: { sha: body.tree }, parents: body.parents.map((parent) => ({ sha: parent })) };
-      commits.set(commitSha, commit);
-      return commit;
-    }
-    if (suffix.startsWith('/git/commits/')) return commits.get(suffix.slice('/git/commits/'.length));
-    if (suffix.startsWith('/git/trees/')) return trees.get(suffix.slice('/git/trees/'.length));
-    if (suffix.startsWith('/git/blobs/')) return blobs.get(suffix.slice('/git/blobs/'.length));
-    if (suffix === '/git/refs' && method === 'POST') {
-      const ref = body.ref.slice('refs/'.length);
-      if (refs.has(ref)) throw new Error('existing ref');
-      refs.set(ref, body.sha);
-      return {};
-    }
-    if (suffix.startsWith('/git/refs/') && method === 'PATCH') {
-      assert.equal(body.force, false);
-      if (beforePatch) { const hook = beforePatch; beforePatch = undefined; await hook(); }
-      const ref = suffix.slice('/git/refs/'.length);
-      const previous = refs.get(ref);
-      const candidate = commits.get(body.sha);
-      if (candidate.parents.length !== 1 || candidate.parents[0].sha !== previous) throw new Error('non-fast-forward');
-      refs.set(ref, body.sha);
-      if (losePatchResponse) { losePatchResponse = false; throw new Error('lost response after success'); }
-      return {};
-    }
-    throw new Error(`Unexpected ${method} ${endpoint}`);
-  };
-  return { api, metadata, calls, refs, commits, blobs, comments, putRecord,
-    race: (hook) => { beforePatch = hook; }, loseResponse: () => { losePatchResponse = true; } };
 }
 
 test('exact Mac1+4 and Windows0+5 quotas, no borrowing and global overlaps', () => {
@@ -704,9 +628,11 @@ test('runtime fsyncs local intent, validates actual session and never reauthoriz
     historyChecked: true, capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions: [],
   } }, dependencies);
   await publishEvent(control, currentEvent('begin-round', 'coordinator', { invocationDigest: digest('coordinator') }), f.api);
+  registerTaskSubject(f, evidence(), { body: 'Fixture issue body.' });
   await publishEvent(control, currentEvent('reserve', 'coordinator', {
     assignmentId: 'assignment-1', workerId: 'mini', generation: 1, task: taskFromEvidence(evidence()),
     eligibilityDigest: digest('eligibility'), policySha: config.approvedPolicy,
+    taskPacket: taskPacketFromEvidence(evidence(), createHash('sha256').update('Fixture issue body.').digest('hex')),
   }), f.api);
   const state = (await readMailbox(control, f.api)).state;
   await publishEvent(control, currentEvent('publish', 'coordinator', binding(state, 1)), f.api);
@@ -893,6 +819,7 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
     const taskEvidence = fresh({ ...evidence(issue), labels: ['squad:dallas', 'go:needs-research', 'type:bug', 'priority:p1'],
       claimsReconciled: true, holdsChecked: true, dependenciesReady: true, epicChildrenReady: true,
       analysisReady: true, reviewGatesChecked: true, ownershipReconciled: true });
+    registerTaskSubject(f.github, taskEvidence);
     const reserved = await run(coordinator, c, 'reserve', {
       data: { assignmentId: `assignment-${issue}`, workerId: 'mini' }, evidence: taskEvidence,
     });
@@ -1071,6 +998,7 @@ test('old-policy prestart proof comes from the consumer journal and is bound to 
   await run(consumer, w, 'ready', { evidence: inventory });
   const taskEvidence = fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true, dependenciesReady: true,
     epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true, ownershipReconciled: true });
+  registerTaskSubject(f.github, taskEvidence);
   const reserved = await run(coordinator, c, 'reserve', {
     data: { assignmentId: 'assignment-1', workerId: 'mini' }, evidence: taskEvidence,
   });
@@ -1084,14 +1012,19 @@ test('old-policy prestart proof comes from the consumer journal and is bound to 
   const proofRequest = { data: bound, evidence: fresh({ authoritativeJournalRetained: true, protocolOnlyDeliveryAttested: true }) };
   await assert.rejects(run(coordinator, c, 'prestart-proof', proofRequest), /locally owned/);
   const { proof } = await run(consumer, w, 'prestart-proof', proofRequest);
-  const withdrawal = { data: bound, evidence: fresh({ claimsReconciled: true, noNativeDeliveryVerified: true, prestartProof: proof }) };
+  // The coordinator never receives the proof out of band: it reads the published blocker.
+  const withdrawal = { data: bound, evidence: fresh({ claimsReconciled: true, noNativeDeliveryVerified: true }) };
   await assert.rejects(run(coordinator, c, 'withdraw', withdrawal), /committed by its blocker/);
-  await run(consumer, w, 'report-blocker', { data: { ...bound, reasonCode: 'task-changed' }, evidence: proof });
+  await assert.rejects(run(consumer, w, 'report-blocker', { data: { ...bound, reasonCode: 'task-changed' },
+    evidence: { ...proof, consumerJournalDigest: digest('forged') } }), /exact proof retained/);
+  const blocked = await run(consumer, w, 'report-blocker', { data: { ...bound, reasonCode: 'task-changed' }, evidence: proof });
+  assert.deepEqual(blocked.state.assignments['assignment-1'].blocker.prestartProof, proof);
   const repeatProof = await run(consumer, w, 'prestart-proof', proofRequest);
   assert.equal(repeatProof.alreadyReported, true);
   assert.deepEqual(repeatProof.proof, proof);
   await assert.rejects(run(coordinator, c, 'withdraw', { ...withdrawal,
     evidence: { ...withdrawal.evidence, prestartProof: { ...proof, workerId: 'windows' } } }), /consumer no-delivery proof/);
+  assert.equal(JSON.stringify(withdrawal.evidence).includes(proof.consumerJournalDigest), false);
   const withdrawn = await run(coordinator, c, 'withdraw', withdrawal);
   assert.equal(withdrawn.state.assignments['assignment-1'].disposition, 'withdrawn-before-delivery');
   const refreshed = await run(consumer, w, 'ready', { evidence: inventory });
@@ -1119,6 +1052,7 @@ test('partial native creation retains the handle before readback and never adopt
   const taskEvidence = fresh({ ...evidence(), labels: ['squad:dallas', 'type:bug', 'priority:p1'],
     claimsReconciled: true, holdsChecked: true, dependenciesReady: true, epicChildrenReady: true,
     analysisReady: true, reviewGatesChecked: true, ownershipReconciled: true });
+  registerTaskSubject(f.github, taskEvidence);
   const incomplete = { ...taskEvidence };
   delete incomplete.classificationComplete;
   await assert.rejects(run(coordinator, c, 'reserve', {
@@ -1206,6 +1140,7 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
     const taskEvidence = fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true,
       dependenciesReady: true, epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true,
       ownershipReconciled: true });
+    registerTaskSubject(f.github, taskEvidence);
     await assert.rejects(run(consumer, w, 'reserve', {
       data: { assignmentId: 'unauthorized', workerId }, evidence: taskEvidence,
     }), /Only coordinator/);
@@ -1237,20 +1172,33 @@ test('manual initializer and repeated coordinator/consumer lifecycles need no cu
     assert.notEqual(c.roundToken, c2.roundToken);
     assert.notEqual(w.roundToken, w2.roundToken);
     await assert.rejects(run(consumer, { ...w2, roundToken: w.roundToken }, 'ready', { evidence: inventory() }), /round token/);
+    const prHead = 'c'.repeat(40);
+    const pr = registerPullRequest(f.github, { number: 700, issue: 1, headSha: prHead });
+    const readback = await run(consumer, w2, 'artifact-readback', { data: { ...taskBinding, correlation: 'delivery-one',
+      artifactUrl: pr.html_url }, evidence: fresh() });
+    assert.deepEqual(readback.artifact, { kind: 'pull-request', url: pr.html_url, number: 700, headSha: prHead });
     const terminal = await run(consumer, w2, 'receipt', {
       data: { ...taskBinding, status: 'terminal-reported', correlation: 'delivery-one' },
       evidence: { ...delivered, session: { ...session, terminalVerified: true },
         queueChecked: true, historyChecked: true, artifactsVerified: true,
+        artifactReadbackVerified: true, artifact: readback.artifact,
         noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one',
         finalAck: { ...started.dispatchPlan.packet, noChildren: true, noPendingContinuation: true,
-          noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one' } },
+          noFutureDelivery: true, finalDeliveryCorrelation: 'delivery-one',
+          artifactUrl: pr.html_url, artifactHeadSha: prHead, artifactReadbackVerified: true } },
     });
+    assert.deepEqual(terminal.state.assignments['assignment-1'].terminalArtifact, readback.artifact);
     await run(consumer, w2, 'ready', { evidence: inventory([{ id: sessionId, terminalVerified: true }]) });
     const receipt = terminal.state.assignments['assignment-1'].receipts.at(-1);
-    const released = await run(coordinator, c2, 'release', {
+    const release = () => run(coordinator, c2, 'release', {
       data: taskBinding, evidence: fresh({ consumerReceiptDigest: receipt.evidenceDigest,
         taskDigest: taskBinding.taskDigest, ownershipReconciled: true, artifactsVerified: true, noPendingContinuation: true }),
     });
+    await assert.rejects(release(), /artifact-pending/);
+    Object.assign(pr, { state: 'closed', merged: true });
+    await assert.rejects(release(), /artifact-unreviewed/);
+    setVerdictStatus(f.github, prHead);
+    const released = await release();
     assert.equal(released.state.assignments['assignment-1'].state, 'terminal');
     await run(consumer, w2, 'end-round');
     await run(coordinator, c2, 'end-round');
@@ -1848,6 +1796,7 @@ test('native asynchronous hourly rounds admit locally and settle days later with
   const taskEvidence = () => fresh({ ...evidence(), claimsReconciled: true, holdsChecked: true,
     dependenciesReady: true, epicChildrenReady: true, analysisReady: true, reviewGatesChecked: true,
     ownershipReconciled: true });
+  registerTaskSubject(f.github, taskEvidence());
   const acquire = async (config) => {
     const request = f.request(config, 'begin-round');
     const result = await runNativeRequest(config, request, dependencies);
@@ -1924,11 +1873,16 @@ test('native asynchronous hourly rounds admit locally and settle days later with
       queueChecked: true, historyChecked: true, artifactsVerified: true },
   };
   await assert.rejects(run(consumer, w, 'receipt', terminalRequest), /final delivery ACK/);
+  // Implementation that ends with a durable issue report instead of a PR.
+  const { url: reportUrl } = registerIssueComment(f.github, 1, 900, 'Duplicate of existing fix; no change required.\n');
+  const { artifact } = await run(consumer, w, 'artifact-readback', {
+    data: { ...bound, correlation: 'delayed-delivery', artifactUrl: reportUrl }, evidence: fresh() });
   const terminal = await run(consumer, w, 'receipt', { ...terminalRequest, evidence: {
     ...terminalRequest.evidence, noPendingContinuation: true, noFutureDelivery: true,
-    finalDeliveryCorrelation: 'follow-up-one',
+    finalDeliveryCorrelation: 'follow-up-one', artifactReadbackVerified: true, artifact,
     finalAck: { ...authorized.dispatchPlan.packet, noChildren: true, noPendingContinuation: true,
-      noFutureDelivery: true, finalDeliveryCorrelation: 'follow-up-one' },
+      noFutureDelivery: true, finalDeliveryCorrelation: 'follow-up-one',
+      artifactUrl: artifact.url, artifactBodyDigest: artifact.bodyDigest, artifactReadbackVerified: true },
   } });
   const receiptDigest = terminal.state.assignments['assignment-1'].receipts.at(-1).evidenceDigest;
   await run(consumer, w, 'end-round');

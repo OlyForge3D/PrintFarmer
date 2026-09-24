@@ -36,6 +36,7 @@ async function fixture(t) {
     ['scripts/ci/ralph-native-runtime.mjs', '// approved fixture\n'],
     ['scripts/ci/ralph-native-dispatch.mjs', '// approved fixture\n'],
     ['scripts/ci/ralph-native-cleanup.mjs', '// approved fixture\n'],
+    ['scripts/ci/ralph-worktree-path.mjs', '// approved fixture\n'],
     ['scripts/ci/resolve-ios-simulator.sh', '# approved fixture\n'],
     ['scripts/common-utils.sh', '# approved fixture\n'],
   ]) await writeFile(path.join(repo, file), content);
@@ -233,6 +234,23 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.match(settings.prompt, /record-creation/);
     assert.match(settings.prompt, /startup-check/);
     assert.match(settings.prompt, /prestart-proof/);
+    assert.match(settings.prompt, /The runtime publishes\nit in the mailbox blocker; never relay it/);
+    assert.match(settings.prompt, /withdraws only that binding from the published blocker alone/);
+    assert.doesNotMatch(settings.prompt, /through report-blocker and to the coordinator/);
+    assert.match(settings.prompt, /TASK PACKETS \(#2958\)/);
+    assert.match(settings.prompt, /dispatch-plan and starting evidence WITHOUT task facts/);
+    assert.match(settings.prompt, /Never ask the\nowner to relay coordinator evidence/);
+    assert.match(settings.prompt, /artifactUrl, artifactHeadSha and\nartifactReadbackVerified:true/);
+    assert.match(settings.prompt, /squad\/pre-pr-verdict at that exact head/);
+    assert.match(settings.prompt, /reserve rejects\nlocal paths, native IDs\/UUIDs and credentials/);
+    assert.match(settings.prompt, /task-changed or held there means keep the child\nstartup-only and report-blocker/);
+    assert.match(settings.prompt, /prWorkerPolicyDigest from the PR head on GitHub; never compute or supply it/);
+    assert.match(settings.prompt, /digest-only blocker gets a fresh prestart-proof/);
+    assert.match(settings.prompt, /from a trusted squad-review-verdict run/);
+    assert.match(settings.prompt, /replacement receipt after verification rejects it/);
+    assert.match(settings.prompt, /Pass the native worktreePath verbatim, never realpath it yourself/);
+    assert.match(settings.prompt, /resubmit record-creation with the original creation handle\nand the SAME child's readback/);
+    assert.match(settings.prompt, /realpath forms, so a symlinked alias of worktreeRoot is the same worktree/);
     assertNativePrompt(settings.prompt, role, windows);
     assert.equal(await readFile(path.join(path.dirname(f.options['host-config']), 'workflow-prompt.txt'), 'utf8'), `${settings.prompt}\n`);
     assert.equal(host.executionTrust, 'local-owner-v1');
@@ -258,12 +276,12 @@ test('native prompt generation rejects a pin without the owned-lineage contract 
 });
 
 test('native prompt generation rejects a pin without owning-consumer worker cleanup before writing', async (t) => {
-  for (const change of ['marker', 'module']) {
+  for (const change of ['marker', 'ralph-native-cleanup.mjs', 'ralph-worktree-path.mjs']) {
     const f = await fixture(t);
     if (change === 'marker') {
       await writeFile(path.join(f.repo, '.copilot/skills/ralph-loop/native-roles.md'), nativeRoles.replaceAll('RALPH-WORKER-CLEANUP-V1', 'RALPH-WORKER-CLEANUP-UNAPPROVED'));
     } else {
-      await rm(path.join(f.repo, 'scripts/ci/ralph-native-cleanup.mjs'));
+      await rm(path.join(f.repo, 'scripts/ci', change));
     }
     await f.git(['add', '-A']);
     await f.git(['commit', '-qm', 'Policy without worker cleanup']);
@@ -271,7 +289,7 @@ test('native prompt generation rejects a pin without owning-consumer worker clea
     f.state.comparison = { status: 'identical', merge_base_commit: { sha: f.state.development }, files: [] };
     const options = await nativeOptions(f);
     await assert.rejects(f.run({ ...options, 'approved-policy': f.state.development, apply: true }),
-      change === 'marker' ? /lacks owning-consumer worker cleanup/ : (error) => { assert.match(String(error.stderr ?? error.message), /ralph-native-cleanup\.mjs/); return true; });
+      change === 'marker' ? /lacks owning-consumer worker cleanup/ : (error) => { assert.ok(String(error.stderr ?? error.message).includes(change)); return true; });
     await assert.rejects(readFile(f.options['host-config']), /ENOENT/);
   }
 });

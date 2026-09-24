@@ -408,6 +408,13 @@ model availability and app-created worktree parent, then explicitly authorize
 changing private `verified:false` to `verified:true`. The script has no flag
 that performs this attestation.
 
+Compare the worktree parent by its canonical (realpath) form. The app may report
+the parent through a symlinked alias of `worktreeRoot`, for example
+`/Users/<user>/s/...` for `/Volumes/data/src/...`. The runtime accepts that
+spelling, stores the canonical path and rejects symlink escapes and
+main-checkout aliases. See
+[native vs canonical worktree path identity](../.copilot/skills/ralph-loop/native-roles.md#native-vs-canonical-worktree-path-identity).
+
 Filesystem `preflight` can then run in an app-created isolated verification
 worktree, after the saved bootstrap's origin/fetch/policy guards. It returns
 `dispatchAuthorized:false` and `nativeIdentityVerified:false`. This is expected:
@@ -542,6 +549,33 @@ cannot reclaim an uncertain round. Persist consumer delivery intent before
 creating a session and correlate the actual native session response afterward.
 A lost response blocks redelivery until genuine native evidence reconciles it:
 there is no exposed idempotency key for native session creation.
+
+### Verifiable cross-role handoffs
+
+The roles share no private state, so every fact one role needs from the other
+travels through the mailbox or is read from GitHub by the runtime
+([#2958](https://github.com/OlyForge3D/PrintFarmer/issues/2958)). Three optional,
+versioned payloads carry them:
+
+| Payload | Written by | Read by | Verification |
+| --- | --- | --- | --- |
+| `reserve.taskPacket` (`ralph-task-packet-v1`) | Coordinator runtime, from a live issue readback | Coordinator publish, consumer dispatch/start | Reproduces `requirementsDigest`, `fileKeys` and `taskDigest`; live title, labels and body digest unchanged |
+| `report-blocker.prestartProof` | Consumer runtime journal | Coordinator withdraw | Equals the consumer's retained proof and the committed blocker digest |
+| `terminal-receipt.artifact` | Consumer runtime, from an artifact readback | Coordinator release | Re-read on GitHub: comment bytes, or merged PR head, `Closes #N` and a review verdict from a trusted `squad-review-verdict.yml` run |
+| `settle.terminalReceiptDigest` / `terminalArtifactDigest` | Coordinator runtime | Mailbox reducer | Equal the latest terminal commitment and artifact, so a replacement receipt after verification rejects the settlement |
+
+Existing-PR recovery reads `prWorkerPolicyDigest` from the PR head through the
+GitHub contents API rather than from consumer evidence. `startup-check` re-reads
+the issue before the first substantive continuation.
+
+Consumers never re-author task facts and nobody relays evidence by hand. Replay
+of pre-#2958 history is unchanged. Assignments reserved before this change have
+no packet and block with `native-evidence-missing`: the consumer reports that
+blocker with its runtime prestart-proof, then the coordinator withdraws and
+re-reserves from a fresh readback. A blocker already reported with only a proof
+digest gets a fresh proof, which the consumer re-reports with its full payload. An issue edited after reservation blocks with
+`task-changed` the same way. See the
+[published task packet contract](../.copilot/skills/ralph-loop/native-roles.md#published-task-packets).
 
 ### Asynchronous capacity and completion
 
@@ -869,6 +903,8 @@ node --test scripts/ci/tests/test-setup-ralph-macos.mjs \
   scripts/ci/tests/test-ralph-automation.mjs \
   scripts/ci/tests/test-ralph-host-capacity.mjs \
   scripts/ci/tests/test-ralph-mailbox.mjs \
+  scripts/ci/tests/test-ralph-e2e-roles.mjs \
   scripts/ci/tests/test-ralph-native-cleanup.mjs \
+  scripts/ci/tests/test-ralph-worktree-path.mjs \
   scripts/ci/tests/test-ralph-github-snapshot.mjs
 ```

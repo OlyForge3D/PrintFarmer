@@ -373,13 +373,8 @@ export function verifySquadVerdict({ pull, status, run }) {
   });
 }
 
-export function selectSquadVerdict({
-  pull,
-  statuses,
-  statusHeadSha = pull.head.sha,
-  loadRun,
-}) {
-  const candidates = statuses
+function newestVerdictStatuses(statuses, statusHeadSha) {
+  return statuses
     .filter((status) => status.context === verdictContext)
     .map((status) => bindStatusToHead(status, statusHeadSha))
     .sort((left, right) => {
@@ -387,6 +382,15 @@ export function selectSquadVerdict({
         Date.parse(right.created_at) - Date.parse(left.created_at);
       return timestampOrder || right.id - left.id;
     });
+}
+
+export function selectSquadVerdict({
+  pull,
+  statuses,
+  statusHeadSha = pull.head.sha,
+  loadRun,
+}) {
+  const candidates = newestVerdictStatuses(statuses, statusHeadSha);
 
   for (const status of candidates) {
     const runId = parseRunTarget(status.target_url, pull.base.repo.full_name);
@@ -435,6 +439,56 @@ function parseArgs(argv) {
   return { ...args, pr: Number.parseInt(args.pr, 10) };
 }
 
+/**
+ * Reads and verifies the newest squad verdict for `pull` through an async
+ * GitHub API reader. Shared by this CLI and Ralph settlement so both apply
+ * the same creator, workflow-run, default-branch and PR-number provenance.
+ */
+export async function loadSquadVerdict({
+  api,
+  pull,
+  statusHeadSha = pull.head.sha,
+}) {
+  const repository = pull.base.repo.full_name;
+  const defaultBranch = pull.base.repo.default_branch;
+  const statuses = await api(
+    `repos/${repository}/commits/${statusHeadSha}/statuses?per_page=100`,
+  );
+  if (!Array.isArray(statuses)) {
+    return result('INVALID', 'GitHub returned an invalid status list.');
+  }
+  const newest = newestVerdictStatuses(statuses, statusHeadSha)[0];
+  const runId = newest && parseRunTarget(newest.target_url, repository);
+  let run;
+  if (runId) {
+    const raw = await api(`repos/${repository}/actions/runs/${runId}`);
+    const comparison = await api(
+      `repos/${repository}/compare/${raw.head_sha}...` +
+      encodeURIComponent(defaultBranch),
+    );
+    run = {
+      ...raw,
+      default_branch_contains_run:
+        comparison?.status === 'ahead' || comparison?.status === 'identical',
+      workflow_definition_matches_default_branch:
+        raw.event === 'pull_request_review'
+          ? await workflowDefinitionMatchesDefaultBranch(
+            api,
+            repository,
+            raw.head_sha,
+            defaultBranch,
+          )
+          : undefined,
+    };
+  }
+  return selectSquadVerdict({
+    pull,
+    statuses,
+    statusHeadSha,
+    loadRun: () => run,
+  });
+}
+
 function ghApi(path) {
   const output = execFileSync('gh', ['api', path], {
     encoding: 'utf8',
@@ -446,12 +500,12 @@ function ghApi(path) {
 // Returns the git blob SHA of the gate workflow file at `ref`, or undefined
 // if it cannot be read there (e.g. deleted on that branch, or the ref itself
 // is gone). A missing file must never be treated as a match.
-function fetchWorkflowBlobSha(repository, ref) {
+async function fetchWorkflowBlobSha(api, repository, ref) {
   try {
-    const content = ghApi(
-      `/repos/${repository}/contents/${verdictWorkflowPath}?ref=${encodeURIComponent(ref)}`,
+    const content = await api(
+      `repos/${repository}/contents/${verdictWorkflowPath}?ref=${encodeURIComponent(ref)}`,
     );
-    return content.sha;
+    return content?.sha;
   } catch {
     return undefined;
   }
@@ -462,43 +516,19 @@ function fetchWorkflowBlobSha(repository, ref) {
 // from the default branch, so this compares the actual file content at the
 // reviewed commit against the default branch's copy. A PR that tampered with
 // the workflow file on its own branch fails this regardless of run.event.
-function workflowDefinitionMatchesDefaultBranch(repository, headSha, defaultBranch) {
-  const headBlobSha = fetchWorkflowBlobSha(repository, headSha);
-  const defaultBlobSha = fetchWorkflowBlobSha(repository, defaultBranch);
+async function workflowDefinitionMatchesDefaultBranch(api, repository, headSha, defaultBranch) {
+  const headBlobSha = await fetchWorkflowBlobSha(api, repository, headSha);
+  const defaultBlobSha = await fetchWorkflowBlobSha(api, repository, defaultBranch);
   return Boolean(headBlobSha) && headBlobSha === defaultBlobSha;
 }
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   const pull = ghApi(`/repos/${args.repo}/pulls/${args.pr}`);
-  const statusHeadSha = args['expected-head'] ?? pull.head.sha;
-  const statuses = ghApi(
-    `/repos/${args.repo}/commits/${statusHeadSha}/statuses?per_page=100`,
-  );
-  const verdict = selectSquadVerdict({
+  const verdict = await loadSquadVerdict({
+    api: async (path) => ghApi(`/${path}`),
     pull,
-    statuses,
-    statusHeadSha,
-    loadRun: (runId) => {
-      const run = ghApi(`/repos/${args.repo}/actions/runs/${runId}`);
-      const comparison = ghApi(
-        `/repos/${args.repo}/compare/${run.head_sha}...` +
-        encodeURIComponent(pull.base.repo.default_branch),
-      );
-      return {
-        ...run,
-        default_branch_contains_run:
-          comparison.status === 'ahead' || comparison.status === 'identical',
-        workflow_definition_matches_default_branch:
-          run.event === 'pull_request_review'
-            ? workflowDefinitionMatchesDefaultBranch(
-              args.repo,
-              run.head_sha,
-              pull.base.repo.default_branch,
-            )
-            : undefined,
-      };
-    },
+    statusHeadSha: args['expected-head'] ?? pull.head.sha,
   });
 
   if (args.json) {

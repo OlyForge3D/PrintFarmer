@@ -120,12 +120,15 @@ export function validatePacketAck(packet, ack) {
   }
 }
 
-export function validateStartup(plan, evidence) {
+export function validateStartup(plan, evidence, { verifiedHeadAdvance } = {}) {
   const ack = evidence.startupAck;
   const packet = plan.packet;
   validatePacketAck(packet, ack);
   if (ack.substantiveWorkStarted !== false || ack.noChildren !== true) fail('Startup-only ACK with no children required.');
-  if (ack.initialHeadSha !== packet.headSha) {
+  // A non-PR worker starts from the live source branch; the runtime may prove via
+  // GitHub that its HEAD is a descendant of the reserved head on that branch.
+  if (ack.initialHeadSha !== packet.headSha &&
+      (packet.pr || !verifiedHeadAdvance || ack.initialHeadSha !== verifiedHeadAdvance)) {
     fail('Initial worker HEAD must match the packet; reconcile movement on the same child before work.');
   }
   if (typeof evidence.session?.branch !== 'string' || !evidence.session.branch) {
