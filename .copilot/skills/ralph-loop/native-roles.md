@@ -640,7 +640,8 @@ does not exist yet resolves through its nearest existing ancestor. It then:
   worker directory with a symlink to another worktree cannot rebind the mapping;
 - never folds case: `fs.realpath` returns the on-disk spelling, so a genuine case
   alias converges, while distinct directories on a case-sensitive volume stay
-  distinct;
+  distinct. Containment is an exact separator-bounded prefix test, not
+  `path.relative`, because `path.win32.relative` folds case internally;
 - runs cleanup `.git`, `lstat`, `git` and absent-worktree checks on the canonical
   path, retains a worker whose path changes identity during inspection, and
   accepts either spelling for the post-delete `worktree.path`.

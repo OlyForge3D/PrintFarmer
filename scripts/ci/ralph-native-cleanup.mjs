@@ -4,7 +4,7 @@ import path from 'node:path';
 import { promisify } from 'node:util';
 import { digest } from './ralph-mailbox.mjs';
 import { assessCleanupCandidate } from './ralph-round-cache.mjs';
-import { canonicalPath } from './ralph-worktree-path.mjs';
+import { canonicalPath, strictlyWithin } from './ralph-worktree-path.mjs';
 
 // Owning-consumer deletion of its own settled Ralph workers (#2954). The plan is
 // read-only; deletion intent is journaled before delete_item and a retirement is
@@ -195,10 +195,7 @@ export const defaultCleanupProbe = {
   },
 };
 
-const within = (root, target) => {
-  const relative = path.relative(root, target);
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
-};
+const within = (root, target) => strictlyWithin(root, target);
 
 // Canonical containment: inside the canonical worktree root, its final
 // component not a symlink redirecting to another directory, and never the main

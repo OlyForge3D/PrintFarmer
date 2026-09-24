@@ -75,13 +75,14 @@ test('resolveWorktreePath rejects symlink escapes, the root itself and main-chec
 });
 
 // A case-sensitive volume in memory: directories and symlinks keyed by exact spelling.
-function caseSensitiveFs(directories, links = {}) {
+function caseSensitiveFs(directories, links = {}, p = path) {
   const enoent = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
   const resolve = (target, depth = 0) => {
     if (depth > 16) throw Object.assign(new Error('ELOOP'), { code: 'ELOOP' });
-    let current = '/';
-    for (const part of target.split('/').filter(Boolean)) {
-      const next = path.join(current, part);
+    const { root } = p.parse(target);
+    let current = root;
+    for (const part of target.slice(root.length).split(p.sep).filter(Boolean)) {
+      const next = p.join(current, part);
       if (links[next]) current = resolve(links[next], depth + 1);
       else if (directories.has(next)) current = next;
       else throw enoent();
@@ -108,6 +109,28 @@ test('canonical identity never folds case: a case-sensitive sibling of the root 
   assert.equal(await resolveWorktreePath('/sandbox/worktrees', '/sandbox/worktrees/Worker', { fs }), '/sandbox/worktrees/Worker');
   assert.equal(await resolveWorktreePath('/sandbox/worktrees', '/sandbox/worktrees/worker', { fs }), '/sandbox/worktrees/worker');
   assert.equal(samePath('/sandbox/worktrees/Worker', '/sandbox/worktrees/worker'), false);
+});
+
+test('Windows containment is exact too: path.win32.relative case folding never admits a sibling root', async () => {
+  const win = path.win32;
+  // The hazard: win32.relative lowercases both sides, so a relative-based check would accept this.
+  assert.equal(win.relative('C:\\sandbox\\worktrees', 'C:\\sandbox\\WORKTREES\\outside'), 'outside');
+  const options = { pathApi: win };
+  assert.equal(strictlyWithin('C:\\sandbox\\worktrees', 'C:\\sandbox\\WORKTREES\\outside', options), false);
+  assert.equal(strictlyWithin('C:\\sandbox\\worktrees', 'C:\\sandbox\\worktrees\\worker', options), true);
+  assert.equal(strictlyWithin('C:\\sandbox\\worktrees', 'C:\\sandbox\\worktreesX\\worker', options), false);
+  assert.equal(strictlyWithin('C:\\sandbox\\worktrees', 'C:\\sandbox\\worktrees', options), false);
+  assert.equal(strictlyWithin('C:\\', 'C:\\worker', options), true);
+  const fs = caseSensitiveFs(new Set(['C:\\sandbox', 'C:\\sandbox\\worktrees', 'C:\\sandbox\\worktrees\\worker',
+    'C:\\sandbox\\WORKTREES', 'C:\\sandbox\\WORKTREES\\outside', 'C:\\alias']),
+  { 'C:\\sandbox\\worktrees\\escape': 'C:\\sandbox\\WORKTREES\\outside', 'C:\\alias\\wt': 'C:\\sandbox\\worktrees' }, win);
+  const resolve = (root, target) => resolveWorktreePath(root, target, { fs, pathApi: win });
+  await assert.rejects(resolve('C:\\sandbox\\worktrees', 'C:\\sandbox\\WORKTREES\\outside'), /escapes/);
+  await assert.rejects(resolve('C:\\sandbox\\worktrees', 'C:\\sandbox\\worktrees\\escape'), /escapes/);
+  await assert.rejects(resolve('C:\\sandbox\\worktrees', 'C:\\sandbox\\worktrees\\escape\\nested'), /escapes/);
+  // A genuine alias of the root still converges on the canonical spelling.
+  assert.equal(await resolve('C:\\sandbox\\worktrees', 'C:\\alias\\wt\\worker'), 'C:\\sandbox\\worktrees\\worker');
+  assert.equal(await resolve('C:\\alias\\wt', 'C:\\sandbox\\worktrees\\new-worker'), 'C:\\sandbox\\worktrees\\new-worker');
 });
 
 test('a case alias on a case-insensitive volume converges through realpath, not folding', async (t) => {
