@@ -1,6 +1,8 @@
 ﻿using System.Net;
 using System.Text.Json;
+using Farm.Infrastructure.Dtos;
 using Farm.Infrastructure.Services.HostUpdates;
+using Moq;
 
 namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 
@@ -252,6 +254,155 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Equal("sha256:" + new string('b', 64), metadata.ComponentPlatformDigests["api/linux-amd64"]);
         Assert.Equal("sha256:" + new string('a', 64), metadata.ComponentIndexDigests!["api"]);
         Assert.Equal(["linux-amd64", "linux-arm64"], metadata.ComponentPlatforms!["api"]);
+    }
+
+    [Fact]
+    public async Task Current_VerifiedManifestThroughMapperAndCache_PreservesSixCanonicalChildTargets()
+    {
+        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
+        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64");
+        VerifiedReleaseEvidenceCache evidence = new();
+        DateTimeOffset verifiedAt = DateTimeOffset.UtcNow;
+        Assert.True(evidence.SetVerified(mapped, verifiedAt));
+        VerifiedReleaseEvidenceCandidateCache cache = new(
+            evidence, Ready(), "linux-amd64", TimeSpan.FromMinutes(10));
+
+        Assert.Equal(
+            ["api", "frontend", "slicer-host", "discovery", "slicer-worker"],
+            mapped.Services.Select(service => service.ServiceId));
+        Assert.Equal(
+            ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"],
+            mapped.ExecutionTargets.Select(target => target.ServiceId));
+        Assert.All(mapped.ExecutionTargets, target =>
+        {
+            Assert.Equal("linux-amd64", target.Platform);
+            Assert.Equal(metadata.ComponentPlatformDigests[$"{target.ServiceId}/linux-amd64"], target.PlatformDigest);
+            Assert.NotEqual(metadata.ComponentIndexDigests![target.ServiceId], target.PlatformDigest);
+        });
+        Assert.Same(mapped, evidence.Current);
+        VerifiedHostUpdateCandidate candidate = Assert.IsType<VerifiedHostUpdateCandidate>(cache.Current);
+        Assert.Null(cache.LastError);
+        Assert.Equal(metadata.Sequence, candidate.Sequence);
+        Assert.Equal(metadata.Identity.ReleaseId, candidate.ReleaseId);
+        Assert.Equal(metadata.Identity.SourceCommit, candidate.SourceCommit);
+        Assert.Equal(metadata.Identity.ManifestDigest, candidate.ManifestDigest);
+        Assert.Equal(metadata.Identity.Channel, candidate.Channel);
+        Assert.Equal(verifiedAt, candidate.VerifiedAt);
+        Assert.Equal("linux-amd64", candidate.HostPlatform);
+        Assert.True(candidate.SignatureVerified);
+        Assert.True(candidate.CompatibilityReady);
+        Assert.True(candidate.InstallationAvailable);
+        Assert.True(candidate.SafetyPassed);
+        Assert.True(candidate.IsNewer);
+        Assert.True(candidate.EvidenceFresh);
+        Assert.Equal(new HostUpdatePlatformDigests(
+            metadata.ComponentPlatformDigests["api/linux-amd64"],
+            metadata.ComponentPlatformDigests["frontend/linux-amd64"],
+            metadata.ComponentPlatformDigests["slicer-host/linux-amd64"],
+            metadata.ComponentPlatformDigests["printer-discovery/linux-amd64"],
+            metadata.ComponentPlatformDigests["orcaslicer-worker/linux-amd64"],
+            metadata.ComponentPlatformDigests["monolith/linux-amd64"]), candidate.PlatformDigests);
+    }
+
+    [Fact]
+    public async Task Current_VerifiedArmManifestWithoutWorker_RejectsWithoutInventingTarget()
+    {
+        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
+        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-arm64");
+        VerifiedReleaseEvidenceCache evidence = new();
+        evidence.SetVerified(mapped, DateTimeOffset.UtcNow);
+        VerifiedReleaseEvidenceCandidateCache cache = new(
+            evidence, new Mock<IHostUpdateCandidateReadiness>(MockBehavior.Strict).Object,
+            "linux-arm64", TimeSpan.FromMinutes(10));
+
+        Assert.Equal(4, mapped.Services.Count);
+        Assert.Equal(5, mapped.ExecutionTargets.Count);
+        Assert.DoesNotContain(mapped.ExecutionTargets, target => target.ServiceId == "orcaslicer-worker");
+        Assert.All(mapped.ExecutionTargets, target =>
+            Assert.Equal(metadata.ComponentPlatformDigests[$"{target.ServiceId}/linux-arm64"], target.PlatformDigest));
+        Assert.Null(cache.Current);
+        Assert.Equal("verified_release_target_set_invalid", cache.LastError);
+    }
+
+    [Theory]
+    [InlineData("missing", "verified_release_target_set_invalid")]
+    [InlineData("duplicate", "verified_release_target_set_invalid")]
+    [InlineData("unknown", "verified_release_target_set_invalid")]
+    [InlineData("platform", "verified_release_target_platform_invalid")]
+    [InlineData("digest", "verified_release_target_platform_invalid")]
+    [InlineData("identity", "verified_release_identity_invalid")]
+    [InlineData("signature", "verified_release_evidence_untrusted")]
+    [InlineData("stale", "verified_release_evidence_stale")]
+    [InlineData("cache-error", "discovery_failed")]
+    public async Task Current_MappedEvidenceInvalidated_RejectsBeforeReadingReadiness(string field, string reason)
+    {
+        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
+        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64");
+        mapped = field switch
+        {
+            "missing" => mapped with { ExecutionTargets = mapped.ExecutionTargets.Take(5).ToArray() },
+            "duplicate" => mapped with
+            {
+                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
+                    target.ServiceId == "monolith" ? target with { ServiceId = "api" } : target).ToArray(),
+            },
+            "unknown" => mapped with
+            {
+                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
+                    target.ServiceId == "monolith" ? target with { ServiceId = "unknown" } : target).ToArray(),
+            },
+            "platform" => mapped with
+            {
+                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
+                    target.ServiceId == "monolith" ? target with { Platform = "linux-arm64" } : target).ToArray(),
+            },
+            "digest" => mapped with
+            {
+                ExecutionTargets = mapped.ExecutionTargets.Select(target =>
+                    target.ServiceId == "monolith" ? target with { PlatformDigest = "sha256:" + new string('A', 64) } : target).ToArray(),
+            },
+            "identity" => mapped with { Identity = mapped.Identity! with { ReleaseId = "invalid" } },
+            "signature" => mapped with { SignatureVerified = false },
+            _ => mapped,
+        };
+        VerifiedReleaseEvidenceCache evidence = new();
+        evidence.SetVerified(mapped, field == "stale" ? DateTimeOffset.UtcNow.AddHours(-1) : DateTimeOffset.UtcNow);
+        if (field == "cache-error")
+        {
+            evidence.SetError(reason);
+            Assert.Same(mapped, evidence.Current);
+        }
+        VerifiedReleaseEvidenceCandidateCache cache = new(
+            evidence, new Mock<IHostUpdateCandidateReadiness>(MockBehavior.Strict).Object,
+            "linux-amd64", TimeSpan.FromMinutes(10));
+
+        Assert.Null(cache.Current);
+        Assert.Equal(reason, cache.LastError);
+    }
+
+    [Theory]
+    [InlineData(false, "0.0.0")]
+    [InlineData(true, "invalid")]
+    public async Task Current_MappedEvidenceWithoutReadinessOrMinimumVersion_DoesNotClaimCompatibility(
+        bool ready, string minimumUpdaterVersion)
+    {
+        SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
+        VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64") with
+        {
+            MinimumUpdaterVersion = minimumUpdaterVersion,
+        };
+        VerifiedReleaseEvidenceCache evidence = new();
+        evidence.SetVerified(mapped, DateTimeOffset.UtcNow);
+        VerifiedReleaseEvidenceCandidateCache cache = new(
+            evidence, ready ? Ready() : new UnavailableHostUpdateCandidateReadiness(),
+            "linux-amd64", TimeSpan.FromMinutes(10));
+
+        VerifiedHostUpdateCandidate candidate = Assert.IsType<VerifiedHostUpdateCandidate>(cache.Current);
+        Assert.False(candidate.CompatibilityReady);
+        Assert.Equal(ready, candidate.InstallationAvailable);
+        Assert.Equal(ready, candidate.SafetyPassed);
+        Assert.Equal(ready, candidate.IsNewer);
+        Assert.Null(cache.LastError);
     }
 
     [Fact]
@@ -685,6 +836,30 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Equal(["linux-amd64", "linux-arm64"], manifest.Services[0].Platforms);
         Assert.Equal(["linux-amd64"], manifest.Services[4].Platforms);
         Assert.Contains("printer-discovery/linux-amd64", manifest.PlatformDigests.Keys);
+    }
+
+    private static async Task<SignedReleaseMetadata> CreateVerifiedMetadataAsync()
+    {
+        SignedUpdateManifest manifest = CreateManifest("1.2.3", "stable", "main");
+        manifest = manifest with
+        {
+            PlatformDigests = manifest.PlatformDigests.Keys.Select((key, index) =>
+                KeyValuePair.Create(key, $"sha256:{index + 1:x64}")).ToDictionary(StringComparer.Ordinal),
+        };
+        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(manifest, JsonOptions);
+        using HttpClient client = new(new TestHandler(bytes));
+        VerifiedGitHubReleaseMetadataProvider provider = new(new GitHubSignedReleaseDiscovery(client, new AcceptingVerifier()));
+        return await provider.GetCurrentAsync("stable", default);
+    }
+
+    private static IHostUpdateCandidateReadiness Ready()
+    {
+        Mock<IHostUpdateCandidateReadiness> readiness = new(MockBehavior.Strict);
+        readiness.SetupGet(value => value.CompatibilityReady).Returns(true);
+        readiness.SetupGet(value => value.InstallationAvailable).Returns(true);
+        readiness.SetupGet(value => value.SafetyPassed).Returns(true);
+        readiness.SetupGet(value => value.IsNewer).Returns(true);
+        return readiness.Object;
     }
 
     private static SignedUpdateManifest CreateManifest(string version, string channel, string branch)
