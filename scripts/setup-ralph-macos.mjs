@@ -326,7 +326,7 @@ export async function validatePolicy(options, command, development) {
     if (!rolePrompt.includes('ownershipScope:"ralph-owned-v1"')) throw new Error('Approved policy lacks Ralph-owned lineage inventory; review and renew the policy before generating native prompts.');
     if (!rolePrompt.includes('RALPH-ASSIGNED-WORKER-V1')) throw new Error('Approved policy lacks bounded specialist dispatch; renew before generating native prompts.');
     if (!rolePrompt.includes('RALPH-WORKER-CLEANUP-V1')) throw new Error('Approved policy lacks owning-consumer worker cleanup; review and renew the policy before generating native prompts.');
-    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs', 'ralph-native-cleanup.mjs']) {
+    for (const file of ['ralph-mailbox.mjs', 'ralph-native-runtime.mjs', 'ralph-native-dispatch.mjs', 'ralph-native-cleanup.mjs', 'ralph-worktree-path.mjs']) {
       await git(['cat-file', '-e', `${approved}:scripts/ci/${file}`]);
     }
     const workerAgent = await git(['show', `${approved}:.github/agents/ralph-worker.agent.md`]);
@@ -497,6 +497,8 @@ Inventory scope is Ralph-owned lineage across rounds, NOT all project sessions.
 For ready, supply ownershipScope:"ralph-owned-v1" and lineageChecked:true only
 after reconciling this worker's retained creation/delivery intents, mapped workers,
 verified role roots and descendants through actual native readback/history.
+Report every worktreePath exactly as get_session returns it; the runtime compares
+realpath forms, so a symlinked alias of worktreeRoot is the same worktree.
 Normalize creator_session_id to session.creatorSessionId and retain ancestor
 readbacks. Unrelated maintainer and other-automation sessions consume no Ralph
 slots and need no terminal attestation. Do not adopt, archive or mutate them.
@@ -564,6 +566,11 @@ Use startup-check on the same child and its actual startup-only ACK; send only t
 returned continuation once. Include native readback session.id, projectId,
 worktreePath AND branch in startup-check evidence. Missing branch is malformed
 evidence: correct it from get_session on the SAME child, never recreate.
+Pass the native worktreePath verbatim, never realpath it yourself: the runtime
+canonicalizes symlinked aliases of worktreeRoot, stores the canonical path and
+rejects escapes and main-checkout aliases. If startup-check says to submit
+record-creation first, resubmit record-creation with the original creation handle
+and the SAME child's readback in this or a later round, then startup-check again.
 A failed kickoff's requested model/effort is NOT proof
 of persisted configuration. Successful native creation establishes accepted settings,
 not independently observed runtime settings; preserve that evidence distinction.
@@ -674,7 +681,8 @@ Use list_projects, list_workflows, get_session and live session inventory to ver
 repository, actual destination project/workflow/environment and the disabled state.
 Use the native automation editor/environment picker if the tools cannot discover an
 environment ID. Do not infer that source ID "local" denotes this destination.
-Verify an app-created isolated worktree's actual parent equals worktreeRoot.
+Verify an app-created isolated worktree's canonical (realpath) parent equals worktreeRoot;
+the app may report it through a symlinked alias of that directory.
 Confirm Copilot app sign-in/entitlement and selected model availability natively.
 Verify repository access uses the intended account ${options['github-login']}.
 No app database edits, undocumented endpoints, exported sessions or token copying.

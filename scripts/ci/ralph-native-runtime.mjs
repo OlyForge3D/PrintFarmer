@@ -20,6 +20,9 @@ import {
   buildDispatchPlan, policyTextDigest, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
 } from './ralph-native-dispatch.mjs';
 import { loadSquadVerdict } from './verify-squad-verdict.mjs';
+import {
+  canonicalPath, mainCheckoutFromGitDirectory, resolveWorktreePath, samePath, strictlyWithin,
+} from './ralph-worktree-path.mjs';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (message) => { throw new Error(`Native Ralph blocked: ${message}`); };
@@ -95,11 +98,46 @@ function freshEvidence(evidence, now) {
       typeof evidence.source !== 'string' || !evidence.source.trim()) fail('Fresh observations from supported native/GitHub tools required.');
 }
 
+// runNativeRequest canonicalizes the root and every reported worktree path
+// before these checks, so this comparison is between realpath forms.
 function withinWorktreeRoot(root, target) {
   if (!path.isAbsolute(root ?? '') || !path.isAbsolute(target ?? '') ||
       path.normalize(target) !== target) return false;
-  const relative = path.relative(root, target);
-  return Boolean(relative) && !relative.startsWith('..') && !path.isAbsolute(relative);
+  return strictlyWithin(root, target);
+}
+
+// Accept the native (symlinked alias) or canonical spelling of a reported
+// worktree; store and compare only its canonical form. The worker path may
+// never alias the role's own checkout or the main checkout behind it.
+async function canonicalizeWorktreeEvidence(config, request, localContext) {
+  const evidence = request.evidence;
+  if (!evidence || typeof evidence !== 'object') return request;
+  const main = mainCheckoutFromGitDirectory(localContext.gitDirectory);
+  let canonical = evidence;
+  if (['receipt', 'record-creation', 'startup-check'].includes(request.type) &&
+      typeof evidence.session?.worktreePath === 'string') {
+    const worktreePath = await resolveWorktreePath(config.worktreeRoot, evidence.session.worktreePath,
+      { exclude: [localContext.worktreePath, main] });
+    canonical = { ...canonical, session: { ...evidence.session, worktreePath } };
+  }
+  if (request.type === 'ready' && Array.isArray(evidence.sessions)) {
+    const sessions = await Promise.all(evidence.sessions.map(async (session) => {
+      const role = session?.roleObservation;
+      if (role?.workerId !== config.workerId || role.projectId !== config.projectId || typeof role.worktreePath !== 'string') return session;
+      try {
+        return { ...session, roleObservation: { ...role,
+          worktreePath: await resolveWorktreePath(config.worktreeRoot, role.worktreePath, { exclude: [main] }) } };
+      } catch (error) { fail(`Ralph role lineage requires actual owner-configured native readback. (${error.message})`); }
+    }));
+    canonical = { ...canonical, sessions };
+  }
+  return canonical === evidence ? request : { ...request, evidence: canonical };
+}
+
+async function sameRecordedWorktree(recorded, canonical) {
+  if (samePath(recorded, canonical)) return true;
+  if (typeof recorded !== 'string') return false;
+  return samePath(await canonicalPath(recorded).catch(() => undefined), canonical);
 }
 
 function ownedSessionInventory(config, evidence, journal, state, now) {
@@ -663,6 +701,10 @@ export async function runNativeRequest(config, request, {
   if (!path.isAbsolute(checked.localContext?.worktreePath ?? '') ||
       !path.isAbsolute(checked.localContext?.gitDirectory ?? '')) fail('Verified local worktree context required.');
   if (request.native !== undefined) fail('Retired native.actual is not execution proof. Use the owner-configured role contract.');
+  if (path.isAbsolute(config.worktreeRoot ?? '')) {
+    config = { ...config, worktreeRoot: await canonicalPath(path.normalize(config.worktreeRoot)) };
+    request = await canonicalizeWorktreeEvidence(config, request, checked.localContext);
+  }
   await verifyControlRepository(config.control, api);
   const root = config.stateDirectory;
   if (!path.isAbsolute(root ?? '') || path.basename(root) !== 'native-state') fail('Approved private native-state path required; retain it across package renewals.');
@@ -859,7 +901,7 @@ export async function runNativeRequest(config, request, {
         if (!uuidPattern.test(evidence.creationHandle ?? '') ||
             !['succeeded', 'partial'].includes(evidence.creationOutcome) ||
             (local.creationHandle && local.creationHandle !== evidence.creationHandle) ||
-            (evidence.session && local.worktreePath && local.worktreePath !== evidence.session.worktreePath) ||
+            (evidence.session && local.worktreePath && !await sameRecordedWorktree(local.worktreePath, evidence.session.worktreePath)) ||
             (evidence.session && local.sessionId && local.sessionId !== evidence.session.id &&
               evidence.resolvedCreationHandle !== local.creationHandle) ||
             (evidence.creationOutcome === 'succeeded' &&
@@ -890,8 +932,11 @@ export async function runNativeRequest(config, request, {
         await writeJournal(journalPath, journal);
         return { nativeCreateAllowed: false, sessionId: local.sessionId, creationHandle: local.creationHandle };
       }
+      if (!local.worktreePath || !local.sessionId) {
+        fail('No recorded native session for this child: submit record-creation with the original creation handle and the same child readback first. Never recreate it.');
+      }
       if (!local.creationHandle || local.sessionId !== evidence.session.id ||
-          local.worktreePath !== evidence.session.worktreePath ||
+          !await sameRecordedWorktree(local.worktreePath, evidence.session.worktreePath) ||
           (local.creationOutcome !== 'succeeded' && evidence.configuration?.source === 'successful-native-create')) {
         fail('Partial startup requires actual configuration readback or explicit owner attestation on the same child.');
       }

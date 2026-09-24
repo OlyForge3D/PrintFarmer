@@ -408,6 +408,13 @@ model availability and app-created worktree parent, then explicitly authorize
 changing private `verified:false` to `verified:true`. The script has no flag
 that performs this attestation.
 
+Compare the worktree parent by its canonical (realpath) form. The app may report
+the parent through a symlinked alias of `worktreeRoot`, for example
+`/Users/<user>/s/...` for `/Volumes/data/src/...`. The runtime accepts that
+spelling, stores the canonical path and rejects symlink escapes and
+main-checkout aliases. See
+[native vs canonical worktree path identity](../.copilot/skills/ralph-loop/native-roles.md#native-vs-canonical-worktree-path-identity).
+
 Filesystem `preflight` can then run in an app-created isolated verification
 worktree, after the saved bootstrap's origin/fetch/policy guards. It returns
 `dispatchAuthorized:false` and `nativeIdentityVerified:false`. This is expected:
@@ -898,5 +905,6 @@ node --test scripts/ci/tests/test-setup-ralph-macos.mjs \
   scripts/ci/tests/test-ralph-mailbox.mjs \
   scripts/ci/tests/test-ralph-e2e-roles.mjs \
   scripts/ci/tests/test-ralph-native-cleanup.mjs \
+  scripts/ci/tests/test-ralph-worktree-path.mjs \
   scripts/ci/tests/test-ralph-github-snapshot.mjs
 ```

@@ -617,6 +617,35 @@ Then record actual normalized native readback (`session`, `repository`,
 `creationHandle`, identify it as `resolvedCreationHandle` and preserve the same
 project/worktree; it is not permission to replace the workspace.
 
+### Native vs canonical worktree path identity
+
+Pass the native `worktreePath` verbatim; never `realpath` it yourself. The app may
+report a worker through a symlinked alias of `worktreeRoot`, for example
+`/Users/<me>/s/...` when `/Users/<me>/s` links to `/Volumes/data/src`. The runtime
+canonicalizes `worktreeRoot` and every reported path with `fs.realpath`; a path that
+does not exist yet resolves through its nearest existing ancestor. It then:
+
+- requires the canonical path to be strictly inside the canonical root, so a
+  symlink leading outside, the root itself, a dangling symlink or a `..` spelling
+  is rejected;
+- rejects the main checkout, derived from the role's own linked worktree, and the
+  role's own checkout, by any spelling, as well as any directory at or below the
+  root whose `.git` is a directory;
+- stores only the canonical path in the mapping and in the terminal evidence;
+- compares later `startup-check`, receipt and cleanup readbacks by canonical
+  identity, so a mapping recorded as `/Volumes/...` still matches the
+  `/Users/<me>/s/...` spelling;
+- runs cleanup `.git`, `lstat` and absent-worktree checks on the canonical path,
+  and accepts either spelling for the post-delete `worktree.path`.
+
+A rejected `record-creation` or `startup-check` persists nothing. If a child exists
+but its mapping lacks `sessionId`/`worktreePath`, for example after a lost readback
+or a rejected alias path on an older runtime, `startup-check` names the recovery
+step: in any later round, resubmit `record-creation` with the original
+`creationHandle` and the same child's native readback, then `startup-check` on that
+same child. `ready` stays blocked until that readback is recorded. Never recreate
+the child.
+
 The worker initially returns startup-only ACK and stops. Submit `startup-check`
 with the exact binding, same session, plan digest and `startupAck`.
 `evidence.session` must include actual native-readback `id`, normalized
@@ -843,8 +872,11 @@ After the round's admission/kickoff work and before `end-round`, submit
 
 The runtime, not the caller, reads the git and GitHub facts. It canonicalizes the
 recorded worktree path (`realpath`, case-folded) and requires it to stay inside the
-configured worktree root with no symlink redirection and no overlap with the main
-checkout. It then reads `HEAD`, the branch and `git status --porcelain` (tracked and
+canonical worktree root. Its final component must not be a symlink redirecting to
+another directory, it must not overlap the main checkout, and its `.git` must not be
+a directory. The live `worktreePath` may be the native alias spelling of the
+recorded canonical path; see
+[Native vs canonical worktree path identity](#native-vs-canonical-worktree-path-identity). It then reads `HEAD`, the branch and `git status --porcelain` (tracked and
 untracked) with hooks and fsmonitor disabled. From GitHub it reads every PR for that
 exact head branch and repository, the remote branch ref, and the head's commit
 comparison with `development`. Pushed means the remote ref equals the local `HEAD`,

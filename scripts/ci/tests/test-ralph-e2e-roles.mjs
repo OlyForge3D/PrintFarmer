@@ -4,8 +4,9 @@
 // the simulated private control repository and public GitHub fixtures. No test
 // step copies a value produced by one role into another role's request.
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -13,6 +14,7 @@ import {
   digest, publishEvent, readMailbox, taskFromEvidence, taskFromPacket, taskPacketFromEvidence, validateTaskPacket,
 } from '../ralph-mailbox.mjs';
 import { composeTaskEvidence, runNativeRequest, verifyDevelopmentAdvance, verifyTerminalArtifact } from '../ralph-native-runtime.mjs';
+import { defaultCleanupProbe } from '../ralph-native-cleanup.mjs';
 import {
   githubFixture, registerIssueComment, registerPolicyAtHead, registerPullRequest, registerTaskSubject, setCompare, setVerdictStatus,
 } from './fixtures/ralph-github-fixture.mjs';
@@ -72,7 +74,7 @@ async function farm(t) {
 
   // One runtime invocation: load this role's host config from its own file,
   // exactly as `ralph-native-runtime.mjs --host-config` does, and nothing else.
-  const invoke = async (name, request, { at = now } = {}) => {
+  const invoke = async (name, request, { at = now, cleanupProbe = defaultCleanupProbe } = {}) => {
     const entry = roles[name];
     const config = JSON.parse(await readFile(entry.hostConfigPath, 'utf8'));
     const full = { approvedPolicy: config.approvedPolicy, id: `${name}-${++sequence}`, ...request, hostConfigPath: entry.hostConfigPath };
@@ -83,7 +85,7 @@ async function farm(t) {
     }
     log.push({ role: name, request: full });
     return runNativeRequest(config, full, {
-      api: github.api, now: at, preflight: async () => ({ localContext: entry.localContext }),
+      api: github.api, now: at, preflight: async () => ({ localContext: entry.localContext }), cleanupProbe,
     });
   };
   const begin = async (name) => {
@@ -152,7 +154,7 @@ async function discover(f, name, issue) {
   return { assignment, binding: { assignmentId: assignment.assignmentId, generation: assignment.generation, taskDigest: assignment.taskDigest } };
 }
 
-async function startWorker(f, name, binding, { correlation, initialHeadSha } = {}) {
+async function startWorker(f, name, binding, { correlation, initialHeadSha, worktreePath } = {}) {
   const data = { ...binding, correlation };
   const preview = await f.act(name, 'dispatch-plan', { data, evidence: consumerStartEvidence() });
   assert.equal(preview.nativeCreateAllowed, false);
@@ -164,7 +166,7 @@ async function startWorker(f, name, binding, { correlation, initialHeadSha } = {
   const config = f.roles[name].config;
   const session = {
     id: `cccccccc-2222-4333-8444-${String(++sessionCounter).padStart(12, '0')}`,
-    projectId: config.projectId, worktreePath: `${config.worktreeRoot}/${correlation}`, branch: `worker-${correlation}`,
+    projectId: config.projectId, worktreePath: worktreePath ?? `${config.worktreeRoot}/${correlation}`, branch: `worker-${correlation}`,
   };
   const readback = fresh({ session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, dispatchPlanDigest: plan.planDigest });
   await f.act(name, 'record-creation', { data, evidence: { ...readback,
@@ -682,5 +684,184 @@ test('existing-PR recovery dispatches from a runtime PR-head policy readback, no
   assert.equal(accepted.dispatchPlan.packet.pr, 7901);
   pr.head.sha = 'b'.repeat(40);
   await assert.rejects(plan(), /New PR recovery requires|github-readback/);
+  assertNoRelay(f);
+});
+
+// The live Mac layout: the native app reports worker worktrees through
+// /Users/<me>/s -> /Volumes/data/src while worktreeRoot is the canonical
+// /Volumes/data/src/copilot-worktrees/pfarm1. The main checkout is a real
+// repository so the consumer's own linked worktree derives it.
+async function aliasedFarm(t) {
+  const f = await farm(t);
+  const src = path.join(f.root, 'Volumes', 'data', 'src');
+  const root = path.join(src, 'copilot-worktrees', 'pfarm1');
+  const main = path.join(src, 'pfarm1');
+  await mkdir(root, { recursive: true });
+  await mkdir(main, { recursive: true });
+  const git = (cwd, ...args) => execFileSync('git', ['-C', cwd, ...args], { encoding: 'utf8' });
+  git(main, 'init', '-q', '-b', 'development');
+  git(main, '-c', 'user.email=f@example.com', '-c', 'user.name=f', 'commit', '-q', '--allow-empty', '-m', 'init');
+  const aliasSrc = path.join(f.root, 'Users', 'me', 's');
+  await mkdir(path.dirname(aliasSrc), { recursive: true });
+  await symlink(src, aliasSrc);
+  const aliasRoot = path.join(aliasSrc, 'copilot-worktrees', 'pfarm1');
+  const mini = f.roles.mini;
+  mini.config.worktreeRoot = root;
+  mini.localContext = { worktreePath: path.join(root, 'ralph-consumer'), gitDirectory: path.join(main, '.git', 'worktrees', 'ralph-consumer') };
+  await writeFile(mini.hostConfigPath, `${JSON.stringify(mini.config, null, 2)}\n`, { mode: 0o600 });
+  const addWorktree = (name, branch) => {
+    git(main, 'worktree', 'add', '-q', '-b', branch, path.join(root, name));
+    return { canonical: path.join(root, name), native: path.join(aliasRoot, name) };
+  };
+  const journalPath = path.join(mini.config.stateDirectory, 'journal.json');
+  const journal = async () => JSON.parse(await readFile(journalPath, 'utf8'));
+  return { ...f, worktreeRoot: root, main, aliasSrc, aliasRoot, git, addWorktree, journalPath, journal };
+}
+
+test('a symlinked native worktree alias keeps one canonical identity through research start, startup-check, terminal and cleanup', async (t) => {
+  const f = await aliasedFarm(t);
+  await f.begin('coordinator');
+  await f.begin('mini');
+  await f.ready('mini');
+  const research = await reserveAndPublish(f, 2880, 'mini', { research: true });
+  const { binding } = await discover(f, 'mini', 2880);
+  const correlation = 'research-2880';
+  const paths = f.addWorktree('jpapiez-crispy-eureka', `worker-${correlation}`);
+  assert.notEqual(paths.native, paths.canonical);
+  assert.equal(await realpath(paths.native), paths.canonical);
+  // The consumer passes the native spelling verbatim; the runtime stores the canonical one.
+  const worker = await startWorker(f, 'mini', binding, { correlation, worktreePath: paths.native });
+  assert.equal((await f.journal()).sessions[correlation].worktreePath, paths.canonical);
+  const delivered = await runWorker(f, 'mini', worker);
+  const { url: findingsUrl } = registerIssueComment(f.github, 2880, 28801, 'Findings for the aliased worker.\n');
+  await reportTerminal(f, 'mini', worker, delivered, findingsUrl);
+  const mapping = (await f.journal()).sessions[correlation];
+  assert.equal(mapping.worktreePath, paths.canonical);
+  assert.equal(mapping.terminalEvidence.session.worktreePath, paths.canonical, 'terminal evidence commits the canonical path');
+  const settled = await f.act('coordinator', 'release', await settlementRequest(f, research.assignmentId));
+  assert.equal(settled.state.assignments[research.assignmentId].state, 'terminal');
+
+  // Cleanup: live readback and the main checkout both arrive by their native aliases.
+  const later = now + 16 * 60_000;
+  const original = f.github.api;
+  f.github.api = async (endpoint, ...rest) => {
+    if (/^repos\/OlyForge3D\/PrintFarmer\/pulls\?head=/.test(endpoint)) return [];
+    if (/^repos\/OlyForge3D\/PrintFarmer\/git\/matching-refs\/heads\//.test(endpoint)) return [];
+    if (/^repos\/OlyForge3D\/PrintFarmer\/compare\/development\.\.\.[0-9a-f]{40}$/.test(endpoint)) return { status: 'behind', ahead_by: 0 };
+    return original(endpoint, ...rest);
+  };
+  const cleanupEvidence = (live = {}) => ({ observedAt: new Date(later).toISOString(), source: 'fixture get_session readback',
+    callingSessionId: 'aaaaaaaa-2222-4333-8444-555555555555', mainCheckoutPath: path.join(f.aliasSrc, 'pfarm1'),
+    candidates: [{ sessionId: worker.session.id, live: { found: true, name: 'research 2880', projectId: worker.session.projectId,
+      worktreePath: paths.native, branch: worker.session.branch, busy: false, pendingInput: false, agentMerge: false,
+      automation: false, ...live }, artifactUrl: findingsUrl }] });
+  const cleanup = (type, evidence, data = { sessionId: worker.session.id }) => f.act('mini', type, { data, evidence }, { at: later });
+  const other = f.addWorktree('another-worker', 'worker-another');
+  const mismatched = await cleanup('cleanup-plan', cleanupEvidence({ worktreePath: other.native }));
+  assert.deepEqual(mismatched.eligible, []);
+  assert.ok(mismatched.retained[0].reasons.includes('worktree path does not match the recorded isolated worker worktree'));
+  for (const spelling of [paths.native, paths.canonical]) {
+    const plan = await cleanup('cleanup-plan', cleanupEvidence({ worktreePath: spelling }));
+    assert.deepEqual(plan.eligible.map((item) => item.sessionId), [worker.session.id], JSON.stringify(plan.retained));
+    assert.equal(plan.eligible[0].worktreePath, paths.canonical);
+  }
+  const intent = await cleanup('record-deletion-intent', cleanupEvidence());
+  assert.equal(intent.deleteAllowed, true);
+  f.git(f.main, 'worktree', 'remove', '--force', paths.canonical);
+  const result = await cleanup('record-deletion-result', { observedAt: new Date(later).toISOString(),
+    source: 'fixture get_session and worktree stat', lookups: [{ id: worker.session.id, notFound: true }],
+    worktree: { path: paths.native, absent: true }, deleteOutcome: 'Session deleted.' });
+  assert.equal(result.confirmed, true, JSON.stringify(result));
+  assert.equal((await f.journal()).deletions[worker.session.id].confirmation.worktree.path, paths.canonical);
+  assertNoRelay(f);
+});
+
+test('symlink escapes and main-checkout aliases fail closed, and a rejected startup-check resumes on the same child after renewal', async (t) => {
+  const f = await aliasedFarm(t);
+  await f.begin('coordinator');
+  await f.begin('mini');
+  await f.ready('mini');
+  await reserveAndPublish(f, 2881, 'mini', { research: true });
+  const { binding } = await discover(f, 'mini', 2881);
+  const correlation = 'research-2881';
+  const data = { ...binding, correlation };
+  await f.act('mini', 'dispatch-plan', { data, evidence: consumerStartEvidence() });
+  await f.ready('mini');
+  const start = await f.act('mini', 'receipt', { data: { ...data, status: 'starting' }, evidence: consumerStartEvidence() });
+  assert.equal(start.nativeCreateAllowed, true);
+  const plan = start.dispatchPlan;
+  const paths = f.addWorktree('jpapiez-crispy-eureka', `worker-${correlation}`);
+  const session = { id: 'cccccccc-2222-4333-8444-000000002881', projectId: f.roles.mini.config.projectId,
+    worktreePath: paths.native, branch: `worker-${correlation}` };
+  const creation = { creationHandle: session.id, creationOutcome: 'succeeded',
+    createRequestDigest: digest(plan.nativeArguments), kickoffAccepted: true };
+  const readback = (worktreePath) => fresh({ session: { ...session, worktreePath }, repository: 'OlyForge3D/PrintFarmer',
+    nativeReadbackVerified: true, dispatchPlanDigest: plan.planDigest });
+  const startup = (worktreePath) => ({ ...readback(worktreePath),
+    configuration: { source: 'successful-native-create', model: plan.packet.model, reasoningEffort: plan.packet.reasoningEffort },
+    startupAck: { ...plan.packet, substantiveWorkStarted: false, noChildren: true, actualModel: plan.packet.model,
+      initialHeadSha: plan.packet.headSha, actualBranch: session.branch } });
+  // The native create succeeded but its session readback was not recorded: only the handle is journaled.
+  const recorded = await f.act('mini', 'record-creation', { data, evidence: fresh({ repository: 'OlyForge3D/PrintFarmer',
+    nativeReadbackVerified: true, dispatchPlanDigest: plan.planDigest, ...creation }) });
+  assert.equal(recorded.reconciliationRequired, true);
+  assert.equal((await f.journal()).sessions[correlation].worktreePath ?? null, null);
+
+  const outside = path.join(f.root, 'outside');
+  await mkdir(outside);
+  await symlink(outside, path.join(f.worktreeRoot, 'escape'));
+  await symlink(f.main, path.join(f.worktreeRoot, 'main-alias'));
+  await symlink(path.join(f.root, 'nowhere'), path.join(f.worktreeRoot, 'dangling'));
+  await mkdir(path.join(f.worktreeRoot, 'primary', '.git'), { recursive: true });
+  const before = await readFile(f.journalPath, 'utf8');
+  for (const [bad, pattern] of [
+    [path.join(f.aliasRoot, 'escape'), /escapes the configured Ralph worktree root/],
+    [path.join(f.aliasRoot, 'escape', 'nested'), /escapes the configured Ralph worktree root/],
+    [path.join(f.aliasRoot, 'main-alias'), /escapes/],
+    [path.join(f.aliasSrc, 'pfarm1'), /escapes/],
+    [f.aliasRoot, /escapes/],
+    [path.join(f.aliasRoot, 'primary'), /main checkout \(its \.git is a directory\)/],
+    [path.join(f.aliasRoot, 'ralph-consumer'), /aliases the main checkout or another Ralph checkout/],
+    [path.join(f.aliasRoot, 'dangling'), /dangling symlink/],
+  ]) {
+    await assert.rejects(f.act('mini', 'record-creation', { data, evidence: { ...readback(bad), ...creation } }), pattern, bad);
+    await assert.rejects(f.act('mini', 'startup-check', { data, evidence: startup(bad) }), pattern, bad);
+  }
+  // Before the same child's readback is recorded, startup-check names the recovery step.
+  await assert.rejects(f.act('mini', 'startup-check', { data, evidence: startup(paths.native) }),
+    /submit record-creation with the original creation handle and the same child readback first\. Never recreate it\./);
+  assert.equal(await readFile(f.journalPath, 'utf8'), before, 'rejected requests persist nothing');
+
+  // Renewal: a new round on the updated runtime resubmits for the SAME child. No native create is authorized.
+  await f.end('mini');
+  await f.begin('mini');
+  await assert.rejects(f.ready('mini'), /lacks correlated native delivery/, 'ready waits for the recorded readback');
+  const resumed = await f.act('mini', 'record-creation', { data, evidence: { ...readback(paths.canonical), ...creation } });
+  assert.deepEqual({ sessionId: resumed.sessionId, nativeCreateAllowed: resumed.nativeCreateAllowed }, { sessionId: session.id, nativeCreateAllowed: false });
+  const mapping = (await f.journal()).sessions[correlation];
+  assert.deepEqual({ sessionId: mapping.sessionId, worktreePath: mapping.worktreePath, creationHandle: mapping.creationHandle },
+    { sessionId: session.id, worktreePath: paths.canonical, creationHandle: session.id });
+  // A canonical mapping keeps matching the native spelling; another child's path does not.
+  const other = f.addWorktree('another-worker', 'worker-another');
+  await assert.rejects(f.act('mini', 'startup-check', { data, evidence: startup(other.native) }), /same child/);
+  const allowed = await f.act('mini', 'startup-check', { data, evidence: startup(paths.native) });
+  assert.equal(allowed.continuationAllowed, true);
+  await f.act('mini', 'receipt', { data: { ...data, status: 'running' }, evidence: fresh({ session, assignmentCorrelation: correlation,
+    repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true,
+    continuationAck: { ...plan.packet, substantiveWorkStarted: true } }) });
+  f.roles.mini.sessions.push({ id: session.id, ownershipVerified: true });
+  // The consumer's own role session is also reported through the alias; the main checkout never qualifies.
+  const role = (worktreePath) => ({ id: 'dddddddd-2222-4333-8444-000000002881', nativeReadbackVerified: true,
+    roleObservation: { role: 'consumer', workerId: 'mini', projectId: f.roles.mini.config.projectId, worktreePath,
+      ownerConfiguredRoleVerified: true, noTaskExecutionVerified: true } });
+  f.roles.mini.sessions.push(role(path.join(f.aliasSrc, 'pfarm1')));
+  await assert.rejects(f.ready('mini'), /role lineage requires actual owner-configured native readback\. \(.*escapes/);
+  f.roles.mini.sessions[f.roles.mini.sessions.length - 1] = role(path.join(f.aliasRoot, 'ralph-consumer'));
+  await f.ready('mini');
+  const snapshot = await f.inspect('mini');
+  assert.equal(snapshot.state.assignments[binding.assignmentId].state, 'running');
+  assert.ok(f.log.every(({ request }) => request.type !== 'receipt' || request.data.status !== 'starting' ||
+    request.data.correlation !== correlation || request.id === f.log.find((entry) => entry.request.data?.status === 'starting' &&
+      entry.request.data.correlation === correlation).request.id), 'the child is never re-created');
   assertNoRelay(f);
 });
