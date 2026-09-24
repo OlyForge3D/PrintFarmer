@@ -554,6 +554,16 @@ test('mixed not-found and archived identifiers confirm as an archived retirement
   await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
   const hard = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []), evidence: confirmedLookup(1) });
   assert.deepEqual([hard.confirmed, hard.outcome], [true, 'deleted']);
+  const saved = structuredClone(w.journal.deletions[id(1)]);
+  for (const forged of [null, 'archived', 'unconfirmed']) {
+    const entry = structuredClone(saved);
+    entry.confirmation.outcome = forged;
+    entry.resultEvidenceDigest = digest(entry.confirmation);
+    w.journal.deletions[id(1)] = entry;
+    await assert.rejects(planWorkerCleanup(context(w, [])), /deletion record/, String(forged));
+  }
+  w.journal.deletions[id(1)] = saved;
+  assert.deepEqual([...deletedWorkerIds(w.journal, w.state)], [id(1)]);
 });
 
 test('a legacy not-found confirmation without stored outcomes still verifies as a deletion', async () => {

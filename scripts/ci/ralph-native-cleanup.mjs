@@ -142,7 +142,7 @@ function confirmationProven(record) {
     Date.parse(proof.observedAt) >= Date.parse(record.intentAt) &&
     proof.worktree?.path === record.worktreePath && proof.worktree.absent === true && proof.runtimeWorktreeAbsent === true &&
     outcomes.every((outcome) => outcome !== 'unconfirmed') &&
-    (proof.outcome ?? 'deleted') === retirementOutcome(outcomes);
+    (proof.outcome === undefined ? 'deleted' : proof.outcome) === retirementOutcome(outcomes);
 }
 
 export function deletedWorkerIds(journal, state) {
