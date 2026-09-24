@@ -449,7 +449,7 @@ test('packet negatives fail closed: legacy packetless, tampered, mismatched, hel
   assert.throws(() => composeTaskEvidence({ ...assignment, taskDigest: digest('other') }, liveSubject, {}), /task-packet-tampered/);
   assert.throws(() => composeTaskEvidence({ ...assignment, taskPacket: undefined }, liveSubject, {}), /native-evidence-missing/);
   live.subject.labels.push({ name: 'status:blocked' });
-  await assert.rejects(plan(consumerStartEvidence()), /^Error: held:|held: a human hold/);
+  await assert.rejects(plan(consumerStartEvidence()), /held: a human hold/);
   live.subject.labels.pop();
   live.subject.title = 'Retitled after reservation';
   await assert.rejects(plan(consumerStartEvidence()), /task-changed: issue title changed/);
