@@ -3,9 +3,8 @@
 ## How Ralph Runs Here
 
 PrintFarmer uses stock Squad Ralph. GitHub is the only state: `squad` /
-`squad:{member}` labels, assignees, and PRs are the board. There is no private
-ledger, mailbox, credit, ACK or policy-pin protocol. The native
-coordinator/consumer automation (`NATIVE-MAILBOX-ROLE-V2`) was retired in #2966.
+`squad:{member}` labels, assignees, and PRs are the board. Do not add a private
+state store or scheduled coordinator/consumer layer on top of it (see #2966).
 
 - **In-session:** "Ralph, go" in a Squad session on any machine.
 - **Unattended:** `npx @bradygaster/squad-cli watch --execute --interval 10 --max-concurrent N`
