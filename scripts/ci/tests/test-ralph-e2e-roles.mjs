@@ -6,7 +6,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -74,6 +74,8 @@ async function farm(t) {
 
   // One runtime invocation: load this role's host config from its own file,
   // exactly as `ralph-native-runtime.mjs --host-config` does, and nothing else.
+  // settings.pathFs simulates the pre-canonical runtime: a lexical realpath.
+  const settings = { pathFs: undefined };
   const invoke = async (name, request, { at = now, cleanupProbe = defaultCleanupProbe } = {}) => {
     const entry = roles[name];
     const config = JSON.parse(await readFile(entry.hostConfigPath, 'utf8'));
@@ -86,6 +88,7 @@ async function farm(t) {
     log.push({ role: name, request: full });
     return runNativeRequest(config, full, {
       api: github.api, now: at, preflight: async () => ({ localContext: entry.localContext }), cleanupProbe,
+      pathFs: settings.pathFs,
     });
   };
   const begin = async (name) => {
@@ -112,7 +115,7 @@ async function farm(t) {
     entry.config.control.genesisSha = initialized.genesisSha;
     await writeHost(entry);
   }
-  return { root, github, roles, log, invoke, begin, act, end, ready, inspect, inventory };
+  return { root, github, roles, log, settings, invoke, begin, act, end, ready, inspect, inventory };
 }
 
 // Coordinator-authored triage and classification. Only the coordinator holds it.
@@ -691,6 +694,9 @@ test('existing-PR recovery dispatches from a runtime PR-head policy readback, no
 // /Users/<me>/s -> /Volumes/data/src while worktreeRoot is the canonical
 // /Volumes/data/src/copilot-worktrees/pfarm1. The main checkout is a real
 // repository so the consumer's own linked worktree derives it.
+const lastReceipt = (f, status) => f.log.findLast(({ role, request }) =>
+  role === 'mini' && request.type === 'receipt' && request.data?.status === status).request;
+
 async function aliasedFarm(t) {
   const f = await farm(t);
   const src = path.join(f.root, 'Volumes', 'data', 'src');
@@ -733,6 +739,13 @@ test('a symlinked native worktree alias keeps one canonical identity through res
   const worker = await startWorker(f, 'mini', binding, { correlation, worktreePath: paths.native });
   assert.equal((await f.journal()).sessions[correlation].worktreePath, paths.canonical);
   const delivered = await runWorker(f, 'mini', worker);
+  // Current-format replay of the same request ID converges on one digest by either spelling.
+  const running = lastReceipt(f, 'running');
+  for (const worktreePath of [paths.native, paths.canonical]) {
+    const replay = await f.invoke('mini', { ...running, evidence: { ...running.evidence,
+      session: { ...running.evidence.session, worktreePath } } });
+    assert.equal(replay.replayed, true, worktreePath);
+  }
   const { url: findingsUrl } = registerIssueComment(f.github, 2880, 28801, 'Findings for the aliased worker.\n');
   await reportTerminal(f, 'mini', worker, delivered, findingsUrl);
   const mapping = (await f.journal()).sessions[correlation];
@@ -863,5 +876,85 @@ test('symlink escapes and main-checkout aliases fail closed, and a rejected star
   assert.ok(f.log.every(({ request }) => request.type !== 'receipt' || request.data.status !== 'starting' ||
     request.data.correlation !== correlation || request.id === f.log.find((entry) => entry.request.data?.status === 'starting' &&
       entry.request.data.correlation === correlation).request.id), 'the child is never re-created');
+  assertNoRelay(f);
+});
+
+test('a recorded canonical worktree is immutable: replacing it with a symlink to another worktree never rebinds the child', async (t) => {
+  const f = await aliasedFarm(t);
+  await f.begin('coordinator');
+  await f.begin('mini');
+  await f.ready('mini');
+  await reserveAndPublish(f, 2883, 'mini', { research: true });
+  const { binding } = await discover(f, 'mini', 2883);
+  const correlation = 'research-2883';
+  const paths = f.addWorktree('worker-a', `worker-${correlation}`);
+  const other = f.addWorktree('worker-b', 'worker-b');
+  const worker = await startWorker(f, 'mini', binding, { correlation, worktreePath: paths.native });
+  assert.equal((await f.journal()).sessions[correlation].worktreePath, paths.canonical);
+  // Worker A is replaced by a symlink to worker B: inside the root, not a main checkout.
+  await rename(paths.canonical, `${paths.canonical}-moved`);
+  await symlink(other.canonical, paths.canonical);
+  const before = await readFile(f.journalPath, 'utf8');
+  const readback = fresh({ session: worker.session, repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true,
+    dispatchPlanDigest: worker.plan.planDigest });
+  await assert.rejects(f.act('mini', 'record-creation', { data: worker.data, evidence: { ...readback, creationHandle: worker.session.id,
+    creationOutcome: 'succeeded', createRequestDigest: digest(worker.plan.nativeArguments), kickoffAccepted: true } }),
+  /Retain original creation handle/);
+  await assert.rejects(f.act('mini', 'startup-check', { data: worker.data, evidence: worker.startupAck(worker.head) }), /same child/);
+  assert.equal(await readFile(f.journalPath, 'utf8'), before, 'rejected rebinding persists nothing');
+  await rm(paths.canonical);
+  await rename(`${paths.canonical}-moved`, paths.canonical);
+  const allowed = await f.act('mini', 'startup-check', { data: worker.data, evidence: worker.startupAck(worker.head) });
+  assert.equal(allowed.continuationAllowed, true);
+  assertNoRelay(f);
+});
+
+test('requests journaled by the pre-canonical runtime replay exactly after upgrade, committed or pending', async (t) => {
+  const f = await aliasedFarm(t);
+  // A legacy host config spelled the root through the alias and the old runtime compared lexically.
+  f.roles.mini.config.worktreeRoot = f.aliasRoot;
+  await writeFile(f.roles.mini.hostConfigPath, `${JSON.stringify(f.roles.mini.config, null, 2)}\n`, { mode: 0o600 });
+  f.settings.pathFs = { lstat, realpath: async (target) => target };
+  await f.begin('coordinator');
+  await f.begin('mini');
+  await f.ready('mini');
+  const research = await reserveAndPublish(f, 2884, 'mini', { research: true });
+  const { binding } = await discover(f, 'mini', 2884);
+  const correlation = 'research-2884';
+  const paths = f.addWorktree('legacy-worker', `worker-${correlation}`);
+  const worker = await startWorker(f, 'mini', binding, { correlation, worktreePath: paths.native });
+  assert.equal((await f.journal()).sessions[correlation].worktreePath, paths.native, 'the legacy runtime stored the alias spelling');
+  const delivered = await runWorker(f, 'mini', worker);
+  const running = lastReceipt(f, 'running');
+  // The terminal receipt is journaled but its publication is lost: pending.
+  const { url } = registerIssueComment(f.github, 2884, 28841, 'Legacy findings.\n');
+  const original = f.github.api;
+  f.github.api = async (endpoint, method, ...rest) => {
+    if (method === 'PATCH' && endpoint.includes('/git/refs/')) throw new Error('fixture: publication lost');
+    return original(endpoint, method, ...rest);
+  };
+  await assert.rejects(reportTerminal(f, 'mini', worker, delivered, url, { replacement: true }), /acknowledgement lost/);
+  f.github.api = original;
+  const pending = lastReceipt(f, 'terminal-reported');
+  const legacy = await f.journal();
+  assert.ok(legacy.events[pending.id] && legacy.requestDigests[pending.id], 'pending receipt is journaled');
+
+  // Upgrade: the canonical runtime replays both exact legacy requests.
+  f.settings.pathFs = undefined;
+  assert.equal((await f.invoke('mini', running)).replayed, true, 'committed legacy receipt');
+  const published = await f.invoke('mini', pending);
+  assert.equal(published.state.assignments[research.assignmentId].state, 'terminal-reported', 'pending legacy receipt');
+  const upgraded = await f.journal();
+  assert.deepEqual(upgraded.events[pending.id], legacy.events[pending.id], 'saved event is preserved');
+  assert.equal(upgraded.requestDigests[pending.id], legacy.requestDigests[pending.id]);
+  assert.deepEqual(upgraded.sessions[correlation].terminalEvidence, legacy.sessions[correlation].terminalEvidence);
+  // Changed content under a legacy ID is still rejected; a respelling is not the legacy request.
+  await assert.rejects(f.invoke('mini', { ...running, evidence: { ...running.evidence,
+    session: { ...running.evidence.session, worktreePath: paths.canonical } } }), /Local event ID changed content/);
+  await assert.rejects(f.invoke('mini', { ...running, evidence: { ...running.evidence, kickoffDeliveryVerified: false } }),
+    /Local event ID changed content/);
+  f.roles.mini.sessions.push({ id: worker.session.id, terminalVerified: true });
+  const settled = await f.act('coordinator', 'release', await settlementRequest(f, research.assignmentId));
+  assert.equal(settled.state.assignments[research.assignmentId].state, 'terminal');
   assertNoRelay(f);
 });

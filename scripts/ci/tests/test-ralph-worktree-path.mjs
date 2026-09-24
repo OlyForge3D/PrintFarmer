@@ -1,12 +1,12 @@
 // Native-vs-canonical worktree path identity: the native app may report a
 // worker through a symlinked alias of the configured worktree root.
 import assert from 'node:assert/strict';
-import { mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, realpath, rm, symlink } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 import {
-  canonicalPath, foldPath, mainCheckoutFromGitDirectory, resolveWorktreePath, samePath, strictlyWithin,
+  canonicalPath, mainCheckoutFromGitDirectory, resolveWorktreePath, samePath, strictlyWithin,
 } from '../ralph-worktree-path.mjs';
 
 async function layout(t) {
@@ -74,12 +74,58 @@ test('resolveWorktreePath rejects symlink escapes, the root itself and main-chec
   await assert.rejects(resolveWorktreePath('relative', own), /worktree root required/);
 });
 
-test('path helpers fold case only on case-insensitive hosts and derive the main checkout of a linked worktree', () => {
-  assert.equal(samePath('/Volumes/Data/x', '/volumes/data/x', 'darwin'), true);
-  assert.equal(samePath('C:\\Src\\x', 'c:\\src\\x', 'win32'), true);
-  assert.equal(samePath('/Volumes/Data/x', '/volumes/data/x', 'linux'), false);
-  assert.equal(foldPath('/A', 'linux'), '/A');
+// A case-sensitive volume in memory: directories and symlinks keyed by exact spelling.
+function caseSensitiveFs(directories, links = {}) {
+  const enoent = () => Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+  const resolve = (target, depth = 0) => {
+    if (depth > 16) throw Object.assign(new Error('ELOOP'), { code: 'ELOOP' });
+    let current = '/';
+    for (const part of target.split('/').filter(Boolean)) {
+      const next = path.join(current, part);
+      if (links[next]) current = resolve(links[next], depth + 1);
+      else if (directories.has(next)) current = next;
+      else throw enoent();
+    }
+    return current;
+  };
+  return {
+    realpath: async (target) => resolve(target),
+    lstat: async (target) => {
+      if (links[target]) return { isDirectory: () => false };
+      if (directories.has(target)) return { isDirectory: () => true };
+      throw enoent();
+    },
+  };
+}
+
+test('canonical identity never folds case: a case-sensitive sibling of the root is an escape', async () => {
+  const fs = caseSensitiveFs(new Set(['/sandbox', '/sandbox/worktrees', '/sandbox/worktrees/worker', '/sandbox/worktrees/Worker',
+    '/sandbox/WORKTREES', '/sandbox/WORKTREES/outside']), { '/sandbox/worktrees/escape': '/sandbox/WORKTREES/outside' });
+  await assert.rejects(resolveWorktreePath('/sandbox/worktrees', '/sandbox/WORKTREES/outside', { fs }), /escapes/);
+  await assert.rejects(resolveWorktreePath('/sandbox/worktrees', '/sandbox/worktrees/escape', { fs }), /escapes/);
+  await assert.rejects(resolveWorktreePath('/sandbox/WORKTREES', '/sandbox/worktrees/worker', { fs }), /escapes/);
+  // Two workers whose names differ only by case are two worktrees.
+  assert.equal(await resolveWorktreePath('/sandbox/worktrees', '/sandbox/worktrees/Worker', { fs }), '/sandbox/worktrees/Worker');
+  assert.equal(await resolveWorktreePath('/sandbox/worktrees', '/sandbox/worktrees/worker', { fs }), '/sandbox/worktrees/worker');
+  assert.equal(samePath('/sandbox/worktrees/Worker', '/sandbox/worktrees/worker'), false);
+});
+
+test('a case alias on a case-insensitive volume converges through realpath, not folding', async (t) => {
+  const l = await layout(t);
+  const worker = path.join(l.root, 'jpapiez-crispy-eureka');
+  await mkdir(worker);
+  const upper = path.join(path.dirname(l.root), 'PFARM1', 'jpapiez-crispy-eureka');
+  const insensitive = await access(upper).then(() => true, () => false);
+  if (insensitive) assert.equal(await resolveWorktreePath(l.root, upper), worker, 'realpath returns the on-disk spelling');
+  else await assert.rejects(resolveWorktreePath(l.root, upper), /escapes/, 'a case-sensitive volume keeps the spellings distinct');
+});
+
+test('path helpers compare canonical forms exactly and derive the main checkout of a linked worktree', () => {
+  assert.equal(samePath('/Volumes/Data/x', '/Volumes/Data/x'), true);
+  assert.equal(samePath('/Volumes/Data/x', '/volumes/data/x'), false);
+  assert.equal(samePath(undefined, undefined), false);
   assert.equal(strictlyWithin('/w', '/w/a'), true);
+  assert.equal(strictlyWithin('/w', '/W/a'), false);
   assert.equal(strictlyWithin('/w', '/w'), false);
   assert.equal(strictlyWithin('/w', '/wx/a'), false);
   assert.equal(strictlyWithin('/w', '/w/..hidden'), true, 'a name starting with .. is not a parent reference');

@@ -430,6 +430,27 @@ test('a native alias of the recorded canonical worktree matches; an alias of ano
   assert.ok(plan.retained[0].reasons.includes('worktree path does not match the recorded isolated worker worktree'));
 });
 
+test('the recorded canonical worktree is immutable: a swapped symlink or inspection drift is never deletable', async () => {
+  // The recorded /worktrees/w-1 now resolves to another worktree inside the root.
+  let w = world([{ n: 1 }]);
+  let plan = await planWorkerCleanup(context(w, [candidate(1)], {}, { links: { '/worktrees/w-1': '/worktrees/w-2' } }));
+  assert.deepEqual(plan.eligible, []);
+  assert.ok(plan.retained[0].reasons.includes('recorded worktree no longer resolves to its recorded canonical path; clean up manually'));
+  plan = await planWorkerCleanup(context(w, [{ ...candidate(1), live: { ...candidate(1).live, worktreePath: '/worktrees/w-2' } }], {},
+    { links: { '/worktrees/w-1': '/worktrees/w-2' } }));
+  assert.deepEqual(plan.eligible, []);
+  // Containment passed, then the path changed identity before inspection: the probe reads another worktree.
+  w = world([{ n: 1 }]);
+  const drift = context(w, [candidate(1)]);
+  const readback = drift.probe.worktree;
+  drift.probe = { ...drift.probe, worktree: async (target) => ({ ...await readback(target), canonicalPath: '/outside/unrelated' }) };
+  plan = await planWorkerCleanup(drift);
+  assert.deepEqual(plan.eligible, []);
+  assert.ok(plan.retained[0].reasons.includes('worktree identity changed during inspection'));
+  await assert.rejects(recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...drift }), /not eligible/);
+  assert.equal(w.journal.deletions, undefined);
+});
+
 test('git and PR facts come from runtime readback; caller claims are ignored', async () => {
   const w = world([{ n: 1 }]);
   const omittedOpenPr = { ...candidate(1, { pr: { state: 'OPEN' } }), prs: [], prsChecked: true };
@@ -471,6 +492,16 @@ test('default probe reads real git state without hooks and resolves symlinks can
   const link = path.join(root, 'w-link');
   await symlink(worktree, link);
   assert.equal(await defaultCleanupProbe.canonical(link), worktree);
+  assert.equal((await defaultCleanupProbe.worktree(link)).canonicalPath, worktree, 'inspection binds to the canonical path');
+  // A path that resolves elsewhere once git has run reports no canonical identity.
+  const resolve = defaultCleanupProbe.canonical;
+  let resolutions = 0;
+  defaultCleanupProbe.canonical = async (target) => (++resolutions === 1 ? resolve(target) : path.join(root, 'elsewhere'));
+  try {
+    const drifted = await defaultCleanupProbe.worktree(worktree);
+    assert.equal(drifted.canonicalPath, undefined);
+    assert.equal(drifted.headSha, undefined);
+  } finally { defaultCleanupProbe.canonical = resolve; }
   assert.equal(await defaultCleanupProbe.absent(link), false);
   assert.equal(await defaultCleanupProbe.absent(path.join(root, 'missing')), true);
   assert.deepEqual(await defaultCleanupProbe.worktree(path.join(root, 'missing')), { exists: false });

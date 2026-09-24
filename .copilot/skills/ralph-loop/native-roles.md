@@ -632,11 +632,26 @@ does not exist yet resolves through its nearest existing ancestor. It then:
   role's own checkout, by any spelling, as well as any directory at or below the
   root whose `.git` is a directory;
 - stores only the canonical path in the mapping and in the terminal evidence;
-- compares later `startup-check`, receipt and cleanup readbacks by canonical
-  identity, so a mapping recorded as `/Volumes/...` still matches the
+- compares later `startup-check`, receipt and cleanup readbacks by exact
+  canonical identity, so a mapping recorded as `/Volumes/...` still matches the
   `/Users/<me>/s/...` spelling;
-- runs cleanup `.git`, `lstat` and absent-worktree checks on the canonical path,
-  and accepts either spelling for the post-delete `worktree.path`.
+- treats the recorded canonical path as immutable: fresh evidence must resolve to
+  exactly that path, and the recorded path is never re-resolved, so replacing a
+  worker directory with a symlink to another worktree cannot rebind the mapping;
+- never folds case: `fs.realpath` returns the on-disk spelling, so a genuine case
+  alias converges, while distinct directories on a case-sensitive volume stay
+  distinct;
+- runs cleanup `.git`, `lstat`, `git` and absent-worktree checks on the canonical
+  path, retains a worker whose path changes identity during inspection, and
+  accepts either spelling for the post-delete `worktree.path`.
+
+An exact replay (same request ID and bytes) of a request journaled by the earlier
+lexical runtime keeps its original bytes, saved event and terminal commitment,
+after its paths pass the canonical checks. Changed content under that ID is still
+rejected. A mapping stored with a non-canonical spelling, which is possible only if
+`worktreeRoot` itself was configured through an alias, fails closed:
+`startup-check` rejects it, cleanup retains it for manual cleanup, and nothing is
+rebound.
 
 A rejected `record-creation` or `startup-check` persists nothing. If a child exists
 but its mapping lacks `sessionId`/`worktreePath`, for example after a lost readback

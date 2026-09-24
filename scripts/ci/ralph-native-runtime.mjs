@@ -21,7 +21,7 @@ import {
 } from './ralph-native-dispatch.mjs';
 import { loadSquadVerdict } from './verify-squad-verdict.mjs';
 import {
-  canonicalPath, mainCheckoutFromGitDirectory, resolveWorktreePath, samePath, strictlyWithin,
+  canonicalPath, defaultPathFs, mainCheckoutFromGitDirectory, resolveWorktreePath, strictlyWithin,
 } from './ralph-worktree-path.mjs';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -109,7 +109,7 @@ function withinWorktreeRoot(root, target) {
 // Accept the native (symlinked alias) or canonical spelling of a reported
 // worktree; store and compare only its canonical form. The worker path may
 // never alias the role's own checkout or the main checkout behind it.
-async function canonicalizeWorktreeEvidence(config, request, localContext) {
+async function canonicalizeWorktreeEvidence(config, request, localContext, fs) {
   const evidence = request.evidence;
   if (!evidence || typeof evidence !== 'object') return request;
   const main = mainCheckoutFromGitDirectory(localContext.gitDirectory);
@@ -117,7 +117,7 @@ async function canonicalizeWorktreeEvidence(config, request, localContext) {
   if (['receipt', 'record-creation', 'startup-check'].includes(request.type) &&
       typeof evidence.session?.worktreePath === 'string') {
     const worktreePath = await resolveWorktreePath(config.worktreeRoot, evidence.session.worktreePath,
-      { exclude: [localContext.worktreePath, main] });
+      { exclude: [localContext.worktreePath, main], fs });
     canonical = { ...canonical, session: { ...evidence.session, worktreePath } };
   }
   if (request.type === 'ready' && Array.isArray(evidence.sessions)) {
@@ -126,7 +126,7 @@ async function canonicalizeWorktreeEvidence(config, request, localContext) {
       if (role?.workerId !== config.workerId || role.projectId !== config.projectId || typeof role.worktreePath !== 'string') return session;
       try {
         return { ...session, roleObservation: { ...role,
-          worktreePath: await resolveWorktreePath(config.worktreeRoot, role.worktreePath, { exclude: [main] }) } };
+          worktreePath: await resolveWorktreePath(config.worktreeRoot, role.worktreePath, { exclude: [main], fs }) } };
       } catch (error) { fail(`Ralph role lineage requires actual owner-configured native readback. (${error.message})`); }
     }));
     canonical = { ...canonical, sessions };
@@ -134,11 +134,14 @@ async function canonicalizeWorktreeEvidence(config, request, localContext) {
   return canonical === evidence ? request : { ...request, evidence: canonical };
 }
 
-async function sameRecordedWorktree(recorded, canonical) {
-  if (samePath(recorded, canonical)) return true;
-  if (typeof recorded !== 'string') return false;
-  return samePath(await canonicalPath(recorded).catch(() => undefined), canonical);
-}
+// A recorded worktree identity is immutable: fresh evidence must canonicalize to
+// the exact recorded path. The recorded path is never re-resolved, so replacing
+// it with a symlink to another worktree cannot rebind the mapping.
+const sameRecordedWorktree = (recorded, canonical) => typeof recorded === 'string' && recorded === canonical;
+
+const requestDigestOf = (request) => digest({
+  type: request.type, roundId: request.roundId, data: request.data ?? {}, evidence: request.evidence,
+});
 
 function ownedSessionInventory(config, evidence, journal, state, now) {
   if (evidence.ownershipScope !== 'ralph-owned-v1' || evidence.lineageChecked !== true) {
@@ -687,6 +690,7 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
 
 export async function runNativeRequest(config, request, {
   api, cwd = process.cwd(), now = Date.now(), preflight = runAutomationPreflight, cleanupProbe = defaultCleanupProbe,
+  pathFs = defaultPathFs,
 } = {}) {
   validateControl(config.control);
   if (config.verified !== true || config.migrationAttested !== true ||
@@ -701,9 +705,12 @@ export async function runNativeRequest(config, request, {
   if (!path.isAbsolute(checked.localContext?.worktreePath ?? '') ||
       !path.isAbsolute(checked.localContext?.gitDirectory ?? '')) fail('Verified local worktree context required.');
   if (request.native !== undefined) fail('Retired native.actual is not execution proof. Use the owner-configured role contract.');
+  // The as-submitted request is kept only to recognize an exact replay of a
+  // request journaled by the pre-canonical runtime (see requestDigest below).
+  const submitted = { config, request };
   if (path.isAbsolute(config.worktreeRoot ?? '')) {
-    config = { ...config, worktreeRoot: await canonicalPath(path.normalize(config.worktreeRoot)) };
-    request = await canonicalizeWorktreeEvidence(config, request, checked.localContext);
+    config = { ...config, worktreeRoot: await canonicalPath(path.normalize(config.worktreeRoot), { fs: pathFs }) };
+    request = await canonicalizeWorktreeEvidence(config, request, checked.localContext, pathFs);
   }
   await verifyControlRepository(config.control, api);
   const root = config.stateDirectory;
@@ -777,13 +784,20 @@ export async function runNativeRequest(config, request, {
       await writeJournal(journalPath, journal);
       return { ...snapshot, acquisitionAbandoned: true, dispatchAuthorized: false, nativeCreateAllowed: false };
     }
-    const requestDigest = digest({
-      type: request.type, roundId: request.roundId, data: request.data ?? {}, evidence: request.evidence,
-    });
+    let requestDigest = requestDigestOf(request);
     const saved = journal.events[request.id];
     journal.requestDigests ??= {};
-    if (saved && journal.requestDigests[request.id]) {
-      if (journal.requestDigests[request.id] !== requestDigest) fail('Local event ID changed content.');
+    const recordedDigest = journal.requestDigests[request.id];
+    if (saved && recordedDigest && recordedDigest !== requestDigest && request !== submitted.request &&
+        recordedDigest === requestDigestOf(submitted.request)) {
+      // Exact replay of a request journaled before canonical path identity. Its
+      // paths passed the canonical checks above; keep its original bytes so the
+      // saved event and terminal commitment reconstruct unchanged.
+      ({ config, request } = submitted);
+      requestDigest = recordedDigest;
+    }
+    if (saved && recordedDigest) {
+      if (recordedDigest !== requestDigest) fail('Local event ID changed content.');
       if (snapshot.state.events[request.id] === digest(saved)) {
         await writeJournal(journalPath, journal);
         return { ...snapshot, replayed: true, nativeCreateAllowed: false };
@@ -901,7 +915,7 @@ export async function runNativeRequest(config, request, {
         if (!uuidPattern.test(evidence.creationHandle ?? '') ||
             !['succeeded', 'partial'].includes(evidence.creationOutcome) ||
             (local.creationHandle && local.creationHandle !== evidence.creationHandle) ||
-            (evidence.session && local.worktreePath && !await sameRecordedWorktree(local.worktreePath, evidence.session.worktreePath)) ||
+            (evidence.session && local.worktreePath && !sameRecordedWorktree(local.worktreePath, evidence.session.worktreePath)) ||
             (evidence.session && local.sessionId && local.sessionId !== evidence.session.id &&
               evidence.resolvedCreationHandle !== local.creationHandle) ||
             (evidence.creationOutcome === 'succeeded' &&
@@ -936,7 +950,7 @@ export async function runNativeRequest(config, request, {
         fail('No recorded native session for this child: submit record-creation with the original creation handle and the same child readback first. Never recreate it.');
       }
       if (!local.creationHandle || local.sessionId !== evidence.session.id ||
-          !await sameRecordedWorktree(local.worktreePath, evidence.session.worktreePath) ||
+          !sameRecordedWorktree(local.worktreePath, evidence.session.worktreePath) ||
           (local.creationOutcome !== 'succeeded' && evidence.configuration?.source === 'successful-native-create')) {
         fail('Partial startup requires actual configuration readback or explicit owner attestation on the same child.');
       }
