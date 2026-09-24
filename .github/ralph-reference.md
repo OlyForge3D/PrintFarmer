@@ -1,46 +1,18 @@
 # Ralph Reference
 
-## Shared Scheduled Automations
+## How Ralph Runs Here
 
-New `NATIVE-MAILBOX-ROLE-V2` packages use the
-[native coordinator/consumer contract](../.copilot/skills/ralph-loop/native-roles.md):
-one mini coordinator performs global triage and durable assignment, including
-bounded `go:needs-research`; device consumers pull only their assigned work and
-follow local native sessions. The private control repository is the sole
-reservation ledger. Setup stages disabled packages, not live takeover. Explicit
-local-owner trust, atomic round ownership, approved policy, pinned genesis and reconciled
-legacy authority migration are all required. No direct remote native creation,
-SSH worker dispatch or independent consumer backlog selection is introduced.
-Consumer readiness offers bounded durable credits, not device liveness; offline
-devices receive only unused pre-offered credits. Independent hourly rounds need
-no sub-minute coordination. Each kickoff still requires fresh current-round
-local inventory/tooling checks. Final sole-sender delivery commitments allow
-later coordinator settlement without expiring reservations or refunding credits.
+PrintFarmer uses stock Squad Ralph. GitHub is the only state: `squad` /
+`squad:{member}` labels, assignees, and PRs are the board. Do not add a private
+state store or scheduled coordinator/consumer layer on top of it (see #2966).
 
-The macOS-mobile and Windows-general scheduled instances use one checked-in
-[automation lifecycle](../.copilot/skills/ralph-loop/automation.md), with explicit
-[host profiles](../.copilot/skills/ralph-loop/hosts.json) and a pinned
-[bootstrap/deployment contract](../.copilot/skills/ralph-loop/bootstrap.md).
-Shared profiles define roles, not deployment workflow/project/environment IDs.
-Those bindings stay private. Filesystem preflight never authorizes dispatch;
-each round acquires a unique token under atomic local/mailbox locking before any
-mutation. The app does not expose current-automation identity; configured IDs
-are deployment assertions, never fabricated execution proof. Use the
-[Mac mini setup guide](../docs/ralph-macos-migration.md) for unverified staging.
-macOS now has mixed eligibility with hard 1-mobile + 4-general work slots;
-Windows has 0-mobile + 5-general. Category slots cannot be borrowed. New Mac
-general admission remains blocked on legacy dispatch; use the separately
-attested native-role path, not spare capacity or matching GitHub labels as authority.
-Each round scans draft and non-draft PR recovery before new issues, records real
-host/session/head handoffs, and retains unknown remote ownership. Shared-file
-integration is serialized; cross-host overlap requires a verified sole owner.
-The Windows profile has been exported and verified; its schedule remains disabled pending separate owner authorization to enable.
-
-This is not an upstream CLI fix. In Squad CLI 0.11.0,
-`watch/capabilities/execute.ts` filters blocked/assigned issues and returns before
-loading repo instructions when no issues qualify. Its PR report does not dispatch
-recovery. Do not restart `squad watch --execute` as the scheduled automation
-entrypoint. No upstream fork or installed-package patch is part of this policy.
+- **In-session:** "Ralph, go" in a Squad session on any machine.
+- **Unattended:** `npx @bradygaster/squad-cli watch --execute --interval 10 --max-concurrent N`
+  on each machine, started by a human. Repo rules live in `.squad/ralph-instructions.md`.
+- **Multiple machines** coordinate through GitHub only: an issue with an assignee
+  or an open PR is claimed, so skip it. Declare each host's tooling in
+  `~/.squad/machine-capabilities.json`; issues labelled `needs:xcode` run only on
+  a host whose `capabilities` include `xcode` (the Mac).
 
 ## Ralph — Work Monitor
 
@@ -292,135 +264,24 @@ After the coordinator's step 6 ("Immediately assess: Does anything trigger follo
 
 **While work exists, Ralph does NOT ask "should I continue?" — Ralph KEEPS GOING.** The loop ends when the board is clear, or earlier on explicit "idle"/"stop", or at session end. A clear board → full stop, never a timed recheck. If the human wants monitoring to continue after that, they run `npx @bradygaster/squad-cli watch` themselves.
 
-### Mobile/iOS Job Admission & Evidence Reconciliation
-
-This section governs how Ralph handles mobile QA/test work dispatched through the
-`scripts/ci/ralph-macos-ssh.mjs` / `scripts/ci/ralph-admission.mjs` job ledger, and how
-Ralph reconciles the `<!-- ralph-claim -->` comment convention posted on issues. It exists
-because of a concrete failure: issues #2577/#2578 were stuck "awaiting causal evidence"
-that only ever existed in a session's local `files/` directory, and #2599/#2582 carried
-`Ralph-Fence: pending-admission` claims that never got reconciled against the ledger. Both
-are fail-closed rules, not suggestions.
+### Mobile/iOS Work
 
 **Session-local evidence is never durable.** Anything under a session's own working
-directory — for example `session <uuid>/files/before-recovery-2573.log`, an in-memory
-xcresult, or an attachment that only lives in the chat transcript — is **not** recoverable
-evidence and must never be cited as if it were. Evidence only counts once it is:
-- committed to the repository (a file in the diff/PR), or
-- durably published (pushed to a branch, uploaded as a GitHub artifact/attachment on the
-  issue or PR, or attached via `actions/upload-artifact`).
+directory (for example `files/*.log`, an in-memory xcresult, or a chat attachment) is
+not evidence. It counts only once committed to the repository or durably published
+(pushed branch, uploaded artifact, or attachment on the issue/PR). If the only
+evidence was session-local and that session is gone, treat it as unavailable: comment
+on the issue saying exactly what is missing, apply `status:blocked`, and move on.
+Never reconstruct or fabricate what the session might have shown.
 
-If the only evidence for a claim was session-local and that session is gone, treat the
-evidence as **unavailable**, not merely "hard to find." Never reconstruct, paraphrase, or
-fabricate what the session might have shown — that is fabricating evidence, which is
-never acceptable regardless of how confident the reconstruction feels.
+**Xcode/CoreSimulator concurrency is per-Mac.** One physical Mac runs only one
+`xcodebuild`/`simctl` invocation at a time; git worktrees do not isolate DerivedData,
+simulator state or CoreSimulator services. Run at most one `needs:xcode` issue per
+Mac at a time. Every mobile test run uses a run-unique result bundle path, log path
+and an explicit simulator UDID — see `mobile/scripts/run-tests.py` and
+`mobile/AGENTS.md`.
 
-**Evidence-gated issue disposition.** When an issue's fix/verification is blocked purely
-on evidence that is confirmed unavailable per the rule above:
-1. Comment on the issue explaining exactly what evidence is missing and why it cannot be
-   recovered (name the session/path if known).
-2. Apply (or ask a human to apply) a `status:evidence-unavailable` label, or if labels
-   aren't available, state the disposition explicitly in the comment: **"Marking
-   evidence-unavailable; will not be redispatched until fresh reproduction is
-   authorized."**
-3. **Stop redispatching this issue.** Do not spawn another job/session against it on the
-   strength of the old (now-unavailable) evidence.
-4. Only resume work when one of two things happens: (a) a human or agent posts an
-   explicit fresh-reproduction authorization (e.g. "reproduce and gather fresh evidence"),
-   or (b) a new durable artifact (committed log, uploaded xcresult, etc.) appears on the
-   issue/PR. Either one clears the disposition and a brand-new job/claim may be opened.
-
-**Reconciling `<!-- ralph-claim -->` comments.** These HTML-comment blocks
-(`Ralph-Job-ID`, `Ralph-Fence`, `Ralph-Issue`, `Ralph-Owner`, `Ralph-Base-SHA`,
-`Ralph-Status`) are a human-readable surface of the ledger, not the source of truth. A
-claim whose `Ralph-Fence` is the literal string `pending-admission` (dispatch was still
-in flight when the comment was posted) or whose status looks stale **must be reconciled
-against the authoritative ledger before being trusted**:
-- Never take the comment text as proof that work is in progress. Query the ledger
-  (`node scripts/ci/ralph-admission.mjs status-remote` for a remote/mac job, or inspect
-  local state) for the named `Ralph-Job-ID`.
-- If the ledger shows no such job, or the job's worker/session/admission record is
-  **absent or terminal** (no matching ledger entry, or a `completed`/`failed`/`abandoned`
-  state that postdates the claim), the claim is **stale**. Reconcile it explicitly — do
-  not silently delete the comment or the claim; post a follow-up comment stating the
-  reconciled disposition (e.g. "Ledger shows no active job for `Ralph-Job-ID`; treating
-  this claim as abandoned/lost — see below") and act on the *current* ledger state, never
-  the comment's `Ralph-Status` text. The one exception is a `failed` entry whose
-  `failureReason` is `kickoff-unverified` and which carries a `strandedSessionId`: that
-  claim is **not** stale while that session still exists — see the stranded-kickoff
-  paragraph below, which forbids re-admitting the issue.
-- If the ledger shows the job is genuinely still active (`reserved`, `delivery-intent`,
-  `accepted`, `running`, `uncertain`), leave it alone — a pending-admission claim with a
-  live ledger entry is not stuck, it is just early. **Pending-admission claims must never
-  be treated as permanently blocking**: if the ledger entry is active, wait and re-check
-  next round; if it is absent/terminal, reconcile immediately per the next paragraph.
-
-**Reconciling a lost local session (accepted/running, no terminal result).** When a local
-job's session dies before ever calling the terminal-result path, use
-`recoverLostLocalSession` (CLI: `node scripts/ci/ralph-admission.mjs recover-local-session`)
-with `jobId`, `sessionAbsent:true`, and fresh `sessionEvidence` containing `repository`,
-`issue`, `sessionId`, `fence`, `state:"absent"`, `observedAt`, `source`,
-`liveInventoryChecked:true`, `archivedHistoryChecked:true`, and `terminalHistoryChecked:true`.
-Confirm absence against live inventory and archived/terminal history; a missing inventory
-row or idle session alone is insufficient. If correlated terminal proof exists, use
-`terminal-local` for actual process results, or `complete-local-session` for correlated runtime
-task completion plus verified clean/pushed delivery and fresh stopped/no-follow-up observation.
-The latter never invents an exit code; see the
-[app-session completion contract](../.copilot/skills/ralph-loop/operations.md#app-session-completion-without-process-exit).
-Unavailable history remains a blocker.
-This transitions the job to a new terminal `abandoned` state — distinct from `failed` —
-and frees the issue's slot for a fresh `jobId` (an explicit re-admission/fresh
-reproduction). It never deletes the ledger entry, the session's worktree, or any
-artifacts: the abandoned record stays as a permanent audit trail. Reusing the *old*
-`jobId` after abandonment still fails closed with `FENCED`; only a new `jobId` may claim
-the issue again. The equivalent pre-acknowledgment case (a `reserved` job whose session
-was never created at all) uses the existing `recoverLocalReservation` /
-`recover-local` path with the same `sessionAbsent: true` contract.
-
-**Releasing a stranded kickoff (reserved, session created but never started).** A created session
-is not a started session: issue #2621's session was created with its worktree and branch and then
-sat idle with zero turns for hours while holding a slot and the issue's claim. Acknowledgement is
-therefore gated — `acknowledgeLocalJob` / `acknowledge-local` requires `kickoffVerified: true`
-(plus `kickoffRetried` when the kickoff had to be resent) and fails closed without it. When a
-session's processing is still unconfirmed after one `send_session_message` resend, use
-`failLocalKickoff` (CLI: `node scripts/ci/ralph-admission.mjs fail-local-kickoff`) with
-`{ jobId, sessionId, controllerPid, kickoffUnverified: true }`; `sessionId` is required. Release is
-authorized either by the reservation's own owner (matching the recorded `reservationOwnerPid`) or,
-when that controller died first, by a later controller under the same dead-owner-plus-expired-lease
-proof `recoverLocalReservation` uses — otherwise a crashed round would wedge the reservation in
-`reserved` forever. The PID match correlates a caller to its own reservation inside this
-machine-local trusted ledger; it is not an authentication boundary. Neither existing recovery path
-fits this case: `recoverLocalReservation` also requires authoritative session absence, and
-`recoverLostLocalSession` requires state `accepted`/`running`. The job becomes terminal `failed`
-with `failureReason: 'kickoff-unverified'` and records the stranded session as
-`strandedSessionId` (not `sessionId`, which stays reserved for acknowledged sessions). It never
-archives, deletes, or cleans up the stranded session. Freeing the ledger slot is **not** permission
-to re-dispatch: the issue's claim stays in place and the issue must not be re-admitted while the
-stranded session still exists, or a late-waking session and a fresh one would both work the same
-issue. That is enforced, not merely documented — `reserveJob` rejects the issue with
-`STRANDED_SESSION` until `clearStrandedKickoff` (CLI: `clear-stranded-kickoff`) is called with
-`{ jobId, sessionAbsent: true }` after independently verifying authoritative absence.
-This pre-acknowledgment assertion is distinct from the correlated `sessionEvidence` required
-by `recoverLostLocalSession`. Clearing keeps the audit record and the jobId's fence. The round report names the issue
-and its `strandedSessionId`.
-
-**Xcode/CoreSimulator concurrency is per-Mac, not per-slot.** The shared 5-slot ledger
-pool bounds total concurrent Ralph jobs, but a single physical Mac can run only one
-`xcodebuild`/`simctl` invocation at a time — DerivedData, the simulator's boot/log state,
-and CoreSimulator services are host-wide, and **a git worktree does not isolate any of
-that**. `reserveJob` therefore rejects a second active remote (mac-dispatched) job
-targeting the same `expectedHost` with `XCODE_HOST_BUSY`, independent of how many of the
-5 slots are free. There is no separate in-process queue: a rejected dispatch is expected
-to be retried on Ralph's normal next round, which is the "queued" behavior. Every mobile
-test invocation must still use a run-unique result bundle path, a run-unique log path, and
-an explicit simulator UDID (never an implicit/default destination) — see
-`mobile/scripts/run-tests.py`'s argument validation and `mobile/AGENTS.md`'s simulator
-resolver — so that even serialized runs never collide on stale artifacts from a prior run.
-
-**Never fabricate, never destructively clean up.** None of the above authorizes closing
-an issue, merging a PR, deleting a worktree/session, or inventing evidence to make a
-claim "resolved." Reconciliation only ever produces an explicit, auditable ledger/issue
-state — `abandoned`, `evidence-unavailable`, or a freshly reconciled active state — never
-a silent deletion or a fabricated pass.
+**Never fabricate, never destructively clean up.** Nothing here authorizes closing an
+issue, merging a PR, deleting a worktree/session, or inventing evidence.
 
 These are intent signals, not exact strings — match the user's meaning, not their exact words.
