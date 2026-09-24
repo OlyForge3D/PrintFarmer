@@ -451,6 +451,43 @@ dispatch owners. Epics and `status:needs-analysis` permit only bounded
 analysis/research. For research, `analysisReady` means its bounded investigation
 scope is ready, not that the unanswered research has already been completed.
 
+#### Published Task Packets
+
+`requirementsDigest` hashes coordinator-authored `acceptanceCriteria`, and
+`fileKeys` hash coordinator-selected `files`. A consumer holding only the public
+issue cannot re-derive either, so the runtime publishes the facts themselves.
+Before `reserve`, the runtime re-reads the live issue (and PR) through GitHub and
+fails `task-readback-mismatch` if the reserve evidence's title, labels, state or
+assignees differ. It then builds a versioned `taskPacket`
+(`version:"ralph-task-packet-v1"`): `repository`, issue/PR, `purpose`, `headSha`,
+`title`, `labels`, `acceptanceCriteria`, repository-relative `files`, `scope`,
+`classificationComplete`, `capabilities` and `sourceBodySha256` (SHA-256 of the
+issue body at reservation). It has exact keys and a 64 KiB bound; absolute,
+home-relative, drive-letter and `..` paths are rejected. It never contains
+secrets, local paths, prompts or native IDs. The reducer accepts the packet only
+if it reproduces the reserved task digest (`task-packet-tampered` otherwise), so
+a rewritten control-repository record also fails replay.
+
+Coordinator `publish` and consumer `dispatch-plan`/`starting` do not re-author
+task facts. The runtime reads the published packet, re-verifies it against
+`requirementsDigest`, `fileKeys` and `taskDigest`, re-reads GitHub, and composes
+the task evidence itself. Consumer evidence supplies only `observedAt`, `source`,
+`holdsChecked`, `ownershipReconciled` and `nativeCapabilities`. Supplied task
+facts are optional, but must equal the packet exactly (`task-packet-mismatch`) or
+the live readback (`github-readback-mismatch`). These fail closed before kickoff:
+
+| Code | Cause | Consumer action |
+|---|---|---|
+| `native-evidence-missing` | Packetless (pre-#2958) reservation | `report-blocker` with prestart-proof |
+| `task-changed` | Title, labels or body digest changed after reservation | `report-blocker` with prestart-proof |
+| `held` | A human hold or `go:no` label is now present | `report-blocker` with prestart-proof |
+| `task-packet-tampered` | Packet no longer reproduces the task digest | Stop; the mailbox is untrusted |
+
+The coordinator withdraws such a binding from the published blocker and, when
+still eligible, re-reserves from a fresh readback. Nobody relays evidence by hand.
+Existing packetless assignments keep blocking; only an already-delivered
+packetless start may replay its own saved request.
+
 The coordinator reserves Mac **1 mobile + 4 general, 5 total** and Windows
 **0 mobile + 5 general, 5 total**, with no borrowing. Global issue/PR/file
 overlap is excluded atomically. Substantial analysis is assigned and accounted
@@ -460,7 +497,7 @@ session requires another valid reservation; no hidden review/recovery slots.
 One Xcode job remains an additional Mac safeguard.
 
 Publish the exact reserved binding using `assignmentId`, `generation:1` and
-returned `taskDigest`. A reservation survives a crash before publication; retry
+returned `taskDigest`; the runtime re-verifies the packet and live issue first. A reservation survives a crash before publication; retry
 only its original publication, not another assignment. Do not publish if current
 holds/head/ownership have changed; retain and reconcile the reservation instead.
 The coordinator tracks aggregate progress and handles consumer discoveries.
@@ -505,8 +542,8 @@ Correct malformed observations while holding the same gate; do not keep retrying
 invented reason codes or silently exit claiming that a rejected blocker was saved.
 
 Under the consumer round token, `dispatch-plan` takes the exact assignment
-binding plus proposed opaque `correlation` and fresh complete task/capability
-evidence. It validates the owner and bounded entrypoint, loads the owner's
+binding plus proposed opaque `correlation` and fresh capability evidence. Task
+facts come from the published packet (see "Published Task Packets"). It validates the owner and bounded entrypoint, loads the owner's
 charter, resolves model/effort and returns a **non-authorizing** plan.
 The macOS Dallas host override remains Astra/xhigh; otherwise explicit Squad
 overrides win, a configured model effort suffix is normalized, and unspecified
@@ -542,7 +579,11 @@ blind kickoff using its old coordinator instructions. Forks and unverifiable
 head policy block new admission.
 
 The packet binds the original PR branch and head. Startup ACK must report the
-actual initial Git HEAD and the actual branch matching native readback. Head
+actual initial Git HEAD and the actual branch matching native readback. Issue
+work starts from `development`, which may have advanced since reservation: a
+different `initialHeadSha` is accepted only when GitHub compare proves it is a
+descendant of the reserved head and still on `development`. PR work never
+accepts a different head. Head
 movement blocks before substantive work; `startup-check` also requires
 `currentPrHeadSha` from fresh GitHub readback equal to the assigned head.
 The new worktree is only a repair
@@ -620,6 +661,14 @@ Chat-only findings are not a durable research deliverable. Keep existing
 implementation/review gates and never close an implementation issue after research.
 Terminal submission independently fetches and hashes the live comment again;
 changed bytes or a missing/mismatched worker artifact ACK block the receipt.
+
+Every packet-bound terminal receipt publishes its terminal artifact. Implementation
+work ending in a PR uses the same `artifact-readback` with the PR URL. The runtime
+reads the same-repository PR and returns `kind:"pull-request"`, `url`, `number`
+and `headSha`; the final ACK echoes `artifactUrl`, `artifactHeadSha` and
+`artifactReadbackVerified:true`. Implementation work with no PR (for example a
+duplicate) uses an issue-comment artifact. The receipt stores only this public
+artifact in the mailbox, so the coordinator settles from GitHub, not a relay.
 
 ### Ordinary Local Lifecycle
 
@@ -699,7 +748,18 @@ proof of the app's global queues. Consumer reports never release capacity.
 The durable commitment is one-way: no starting/running transition may resume it.
 Coordinator
 `release` requires the exact consumer receipt digest, task digest, verified
-ownership/artifacts and no pending continuation. Until then all slots remain
+ownership/artifacts and no pending continuation. For packet-bound work the
+runtime re-reads the published terminal artifact itself:
+
+- An issue comment must be byte-identical (`artifact-changed`).
+- An open PR retains the assignment (`artifact-pending`).
+- A closed unmerged PR needs an explicit `closureReason`.
+- A merged PR must keep the published head (`artifact-changed`) and contain
+  `Closes #issue` (`artifact-unlinked`). Its `squad/pre-pr-verdict` status at
+  that exact head must be `REVIEWED (self-attested…)` or `APPROVE (owner)`
+  (`artifact-unreviewed`).
+
+The settle digest binds that readback. Until then all slots remain
 reserved. Discoveries, new prerequisites and expanded scope go back to the
 coordinator before work expands.
 A later coordinator may settle that commitment hours/days later without consumer
@@ -711,7 +771,10 @@ receipts without this commitment need that one-time reconciliation; never promot
 an old idle/history observation automatically.
 
 The mailbox uses additive `offer-capacity`, `deliver`, `accept`,
-`terminal-receipt` and `settle` events internally. Keep using the public runtime
+`terminal-receipt` and `settle` events internally. Three optional, versioned
+payloads carry cross-role facts: `reserve.taskPacket`
+(`ralph-task-packet-v1`), `report-blocker.prestartProof`
+(`native-runtime-prestart-proof-v1`) and `terminal-receipt.artifact`. Keep using the public runtime
 requests `ready`, `publish`, `receipt` and `release`; internal event names are
 rejected as requests. Historical events retain their original reducer and
 hashes. No genesis replacement or history rewrite is needed.
@@ -841,16 +904,20 @@ outside that trust boundary. Idle/missing sessions or an empty coordinator journ
 are not substitutes.
 
 Commit the exact returned proof as `report-blocker` evidence (for example
-`task-changed` on old-policy work), then send that same proof to the coordinator
-through supported session messaging. Later `prestart-proof` calls return the
-retained proof with `alreadyReported:true` when that digest is already committed;
-forward it if needed, but do not report the blocker again. Coordinator `withdraw` evidence includes
-`prestartProof` plus fresh claims/no-delivery reconciliation. Runtime verifies
-its digest equals the consumer's committed blocker, and rechecks binding/state.
+`task-changed` on old-policy work). The runtime accepts it only if it equals the
+proof retained in this consumer's journal, and publishes it as the blocker's
+`prestartProof`. Never send the proof through session messaging or the owner.
+Later `prestart-proof` calls return the retained proof with
+`alreadyReported:true` when that digest is already committed; do not report the
+blocker again. Coordinator `withdraw` evidence needs only fresh `claimsReconciled`
+and `noNativeDeliveryVerified`: the runtime reads the published proof from the
+mailbox, verifies its digest equals the committed blocker, rechecks binding and
+state, and binds it into the withdrawal digest.
 Proof can cross hourly rounds: fresh coordinator observation still must find
 the same never-started binding and consumer proof. A racing start prevents
-withdrawal; a racing withdrawal prevents start. No new mailbox event format,
-history rewrite, Windows journal access from the mini or quota refund is needed.
+withdrawal; a racing withdrawal prevents start. The only format change is the
+optional versioned `prestartProof` field; no history rewrite, Windows journal
+access from the mini or quota refund is needed.
 
 Publish fresh ready **after** recovery reports. Do not re-report an unchanged
 already-committed blocker on every round and revoke the replacement offer again.
@@ -864,3 +931,8 @@ Use the focused Node fixtures for mailbox transitions, private-repository
 identity, sibling conflicts, lost acknowledgments, quotas, local identity
 mapping and setup staging. They do not initialize a live queue, create native
 sessions, run Xcode, enable schedules or manufacture production attestation.
+`scripts/ci/tests/test-ralph-e2e-roles.mjs` runs the coordinator, mini and
+Windows consumers as separate runtime invocations with separate journals and host
+configs, sharing only a simulated control repository and GitHub fixtures. It
+drives research, implementation, stale-withdrawal and Windows assignments to
+settlement with no owner relay, plus the fail-closed negative cases.

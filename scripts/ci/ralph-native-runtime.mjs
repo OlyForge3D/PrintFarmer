@@ -8,6 +8,7 @@ import { pathToFileURL } from 'node:url';
 import {
   applyEvent, digest, admissionInventoryDigest, readMailbox, publishEvent, initializeMailbox,
   taskFromEvidence, researchDisposition, validateControl, verifyControlRepository, githubApi, localInventoryFreshness,
+  taskFromPacket, taskPacketFromEvidence, hasHeldLabel, prestartProofSource, validateTerminalArtifact,
 } from './ralph-mailbox.mjs';
 import { runAutomationPreflight } from './ralph-automation.mjs';
 import { acquireTransactionLock } from './ralph-native-lock.mjs';
@@ -226,6 +227,166 @@ export async function readResearchArtifact(assignment, url, api = githubApi) {
   };
 }
 
+const repository = 'OlyForge3D/PrintFarmer';
+const sha256Text = (text) => createHash('sha256').update(text, 'utf8').digest('hex');
+const sortedDigest = (values) => digest([...(Array.isArray(values) ? values : [])].map(String).sort());
+const packetTaskKeys = ['issue', 'pr', 'purpose', 'headSha', 'title', 'labels', 'acceptanceCriteria', 'files',
+  'scope', 'classificationComplete', 'capabilities'];
+const liveTaskKeys = ['issueState', 'githubAssignees', 'prState', 'prHeadRepository', 'prHeadRef', 'prHeadSha'];
+
+// Runtime-owned GitHub readback of the public task subject. The consumer never
+// re-authors task facts: it compares this readback with the published packet.
+export async function readTaskSubject(task, api = githubApi) {
+  const subject = task.issue ?? task.pr;
+  if (!Number.isSafeInteger(subject) || subject < 1) fail('github-readback-invalid: exact issue or PR number required.');
+  const issue = await api(`repos/${repository}/issues/${subject}`);
+  const labels = Array.isArray(issue?.labels) ? issue.labels.map((label) => typeof label === 'string' ? label : label?.name) : undefined;
+  const assignees = Array.isArray(issue?.assignees ?? []) ? (issue?.assignees ?? []).map((user) => user?.login) : undefined;
+  if (issue?.number !== subject || typeof issue.title !== 'string' || !labels || labels.some((label) => typeof label !== 'string') ||
+      !assignees || assignees.some((login) => typeof login !== 'string') || !['open', 'closed'].includes(issue.state) ||
+      (issue.body != null && typeof issue.body !== 'string')) fail('github-readback-invalid: GitHub returned an invalid issue readback.');
+  const live = { title: issue.title, labels, issueState: issue.state, githubAssignees: assignees, bodySha256: sha256Text(issue.body ?? '') };
+  if (task.pr) {
+    const pr = await api(`repos/${repository}/pulls/${task.pr}`);
+    if (pr?.number !== task.pr || typeof pr.head?.sha !== 'string') fail('github-readback-invalid: GitHub returned an invalid PR readback.');
+    Object.assign(live, { prState: pr.merged ? 'merged' : pr.state, prHeadRepository: pr.head.repo?.full_name,
+      prHeadRef: pr.head.ref, prHeadSha: pr.head.sha });
+  }
+  return live;
+}
+
+function liveMatches(key, supplied, live) {
+  if (key === 'githubAssignees') return sortedDigest(supplied) === sortedDigest(live);
+  if (['issueState', 'prState'].includes(key)) return String(supplied).toLowerCase() === String(live).toLowerCase();
+  return supplied === live;
+}
+
+// Coordinator reservation: its evidence must describe the live issue exactly.
+export function verifyReservationReadback(evidence, live) {
+  const drift = ['title', 'labels', ...liveTaskKeys].filter((key) => {
+    if (key === 'title') return evidence.title !== live.title;
+    if (key === 'labels') return sortedDigest(evidence.labels) !== sortedDigest(live.labels);
+    return evidence[key] !== undefined && !liveMatches(key, evidence[key], live[key]);
+  });
+  if (drift.length) fail(`task-readback-mismatch: reserve evidence ${drift.join(', ')} differs from the live GitHub subject; re-read GitHub and retry.`);
+}
+
+// Rebuilds task evidence from the published packet plus a fresh runtime readback.
+// Supplied task facts are optional and must equal the packet exactly.
+export function composeTaskEvidence(assignment, live, supplied) {
+  const packet = assignment?.taskPacket;
+  if (!packet) {
+    fail('native-evidence-missing: this assignment has no published task packet (legacy reservation). The consumer reports blocker native-evidence-missing with its prestart-proof; the coordinator withdraws and re-reserves. Never relay task facts.');
+  }
+  const task = taskFromPacket(packet);
+  if (digest(task) !== assignment.taskDigest || digest(task) !== digest(assignment.task)) {
+    fail('task-packet-tampered: published task packet does not reproduce the assignment task digest.');
+  }
+  for (const key of [...packetTaskKeys, 'filesComplete', 'repository']) {
+    if (supplied?.[key] === undefined) continue;
+    const expected = key === 'filesComplete' ? true : packet[key];
+    const same = key === 'labels' ? sortedDigest(supplied.labels) === sortedDigest(expected) : digest(supplied[key]) === digest(expected);
+    if (!same) fail(`task-packet-mismatch: supplied ${key} differs from the published task packet; omit task facts and let the runtime read the packet.`);
+  }
+  for (const key of liveTaskKeys) {
+    if (supplied?.[key] !== undefined && !liveMatches(key, supplied[key], live[key])) {
+      fail(`github-readback-mismatch: supplied ${key} differs from the runtime GitHub readback; omit it.`);
+    }
+  }
+  if (hasHeldLabel(live.labels)) fail('held: a human hold or go:no label is now present; report-blocker reasonCode held without kickoff.');
+  const changed = [
+    live.title !== packet.title && 'title',
+    sortedDigest(live.labels) !== sortedDigest(packet.labels) && 'labels',
+    live.bodySha256 !== packet.sourceBodySha256 && 'body',
+  ].filter(Boolean);
+  if (changed.length) {
+    fail(`task-changed: issue ${changed.join(', ')} changed after reservation; report-blocker reasonCode task-changed with prestart-proof so the coordinator withdraws and re-reserves.`);
+  }
+  const { version, sourceBodySha256, ...facts } = packet;
+  return {
+    ...supplied, ...facts, filesComplete: true,
+    issueState: live.issueState, githubAssignees: live.githubAssignees,
+    ...(packet.pr ? { prState: live.prState, prHeadRepository: live.prHeadRepository, prHeadRef: live.prHeadRef, prHeadSha: live.prHeadSha } : {}),
+  };
+}
+
+export async function readIssueCommentArtifact(assignment, url, api = githubApi) {
+  const subject = assignment?.task.issue ?? assignment?.task.pr;
+  const match = /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/issues\/([0-9]+)#issuecomment-([0-9]+)$/.exec(url ?? '');
+  if (!assignment || match?.[1] !== String(subject)) fail('Issue-comment artifact must belong to the assigned issue.');
+  const comment = await api(`repos/${repository}/issues/comments/${match[2]}`);
+  if (String(comment.id) !== match[2] || comment.html_url !== url ||
+      comment.issue_url !== `https://api.github.com/repos/${repository}/issues/${subject}` ||
+      typeof comment.body !== 'string' || !comment.body.trim()) fail('GitHub returned an invalid issue-comment artifact readback.');
+  return { kind: 'issue-comment', url, bodyDigest: sha256Text(comment.body), bodyBytes: Buffer.byteLength(comment.body, 'utf8') };
+}
+
+export async function readPullRequestArtifact(assignment, url, api = githubApi) {
+  const match = /^https:\/\/github\.com\/OlyForge3D\/PrintFarmer\/pull\/([1-9][0-9]*)$/.exec(url ?? '');
+  if (!assignment || !match || !['implementation', 'recovery'].includes(assignment.task.purpose) ||
+      (assignment.task.pr !== undefined && Number(match[1]) !== assignment.task.pr)) {
+    fail('Pull-request artifact must be the assigned implementation/recovery PR.');
+  }
+  const pr = await api(`repos/${repository}/pulls/${match[1]}`);
+  if (pr?.number !== Number(match[1]) || pr.html_url !== url || pr.base?.repo?.full_name !== repository ||
+      pr.head?.repo?.full_name !== repository || !/^[0-9a-f]{40}$/.test(pr.head?.sha ?? '')) {
+    fail('GitHub returned an invalid or cross-repository pull-request artifact readback.');
+  }
+  return { kind: 'pull-request', url, number: pr.number, headSha: pr.head.sha,
+    state: pr.merged ? 'merged' : pr.state, body: typeof pr.body === 'string' ? pr.body : '' };
+}
+
+function publishedArtifact(artifact) {
+  return artifact.kind === 'pull-request'
+    ? { kind: artifact.kind, url: artifact.url, number: artifact.number, headSha: artifact.headSha }
+    : { kind: artifact.kind, url: artifact.url, bodyDigest: artifact.bodyDigest };
+}
+
+const verdictPattern = (sha) => new RegExp(`^(REVIEWED \\(self-attested(, carried across sync)?\\)|APPROVE \\(owner\\)) @ ${sha.slice(0, 12)}\\b`);
+
+// Coordinator-side settlement readback of the consumer-published terminal artifact.
+export async function verifyTerminalArtifact(assignment, evidence, api = githubApi) {
+  const published = assignment.terminalArtifact;
+  if (!published) fail('native-evidence-missing: packet-bound assignment has no published terminal artifact; the consumer must report its artifact in the terminal receipt.');
+  if (published.kind === 'issue-comment') {
+    const artifact = await readIssueCommentArtifact(assignment, published.url, api);
+    if (artifact.bodyDigest !== published.bodyDigest) fail('artifact-changed: published issue-comment artifact bytes changed after the terminal receipt.');
+    return { artifact: publishedArtifact(artifact) };
+  }
+  const pr = await readPullRequestArtifact(assignment, published.url, api);
+  if (pr.state === 'open') fail('artifact-pending: implementation PR is still open; retain the assignment until it merges or closes.');
+  if (pr.state !== 'merged') {
+    if (typeof evidence.closureReason !== 'string' || !evidence.closureReason.trim()) {
+      fail('artifact-closed: a closed unmerged implementation PR needs an explicit closureReason before settlement.');
+    }
+    return { artifact: publishedArtifact(pr), closedUnmerged: true };
+  }
+  if (pr.headSha !== published.headSha) fail('artifact-changed: merged PR head differs from the published terminal artifact head; reconcile a recovery assignment.');
+  if (assignment.task.issue !== undefined && assignment.task.pr === undefined &&
+      !new RegExp(`\\b(close[sd]?|fix(e[sd])?|resolve[sd]?) #${assignment.task.issue}\\b`, 'i').test(pr.body)) {
+    fail(`artifact-unlinked: merged PR body must contain Closes #${assignment.task.issue}.`);
+  }
+  const status = await api(`repos/${repository}/commits/${pr.headSha}/status`).catch(() => undefined);
+  const verdict = Array.isArray(status?.statuses)
+    ? status.statuses.find((entry) => entry?.context === 'squad/pre-pr-verdict') : undefined;
+  if (verdict?.state !== 'success' || !verdictPattern(pr.headSha).test(verdict.description ?? '')) {
+    fail('artifact-unreviewed: merged PR head lacks a REVIEWED or APPROVE (owner) squad/pre-pr-verdict status at that exact head.');
+  }
+  return { artifact: publishedArtifact(pr), verdict: verdict.description };
+}
+
+// Issue workers start from the live development branch, which may have advanced
+// past the reservation head. Accept only a GitHub-proven descendant on development.
+export async function verifyDevelopmentAdvance(packet, initialHeadSha, api = githubApi) {
+  if (packet.pr || !/^[0-9a-f]{40}$/.test(initialHeadSha ?? '') || initialHeadSha === packet.headSha) return undefined;
+  const forward = await api(`repos/${repository}/compare/${packet.headSha}...${initialHeadSha}`);
+  const onBranch = await api(`repos/${repository}/compare/${initialHeadSha}...${packet.sourceRef}`);
+  if (forward?.status !== 'ahead' || !['identical', 'ahead'].includes(onBranch?.status)) {
+    fail('Initial worker HEAD is not a GitHub-verified descendant of the reserved head on the source branch; reconcile on the same child before work.');
+  }
+  return initialHeadSha;
+}
+
 export function validateTriageEvidence(evidence) {
   const owners = 'dallas|ripley|drake|lambert|hudson|gorman|kane|ash|brett|parker|newt|copilot';
   const ownerPattern = new RegExp(`^squad:[^a-z]*(${owners})$`);
@@ -245,7 +406,7 @@ export function validateTriageEvidence(evidence) {
   return { owner: `squad:${[...normalizedOwners][0]}`, purpose };
 }
 
-export function prepareEvent(config, request, snapshot, journal, now = Date.now(), invocationDigest, dispatchPlan) {
+export function prepareEvent(config, request, snapshot, journal, now = Date.now(), invocationDigest, dispatchPlan, context = {}) {
   if (!['coordinator', 'consumer'].includes(config.role) ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.roundId ?? '') ||
       !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.id ?? '')) fail('Exact role, round and event IDs required.');
@@ -281,10 +442,15 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
     if (evidence.repository !== 'OlyForge3D/PrintFarmer') fail('Wrong target repository.');
     const offer = snapshot.state.availability?.[request.data.workerId];
     if (!offer) fail('Consumer must publish a finite capacity offer before new reservations.');
+    if (config.role !== 'coordinator') fail('Only coordinator may assign or release work.');
+    const task = taskFromEvidence(evidence);
+    if (!context.taskPacket || digest(taskFromPacket(context.taskPacket)) !== digest(task)) {
+      fail('native-evidence-missing: reservation requires the runtime-built task packet from a live GitHub readback.');
+    }
     event.data = {
       assignmentId: request.data.assignmentId, workerId: request.data.workerId, generation: 1,
-      task: taskFromEvidence(evidence), eligibilityDigest: digest(evidence), policySha: config.approvedPolicy,
-      offerId: offer.offerId,
+      task, eligibilityDigest: digest(evidence), policySha: config.approvedPolicy,
+      offerId: offer.offerId, taskPacket: context.taskPacket,
     };
   } else if (event.type === 'publish') {
     requireEvidence();
@@ -376,6 +542,20 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
           fail('Exact worker final ACK with no children, continuation or future delivery required.');
         }
       }
+      let terminalArtifact;
+      if (event.data.status === 'terminal-reported' && prior.dispatchPlan && assignment.taskPacket) {
+        const artifact = evidence.artifact;
+        const ack = evidence.finalAck;
+        const research = ['research', 'analysis'].includes(assignment.task.purpose);
+        if (evidence.artifactReadbackVerified !== true || !artifact || (research && artifact.kind !== 'issue-comment') ||
+            ack?.artifactUrl !== artifact.url || ack.artifactReadbackVerified !== true ||
+            (artifact.kind === 'pull-request' ? ack.artifactHeadSha !== artifact.headSha : ack.artifactBodyDigest !== artifact.bodyDigest)) {
+          fail(research
+            ? 'Research terminal receipt needs read-back issue findings and the same specialist final ACK, not chat-only completion.'
+            : 'Terminal receipt needs a runtime artifact-readback (issue comment or implementation PR) echoed by the same specialist final ACK; the artifact is published for coordinator settlement.');
+        }
+        terminalArtifact = validateTerminalArtifact(publishedArtifact(artifact), assignment.task);
+      }
       if (event.data.status === 'terminal-reported' && prior.dispatchPlan &&
           ['research', 'analysis'].includes(assignment.task.purpose)) {
         const ack = evidence.finalAck;
@@ -400,16 +580,25 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
       prior.sessionId = evidence.session.id;
       prior.lastEvidenceDigest = digest(committed);
       if (event.data.status === 'terminal-reported') prior.terminalEvidence = committed;
-      event.data = { ...event.data, evidenceDigest: digest(committed) };
+      const { artifact: ignoredArtifact, ...receiptData } = event.data;
+      event.data = { ...receiptData, evidenceDigest: digest(committed), ...(terminalArtifact ? { artifact: terminalArtifact } : {}) };
       if (event.data.status === 'terminal-reported') event.type = 'terminal-receipt';
     }
   } else if (event.type === 'report-blocker') {
     requireEvidence();
-    event.data = { ...event.data, evidenceDigest: digest(evidence) };
+    const { prestartProof: ignoredProof, ...blocker } = event.data;
+    event.data = { ...blocker, evidenceDigest: digest(evidence) };
+    if (evidence.source === prestartProofSource) {
+      // Publish the runtime-generated never-started proof itself so the coordinator
+      // can withdraw from the mailbox alone; no session relay is part of the protocol.
+      const retained = journal.prestartProofs?.[event.data.assignmentId];
+      if (!retained || digest(retained) !== digest(evidence)) fail('Prestart proof must be the exact proof retained in this consumer journal.');
+      event.data.prestartProof = retained;
+    }
   } else if (event.type === 'withdraw') {
     requireEvidence();
     if (evidence.claimsReconciled !== true || evidence.noNativeDeliveryVerified !== true) fail('Reconcile never-delivered reservation before withdrawal; no active-worker abandonment.');
-    const proof = evidence.prestartProof;
+    const proof = evidence.prestartProof ?? assignment?.blocker?.prestartProof;
     if (!assignment || !['reserved', 'published'].includes(assignment.state) || assignment.receipts.length ||
         proof?.source !== 'native-runtime-prestart-proof-v1' ||
         proof.assignmentId !== assignment.assignmentId || proof.generation !== assignment.generation ||
@@ -417,13 +606,14 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         assignment.blocker?.evidenceDigest !== digest(proof)) {
       fail('Exact consumer no-delivery proof committed by its blocker is required; coordinator absence is not proof.');
     }
-    event.data = { ...event.data, reconciliationDigest: digest(evidence) };
+    event.data = { ...event.data, reconciliationDigest: digest({ ...evidence, prestartProof: proof }) };
   } else if (event.type === 'release') {
     requireEvidence();
     if (!assignment || evidence.consumerReceiptDigest !== assignment.receipts.at(-1)?.evidenceDigest ||
         evidence.taskDigest !== assignment.taskDigest || evidence.ownershipReconciled !== true ||
         evidence.artifactsVerified !== true || evidence.noPendingContinuation !== true) fail('Coordinator must reconcile the actual consumer terminal receipt and task artifacts.');
-    event.data = { ...event.data, terminalEvidenceDigest: digest(evidence) };
+    if (assignment.taskPacket && !context.settlement) fail('native-evidence-missing: packet-bound settlement requires the runtime GitHub readback of the published terminal artifact.');
+    event.data = { ...event.data, terminalEvidenceDigest: digest(context.settlement ? { ...evidence, settlement: context.settlement } : evidence) };
     event.type = 'settle';
   } else if (event.type !== 'end-round') fail('Unknown public runtime transition; internal mailbox events are not requests.');
   return { event, createAllowed };
@@ -549,7 +739,13 @@ export async function runNativeRequest(config, request, {
       const existing = Object.values(snapshot.state.assignments).filter((entry) =>
         entry.task.issue === request.evidence.issue && entry.task.purpose === 'research');
       const assignment = existing.find((entry) => entry.state !== 'terminal') ?? existing.at(-1);
-      return researchDisposition(request.evidence, assignment);
+      const disposition = researchDisposition(request.evidence, assignment);
+      if (assignment?.taskPacket && assignment.state === 'terminal' && assignment.disposition !== 'withdrawn-before-delivery' &&
+          request.evidence.findings?.issueCommentUrl !== assignment.terminalArtifact?.url) {
+        return { ...disposition, action: 'retain-research-gate', closeIssue: false, mutationAuthorized: false,
+          removeLabels: [], addLabels: [], reason: 'Findings must cite the consumer-published terminal artifact for this assignment.' };
+      }
+      return disposition;
     }
     const assignment = snapshot.state.assignments[request.data?.assignmentId];
     const local = journal.sessions[request.data?.correlation];
@@ -586,7 +782,11 @@ export async function runNativeRequest(config, request, {
     }
     if (request.type === 'artifact-readback') {
       requireBinding();
-      const artifact = await readResearchArtifact(assignment, request.data.artifactUrl, api);
+      const artifact = !assignment.taskPacket
+        ? await readResearchArtifact(assignment, request.data.artifactUrl, api)
+        : /\/pull\/[0-9]+$/.test(request.data.artifactUrl ?? '')
+          ? publishedArtifact(await readPullRequestArtifact(assignment, request.data.artifactUrl, api))
+          : await readIssueCommentArtifact(assignment, request.data.artifactUrl, api);
       const finalDeliveryCorrelation = `final-${digest({
         assignmentId: assignment.assignmentId, generation: assignment.generation,
         taskDigest: assignment.taskDigest, artifact,
@@ -665,7 +865,8 @@ export async function runNativeRequest(config, request, {
           (local.creationOutcome !== 'succeeded' && evidence.configuration?.source === 'successful-native-create')) {
         fail('Partial startup requires actual configuration readback or explicit owner attestation on the same child.');
       }
-      validateStartup(local.dispatchPlan, evidence);
+      const verifiedHeadAdvance = await verifyDevelopmentAdvance(local.dispatchPlan.packet, evidence.startupAck?.initialHeadSha, api ?? githubApi);
+      validateStartup(local.dispatchPlan, evidence, { verifiedHeadAdvance });
       const continuationAllowed = !local.continuationIntent;
       local.continuationIntent ??= { requestId: request.id, evidenceDigest: digest(evidence) };
       local.startupEvidenceDigest = digest(evidence);
@@ -675,31 +876,73 @@ export async function runNativeRequest(config, request, {
         ...(continuationAllowed ? { continuation: local.dispatchPlan.continuation } : {}),
       };
     }
+    const context = {};
+    let evidenceRequest = request;
+    if (request.type === 'reserve' && config.role === 'coordinator') {
+      freshEvidence(request.evidence, now);
+      validateTriageEvidence(request.evidence);
+      validateClassification(request.evidence);
+      const live = await readTaskSubject({ issue: request.evidence.issue, pr: request.evidence.pr }, api ?? githubApi);
+      verifyReservationReadback(request.evidence, live);
+      context.taskPacket = taskPacketFromEvidence(request.evidence, live.bodySha256);
+    }
+    const packetStart = (request.type === 'publish' && config.role === 'coordinator') ||
+      (config.role === 'consumer' && (request.type === 'dispatch-plan' || (request.type === 'receipt' && request.data?.status === 'starting')));
+    if (packetStart) {
+      if (config.role === 'consumer') requireBinding();
+      else if (!assignment || request.data?.generation !== assignment.generation || request.data?.taskDigest !== assignment.taskDigest) {
+        fail('Recheck exact task, holds and ownership immediately before publication.');
+      }
+      freshEvidence(request.evidence, now);
+      const legacyStartReplay = !assignment.taskPacket && request.type === 'receipt' &&
+        journal.sessions[request.data?.correlation]?.startEventId === request.id;
+      if (!legacyStartReplay) {
+        // Packetless assignments already delivered before #2958 may only replay their saved start.
+        if (!assignment.taskPacket) composeTaskEvidence(assignment);
+        const live = await readTaskSubject(assignment.task, api ?? githubApi);
+        evidenceRequest = { ...request, evidence: composeTaskEvidence(assignment, live, request.evidence) };
+      }
+    }
     let dispatchPlan;
     if (request.type === 'dispatch-plan' ||
         (request.type === 'receipt' && request.data?.status === 'starting')) {
       requireBinding();
-      const { owner: member } = validateTriageEvidence(request.evidence);
+      const { owner: member } = validateTriageEvidence(evidenceRequest.evidence);
       if (assignment.policySha !== config.approvedPolicy ||
           !/^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$/.test(request.data.correlation ?? '')) {
         fail('Matching policy and opaque correlation required before planning kickoff.');
       }
       dispatchPlan = await buildDispatchPlan({
-        config, evidence: request.evidence, assignment, correlation: request.data.correlation, owner: member, cwd,
+        config, evidence: evidenceRequest.evidence, assignment, correlation: request.data.correlation, owner: member, cwd,
       });
       if (request.type === 'dispatch-plan') return {
         dispatchAuthorized: false, nativeCreateAllowed: false, dispatchPlan,
         inventoryFreshness: localInventoryFreshness(snapshot.state, config.workerId, now),
       };
     }
-    const prepared = prepareEvent(config, request, snapshot, journal, now, owner.invocationDigest, dispatchPlan);
-    if (request.type === 'receipt' && request.data?.status === 'terminal-reported' &&
-        local?.dispatchPlan && ['research', 'analysis'].includes(assignment?.task.purpose)) {
-      const artifact = await readResearchArtifact(assignment, request.evidence?.artifact?.url, api);
-      if (artifact.bodyDigest !== request.evidence.artifact.bodyDigest) {
-        fail('Research artifact bytes changed or were hashed incorrectly; obtain the same worker ACK for the exact API body.');
+    if (request.type === 'release' && config.role === 'coordinator' && assignment?.taskPacket) {
+      freshEvidence(request.evidence, now);
+      context.settlement = await verifyTerminalArtifact(assignment, request.evidence, api ?? githubApi);
+    }
+    const prepared = prepareEvent(config, evidenceRequest, snapshot, journal, now, owner.invocationDigest, dispatchPlan, context);
+    if (request.type === 'receipt' && request.data?.status === 'terminal-reported' && local?.dispatchPlan &&
+        (assignment?.taskPacket || ['research', 'analysis'].includes(assignment?.task.purpose))) {
+      const claimed = request.evidence?.artifact;
+      if (claimed?.kind === 'pull-request') {
+        const artifact = await readPullRequestArtifact(assignment, claimed.url, api ?? githubApi);
+        if (artifact.number !== claimed.number || artifact.headSha !== claimed.headSha) {
+          fail('Pull-request artifact head moved or was misreported; obtain the same worker ACK for the exact PR head.');
+        }
+        local.terminalArtifact = publishedArtifact(artifact);
+      } else {
+        const artifact = assignment.taskPacket
+          ? await readIssueCommentArtifact(assignment, claimed?.url, api ?? githubApi)
+          : await readResearchArtifact(assignment, claimed?.url, api);
+        if (artifact.bodyDigest !== claimed.bodyDigest) {
+          fail('Research artifact bytes changed or were hashed incorrectly; obtain the same worker ACK for the exact API body.');
+        }
+        local.terminalArtifact = { url: artifact.url, bodyDigest: artifact.bodyDigest };
       }
-      local.terminalArtifact = { url: artifact.url, bodyDigest: artifact.bodyDigest };
     }
     if (saved) {
       if (digest({ ...prepared.event, observedAt: saved.observedAt }) !== digest(saved)) fail('Local event ID changed content.');

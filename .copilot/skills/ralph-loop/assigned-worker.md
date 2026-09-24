@@ -25,8 +25,9 @@ reasoning effort is a runtime observation.
 First return a **startup-only ACK** with all packet identities, charter digest,
 the entire packet echoed unchanged, actual exposed model/effort, `initialHeadSha`
 and `actualBranch` read from Git, `noChildren:true` and
-`substantiveWorkStarted:false`. If the initial HEAD differs from `headSha`, stop.
-Stop until the
+`substantiveWorkStarted:false`. For PR work, if the initial HEAD differs from
+`headSha`, stop. For issue work, report a newer `development` HEAD exactly; the
+runtime accepts it only as a GitHub-verified descendant. Stop until the
 owning consumer supplies the runtime-generated continuation. A kickoff request
 or workspace handle alone is not a successful startup.
 
@@ -55,6 +56,10 @@ After the consumer acknowledges that durable delivery, return a final ACK naming
 the delivery correlation and artifact reference. For research/analysis, read the
 persisted comment and include `artifactUrl`, `artifactBodyDigest` and
 `artifactReadbackVerified:true` only after verifying its findings and exact body.
+For implementation ending in a PR, include the same-repository PR `artifactUrl`,
+its current `artifactHeadSha` and `artifactReadbackVerified:true`; the consumer
+publishes that artifact and the coordinator settles only after it merges with a
+current-head review verdict and `Closes #issue`, or closes with a reason.
 Hash the UTF-8 string from the parsed API JSON `body` field, not shell-formatted
 `gh --jq`/`jq -r` output with an extra newline. Explicitly confirm
 no children, no pending continuation and no future delivery. Then stop. Idle

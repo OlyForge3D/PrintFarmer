@@ -233,6 +233,14 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.match(settings.prompt, /record-creation/);
     assert.match(settings.prompt, /startup-check/);
     assert.match(settings.prompt, /prestart-proof/);
+    assert.match(settings.prompt, /The runtime publishes\nit in the mailbox blocker; never relay it/);
+    assert.match(settings.prompt, /withdraws only that binding from the published blocker alone/);
+    assert.doesNotMatch(settings.prompt, /through report-blocker and to the coordinator/);
+    assert.match(settings.prompt, /TASK PACKETS \(#2958\)/);
+    assert.match(settings.prompt, /dispatch-plan and starting evidence WITHOUT task facts/);
+    assert.match(settings.prompt, /Never ask the\nowner to relay coordinator evidence/);
+    assert.match(settings.prompt, /artifactUrl, artifactHeadSha and\nartifactReadbackVerified:true/);
+    assert.match(settings.prompt, /squad\/pre-pr-verdict at that exact head/);
     assertNativePrompt(settings.prompt, role, windows);
     assert.equal(await readFile(path.join(path.dirname(f.options['host-config']), 'workflow-prompt.txt'), 'utf8'), `${settings.prompt}\n`);
     assert.equal(host.executionTrust, 'local-owner-v1');

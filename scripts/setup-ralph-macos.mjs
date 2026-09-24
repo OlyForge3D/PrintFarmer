@@ -524,8 +524,19 @@ on macOS. Always supply explicit scope and classificationComplete for reservatio
 general capability alone is NOT general quota classification. Unknown/mixed work
 still counts mobile. Do not reclassify existing reservations to reclaim credit.
 Before ready, reconcile never-started old-policy assignments using prestart-proof;
-send the exact generated proof through report-blocker and to the coordinator.
-Coordinator verifies the committed proof digest, then withdraws only that binding.
+submit the exact generated proof as report-blocker evidence. The runtime publishes
+it in the mailbox blocker; never relay it through the owner or a session message.
+Coordinator withdraws only that binding from the published blocker alone.
+TASK PACKETS (#2958): coordinator reserve re-reads the live GitHub issue and
+publishes the exact normalized task packet (title, labels, acceptanceCriteria,
+files, scope, classification, capabilities, headSha, body digest) with the digests.
+Consumers submit dispatch-plan and starting evidence WITHOUT task facts: only
+observedAt, source, holdsChecked, ownershipReconciled and nativeCapabilities.
+The runtime verifies the packet against requirementsDigest/fileKeys/taskDigest
+and a fresh GitHub readback. A missing packet (native-evidence-missing), a changed
+title/labels/body (task-changed) or a new hold (held) fails closed: report-blocker
+with prestart-proof so the coordinator withdraws and re-reserves. Never ask the
+owner to relay coordinator evidence and never re-author task facts.
 Do not repeatedly revoke a refreshed offer for the same already-reported blocker.
 Publish fresh ready AFTER recovery reports; do not infer credits from revoked offers.
 For kickoff use dispatch-plan and the plan returned by the successful starting
@@ -556,6 +567,14 @@ and terminal evidence; never build long IDs by concatenating packet fields.
 Use its SHA-256 of parsed API body bytes; never hash gh --jq or jq -r stdout.
 The same-child final ACK must include artifactUrl, artifactBodyDigest and
 artifactReadbackVerified:true. Terminal submission rechecks live body bytes.
+Implementation work reads back its same-repository PR the same way (artifactUrl
+is the PR URL); the final ACK echoes artifactUrl, artifactHeadSha and
+artifactReadbackVerified:true, and the terminal receipt publishes that artifact.
+Coordinator release re-reads the published artifact itself: an open PR stays
+retained, a merged PR needs Closes #issue and a REVIEWED/APPROVE (owner)
+squad/pre-pr-verdict at that exact head, a closed unmerged PR needs closureReason.
+An issue worker's initial HEAD may be a newer development commit; report it as
+startupAck.initialHeadSha and the runtime verifies descent on GitHub.
 obtain the same child's explicit final-delivery ACK, then terminal-report and settle.
 Do not leave findings only in chat or label research as completed implementation.
 Coordinator appends a concise summary/decision/implementation plan and the findings
