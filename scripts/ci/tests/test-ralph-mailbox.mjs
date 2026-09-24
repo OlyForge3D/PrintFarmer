@@ -619,6 +619,7 @@ test('native role contract separates central triage from local consumers and doc
     "create_session tool's kickoff model/effort catalog",
     'single-model list is not evidence',
     '`data.taskDigest`',
+    'one round is not one reservation', 'including Windows',
   ]) assert.ok(contract.includes(phrase), phrase);
 });
 

@@ -507,6 +507,21 @@ within the owning session via the approved reviewer tools. A new native work
 session requires another valid reservation; no hidden review/recovery slots.
 One Xcode job remains an additional Mac safeguard.
 
+**Capacity fill: one round is not one reservation.** After PR repairs and
+missing-label triage, each coordinator round keeps reserving and publishing
+until every registered consumer's unused offered credits are exhausted or no
+eligible candidate remains. Candidates include live `go:yes` implementation
+issues (purpose `implementation`, owner from the `squad:*` label) and
+`reserve-research` dispositions. Order them by priority (`p0` > `p1` > `p2` >
+`p3`), then children of open `p0`/`p1` epics, then oldest. Route general-scope
+work to **any** worker with general credits, including Windows. Never leave a
+consumer's credits unused while eligible work for that category exists.
+`TEST ONLY` issues and `testing` + `type:spike` issues rank last and never
+consume the last credit of a category while other eligible work exists.
+Report the concrete reason (capacity, overlap, hold, dependency or evidence gap)
+for every eligible-looking candidate left unreserved. Reserving a single item
+while offered credits and eligible work remain is an incomplete round.
+
 Publish the exact reserved binding using `assignmentId`, `generation:1` and
 returned `taskDigest`; the runtime re-verifies the packet and live issue first. A reservation survives a crash before publication; retry
 only its original publication, not another assignment. Do not publish if current
