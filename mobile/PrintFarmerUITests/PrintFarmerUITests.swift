@@ -1098,18 +1098,6 @@ struct RenderedShellRoot {
         case sidebar
     }
 
-    /// The live XCUI boundary is injectable so tests exercise the base adapter
-    /// with the login suite's actual policy, not a second copy of its allowlist.
-    @MainActor
-    struct ShellNavigationDriver {
-        var observeInterruption: ([String]) throws -> ShellNode?
-        var observeApplication: () throws -> ShellObservation
-        var reveal: (ShellNode) -> Bool
-        var leadingEdge: (ShellNode) -> Bool
-        var isDismissalHittable: (ShellNode, ShellNode) -> Bool
-        var tapDismissal: (ShellNode, ShellNode) -> Bool
-    }
-
     let title: String
     let identifier: String
     let surface: Surface
@@ -1117,6 +1105,18 @@ struct RenderedShellRoot {
     var key: String {
         identifier.isEmpty ? title : identifier
     }
+}
+
+/// The live XCUI boundary is injectable so tests exercise the base adapter
+/// with the login suite's actual policy, not a second copy of its allowlist.
+@MainActor
+struct ShellNavigationDriver {
+    var observeInterruption: ([String]) throws -> ShellNode?
+    var observeApplication: () throws -> ShellObservation
+    var reveal: (ShellNode) -> Bool
+    var leadingEdge: (ShellNode) -> Bool
+    var isDismissalHittable: (ShellNode, ShellNode) -> Bool
+    var tapDismissal: (ShellNode, ShellNode) -> Bool
 }
 
 #if PFARM_TIMEOUT_DIAGNOSTICS
