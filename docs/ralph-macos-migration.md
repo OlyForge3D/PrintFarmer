@@ -581,15 +581,26 @@ other worker with a reason. For each eligible worker, the consumer:
 1. Journals `record-deletion-intent` before making any tool call.
 2. Calls `delete_item` exactly once.
 3. Reads back `get_session` for the session ID and every alias, and checks that the
-   worktree directory is gone.
+   worktree directory is gone. Each lookup reports `notFound`, `archived`, `path`
+   and the resolved session ID.
 4. Records the facts with `record-deletion-result`.
+
+On a worktree session, native `delete_item` only archives it. Afterwards
+`get_session` still resolves the session ID and its `project_session_id` alias,
+returning `archived:true` and `path:""`, and it keeps doing so after the archive
+ages. Each identifier must therefore be either not found, or archived with an
+empty path while still resolving to the recorded session ID. The worktree must
+also be absent, as reported by the caller and confirmed by the runtime. The
+runtime records the outcome as `deleted` or `archived`.
 
 Any unconfirmed result stays pending and is never retried. The next round lists it
 in `inspect`'s `deletions.pending` and resolves it before `ready`; any pending
-intent blocks readiness until it is confirmed. A recorded
-deletion keeps its recomputable not-found and absent-worktree proof, and retires the
-mapping from later readiness without live evidence. If the session reappears,
-readiness fails closed. Workers settled before this change have no retained
+intent blocks readiness until it is confirmed. A recorded retirement keeps its
+recomputable not-found/archived and absent-worktree proof. It retires the mapping
+from later readiness without live evidence, whether the outcome was `deleted` or
+`archived`. The consumer omits retired workers from later inventories and cleanup
+candidates. If a retired session ID or alias reappears there, for example
+unarchived or with a path, readiness fails closed. Workers settled before this change have no retained
 terminal session binding, so they are retained with a manual-cleanup reason.
 
 The coordinator, Windows consumers and every non-Ralph session stay report-only;

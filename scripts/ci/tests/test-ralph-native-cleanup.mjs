@@ -473,3 +473,110 @@ test('the committed identifier set cannot be narrowed or replaced before intent'
     await assert.rejects(planWorkerCleanup(context(w, [])), /deletion record/);
   }
 });
+
+// Native delete_item archives worktree sessions (#2956): get_session keeps resolving the
+// session ID and its project_session_id alias with archived:true and path:"".
+const archivedLookup = (n, aliases = [], overrides = {}) => ({ ...confirmedLookup(n, aliases), deleteOutcome: 'Session archive requested.',
+  lookups: [id(n), ...aliases].map((value) => ({ id: value, notFound: false, archived: true, path: '', resolvedId: id(n),
+    ...overrides[value] })) });
+
+test('an archived retirement with an empty path and absent worktree is confirmed and recorded as archived', async () => {
+  const w = world([{ n: 1, mapping: { sessionAliases: [alias(1)] } }]);
+  await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+  w.present.add('/worktrees/w-1');
+  const lingering = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+    evidence: archivedLookup(1, [alias(1)]) });
+  assert.equal(lingering.confirmed, false, 'archive does not bypass the runtime worktree check');
+  w.present.clear();
+  const result = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+    evidence: archivedLookup(1, [alias(1)], { [alias(1)]: { path: undefined } }) });
+  assert.deepEqual([result.confirmed, result.outcome], [true, 'archived']);
+  const record = w.journal.deletions[id(1)];
+  assert.equal(record.status, 'deleted');
+  assert.equal(record.confirmation.outcome, 'archived');
+  assert.deepEqual(record.confirmation.lookups.map((lookup) => [lookup.id, lookup.outcome, lookup.resolvedId]),
+    [[id(1), 'archived', id(1)], [alias(1), 'archived', id(1)]]);
+  assert.equal(record.resultEvidenceDigest, digest(record.confirmation));
+  assert.deepEqual([...deletedWorkerIds(w.journal, w.state)], [id(1)]);
+  const plan = await planWorkerCleanup(context(w, []));
+  assert.deepEqual(plan.deleted.map((item) => [item.sessionId, item.outcome]), [[id(1), 'archived']]);
+  assert.equal((await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+    evidence: archivedLookup(1, [alias(1)]) })).outcome, 'archived');
+  await assert.rejects(recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) }),
+    /already confirmed; never delete it again/);
+});
+
+test('archived lookups stay pending unless every identifier is retired to the recorded session with no path', async () => {
+  const pendingCases = [
+    ['archived with a non-empty path', { [id(1)]: { path: '/worktrees/w-1' } }],
+    ['unarchived with an empty path', { [id(1)]: { archived: false } }],
+    ['archived flag missing', { [id(1)]: { archived: undefined } }],
+    ['alias resolves to a different session', { [alias(1)]: { resolvedId: id(2) } }],
+    ['resolved session unknown', { [alias(1)]: { resolvedId: undefined } }],
+    ['mixed archived and live alias', { [alias(1)]: { archived: false, path: '/worktrees/w-1' } }],
+    ['not found yet contradicted by archive facts', { [alias(1)]: { notFound: true, archived: true, resolvedId: undefined } }],
+    ['not found yet contradicted by a path', { [alias(1)]: { notFound: true, archived: undefined, path: '/worktrees/w-1', resolvedId: undefined } }],
+  ];
+  for (const [name, overrides] of pendingCases) {
+    const w = world([{ n: 1, mapping: { sessionAliases: [alias(1)] } }, { n: 2 }]);
+    await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+    const result = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+      evidence: archivedLookup(1, [alias(1)], overrides) });
+    assert.equal(result.confirmed, false, name);
+    assert.equal(result.pending, true, name);
+    assert.deepEqual(result.stillPresent, Object.keys(overrides), name);
+    const record = w.journal.deletions[id(1)];
+    assert.equal(record.status, 'pending', name);
+    assert.equal(record.inspections.at(-1).outcome, 'unconfirmed', name);
+  }
+  const w = world([{ n: 1, mapping: { sessionAliases: [alias(1)] } }]);
+  await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+  for (const bad of [{ archived: 'true' }, { path: 7 }, { resolvedId: 'not-a-uuid' }]) {
+    await assert.rejects(recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+      evidence: archivedLookup(1, [alias(1)], { [id(1)]: bad }) }), /explicit notFound result/);
+  }
+  const unchecked = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+    evidence: archivedLookup(1) });
+  assert.deepEqual([unchecked.confirmed, unchecked.unchecked], [false, [alias(1)]]);
+});
+
+test('mixed not-found and archived identifiers confirm as an archived retirement', async () => {
+  for (const overrides of [{ [alias(1)]: { notFound: true, archived: undefined, path: undefined, resolvedId: undefined } },
+    { [id(1)]: { notFound: true, archived: undefined, path: undefined, resolvedId: undefined } }]) {
+    const w = world([{ n: 1, mapping: { sessionAliases: [alias(1)] } }]);
+    await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+    const result = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+      evidence: archivedLookup(1, [alias(1)], overrides) });
+    assert.deepEqual([result.confirmed, result.outcome], [true, 'archived']);
+    assert.deepEqual(w.journal.deletions[id(1)].confirmation.lookups.map((lookup) => lookup.outcome).sort(), ['archived', 'deleted']);
+  }
+  const w = world([{ n: 1 }]);
+  await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+  const hard = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []), evidence: confirmedLookup(1) });
+  assert.deepEqual([hard.confirmed, hard.outcome], [true, 'deleted']);
+});
+
+test('a retired archived identity that reappears live or tampered archive proof fails closed', async () => {
+  const w = world([{ n: 1, mapping: { sessionAliases: [alias(1)] } }, { n: 2 }]);
+  await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+  assert.equal((await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
+    evidence: archivedLookup(1, [alias(1)]) })).confirmed, true);
+  await assert.rejects(planWorkerCleanup(context(w, [candidate(1)])), /reappeared/);
+  await assert.rejects(planWorkerCleanup(context(w, [{ ...candidate(2), sessionId: alias(1) }])), /reappeared/);
+  const confirmed = structuredClone(w.journal.deletions[id(1)]);
+  const redigest = (entry) => { entry.resultEvidenceDigest = digest(entry.confirmation); };
+  const tamper = [
+    (entry) => { entry.confirmation.outcome = 'deleted'; redigest(entry); },
+    (entry) => { entry.confirmation.lookups[1].resolvedId = id(2); redigest(entry); },
+    (entry) => { entry.confirmation.lookups[0].path = '/worktrees/w-1'; redigest(entry); },
+    (entry) => { entry.confirmation.lookups[0].archived = false; redigest(entry); },
+    (entry) => { entry.confirmation.lookups.push({ ...entry.confirmation.lookups[0], archived: false }); redigest(entry); },
+  ];
+  for (const change of tamper) {
+    w.journal.deletions[id(1)] = structuredClone(confirmed);
+    change(w.journal.deletions[id(1)]);
+    await assert.rejects(planWorkerCleanup(context(w, [])), /deletion record/);
+  }
+  w.journal.deletions[id(1)] = confirmed;
+  assert.deepEqual([...deletedWorkerIds(w.journal, w.state)], [id(1)]);
+});

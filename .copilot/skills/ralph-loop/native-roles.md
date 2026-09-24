@@ -244,9 +244,10 @@ Keep journal mappings across rounds, including terminal workers so later
 resumption remains detectable. Every retained mapping, including terminal workers,
 requires an explicit entry backed by current readback or verified cessation in each
 readiness inventory; omission blocks. The sole exception is a mapped worker whose
-deletion the consumer recorded through `record-deletion-result` (see "Owning-Consumer
-Worker Cleanup"): omit it, because any inventory entry for its session ID or a known
-alias is treated as reappearance and fails closed.
+retirement (outcome `deleted` or `archived`) the consumer recorded through
+`record-deletion-result` (see "Owning-Consumer Worker Cleanup"): omit it even though
+`get_session` still resolves an archived one, because any inventory entry for its
+session ID or a known alias is treated as reappearance and fails closed.
 Every unresolved local creation intent remains
 owned even when its native creation response was lost; a missing ID never makes
 that intent unrelated or authorizes another creation.
@@ -793,19 +794,33 @@ worktree) with fsync, and only then returns `deleteAllowed:true`, `nativeTool` a
 a second intent for the same session, or a failed call never authorizes another.
 Then call `get_session` for the session ID and every returned alias, check whether
 the worktree directory exists, and submit `type:"record-deletion-result"` with
-`data.sessionId`, `lookups:[{id,notFound}]`, `worktree:{path,absent}` and the
-observed `deleteOutcome`. The runtime records the deletion only when every
-identifier is not found, the caller reports the recorded worktree path absent, and
-its own `lstat` of that path also finds nothing. It stores that confirmation with a
-digest; every later read recomputes it, so a record flipped to `deleted` without
-matching not-found lookups for every identifier fails closed. Anything else
-stays pending with its inspection retained; re-inspect it on later rounds and
-report it. Never retry `delete_item` or edit the journal to clear a pending intent.
+`data.sessionId`, `lookups:[{id,notFound,archived,path,resolvedId}]`,
+`worktree:{path,absent}` and the observed `deleteOutcome`. Report each lookup
+exactly as observed: `notFound`, and, when found, the boolean `archived`, the
+normalized `path`, and `resolvedId`, the session ID the lookup resolved to. Native
+`delete_item` only archives worktree sessions: afterwards `get_session` still
+resolves the session ID and its `project_session_id` alias with `archived:true` and
+`path:""`, and this persists. Each identifier is therefore retired when it is
+`deleted` (not found, with no contradicting archive, path or resolved-ID facts) or
+`archived` (found, `archived:true`, empty or absent path, and `resolvedId` equal to
+the recorded session ID). A live, path-bearing, differently resolved, unknown or
+contradictory lookup is unconfirmed. The runtime records the retirement only when
+every identifier is retired, the caller reports the recorded worktree path absent,
+and its own `lstat` of that path also finds nothing. The confirmation stores each
+lookup's facts and outcome plus the overall `outcome` (`deleted` only when every
+identifier was not found, otherwise `archived`) with a digest. Every later read
+recomputes it, so a record flipped to `deleted` without matching per-identifier
+proof fails closed. Anything else stays pending with its inspection retained;
+re-inspect it on later rounds and report it. Never retry `delete_item` or edit the
+journal to clear a pending intent.
 
-A recorded deletion keeps the mapping, its terminal proof and retained ancestry.
-Later `ready` calls accept that mapping without live evidence. If the session ID or
-a known alias reappears in any inventory, or a descendant names it as creator,
-readiness fails closed until the owner reconciles it. Report `Sessions retained`
+A recorded retirement keeps the mapping, its terminal proof and retained ancestry;
+an `archived` outcome is treated exactly like `deleted`. Later `ready` calls accept
+that mapping without live evidence, and `inspect`'s `deletions.deleted` and the
+plan's `deleted` list report the outcome. Omit retired workers from inventories and
+`cleanup-plan` candidates. If the session ID or a known alias reappears in any
+inventory or candidate list, for example unarchived or with a path, or a descendant
+names it as creator, readiness fails closed until the owner reconciles it. Report `Sessions retained`
 and `🧹 Ready to reap` every round, including empty headings, with each reason and
 deletion result.
 

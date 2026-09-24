@@ -112,8 +112,9 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
     if (known.has(entry.sessionId)) fail('Duplicate Ralph native session mapping.');
     known.set(entry.sessionId, entry);
   }
-  // A journal-verified deletion of a settled mapped worker retires that mapping
-  // without new live evidence; any reappearance under a known ID fails closed.
+  // A journal-verified retirement (not found or archived, #2956) of a settled
+  // mapped worker retires that mapping without new live evidence; any
+  // reappearance under a known ID fails closed.
   const { bySession: deletions, identifiers: deletionIds } = deletionLedger(journal, state);
   const deleted = new Set([...deletions.values()].filter((record) => record.status === 'deleted').map((record) => record.sessionId));
   if (deleted.size !== deletions.size) {
@@ -121,7 +122,7 @@ function ownedSessionInventory(config, evidence, journal, state, now) {
   }
   for (const session of evidence.sessions) {
     if (deleted.has(deletionIds.get(session?.id))) {
-      fail(`Deleted Ralph worker ${deletionIds.get(session.id)} reappeared in native inventory; omit only verified deletions and reconcile any reappearance.`);
+      fail(`Deleted Ralph worker ${deletionIds.get(session.id)} reappeared in native inventory; omit only verified retirements (deleted or archived) and reconcile any reappearance.`);
     }
     if (deleted.has(deletionIds.get(session?.creatorSessionId))) fail('Descendant of a deleted Ralph worker blocks readiness.');
   }
@@ -495,7 +496,8 @@ export async function runNativeRequest(config, request, {
       try {
         const records = [...deletionLedger(journal, snapshot.state).bySession.values()];
         deletions = { pending: records.filter((record) => record.status === 'pending').map(pendingSummary),
-          deleted: records.filter((record) => record.status === 'deleted').map(pendingSummary) };
+          deleted: records.filter((record) => record.status === 'deleted')
+            .map((record) => ({ ...pendingSummary(record), outcome: record.confirmation.outcome ?? 'deleted' })) };
       } catch (error) { deletions = { error: error.message }; }
       return { ...snapshot, retainedLineage: retainNativeLineage(journal.nativeLineage, [], now), deletions, dispatchAuthorized: false };
     }

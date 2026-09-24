@@ -148,8 +148,10 @@ function assertWorkerCleanupPrompt(prompt, role, windows) {
     assert.deepEqual([...steps].sort((a, b) => a - b), steps, 'cleanup steps are ordered');
     assert.match(prompt, /Before ready, inspect every pending deletion intent/);
     assert.match(prompt, /A lost, failed or unconfirmed result stays pending; never retry/);
-    assert.match(prompt, /Omit workers already recorded as deleted from the ready inventory/);
-    assert.match(prompt, /reappears, readiness fails closed/);
+    assert.match(prompt, /Omit workers already recorded as retired \(outcome deleted or archived\) from the\s+ready inventory and cleanup-plan candidates/);
+    assert.match(prompt, /reappears unarchived\s+or with a path, readiness fails closed/);
+    assert.match(prompt, /report each lookup as \{id, notFound, archived, path, resolvedId\}/);
+    assert.match(prompt, /not found or archived with an\s+empty path resolving to the recorded session/);
     assert.match(prompt, /aliases \(project_session_id, never\s+as sessionId\)/);
     assert.match(prompt, /deletions\.pending/);
     assert.match(prompt, /caller-supplied git or PR claims are ignored/);
