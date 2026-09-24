@@ -25,8 +25,10 @@ public sealed class QueueOutboxPublisherService(
     IHubContext<PrinterHub> hub,
     ILogger<QueueOutboxPublisherService> logger,
     IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
-    Farm.Infrastructure.Services.HostUpdates.IHostUpdateWriterActivityFlag? hostUpdateFence = null) : BackgroundService
+    Farm.Infrastructure.Services.HostUpdates.IHostUpdateWriterActivityFlag? hostUpdateFence = null,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private static readonly TimeSpan RetryBackoffBase = TimeSpan.FromSeconds(10);
     private static readonly TimeSpan StaleLeaseAge = TimeSpan.FromMinutes(10);
@@ -81,7 +83,7 @@ public sealed class QueueOutboxPublisherService(
                 if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
                 }
                 else
                 {
@@ -107,8 +109,8 @@ public sealed class QueueOutboxPublisherService(
 
     private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
     {
-        DateTimeOffset until = DateTimeOffset.UtcNow + PollInterval;
-        while (DateTimeOffset.UtcNow < until)
+        DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
+        while (_timeProvider.GetUtcNow() < until)
         {
             if (hostUpdateFence is not null &&
                 await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
@@ -116,7 +118,7 @@ public sealed class QueueOutboxPublisherService(
                 return true;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
         return false;
@@ -126,7 +128,8 @@ public sealed class QueueOutboxPublisherService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        DateTime staleCutoff = DateTime.UtcNow - StaleLeaseAge;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
+        DateTime staleCutoff = now - StaleLeaseAge;
 
         List<QueueDispatchOutbox> stale = await db.QueueDispatchOutbox
             .Where(evt =>
@@ -140,7 +143,7 @@ public sealed class QueueOutboxPublisherService(
         {
             evt.Status = QueueOutboxEventStatus.Pending;
             evt.LastError = "Recovered after the publisher lease expired.";
-            evt.RetryAfterUtc = DateTime.UtcNow;
+            evt.RetryAfterUtc = now;
         }
 
         if (stale.Count > 0)
@@ -157,7 +160,7 @@ public sealed class QueueOutboxPublisherService(
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         List<QueueDispatchOutbox> events = await db.QueueDispatchOutbox
             .Where(e =>
                 e.Status == QueueOutboxEventStatus.Pending &&
@@ -297,7 +300,7 @@ public sealed class QueueOutboxPublisherService(
             await Task.WhenAll(sends);
 
             evt.Status = QueueOutboxEventStatus.Published;
-            evt.CompletedAtUtc = DateTime.UtcNow;
+            evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
 
             logger.LogDebug(
                 "[OutboxPublisher] Published event {EventId} type={EventType} seq={Seq}",
@@ -313,13 +316,13 @@ public sealed class QueueOutboxPublisherService(
             {
                 evt.Status = QueueOutboxEventStatus.DeadLettered;
                 evt.LastError = ex.Message[..Math.Min(ex.Message.Length, 2047)];
-                evt.CompletedAtUtc = DateTime.UtcNow;
+                evt.CompletedAtUtc = _timeProvider.GetUtcNow().UtcDateTime;
             }
             else
             {
                 evt.Status = QueueOutboxEventStatus.Pending;
                 evt.LastError = ex.Message[..Math.Min(ex.Message.Length, 2047)];
-                evt.RetryAfterUtc = DateTime.UtcNow + TimeSpan.FromSeconds(
+                evt.RetryAfterUtc = _timeProvider.GetUtcNow().UtcDateTime + TimeSpan.FromSeconds(
                     RetryBackoffBase.TotalSeconds * Math.Pow(2, evt.AttemptCount - 1));
             }
         }

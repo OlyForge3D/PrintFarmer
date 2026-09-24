@@ -1771,7 +1771,7 @@ public class PrintJobManagementService(
         job.DispatchedAt ??= now;
         job.DispatchMode ??= (int)Farm.Infrastructure.Services.Queue.Dispatch.DispatchMode.Manual;
         _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
-        _repository.AddDispatchLog(new DispatchLog
+        _repository.AddDispatchLog(new DispatchLog(now)
         {
             Id = Guid.NewGuid(),
             PrintJobId = job.Id,
@@ -1781,7 +1781,6 @@ public class PrintJobManagementService(
             DispatchedAt = new DateTimeOffset(now, TimeSpan.Zero),
             DispatchedByUserId = userId,
             Reason = reason,
-            CreatedAtUtc = now,
         });
     }
 
@@ -3981,7 +3980,8 @@ public class PrintJobManagementService(
             printJobId: job.Id,
             reasonCode: reasonCode,
             jobRowVersion: job.RowVersion,
-            detail: detail ?? new { jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard), status = job.Status.ToString() });
+            detail: detail ?? new { jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard), status = job.Status.ToString() },
+            timeProvider: _timeProvider);
     }
 
     /// <summary>
@@ -4204,7 +4204,8 @@ public class PrintJobManagementService(
                 commandId = command.Id,
                 commandQueued = true,
                 syntheticLegacyOwnership = attempt.StartPathKind == "LegacyControlOwnership",
-            });
+            },
+            timeProvider: _timeProvider);
     }
 
     /// <summary>
