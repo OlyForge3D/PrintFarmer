@@ -425,10 +425,12 @@ narrowly scoped maintainer authorization for delete_item; never archive_session.
 Before ready, inspect every pending deletion intent (the type:"inspect"
 response's deletions.pending, retained from any earlier round) with
 record-deletion-result; never call delete_item again for a pending intent. A
-pending intent blocks readiness until its not-found and absent-worktree proof is
-recorded; if it stays unconfirmed, stop and report it.
-Omit workers already recorded as deleted from the ready inventory; if a recorded
-deleted session ID or alias reappears, readiness fails closed: stop and report it.
+pending intent blocks readiness until its retirement (not-found or archived) and
+absent-worktree proof is recorded; if it stays unconfirmed, stop and report it.
+Omit workers already recorded as retired (outcome deleted or archived) from the
+ready inventory and cleanup-plan candidates, even though get_session still
+resolves an archived one. If a retired session ID or alias reappears unarchived
+or with a path, readiness fails closed: stop and report it.
 After admission/kickoff work and before end-round, run the read-only runtime
 type:"cleanup-plan" with this run's callingSessionId, mainCheckoutPath and one
 fresh candidate per mapped worker: sessionId, aliases (project_session_id, never
@@ -443,8 +445,12 @@ item in plan order (at most five, oldest settled first):
    its deleteAllowed:true response.
 2. Call delete_item exactly once with the returned nativeArguments.
 3. Read back get_session for the session ID and every alias, and check whether
-   the worktree directory still exists.
+   the worktree directory still exists. delete_item may only archive the
+   session, so report each lookup as {id, notFound, archived, path, resolvedId}
+   exactly as observed (resolvedId: the session ID the lookup resolved to).
 4. record-deletion-result with lookups, worktree and the observed deleteOutcome.
+   It confirms only when every identifier is not found or archived with an
+   empty path resolving to the recorded session, and the worktree is absent.
 A lost, failed or unconfirmed result stays pending; never retry. Never delete
 role sessions, Ralph/Reaper-named sessions, the main checkout, this session,
 unmapped/maintainer sessions or other workers' sessions.

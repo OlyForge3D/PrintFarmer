@@ -97,7 +97,9 @@ explicitly, and this change must not alter live workflows. Preserve manual targe
   `assessCleanupCandidate` while reusing that round's session inventory and PR results.
   Only the macOS consumer deletes, and only its own settled, clean, mapped workers through
   the runtime's `cleanup-plan` → `record-deletion-intent` → `delete_item` →
-  `record-deletion-result` sequence; never `archive_session`. The coordinator never deletes.
+  `record-deletion-result` sequence; never `archive_session`. Because `delete_item` archives
+  worktree sessions, an archived, path-less readback resolving to the recorded session counts as
+  retired. The coordinator never deletes.
 
 ## Non-Negotiable Gates
 

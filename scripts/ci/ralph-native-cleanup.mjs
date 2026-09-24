@@ -6,9 +6,11 @@ import { digest } from './ralph-mailbox.mjs';
 import { assessCleanupCandidate } from './ralph-round-cache.mjs';
 
 // Owning-consumer deletion of its own settled Ralph workers (#2954). The plan is
-// read-only; deletion intent is journaled before delete_item and a deletion is
-// recorded only after get_session not-found for every known identifier and an
-// absent worktree directory. Uncertain results stay pending and are never retried.
+// read-only; deletion intent is journaled before delete_item and a retirement is
+// recorded only after get_session shows every known identifier not found, or
+// archived with no path and resolving to the recorded session (#2956: native
+// delete_item archives worktree sessions), plus an absent worktree directory.
+// Uncertain results stay pending and are never retried.
 
 export const reapSettleMs = 15 * 60 * 1000;
 export const defaultMaxDeletions = 5;
@@ -101,7 +103,7 @@ export function deletionLedger(journal, state) {
       fail('Retained deletion record intent is incomplete.');
     }
     if (record.status === 'deleted' && !confirmationProven(record)) {
-      fail('Retained deletion record lacks recomputable not-found and absent-worktree confirmation.');
+      fail('Retained deletion record lacks recomputable not-found/archived and absent-worktree confirmation.');
     }
     bySession.set(sessionId, record);
     for (const id of [sessionId, ...record.aliases]) claim(id, sessionId);
@@ -109,14 +111,38 @@ export function deletionLedger(journal, state) {
   return { bySession, identifiers };
 }
 
+// Per-identifier post-delete outcome. 'deleted': get_session not found with no
+// contradicting facts. 'archived': found, archived, empty/absent path and resolving
+// to the recorded session. Anything else (live, a path, another session, unknown
+// or contradictory facts) is 'unconfirmed'.
+export function lookupOutcome(lookup, sessionId) {
+  const pathEmpty = lookup?.path === undefined || lookup.path === null || lookup.path === '';
+  if (lookup?.notFound === true) {
+    return lookup.archived !== true && pathEmpty && (lookup.resolvedId === undefined || lookup.resolvedId === null)
+      ? 'deleted' : 'unconfirmed';
+  }
+  if (lookup?.notFound === false && lookup.archived === true && pathEmpty && lookup.resolvedId === sessionId) return 'archived';
+  return 'unconfirmed';
+}
+
+const retirementOutcome = (outcomes) => (outcomes.every((outcome) => outcome === 'deleted') ? 'deleted' : 'archived');
+
 function confirmationProven(record) {
   const proof = record.confirmation;
   const lookups = Array.isArray(proof?.lookups) ? proof.lookups : [];
+  // Legacy #2955 confirmations carry no outcomes; newer ones must store exactly the recomputed ones.
+  const outcomes = [record.sessionId, ...record.aliases].map((id) => {
+    const matches = lookups.filter((lookup) => lookup?.id === id);
+    if (matches.length !== 1) return 'unconfirmed';
+    const outcome = lookupOutcome(matches[0], record.sessionId);
+    return matches[0].outcome === (proof.outcome === undefined ? undefined : outcome) ? outcome : 'unconfirmed';
+  });
   return Boolean(proof) && digest(proof) === record.resultEvidenceDigest &&
     Date.parse(record.confirmedAt) >= Date.parse(record.intentAt) &&
     Date.parse(proof.observedAt) >= Date.parse(record.intentAt) &&
     proof.worktree?.path === record.worktreePath && proof.worktree.absent === true && proof.runtimeWorktreeAbsent === true &&
-    [record.sessionId, ...record.aliases].every((id) => lookups.some((lookup) => lookup?.id === id && lookup.notFound === true));
+    outcomes.every((outcome) => outcome !== 'unconfirmed') &&
+    (proof.outcome === undefined ? 'deleted' : proof.outcome) === retirementOutcome(outcomes);
 }
 
 export function deletedWorkerIds(journal, state) {
@@ -352,7 +378,11 @@ export async function planWorkerCleanup({ config, evidence, journal, state, now,
   const roundIntents = [...bySession.values()].filter((record) => record.roundId === roundId).length;
   for (const [id, { correlation, mapping }] of mappingBySession) {
     const record = bySession.get(id);
-    if (record?.status === 'deleted') { deleted.push({ sessionId: id, assignmentId: mapping.assignmentId, confirmedAt: record.confirmedAt }); continue; }
+    if (record?.status === 'deleted') {
+      deleted.push({ sessionId: id, assignmentId: mapping.assignmentId, confirmedAt: record.confirmedAt,
+        outcome: record.confirmation.outcome ?? 'deleted' });
+      continue;
+    }
     if (record) {
       pending.push({ ...pendingSummary(record), reasons: ['unconfirmed deletion: inspect get_session and the worktree with record-deletion-result; never retry delete_item'] });
       continue;
@@ -414,7 +444,8 @@ export async function recordDeletionResult({ config, request, evidence, journal,
   const record = journal.deletions?.[sessionId];
   if (!record) fail('No recorded deletion intent for this session.');
   if (record.status === 'deleted') {
-    return { dispatchAuthorized: false, deleteAllowed: false, confirmed: true, alreadyRecorded: true, sessionId };
+    return { dispatchAuthorized: false, deleteAllowed: false, confirmed: true, alreadyRecorded: true, sessionId,
+      outcome: record.confirmation.outcome ?? 'deleted' };
   }
   if (!Array.isArray(evidence?.lookups)) fail('Post-delete get_session lookups are required.');
   const observed = Date.parse(evidence.observedAt);
@@ -423,25 +454,33 @@ export async function recordDeletionResult({ config, request, evidence, journal,
   }
   const lookups = new Map();
   for (const lookup of evidence.lookups) {
-    if (!uuidPattern.test(lookup?.id ?? '') || lookups.has(lookup.id) || typeof lookup.notFound !== 'boolean') {
-      fail('Each post-delete lookup needs a unique native ID and an explicit notFound result.');
+    if (!uuidPattern.test(lookup?.id ?? '') || lookups.has(lookup.id) || typeof lookup.notFound !== 'boolean' ||
+        (lookup.archived !== undefined && typeof lookup.archived !== 'boolean') ||
+        (lookup.path !== undefined && lookup.path !== null && typeof lookup.path !== 'string') ||
+        (lookup.resolvedId !== undefined && lookup.resolvedId !== null && !uuidPattern.test(lookup.resolvedId))) {
+      fail('Each post-delete lookup needs a unique native ID, an explicit notFound result and, when found, boolean archived, string path and UUID resolvedId.');
     }
-    lookups.set(lookup.id, lookup.notFound);
+    lookups.set(lookup.id, { id: lookup.id, notFound: lookup.notFound, archived: lookup.archived ?? null,
+      path: lookup.path ?? null, resolvedId: lookup.resolvedId ?? null });
   }
   const identifiers = [sessionId, ...record.aliases];
+  const outcomes = new Map(identifiers.filter((id) => lookups.has(id))
+    .map((id) => [id, lookupOutcome(lookups.get(id), sessionId)]));
+  const retired = identifiers.every((id) => outcomes.has(id) && outcomes.get(id) !== 'unconfirmed');
   const runtimeWorktreeAbsent = await probe.absent(record.worktreePath);
   const confirmation = { observedAt: evidence.observedAt, source: evidence.source,
-    lookups: identifiers.map((id) => ({ id, notFound: lookups.get(id) === true })),
+    lookups: identifiers.map((id) => (lookups.has(id) ? { ...lookups.get(id), outcome: outcomes.get(id) } : { id, outcome: 'unchecked' })),
     worktree: { path: evidence.worktree?.path, absent: evidence.worktree?.absent === true },
-    runtimeWorktreeAbsent, deleteOutcome: evidence.deleteOutcome };
-  const confirmed = identifiers.every((id) => lookups.get(id) === true) &&
+    runtimeWorktreeAbsent, deleteOutcome: evidence.deleteOutcome,
+    outcome: retired ? retirementOutcome([...outcomes.values()]) : 'unconfirmed' };
+  const confirmed = retired &&
     evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent === true;
   const inspection = { observedAt: evidence.observedAt, evidenceDigest: digest(confirmation), requestId: request.id,
-    deleteOutcome: evidence.deleteOutcome, runtimeWorktreeAbsent, confirmed };
+    deleteOutcome: evidence.deleteOutcome, runtimeWorktreeAbsent, outcome: confirmation.outcome, confirmed };
   if (!confirmed) {
     record.inspections = [...(record.inspections ?? []), inspection].slice(-20);
     return { dispatchAuthorized: false, deleteAllowed: false, confirmed: false, pending: true, sessionId,
-      stillPresent: identifiers.filter((id) => lookups.get(id) === false),
+      stillPresent: identifiers.filter((id) => outcomes.get(id) === 'unconfirmed'),
       unchecked: identifiers.filter((id) => !lookups.has(id)),
       worktreeAbsent: evidence.worktree?.path === record.worktreePath && evidence.worktree.absent === true && runtimeWorktreeAbsent,
       message: 'Deletion is unconfirmed and remains pending. Inspect again on a later round; never retry delete_item.' };
@@ -451,5 +490,5 @@ export async function recordDeletionResult({ config, request, evidence, journal,
   record.confirmation = confirmation;
   record.resultEvidenceDigest = digest(confirmation);
   record.inspections = [...(record.inspections ?? []), inspection].slice(-20);
-  return { dispatchAuthorized: false, deleteAllowed: false, confirmed: true, sessionId };
+  return { dispatchAuthorized: false, deleteAllowed: false, confirmed: true, sessionId, outcome: confirmation.outcome };
 }

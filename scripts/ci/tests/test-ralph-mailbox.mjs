@@ -845,8 +845,12 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
   const cleanup = (config, round, type, extra) => runNativeRequest(config, {
     ...round, type, id: `cleanup-${++next}`, data: { sessionId: deleted.session.id }, ...extra,
   }, { ...dependencies, api: cleanupApi, cleanupProbe, now: later });
-  const lookup = (notFound, absent) => ({ observedAt: new Date(later).toISOString(), source: 'fixture get_session and worktree stat',
-    lookups: [{ id: deleted.session.id, notFound }], worktree: { path: deleted.session.worktreePath, absent }, deleteOutcome: 'unknown' });
+  // Native delete_item archives worktree sessions (#2956): get_session still resolves the
+  // retired ID with archived:true and an empty path rather than reporting not-found.
+  const lookup = (archived, absent) => ({ observedAt: new Date(later).toISOString(), source: 'fixture get_session and worktree stat',
+    lookups: [{ id: deleted.session.id, notFound: false, archived, path: archived ? '' : deleted.session.worktreePath,
+      resolvedId: deleted.session.id }],
+    worktree: { path: deleted.session.worktreePath, absent }, deleteOutcome: 'Session archive requested.' });
   if (lineageMode === 'automatic-ready') sessions.push(roleSession(consumer, creatorId));
   const inventory = () => fresh({ ...ownedScope, complete: true, queueChecked: true, historyChecked: true,
     capabilitiesVerified: true, capabilities: ['general', 'ios'], sessions });
@@ -873,12 +877,16 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
         'valid live evidence cannot bypass an unresolved deletion intent');
       sessions.pop();
       await assert.rejects(cleanup(consumer, w, 'record-deletion-intent', { evidence: deleted.evidence() }), /already pending/);
-      assert.equal((await cleanup(consumer, w, 'record-deletion-result', { evidence: lookup(true, true) })).confirmed, true);
+      const retired = await cleanup(consumer, w, 'record-deletion-result', { evidence: lookup(true, true) });
+      assert.deepEqual([retired.confirmed, retired.outcome], [true, 'archived']);
       const confirmed = await run(consumer, w, 'inspect');
-      assert.deepEqual(confirmed.deletions, { pending: [], deleted: [{ ...inspected.deletions.pending[0] }] });
-      sessions.push({ id: deleted.session.id, terminalVerified: true });
-      await assert.rejects(run(consumer, w, 'ready', { evidence: inventory() }), /reappeared/);
-      sessions.pop();
+      assert.deepEqual(confirmed.deletions, { pending: [], deleted: [{ ...inspected.deletions.pending[0], outcome: 'archived' }] });
+      for (const reappeared of [{ id: deleted.session.id, terminalVerified: true },
+        { ...deleted.session, creatorSessionId: creatorId, nativeReadbackVerified: true, terminalVerified: true }]) {
+        sessions.push(reappeared);
+        await assert.rejects(run(consumer, w, 'ready', { evidence: inventory() }), /reappeared/);
+        sessions.pop();
+      }
     }
     await run(consumer, w, 'ready', { evidence: inventory() });
     if (issue === 100 && lineageMode === 'automatic-ready') sessions.splice(0, 1);
@@ -1026,8 +1034,8 @@ test(`two research lifecycles retain ${lineageMode} ancestry, deliver findings a
       assert.deepEqual({ tool: intent.nativeTool, arguments: intent.nativeArguments }, { tool: 'delete_item', arguments: { id: session.id } });
       deleteCalls.push(intent.nativeArguments);
       await assert.rejects(cleanup(consumer, w, 'record-deletion-intent', { evidence: cleanupEvidence(later) }), /already pending/);
-      // The response was lost: the caller cannot yet prove absence, so the deletion stays pending.
-      assert.equal((await cleanup(consumer, w, 'record-deletion-result', { evidence: lookup(true, false) })).pending, true);
+      // The response was lost: the session still resolves unarchived with its worktree, so the deletion stays pending.
+      assert.equal((await cleanup(consumer, w, 'record-deletion-result', { evidence: lookup(false, false) })).pending, true);
       present.delete(session.worktreePath);
       sessions.pop();
     }
@@ -1446,7 +1454,7 @@ test('archived ancestry-only creator needs no live worktree or role exemption', 
   assert.throws(f.prepare, /Conflicting retained native ancestry/);
 });
 
-test('a journal-verified deletion retires a settled mapped worker without live evidence and fails closed on reappearance', () => {
+test('a journal-verified deletion or archived retirement retires a settled mapped worker without live evidence and fails closed on reappearance', () => {
   const id = 'dddddddd-1111-4222-8333-444444444444';
   const projectAlias = 'eeeeeeee-1111-4222-8333-444444444444';
   const terminalEvidence = { assignmentCorrelation: 'previous-round',
@@ -1490,6 +1498,25 @@ test('a journal-verified deletion retires a settled mapped worker without live e
   for (const change of [{ terminalEvidenceDigest: digest('forged') }, { sessionId: projectAlias }, { correlation: 'other' }]) {
     f.journal.deletions[id] = { ...record, ...change };
     assert.throws(f.prepare, /deletion record/);
+  }
+  // #2956: a confirmed archived retirement retires the mapping exactly like a deletion.
+  const archivedConfirmation = { ...confirmation, deleteOutcome: 'Session archive requested.', outcome: 'archived',
+    lookups: [id, projectAlias].map((value) => ({ id: value, notFound: false, archived: true, path: '', resolvedId: id,
+      outcome: 'archived' })) };
+  const archivedRecord = { ...record, confirmation: archivedConfirmation, resultEvidenceDigest: digest(archivedConfirmation) };
+  f.journal.deletions[id] = archivedRecord;
+  f.request.evidence.sessions = [];
+  assert.equal(f.prepare().event.data.unassignedSessions, 0);
+  for (const reappeared of [{ id, terminalVerified: true, nativeReadbackVerified: true }, { id: projectAlias }]) {
+    f.request.evidence.sessions = [reappeared];
+    assert.throws(f.prepare, /Deleted Ralph worker .* reappeared/);
+  }
+  f.request.evidence.sessions = [];
+  for (const lookups of [archivedConfirmation.lookups.map((lookup) => ({ ...lookup, path: '/worktrees/deleted' })),
+    archivedConfirmation.lookups.map((lookup) => ({ ...lookup, resolvedId: projectAlias }))]) {
+    const forged = { ...archivedConfirmation, lookups };
+    f.journal.deletions[id] = { ...archivedRecord, confirmation: forged, resultEvidenceDigest: digest(forged) };
+    assert.throws(f.prepare, /deletion record lacks recomputable/);
   }
   f.journal.deletions[id] = record;
   f.state.assignments.earlier.state = 'terminal-reported';

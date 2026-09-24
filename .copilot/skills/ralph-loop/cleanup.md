@@ -58,12 +58,18 @@ non-terminal assignments. At most five deletions per round, oldest settled first
 For each eligible item, in plan order: `record-deletion-intent` journals the intent and returns
 the single `delete_item` call; make exactly that call; then read back `get_session` for the mapped
 session ID and every returned alias (for example the `project_session_id`) and check the worktree
-directory; submit those facts with `record-deletion-result`. The deletion is recorded only when
-every identifier is not found and the worktree is absent, confirmed by the runtime's own check. A
+directory; submit those facts with `record-deletion-result`. Native `delete_item` only archives a
+worktree session, so `get_session` keeps resolving it with `archived:true` and `path:""`. Report
+each lookup's `notFound`, `archived`, `path` and resolved session ID as observed. The retirement is
+recorded only when every identifier is either not found, or archived with an empty path and
+resolving to the recorded session ID, and the worktree is absent, confirmed by the runtime's own
+check. The runtime records the outcome as `deleted` or `archived`. A
 lost, failed, or unconfirmed result stays pending. The next round lists it in `inspect`'s
 `deletions.pending` and resolves it before `ready`, which any pending intent blocks; never call `delete_item` twice for the same
 intent. Once recorded, the runtime retires that mapping from later readiness without live
-evidence, and any reappearance under a known identifier fails closed.
+evidence, whichever outcome it recorded. Omit retired workers from later inventories and cleanup
+candidates even though an archived one still resolves. Any reappearance under a known identifier
+fails closed, including one that is unarchived or has a path.
 
 ## Report
 
