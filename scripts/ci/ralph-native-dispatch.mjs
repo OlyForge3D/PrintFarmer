@@ -110,12 +110,16 @@ ${clauses}`;
   return { ...plan, planDigest: digest(plan) };
 }
 
+// A worker reports a runtime setting it cannot observe as null or omits it (#2960).
+// Either means "not observed"; only an observed value is compared with the packet.
+const observed = (value) => value !== undefined && value !== null;
+
 export function validatePacketAck(packet, ack) {
   for (const [key, value] of Object.entries(packet)) {
     if (ack?.[key] !== value) fail(`Packet ACK does not match ${key}.`);
   }
-  if ((ack.actualModel !== undefined && ack.actualModel !== packet.model) ||
-      (ack.actualReasoningEffort !== undefined && ack.actualReasoningEffort !== packet.reasoningEffort)) {
+  if ((observed(ack.actualModel) && ack.actualModel !== packet.model) ||
+      (observed(ack.actualReasoningEffort) && ack.actualReasoningEffort !== packet.reasoningEffort)) {
     fail('Observed model/effort differs from the configured packet.');
   }
 }

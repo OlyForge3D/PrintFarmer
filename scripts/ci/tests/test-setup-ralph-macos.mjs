@@ -233,6 +233,9 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.doesNotMatch(bootstrap, /\.github\/agents\/squad\.agent\.md/);
     assert.match(settings.prompt, /record-creation/);
     assert.match(settings.prompt, /startup-check/);
+    assert.match(settings.prompt, /Submit the child's ACK JSON VERBATIM as startupAck\n\(likewise continuationAck and finalAck\): never construct, edit, normalize or\nre-stamp any field, including policySha/);
+    assert.match(settings.prompt, /null or omitted actualModel\/actualReasoningEffort means not\nobserved/);
+    assert.match(settings.prompt, /never a hand-built ACK/);
     assert.match(settings.prompt, /prestart-proof/);
     assert.match(settings.prompt, /The runtime publishes\nit in the mailbox blocker; never relay it/);
     assert.match(settings.prompt, /withdraws only that binding from the published blocker alone/);

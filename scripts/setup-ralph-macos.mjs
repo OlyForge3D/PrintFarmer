@@ -563,7 +563,12 @@ Fix malformed request fields; rejected blocker writes are not persisted blockers
 Record every returned creation handle with record-creation, including partial
 failures, before attempting startup recovery. Never retry creation.
 Use startup-check on the same child and its actual startup-only ACK; send only the
-returned continuation once. Include native readback session.id, projectId,
+returned continuation once. Submit the child's ACK JSON VERBATIM as startupAck
+(likewise continuationAck and finalAck): never construct, edit, normalize or
+re-stamp any field, including policySha, which stays the child's packet policy
+after a renewal. A null or omitted actualModel/actualReasoningEffort means not
+observed; submit it as returned. If an ACK is rejected, obtain a same-child
+correction, never a hand-built ACK. Include native readback session.id, projectId,
 worktreePath AND branch in startup-check evidence. Missing branch is malformed
 evidence: correct it from get_session on the SAME child, never recreate.
 Pass the native worktreePath verbatim, never realpath it yourself: the runtime

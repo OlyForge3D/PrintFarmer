@@ -20,7 +20,11 @@ Act as that member in this session; the native agent name is `Ralph Worker`.
 Do not invoke Squad, switch to coordinator mode or reinterpret the issue's owner.
 If your actual model is exposed and differs from the packet, report blocked.
 Report unavailable configuration fields honestly; never claim a requested
-reasoning effort is a runtime observation.
+reasoning effort is a runtime observation. Represent a setting you cannot
+observe (`actualModel`, `actualReasoningEffort`) as `null` or omit it, optionally
+with a short observation note such as `reasoningEffortObservation`. Report an
+independently observed value even when it matches the packet; never copy the
+packet's requested value into an `actual*` field without observing it.
 
 First return a **startup-only ACK** with all packet identities, charter digest,
 the entire packet echoed unchanged, actual exposed model/effort, `initialHeadSha`

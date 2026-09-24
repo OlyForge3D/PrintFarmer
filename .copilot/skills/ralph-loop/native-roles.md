@@ -674,7 +674,19 @@ The `startupAck` must contain packet
 `charterSha256` and **every other packet field unchanged**, including policy,
 repository/head/ref, purpose/category and configured model/effort. Also require
 `initialHeadSha`, `actualBranch`, `substantiveWorkStarted:false`, `noChildren:true`, plus actual
-model/effort **only if exposed**. Include `configuration` with exact `model`,
+model/effort **only if exposed**. A `null` or omitted `actualModel` or
+`actualReasoningEffort` means not observed and passes; a non-null value that
+differs from the packet fails. `null` never stands in for a packet field.
+
+**Submit the child's ACK verbatim.** The consumer passes the child's own
+startup-only ACK JSON as `startupAck`, and likewise its `continuationAck` and
+`finalAck`. It never constructs, edits, normalizes or re-stamps any field. In
+particular `policySha` is the policy in the child's saved packet: after a policy
+renewal, a child created under the previous approved policy still acknowledges
+that policy, and `startup-check` validates it against the saved dispatch plan,
+not the current configuration. A rejected ACK needs a same-child correction,
+never a consumer-built replacement.
+Include `configuration` with exact `model`,
 `reasoningEffort` and source `successful-native-create`, `native-readback`, or
 `owner-attestation`. Success of the exact native creation request establishes
 accepted settings, not independently observed runtime settings. A partial/failed

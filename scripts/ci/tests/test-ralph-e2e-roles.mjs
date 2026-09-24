@@ -191,7 +191,7 @@ async function runWorker(f, name, worker) {
   return delivered;
 }
 
-async function reportTerminal(f, name, worker, delivered, artifactUrl, { replacement = false } = {}) {
+async function reportTerminal(f, name, worker, delivered, artifactUrl, { replacement = false, ackFields = {} } = {}) {
   const readback = await f.act(name, 'artifact-readback', { data: { ...worker.data, artifactUrl }, evidence: fresh() });
   const { artifact, finalDeliveryCorrelation } = readback;
   const echo = artifact.kind === 'pull-request' ? { artifactHeadSha: artifact.headSha } : { artifactBodyDigest: artifact.bodyDigest };
@@ -199,7 +199,7 @@ async function reportTerminal(f, name, worker, delivered, artifactUrl, { replace
     ...delivered, session: { ...worker.session, terminalVerified: true },
     queueChecked: true, historyChecked: true, artifactsVerified: true, artifactReadbackVerified: true, artifact,
     noPendingContinuation: true, noFutureDelivery: true, finalDeliveryCorrelation,
-    finalAck: { ...worker.plan.packet, noChildren: true, noPendingContinuation: true, noFutureDelivery: true,
+    finalAck: { ...worker.plan.packet, ...ackFields, noChildren: true, noPendingContinuation: true, noFutureDelivery: true,
       finalDeliveryCorrelation, artifactUrl: artifact.url, artifactReadbackVerified: true, ...echo },
   } });
   if (replacement) return { terminal, artifact };
@@ -876,6 +876,88 @@ test('symlink escapes and main-checkout aliases fail closed, and a rejected star
   assert.ok(f.log.every(({ request }) => request.type !== 'receipt' || request.data.status !== 'starting' ||
     request.data.correlation !== correlation || request.id === f.log.find((entry) => entry.request.data?.status === 'starting' &&
       entry.request.data.correlation === correlation).request.id), 'the child is never re-created');
+  assertNoRelay(f);
+});
+
+// #2960: the verbatim startup-only ACK of worker 94ce8e44 (#2880), created under
+// policy de5a3227 and checked after renewal to 5be8ec9f. Only the IDs are fixtures.
+function verbatimWorkerAck(plan, session, overrides = {}) {
+  const packet = JSON.parse(JSON.stringify(plan.packet));
+  return JSON.parse(JSON.stringify({
+    ...packet, initialHeadSha: packet.headSha, actualBranch: session.branch,
+    actualRepository: 'OlyForge3D/PrintFarmer', actualModel: packet.model, actualReasoningEffort: null,
+    reasoningEffortObservation: `Not exposed by runtime; packet requests ${packet.reasoningEffort}, not independently observed.`,
+    charterVerified: true, workerPolicyVerified: true, noChildren: true, substantiveWorkStarted: false, ...overrides,
+  }));
+}
+
+test('a verbatim startup ACK with an unobserved (null) effort passes startup-check after policy renewal; fabricated or mismatched ACKs fail closed', async (t) => {
+  const f = await farm(t);
+  const oldPolicy = 'de5a3227bf5b4c7e3f7f294f596764b8623da57a';
+  const newPolicy = '5be8ec9f0'.padEnd(40, '0');
+  const setPolicy = async (policy) => {
+    for (const entry of Object.values(f.roles)) {
+      entry.config.approvedPolicy = policy;
+      await writeFile(entry.hostConfigPath, `${JSON.stringify(entry.config, null, 2)}\n`, { mode: 0o600 });
+    }
+  };
+  await setPolicy(oldPolicy);
+  await f.begin('coordinator');
+  await f.begin('mini');
+  await f.ready('mini');
+  const research = await reserveAndPublish(f, 2880, 'mini', { research: true, owner: 'squad:lambert',
+    assignmentId: 'research-2880-mini-7f3c-1790221518836' });
+  const { binding } = await discover(f, 'mini', 2880);
+  const worker = await startWorker(f, 'mini', binding, { correlation: 'research-2880-mini-7f3c-correlation' });
+  assert.deepEqual([worker.plan.packet.policySha, worker.plan.packet.member, worker.plan.packet.model, worker.plan.packet.reasoningEffort],
+    [oldPolicy, 'lambert', 'gpt-6-astra', 'medium']);
+
+  // Renewal: every role now runs the newer approved policy; the saved plan keeps the old one.
+  await f.end('mini');
+  await f.end('coordinator');
+  await setPolicy(newPolicy);
+  await f.begin('coordinator');
+  await f.begin('mini');
+  const journalPath = path.join(f.roles.mini.config.stateDirectory, 'journal.json');
+  const saved = JSON.parse(await readFile(journalPath, 'utf8')).sessions[worker.data.correlation];
+  assert.equal(saved.dispatchPlan.packet.policySha, oldPolicy, 'the saved dispatch plan retains the policy the child was created under');
+  const startup = (ack) => ({ ...worker.startupAck(worker.head), startupAck: ack });
+  const before = await readFile(journalPath, 'utf8');
+  for (const [ack, pattern] of [
+    // A consumer-built ACK re-stamped with the current policy is not the child's ACK.
+    [verbatimWorkerAck(worker.plan, worker.session, { policySha: newPolicy }), /Packet ACK does not match policySha/],
+    [verbatimWorkerAck(worker.plan, worker.session, { actualReasoningEffort: 'xhigh' }), /Observed model\/effort differs/],
+    [verbatimWorkerAck(worker.plan, worker.session, { actualModel: 'claude-opus-4.7' }), /Observed model\/effort differs/],
+    [verbatimWorkerAck(worker.plan, worker.session, { reasoningEffort: null }), /Packet ACK does not match reasoningEffort/],
+  ]) {
+    await assert.rejects(f.act('mini', 'startup-check', { data: worker.data, evidence: startup(ack) }), pattern);
+  }
+  assert.equal(await readFile(journalPath, 'utf8'), before, 'rejected startup-checks persist nothing');
+
+  const allowed = await f.act('mini', 'startup-check', { data: worker.data,
+    evidence: startup(verbatimWorkerAck(worker.plan, worker.session)) });
+  assert.equal(allowed.continuationAllowed, true);
+  assert.equal(allowed.continuation, worker.plan.continuation);
+  const repeated = await f.act('mini', 'startup-check', { data: worker.data,
+    evidence: startup(verbatimWorkerAck(worker.plan, worker.session, { actualReasoningEffort: undefined })) });
+  assert.equal(repeated.continuationAllowed, false, 'the continuation is sent once');
+
+  const unobserved = { actualModel: 'gpt-6-astra', actualReasoningEffort: null,
+    reasoningEffortObservation: 'Not exposed by runtime; packet requests medium, not independently observed.' };
+  const delivered = fresh({ session: worker.session, assignmentCorrelation: worker.data.correlation,
+    repository: 'OlyForge3D/PrintFarmer', nativeReadbackVerified: true, kickoffDeliveryVerified: true,
+    continuationAck: JSON.parse(JSON.stringify({ ...worker.plan.packet, ...unobserved, substantiveWorkStarted: true })) });
+  await assert.rejects(f.act('mini', 'receipt', { data: { ...worker.data, status: 'running' }, evidence: { ...delivered,
+    continuationAck: { ...delivered.continuationAck, policySha: newPolicy } } }), /Packet ACK does not match policySha/);
+  const running = await f.act('mini', 'receipt', { data: { ...worker.data, status: 'running' }, evidence: delivered });
+  assert.equal(running.state.assignments[research.assignmentId].state, 'running');
+
+  const { url } = registerIssueComment(f.github, 2880, 28802, 'Findings for #2880 from the renewed worker.\n');
+  await reportTerminal(f, 'mini', worker, delivered, url, { ackFields: unobserved });
+  const settled = await f.act('coordinator', 'release', await settlementRequest(f, research.assignmentId));
+  assert.equal(settled.state.assignments[research.assignmentId].state, 'terminal');
+  assert.equal(f.log.filter(({ request }) => request.type === 'receipt' && request.data.status === 'starting').length, 1,
+    'the child is never re-created');
   assertNoRelay(f);
 });
 
