@@ -141,6 +141,24 @@ test('dispatch separates native Ralph Worker agent, Squad charter owner, categor
   for (const key of Object.keys(plan.packet)) {
     assert.throws(() => validatePacketAck(plan.packet, { ...plan.packet, [key]: 'mismatch' }), /Packet ACK/);
   }
+  // #2960: null or omitted actual model/effort means "not observed"; an observed mismatch still fails.
+  for (const unobserved of [{}, { actualReasoningEffort: null }, { actualModel: null },
+    { actualModel: null, actualReasoningEffort: null }, { actualModel: 'gpt-6-astra', actualReasoningEffort: null,
+      reasoningEffortObservation: 'Not exposed by runtime; packet requests xhigh, not independently observed.' }]) {
+    validatePacketAck(plan.packet, { ...plan.packet, ...unobserved });
+    validateStartup(plan, { ...ack, startupAck: { ...ack.startupAck, ...unobserved } });
+  }
+  for (const observedMismatch of [{ actualReasoningEffort: 'medium' }, { actualReasoningEffort: '' },
+    { actualModel: 'claude-opus-4.7' }, { actualModel: 'claude-opus-4.7', actualReasoningEffort: null },
+    { actualModel: null, actualReasoningEffort: 'max' }]) {
+    assert.throws(() => validatePacketAck(plan.packet, { ...plan.packet, ...observedMismatch }), /Observed model\/effort/);
+  }
+  // Null never stands in for a packet identity, and a re-stamped policy is not the packet's.
+  for (const key of Object.keys(plan.packet).filter((name) => plan.packet[name] !== undefined)) {
+    assert.throws(() => validatePacketAck(plan.packet, { ...plan.packet, [key]: null }), /Packet ACK/);
+  }
+  assert.throws(() => validateStartup(plan, { ...ack, startupAck: { ...ack.startupAck, policySha: 'b'.repeat(40),
+    actualReasoningEffort: null } }), /Packet ACK does not match policySha/);
   assert.throws(() => validateStartup(plan, { ...ack,
     startupAck: { ...ack.startupAck, initialHeadSha: 'b'.repeat(40) } }), /Initial worker HEAD/);
   for (const branch of [undefined, '']) {

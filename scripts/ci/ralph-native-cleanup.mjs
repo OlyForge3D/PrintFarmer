@@ -475,7 +475,7 @@ export async function recordDeletionResult({ config, request, evidence, journal,
   const lookups = new Map();
   for (const lookup of evidence.lookups) {
     if (!uuidPattern.test(lookup?.id ?? '') || lookups.has(lookup.id) || typeof lookup.notFound !== 'boolean' ||
-        (lookup.archived !== undefined && typeof lookup.archived !== 'boolean') ||
+        (lookup.archived !== undefined && lookup.archived !== null && typeof lookup.archived !== 'boolean') ||
         (lookup.path !== undefined && lookup.path !== null && typeof lookup.path !== 'string') ||
         (lookup.resolvedId !== undefined && lookup.resolvedId !== null && !uuidPattern.test(lookup.resolvedId))) {
       fail('Each post-delete lookup needs a unique native ID, an explicit notFound result and, when found, boolean archived, string path and UUID resolvedId.');

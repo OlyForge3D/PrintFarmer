@@ -566,6 +566,7 @@ test('archived lookups stay pending unless every identifier is retired to the re
     ['archived with a non-empty path', { [id(1)]: { path: '/worktrees/w-1' } }],
     ['unarchived with an empty path', { [id(1)]: { archived: false } }],
     ['archived flag missing', { [id(1)]: { archived: undefined } }],
+    ['archived flag not observed (null)', { [id(1)]: { archived: null } }],
     ['alias resolves to a different session', { [alias(1)]: { resolvedId: id(2) } }],
     ['resolved session unknown', { [alias(1)]: { resolvedId: undefined } }],
     ['mixed archived and live alias', { [alias(1)]: { archived: false, path: '/worktrees/w-1' } }],
@@ -597,7 +598,9 @@ test('archived lookups stay pending unless every identifier is retired to the re
 
 test('mixed not-found and archived identifiers confirm as an archived retirement', async () => {
   for (const overrides of [{ [alias(1)]: { notFound: true, archived: undefined, path: undefined, resolvedId: undefined } },
-    { [id(1)]: { notFound: true, archived: undefined, path: undefined, resolvedId: undefined } }]) {
+    { [id(1)]: { notFound: true, archived: undefined, path: undefined, resolvedId: undefined } },
+    // A not-found lookup honestly reports unobservable facts as null (#2960).
+    { [alias(1)]: { notFound: true, archived: null, path: null, resolvedId: null } }]) {
     const w = world([{ n: 1, mapping: { sessionAliases: [alias(1)] } }]);
     await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
     const result = await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []),
