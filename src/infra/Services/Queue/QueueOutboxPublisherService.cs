@@ -107,7 +107,7 @@ public sealed class QueueOutboxPublisherService(
         }
     }
 
-    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    internal async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
     {
         DateTimeOffset until = _timeProvider.GetUtcNow() + PollInterval;
         while (_timeProvider.GetUtcNow() < until)
@@ -155,7 +155,7 @@ public sealed class QueueOutboxPublisherService(
         }
     }
 
-    private async Task ProcessPendingEventsAsync(CancellationToken ct)
+    internal async Task ProcessPendingEventsAsync(CancellationToken ct)
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();

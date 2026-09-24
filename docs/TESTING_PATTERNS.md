@@ -2,6 +2,26 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## Queue lifecycle clocks
+
+Inject the same `TimeProvider` into dispatch claims, reconciliation, the SignalR
+outbox publisher, and the print-job repository when testing a connected lifecycle.
+Forward it to `QueueAuditWriter.Add` and `AddLifecycleOutboxEventAsync`; omitting it
+uses the system clock even when the caller has a fake clock. `DispatchLog` requires
+a caller-owned instant and initializes all three creation timestamps from it.
+Its private parameterless constructor is only for EF materialization.
+
+Pin exact persisted timestamps after reloading the context, not merely
+`timestamp <= DateTime.UtcNow`. Cover strict stale-lease/attempt boundaries,
+inclusive retry/lookback boundaries, preserved acceptance/end timestamps, and
+completion sampled after delivery. Advance fake timers for polling rather than
+sleeping. `QueueProductionCallChainTests` contains the reconciliation/publisher
+clock cases, including timer cancellation.
+
+This first wave (#2880) does not make every queue service deterministic:
+second-wave service clocks, upload-progress timing, retention, and settings
+timestamps are tracked separately in #2972.
+
 ## React printer response contracts
 
 `npm run typecheck:test` rejects every direct test, helper, imported-source, or

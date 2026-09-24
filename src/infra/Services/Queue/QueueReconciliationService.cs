@@ -208,7 +208,7 @@ public sealed class QueueReconciliationService(
         await db.SaveChangesAsync(ct);
     }
 
-    private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
+    internal async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
     {
         DateTimeOffset until = _timeProvider.GetUtcNow() + ReconciliationInterval;
         while (_timeProvider.GetUtcNow() < until)
