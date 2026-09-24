@@ -37,6 +37,13 @@ final class UIWaitBudget {
     }
 
     private(set) var lastShellObservation = "not observed"
+    private(set) var shellFailure = "none"
+    private(set) var interruptionDismissalAttempts = 0
+
+    var shellDiagnostic: String {
+        "\(diagnostic); failure=\(shellFailure); dismissal attempts=\(interruptionDismissalAttempts); "
+            + "last snapshot: \(lastShellObservation)"
+    }
 
     func observeShell(
         observeInterruption: () throws -> ShellNode?,
@@ -52,8 +59,11 @@ final class UIWaitBudget {
                 .application, frame: interruption.frame, children: [interruption]
             ))
         }
-        return try perform("application shell snapshot", observeApplication)
-            ?? ShellObservation(ShellNode(.application))
+        guard remaining > 0 else { return ShellObservation(ShellNode(.application)) }
+        lastOperation = "application shell snapshot"
+        // Retain a late snapshot for diagnosis only. waitForShell rejects it
+        // before resolving navigation or starting any further remote work.
+        return try observeApplication()
     }
 
     func waitForShell<T>(
@@ -69,20 +79,45 @@ final class UIWaitBudget {
         var usedLeadingEdge = false
         var dismissedAlert: ShellNode?
         var retriedInterruptionDismissal = false
+        var dismissalDeadline: TimeInterval?
         while remaining > 0 {
-            guard let observation = try perform("shell snapshot", observe) else { return nil }
-            lastShellObservation = observation.diagnostic
+            if let dismissalDeadline, now() >= dismissalDeadline {
+                shellFailure = "interruption did not disappear after dismissal"
+                return nil
+            }
+            guard let observation = try perform("shell snapshot", {
+                let observation = try observe()
+                lastShellObservation = observation.diagnostic
+                return observation
+            }) else {
+                shellFailure = "snapshot exceeded navigation deadline"
+                return nil
+            }
             if let alert = observation.blockingAlert {
                 if let previous = dismissedAlert {
                     guard alert.identifier == previous.identifier, alert.label == previous.label,
-                          alert.frame == previous.frame else { return nil }
+                          alert.frame == previous.frame else {
+                        shellFailure = "interruption changed after dismissal"
+                        return nil
+                    }
+                }
+                if let dismissalDeadline, now() >= dismissalDeadline {
+                    shellFailure = "interruption did not disappear after dismissal"
+                    return nil
                 }
                 if dismissedAlert == nil || (retryUnchangedInterruption && !retriedInterruptionDismissal) {
                     retriedInterruptionDismissal = dismissedAlert != nil
                     dismissedAlert = alert
+                    interruptionDismissalAttempts += 1
                     guard perform("dismiss observed alert: \(alert.label)", {
                         dismissInterruption(alert)
-                    }) == true else { return nil }
+                    }) == true else {
+                        shellFailure = "interruption dismissal rejected or exceeded deadline"
+                        return nil
+                    }
+                    // Neither the optional retry nor repeated observations can
+                    // renew the original disappearance grace.
+                    if dismissalDeadline == nil { dismissalDeadline = min(deadline, now() + 3) }
                 }
             } else {
                 if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
@@ -106,6 +141,7 @@ final class UIWaitBudget {
                 if let pause { pause() } else { self.pause() }
             }
         }
+        shellFailure = "navigation deadline exhausted"
         return nil
     }
 
@@ -214,9 +250,13 @@ final class UIWaitBudget {
 
         let state: State
         let blockingAlert: ShellNode?
+        private let readinessAnchors: [String]
         init(_ root: ShellNode) {
             let visible = root.descendants.filter {
                 !$0.frame.isEmpty && $0.frame.intersects(root.frame)
+            }
+            readinessAnchors = visible.map(\.identifier).filter {
+                $0 == "launchSplash" || $0 == "loginView" || $0.hasPrefix("navigation.")
             }
             blockingAlert = visible.first { $0.type == .alert }
             if blockingAlert != nil || visible.contains(where: {
@@ -306,7 +346,7 @@ final class UIWaitBudget {
         var diagnostic: String {
             if let blockingAlert { return "alert; title=\(blockingAlert.label)" }
             return switch state {
-            case .notReady: "not ready"
+            case .notReady: "not ready; anchors=\(readinessAnchors)"
             case .collapsed(let toggle): "collapsed; toggle=\(toggle.label)"
             case .compact: "compact; roots=\(roots.map(\.key))"
             case .sidebar: "sidebar; roots=\(roots.map(\.key))"
@@ -575,6 +615,69 @@ final class UIWaitBudgetTests: XCTestCase {
                        "Starting another action must never renew the overall allowance")
     }
 
+    func testReadinessChildCannotConsumeTheWholeTestAllowanceOrRenewItsDeadline() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 600, now: { clock })
+        clock = 15
+        let readiness = testBudget.child(timeout: 60)
+        let result: Bool? = readiness.waitForShell(
+            observe: { ShellObservation(ShellNode(.application)) },
+            resolve: { _ in nil },
+            reveal: { _ in XCTFail("No sidebar"); return false },
+            leadingEdge: { _ in XCTFail("No sidebar"); return false },
+            pause: { clock += 1 }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(clock, 75)
+        XCTAssertEqual(testBudget.remaining, 525)
+        XCTAssertNil(readiness.perform("expired") { XCTFail("No renewed budget"); return true })
+        clock = 590
+        XCTAssertEqual(testBudget.child(timeout: 60).remaining, 10)
+    }
+
+    func testApplicationSnapshotOverrunRetainsStateWithoutAcceptingIt() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        let result: Bool? = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: { nil },
+                    observeApplication: { clock = 3; return self.sidebar() }
+                )
+            },
+            resolve: { _ in XCTFail("Late snapshot cannot authorize navigation"); return true },
+            reveal: { _ in XCTFail("No post-deadline work"); return false },
+            leadingEdge: { _ in XCTFail("No post-deadline work"); return false },
+            pause: { XCTFail("No post-deadline work") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(budget.lastOperation, "application shell snapshot")
+        XCTAssertTrue(budget.lastShellObservation.contains("sidebar.overview"))
+    }
+
+    func testPersistentInterruptionStopsBeforeAnotherObservationAfterDisappearanceGrace() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 600, now: { clock })
+        var observations = 0
+        let result: Bool? = budget.waitForShell(
+            observe: {
+                observations += 1
+                return ShellObservation(ShellNode(.application, children: [self.passwordAlert()]))
+            },
+            resolve: { _ in XCTFail("No navigation behind alert"); return true },
+            reveal: { _ in XCTFail("No navigation behind alert"); return false },
+            leadingEdge: { _ in XCTFail("No navigation behind alert"); return false },
+            dismissInterruption: { _ in true },
+            retryUnchangedInterruption: true,
+            pause: { clock += 1 }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(clock, 3)
+        XCTAssertEqual(observations, 3)
+        XCTAssertEqual(budget.interruptionDismissalAttempts, 2)
+        XCTAssertEqual(budget.shellFailure, "interruption did not disappear after dismissal")
+    }
+
     func testNavigationReadinessIncludesSidebarRevealBeforeDestinationBudgetStarts() {
         var clock: TimeInterval = 0
         let testBudget = UIWaitBudget(timeout: 60, now: { clock })
@@ -706,7 +809,8 @@ final class UIWaitBudgetTests: XCTestCase {
         )
         XCTAssertNil(result)
         XCTAssertEqual(budget.lastOperation, "shell snapshot")
-        XCTAssertEqual(budget.lastShellObservation, "not observed")
+        XCTAssertEqual(budget.lastShellObservation, "collapsed; toggle=Show Sidebar")
+        XCTAssertEqual(budget.shellFailure, "snapshot exceeded navigation deadline")
     }
 
     func testTitleFallbackAndIdentifierPriorityAreResolvedInTheSameTree() {
@@ -994,6 +1098,18 @@ struct RenderedShellRoot {
         case sidebar
     }
 
+    /// The live XCUI boundary is injectable so tests exercise the base adapter
+    /// with the login suite's actual policy, not a second copy of its allowlist.
+    @MainActor
+    struct ShellNavigationDriver {
+        var observeInterruption: ([String]) throws -> ShellNode?
+        var observeApplication: () throws -> ShellObservation
+        var reveal: (ShellNode) -> Bool
+        var leadingEdge: (ShellNode) -> Bool
+        var isDismissalHittable: (ShellNode, ShellNode) -> Bool
+        var tapDismissal: (ShellNode, ShellNode) -> Bool
+    }
+
     let title: String
     let identifier: String
     let surface: Surface
@@ -1041,6 +1157,7 @@ class PrintFarmerUITestCase: XCTestCase {
     /// bootstrap; override to select a different explicit launch mode.
     var additionalLaunchArguments: [String] { [] }
     var waitsForNavigationReadiness: Bool { false }
+    var navigationReadinessTimeout: TimeInterval { 60 }
     var navigationAlertDismissals: [String: String] { [:] }
     var retryUnchangedNavigationAlertDismissal: Bool { false }
 
@@ -1073,12 +1190,13 @@ class PrintFarmerUITestCase: XCTestCase {
         guard let testBudget else {
             return XCTFail("Shell readiness requires the existing test allowance", file: file, line: line)
         }
-        let ready = waitForObservedShell(budget: testBudget, file: file, line: line) {
+        let budget = testBudget.child(timeout: navigationReadinessTimeout)
+        let ready = waitForObservedShell(budget: budget, file: file, line: line) {
             $0.isLaunchReady ? true : nil
         }
         XCTAssertEqual(
             ready, true,
-            "Authenticated shell did not finish launching within the test allowance; \(testBudget.diagnostic)",
+            "Authenticated shell did not finish launching; \(budget.shellDiagnostic)",
             file: file,
             line: line
         )
@@ -1178,17 +1296,12 @@ class PrintFarmerUITestCase: XCTestCase {
         observedElement(node, within: app.navigationBars.descendants(matching: .button))
     }
 
-    private func waitForObservedShell<T>(
-        budget: UIWaitBudget,
-        file: StaticString = #filePath,
-        line: UInt = #line,
-        resolve: (ShellObservation) -> T?
-    ) -> T? {
-        do {
-            let observeInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : {
-                for title in self.navigationAlertDismissals.keys.sorted() {
+    private func liveNavigationDriver(budget: UIWaitBudget) -> ShellNavigationDriver {
+        ShellNavigationDriver(
+            observeInterruption: { titles in
+                for title in titles {
                     let alert = self.app.alerts[title]
-                    guard budget.exists(alert, named: "navigation interruption: \(title)") else {
+                    guard budget.exists(alert, named: "target application navigation interruption: \(title)") else {
                         continue
                     }
                     return try budget.perform("observed alert snapshot") {
@@ -1196,51 +1309,76 @@ class PrintFarmerUITestCase: XCTestCase {
                     }
                 }
                 return nil
+            },
+            observeApplication: { ShellObservation(ShellNode(try self.app.snapshot())) },
+            reveal: { node in
+                let toggle = self.observedToggle(node)
+                guard budget.perform("hittable observed sidebar toggle", {
+                    toggle.isHittable
+                }) == true else { return false }
+                return budget.perform("tap observed sidebar toggle", {
+                    toggle.tap()
+                    return true
+                }) == true
+            },
+            leadingEdge: { node in
+                guard budget.perform("hittable observed Show Sidebar", {
+                    self.observedToggle(node).isHittable
+                }) == true else { return false }
+                return self.performSidebarLeadingEdge(budget: budget)
+            },
+            isDismissalHittable: { alert, button in
+                let container = self.observedElement(alert, within: self.app.alerts)
+                let dismissal = self.observedElement(button, within: container.buttons)
+                return dismissal.isHittable
+            },
+            tapDismissal: { alert, button in
+                let container = self.observedElement(alert, within: self.app.alerts)
+                self.observedElement(button, within: container.buttons).tap()
+                return true
             }
+        )
+    }
+
+    func waitForObservedShell<T>(
+        budget: UIWaitBudget,
+        driver: ShellNavigationDriver? = nil,
+        pause: (() -> Void)? = nil,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        resolve: (ShellObservation) -> T?
+    ) -> T? {
+        let driver = driver ?? liveNavigationDriver(budget: budget)
+        do {
             return try budget.waitForShell(
                 observe: {
                     try budget.observeShell(
-                        observeInterruption: observeInterruption,
-                        observeApplication: { ShellObservation(ShellNode(try self.app.snapshot())) }
+                        observeInterruption: {
+                            try driver.observeInterruption(self.navigationAlertDismissals.keys.sorted())
+                        },
+                        observeApplication: driver.observeApplication
                     )
                 },
                 resolve: resolve,
-                reveal: { node in
-                    let toggle = self.observedToggle(node)
-                    guard budget.perform("hittable observed sidebar toggle", {
-                        toggle.isHittable
-                    }) == true else { return false }
-                    return budget.perform("tap observed sidebar toggle", {
-                        toggle.tap()
-                        return true
-                    }) == true
-                },
-                leadingEdge: { node in
-                    guard budget.perform("hittable observed Show Sidebar", {
-                        self.observedToggle(node).isHittable
-                    }) == true else { return false }
-                    return self.performSidebarLeadingEdge(budget: budget)
-                },
+                reveal: driver.reveal,
+                leadingEdge: driver.leadingEdge,
                 dismissInterruption: { alert in
                     guard let button = alert.dismissalButton(allowedTitles: self.navigationAlertDismissals) else {
                         return false
                     }
-                    let container = self.observedElement(alert, within: self.app.alerts)
-                    let dismissal = self.observedElement(button, within: container.buttons)
                     guard budget.perform("hittable observed alert dismissal", {
-                        dismissal.isHittable
+                        driver.isDismissalHittable(alert, button)
                     }) == true else { return false }
                     return budget.perform("tap observed alert dismissal", {
-                        dismissal.tap()
-                        return true
+                        driver.tapDismissal(alert, button)
                     }) == true
                 },
-                retryUnchangedInterruption: retryUnchangedNavigationAlertDismissal
+                retryUnchangedInterruption: retryUnchangedNavigationAlertDismissal,
+                pause: pause
             )
         } catch {
             recordQueryFailure(
-                "Shell snapshot failed: \(error); \(budget.diagnostic); "
-                    + "last snapshot: \(budget.lastShellObservation)",
+                "Shell snapshot failed: \(error); \(budget.shellDiagnostic)",
                 file: file, line: line
             )
             return nil
@@ -1292,8 +1430,7 @@ class PrintFarmerUITestCase: XCTestCase {
             return element
         }) { return element }
         recordQueryFailure(
-            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.diagnostic); "
-                + "last snapshot: \(budget.lastShellObservation)",
+            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.shellDiagnostic)",
             file: file,
             line: line
         )

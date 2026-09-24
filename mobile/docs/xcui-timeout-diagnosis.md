@@ -149,6 +149,34 @@ changed alerts and expired budgets never authorize another tap. Other suites
 do not opt into that repeat. No credentials are saved, no physical command is
 retried, and no product behavior changes.
 
+### Login and cold-offline readiness (#2829)
+
+Navigation readiness has a 60-second child budget, bounded by the existing
+absolute test deadline. This is separate from XCTest's watchdog: it prevents
+repeated unready snapshots from consuming the general 600-second allowance,
+but cannot cancel an in-flight synchronous XCUI call. Cold-offline shell tests
+establish this readiness (including a positively observed sidebar reveal)
+before starting the unchanged eight-second Attention destination lookup.
+
+After a permitted alert dismissal, disappearance has a three-second grace
+within that same navigation budget. Login's single unchanged-alert retry
+does not restart the grace. Unknown, changed, non-hittable, and persistent
+alerts fail closed with the last observation, dismissal count, and reason.
+Late application snapshots are retained for diagnostics without authorizing
+navigation or starting another query.
+
+`LoginFlowUITests/testNavigationAdapterUsesLoginDismissalPolicy` runs the
+base navigation adapter with the login suite's actual allowlist and retry
+configuration, injecting only the remote XCUI boundary. It covers absent,
+separate-root, application-only, late, unknown, non-hittable, persistent,
+changed, and retry-success interruptions. Live login and cold-offline suites
+still require separate approved iPhone and iPad evidence.
+
+The skips investigated in #2829 were intentional iOS path-selection results,
+not a broken matrix expansion. Shared API contract changes also select iOS
+coverage. A green build alone is not proof that XCUI executed; check the
+selected jobs and their retained test results.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test

@@ -81,6 +81,60 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
 
     // MARK: - Login to Operator Shell Transition
 
+    func testNavigationAdapterUsesLoginDismissalPolicy() {
+        let alert = ShellNode(.alert, label: "Save Password?", children: [
+            ShellNode(.button, label: "Not Now"),
+            ShellNode(.button, label: "Save")
+        ])
+        let unknown = ShellNode(.alert, label: "Allow access?", children: [
+            ShellNode(.button, label: "Not Now")
+        ])
+        let ready = ShellObservation(ShellNode(.application, children: [
+            ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.attention")])
+        ]))
+        let loading = ShellObservation(ShellNode(.application))
+        let embedded = ShellObservation(ShellNode(.application, children: [alert]))
+        let scenarios: [(String, [ShellNode?], [ShellObservation], Bool, Bool, Int)] = [
+            ("no interruption", [nil], [ready], true, true, 0),
+            ("separate alert root", [alert, nil], [loading, ready], true, true, 1),
+            ("late alert", [nil, alert, nil], [loading, loading, ready], true, true, 1),
+            ("application-only alert", [nil, nil], [embedded, ready], true, true, 1),
+            ("unknown alert", [unknown], [ready], true, false, 0),
+            ("non-hittable dismissal", [alert], [ready], false, false, 0),
+            ("unchanged retry", [alert, alert, nil], [loading, loading, ready], true, true, 2),
+            ("persistent alert", [alert], [ready], true, false, 2),
+            ("changed alert", [alert, unknown], [ready, ready], true, false, 1)
+        ]
+        for (name, interruptions, applications, hittable, succeeds, expectedTaps) in scenarios {
+            var clock: TimeInterval = 0
+            let budget = UIWaitBudget(timeout: 60, now: { clock })
+            var index = -1
+            var taps: [String] = []
+            let driver = ShellNavigationDriver(
+                observeInterruption: { titles in
+                    XCTAssertEqual(titles, ["Save Password?"], name)
+                    index = min(index + 1, interruptions.count - 1)
+                    return interruptions[index]
+                },
+                observeApplication: { applications[index] },
+                reveal: { _ in XCTFail("Unexpected sidebar reveal: \(name)"); return false },
+                leadingEdge: { _ in XCTFail("Unexpected sidebar gesture: \(name)"); return false },
+                isDismissalHittable: { _, button in
+                    XCTAssertEqual(button.label, "Not Now", name)
+                    return hittable
+                },
+                tapDismissal: { _, button in taps.append(button.label); return true }
+            )
+            let result = waitForObservedShell(budget: budget, driver: driver, pause: { clock += 0.2 }) {
+                $0.isLaunchReady ? true : nil
+            }
+            XCTAssertEqual(result == true, succeeds, "\(name): \(budget.shellDiagnostic)")
+            XCTAssertEqual(taps, Array(repeating: "Not Now", count: expectedTaps), name)
+            XCTAssertLessThan(clock, 4, "\(name) must not consume the navigation or test allowance")
+            if !succeeds { XCTAssertNotEqual(budget.shellFailure, "none", name) }
+        }
+    }
+
     func testLoginTransitionsToOperatorShell() {
         let loginButton = app.buttons["loginButton"]
         XCTAssertTrue(loginButton.waitForExistence(timeout: 5))
