@@ -119,7 +119,8 @@ const text = (value, max) => typeof value === 'string' && value.length <= max &&
 // must not carry local paths, native/session UUIDs or recognizable credentials.
 const privateTextPattern = new RegExp([
   /(?:^|[^A-Za-z0-9._-])\/(?:Users|home|root|private|var\/folders|Volumes)\//.source,
-  /(?:^|[\s"'(=:])~[\\/]/.source, /(?:^|[^A-Za-z0-9])[A-Za-z]:\\/.source, /(?:^|\s)\\\\[A-Za-z0-9]/.source,
+  /(?:^|[^A-Za-z0-9._-])~[\\/]/.source, /(?:^|[^A-Za-z0-9])[A-Za-z]:[\\/]/.source,
+  /(?:^|[^A-Za-z0-9\\])\\\\[A-Za-z0-9._-]+[\\/]/.source, /(?:^|[^A-Za-z0-9:\\/])\/\/[A-Za-z0-9._-]+\//.source,
   /\.printfarmer-ralph/.source, /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/.source,
   /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,})/.source,
   /-----BEGIN [A-Z ]*PRIVATE KEY-----/.source,

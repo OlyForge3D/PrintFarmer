@@ -465,8 +465,9 @@ assignees differ. It then builds a versioned `taskPacket`
 issue body at reservation). It has exact keys and a 64 KiB bound; absolute,
 home-relative, drive-letter and `..` paths are rejected. It never contains
 secrets, local paths, prompts or native IDs: acceptance criteria, scope and
-files that mention a home-style or drive path, `.printfarmer-ralph`, a UUID, a
-token-shaped credential or a private key are rejected before reservation. The reducer accepts the packet only
+files that mention a home-style, drive (`C:\` or `D:/`) or UNC path,
+`.printfarmer-ralph`, a UUID, a token-shaped credential or a private key are
+rejected before reservation. The reducer accepts the packet only
 if it reproduces the reserved task digest (`task-packet-tampered` otherwise), so
 a rewritten control-repository record also fails replay.
 

@@ -488,8 +488,20 @@ test('task packets are exact, versioned and reject private or unbounded facts', 
     { acceptanceCriteria: ['Resume session cccccccc-2222-4333-8444-000000000001'] },
     { acceptanceCriteria: [`Use token ghp_${'a'.repeat(36)}`] }, { acceptanceCriteria: ['Read ~/.printfarmer-ralph/host.json'] },
     { acceptanceCriteria: ['Open C:\\Users\\owner\\notes.txt'] }, { scope: '/home/owner' },
+    { acceptanceCriteria: ['Inspect D:/agents/ralph/native-state/journal.json'] },
+    { acceptanceCriteria: ['Read `\\\\server\\private\\journal.json`'] },
+    { acceptanceCriteria: ['Read (//server/share/journal.json)'] }, { acceptanceCriteria: ['Check `~/notes`'] },
   ]) {
     assert.throws(() => validateTaskPacket({ ...packet, ...change }), /Invalid task packet|Unexpected|exact/i, JSON.stringify(change).slice(0, 80));
+  }
+  for (const criterion of ['Inspect D:/agents/ralph/journal.json', 'Read `\\\\server\\private\\journal.json`',
+    'Read (//server/share/journal.json)', 'Check `~/notes`']) {
+    assert.throws(() => validateTaskPacket({ ...packet, acceptanceCriteria: [criterion] }), /must not contain local paths/, criterion);
+  }
+  // Public references stay valid: URLs, repository-relative paths and ordinary prose.
+  for (const criterion of ['See https://github.com/OlyForge3D/PrintFarmer/issues/601 and http://localhost:5245/healthz',
+    'Update src/api/Controllers/FooController.cs and docs/ralph-macos-migration.md', 'Keep the 16:9 ratio; a/b testing is fine']) {
+    assert.doesNotThrow(() => validateTaskPacket({ ...packet, acceptanceCriteria: [criterion] }), criterion);
   }
 });
 
@@ -549,7 +561,8 @@ test('review findings: settlement races, startup rechecks, private text, legacy 
   const headBefore = f.github.refs.get('heads/main');
   const leaky = coordinatorEvidence(801);
   registerTaskSubject(f.github, leaky);
-  for (const criterion of ['Inspect /Users/owner/private/native-state/journal.json', 'Resume cccccccc-2222-4333-8444-000000000009']) {
+  for (const criterion of ['Inspect /Users/owner/private/native-state/journal.json', 'Resume cccccccc-2222-4333-8444-000000000009',
+    'Inspect D:/agents/ralph/native-state/journal.json', 'Read `\\\\server\\private\\journal.json`']) {
     await assert.rejects(f.act('coordinator', 'reserve', { data: { assignmentId: 'leaky-801', workerId: 'mini' },
       evidence: { ...leaky, acceptanceCriteria: [criterion] } }), /must not contain local paths, native IDs or credentials/);
   }
