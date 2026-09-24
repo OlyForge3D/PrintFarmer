@@ -289,7 +289,7 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Equal(metadata.Identity.Channel, candidate.Channel);
         Assert.Equal(verifiedAt, candidate.VerifiedAt);
         Assert.Equal("linux-amd64", candidate.HostPlatform);
-        Assert.True(candidate.SignatureVerified);
+        Assert.True(candidate.CryptographicallyVerified);
         Assert.True(candidate.CompatibilityReady);
         Assert.True(candidate.InstallationAvailable);
         Assert.True(candidate.SafetyPassed);
@@ -302,6 +302,20 @@ public sealed class SignedUpdateInfrastructureTests
             metadata.ComponentPlatformDigests["printer-discovery/linux-amd64"],
             metadata.ComponentPlatformDigests["orcaslicer-worker/linux-amd64"],
             metadata.ComponentPlatformDigests["monolith/linux-amd64"]), candidate.PlatformDigests);
+
+        HostUpdateExecutorRequest executorRequest = new(
+            "signed-target-regression", candidate.ReleaseId, candidate.SourceCommit,
+            candidate.Sequence, candidate.ManifestDigest, candidate.Channel, candidate.TrustRoot,
+            1, "test-policy-fingerprint", candidate.PlatformDigests);
+        HostUpdateExecutionRequest execution = HostUpdateExecutionRequestBuilder.FromExecutorRequest(
+            executorRequest, candidate.HostPlatform, HostUpdateAuthorizationKind.StandingPolicy);
+
+        Assert.True(execution.IsValid(out string error), error);
+        Assert.Equal(HostUpdateExecutionRequest.RequiredTargetCount, execution.Targets.Count);
+        Assert.True(HostUpdateExecutionRequest.RequiredServiceIds.SetEquals(
+            execution.Targets.Select(target => target.ServiceId)));
+        Assert.All(execution.Targets, target =>
+            Assert.Equal(metadata.ComponentPlatformDigests[$"{target.ServiceId}/{target.Platform}"], target.ChildDigest));
     }
 
     [Fact]
