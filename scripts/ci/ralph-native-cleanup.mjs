@@ -130,9 +130,12 @@ const retirementOutcome = (outcomes) => (outcomes.every((outcome) => outcome ===
 function confirmationProven(record) {
   const proof = record.confirmation;
   const lookups = Array.isArray(proof?.lookups) ? proof.lookups : [];
+  // Legacy #2955 confirmations carry no outcomes; newer ones must store exactly the recomputed ones.
   const outcomes = [record.sessionId, ...record.aliases].map((id) => {
     const matches = lookups.filter((lookup) => lookup?.id === id);
-    return matches.length === 1 ? lookupOutcome(matches[0], record.sessionId) : 'unconfirmed';
+    if (matches.length !== 1) return 'unconfirmed';
+    const outcome = lookupOutcome(matches[0], record.sessionId);
+    return matches[0].outcome === (proof.outcome === undefined ? undefined : outcome) ? outcome : 'unconfirmed';
   });
   return Boolean(proof) && digest(proof) === record.resultEvidenceDigest &&
     Date.parse(record.confirmedAt) >= Date.parse(record.intentAt) &&

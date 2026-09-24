@@ -556,6 +556,21 @@ test('mixed not-found and archived identifiers confirm as an archived retirement
   assert.deepEqual([hard.confirmed, hard.outcome], [true, 'deleted']);
 });
 
+test('a legacy not-found confirmation without stored outcomes still verifies as a deletion', async () => {
+  const w = world([{ n: 1 }]);
+  await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
+  await recordDeletionResult({ request: request(1, 'record-deletion-result'), ...context(w, []), evidence: confirmedLookup(1) });
+  const record = w.journal.deletions[id(1)];
+  record.confirmation = { observedAt: record.confirmation.observedAt, source: record.confirmation.source,
+    lookups: [{ id: id(1), notFound: true }], worktree: record.confirmation.worktree, runtimeWorktreeAbsent: true,
+    deleteOutcome: 'succeeded' };
+  record.resultEvidenceDigest = digest(record.confirmation);
+  assert.deepEqual((await planWorkerCleanup(context(w, []))).deleted.map((item) => item.outcome), ['deleted']);
+  record.confirmation.lookups[0].outcome = 'deleted';
+  record.resultEvidenceDigest = digest(record.confirmation);
+  await assert.rejects(planWorkerCleanup(context(w, [])), /deletion record/);
+});
+
 test('a retired archived identity that reappears live or tampered archive proof fails closed', async () => {
   const w = world([{ n: 1, mapping: { sessionAliases: [alias(1)] } }, { n: 2 }]);
   await recordDeletionIntent({ request: request(1, 'record-deletion-intent'), ...context(w, [candidate(1)]) });
@@ -571,6 +586,10 @@ test('a retired archived identity that reappears live or tampered archive proof 
     (entry) => { entry.confirmation.lookups[0].path = '/worktrees/w-1'; redigest(entry); },
     (entry) => { entry.confirmation.lookups[0].archived = false; redigest(entry); },
     (entry) => { entry.confirmation.lookups.push({ ...entry.confirmation.lookups[0], archived: false }); redigest(entry); },
+    (entry) => { entry.confirmation.lookups[1].outcome = 'deleted'; redigest(entry); },
+    (entry) => { entry.confirmation.lookups[0].outcome = 'unchecked'; redigest(entry); },
+    (entry) => { delete entry.confirmation.lookups[0].outcome; redigest(entry); },
+    (entry) => { delete entry.confirmation.outcome; redigest(entry); },
   ];
   for (const change of tamper) {
     w.journal.deletions[id(1)] = structuredClone(confirmed);
