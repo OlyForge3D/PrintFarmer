@@ -14,7 +14,7 @@ import {
 } from '../ralph-mailbox.mjs';
 import { composeTaskEvidence, runNativeRequest, verifyDevelopmentAdvance, verifyTerminalArtifact } from '../ralph-native-runtime.mjs';
 import {
-  githubFixture, registerIssueComment, registerPullRequest, registerTaskSubject, setCompare, setVerdictStatus,
+  githubFixture, registerIssueComment, registerPolicyAtHead, registerPullRequest, registerTaskSubject, setCompare, setVerdictStatus,
 } from './fixtures/ralph-github-fixture.mjs';
 
 const now = Date.now();
@@ -186,7 +186,7 @@ async function runWorker(f, name, worker) {
   return delivered;
 }
 
-async function reportTerminal(f, name, worker, delivered, artifactUrl) {
+async function reportTerminal(f, name, worker, delivered, artifactUrl, { replacement = false } = {}) {
   const readback = await f.act(name, 'artifact-readback', { data: { ...worker.data, artifactUrl }, evidence: fresh() });
   const { artifact, finalDeliveryCorrelation } = readback;
   const echo = artifact.kind === 'pull-request' ? { artifactHeadSha: artifact.headSha } : { artifactBodyDigest: artifact.bodyDigest };
@@ -197,6 +197,7 @@ async function reportTerminal(f, name, worker, delivered, artifactUrl) {
     finalAck: { ...worker.plan.packet, noChildren: true, noPendingContinuation: true, noFutureDelivery: true,
       finalDeliveryCorrelation, artifactUrl: artifact.url, artifactReadbackVerified: true, ...echo },
   } });
+  if (replacement) return { terminal, artifact };
   f.roles[name].sessions.push({ id: worker.session.id, terminalVerified: true });
   await f.ready(name);
   return { terminal, artifact };
@@ -483,6 +484,10 @@ test('task packets are exact, versioned and reject private or unbounded facts', 
     { files: ['C:\\Users\\owner\\file.cs'] }, { files: ['~/secret'] }, { files: ['/etc/passwd'] }, { files: ['src/../../escape'] },
     { files: [] }, { scope: 'x'.repeat(65) }, { sourceBodySha256: 'not-a-digest' },
     { acceptanceCriteria: ['x'.repeat(70 * 1024)] },
+    { acceptanceCriteria: ['Inspect /Users/owner/private/native-state/journal.json'] },
+    { acceptanceCriteria: ['Resume session cccccccc-2222-4333-8444-000000000001'] },
+    { acceptanceCriteria: [`Use token ghp_${'a'.repeat(36)}`] }, { acceptanceCriteria: ['Read ~/.printfarmer-ralph/host.json'] },
+    { acceptanceCriteria: ['Open C:\\Users\\owner\\notes.txt'] }, { scope: '/home/owner' },
   ]) {
     assert.throws(() => validateTaskPacket({ ...packet, ...change }), /Invalid task packet|Unexpected|exact/i, JSON.stringify(change).slice(0, 80));
   }
@@ -503,7 +508,24 @@ test('settlement and startup readbacks fail closed on GitHub gaps', async () => 
   setVerdictStatus(github, 'b'.repeat(40), `REVIEWED (self-attested) @ ${'b'.repeat(12)} by bishop`, 'failure');
   await assert.rejects(verifyTerminalArtifact(assignment, {}, github.api), /artifact-unreviewed/);
   setVerdictStatus(github, 'b'.repeat(40), `REVIEWED (self-attested, carried across sync) @ ${'b'.repeat(12)} by bishop, hicks`);
-  assert.match((await verifyTerminalArtifact(assignment, {}, github.api)).verdict, /carried across sync/);
+  const carried = (await verifyTerminalArtifact(assignment, {}, github.api)).verdict;
+  assert.equal(carried.classification, 'REVIEWED');
+  assert.equal(carried.carriedAcrossSync, true);
+  // Provenance is verified exactly as verify-squad-verdict.mjs does, not from the description.
+  const reviewed = `REVIEWED (self-attested) @ ${'b'.repeat(12)} by bishop, hicks`;
+  for (const [label, options] of [
+    ['spoofed status creator', { creator: 'jpapiez' }], ['run for another PR', { pr: 9999 }],
+    ['absent workflow run', { withoutRun: true }], ['untrusted pull_request event', { run: { event: 'pull_request' } }],
+    ['failed run', { run: { conclusion: 'failure' } }], ['workflow from a feature branch', { run: { head_branch: 'feature' } }],
+    ['re-run attempt', { run: { run_attempt: 2 } }],
+  ]) {
+    setVerdictStatus(github, 'b'.repeat(40), reviewed, 'success', options);
+    await assert.rejects(verifyTerminalArtifact(assignment, {}, github.api), /artifact-unreviewed/, label);
+  }
+  setVerdictStatus(github, 'b'.repeat(40), `APPROVE (owner) @ ${'b'.repeat(12)} by jpapiez; dissent=1; short=1`);
+  assert.equal((await verifyTerminalArtifact(assignment, {}, github.api)).verdict.classification, 'APPROVED');
+  setVerdictStatus(github, 'b'.repeat(40), reviewed);
+  assert.equal((await verifyTerminalArtifact(assignment, {}, github.api)).verdict.classification, 'REVIEWED');
 
   const reserved = 'a'.repeat(40), advanced = 'c'.repeat(40);
   const dispatch = { ...packet, sourceRef: 'development' };
@@ -515,4 +537,137 @@ test('settlement and startup readbacks fail closed on GitHub gaps', async () => 
   assert.equal(await verifyDevelopmentAdvance(dispatch, advanced, github.api), advanced);
   assert.equal(await verifyDevelopmentAdvance({ ...dispatch, pr: 5 }, advanced, github.api), undefined,
     'PR recovery never accepts a different head');
+});
+
+test('review findings: settlement races, startup rechecks, private text, legacy blockers and existing-PR dispatch fail closed', async (t) => {
+  const f = await farm(t);
+  await f.begin('coordinator');
+  await f.begin('mini');
+  await f.ready('mini');
+
+  // Private free text never reaches the mailbox (R2958-04).
+  const headBefore = f.github.refs.get('heads/main');
+  const leaky = coordinatorEvidence(801);
+  registerTaskSubject(f.github, leaky);
+  for (const criterion of ['Inspect /Users/owner/private/native-state/journal.json', 'Resume cccccccc-2222-4333-8444-000000000009']) {
+    await assert.rejects(f.act('coordinator', 'reserve', { data: { assignmentId: 'leaky-801', workerId: 'mini' },
+      evidence: { ...leaky, acceptanceCriteria: [criterion] } }), /must not contain local paths, native IDs or credentials/);
+  }
+  assert.equal(f.github.refs.get('heads/main'), headBefore, 'a rejected reservation publishes nothing');
+
+  // Optional identity facts that the packet does not carry are mismatches, not TypeErrors (R2958-07).
+  const identity = await reserveAndPublish(f, 802, 'mini');
+  const identityAssignment = (await f.inspect('mini')).state.assignments[identity.assignmentId];
+  const identitySubject = { title: identity.subject.title, labels: identity.evidence.labels, issueState: 'open',
+    githubAssignees: [], bodySha256: sha256(identity.subject.body) };
+  assert.throws(() => composeTaskEvidence(identityAssignment, identitySubject, { pr: 5 }), /task-packet-mismatch: supplied pr/);
+
+  // An edit or hold after `starting` keeps the child startup-only (R2958-03).
+  const { binding: identityBinding } = await discover(f, 'mini', 802);
+  const recheck = await startWorker(f, 'mini', identityBinding, { correlation: 'recheck-802' });
+  identity.subject.body = 'Requirements rewritten after starting.\n';
+  await assert.rejects(f.act('mini', 'startup-check', { data: recheck.data, evidence: recheck.startupAck(recheck.head) }),
+    /task-changed: no substantive continuation.*Report-blocker task-changed/);
+  identity.subject.body = 'Public body for issue 802.\n';
+  identity.subject.labels.push({ name: 'go:no' });
+  await assert.rejects(f.act('mini', 'startup-check', { data: recheck.data, evidence: recheck.startupAck(recheck.head) }),
+    /held: no substantive continuation/);
+  identity.subject.labels.pop();
+  identity.subject.assignees = [{ login: 'jpapiez' }];
+  await assert.rejects(f.act('mini', 'startup-check', { data: recheck.data, evidence: recheck.startupAck(recheck.head) }),
+    /task-changed: no substantive continuation/);
+  identity.subject.assignees = [];
+  const recheckDelivered = await runWorker(f, 'mini', recheck);
+
+  // A replacement terminal receipt that lands between coordinator verification and
+  // settlement publication rejects the settlement (R2958-02).
+  const verifiedHead = '1'.repeat(40);
+  const verifiedPr = registerPullRequest(f.github, { number: 7802, issue: 802, headSha: verifiedHead });
+  await reportTerminal(f, 'mini', recheck, recheckDelivered, verifiedPr.html_url);
+  Object.assign(verifiedPr, { state: 'closed', merged: true });
+  setVerdictStatus(f.github, verifiedHead);
+  const settlement = await settlementRequest(f, identity.assignmentId);
+  const unverifiedPr = registerPullRequest(f.github, { number: 7803, issue: 802, headSha: '2'.repeat(40) });
+  const original = f.github.api;
+  let armed = false, raced = false;
+  f.github.api = async (endpoint, ...rest) => {
+    if (endpoint.endsWith(`/commits/${verifiedHead}/statuses?per_page=100`)) armed = true;
+    if (armed && !raced && endpoint === 'repos/fixture/private-control/git/ref/heads/main') {
+      raced = true;
+      f.github.api = original;
+      await reportTerminal(f, 'mini', recheck, recheckDelivered, unverifiedPr.html_url, { replacement: true });
+      f.github.api = async (...args) => original(...args);
+    }
+    return original(endpoint, ...rest);
+  };
+  await assert.rejects(f.act('coordinator', 'release', settlement), /artifact-changed: the terminal receipt or artifact changed/);
+  f.github.api = original;
+  assert.equal(raced, true, 'the replacement receipt raced the settlement');
+  const racedEntry = (await f.inspect('coordinator')).state.assignments[identity.assignmentId];
+  assert.equal(racedEntry.state, 'terminal-reported');
+  assert.equal(racedEntry.terminalArtifact.number, 7803);
+  // Fresh reconciliation of the new receipt sees the open PR and retains the assignment.
+  await assert.rejects(f.act('coordinator', 'release', await settlementRequest(f, identity.assignmentId)), /artifact-pending/);
+
+  // A pre-#2958 digest-only blocker self-heals after renewal: the consumer mints a
+  // fresh proof that is published, and the coordinator withdraws from the mailbox (R2958-05).
+  const legacyEvidence = coordinatorEvidence(803);
+  registerTaskSubject(f.github, legacyEvidence);
+  const offerId = (await f.inspect('coordinator')).state.availability.mini.offerId;
+  await publishEvent(f.roles.coordinator.config.control, {
+    id: 'legacy-reserve-803', type: 'reserve', authorityId: 'primary', epoch: 1, role: 'coordinator',
+    roundId: f.roles.coordinator.round.roundId, observedAt: new Date(now).toISOString(),
+    data: { assignmentId: 'legacy-803', workerId: 'mini', generation: 1, task: taskFromEvidence(legacyEvidence),
+      eligibilityDigest: digest('legacy-803'), policySha: 'a'.repeat(40), offerId },
+  }, f.github.api);
+  const legacy = (await f.inspect('coordinator')).state.assignments['legacy-803'];
+  const legacyBinding = { assignmentId: 'legacy-803', generation: legacy.generation, taskDigest: legacy.taskDigest };
+  const proofEvidence = fresh({ authoritativeJournalRetained: true, protocolOnlyDeliveryAttested: true });
+  const { proof: oldProof } = await f.act('mini', 'prestart-proof', { data: legacyBinding, evidence: proofEvidence });
+  await publishEvent(f.roles.coordinator.config.control, {
+    id: 'legacy-blocker-803', type: 'report-blocker', authorityId: 'primary', epoch: 1, role: 'consumer', workerId: 'mini',
+    roundId: f.roles.mini.round.roundId, observedAt: new Date(now).toISOString(),
+    data: { ...legacyBinding, reasonCode: 'native-evidence-missing', evidenceDigest: digest(oldProof) },
+  }, f.github.api);
+  assert.equal((await f.inspect('coordinator')).state.assignments['legacy-803'].blocker.prestartProof, undefined);
+  await assert.rejects(f.act('coordinator', 'withdraw', { data: legacyBinding,
+    evidence: fresh({ claimsReconciled: true, noNativeDeliveryVerified: true }) }), /committed by its blocker/);
+  const renewed = await f.act('mini', 'prestart-proof', { data: legacyBinding, evidence: proofEvidence });
+  assert.equal(renewed.alreadyReported, false, 'a digest-only historical blocker needs its proof published');
+  assert.notEqual(digest(renewed.proof), digest(oldProof));
+  await f.act('mini', 'report-blocker', { data: { ...legacyBinding, reasonCode: 'native-evidence-missing' }, evidence: renewed.proof });
+  const again = await f.act('mini', 'prestart-proof', { data: legacyBinding, evidence: proofEvidence });
+  assert.equal(again.alreadyReported, true, 'idempotent once the full proof is published');
+  const withdrawn = await f.act('coordinator', 'withdraw', { data: legacyBinding,
+    evidence: fresh({ claimsReconciled: true, noNativeDeliveryVerified: true }) });
+  assert.equal(withdrawn.state.assignments['legacy-803'].disposition, 'withdrawn-before-delivery');
+});
+
+test('existing-PR recovery dispatches from a runtime PR-head policy readback, not consumer evidence (R2958-06)', async (t) => {
+  const f = await farm(t);
+  await f.begin('coordinator');
+  await f.begin('mini');
+  await f.ready('mini');
+  const headSha = 'a'.repeat(40);
+  const pr = registerPullRequest(f.github, { number: 7901, headSha, ref: 'fix/existing-7901' });
+  const evidence = { ...coordinatorEvidence(901), pr: 7901, prState: 'open', prHeadRepository: 'OlyForge3D/PrintFarmer',
+    prHeadRef: pr.head.ref, prHeadSha: headSha };
+  registerTaskSubject(f.github, evidence);
+  await f.act('coordinator', 'reserve', { data: { assignmentId: 'pr-7901', workerId: 'mini' }, evidence });
+  const entry = (await f.inspect('coordinator')).state.assignments['pr-7901'];
+  const binding = { assignmentId: 'pr-7901', generation: entry.generation, taskDigest: entry.taskDigest };
+  await f.act('coordinator', 'publish', { data: binding, evidence });
+  const data = { ...binding, correlation: 'pr-7901' };
+  const plan = (extra = {}) => f.act('mini', 'dispatch-plan', { data, evidence: { ...consumerStartEvidence(), ...extra } });
+  await assert.rejects(plan(), /github-readback-invalid: .* unavailable at the PR head/);
+  await registerPolicyAtHead(f.github, headSha, 'copilot', { '.github/agents/ralph-worker.agent.md': 'name: Old Worker\n' });
+  await assert.rejects(plan(), /New PR recovery requires/);
+  await registerPolicyAtHead(f.github, headSha, 'copilot');
+  await assert.rejects(plan({ prWorkerPolicyDigest: digest('consumer-invented') }), /github-readback-mismatch: supplied prWorkerPolicyDigest/);
+  const accepted = await plan();
+  assert.equal(accepted.dispatchPlan.nativeArguments.base_branch, 'fix/existing-7901');
+  assert.equal(accepted.dispatchPlan.packet.pr, 7901);
+  pr.head.sha = 'b'.repeat(40);
+  await assert.rejects(plan(), /New PR recovery requires|github-readback/);
+  assertNoRelay(f);
 });

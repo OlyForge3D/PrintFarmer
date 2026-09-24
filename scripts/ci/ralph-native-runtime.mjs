@@ -17,8 +17,9 @@ import {
   defaultCleanupProbe, deletionLedger, pendingSummary, terminalIdentity, planWorkerCleanup, recordDeletionIntent, recordDeletionResult, requireCleanupRole,
 } from './ralph-native-cleanup.mjs';
 import {
-  buildDispatchPlan, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
+  buildDispatchPlan, policyTextDigest, validateClassification, validateNativeCapabilities, validateStartup, validatePacketAck,
 } from './ralph-native-dispatch.mjs';
+import { loadSquadVerdict } from './verify-squad-verdict.mjs';
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const fail = (message) => { throw new Error(`Native Ralph blocked: ${message}`); };
@@ -285,7 +286,8 @@ export function composeTaskEvidence(assignment, live, supplied) {
   for (const key of [...packetTaskKeys, 'filesComplete', 'repository']) {
     if (supplied?.[key] === undefined) continue;
     const expected = key === 'filesComplete' ? true : packet[key];
-    const same = key === 'labels' ? sortedDigest(supplied.labels) === sortedDigest(expected) : digest(supplied[key]) === digest(expected);
+    const same = expected !== undefined &&
+      (key === 'labels' ? sortedDigest(supplied.labels) === sortedDigest(expected) : digest(supplied[key]) === digest(expected));
     if (!same) fail(`task-packet-mismatch: supplied ${key} differs from the published task packet; omit task facts and let the runtime read the packet.`);
   }
   for (const key of liveTaskKeys) {
@@ -308,6 +310,25 @@ export function composeTaskEvidence(assignment, live, supplied) {
     issueState: live.issueState, githubAssignees: live.githubAssignees,
     ...(packet.pr ? { prState: live.prState, prHeadRepository: live.prHeadRepository, prHeadRef: live.prHeadRef, prHeadSha: live.prHeadSha } : {}),
   };
+}
+
+// Bounded worker policy at an existing PR head, read by the runtime from GitHub
+// so PR recovery never needs a consumer-computed policy digest.
+export async function readPrWorkerPolicyDigest(headSha, member, api = githubApi) {
+  if (!/^[0-9a-f]{40}$/.test(headSha ?? '') || !/^[a-z]+$/.test(member ?? '')) fail('github-readback-invalid: exact PR head and member required.');
+  const read = async (file) => {
+    const content = await api(`repos/${repository}/contents/${file}?ref=${headSha}`).catch(() => undefined);
+    if (content?.type !== 'file' || content.encoding !== 'base64' || typeof content.content !== 'string') {
+      fail(`github-readback-invalid: ${file} is unavailable at the PR head; the existing owner reconciles policy first.`);
+    }
+    return policyTextDigest(Buffer.from(content.content, 'base64').toString('utf8'));
+  };
+  const charterPath = member === 'copilot' ? '.github/copilot-instructions.md' : `.squad/agents/${member}/charter.md`;
+  return digest({
+    agentSha256: await read('.github/agents/ralph-worker.agent.md'),
+    contractSha256: await read('.copilot/skills/ralph-loop/assigned-worker.md'),
+    charterSha256: await read(charterPath),
+  });
 }
 
 export async function readIssueCommentArtifact(assignment, url, api = githubApi) {
@@ -333,7 +354,7 @@ export async function readPullRequestArtifact(assignment, url, api = githubApi) 
     fail('GitHub returned an invalid or cross-repository pull-request artifact readback.');
   }
   return { kind: 'pull-request', url, number: pr.number, headSha: pr.head.sha,
-    state: pr.merged ? 'merged' : pr.state, body: typeof pr.body === 'string' ? pr.body : '' };
+    state: pr.merged ? 'merged' : pr.state, body: typeof pr.body === 'string' ? pr.body : '', pull: pr };
 }
 
 function publishedArtifact(artifact) {
@@ -341,8 +362,6 @@ function publishedArtifact(artifact) {
     ? { kind: artifact.kind, url: artifact.url, number: artifact.number, headSha: artifact.headSha }
     : { kind: artifact.kind, url: artifact.url, bodyDigest: artifact.bodyDigest };
 }
-
-const verdictPattern = (sha) => new RegExp(`^(REVIEWED \\(self-attested(, carried across sync)?\\)|APPROVE \\(owner\\)) @ ${sha.slice(0, 12)}\\b`);
 
 // Coordinator-side settlement readback of the consumer-published terminal artifact.
 export async function verifyTerminalArtifact(assignment, evidence, api = githubApi) {
@@ -366,13 +385,16 @@ export async function verifyTerminalArtifact(assignment, evidence, api = githubA
       !new RegExp(`\\b(close[sd]?|fix(e[sd])?|resolve[sd]?) #${assignment.task.issue}\\b`, 'i').test(pr.body)) {
     fail(`artifact-unlinked: merged PR body must contain Closes #${assignment.task.issue}.`);
   }
-  const status = await api(`repos/${repository}/commits/${pr.headSha}/status`).catch(() => undefined);
-  const verdict = Array.isArray(status?.statuses)
-    ? status.statuses.find((entry) => entry?.context === 'squad/pre-pr-verdict') : undefined;
-  if (verdict?.state !== 'success' || !verdictPattern(pr.headSha).test(verdict.description ?? '')) {
-    fail('artifact-unreviewed: merged PR head lacks a REVIEWED or APPROVE (owner) squad/pre-pr-verdict status at that exact head.');
+  // Same provenance as verify-squad-verdict.mjs: GitHub Actions creator, trusted
+  // default-branch workflow run, this PR number and this exact head.
+  const verdict = await loadSquadVerdict({ api, pull: pr.pull, statusHeadSha: pr.headSha }).catch(() => undefined);
+  if (!['REVIEWED', 'APPROVED'].includes(verdict?.classification) || verdict.reviewedHeadSha !== pr.headSha) {
+    fail(`artifact-unreviewed: merged PR head lacks a verified REVIEWED or APPROVE (owner) squad/pre-pr-verdict at that exact head (${verdict?.classification ?? 'unreadable'}).`);
   }
-  return { artifact: publishedArtifact(pr), verdict: verdict.description };
+  return { artifact: publishedArtifact(pr), verdict: {
+    classification: verdict.classification, reviewedHeadSha: verdict.reviewedHeadSha, workflowRunUrl: verdict.workflowRunUrl,
+    ...(verdict.carriedAcrossSync !== undefined ? { carriedAcrossSync: verdict.carriedAcrossSync } : {}),
+  } };
 }
 
 // Issue workers start from the live development branch, which may have advanced
@@ -614,6 +636,12 @@ export function prepareEvent(config, request, snapshot, journal, now = Date.now(
         evidence.artifactsVerified !== true || evidence.noPendingContinuation !== true) fail('Coordinator must reconcile the actual consumer terminal receipt and task artifacts.');
     if (assignment.taskPacket && !context.settlement) fail('native-evidence-missing: packet-bound settlement requires the runtime GitHub readback of the published terminal artifact.');
     event.data = { ...event.data, terminalEvidenceDigest: digest(context.settlement ? { ...evidence, settlement: context.settlement } : evidence) };
+    if (assignment.taskPacket) {
+      // Bind settlement to the exact receipt and artifact verified above; a racing
+      // replacement terminal receipt makes the reducer reject this settlement.
+      event.data.terminalReceiptDigest = assignment.terminalCommitment;
+      event.data.terminalArtifactDigest = digest(assignment.terminalArtifact);
+    }
     event.type = 'settle';
   } else if (event.type !== 'end-round') fail('Unknown public runtime transition; internal mailbox events are not requests.');
   return { event, createAllowed };
@@ -804,8 +832,10 @@ export async function runNativeRequest(config, request, {
       }
       journal.prestartProofs ??= {};
       const retained = journal.prestartProofs[assignment.assignmentId];
+      // A pre-#2958 blocker committed only the digest; mint a fresh proof so it can be published.
       if (retained && retained.generation === assignment.generation && retained.taskDigest === assignment.taskDigest &&
-          assignment.blocker?.evidenceDigest === digest(retained)) {
+          assignment.blocker?.evidenceDigest === digest(retained) &&
+          digest(assignment.blocker.prestartProof ?? null) === digest(retained)) {
         await writeJournal(journalPath, journal);
         return { dispatchAuthorized: false, nativeCreateAllowed: false, alreadyReported: true, proof: retained };
       }
@@ -867,6 +897,24 @@ export async function runNativeRequest(config, request, {
       }
       const verifiedHeadAdvance = await verifyDevelopmentAdvance(local.dispatchPlan.packet, evidence.startupAck?.initialHeadSha, api ?? githubApi);
       validateStartup(local.dispatchPlan, evidence, { verifiedHeadAdvance });
+      if (!local.continuationIntent && assignment.taskPacket) {
+        // Re-read the subject before the first substantive continuation: an edit or
+        // hold after `starting` keeps the child startup-only.
+        try {
+          const current = composeTaskEvidence(assignment, await readTaskSubject(assignment.task, api ?? githubApi), {});
+          validateTriageEvidence(current);
+          if (assignment.task.pr && (String(current.prState).toLowerCase() !== 'open' ||
+              current.prHeadRepository !== repository || current.prHeadSha !== assignment.task.headSha)) {
+            fail('task-changed: assigned PR is no longer open at the reserved same-repository head.');
+          }
+        } catch (error) {
+          const code = /blocked: (held|github-readback-invalid|task-packet-tampered):/.exec(error.message)?.[1] ??
+            (error.message.startsWith('Native Ralph blocked:') ? 'task-changed' : 'github-readback-invalid');
+          fail(`${code}: no substantive continuation; keep the child startup-only. ${code === 'github-readback-invalid'
+            ? 'Retry startup-check after GitHub is readable.'
+            : `Report-blocker ${code === 'held' ? 'held' : 'task-changed'} so the coordinator reconciles recovery.`} (${error.message})`);
+        }
+      }
       const continuationAllowed = !local.continuationIntent;
       local.continuationIntent ??= { requestId: request.id, evidenceDigest: digest(evidence) };
       local.startupEvidenceDigest = digest(evidence);
@@ -901,6 +949,14 @@ export async function runNativeRequest(config, request, {
         if (!assignment.taskPacket) composeTaskEvidence(assignment);
         const live = await readTaskSubject(assignment.task, api ?? githubApi);
         evidenceRequest = { ...request, evidence: composeTaskEvidence(assignment, live, request.evidence) };
+        if (config.role === 'consumer' && assignment.task.pr && live.prHeadSha === assignment.task.headSha) {
+          const { owner: prOwner } = validateTriageEvidence(evidenceRequest.evidence);
+          const derived = await readPrWorkerPolicyDigest(assignment.task.headSha, prOwner.slice('squad:'.length), api ?? githubApi);
+          if (request.evidence.prWorkerPolicyDigest !== undefined && request.evidence.prWorkerPolicyDigest !== derived) {
+            fail('github-readback-mismatch: supplied prWorkerPolicyDigest differs from the runtime PR-head policy readback; omit it.');
+          }
+          evidenceRequest.evidence.prWorkerPolicyDigest = derived;
+        }
       }
     }
     let dispatchPlan;

@@ -108,17 +108,50 @@ export function registerPullRequest(github, { number, issue, headSha, ref = `wor
     number, html_url: `https://github.com/OlyForge3D/PrintFarmer/pull/${number}`, state, merged,
     body: issue ? `Implements the assigned task.\n\nCloses #${issue}\n` : 'Repairs the assigned PR.\n',
     head: { sha: headSha, ref, repo: { full_name: headRepository } },
-    base: { ref: 'development', repo: { full_name: 'OlyForge3D/PrintFarmer' } },
+    base: { ref: 'development', repo: { full_name: 'OlyForge3D/PrintFarmer', default_branch: 'development' } },
   };
   github.comments.set(`repos/OlyForge3D/PrintFarmer/pulls/${number}`, pr);
   return pr;
 }
 
-// Mirrors the squad/pre-pr-verdict commit status published by squad-review-verdict.yml.
-export function setVerdictStatus(github, sha, description = `REVIEWED (self-attested) @ ${sha.slice(0, 12)} by bishop, hicks`, state = 'success') {
-  github.comments.set(`repos/OlyForge3D/PrintFarmer/commits/${sha}/status`, {
-    sha, state, statuses: [{ context: 'squad/pre-pr-verdict', state, description }],
-  });
+let verdictRunId = 880000;
+const workflowSourceSha = '9'.repeat(40);
+
+// Mirrors the squad/pre-pr-verdict commit status and the trusted workflow run
+// that squad-review-verdict.yml publishes, so settlement applies the same
+// provenance checks as verify-squad-verdict.mjs. Options forge provenance gaps.
+export function setVerdictStatus(github, sha, description = `REVIEWED (self-attested) @ ${sha.slice(0, 12)} by bishop, hicks`,
+  state = 'success', { pr, creator = 'github-actions[bot]', run = {}, withoutRun = false } = {}) {
+  const number = pr ?? [...github.comments].find(([key, value]) =>
+    /^repos\/OlyForge3D\/PrintFarmer\/pulls\/[0-9]+$/.test(key) && value.head?.sha === sha)?.[1].number;
+  const id = ++verdictRunId;
+  const target = `https://github.com/OlyForge3D/PrintFarmer/actions/runs/${id}`;
+  github.comments.set(`repos/OlyForge3D/PrintFarmer/commits/${sha}/statuses?per_page=100`, [{
+    id, context: 'squad/pre-pr-verdict', state, sha, description, target_url: target,
+    creator: { login: creator }, created_at: '2026-08-07T03:00:10Z',
+  }]);
+  if (!withoutRun) {
+    github.comments.set(`repos/OlyForge3D/PrintFarmer/actions/runs/${id}`, {
+      id, html_url: target, path: '.github/workflows/squad-review-verdict.yml', event: 'issue_comment', run_attempt: 1,
+      head_branch: 'development', head_sha: workflowSourceSha, repository: { full_name: 'OlyForge3D/PrintFarmer' },
+      actor: { login: 'jpapiez' }, triggering_actor: { login: 'jpapiez' }, display_title: `Squad review record for PR #${number}`,
+      status: 'completed', conclusion: 'success', run_started_at: '2026-08-07T03:00:00Z', updated_at: '2026-08-07T03:00:20Z', ...run,
+    });
+  }
+  github.comments.set(`repos/OlyForge3D/PrintFarmer/compare/${workflowSourceSha}...development`, { status: 'identical' });
+  return { id, target };
+}
+
+// Serves the bounded worker-policy files at an existing PR head. `override`
+// replaces file text to simulate a PR whose policy differs from the local one.
+export async function registerPolicyAtHead(github, sha, member, override = {}) {
+  const { readFile } = await import('node:fs/promises');
+  const charterPath = member === 'copilot' ? '.github/copilot-instructions.md' : `.squad/agents/${member}/charter.md`;
+  for (const file of ['.github/agents/ralph-worker.agent.md', '.copilot/skills/ralph-loop/assigned-worker.md', charterPath]) {
+    const text = override[file] ?? await readFile(file, 'utf8');
+    github.comments.set(`repos/OlyForge3D/PrintFarmer/contents/${file}?ref=${sha}`,
+      { type: 'file', encoding: 'base64', content: Buffer.from(text).toString('base64') });
+  }
 }
 
 export function setCompare(github, base, head, status) {

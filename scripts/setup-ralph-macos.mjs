@@ -537,6 +537,13 @@ and a fresh GitHub readback. A missing packet (native-evidence-missing), a chang
 title/labels/body (task-changed) or a new hold (held) fails closed: report-blocker
 with prestart-proof so the coordinator withdraws and re-reserves. Never ask the
 owner to relay coordinator evidence and never re-author task facts.
+Packet acceptanceCriteria, scope and files are public text: reserve rejects
+local paths, native IDs/UUIDs and credentials. startup-check re-reads the issue
+before the first continuation; task-changed or held there means keep the child
+startup-only and report-blocker. For existing-PR recovery the runtime reads
+prWorkerPolicyDigest from the PR head on GitHub; never compute or supply it.
+A pre-#2958 digest-only blocker gets a fresh prestart-proof (alreadyReported
+false): report-blocker with it so the full proof is published.
 Do not repeatedly revoke a refreshed offer for the same already-reported blocker.
 Publish fresh ready AFTER recovery reports; do not infer credits from revoked offers.
 For kickoff use dispatch-plan and the plan returned by the successful starting
@@ -572,7 +579,9 @@ is the PR URL); the final ACK echoes artifactUrl, artifactHeadSha and
 artifactReadbackVerified:true, and the terminal receipt publishes that artifact.
 Coordinator release re-reads the published artifact itself: an open PR stays
 retained, a merged PR needs Closes #issue and a REVIEWED/APPROVE (owner)
-squad/pre-pr-verdict at that exact head, a closed unmerged PR needs closureReason.
+squad/pre-pr-verdict at that exact head from a trusted squad-review-verdict run,
+a closed unmerged PR needs closureReason. Settle binds the terminal receipt and
+artifact digests, so a replacement receipt after verification rejects it.
 An issue worker's initial HEAD may be a newer development commit; report it as
 startupAck.initialHeadSha and the runtime verifies descent on GitHub.
 obtain the same child's explicit final-delivery ACK, then terminal-report and settle.

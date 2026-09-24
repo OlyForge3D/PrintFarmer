@@ -241,6 +241,12 @@ test('native packages stage coordinator and both consumers with role-specific tr
     assert.match(settings.prompt, /Never ask the\nowner to relay coordinator evidence/);
     assert.match(settings.prompt, /artifactUrl, artifactHeadSha and\nartifactReadbackVerified:true/);
     assert.match(settings.prompt, /squad\/pre-pr-verdict at that exact head/);
+    assert.match(settings.prompt, /reserve rejects\nlocal paths, native IDs\/UUIDs and credentials/);
+    assert.match(settings.prompt, /task-changed or held there means keep the child\nstartup-only and report-blocker/);
+    assert.match(settings.prompt, /prWorkerPolicyDigest from the PR head on GitHub; never compute or supply it/);
+    assert.match(settings.prompt, /digest-only blocker gets a fresh prestart-proof/);
+    assert.match(settings.prompt, /from a trusted squad-review-verdict run/);
+    assert.match(settings.prompt, /replacement receipt after verification rejects it/);
     assertNativePrompt(settings.prompt, role, windows);
     assert.equal(await readFile(path.join(path.dirname(f.options['host-config']), 'workflow-prompt.txt'), 'utf8'), `${settings.prompt}\n`);
     assert.equal(host.executionTrust, 'local-owner-v1');

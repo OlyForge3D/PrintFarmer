@@ -554,13 +554,19 @@ versioned payloads carry them:
 | --- | --- | --- | --- |
 | `reserve.taskPacket` (`ralph-task-packet-v1`) | Coordinator runtime, from a live issue readback | Coordinator publish, consumer dispatch/start | Reproduces `requirementsDigest`, `fileKeys` and `taskDigest`; live title, labels and body digest unchanged |
 | `report-blocker.prestartProof` | Consumer runtime journal | Coordinator withdraw | Equals the consumer's retained proof and the committed blocker digest |
-| `terminal-receipt.artifact` | Consumer runtime, from an artifact readback | Coordinator release | Re-read on GitHub: comment bytes, or merged PR head, `Closes #N` and review verdict |
+| `terminal-receipt.artifact` | Consumer runtime, from an artifact readback | Coordinator release | Re-read on GitHub: comment bytes, or merged PR head, `Closes #N` and a review verdict from a trusted `squad-review-verdict.yml` run |
+| `settle.terminalReceiptDigest` / `terminalArtifactDigest` | Coordinator runtime | Mailbox reducer | Equal the latest terminal commitment and artifact, so a replacement receipt after verification rejects the settlement |
+
+Existing-PR recovery reads `prWorkerPolicyDigest` from the PR head through the
+GitHub contents API rather than from consumer evidence. `startup-check` re-reads
+the issue before the first substantive continuation.
 
 Consumers never re-author task facts and nobody relays evidence by hand. Replay
 of pre-#2958 history is unchanged. Assignments reserved before this change have
 no packet and block with `native-evidence-missing`: the consumer reports that
 blocker with its runtime prestart-proof, then the coordinator withdraws and
-re-reserves from a fresh readback. An issue edited after reservation blocks with
+re-reserves from a fresh readback. A blocker already reported with only a proof
+digest gets a fresh proof, which the consumer re-reports with its full payload. An issue edited after reservation blocks with
 `task-changed` the same way. See the
 [published task packet contract](../.copilot/skills/ralph-loop/native-roles.md#published-task-packets).
 

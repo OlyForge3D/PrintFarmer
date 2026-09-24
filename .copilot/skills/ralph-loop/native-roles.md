@@ -464,7 +464,9 @@ assignees differ. It then builds a versioned `taskPacket`
 `classificationComplete`, `capabilities` and `sourceBodySha256` (SHA-256 of the
 issue body at reservation). It has exact keys and a 64 KiB bound; absolute,
 home-relative, drive-letter and `..` paths are rejected. It never contains
-secrets, local paths, prompts or native IDs. The reducer accepts the packet only
+secrets, local paths, prompts or native IDs: acceptance criteria, scope and
+files that mention a home-style or drive path, `.printfarmer-ralph`, a UUID, a
+token-shaped credential or a private key are rejected before reservation. The reducer accepts the packet only
 if it reproduces the reserved task digest (`task-packet-tampered` otherwise), so
 a rewritten control-repository record also fails replay.
 
@@ -483,10 +485,18 @@ the live readback (`github-readback-mismatch`). These fail closed before kickoff
 | `held` | A human hold or `go:no` label is now present | `report-blocker` with prestart-proof |
 | `task-packet-tampered` | Packet no longer reproduces the task digest | Stop; the mailbox is untrusted |
 
+`startup-check` repeats this recheck before it authorizes the first substantive
+continuation. An edit, hold or assignee added after `starting` fails `task-changed`
+or `held` with no continuation: keep the child startup-only and `report-blocker`.
+A failed GitHub readback fails `github-readback-invalid`; retry the same check.
+
 The coordinator withdraws such a binding from the published blocker and, when
 still eligible, re-reserves from a fresh readback. Nobody relays evidence by hand.
 Existing packetless assignments keep blocking; only an already-delivered
-packetless start may replay its own saved request.
+packetless start may replay its own saved request. A blocker recorded before
+#2958 committed only its proof digest; `prestart-proof` then mints a fresh proof
+(`alreadyReported:false`) so the consumer re-reports it with the full payload
+and the coordinator withdraws from the mailbox alone.
 
 The coordinator reserves Mac **1 mobile + 4 general, 5 total** and Windows
 **0 mobile + 5 general, 5 total**, with no borrowing. Global issue/PR/file
@@ -567,12 +577,13 @@ New PR recovery uses `create_session` at the verified existing PR head ref in a
 new isolated worktree; **never the native PR-opening tool**, whose implicit reuse can adopt
 or mutate an unrelated native session. Fresh evidence includes `prState:"open"`,
 `prHeadRepository:"OlyForge3D/PrintFarmer"`, `prHeadRef`, `prHeadSha` matching the
-task, and `prWorkerPolicyDigest`. Compute that digest from the immutable PR head:
-the SHA-256 text hashes of `.github/agents/ralph-worker.agent.md`, this member's charter,
-and `.copilot/skills/ralph-loop/assigned-worker.md`, serialized as
-`{agentSha256,contractSha256,charterSha256}` in that order using mailbox `digest`.
-Normalize CRLF to LF for these policy-text hashes (and `charterSha256`) on both
-hosts; do not trim content or normalize task/receipt JSON.
+task, and `prWorkerPolicyDigest`. The consumer does not supply that digest: the
+runtime reads it from the immutable PR head through the GitHub contents API.
+It hashes `.github/agents/ralph-worker.agent.md`, the owner member's charter
+and `.copilot/skills/ralph-loop/assigned-worker.md` (CRLF normalized to LF),
+serialized as `{agentSha256,contractSha256,charterSha256}` in that order using
+mailbox `digest`. An unreadable file fails `github-readback-invalid`; a supplied
+value that differs fails `github-readback-mismatch`.
 It must match the approved local worker policy. An older branch without this
 bounded entrypoint needs policy reconciliation by its existing owner, not a
 blind kickoff using its old coordinator instructions. Forks and unverifiable
@@ -756,10 +767,16 @@ runtime re-reads the published terminal artifact itself:
 - A closed unmerged PR needs an explicit `closureReason`.
 - A merged PR must keep the published head (`artifact-changed`) and contain
   `Closes #issue` (`artifact-unlinked`). Its `squad/pre-pr-verdict` status at
-  that exact head must be `REVIEWED (self-attested…)` or `APPROVE (owner)`
-  (`artifact-unreviewed`).
+  that exact head must classify as `REVIEWED` or `APPROVED`
+  (`artifact-unreviewed`). The runtime uses `loadSquadVerdict` from
+  `verify-squad-verdict.mjs`, so the status must come from a trusted
+  `squad-review-verdict.yml` run for that PR on the default branch, not merely
+  carry a matching description.
 
-The settle digest binds that readback. Until then all slots remain
+The settle digest binds that readback. For packet-bound work, `settle` also
+carries `terminalReceiptDigest` and `terminalArtifactDigest`. The reducer
+rejects the settlement (`artifact-changed`) if a replacement terminal receipt
+lands between the coordinator's verification and publication. Until then all slots remain
 reserved. Discoveries, new prerequisites and expanded scope go back to the
 coordinator before work expands.
 A later coordinator may settle that commitment hours/days later without consumer

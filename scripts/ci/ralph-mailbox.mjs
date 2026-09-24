@@ -115,6 +115,15 @@ const maxPacketBytes = 64 * 1024;
 const packetKeys = ['version', 'repository', 'issue', 'pr', 'purpose', 'headSha', 'title', 'labels',
   'acceptanceCriteria', 'files', 'scope', 'classificationComplete', 'capabilities', 'sourceBodySha256'];
 const text = (value, max) => typeof value === 'string' && value.length <= max && !/[\u0000]/.test(value);
+// Coordinator-authored free text is not verified against public GitHub facts, so it
+// must not carry local paths, native/session UUIDs or recognizable credentials.
+const privateTextPattern = new RegExp([
+  /(?:^|[^A-Za-z0-9._-])\/(?:Users|home|root|private|var\/folders|Volumes)\//.source,
+  /(?:^|[\s"'(=:])~[\\/]/.source, /(?:^|[^A-Za-z0-9])[A-Za-z]:\\/.source, /(?:^|\s)\\\\[A-Za-z0-9]/.source,
+  /\.printfarmer-ralph/.source, /\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b/.source,
+  /\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|xox[abprs]-[A-Za-z0-9-]{10,})/.source,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/.source,
+].join('|'), 'i');
 
 export function hasHeldLabel(labels) {
   return Array.isArray(labels) && labels.some((label) => heldLabels.has(String(label).toLowerCase()));
@@ -139,6 +148,9 @@ export function validateTaskPacket(packet) {
       packet.files.some((file) => !text(file, 1024) || /^(?:[A-Za-z]:|~|[\\/])/.test(file) ||
         /(?:^|[\\/])\.\.(?:[\\/]|$)/.test(file)) ||
       Buffer.byteLength(JSON.stringify(packet)) > maxPacketBytes) fail('Invalid task packet: exact public task facts and repository-relative files only.');
+  if ([...packet.acceptanceCriteria, packet.scope, ...packet.files].some((value) => privateTextPattern.test(value))) {
+    fail('Invalid task packet: acceptance criteria, scope and files must not contain local paths, native IDs or credentials.');
+  }
   return packet;
 }
 
@@ -404,9 +416,16 @@ export function applyEvent(previous, event, { now = Date.now(), replay = false }
       case 'settle':
       case 'release': {
         coordinator();
-        exact(data, ['assignmentId', 'generation', 'taskDigest', 'terminalEvidenceDigest']);
+        exact(data, ['assignmentId', 'generation', 'taskDigest', 'terminalEvidenceDigest', 'terminalReceiptDigest', 'terminalArtifactDigest']);
         const assignment = getAssignment();
         if (assignment.state !== 'terminal-reported' || !digestPattern.test(data.terminalEvidenceDigest ?? '')) fail('Correlated terminal report and independent native reconciliation required.');
+        // Packet-bound settlement names the exact terminal receipt and artifact the
+        // coordinator verified; a replacement receipt published meanwhile rejects it.
+        if ((assignment.taskPacket || data.terminalReceiptDigest !== undefined || data.terminalArtifactDigest !== undefined) &&
+            (data.terminalReceiptDigest !== assignment.terminalCommitment ||
+              data.terminalArtifactDigest !== digest(assignment.terminalArtifact ?? null))) {
+          fail('artifact-changed: the terminal receipt or artifact changed after coordinator verification; re-read and reconcile before settlement.');
+        }
         if (event.type === 'settle') {
           if (assignment.blocker || assignment.terminalCommitment !== assignment.receipts.at(-1)?.evidenceDigest) fail('Unblocked durable terminal commitment required; old receipts need consumer reconciliation.');
         } else {
