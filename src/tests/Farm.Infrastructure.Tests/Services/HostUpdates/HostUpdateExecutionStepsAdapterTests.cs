@@ -66,8 +66,17 @@ public sealed class HostUpdateExecutionStepsAdapterTests : IDisposable
         Assert.True(request.IsValid(out string error), error);
         string priorPath = Path.Combine(_root, "prior-state.json");
         await WritePriorStateAsync(new FileInstalledHostStateStore(priorPath));
-        // The prior filename fits NTFS/ext4 limits; the atomic writer's GUID suffix does not.
-        string path = Path.Combine(_root, new string('s', 240) + ".json");
+        // Filesystem assumption: the supported test filesystems (NTFS, ext4, APFS) cap a single
+        // path component at 255 characters. The 245-character ASCII state filename fits, but the
+        // atomic writer's ".tmp-<32-hex GUID>" sibling (245 + 37 = 282) does not, so creating the
+        // temp file fails before the existing state is replaced. This is not a universal .NET or
+        // filesystem guarantee; a filesystem that accepts the longer name fails the assertion below.
+        const int ComponentLimit = 255;
+        string fileName = new string('s', 240) + ".json";
+        int tempComponentLength = fileName.Length + ".tmp-".Length + Guid.Empty.ToString("N").Length;
+        Assert.Equal(245, fileName.Length);
+        Assert.Equal(282, tempComponentLength);
+        string path = Path.Combine(_root, fileName);
         File.Move(priorPath, path);
         var store = new FileInstalledHostStateStore(path);
         Assert.NotNull(await store.ReadAsync(CancellationToken.None));
@@ -77,9 +86,16 @@ public sealed class HostUpdateExecutionStepsAdapterTests : IDisposable
         var fence = new Mock<IHostUpdateFenceCoordinator>(MockBehavior.Strict);
         HostUpdateExecutionStepsAdapter adapter = CreateAdapter(store, verifier.Object, fence.Object);
 
-        await Assert.ThrowsAnyAsync<IOException>(() =>
-                adapter.VerifyAsync(request, CancellationToken.None));
+        Exception? failure = await Record.ExceptionAsync(() =>
+            adapter.VerifyAsync(request, CancellationToken.None));
 
+        Assert.True(
+            failure is IOException,
+            $"Expected an IOException because the atomic writer's {tempComponentLength}-character temp " +
+            $"filename exceeds the {ComponentLimit}-character component limit assumed for NTFS/ext4/APFS; " +
+            $"got {failure?.GetType().FullName ?? "no exception"}. If the state write succeeded (no exception, " +
+            "or the strict fence mock rejecting ReleaseAsync), this filesystem accepts longer components " +
+            "and the fixture no longer exercises a write failure.");
         Assert.Equal(prior, await File.ReadAllTextAsync(path));
         fence.Verify(value => value.ReleaseAsync(It.IsAny<CancellationToken>()), Times.Never);
     }
