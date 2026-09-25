@@ -13,12 +13,20 @@ post_date: "2026-09-24"
 
 ## Support boundary
 
-This is the documentation slice of #2664, not proof of completed manual or
-offline recovery. **Do not enable managed installation on the strength of this
-guide.** The packaged host-local recovery CLI (only a first slice exists; see
-[Failure and recovery](#failure-and-recovery)), complete offline bundle and isolated
-restore evidence remain delivery gates. See the
-[offline recovery requirements](OFFLINE_UPDATE_RECOVERY.md).
+This runbook is part of #2664. It does not prove that manual or offline
+recovery is complete. **Do not enable managed installation on the strength of
+this guide.** The host-local status/recovery CLI (#2980) now ships as a signed
+package; see [Failure and recovery](#failure-and-recovery). The following
+delivery gates are still open:
+
+- installer placement and generated host configuration (#3045)
+- manifest-binding drift detection (#3050)
+- the physical printer reconciliation gate (#2999)
+- provider and topology coverage (#3000)
+- complete offline bundles (#2981)
+- isolated recovery and rollout evidence (#2982)
+
+See the [offline recovery requirements](OFFLINE_UPDATE_RECOVERY.md).
 
 The API has constrained executor adapters and a manual authorization path.
 The scheduler is registered when protected host state is enabled, but production
@@ -88,7 +96,7 @@ Back up sensitive state securely without publishing it in tickets or logs.
 | `HostUpdateExecution:RootDirectory` | Absolute persistent executor root, not temp or the working tree. `state/journal.ndjson`, `state/installed-state.json`, `state/execution.lock`, `state/recovery-outcomes` and `backups` are derived beneath it. Preserve the complete root, not just the named examples. |
 | `HostUpdates:HostState` | Default `Enabled=false`. `RootPath` must already exist and pass filesystem-security validation. It holds installation identity, replay store/anchor/journal, policy fence, one-time authorizations and automation policy. Windows additionally requires a genuinely provisioned restricted ACL and `WindowsSecurityAttested`; the flag is not an ACL installer. |
 | `HostUpdateExecution:HostExecutablePaths` | Explicit absolute paths to audited Docker and database tools in the executor's namespace; no ambient PATH or arbitrary commands. This configuration does not authorize API access to Docker. |
-| Executor topology/storage options | Match `ComposeFiles`, `ComposeProjectName`, `ActiveServiceIds`, `ServiceMappings`, `OwnedDirectories` and health endpoint to the actual installation. Defaults are not universal. Missing owned storage is an error, not an empty successful backup. |
+| Executor topology/storage options | Match `ComposeFiles`, `ComposeProjectName`, `ActiveServiceIds`, `ServiceMappings`, `OwnedDirectories` and health endpoint to the actual installation. Defaults are not universal: a configured `ComposeFiles`, `ActiveServiceIds` or `ServiceMappings` list replaces its default rather than extending it (see the [CLI limits](#host-local-status-and-recovery-cli)). Missing owned storage is an error, not an empty successful backup. |
 
 For SQL Server, backup files are written in the **database server's**
 filesystem. The derived backup directory must be visible and readable at the
@@ -195,14 +203,21 @@ endpoints exist.
 
 ## Failure and recovery
 
-**The packaged host-local status/recovery CLI is only partially delivered.** The
-first slice of #2980 (below) adds the API-independent engine entry point and
-wrappers, and #3041 publishes it as a signed, self-contained package for a
-declared host matrix. Automated installer placement and configuration
-generation (#3045), manifest-binding drift (#3050) and
-provider/topology coverage are still open. That gap still blocks a claim of
-complete recovery support. Retain protected host evidence for the deployment
-owner; do not invent a recovery command, edit journal JSON, delete locks, or run
+**The host-local status/recovery CLI is delivered, but recovery support is
+not complete.** #2980 added the API-independent engine entry point and its
+fixed-operation wrappers. #2998 added drift reapproval and the downtime preview,
+and #3047 added journaled authorization baselines. #3041 publishes the CLI as a
+signed, self-contained package for a declared host matrix.
+
+These gaps still block a claim of complete recovery support:
+
+- installer placement and configuration generation (#3045)
+- manifest-binding (database) drift detection (#3050)
+- a physical printer command reconciliation gate (#2999)
+- PostgreSQL/SQL Server and monolith/split topology coverage (#3000)
+
+While those gaps are open, retain protected host evidence for the deployment
+owner. Do not invent a recovery command, edit journal JSON, delete locks, or run
 the installer against a possibly migrated database. Directly reading a file is
 not journal integrity verification or authorization to release a fence.
 
@@ -294,12 +309,12 @@ SHA-256 against the list on the target host before extracting.
 Automated placement by the installer, generated host configuration and a
 per-archive SBOM are follow-up work (#3045).
 
-### Host-local status and recovery CLI (first slice, #2980)
+### Host-local status and recovery CLI
 
 `Farm.HostUpdate.Cli` (`src/tools/Farm.HostUpdate.Cli`) runs the same
 journal, lock and recovery coordinator the API uses, without the API. It is
-**not rollout authorization**: it never starts a forward update, and does not
-close #2980 or #2664. Run it only through the fixed-operation wrappers, as the
+**not rollout authorization**: it never starts a forward update, and it does not
+close #2664. Run it only through the fixed-operation wrappers, as the
 account that owns the protected root, with the same configuration the API host
 uses:
 
@@ -419,7 +434,7 @@ nothing to reapprove.
 | 11 | Fence release pending | Writers stay fenced. Re-run `recover --confirm` once the fence adapter is reachable. |
 | 12 | Drift not reapproved, or the installed state changed after evaluation (`drift_reapproval_stale`) | Run `--preview`, review every drift item with the deployment owner, then re-run `--confirm` with `--reapprove-drift <token>` only if recovery toward the recorded prior state is still correct. |
 
-Known limits of this slice:
+Known limits of the current CLI:
 
 - `status`, `--preview` and the CLI's own reads before `--confirm` take the
   execution lock without rewriting an existing `state/execution.lock`. Only a
@@ -465,9 +480,9 @@ Known limits of this slice:
   which builds the archive with the release packaging code, verifies it
   against its checksum list, extracts it and runs the CLI with `dotnet` poisoned
   on `PATH`.
-- There is no manifest-binding (database) drift
-  detection (#3050), physical command reconciliation gate or PostgreSQL/SQL Server and
-  split-topology proof yet; those remain follow-up work under #2658. The
+- Manifest-binding (database) drift detection is not implemented yet
+  (#3050). Neither is a physical command reconciliation gate (#2999), nor
+  PostgreSQL/SQL Server and monolith/split topology proof (#3000). The
   installer does not yet place the package or generate its configuration
   (#3045), and macOS has no package (see
   [Install the signed CLI package](#install-the-signed-cli-package)).
@@ -510,7 +525,14 @@ For coordinated restoration, the approved recovery procedure must:
    become fresh update offers.
 
 This checklist is a safety boundary, **not a tested provider-specific restore
-script**. Remaining delivery is tracked by #2980 (host-local CLI), #2981
-(complete bundles) and #2982 (isolated recovery and authorized rollout evidence).
+script**. Remaining delivery is tracked by:
+
+- #2999: the physical printer reconciliation gate
+- #3000: provider and topology coverage
+- #3045: installer placement and host configuration
+- #3050: manifest-binding drift
+- #2981: complete bundles
+- #2982: isolated recovery and authorized rollout evidence
+
 #2664 remains open. Keep managed update execution disabled until those gates
 and the deployment owner's rollout requirements are satisfied.

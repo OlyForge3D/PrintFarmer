@@ -13,12 +13,16 @@ post_date: "2026-09-24"
 
 ## Current support
 
-**A complete managed-update/offline recovery bundle is not shipped by this
-documentation change.** `deploy-docker.sh --prepare-offline` prepares legacy
-deployment materials and image caches. It is not a signed complete release,
-bounded trusted importer, host recovery CLI, or proof of coordinated restore.
-Do not use it to update an installation that needs #2664's recovery guarantees.
-There is no supported skip-verification, force-import or replay-reset option.
+**A complete managed-update/offline recovery bundle is not shipped yet** (#2981).
+`deploy-docker.sh --prepare-offline` prepares legacy deployment materials and
+image caches. It is not a signed complete release, a bounded trusted importer,
+or proof of coordinated restore. Do not use it to update an installation that
+needs #2664's recovery guarantees. The signed host-local status/recovery CLI
+package (#2980, #3041) is a separate release asset. It can be carried to a
+disconnected host as described in the
+[runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package), but it is only
+one item in the bundle below. There is no supported skip-verification,
+force-import or replay-reset option.
 
 Connected installations need a proven minimum host-local recovery path but do
 not need to hand-carry a bundle. Disconnected installations additionally need
@@ -38,7 +42,7 @@ bundle complete; this table is not an archive layout or an implementation.
 | Offline verification evidence and tooling | Preserve provenance and approved trust-root continuity, expiry/revocation evidence and pinned verification tools. Bundle-supplied signer material cannot enroll itself. Verification must work after source branch movement without live ancestry lookup. |
 | Target application and infrastructure images | Include every selected platform/service image, database/runtime/proxy/add-on dependency and required worker under the supported topology contract. Six published application images alone are not every installation's infrastructure. Verify archive content against immutable identity; no missing-image downloads or builds. |
 | Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. |
-| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. No reliance on the API, package manager, registry or internet being available during recovery. |
+| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list and the Cosign bundle (#3041) are the status/recovery tool. Installer placement and generated configuration are still open (#3045). No reliance on the API, package manager, registry or internet being available during recovery. |
 | Installation-specific protected backup | Coordinated databases, models/G-code/profiles/artifacts, keys, certificates and config at the same consistency point. Keep private material access-controlled and separate from the redistributable release bundle. Never include publisher credentials. |
 
 ## Import and continuity rules
@@ -111,6 +115,13 @@ allowed metadata must still work.
 No fallback network request, local build, fabricated recovery success or
 physical printer command is acceptable. Retain full failure evidence, prove
 fences stay closed on uncertainty, and confirm safe post-restore reconciliation.
-Implementation is tracked in #2980 (host-local CLI) and #2981 (complete
-bundles); #2982 owns this matrix and separately authorized staging/pilot
-evidence. #2664 remains open until its full retained acceptance is complete.
+The host-local CLI is delivered (#2980). Its open recovery gaps are:
+
+- installer placement and generated configuration (#3045)
+- manifest-binding drift (#3050)
+- physical printer reconciliation (#2999)
+- provider and topology coverage (#3000)
+
+Complete bundles are tracked in #2981. #2982 owns this matrix and separately
+authorized staging/pilot evidence. #2664 remains open until its full retained
+acceptance is complete.
