@@ -288,6 +288,9 @@ a content hash of the prior installed state, the configuration fingerprint
 (below) and the fingerprint of the pinned release trust root (Sigstore issuer
 and per-channel release-workflow identities). If the baseline cannot be
 captured, the update refuses to start (`authorization_baseline_unavailable`).
+The baseline is captured only at first acceptance: a resumed release, including
+one authorized before #3047, is never re-baselined onto the host state at
+restart, and only the journal's hashed payload is trusted when it is read back.
 
 | Drift code | Meaning |
 | --- | --- |

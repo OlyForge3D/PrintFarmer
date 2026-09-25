@@ -207,7 +207,10 @@ public sealed class HostUpdateExecutor(
         if (current == HostUpdateExecutionState.Accepted)
         {
             HostUpdateAuthorizationBaseline? baseline = null;
-            if (baselineProvider is not null)
+            // Capture only at first acceptance: re-capturing after a restart would rebase a legacy or
+            // already-authorized release onto post-authorization host state.
+            bool firstAcceptance = !activities.Any(a => a.State == HostUpdateExecutionState.Accepted);
+            if (baselineProvider is not null && firstAcceptance)
             {
                 try
                 {
@@ -637,6 +640,23 @@ public sealed class FileHostUpdateExecutionJournal(string path) : IHostUpdateExe
                 throw new InvalidDataException("journal_integrity_failure");
             }
 
+            // Only the hashed payload is trusted; the outer activity copy is unauthenticated.
+            HostUpdateExecutionActivity? hashed;
+            try
+            {
+                hashed = JsonSerializer.Deserialize<HostUpdateExecutionActivity>(record.Payload);
+            }
+            catch (JsonException ex)
+            {
+                throw new InvalidDataException("journal_integrity_failure", ex);
+            }
+
+            if (hashed is null)
+            {
+                throw new InvalidDataException("journal_integrity_failure");
+            }
+
+            record = record with { Activity = hashed };
             records.Add(record);
             previous = record.Hash;
         }

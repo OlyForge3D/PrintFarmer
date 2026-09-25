@@ -679,9 +679,14 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
 
         HostUpdateRecoveryDrift.AuthorizationBaseline(
         [
+            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline),
+            Activity(HostUpdateExecutionState.Accepted, "accepted", null),
+        ]).Should().Be(baseline, "the first accepted activity carries the authorization baseline");
+        HostUpdateRecoveryDrift.AuthorizationBaseline(
+        [
             Activity(HostUpdateExecutionState.Accepted, "accepted", null),
             Activity(HostUpdateExecutionState.Accepted, "accepted", baseline),
-        ]).Should().Be(baseline, "a crash before preflight re-appends accepted with the same host state");
+        ]).Should().BeNull("a legacy authorization must not be rebased by a baseline captured on resume");
         HostUpdateRecoveryDrift.AuthorizationBaseline(
         [
             Activity(HostUpdateExecutionState.Accepted, "accepted", null),

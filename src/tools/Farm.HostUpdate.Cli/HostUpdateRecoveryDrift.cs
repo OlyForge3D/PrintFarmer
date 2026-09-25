@@ -231,11 +231,12 @@ internal static class HostUpdateRecoveryDrift
     /// run of <c>accepted</c> activities (a crash before preflight re-appends <c>accepted</c> with
     /// the same host state). Null when none was recorded or the schema is not understood.
     /// </summary>
+    // Only the first activity describes the authorization; a later "accepted" re-append (resume after a
+    // crash) must never supply a baseline, or a legacy journal could be rebased onto post-authorization state.
     internal static HostUpdateAuthorizationBaseline? AuthorizationBaseline(IReadOnlyList<HostUpdateExecutionActivity> activities) =>
-        activities
-            .TakeWhile(activity => activity.State == HostUpdateExecutionState.Accepted && string.Equals(activity.Phase, "accepted", StringComparison.Ordinal))
-            .Select(activity => activity.AuthorizationBaseline)
-            .FirstOrDefault(baseline => baseline is { SchemaVersion: HostUpdateAuthorizationBaseline.CurrentSchemaVersion });
+        activities.Count > 0 && activities[0] is { State: HostUpdateExecutionState.Accepted, Phase: "accepted", AuthorizationBaseline: { SchemaVersion: HostUpdateAuthorizationBaseline.CurrentSchemaVersion } baseline }
+            ? baseline
+            : null;
 
     internal static string ChannelName(HostUpdateExecutionChannel channel) => channel switch
     {

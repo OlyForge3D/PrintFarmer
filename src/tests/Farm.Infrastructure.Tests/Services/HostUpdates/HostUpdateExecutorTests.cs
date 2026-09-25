@@ -303,6 +303,49 @@ public sealed class HostUpdateExecutorTests
     }
 
     [Fact]
+    public async Task Executor_does_not_rebase_a_legacy_accepted_entry_onto_current_host_state()
+    {
+        var journal = new MemoryJournal();
+        journal.Append(new("legacy", Request().ReleaseId, HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow.AddHours(-1)));
+        var provider = new StubBaselineProvider(() => new HostUpdateAuthorizationBaseline(1, "sha256:rebased", "sha256:rebased", HostUpdateTrustRoot.Fingerprint));
+
+        HostUpdateExecutionResult result = await new HostUpdateExecutor(
+            new FailingSteps(), journal, new NoopLock(), new InlinePolicyRepository(Policy()), baselineProvider: provider).ExecuteAsync(Request());
+
+        Assert.Equal(0, provider.Calls);
+        Assert.All(result.Activities, a => Assert.Null(a.AuthorizationBaseline));
+        Assert.All(journal.Read(Request().ReleaseId), a => Assert.Null(a.AuthorizationBaseline));
+    }
+
+    [Fact]
+    public void Journal_trusts_only_the_hashed_payload_not_the_outer_activity_copy()
+    {
+        string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal");
+        try
+        {
+            var baseline = new HostUpdateAuthorizationBaseline(1, "sha256:" + new string('1', 64), "sha256:config", HostUpdateTrustRoot.Fingerprint);
+            new FileHostUpdateExecutionJournal(path).Append(
+                new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow) { AuthorizationBaseline = baseline });
+
+            System.Text.Json.Nodes.JsonNode line = System.Text.Json.Nodes.JsonNode.Parse(File.ReadAllText(path).TrimEnd('\n'))!;
+            line["Activity"]!["AuthorizationBaseline"]!["ConfigurationFingerprint"] = "sha256:forged";
+            line["Activity"]!["ReleaseId"] = "r";
+            File.WriteAllText(path, line.ToJsonString() + "\n");
+
+            HostUpdateExecutionActivity read = Assert.Single(new FileHostUpdateExecutionJournal(path).Read("r"));
+
+            Assert.Equal(baseline, read.AuthorizationBaseline);
+        }
+        finally
+        {
+            if (File.Exists(path))
+            {
+                File.Delete(path);
+            }
+        }
+    }
+
+    [Fact]
     public void Journaled_baseline_round_trips_and_is_absent_from_legacy_entries()
     {
         string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal");
