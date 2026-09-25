@@ -15,7 +15,7 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  closeSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, rmdirSync, rmSync,
+  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, rmdirSync, rmSync,
   writeSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
@@ -300,9 +300,9 @@ function writeAll(fd, buffer) {
 function openRegularFile(path, label) {
   const stat = lstatSync(path, { throwIfNoEntry: false });
   requireThat(stat?.isFile() && !stat.isSymbolicLink(), `${label} must be a regular file (not a link): ${path}`);
-  const fd = openSync(path, 'r');
+  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
   const opened = fstatSync(fd);
-  if (!opened.isFile() || opened.ino !== stat.ino || opened.size !== stat.size) {
+  if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino || opened.size !== stat.size) {
     closeSync(fd);
     throw new Error(`${label} changed while being opened: ${path}`);
   }
