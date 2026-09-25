@@ -133,8 +133,8 @@ also enforces any tighter allowance assigned in a test body. No XCTest
 allowance or action timeout is increased, and unauthenticated/loading-scenario
 suites do not opt into this precondition.
 
-Login navigation explicitly dismisses an observed "Save Password?" alert using
-"Not Now". The password prompt can arrive after the sidebar opens; snapshot-only
+Login navigation explicitly dismisses an observed "Save Password?" prompt
+(an alert, or on iPhone a sheet as described below) using "Not Now". The password prompt can arrive after the sidebar opens; snapshot-only
 polling otherwise cannot trigger XCTest's implicit interruption handler. The
 login-only allowlist checks the public alert root before taking a shell snapshot
 or revealing its sidebar. Only an existing alert is then snapshotted;
@@ -149,8 +149,9 @@ changed alerts and expired budgets never authorize another tap. Other suites
 do not opt into that repeat. No credentials are saved, no physical command is
 retried, and no product behavior changes.
 
-On iOS 26.5 the system presents the same prompt as a `Sheet` titled "Save
-Password?" in the app's own accessibility tree, not as an `Alert` (#3032). The
+On iOS 26.5 iPhone the system presents the same prompt as a `Sheet` titled
+"Save Password?" in the app's own accessibility tree, not as an `Alert`; iPad
+still presents an `Alert` (#3032). The
 login query therefore checks the allowlisted title as an alert and then as a
 sheet, still in the target application's context. A sheet blocks navigation
 only when its title is allowlisted, so app action sheets and suites without an
