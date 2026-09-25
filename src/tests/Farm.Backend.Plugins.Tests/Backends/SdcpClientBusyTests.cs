@@ -131,14 +131,14 @@ public sealed class SdcpClientBusyTests
             await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", context.RequestAborted);
         });
 
-        await app.StartAsync();
+        return await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
+            using var httpClient = new System.Net.Http.HttpClient();
+            var client = new SdcpClient(httpClient, logger.Object, new BackendTimeoutSettings());
 
-        string baseUrl = app.GetLoopbackBaseUrl();
-        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
-        using var httpClient = new System.Net.Http.HttpClient();
-        var client = new SdcpClient(httpClient, logger.Object, new BackendTimeoutSettings());
-
-        return new SdcpTestEnvironment(app, client, baseUrl);
+            return new SdcpTestEnvironment(app, client, baseUrl);
+        });
     }
 
     private static string BuildCommandAckResponse(int cmd, int ack) =>

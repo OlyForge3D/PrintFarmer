@@ -868,14 +868,14 @@ public sealed class SdcpClientParsingTests
             await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", context.RequestAborted);
         });
 
-        await app.StartAsync();
+        return await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
+            using var httpClient = new HttpClient();
+            var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
-        string baseUrl = app.GetLoopbackBaseUrl();
-        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
-        using var httpClient = new HttpClient();
-        var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
-
-        return new SdcpTestEnvironment(app, client, baseUrl);
+            return new SdcpTestEnvironment(app, client, baseUrl);
+        });
     }
 
     private static async Task<SdcpTestEnvironment> CreateSdcpStartServerAsync(int startAck)
@@ -934,17 +934,17 @@ public sealed class SdcpClientParsingTests
             }
         });
 
-        await app.StartAsync();
+        return await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
+            var httpClient = new HttpClient(new SuccessfulHttpHandler());
+            var client = new SdcpClient(
+                httpClient,
+                logger.Object,
+                new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
-        string baseUrl = app.GetLoopbackBaseUrl();
-        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
-        var httpClient = new HttpClient(new SuccessfulHttpHandler());
-        var client = new SdcpClient(
-            httpClient,
-            logger.Object,
-            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
-
-        return new SdcpTestEnvironment(app, client, baseUrl, httpClient);
+            return new SdcpTestEnvironment(app, client, baseUrl, httpClient);
+        });
     }
 
     private static async Task<(SdcpTestEnvironment Environment, Func<int> StatusRequestCount)>
@@ -997,17 +997,16 @@ public sealed class SdcpClientParsingTests
                 "start acknowledgement lost",
                 context.RequestAborted);
         });
-        await app.StartAsync();
-
-        string baseUrl = app.GetLoopbackBaseUrl();
-        var httpClient = new HttpClient(new SuccessfulHttpHandler());
-        var client = new SdcpClient(
-            httpClient,
-            Mock.Of<ILogger<SdcpClient>>(),
-            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
-        return (
-            new SdcpTestEnvironment(app, client, baseUrl, httpClient),
-            () => Volatile.Read(ref statusRequestCount));
+        SdcpTestEnvironment environment = await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            var httpClient = new HttpClient(new SuccessfulHttpHandler());
+            var client = new SdcpClient(
+                httpClient,
+                Mock.Of<ILogger<SdcpClient>>(),
+                new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+            return new SdcpTestEnvironment(app, client, baseUrl, httpClient);
+        });
+        return (environment, () => Volatile.Read(ref statusRequestCount));
     }
 
     /// <summary>
@@ -1079,14 +1078,14 @@ public sealed class SdcpClientParsingTests
             }
         });
 
-        await app.StartAsync();
+        return await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
+            using var httpClient = new HttpClient();
+            var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
 
-        string baseUrl = app.GetLoopbackBaseUrl();
-        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
-        using var httpClient = new HttpClient();
-        var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
-
-        return new SdcpTestEnvironment(app, client, baseUrl);
+            return new SdcpTestEnvironment(app, client, baseUrl);
+        });
     }
 
     private static async Task<SdcpTestEnvironment> CreateSilentSdcpServerAsync()
@@ -1119,20 +1118,18 @@ public sealed class SdcpClientParsingTests
                 // The client timeout closes the test socket.
             }
         });
-        await app.StartAsync();
-
-        using var http = new HttpClient();
-        var client = new SdcpClient(
-            http,
-            Mock.Of<ILogger<SdcpClient>>(),
-            new Farm.Infrastructure.Settings.BackendTimeoutSettings
-            {
-                CommandTimeoutSeconds = 1,
-            });
-        return new SdcpTestEnvironment(
-            app,
-            client,
-            app.GetLoopbackBaseUrl());
+        return await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            using var http = new HttpClient();
+            var client = new SdcpClient(
+                http,
+                Mock.Of<ILogger<SdcpClient>>(),
+                new Farm.Infrastructure.Settings.BackendTimeoutSettings
+                {
+                    CommandTimeoutSeconds = 1,
+                });
+            return new SdcpTestEnvironment(app, client, baseUrl);
+        });
     }
 
     private static async Task<SdcpTestEnvironment> CreateRejectingSdcpServerAsync()
@@ -1149,17 +1146,15 @@ public sealed class SdcpClientParsingTests
             context.Response.StatusCode = (int)HttpStatusCode.ServiceUnavailable;
             return Task.CompletedTask;
         });
-        await app.StartAsync();
-
-        using var http = new HttpClient();
-        var client = new SdcpClient(
-            http,
-            Mock.Of<ILogger<SdcpClient>>(),
-            new Farm.Infrastructure.Settings.BackendTimeoutSettings());
-        return new SdcpTestEnvironment(
-            app,
-            client,
-            app.GetLoopbackBaseUrl());
+        return await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            using var http = new HttpClient();
+            var client = new SdcpClient(
+                http,
+                Mock.Of<ILogger<SdcpClient>>(),
+                new Farm.Infrastructure.Settings.BackendTimeoutSettings());
+            return new SdcpTestEnvironment(app, client, baseUrl);
+        });
     }
 
     /// <summary>
