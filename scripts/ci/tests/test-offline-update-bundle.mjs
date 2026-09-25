@@ -1675,6 +1675,59 @@ test('import refuses unverified bundles with a redacted reason and never loads',
   }
 });
 
+test('an in-progress record is durable before the first load and a partial load is recorded accurately', () => {
+  const context = completeFixture('stable');
+  try {
+    const decisionId = '00000000-0000-4000-8000-000000000002';
+    const target = join(context.records, `2026-09-25T20-00-00-000Z-${decisionId}.json`);
+    const base = importRunner();
+    let loads = 0;
+    const observed = [];
+    const run = (name, args, options) => {
+      if (name !== 'docker') return base.run(name, args, options);
+      observed.push(JSON.parse(readFileSync(target, 'utf8')).outcome);
+      loads += 1;
+      if (loads === 2) throw new Error(`docker load failed for ${context.staging}`);
+      return base.run(name, args, options);
+    };
+    const { record } = runImport(context, { run, newId: () => decisionId });
+    assert.deepEqual(observed, ['in-progress', 'in-progress'], 'durable evidence precedes every docker load');
+    assert.equal(record.outcome, 'refused');
+    assert.match(record.reason, /docker load failed for <staging>/);
+    assert.equal(record.loadedImages.length, 1, 'the image loaded before the failure is recorded');
+    assert.equal(typeof record.failedLoad, 'string');
+    assert.ok(!record.loadedImages.some(image => image.member === record.failedLoad));
+    assert.deepEqual(JSON.parse(readFileSync(target, 'utf8')), record);
+    assert.deepEqual(decisionFiles(context), [`2026-09-25T20-00-00-000Z-${decisionId}.json`]);
+    assert.equal(existsSync(context.staging), false, 'a refused import leaves no staging directory');
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a finalization failure after loading leaves the durable in-progress record', () => {
+  const context = completeFixture('stable');
+  try {
+    const decisionId = '00000000-0000-4000-8000-000000000003';
+    const name = `2026-09-25T20-00-00-000Z-${decisionId}.json`;
+    const base = importRunner();
+    const run = (command, args, options) => {
+      // Block the final record's partial file so finalization fails after images were loaded.
+      if (command === 'docker') mkdirSync(join(context.records, `.${name}.1.partial`), { recursive: true });
+      return base.run(command, args, options);
+    };
+    assert.throws(() => runImport(context, { run, newId: () => decisionId }), /EEXIST/);
+    assert.ok(base.loads.length > 0);
+    const record = JSON.parse(readFileSync(join(context.records, name), 'utf8'));
+    assert.equal(record.outcome, 'in-progress');
+    assert.equal(record.decisionId, decisionId);
+    assert.deepEqual(record.verifiedDigests.images.map(image => image.member).sort(), allImageMembers);
+    assert.equal(record.rolloutAuthorization, false);
+  } finally {
+    context.cleanup();
+  }
+});
+
 test('import refuses to run without an operator, version or durable records directory', () => {
   const context = completeFixture('stable');
   try {

@@ -1002,7 +1002,15 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
     }
     const loaded = [];
     for (const { expected, fd } of opened) {
-      run('docker', ['load'], { stdin: fd });
+      try {
+        run('docker', ['load'], { stdin: fd });
+      } catch (error) {
+        // Earlier loads persist in the engine; report them so the caller's decision record is accurate.
+        const failure = error instanceof Error ? error : new Error(String(error));
+        failure.loaded = [...loaded];
+        failure.attempted = expected.member;
+        throw failure;
+      }
       loaded.push({ member: expected.member, reference: expected.reference, digest: expected.digest });
     }
     return { loaded };
@@ -1012,10 +1020,12 @@ export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits 
 }
 
 // ---------------------------------------------------------------------------------------------
-// Import (network-denied host, #3063): the one host-local operator path. It opens its durable
+// Import (network-denied host, #3063): the one host-local operator path. It reserves its durable
 // decision record first, so every decision -- imported or refused -- is recorded; then verifies
 // the bundle, requires it to be complete (every release-selected image, the infrastructure list
-// and the signed recovery instructions), and loads only verified images. A refused import removes
+// and the signed recovery instructions), publishes an `in-progress` record before the first
+// `docker load`, loads only verified images, and replaces that record with the final one (listing
+// every image loaded before any failure). A refused import removes
 // the staging directory it created. The record is redacted: it names the bundle by digest, never
 // by path, and replaces host paths in failure reasons with placeholders.
 // ---------------------------------------------------------------------------------------------
@@ -1077,65 +1087,42 @@ export function importOfflineBundle({ bundle, channel, version, trustedRoot, sta
   requireThat(/^[0-9a-f-]{36}$/.test(decisionId), 'Decision identifier is invalid');
   const decidedAt = now().toISOString();
   const name = `${decidedAt.replace(/[:.]/g, '-')}-${decisionId}.json`;
-  const partial = join(directory, `.${name}.partial`);
-  const recordFd = openSync(partial, 'wx', 0o600);
-  let written = false;
-  try {
-    const opened = fstatSync(recordFd);
-    const link = lstatSync(partial);
-    requireThat(opened.isFile() && link.isFile() && link.ino === opened.ino && link.dev === opened.dev,
-      'Decision record changed while being opened');
-    const stagingPath = typeof staging === 'string' && staging.length > 0 ? resolve(staging) : undefined;
-    const stagingExisted = stagingPath !== undefined && lstatSync(stagingPath, { throwIfNoEntry: false }) !== undefined;
-    let verification;
-    let loaded = [];
-    let outcome = 'refused';
-    let reason = null;
+  const target = join(directory, name);
+  requireThat(!lstatSync(target, { throwIfNoEntry: false }), 'Decision record already exists');
+  let generation = 0;
+  let published = false;
+  // Opens a fresh exclusive partial file, proven to be the file just created (not a planted link).
+  const openPartial = () => {
+    const partial = join(directory, `.${name}.${generation++}.partial`);
+    const fd = openSync(partial, 'wx', 0o600);
     try {
-      verification = verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run, priorRecoverySet,
-        protectedBackup, limits, imageLimits, now });
-      const missing = [
-        ...(verification.images.length > 0 ? [] : ['release-selected images and the infrastructure image list']),
-        ...(verification.recoveryInstructions ? [] : ['signed recovery instructions']),
-      ];
-      requireThat(missing.length === 0, `Offline bundle is incomplete and cannot be imported; it lacks ${missing.join(' and ')}`);
-      loaded = loadVerifiedImages({ staging, channel, trustedRoot, run, limits, imageLimits }).loaded;
-      outcome = 'imported';
+      const opened = fstatSync(fd);
+      const link = lstatSync(partial);
+      requireThat(opened.isFile() && link.isFile() && link.ino === opened.ino && link.dev === opened.dev,
+        'Decision record changed while being opened');
     } catch (error) {
-      reason = redactReason(error.message, { bundle, 'trusted-root': trustedRoot, staging, records: directory,
-        'prior-recovery-set': priorRecoverySet });
-      // verifyOfflineBundle removes its own staging on failure; a refusal after it succeeded removes it here.
-      if (verification && stagingPath && !stagingExisted) rmSync(stagingPath, { force: true, recursive: true });
+      closeSync(fd);
+      rmSync(partial, { force: true });
+      throw error;
     }
-    const record = {
-      schema: 1,
-      kind: offlineImportDecisionKind,
-      decisionId,
-      decidedAt,
-      operator,
-      outcome,
-      reason,
-      expected: { channel, version },
-      bundleSha256: verification?.bundleSha256 ?? bundleDigest(bundle),
-      release: verification?.release ?? null,
-      verifiedDigests: verification ? {
-        manifest: verification.manifestDigest,
-        images: verification.images.map(image => ({ member: image.member, reference: image.reference, digest: image.digest,
-          sha256: image.sha256 })),
-        recoveryInstructions: verification.recoveryInstructions ? verification.recoveryInstructions.sha256 : null,
-        priorRecoverySet: verification.priorRecoverySet ? verification.priorRecoverySet.manifestDigest : null,
-      } : null,
-      loadedImages: loaded.map(image => ({ member: image.member, digest: image.digest })),
-      installable: false,
-      rolloutAuthorization: false,
-    };
-    writeAll(recordFd, Buffer.from(`${JSON.stringify(record, undefined, 2)}\n`));
-    fsyncSync(recordFd);
-    closeSync(recordFd);
-    written = true;
-    const target = join(directory, name);
-    requireThat(!lstatSync(target, { throwIfNoEntry: false }), 'Decision record already exists');
-    renameSync(partial, target);
+    return { fd, partial };
+  };
+  // Durably publishes one record: write + fsync the partial, rename over the target, fsync the directory.
+  const publish = ({ fd, partial }, record) => {
+    let closed = false;
+    try {
+      writeAll(fd, Buffer.from(`${JSON.stringify(record, undefined, 2)}\n`));
+      fsyncSync(fd);
+      closeSync(fd);
+      closed = true;
+      if (!published) requireThat(!lstatSync(target, { throwIfNoEntry: false }), 'Decision record already exists');
+      renameSync(partial, target);
+      published = true;
+    } catch (error) {
+      if (!closed) closeSync(fd);
+      rmSync(partial, { force: true });
+      throw error;
+    }
     try {
       const directoryFd = openSync(directory, 'r');
       try {
@@ -1147,14 +1134,88 @@ export function importOfflineBundle({ bundle, channel, version, trustedRoot, sta
       // Windows cannot open or fsync a directory handle; the renamed file itself is already fsynced.
       if (process.platform !== 'win32') throw error;
     }
-    return { record, path: target };
+  };
+  // Reserve the record before any verification work, so an unwritable records directory refuses first.
+  const reservation = openPartial();
+  const stagingPath = typeof staging === 'string' && staging.length > 0 ? resolve(staging) : undefined;
+  let stagingExisted;
+  try {
+    stagingExisted = stagingPath !== undefined && lstatSync(stagingPath, { throwIfNoEntry: false }) !== undefined;
   } catch (error) {
-    if (!written) closeSync(recordFd);
-    rmSync(partial, { force: true });
+    closeSync(reservation.fd);
+    rmSync(reservation.partial, { force: true });
     throw error;
   }
+  let verification;
+  let loaded = [];
+  let attempted = null;
+  let outcome = 'refused';
+  let reason = null;
+  const redact = error => redactReason(error?.message ?? error, { bundle, 'trusted-root': trustedRoot, staging,
+    records: directory, 'prior-recovery-set': priorRecoverySet });
+  const recordOf = () => ({
+    schema: 1,
+    kind: offlineImportDecisionKind,
+    decisionId,
+    decidedAt,
+    operator,
+    outcome,
+    reason,
+    expected: { channel, version },
+    bundleSha256: verification?.bundleSha256 ?? bundleDigest(bundle),
+    release: verification?.release ?? null,
+    verifiedDigests: verification ? {
+      manifest: verification.manifestDigest,
+      images: verification.images.map(image => ({ member: image.member, reference: image.reference, digest: image.digest,
+        sha256: image.sha256 })),
+      recoveryInstructions: verification.recoveryInstructions ? verification.recoveryInstructions.sha256 : null,
+      priorRecoverySet: verification.priorRecoverySet ? verification.priorRecoverySet.manifestDigest : null,
+    } : null,
+    loadedImages: loaded.map(image => ({ member: image.member, digest: image.digest })),
+    failedLoad: attempted,
+    installable: false,
+    rolloutAuthorization: false,
+  });
+  let pending = reservation;
+  try {
+    verification = verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run, priorRecoverySet,
+      protectedBackup, limits, imageLimits, now });
+    const missing = [
+      ...(verification.images.length > 0 ? [] : ['release-selected images and the infrastructure image list']),
+      ...(verification.recoveryInstructions ? [] : ['signed recovery instructions']),
+    ];
+    requireThat(missing.length === 0, `Offline bundle is incomplete and cannot be imported; it lacks ${missing.join(' and ')}`);
+  } catch (error) {
+    reason = redact(error);
+    // verifyOfflineBundle removes its own staging on failure; a refusal after it succeeded removes it here.
+    if (verification && stagingPath && !stagingExisted) rmSync(stagingPath, { force: true, recursive: true });
+  }
+  if (reason === null) {
+    // Durable evidence precedes every side effect: an `in-progress` record is published before the
+    // first `docker load`. If finalization later fails, it remains as the record that images may have
+    // been loaded without a final outcome.
+    outcome = 'in-progress';
+    try {
+      publish(pending, recordOf());
+    } catch (error) {
+      if (stagingPath && !stagingExisted) rmSync(stagingPath, { force: true, recursive: true });
+      throw error;
+    }
+    try {
+      loaded = loadVerifiedImages({ staging, channel, trustedRoot, run, limits, imageLimits }).loaded;
+      outcome = 'imported';
+    } catch (error) {
+      loaded = Array.isArray(error?.loaded) ? error.loaded : [];
+      attempted = typeof error?.attempted === 'string' ? error.attempted : null;
+      outcome = 'refused';
+      reason = redact(error);
+      if (stagingPath && !stagingExisted) rmSync(stagingPath, { force: true, recursive: true });
+    }
+    pending = openPartial();
+  }
+  publish(pending, recordOf());
+  return { record: recordOf(), path: target };
 }
-
 // ---------------------------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------------------------

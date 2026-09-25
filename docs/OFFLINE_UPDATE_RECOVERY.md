@@ -310,15 +310,23 @@ image list with its images, and the signed recovery instructions. A bundle that
 verifies but lacks any of them is **not installable for import** and is
 refused. It then runs `load`, which re-authenticates the staged metadata and
 loads only verified archives. It exits 0 when imported and 1 when refused. A
-refusal after verification succeeded removes the staging directory. A refusal
-during `docker load` may leave some verified, content-addressed images in the
-engine; they are inert and are never tagged as active or started.
+refusal after verification succeeded removes the staging directory.
+
+Before the first `docker load`, `import` publishes a durable record with
+outcome `in-progress`, so evidence exists before any engine side effect. The
+final `imported` or `refused` record then atomically replaces it. If `import`
+is interrupted or finalization fails, the `in-progress` record remains: treat
+it as "images may have been loaded" and re-run `import`. A refusal during
+`docker load` may leave the verified, content-addressed images loaded before
+the failure in the engine; they are inert, never tagged as active or started,
+and the record lists them in `loadedImages` and names the failing member in
+`failedLoad`.
 
 Every decision, including every refusal, is written as one record
 `<records>/<decidedAt>-<decisionId>.json`: created exclusively (POSIX mode
 `0600`), fsynced, then renamed into place (and the directory fsynced on POSIX),
 so a leftover `.<name>.partial` file is never a decision. A record holds the decision
-ID and time, operator, outcome (`imported` or `refused`), a bounded reason,
+ID and time, operator, outcome (`imported`, `refused` or `in-progress`), a bounded reason,
 the expected channel and version, the bundle SHA-256, the signed release
 identity, the verified manifest, image, recovery-instruction and prior-set
 digests, the loaded image digests, `installable: false` and
