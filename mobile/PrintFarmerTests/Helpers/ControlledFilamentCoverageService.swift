@@ -147,6 +147,7 @@ actor SuspendedCurrentSessionFeatureReadCacheStore: FeatureReadCacheStoring {
         _ payload: Payload,
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         .committed
@@ -155,6 +156,7 @@ actor SuspendedCurrentSessionFeatureReadCacheStore: FeatureReadCacheStoring {
     func commitDisabled(
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         .committed
@@ -185,6 +187,7 @@ actor RecordingFeatureReadCacheStore: FeatureReadCacheStoring {
         _ payload: Payload,
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         .committed
@@ -193,6 +196,7 @@ actor RecordingFeatureReadCacheStore: FeatureReadCacheStoring {
     func commitDisabled(
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         disabledCommitCount += 1

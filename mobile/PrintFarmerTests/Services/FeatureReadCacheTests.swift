@@ -16,8 +16,12 @@ import XCTest
 ///                                                       `testCommitWithStaleCapturedSessionIsRejected`,
 ///                                                       `testHydrateDuringSwitchYieldsInactive`
 ///  6 monotonic — older cannot overwrite newer          → `testOlderSuccessCannotOverwriteNewer`,
-///                                                       `testExplicitFetchTimestampCannotOverwriteNewerSnapshot`,
+///                                                       `testExplicitFetchTimestampIsDisplayOnlyNotOrdering`,
 ///                                                       `testErrorAfterSuccessNeverWrites`
+///    #3007 clock-independent ordering                  → `testSameMillisecondConfirmedLiveWriteReplaces`,
+///                                                       `testBackwardClockConfirmedLiveWriteReplaces`,
+///                                                       `testNewLaunchSupersedesPriorLaunchRecordAndOrderIsDurable`,
+///                                                       `testLegacyRecordWithoutWriteOrderIsSuperseded`
 ///  7 disabled tombstone beats older, not empty success → `testDisabledTombstoneBeatsOlderSnapshot`,
 ///                                                       `testReverseOrderNewerDisabledWins`,
 ///                                                       `testDisabledIsDistinctFromAbsent`
@@ -31,8 +35,8 @@ final class FeatureReadCacheTests: XCTestCase {
 
     // MARK: Deterministic clock
 
-    /// Monotonic, explicitly-advanced clock so `lastUpdatedAtMillis` is exact and
-    /// ordering never depends on wall time.
+    /// Explicitly-advanced clock so the displayed `lastUpdatedAtMillis` is exact.
+    /// Ordering never depends on it (#3007).
     private final class MutableClock: @unchecked Sendable {
         private let lock = NSLock()
         private var millis: Int64
@@ -43,6 +47,22 @@ final class FeatureReadCacheTests: XCTestCase {
             return Date(timeIntervalSince1970: Double(millis) / 1000.0)
         }
         var sendableNow: @Sendable () -> Date { { [self] in self.now() } }
+    }
+
+    /// Captures every adapter commit outcome (#3007 reporting seam).
+    private final class CommitRecorder: @unchecked Sendable {
+        struct Outcome: Equatable {
+            let recordKey: String
+            let result: FeatureReadCacheCommitResult
+        }
+        private let lock = NSLock()
+        private var recorded: [Outcome] = []
+        var outcomes: [Outcome] { lock.lock(); defer { lock.unlock() }; return recorded }
+        var report: FeatureReadCacheCommitReporter {
+            { [self] key, result in
+                lock.lock(); recorded.append(Outcome(recordKey: key, result: result)); lock.unlock()
+            }
+        }
     }
 
     // MARK: Roots / teardown
@@ -295,23 +315,35 @@ final class FeatureReadCacheTests: XCTestCase {
 
     // MARK: 6 — Monotonic: older success/error cannot overwrite newer
 
+    /// A completion confirmed EARLIER (lower write order) that reaches the store
+    /// after a later-confirmed one is refused — the real out-of-order race,
+    /// independent of any clock (#3007).
     func testOlderSuccessCannotOverwriteNewer() async throws {
         let root = newRoot()
         let (store, authority) = makeStore(root: root)
         let ns = FarmSnapshotFixtures.namespace()
         let session = try mint(authority, ns)
-        let clock = MutableClock(0)
-        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
+        let clock = MutableClock(5_000)
+        let recorder = CommitRecorder()
+        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow, reportCommit: recorder.report)
+        let source = FeatureReadCacheWriteOrderSource()
+        let olderOrder = source.next()
+        let newerOrder = source.next()
 
-        clock.set(5_000)
         let newer = await adapter.recordRefresh(items: [item("failure:new")], nextCursor: nil,
-                                                healthyPrinterCount: 3, capturedSession: session)
+                                                healthyPrinterCount: 3, writeOrder: newerOrder,
+                                                capturedSession: session)
         XCTAssertEqual(newer, .committed)
-        // An older clock-driven response must be refused.
-        clock.set(4_000)
+        // Clock moves FORWARD, yet the earlier-confirmed write must still lose.
+        clock.set(6_000)
         let older = await adapter.recordRefresh(items: [item("failure:old")], nextCursor: nil,
-                                                healthyPrinterCount: 99, capturedSession: session)
+                                                healthyPrinterCount: 99, writeOrder: olderOrder,
+                                                capturedSession: session)
         XCTAssertEqual(older, .notNewer)
+        XCTAssertEqual(recorder.outcomes, [
+            .init(recordKey: AttentionReadCacheAdapter.recordKey, result: .committed),
+            .init(recordKey: AttentionReadCacheAdapter.recordKey, result: .notNewer)
+        ], "a refused confirmed-live write must be reported, not discarded silently")
 
         let hydration = await adapter.loadCached()
         guard case let .snapshot(payload, millis) = hydration else {
@@ -322,39 +354,199 @@ final class FeatureReadCacheTests: XCTestCase {
         XCTAssertEqual(millis, 5_000)
     }
 
-    func testExplicitFetchTimestampCannotOverwriteNewerSnapshot() async throws {
+    /// An explicit fetch timestamp (startup prefetch) is the displayed "last
+    /// updated" instant only; it never decides ordering (#3007).
+    func testExplicitFetchTimestampIsDisplayOnlyNotOrdering() async throws {
         let root = newRoot()
         let (store, authority) = makeStore(root: root)
         let ns = FarmSnapshotFixtures.namespace()
         let session = try mint(authority, ns)
         let clock = MutableClock(5_000)
         let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
+        let source = FeatureReadCacheWriteOrderSource()
+        let earlierOrder = source.next()
 
-        let newer = await adapter.recordRefresh(
-            items: [item("failure:new")],
+        let first = await adapter.recordRefresh(
+            items: [item("failure:first")],
             nextCursor: nil,
             healthyPrinterCount: 3,
+            writeOrder: source.next(),
             capturedSession: session
         )
-        XCTAssertEqual(newer, .committed)
+        XCTAssertEqual(first, .committed)
 
-        clock.set(6_000)
-        let older = await adapter.recordRefresh(
-            items: [item("failure:old")],
+        // Earlier-confirmed write with a LATER explicit timestamp is still refused.
+        let stale = await adapter.recordRefresh(
+            items: [item("failure:stale")],
             nextCursor: nil,
             healthyPrinterCount: 99,
-            lastUpdatedAtMillis: 4_000,
+            lastUpdatedAtMillis: 9_000,
+            writeOrder: earlierOrder,
             capturedSession: session
         )
-        XCTAssertEqual(older, .notNewer)
+        XCTAssertEqual(stale, .notNewer)
+
+        // Later-confirmed write with an EARLIER explicit timestamp replaces, and
+        // keeps its own display instant.
+        let prefetched = await adapter.recordRefresh(
+            items: [item("failure:prefetched")],
+            nextCursor: nil,
+            healthyPrinterCount: 4,
+            lastUpdatedAtMillis: 4_000,
+            writeOrder: source.next(),
+            capturedSession: session
+        )
+        XCTAssertEqual(prefetched, .committed)
 
         let hydration = await adapter.loadCached()
         guard case let .snapshot(payload, millis) = hydration else {
             return XCTFail("expected snapshot")
         }
-        XCTAssertEqual(payload.items.map(\.id), ["failure:new"])
-        XCTAssertEqual(payload.healthyPrinterCount, 3)
+        XCTAssertEqual(payload.items.map(\.id), ["failure:prefetched"])
+        XCTAssertEqual(millis, 4_000)
+    }
+
+    /// #3007 regression: two confirmed-live writes in the SAME millisecond. The
+    /// wall-clock rule refused the second as `.notNewer` and left the older
+    /// snapshot on disk while the VM showed the newer one.
+    func testSameMillisecondConfirmedLiveWriteReplaces() async throws {
+        let root = newRoot()
+        let (store, authority) = makeStore(root: root)
+        let ns = FarmSnapshotFixtures.namespace()
+        let session = try mint(authority, ns)
+        let clock = MutableClock(5_000) // frozen for both writes
+        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
+
+        let seed = await adapter.recordRefresh(items: [item("failure:seed")], nextCursor: nil,
+                                               healthyPrinterCount: 1, capturedSession: session)
+        XCTAssertEqual(seed, .committed)
+        let live = await adapter.recordRefresh(items: [item("failure:live")], nextCursor: nil,
+                                               healthyPrinterCount: 2, capturedSession: session)
+        XCTAssertEqual(live, .committed, "a same-millisecond confirmed-live write must not be refused")
+
+        let hydration = await adapter.loadCached()
+        guard case let .snapshot(payload, millis) = hydration else {
+            return XCTFail("expected snapshot")
+        }
+        XCTAssertEqual(payload.items.map(\.id), ["failure:live"])
         XCTAssertEqual(millis, 5_000)
+    }
+
+    /// #3007 regression: the wall clock steps BACKWARD (NTP step / manual change)
+    /// between two confirmed-live writes. The later-confirmed write must win.
+    func testBackwardClockConfirmedLiveWriteReplaces() async throws {
+        let root = newRoot()
+        let (store, authority) = makeStore(root: root)
+        let ns = FarmSnapshotFixtures.namespace()
+        let session = try mint(authority, ns)
+        let clock = MutableClock(9_000)
+        let adapter = FilamentCoverageReadCacheAdapter(store: store, now: clock.sendableNow)
+        let printerID = UUID()
+
+        let seed = await adapter.recordPrinter(
+            printerCoverage(id: printerID, name: "Seed", status: .covers, toolheads: []),
+            capturedSession: session
+        )
+        XCTAssertEqual(seed, .committed)
+        clock.set(4_000)
+        let live = await adapter.recordPrinter(
+            printerCoverage(id: printerID, name: "Live", status: .runout, toolheads: []),
+            capturedSession: session
+        )
+        XCTAssertEqual(live, .committed, "a backward clock step must not refuse a confirmed-live write")
+
+        let hydration = await adapter.loadCachedPrinter(id: printerID)
+        guard case let .snapshot(coverage, millis) = hydration else {
+            return XCTFail("expected snapshot")
+        }
+        XCTAssertEqual(coverage.printerName, "Live")
+        XCTAssertEqual(millis, 4_000, "the displayed instant is the honest wall clock of the write")
+    }
+
+    /// Cross-launch soundness: a record written by a PRIOR launch (even with a
+    /// much higher sequence and a later wall clock, e.g. after a reboot reset any
+    /// uptime-based counter) is superseded by the first write of this launch,
+    /// while in-launch ordering still holds against the durable record.
+    func testNewLaunchSupersedesPriorLaunchRecordAndOrderIsDurable() async throws {
+        let root = newRoot()
+        let ns = FarmSnapshotFixtures.namespace()
+        let clock = MutableClock(9_000)
+
+        let (priorStore, priorAuthority) = makeStore(root: root)
+        let priorSession = try mint(priorAuthority, ns)
+        let priorAdapter = AttentionReadCacheAdapter(store: priorStore, now: clock.sendableNow)
+        let priorLaunch = FeatureReadCacheWriteOrder(launchID: UUID(), sequence: 1_000_000)
+        let prior = await priorAdapter.recordRefresh(items: [item("failure:prior")], nextCursor: nil,
+                                                     healthyPrinterCount: 1, writeOrder: priorLaunch,
+                                                     capturedSession: priorSession)
+        XCTAssertEqual(prior, .committed)
+
+        // "Relaunch": a new store over the same root, a fresh order source, and a
+        // wall clock that is now EARLIER than the prior launch's write.
+        clock.set(1_000)
+        let (store, authority) = makeStore(root: root)
+        let session = try mint(authority, ns)
+        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
+        let launch = FeatureReadCacheWriteOrderSource()
+        let beforeFirst = launch.next()
+        let first = await adapter.recordRefresh(items: [item("failure:relaunch")], nextCursor: nil,
+                                                healthyPrinterCount: 2, writeOrder: launch.next(),
+                                                capturedSession: session)
+        XCTAssertEqual(first, .committed, "any confirmed-live write of this launch supersedes a prior launch")
+
+        // The order persisted with the record: an earlier-confirmed write of this
+        // launch, arriving late, is refused against the on-disk stamp.
+        let late = await adapter.recordRefresh(items: [item("failure:late")], nextCursor: nil,
+                                               healthyPrinterCount: 3, writeOrder: beforeFirst,
+                                               capturedSession: session)
+        XCTAssertEqual(late, .notNewer)
+
+        let hydration = await adapter.loadCached()
+        guard case let .snapshot(payload, _) = hydration else {
+            return XCTFail("expected snapshot")
+        }
+        XCTAssertEqual(payload.items.map(\.id), ["failure:relaunch"])
+    }
+
+    /// A record written before #3007 carries no `writeOrder` (and may carry a
+    /// wall-clock stamp from the future). It stays readable and is superseded by
+    /// the next confirmed-live write.
+    func testLegacyRecordWithoutWriteOrderIsSuperseded() async throws {
+        let root = newRoot()
+        let (store, authority) = makeStore(root: root)
+        let ns = FarmSnapshotFixtures.namespace()
+        let session = try mint(authority, ns)
+        let clock = MutableClock(1_000)
+        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
+
+        let legacy = FeatureReadCacheEnvelope<AttentionCacheSnapshot>(
+            featureKey: AttentionReadCacheAdapter.recordKey,
+            namespace: ns,
+            lastUpdatedAtMillis: 9_999_999_999_999,
+            writeOrder: nil,
+            kind: .snapshot,
+            payload: AttentionCacheSnapshot(items: [item("failure:legacy")], nextCursor: nil, healthyPrinterCount: 1)
+        )
+        let data = try FeatureReadCacheEnvelope<AttentionCacheSnapshot>.makeEncoder().encode(legacy)
+        XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("writeOrder"),
+                       "fixture must match the pre-#3007 on-disk layout")
+        let live = liveURL(root: root, ns, AttentionReadCacheAdapter.recordKey)
+        try FileManager.default.createDirectory(at: live.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try data.write(to: live)
+
+        guard case let .snapshot(before, _) = await adapter.loadCached() else {
+            return XCTFail("legacy record must remain readable")
+        }
+        XCTAssertEqual(before.items.map(\.id), ["failure:legacy"])
+
+        let fresh = await adapter.recordRefresh(items: [item("failure:fresh")], nextCursor: nil,
+                                                healthyPrinterCount: 2, capturedSession: session)
+        XCTAssertEqual(fresh, .committed)
+        guard case let .snapshot(after, millis) = await adapter.loadCached() else {
+            return XCTFail("expected snapshot")
+        }
+        XCTAssertEqual(after.items.map(\.id), ["failure:fresh"])
+        XCTAssertEqual(millis, 1_000)
     }
 
     /// An error completion never calls a record method, so the last-good snapshot
@@ -387,30 +579,36 @@ final class FeatureReadCacheTests: XCTestCase {
         let session = try mint(authority, ns)
         let clock = MutableClock(0)
         let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
+        let source = FeatureReadCacheWriteOrderSource()
 
         clock.set(1_000)
         let s1 = await adapter.recordRefresh(items: [item("failure:x")], nextCursor: nil,
-                                             healthyPrinterCount: 2, capturedSession: session)
+                                             healthyPrinterCount: 2, writeOrder: source.next(),
+                                             capturedSession: session)
         XCTAssertEqual(s1, .committed)
+        // A snapshot confirmed BEFORE the tombstone but still in flight.
+        let zombieOrder = source.next()
         clock.set(2_000)
-        let disabled = await adapter.recordDisabled(capturedSession: session)
+        let disabled = await adapter.recordDisabled(writeOrder: source.next(), capturedSession: session)
         XCTAssertEqual(disabled, .committed)
 
         // Disabled tombstone now hides the older snapshot.
         let afterDisable = await adapter.loadCached()
         XCTAssertEqual(afterDisable, .disabled(lastUpdatedAtMillis: 2_000))
 
-        // An even-older snapshot cannot resurface past the tombstone.
-        clock.set(1_500)
+        // The earlier-confirmed snapshot cannot resurface past the tombstone, even
+        // though it reaches the store later on a later clock.
+        clock.set(3_000)
         let zombie = await adapter.recordRefresh(items: [item("failure:zombie")], nextCursor: nil,
-                                                 healthyPrinterCount: 5, capturedSession: session)
+                                                 healthyPrinterCount: 5, writeOrder: zombieOrder,
+                                                 capturedSession: session)
         XCTAssertEqual(zombie, .notNewer)
         let stillDisabled = await adapter.loadCached()
         XCTAssertEqual(stillDisabled, .disabled(lastUpdatedAtMillis: 2_000))
     }
 
-    /// Reverse arrival: the disabled completion is the newest, so it wins even
-    /// though a success arrives afterward with an older instant.
+    /// Reverse arrival: the disabled completion is confirmed last, so it wins even
+    /// though an earlier-confirmed success reaches the store afterward.
     func testReverseOrderNewerDisabledWins() async throws {
         let root = newRoot()
         let (store, authority) = makeStore(root: root)
@@ -418,13 +616,15 @@ final class FeatureReadCacheTests: XCTestCase {
         let session = try mint(authority, ns)
         let clock = MutableClock(9_000)
         let adapter = FilamentCoverageReadCacheAdapter(store: store, now: clock.sendableNow)
+        let source = FeatureReadCacheWriteOrderSource()
+        let successOrder = source.next()
 
-        let disabled = await adapter.recordFleetDisabled(capturedSession: session)
+        let disabled = await adapter.recordFleetDisabled(writeOrder: source.next(), capturedSession: session)
         XCTAssertEqual(disabled, .committed)
 
-        clock.set(8_000) // older success completes late
+        clock.set(10_000) // earlier-confirmed success lands late
         let fleet = FleetFilamentCoverage(printers: [], evaluatedAtUtc: Date(timeIntervalSince1970: 1))
-        let late = await adapter.recordFleet(fleet, capturedSession: session)
+        let late = await adapter.recordFleet(fleet, writeOrder: successOrder, capturedSession: session)
         XCTAssertEqual(late, .notNewer)
 
         let hydration = await adapter.loadCachedFleet()

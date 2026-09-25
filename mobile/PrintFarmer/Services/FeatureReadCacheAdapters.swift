@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Feature Read-Cache Adapters (F10-C2, #789)
 //
@@ -7,6 +8,37 @@ import Foundation
 // state and the durable envelope. The adapters hold NO cache mechanics of their
 // own — atomic persistence, namespace isolation, monotonic ordering, tombstones,
 // and quarantine all live in the shared store (which reuses #785).
+//
+// Every `record*` method takes a `writeOrder` (#3007). Its default,
+// `FeatureReadCacheWriteOrder.next()`, is evaluated at the CALL SITE, i.e. on the
+// caller's actor before the call suspends, so a caller that records immediately
+// after confirming a result stamps it in confirmation order. Every outcome is
+// passed to `reportCommit`, so a refused confirmed-live write is never silent.
+
+// MARK: Commit reporting
+
+/// Default sink for feature read-cache commit outcomes (#3007). `.committed` is
+/// the normal path; every other outcome means the durable record did NOT take
+/// this confirmed-live write and is logged so it is diagnosable.
+enum FeatureReadCacheCommitLog {
+    private static let logger = Logger(subsystem: "com.printfarmer.ios", category: "FeatureReadCache")
+
+    @Sendable
+    static func report(recordKey: String, result: FeatureReadCacheCommitResult) {
+        switch result {
+        case .committed:
+            return
+        case .notNewer:
+            logger.notice("Feature cache write for \(recordKey, privacy: .public) refused as notNewer; a later-confirmed write already holds the record")
+        case .superseded:
+            logger.info("Feature cache write for \(recordKey, privacy: .public) superseded by a session change")
+        case .namespaceMismatch, .integrityFailure, .persistenceFailure:
+            logger.error("Feature cache write for \(recordKey, privacy: .public) failed: \(String(describing: result), privacy: .public)")
+        }
+    }
+}
+
+typealias FeatureReadCacheCommitReporter = @Sendable (_ recordKey: String, _ result: FeatureReadCacheCommitResult) -> Void
 
 // MARK: Attention
 
@@ -32,10 +64,16 @@ final class AttentionReadCacheAdapter: Sendable {
 
     private let store: any FeatureReadCacheStoring
     private let now: @Sendable () -> Date
+    private let reportCommit: FeatureReadCacheCommitReporter
 
-    init(store: any FeatureReadCacheStoring, now: @escaping @Sendable () -> Date = { Date() }) {
+    init(
+        store: any FeatureReadCacheStoring,
+        now: @escaping @Sendable () -> Date = { Date() },
+        reportCommit: @escaping FeatureReadCacheCommitReporter = FeatureReadCacheCommitLog.report
+    ) {
         self.store = store
         self.now = now
+        self.reportCommit = reportCommit
     }
 
     func currentSession() async -> FarmSnapshotSession? {
@@ -57,6 +95,7 @@ final class AttentionReadCacheAdapter: Sendable {
         nextCursor: String?,
         healthyPrinterCount: Int,
         lastUpdatedAtMillis: Int64? = nil,
+        writeOrder: FeatureReadCacheWriteOrder = .next(),
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         var seen: Set<String> = []
@@ -70,22 +109,31 @@ final class AttentionReadCacheAdapter: Sendable {
             nextCursor: nextCursor,
             healthyPrinterCount: healthyPrinterCount
         )
-        return await store.commitSnapshot(
+        let result = await store.commitSnapshot(
             payload,
             recordKey: Self.recordKey,
             lastUpdatedAtMillis: lastUpdatedAtMillis ?? Self.millis(now()),
+            writeOrder: writeOrder,
             capturedSession: capturedSession
         )
+        reportCommit(Self.recordKey, result)
+        return result
     }
 
     /// Record a canonical feature-disabled tombstone (criterion 7).
     @discardableResult
-    func recordDisabled(capturedSession: FarmSnapshotSession) async -> FeatureReadCacheCommitResult {
-        await store.commitDisabled(
+    func recordDisabled(
+        writeOrder: FeatureReadCacheWriteOrder = .next(),
+        capturedSession: FarmSnapshotSession
+    ) async -> FeatureReadCacheCommitResult {
+        let result = await store.commitDisabled(
             recordKey: Self.recordKey,
             lastUpdatedAtMillis: Self.millis(now()),
+            writeOrder: writeOrder,
             capturedSession: capturedSession
         )
+        reportCommit(Self.recordKey, result)
+        return result
     }
 
     private static func millis(_ date: Date) -> Int64 {
@@ -104,10 +152,16 @@ final class FilamentCoverageReadCacheAdapter: Sendable {
 
     private let store: any FeatureReadCacheStoring
     private let now: @Sendable () -> Date
+    private let reportCommit: FeatureReadCacheCommitReporter
 
-    init(store: any FeatureReadCacheStoring, now: @escaping @Sendable () -> Date = { Date() }) {
+    init(
+        store: any FeatureReadCacheStoring,
+        now: @escaping @Sendable () -> Date = { Date() },
+        reportCommit: @escaping FeatureReadCacheCommitReporter = FeatureReadCacheCommitLog.report
+    ) {
         self.store = store
         self.now = now
+        self.reportCommit = reportCommit
     }
 
     static func printerRecordKey(_ id: UUID) -> String {
@@ -128,23 +182,33 @@ final class FilamentCoverageReadCacheAdapter: Sendable {
     func recordFleet(
         _ fleet: FleetFilamentCoverage,
         lastUpdatedAtMillis: Int64? = nil,
+        writeOrder: FeatureReadCacheWriteOrder = .next(),
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
-        await store.commitSnapshot(
+        let result = await store.commitSnapshot(
             fleet,
             recordKey: Self.fleetRecordKey,
             lastUpdatedAtMillis: lastUpdatedAtMillis ?? Self.millis(now()),
+            writeOrder: writeOrder,
             capturedSession: capturedSession
         )
+        reportCommit(Self.fleetRecordKey, result)
+        return result
     }
 
     @discardableResult
-    func recordFleetDisabled(capturedSession: FarmSnapshotSession) async -> FeatureReadCacheCommitResult {
-        await store.commitDisabled(
+    func recordFleetDisabled(
+        writeOrder: FeatureReadCacheWriteOrder = .next(),
+        capturedSession: FarmSnapshotSession
+    ) async -> FeatureReadCacheCommitResult {
+        let result = await store.commitDisabled(
             recordKey: Self.fleetRecordKey,
             lastUpdatedAtMillis: Self.millis(now()),
+            writeOrder: writeOrder,
             capturedSession: capturedSession
         )
+        reportCommit(Self.fleetRecordKey, result)
+        return result
     }
 
     // Per-printer detail -----------------------------------------------------
@@ -156,26 +220,36 @@ final class FilamentCoverageReadCacheAdapter: Sendable {
     @discardableResult
     func recordPrinter(
         _ coverage: PrinterFilamentCoverage,
+        writeOrder: FeatureReadCacheWriteOrder = .next(),
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
-        await store.commitSnapshot(
+        let recordKey = Self.printerRecordKey(coverage.printerId)
+        let result = await store.commitSnapshot(
             coverage,
-            recordKey: Self.printerRecordKey(coverage.printerId),
+            recordKey: recordKey,
             lastUpdatedAtMillis: Self.millis(now()),
+            writeOrder: writeOrder,
             capturedSession: capturedSession
         )
+        reportCommit(recordKey, result)
+        return result
     }
 
     @discardableResult
     func recordPrinterDisabled(
         id: UUID,
+        writeOrder: FeatureReadCacheWriteOrder = .next(),
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
-        await store.commitDisabled(
-            recordKey: Self.printerRecordKey(id),
+        let recordKey = Self.printerRecordKey(id)
+        let result = await store.commitDisabled(
+            recordKey: recordKey,
             lastUpdatedAtMillis: Self.millis(now()),
+            writeOrder: writeOrder,
             capturedSession: capturedSession
         )
+        reportCommit(recordKey, result)
+        return result
     }
 
     private static func millis(_ date: Date) -> Int64 {
