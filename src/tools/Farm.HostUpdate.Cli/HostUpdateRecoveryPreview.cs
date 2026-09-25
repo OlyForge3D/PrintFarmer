@@ -181,8 +181,13 @@ internal static class HostUpdateRecoveryPreview
     {
         try
         {
+            if (string.IsNullOrEmpty(file.RelativePath) || Path.IsPathRooted(file.RelativePath))
+            {
+                return false;
+            }
+
             string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(runDirectory));
-            string path = Path.GetFullPath(Path.Combine(root, file.RelativePath));
+            string path = Path.GetFullPath(Path.Join(root, file.RelativePath));
             string relative = Path.GetRelativePath(root, path);
             if (Path.IsPathRooted(relative) || relative == ".." || relative.StartsWith(".." + Path.DirectorySeparatorChar, StringComparison.Ordinal))
             {
