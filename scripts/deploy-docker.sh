@@ -67,6 +67,9 @@ DOTNET_MAJOR_VERSION="${SDK_TAG%%-*}"  # Remove everything after first hyphen
 
 # Default flags
 DRY_RUN=false
+# Opt-in installation of the signed host-update recovery CLI (issue #3045).
+HOST_UPDATE_CLI_VERSION="${HOST_UPDATE_CLI_VERSION:-}"
+HOST_UPDATE_CLI_ASSETS="${HOST_UPDATE_CLI_ASSETS:-}"
 NON_INTERACTIVE=false
 TEAR_DOWN=false
 SHOW_HELP=false
@@ -2863,6 +2866,14 @@ OPTIONS:
     --native-arch           Build for the host's native architecture instead of forcing amd64.
                             Use on Raspberry Pi or when building ARM images on Apple Silicon.
     --platform PLATFORM     Explicitly set the Docker build platform (e.g., linux/arm64).
+    --host-update-cli-version VERSION
+                            Opt in to installing the signed host-update recovery CLI
+                            (X.Y.Z or X.Y.Z-insider.N) and writing /etc/printfarmer/host-update.json
+                            from .env. Requires cosign and root. Not rollout authorization.
+                            Env: HOST_UPDATE_CLI_VERSION.
+    --host-update-cli-assets DIR
+                            Read the CLI archive, SHA256SUMS and its bundle from DIR instead of
+                            the GitHub release (offline hosts). Env: HOST_UPDATE_CLI_ASSETS.
 
 SMART IMAGE CACHING - Automatic offline support:
     * Downloaded images are automatically cached for offline use
@@ -7489,6 +7500,53 @@ display_final_info() {
 }
 
 # Redeploy existing deployment with rebuild
+# Installs the signed host-update recovery CLI and writes its host configuration when the
+# operator opts in with --host-update-cli-version (issue #3045). This is packaging only, not
+# rollout authorization: nothing here enables or starts a host update.
+install_host_update_cli_if_requested() {
+    [ -n "${HOST_UPDATE_CLI_VERSION:-}" ] || return 0
+
+    local installer="$SCRIPT_DIR/install-host-update-cli.sh"
+    local env_file="${ENV_FILE:-.env}"
+    case "$env_file" in
+        /*) ;;
+        *) env_file="$(pwd)/$env_file" ;;
+    esac
+
+    local -a install_args=(install --version "$HOST_UPDATE_CLI_VERSION")
+    if [ -n "${HOST_UPDATE_CLI_ASSETS:-}" ]; then
+        install_args+=(--asset-dir "$HOST_UPDATE_CLI_ASSETS")
+    fi
+
+    local -a elevate=()
+    if [ "$(id -u)" -ne 0 ] && command -v sudo >/dev/null 2>&1; then
+        elevate=(sudo)
+    fi
+
+    if [ "$DRY_RUN" = "true" ]; then
+        print_info "[DRY RUN] Would install host-update CLI: ${elevate[*]:-} $installer ${install_args[*]}"
+        print_info "[DRY RUN] Would write host-update config: ${elevate[*]:-} $installer write-config --env-file $env_file"
+        return 0
+    fi
+
+    print_info "Installing signed host-update CLI $HOST_UPDATE_CLI_VERSION..."
+    if ! ${elevate[@]+"${elevate[@]}"} "$installer" "${install_args[@]}"; then
+        print_error "Host-update CLI installation failed; nothing was placed. See docs/HOST_UPDATE_RUNBOOK.md."
+        exit 1
+    fi
+
+    local rc=0
+    ${elevate[@]+"${elevate[@]}"} "$installer" write-config --env-file "$env_file" || rc=$?
+    case "$rc" in
+        0) print_success "Host-update CLI installed and host-update.json written" ;;
+        3) print_warning "HostUpdateExecution__RootDirectory is not set in $env_file; host-update.json was not written" ;;
+        *)
+            print_error "Writing host-update.json failed (exit $rc). See docs/HOST_UPDATE_RUNBOOK.md."
+            exit 1
+            ;;
+    esac
+}
+
 redeploy_existing() {
     print_header "🔄 Redeploying PrintFarmer (Rebuild Mode)"
     
@@ -7557,6 +7615,8 @@ redeploy_existing() {
         print_error "Failed to regenerate deployment configuration."
         exit 1
     fi
+
+    install_host_update_cli_if_requested
     
     # Remove stale legacy override file - the compose-generator produces a complete
     # docker-compose.yml that already includes the database service configuration.
@@ -7931,6 +7991,8 @@ main() {
     fi
     print_success "Deployment configuration generated successfully"
 
+    install_host_update_cli_if_requested
+
     # Optional prepull for Apple Silicon or slow networks: pull common base images
     prepull_images() {
         if [ "${PREPULL:-false}" != "true" ]; then
@@ -8047,6 +8109,25 @@ while [ $# -gt 0 ]; do
             ;;
         -n|--dry-run)
             DRY_RUN=true
+            shift
+            ;;
+        --host-update-cli-version|--host-update-cli-assets)
+            if [ -z "${2:-}" ]; then
+                echo "Missing value for $1" >&2; exit 2
+            fi
+            if [ "$1" = "--host-update-cli-version" ]; then
+                HOST_UPDATE_CLI_VERSION="$2"
+            else
+                HOST_UPDATE_CLI_ASSETS="$2"
+            fi
+            shift 2
+            ;;
+        --host-update-cli-version=*)
+            HOST_UPDATE_CLI_VERSION="${1#--host-update-cli-version=}"
+            shift
+            ;;
+        --host-update-cli-assets=*)
+            HOST_UPDATE_CLI_ASSETS="${1#--host-update-cli-assets=}"
             shift
             ;;
         -b|--batch|--non-interactive)

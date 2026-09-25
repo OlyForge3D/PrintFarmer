@@ -221,6 +221,43 @@ check "a symlinked output is refused" \
     "[[ \$(write_config --env-file '$ENV' --output '$TEST_ROOT/link.json') == 1 && ! -e '$TEST_ROOT/elsewhere.json' ]]"
 check "a relative env file is a usage error" "[[ \$(write_config --env-file deploy.env --output '$CONFIG') == 2 ]]"
 
+# deploy-docker.sh opt-in hook: run the real function against a recording stub installer.
+HOOK_DIR="$TEST_ROOT/hook"
+mkdir -p "$HOOK_DIR"
+cat >"$HOOK_DIR/install-host-update-cli.sh" <<'STUB'
+#!/bin/sh
+printf '%s\n' "$*" >>"$HOOK_LOG"
+[ "$1" = "write-config" ] && exit "${HOOK_WRITE_RC:-0}"
+exit "${HOOK_INSTALL_RC:-0}"
+STUB
+chmod +x "$HOOK_DIR/install-host-update-cli.sh"
+sed -n '/^install_host_update_cli_if_requested() {$/,/^}$/p' "$REPO_ROOT/scripts/deploy-docker.sh" >"$HOOK_DIR/hook.sh"
+run_hook() {
+    # run_hook <dry-run> <version> [assets]: echoes the exit status; log in $HOOK_LOG.
+    : >"$HOOK_LOG"
+    (
+        cd "$HOOK_DIR"
+        print_info() { echo "$*"; }; print_success() { echo "$*"; }
+        print_warning() { echo "WARN $*"; }; print_error() { echo "ERR $*"; }
+        id() { echo 0; }
+        # shellcheck disable=SC1091
+        source ./hook.sh
+        SCRIPT_DIR="$HOOK_DIR" ENV_FILE=.env DRY_RUN="$1" HOST_UPDATE_CLI_VERSION="$2" HOST_UPDATE_CLI_ASSETS="${3:-}"
+        install_host_update_cli_if_requested
+    ) >"$TEST_ROOT/hook.out" 2>&1 && echo 0 || echo $?
+}
+export HOOK_LOG="$TEST_ROOT/hook.log"
+check "deploy hook is a no-op without a version" "[[ \$(run_hook false '') == 0 && ! -s '$HOOK_LOG' ]]"
+check "deploy hook dry run installs nothing" \
+    "[[ \$(run_hook true $STABLE) == 0 && ! -s '$HOOK_LOG' ]] && grep -q 'DRY RUN' '$TEST_ROOT/hook.out'"
+check "deploy hook installs then writes config from the absolute env file" \
+    "[[ \$(run_hook false $STABLE /media/assets) == 0 ]] && diff -q <(printf 'install --version $STABLE --asset-dir /media/assets\nwrite-config --env-file $HOOK_DIR/.env\n') '$HOOK_LOG' >/dev/null"
+check "deploy hook warns and continues when the root is not configured" \
+    "[[ \$(HOOK_WRITE_RC=3 run_hook false $STABLE) == 0 ]] && grep -q '^WARN' '$TEST_ROOT/hook.out'"
+check "deploy hook fails the deployment when install fails" \
+    "[[ \$(HOOK_INSTALL_RC=1 run_hook false $STABLE) == 1 ]] && [[ \$(wc -l <'$HOOK_LOG') -eq 1 ]]"
+check "deploy hook fails the deployment when write-config fails" "[[ \$(HOOK_WRITE_RC=1 run_hook false $STABLE) == 1 ]]"
+
 if [[ $failures -gt 0 ]]; then
     printf '%d host-update CLI installer test(s) failed\n' "$failures" >&2
     exit 1
