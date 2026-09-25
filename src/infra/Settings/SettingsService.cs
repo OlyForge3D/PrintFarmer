@@ -43,6 +43,9 @@ public class SettingsService : ISettingsService
     private Dictionary<string, long?> _settingsOriginWatermarks = [];
     private Dictionary<string, string> _settingsRowVersions = [];
 
+    // Heartbeats are stamped with server UtcNow; allow modest skew between API instances.
+    private static readonly TimeSpan HeartbeatClockSkewTolerance = TimeSpan.FromMinutes(5);
+
     /// <inheritdoc />
     public SettingsSectionSnapshot GetSectionSnapshot(string key) =>
         new(GetByKey(key), _settingsRowVersions[key]);
@@ -351,8 +354,6 @@ public class SettingsService : ISettingsService
         discovery.LastHeartbeat = null;
         discovery.HeartbeatTelemetryUnreadable = true;
     }
-
-    private static readonly TimeSpan HeartbeatClockSkewTolerance = TimeSpan.FromMinutes(5);
 
     /// <summary>
     /// Reloads all settings from the provided configuration at runtime.

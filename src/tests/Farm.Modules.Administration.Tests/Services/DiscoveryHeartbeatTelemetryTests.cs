@@ -80,6 +80,18 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
         logger.Invocations.Should().NotContain(i => i.Arguments.Count > 0 && Equals(i.Arguments[0], LogLevel.Warning));
     }
 
+    [Fact]
+    public void Load_HeartbeatWithinClockSkewTolerance_IsAccepted()
+    {
+        DateTime heartbeat = DateTime.UtcNow.AddMinutes(1);
+        SeedTelemetry(JsonSerializer.Serialize(heartbeat));
+
+        NetworkDiscoverySettings discovery = CreateService().Get<NetworkDiscoverySettings>();
+
+        discovery.HeartbeatTelemetryUnreadable.Should().BeFalse();
+        discovery.LastHeartbeat.Should().Be(heartbeat);
+    }
+
     [Theory]
     [InlineData("\"not-a-timestamp\"")]
     [InlineData("{not json")]
