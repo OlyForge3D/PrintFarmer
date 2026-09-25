@@ -127,7 +127,14 @@ check "insider install succeeds side by side" \
 check "insider identity is the development-branch release workflow" \
     "grep -q -- 'consolidated-release.yml@refs/heads/development ' '$COSIGN_LOG'"
 
-check "same-version reinstall replaces the placement" \
+check "same-version reinstall of an identical placement succeeds" \
+    "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 0 && -d '$ROOT/$STABLE/cli' ]]"
+printf 'tampered\n' >>"$ROOT/$STABLE/LICENSE"
+cp "$ROOT/$STABLE/LICENSE" "$TEST_ROOT/tampered-license"
+check "a differing same-version placement is refused and left untouched" \
+    "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 1 ]] && cmp -s '$ROOT/$STABLE/LICENSE' '$TEST_ROOT/tampered-license' && grep -q 'differs from the verified release' '$TEST_ROOT/out.log'"
+rm -rf -- "${ROOT:?}/$STABLE"
+check "a removed placement can be reinstalled" \
     "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 0 && -d '$ROOT/$STABLE/cli' ]]"
 
 make_release 2.0.0 "$TEST_ROOT/v2"

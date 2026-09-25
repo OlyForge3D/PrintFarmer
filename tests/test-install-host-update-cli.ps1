@@ -144,7 +144,28 @@ exit 0
     Check 'insider identity is the development-branch release workflow' ((Get-Content -LiteralPath $cosignLog -Raw) -match [regex]::Escape('consolidated-release.yml@refs/heads/development '))
 
     $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
-    Check 'same-version reinstall replaces the placement' ($result.ExitCode -eq 0 -and (Test-Path (Join-Path $root "1.2.3/$launcherName")))
+    Check 'same-version reinstall of an identical placement succeeds' ($result.ExitCode -eq 0 -and (Test-Path (Join-Path $root "1.2.3/$launcherName")))
+    $tamperedFile = Join-Path $root '1.2.3/host-update-cli-package.json'
+    Add-Content -LiteralPath $tamperedFile -Value 'tampered'
+    $tampered = Get-FileHash -LiteralPath $tamperedFile
+    $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
+    Check 'a differing same-version placement is refused and left untouched' ($result.ExitCode -eq 1 -and
+        (Get-FileHash -LiteralPath $tamperedFile).Hash -eq $tampered.Hash -and $result.Output.Contains('differs from the verified release'))
+    Remove-Item -LiteralPath (Join-Path $root '1.2.3') -Recurse -Force
+    $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
+    Check 'a removed placement can be reinstalled' ($result.ExitCode -eq 0 -and (Test-Path (Join-Path $root "1.2.3/$launcherName")))
+
+    if ($IsWindows) {
+        $openRoot = Join-Path $testRoot 'OpenRoot'
+        New-Item -ItemType Directory -Path $openRoot | Out-Null
+        $openAcl = Get-Acl -LiteralPath $openRoot
+        $openAcl.AddAccessRule([System.Security.AccessControl.FileSystemAccessRule]::new(
+            [System.Security.Principal.SecurityIdentifier]::new('S-1-5-32-545'), 'Modify', 'ContainerInherit, ObjectInherit', 'None', 'Allow'))
+        Set-Acl -LiteralPath $openRoot -AclObject $openAcl
+        $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $openRoot)
+        Check 'an install root writable by Users is refused and nothing is placed' ($result.ExitCode -eq 1 -and
+            $result.Output.Contains('writable by S-1-5-32-545') -and @(Get-ChildItem -LiteralPath $openRoot -Force).Count -eq 0)
+    }
 
     New-Release '2.0.0' (Join-Path $testRoot 'v2')
     $result = Invoke-Installer @('install', '-Version', '2.0.0', '-Runtime', $runtime, '-AssetDir', (Join-Path $testRoot 'v2'), '-InstallRoot', $root) @{ COSIGN_FAIL = '1' }

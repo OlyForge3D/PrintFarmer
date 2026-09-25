@@ -10,7 +10,9 @@
 #               its Cosign bundle; verifies the bundle against the release workflow identity for
 #               the version's channel, the archive SHA-256, its members and package manifest;
 #               proves the CLI launches; then places it at <install-root>/<version> (default
-#               /opt/printfarmer/host-update-cli). Requires cosign on PATH.
+#               /opt/printfarmer/host-update-cli). Versions are immutable: an existing placement
+#               identical to the verified archive is accepted, a differing one is refused and left
+#               untouched. The install root must not be group- or world-writable. Requires cosign.
 # write-config  Writes an owner-only (0600) host-update.json (default /etc/printfarmer/host-update.json)
 #               from the deployment .env's HostUpdateExecution__*, HostUpdates__HostState__*,
 #               DB_PROVIDER and ConnectionStrings__Default. The owner defaults to the owner of
@@ -206,17 +208,21 @@ cmd_install() {
     [[ "$help_text" == *"printfarmer-host-update status"* ]] ||
         fail "The host-update CLI does not run on this host ($runtime)"
 
-    local target="$install_root/$version" previous=""
+    # Release versions are immutable, and replacing a directory is never atomic, so an existing
+    # placement is only accepted when it is byte-identical to the verified archive.
+    local target="$install_root/$version"
     if [[ -e "$target" || -L "$target" ]]; then
-        previous="$install_root/.$version.previous.$$"
-        mv -- "$target" "$previous" || fail "Could not move aside the existing $target"
+        [[ -d "$target" && ! -L "$target" ]] || fail "$target exists and is not a directory; nothing was changed"
+        if ! diff -r --no-dereference -- "$stage_dir" "$target" >/dev/null 2>&1 ||
+            [[ -n "$(find "$target" \( -perm -002 -o -perm -020 -o -type l \) -print -quit)" ]]; then
+            fail "$target already exists and differs from the verified release; nothing was changed. Remove it (once no update or recovery needs it) and rerun"
+        fi
+        log_success "The verified host-update CLI $version ($runtime) is already installed at $target"
+        echo "$target/printfarmer-host-update.sh"
+        return 0
     fi
-    if ! mv -- "$stage_dir" "$target"; then
-        [[ -z "$previous" ]] || mv -- "$previous" "$target" || true
-        fail "Could not place the host-update CLI at $target"
-    fi
+    mv -T -- "$stage_dir" "$target" || fail "Could not place the host-update CLI at $target"
     stage_dir=""
-    [[ -z "$previous" ]] || rm -rf -- "$previous"
     log_success "Installed the verified host-update CLI $version ($runtime) at $target"
     echo "$target/printfarmer-host-update.sh"
 }

@@ -16,7 +16,10 @@
                   the version's channel, the archive SHA-256, its members and package manifest;
                   proves the CLI launches; then places it at <InstallRoot>\<version> (default
                   C:\Program Files\PrintFarmer\HostUpdateCli, or /opt/printfarmer/host-update-cli).
-                  Requires cosign on PATH.
+                  Versions are immutable: an existing placement identical to the verified archive
+                  is accepted, a differing one is refused and left untouched. The install root must
+                  not be writable by anyone but SYSTEM, Administrators, TrustedInstaller and the
+                  installing account (group/world-writable elsewhere). Requires cosign on PATH.
     write-config  Writes host-update.json (default C:\ProgramData\PrintFarmer\host-update.json, or
                   /etc/printfarmer/host-update.json) from the deployment .env's
                   HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER and
@@ -63,6 +66,47 @@ function Test-FullyQualified([string] $Path) {
 function Test-Link([string] $Path) {
     $item = Get-Item -LiteralPath $Path -Force -ErrorAction SilentlyContinue
     return $null -ne $item -and ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint)
+}
+
+# True when both trees hold the same relative paths, no reparse points, and identical file bytes.
+function Test-TreeEqual([string] $Expected, [string] $Actual) {
+    function Get-Tree([string] $Root) {
+        $tree = [System.Collections.Generic.SortedDictionary[string, string]]::new([System.StringComparer]::Ordinal)
+        foreach ($item in Get-ChildItem -LiteralPath $Root -Recurse -Force) {
+            if ($item.Attributes -band [System.IO.FileAttributes]::ReparsePoint) { return $null }
+            $relative = [System.IO.Path]::GetRelativePath($Root, $item.FullName)
+            $tree[$relative] = if ($item.PSIsContainer) { '<dir>' } else { (Get-FileHash -LiteralPath $item.FullName -Algorithm SHA256).Hash }
+        }
+        return , $tree
+    }
+    $left = Get-Tree $Expected
+    $right = Get-Tree $Actual
+    if ($null -eq $left -or $null -eq $right -or $left.Count -ne $right.Count) { return $false }
+    foreach ($entry in $left.GetEnumerator()) {
+        $value = $null
+        if (-not $right.TryGetValue($entry.Key, [ref] $value) -or $value -cne $entry.Value) { return $false }
+    }
+    return $true
+}
+
+# Windows counterpart of the Unix group/world-writable check: only SYSTEM, Administrators,
+# TrustedInstaller, the creator-owner placeholder and the installing account may be able to
+# modify the install root or anything that inherits from it.
+function Assert-InstallRootAcl([string] $Path) {
+    $trusted = @('S-1-5-18', 'S-1-5-32-544', 'S-1-3-0',
+        'S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464',
+        [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value)
+    # WriteData, AppendData, WriteExtendedAttributes, DeleteSubdirectoriesAndFiles,
+    # WriteAttributes, Delete, ChangePermissions, TakeOwnership, GENERIC_ALL, GENERIC_WRITE.
+    $writeMask = 0x2 -bor 0x4 -bor 0x10 -bor 0x40 -bor 0x100 -bor 0x10000 -bor 0x40000 -bor 0x80000 -bor 0x10000000 -bor 0x40000000
+    $acl = Get-Acl -LiteralPath $Path
+    foreach ($rule in $acl.GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier])) {
+        if ($rule.AccessControlType -ne [System.Security.AccessControl.AccessControlType]::Allow) { continue }
+        if (([int64] $rule.FileSystemRights -band $writeMask) -eq 0) { continue }
+        if ($rule.IdentityReference.Value -notin $trusted) {
+            Stop-Install "Install root is writable by $($rule.IdentityReference.Value): $Path"
+        }
+    }
 }
 
 function Get-Options([string[]] $Arguments, [string[]] $Names) {
@@ -205,7 +249,9 @@ function Invoke-Install([string[]] $Arguments) {
         } else {
             New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
         }
-        if (-not $IsWindows) {
+        if ($IsWindows) {
+            Assert-InstallRootAcl $installRoot
+        } else {
             $mode = (Get-Item -LiteralPath $installRoot -Force).UnixFileMode
             if ($mode -band ([System.IO.UnixFileMode]::GroupWrite -bor [System.IO.UnixFileMode]::OtherWrite)) {
                 Stop-Install "Install root is group- or world-writable: $installRoot"
@@ -236,21 +282,24 @@ function Invoke-Install([string[]] $Arguments) {
             Stop-Install "The host-update CLI does not run on this host ($runtime)"
         }
 
+        # Release versions are immutable, and replacing a directory is never atomic, so an
+        # existing placement is only accepted when it is identical to the verified archive.
         $target = Join-Path $installRoot $version
-        $previous = $null
         if (Test-Path -LiteralPath $target) {
-            $previous = Join-Path $installRoot ".$version.previous.$PID"
-            Move-Item -LiteralPath $target -Destination $previous
+            if (-not (Test-Path -LiteralPath $target -PathType Container) -or (Test-Link $target) -or
+                -not (Test-TreeEqual $stage $target)) {
+                Stop-Install "$target already exists and differs from the verified release; nothing was changed. Remove it (once no update or recovery needs it) and rerun"
+            }
+            [Console]::Error.WriteLine("The verified host-update CLI $version ($runtime) is already installed at $target")
+        } else {
+            try {
+                [System.IO.Directory]::Move($stage, $target)
+            } catch {
+                Stop-Install "Could not place the host-update CLI at $target"
+            }
+            $stage = $null
+            [Console]::Error.WriteLine("Installed the verified host-update CLI $version ($runtime) at $target")
         }
-        try {
-            Move-Item -LiteralPath $stage -Destination $target
-        } catch {
-            if ($previous) { Move-Item -LiteralPath $previous -Destination $target -ErrorAction SilentlyContinue }
-            Stop-Install "Could not place the host-update CLI at $target"
-        }
-        $stage = $null
-        if ($previous) { Remove-Item -LiteralPath $previous -Recurse -Force }
-        [Console]::Error.WriteLine("Installed the verified host-update CLI $version ($runtime) at $target")
         $wrapper = if ($runtime.StartsWith('win-')) { 'printfarmer-host-update.ps1' } else { 'printfarmer-host-update.sh' }
         [Console]::Out.WriteLine((Join-Path $target $wrapper))
     } finally {
