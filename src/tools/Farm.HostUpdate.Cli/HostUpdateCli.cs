@@ -254,7 +254,11 @@ public static partial class HostUpdateCli
         string? currentPlatform = HostUpdateRecoveryDrift.CurrentPlatform();
 
         // A terminal RolledBack outcome makes confirm a durable no-op, so there is nothing to reapprove.
-        HostUpdateDriftReport drift = existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack }
+        bool rolledBack = existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack };
+        string? observedManifestBinding = rolledBack
+            ? null
+            : await ReadManifestBindingAsync(provider, request.ReleaseId, cancellationToken).ConfigureAwait(false);
+        HostUpdateDriftReport drift = rolledBack
             ? new HostUpdateDriftReport([], configurationFingerprint, null)
             : HostUpdateRecoveryDrift.Detect(
                 request,
@@ -263,7 +267,8 @@ public static partial class HostUpdateCli
                 existingOutcome,
                 HostUpdateRecoveryDrift.ReadPolicy(configuration),
                 currentPlatform,
-                configurationFingerprint);
+                configurationFingerprint,
+                observedManifestBinding);
 
         if (args.Confirm)
         {
@@ -374,6 +379,23 @@ public static partial class HostUpdateCli
         catch (TimeoutException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the database manifest binding read-only (issue #3050). Any failure becomes an
+    /// <c>unreadable:&lt;type&gt;</c> observation, which drift detection always treats as drift; the
+    /// message is dropped because provider errors can carry connection details.
+    /// </summary>
+    private static async Task<string> ReadManifestBindingAsync(IServiceProvider provider, string releaseId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await provider.GetRequiredService<IHostUpdateManifestBindingReader>().ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return HostUpdateRecoveryDrift.ManifestBindingUnreadablePrefix + exception.GetType().Name;
         }
     }
 

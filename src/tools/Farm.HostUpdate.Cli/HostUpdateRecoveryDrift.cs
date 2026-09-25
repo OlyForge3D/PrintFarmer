@@ -34,7 +34,8 @@ internal sealed record HostUpdatePolicyObservation(bool Available, long Revision
 /// <summary>
 /// Detects drift since the recorded authorization (issues #2998, #3047): host platform, standing
 /// policy revision/fingerprint/channel, and -- against the baseline journaled on the
-/// <c>accepted</c> activity -- the prior installed state, configuration and release trust root.
+/// <c>accepted</c> activity -- the prior installed state, configuration, release trust root and
+/// database manifest binding (issue #3050).
 /// It never resolves mutable tags,
 /// never trusts unsigned material, and never writes: the host-state root is opened with
 /// <see cref="HostStatePath.OpenReadOnly"/>, which skips the write probe.
@@ -51,6 +52,13 @@ internal static class HostUpdateRecoveryDrift
     public const string AuthorizationBaselineUnrecorded = "authorization_baseline_unrecorded";
     public const string ConfigurationDrift = "configuration_drift";
     public const string TrustRootDrift = "trust_root_drift";
+    public const string ManifestBindingDrift = "manifest_binding_drift";
+
+    /// <summary>Recorded value reported for a schema-1 baseline, which predates the manifest binding.</summary>
+    public const string ManifestBindingUnrecorded = "unrecorded";
+
+    /// <summary>Observed value reported when the binding could not be read; always drift, never "no drift".</summary>
+    public const string ManifestBindingUnreadablePrefix = "unreadable:";
 
     private const string TokenPrefix = "drift-";
 
@@ -116,6 +124,7 @@ internal static class HostUpdateRecoveryDrift
         HostUpdatePolicyObservation policy,
         string? currentPlatform,
         string configurationFingerprint,
+        string? observedManifestBinding,
         string? currentTrustRootFingerprint = null)
     {
         ArgumentNullException.ThrowIfNull(recorded);
@@ -176,6 +185,17 @@ internal static class HostUpdateRecoveryDrift
             {
                 items.Add(new(TrustRootDrift, baseline.TrustRootFingerprint, trustRootFingerprint));
             }
+
+            // Issue #3050: a missing baseline value, an unobserved or unreadable binding, or any
+            // difference is drift. An unreadable binding never counts as "no drift".
+            string recordedBinding = baseline.ManifestBinding ?? ManifestBindingUnrecorded;
+            string observedBinding = observedManifestBinding ?? ManifestBindingUnreadablePrefix + "unobserved";
+            if (baseline.ManifestBinding is null
+                || observedBinding.StartsWith(ManifestBindingUnreadablePrefix, StringComparison.Ordinal)
+                || !string.Equals(recordedBinding, observedBinding, StringComparison.Ordinal))
+            {
+                items.Add(new(ManifestBindingDrift, recordedBinding, observedBinding));
+            }
         }
 
         if (priorComparable && baseline is not null)
@@ -215,6 +235,7 @@ internal static class HostUpdateRecoveryDrift
                 Items = ordered,
                 Configuration = configurationFingerprint,
                 Installed = InstalledStateHash(installed),
+                ManifestBinding = observedManifestBinding,
             })[..32];
         return new(ordered, configurationFingerprint, token);
     }
@@ -227,14 +248,15 @@ internal static class HostUpdateRecoveryDrift
         HostUpdateBaselineHashes.Configuration(options, database);
 
     /// <summary>
-    /// The baseline journaled when the update was authorized: the first one carried by the leading
-    /// run of <c>accepted</c> activities (a crash before preflight re-appends <c>accepted</c> with
-    /// the same host state). Null when none was recorded or the schema is not understood.
+    /// The baseline journaled when the update was authorized, carried only by the first journal
+    /// activity: a later <c>accepted</c> re-append (resume after a crash) must never supply one, or a
+    /// legacy journal could be rebased onto post-authorization state. Null when none was recorded or
+    /// the schema is not understood; schema 1 predates the manifest binding and reports it as drift.
     /// </summary>
-    // Only the first activity describes the authorization; a later "accepted" re-append (resume after a
-    // crash) must never supply a baseline, or a legacy journal could be rebased onto post-authorization state.
     internal static HostUpdateAuthorizationBaseline? AuthorizationBaseline(IReadOnlyList<HostUpdateExecutionActivity> activities) =>
-        activities.Count > 0 && activities[0] is { State: HostUpdateExecutionState.Accepted, Phase: "accepted", AuthorizationBaseline: { SchemaVersion: HostUpdateAuthorizationBaseline.CurrentSchemaVersion } baseline }
+        activities.Count > 0
+        && activities[0] is { State: HostUpdateExecutionState.Accepted, Phase: "accepted", AuthorizationBaseline: { } baseline }
+        && baseline.SchemaVersion is >= HostUpdateAuthorizationBaseline.MinimumSupportedSchemaVersion and <= HostUpdateAuthorizationBaseline.CurrentSchemaVersion
             ? baseline
             : null;
 

@@ -214,7 +214,7 @@ public sealed class HostUpdateExecutor(
             {
                 try
                 {
-                    baseline = await baselineProvider.CaptureAsync(cancellationToken).ConfigureAwait(false);
+                    baseline = await baselineProvider.CaptureAsync(request, cancellationToken).ConfigureAwait(false);
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {

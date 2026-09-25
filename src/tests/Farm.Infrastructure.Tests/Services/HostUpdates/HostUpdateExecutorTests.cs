@@ -378,15 +378,16 @@ public sealed class HostUpdateExecutorTests
         InstalledHostState ordered = Installed(new() { ["api"] = "sha256:1", ["frontend"] = "sha256:2" });
         InstalledHostState reversed = Installed(new() { ["frontend"] = "sha256:2", ["api"] = "sha256:1" });
 
-        HostUpdateAuthorizationBaseline first = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(ordered), options, database).CaptureAsync(CancellationToken.None);
-        HostUpdateAuthorizationBaseline second = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(reversed), options, database).CaptureAsync(CancellationToken.None);
-        HostUpdateAuthorizationBaseline absent = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(null), options, database).CaptureAsync(CancellationToken.None);
+        HostUpdateAuthorizationBaseline first = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(ordered), options, database, new StaticBindingReader("sha256:m")).CaptureAsync(Request(), CancellationToken.None);
+        HostUpdateAuthorizationBaseline second = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(reversed), options, database, new StaticBindingReader("sha256:m")).CaptureAsync(Request(), CancellationToken.None);
+        HostUpdateAuthorizationBaseline absent = await new HostUpdateAuthorizationBaselineProvider(new StaticStateStore(null), options, database, new StaticBindingReader("sha256:m")).CaptureAsync(Request(), CancellationToken.None);
 
         Assert.Equal(HostUpdateAuthorizationBaseline.CurrentSchemaVersion, first.SchemaVersion);
         Assert.Equal(first, second);
         Assert.Matches("^sha256:[0-9a-f]{64}$", first.InstalledStateHash);
         Assert.Equal(HostUpdateBaselineHashes.NoInstalledState, absent.InstalledStateHash);
         Assert.Equal(HostUpdateTrustRoot.Fingerprint, first.TrustRootFingerprint);
+        Assert.Equal("sha256:m", first.ManifestBinding);
         Assert.NotEqual(first.InstalledStateHash, HostUpdateBaselineHashes.InstalledState(ordered with { ReleaseId = "stable:1.2.1" }));
     }
 
@@ -408,11 +409,16 @@ public sealed class HostUpdateExecutorTests
     {
         public int Calls { get; private set; }
 
-        public Task<HostUpdateAuthorizationBaseline> CaptureAsync(CancellationToken cancellationToken)
+        public Task<HostUpdateAuthorizationBaseline> CaptureAsync(HostUpdateExecutionRequest request, CancellationToken cancellationToken)
         {
             Calls++;
             return Task.FromResult(capture());
         }
+    }
+
+    private sealed class StaticBindingReader(string binding) : IHostUpdateManifestBindingReader
+    {
+        public Task<string> ReadAsync(string releaseId, CancellationToken cancellationToken) => Task.FromResult(binding);
     }
 
     private sealed class StaticStateStore(InstalledHostState? state) : IInstalledHostStateStore

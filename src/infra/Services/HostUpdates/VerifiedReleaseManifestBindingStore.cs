@@ -43,33 +43,11 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
         ArgumentException.ThrowIfNullOrWhiteSpace(releaseId);
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestDigest);
 
-        string releaseKey = Convert.ToHexString(
-            SHA256.HashData(Encoding.UTF8.GetBytes(releaseId))).ToLowerInvariant();
-        string key = KeyPrefix + releaseKey;
+        string key = KeyFor(releaseId);
         AppSettingsEntity? existing = await ReadAsync(key, cancellationToken);
         if (existing is not null)
         {
-            ManifestBinding? binding;
-            try
-            {
-                binding = JsonSerializer.Deserialize<ManifestBinding>(existing.SettingsJson);
-            }
-            catch (JsonException ex)
-            {
-                throw new InvalidDataException(
-                    $"Persisted manifest binding for release '{releaseId}' is invalid.",
-                    ex);
-            }
-
-            if (binding is null
-                || binding.ReleaseId != releaseId
-                || string.IsNullOrWhiteSpace(binding.ManifestDigest))
-            {
-                throw new InvalidDataException(
-                    $"Persisted manifest binding for release '{releaseId}' is invalid.");
-            }
-
-            if (binding.ManifestDigest != manifestDigest)
+            if (ParseDigest(releaseId, existing.SettingsJson) != manifestDigest)
             {
                 throw new InvalidDataException(
                     $"Manifest digest conflict for immutable release '{releaseId}'.");
@@ -86,10 +64,23 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
 
         AppSettingsEntity? raced = await ReadAsync(key, cancellationToken).ConfigureAwait(false) ?? throw new InvalidDataException($"Manifest binding race for release '{releaseId}' could not be resolved.");
 
-        ManifestBinding? racedBinding;
+        if (ParseDigest(releaseId, raced.SettingsJson) != manifestDigest)
+        {
+            throw new InvalidDataException($"Manifest digest conflict for immutable release '{releaseId}'.");
+        }
+    }
+
+    /// <summary>The application-settings key holding the binding for <paramref name="releaseId"/>.</summary>
+    public static string KeyFor(string releaseId) =>
+        KeyPrefix + Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(releaseId))).ToLowerInvariant();
+
+    /// <summary>Validates a persisted binding for <paramref name="releaseId"/> and returns its manifest digest.</summary>
+    public static string ParseDigest(string releaseId, string settingsJson)
+    {
+        ManifestBinding? binding;
         try
         {
-            racedBinding = JsonSerializer.Deserialize<ManifestBinding>(raced.SettingsJson);
+            binding = JsonSerializer.Deserialize<ManifestBinding>(settingsJson);
         }
         catch (JsonException ex)
         {
@@ -98,15 +89,15 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
                 ex);
         }
 
-        if (racedBinding is null || racedBinding.ReleaseId != releaseId || string.IsNullOrWhiteSpace(racedBinding.ManifestDigest))
+        if (binding is null
+            || binding.ReleaseId != releaseId
+            || string.IsNullOrWhiteSpace(binding.ManifestDigest))
         {
-            throw new InvalidDataException($"Persisted manifest binding for release '{releaseId}' is invalid.");
+            throw new InvalidDataException(
+                $"Persisted manifest binding for release '{releaseId}' is invalid.");
         }
 
-        if (racedBinding.ManifestDigest != manifestDigest)
-        {
-            throw new InvalidDataException($"Manifest digest conflict for immutable release '{releaseId}'.");
-        }
+        return binding.ManifestDigest;
     }
 
     private async Task<AppSettingsEntity?> ReadAsync(string key, CancellationToken cancellationToken)
