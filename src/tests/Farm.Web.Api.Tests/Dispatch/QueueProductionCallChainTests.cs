@@ -5202,7 +5202,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
 
         var printers = new Mock<IPrintersService>(MockBehavior.Strict);
         printers.Setup(value => value.GetStatusDtoAsync(fixture.PrinterId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PrinterStatusDto(fixture.PrinterId, IsOnline: false));
+            .ReturnsAsync(new PrinterStatusDto(fixture.PrinterId, IsOnline: false, State: null));
         await RunReconciliationAsync(printers.Object, clock);
         printers.Verify(value => value.GetStatusDtoAsync(fixture.PrinterId, It.IsAny<CancellationToken>()), Times.Never);
         clock.Advance(TimeSpan.FromTicks(1));
@@ -5343,16 +5343,16 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<IServiceScopeFactory>(), CreateHubContext(),
             NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
         using var cancellation = new CancellationTokenSource();
-        Task<bool> Wait() => reconciliation
+        Task<bool> WaitAsync() => reconciliation
             ? reconciler.WaitForIntervalOrPauseAsync(cancellation.Token)
             : publisher.WaitForIntervalOrPauseAsync(cancellation.Token);
 
-        Task<bool> interval = Wait();
+        Task<bool> interval = WaitAsync();
         interval.IsCompleted.Should().BeFalse();
         clock.Advance(reconciliation ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(5));
         (await interval.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeFalse();
 
-        Task<bool> cancelledInterval = Wait();
+        Task<bool> cancelledInterval = WaitAsync();
         cancelledInterval.IsCompleted.Should().BeFalse();
         await cancellation.CancelAsync();
         Func<Task> waitForCancellation = async () => await cancelledInterval.WaitAsync(TimeSpan.FromSeconds(5));
