@@ -137,6 +137,42 @@ public sealed class DispatchRecoveryServiceTests : IAsyncDisposable
         (await db.DispatchRecoveryJournalEntries.CountAsync()).Should().Be(1);
     }
 
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task RecoverAsync_ReplayWithNewIfMatch_ReplaysAndClientTimeIsFingerprinted()
+    {
+        RecoveryFixture fixture = await SeedIndeterminateClaimAsync(senderSettled: true);
+        await using AppDbContext db = CreateContext();
+        DispatchRecoveryService sut = CreateRecoveryService(db);
+        var request = new DispatchRecoveryRequest
+        {
+            DispatchAttemptId = fixture.AttemptId,
+            ClaimRevision = fixture.AttemptRevision,
+            PhysicalCheckConfirmed = true,
+            ClientReportedAtUtc = Now.AddMinutes(-1).UtcDateTime,
+        };
+
+        DispatchRecoveryResult first = await RecoverAsync(sut, fixture, "replay-key", request);
+        DispatchRecoveryResult replayWithStaleETag = await sut.RecoverAsync(
+            fixture.PrinterId,
+            "operator-1",
+            fixture.StateRevision + 7,
+            RevisionETag.EncodeQuoted(fixture.StateRevision + 7),
+            "replay-key",
+            request,
+            null,
+            CancellationToken.None);
+        request.ClientReportedAtUtc = Now.UtcDateTime;
+        DispatchRecoveryResult reused = await RecoverAsync(sut, fixture, "replay-key", request);
+
+        first.StatusCode.Should().Be(StatusCodes.Status200OK);
+        replayWithStaleETag.StatusCode.Should().Be(first.StatusCode);
+        replayWithStaleETag.BodyJson.Should().Be(first.BodyJson);
+        reused.StatusCode.Should().Be(StatusCodes.Status409Conflict);
+        JsonError(reused).Should().Be("idempotency_key_reused");
+        (await db.DispatchRecoveryJournalEntries.CountAsync()).Should().Be(1);
+    }
+
     [Theory]
     [InlineData(false, StatusCodes.Status400BadRequest, "physical_check_required", null, null)]
     [InlineData(true, StatusCodes.Status412PreconditionFailed, "rejected_stale", 99L, null)]
@@ -332,6 +368,39 @@ public sealed class DispatchRecoveryServiceTests : IAsyncDisposable
             .Should().BeTrue();
         (await verify.QueueDispatchOutbox.AnyAsync(o => o.EventType == DispatchClaimService.EventTypeDispatchRecoveryCleared))
             .Should().BeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task ScanOnceAsync_MoreClaimsThanPageSize_RaisesMarkersForEveryClaim()
+    {
+        DateTime claimedAt = Now.AddHours(-2).UtcDateTime;
+        for (int i = 0; i < 3; i++)
+        {
+            _ = await SeedIndeterminateClaimAsync(senderSettled: true, claimedAtUtc: claimedAt.AddMinutes(i));
+        }
+
+        DispatchEscalationOptions policy = new()
+        {
+            PolicyRevision = 1,
+            OperationalAfter = TimeSpan.FromMinutes(15),
+            CriticalAfter = TimeSpan.FromHours(1),
+            HardLimitAfter = TimeSpan.FromHours(24),
+        };
+        await using ServiceProvider provider = CreateServiceProvider();
+        var service = new DispatchEscalationService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            Options.Create(policy),
+            _clock,
+            NullLogger<DispatchEscalationService>.Instance)
+        {
+            ScanBatchSize = 1,
+        };
+
+        (await service.ScanOnceAsync(CancellationToken.None)).Should().Be(9);
+        (await service.ScanOnceAsync(CancellationToken.None)).Should().Be(0);
+        await using AppDbContext verify = CreateContext();
+        (await verify.DispatchEscalationMarkers.Select(m => m.DispatchAttemptId).Distinct().CountAsync()).Should().Be(3);
     }
 
     [Fact]

@@ -200,7 +200,14 @@ public sealed class DispatchRecoveryService(
         }
 
         bool senderIsolationConfirmed = request.SenderIsolationConfirmed == true;
+        DateTime? clientReportedAtUtc = NormalizeUtc(request.ClientReportedAtUtc);
+
+        // The fingerprint covers the request body only. If-Match is a precondition header: an
+        // exact replay resolves before ETag checks, so it must not change the fingerprint.
         string scopeHash = Sha256Hex(string.Join('\n', actorSubject, RecoverRoute, printerId.ToString("D"), idempotencyKey));
+        string reportedToken = clientReportedAtUtc is DateTime reportedAt
+            ? reportedAt.Ticks.ToString(System.Globalization.CultureInfo.InvariantCulture)
+            : string.Empty;
         string fingerprint = Sha256Hex(string.Join(
             '\n',
             attemptId.ToString("D"),
@@ -208,7 +215,7 @@ public sealed class DispatchRecoveryService(
             "physical=true",
             senderIsolationConfirmed ? "isolation=true" : "isolation=false",
             note ?? string.Empty,
-            ifMatch.Trim()));
+            "reported=" + reportedToken));
 
         DispatchRecoveryResult? replay = await TryReplayAsync(scopeHash, fingerprint, ct);
         if (replay is not null)
@@ -226,7 +233,7 @@ public sealed class DispatchRecoveryService(
                 claimRevision,
                 senderIsolationConfirmed,
                 note,
-                request.ClientReportedAtUtc,
+                clientReportedAtUtc,
                 correlationId,
                 scopeHash,
                 fingerprint,
@@ -371,9 +378,7 @@ public sealed class DispatchRecoveryService(
             PriorOutcome = attempt?.PrinterId == printerId ? attempt.Outcome.ToString() : "NotFound",
             ActorSubject = Truncate(actorSubject, 256),
             ActorRecordedAtUtc = now,
-            ClientReportedAtUtc = clientReportedAtUtc is DateTime reported
-                ? (reported.Kind == DateTimeKind.Unspecified ? DateTime.SpecifyKind(reported, DateTimeKind.Utc) : reported.ToUniversalTime())
-                : null,
+            ClientReportedAtUtc = clientReportedAtUtc,
             AssertionVersion = AssertionVersion,
             PhysicalCheckConfirmed = true,
             SenderIsolationConfirmed = senderIsolationConfirmed,
@@ -823,6 +828,13 @@ public sealed class DispatchRecoveryService(
         new(statusCode, null, Serialize(new { error, detail }));
 
     private static string Serialize(object body) => JsonSerializer.Serialize(body, JsonOptions);
+
+    private static DateTime? NormalizeUtc(DateTime? value) => value switch
+    {
+        null => null,
+        { Kind: DateTimeKind.Unspecified } unspecified => DateTime.SpecifyKind(unspecified, DateTimeKind.Utc),
+        DateTime other => other.ToUniversalTime(),
+    };
 
     private static string Sha256Hex(string value) =>
         Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(value))).ToLowerInvariant();

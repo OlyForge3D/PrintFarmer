@@ -22,7 +22,10 @@ public sealed class DispatchEscalationService(
     TimeProvider timeProvider,
     ILogger<DispatchEscalationService> logger) : BackgroundService
 {
-    private const int ScanBatchSize = 200;
+    private const int DefaultScanBatchSize = 200;
+
+    /// <summary>Gets the page size for one scan query. Internal so tests can exercise paging.</summary>
+    internal int ScanBatchSize { get; init; } = DefaultScanBatchSize;
 
     /// <inheritdoc />
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -62,22 +65,48 @@ public sealed class DispatchEscalationService(
         IDbOutboxSequenceAllocator sequenceAllocator =
             scope.ServiceProvider.GetRequiredService<IDbOutboxSequenceAllocator>();
         DispatchEscalationOptions policy = options.Value;
+        DateTime now = timeProvider.GetUtcNow().UtcDateTime;
+        int count = 0;
 
-        List<QueueDispatchAttempt> claims = await (
-                from state in db.PrinterDispatchStates.AsNoTracking()
-                join attempt in db.QueueDispatchAttempts.AsNoTracking()
-                    on state.ActiveDispatchAttemptId equals (Guid?)attempt.Id
-                where attempt.Outcome == DispatchAttemptOutcome.Unknown &&
-                      attempt.RequiresReconciliation
-                orderby attempt.ClaimedAtUtc
-                select attempt)
-            .Take(ScanBatchSize)
-            .ToListAsync(ct);
-        if (claims.Count == 0)
+        // Page through every unresolved claim each pass so claims beyond the first batch are
+        // never starved. Offset paging on a stable (ClaimedAtUtc, Id) order is sufficient: rows
+        // that shift between pages are picked up by the next pass, and markers are idempotent.
+        int offset = 0;
+        bool morePages = true;
+        while (morePages)
         {
-            return 0;
+            List<QueueDispatchAttempt> claims = await (
+                    from state in db.PrinterDispatchStates.AsNoTracking()
+                    join attempt in db.QueueDispatchAttempts.AsNoTracking()
+                        on state.ActiveDispatchAttemptId equals (Guid?)attempt.Id
+                    where attempt.Outcome == DispatchAttemptOutcome.Unknown &&
+                          attempt.RequiresReconciliation
+                    orderby attempt.ClaimedAtUtc, attempt.Id
+                    select attempt)
+                .Skip(offset)
+                .Take(ScanBatchSize)
+                .ToListAsync(ct);
+            if (claims.Count == 0)
+            {
+                break;
+            }
+
+            count += await RaiseDueAsync(db, sequenceAllocator, policy, claims, now, ct);
+            morePages = claims.Count == ScanBatchSize;
+            offset += ScanBatchSize;
         }
 
+        return count;
+    }
+
+    private async Task<int> RaiseDueAsync(
+        AppDbContext db,
+        IDbOutboxSequenceAllocator sequenceAllocator,
+        DispatchEscalationOptions policy,
+        List<QueueDispatchAttempt> claims,
+        DateTime now,
+        CancellationToken ct)
+    {
         List<Guid> attemptIds = claims.Select(attempt => attempt.Id).ToList();
         List<(Guid AttemptId, string Threshold)> existing = (await db.DispatchEscalationMarkers
                 .AsNoTracking()
@@ -90,7 +119,6 @@ public sealed class DispatchEscalationService(
             .ToList();
         HashSet<(Guid, string)> raised = [.. existing];
 
-        DateTime now = timeProvider.GetUtcNow().UtcDateTime;
         int count = 0;
         foreach (QueueDispatchAttempt attempt in claims)
         {
