@@ -866,7 +866,7 @@ public sealed class HostUpdateSchedulerTests
 
     private static string TempRoot()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-replay-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-replay-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         return root;
     }

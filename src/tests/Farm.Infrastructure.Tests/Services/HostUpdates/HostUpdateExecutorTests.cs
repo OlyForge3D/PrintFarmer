@@ -26,7 +26,7 @@ public sealed class HostUpdateExecutorTests
     [Fact] public void Request_requires_exact_unique_six_targets() { var request = Request() with { Targets = Request().Targets.Take(5).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_invalid", error); }
     [Fact] public void Request_rejects_duplicate_service_ids() { var request = Request() with { Targets = Request().Targets.Select((t, i) => i == 5 ? t with { ServiceId = "svc-1" } : t).ToArray() }; Assert.False(request.IsValid(out var error)); Assert.Equal("target_set_invalid", error); }
     [Fact] public void Request_rejects_noncanonical_platform() { var request = Request() with { HostPlatform = "linux-armv8" }; Assert.False(request.IsValid(out var error)); Assert.Equal("release_binding_invalid", error); }
-    [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)); Assert.Single(journal.Read("r")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("r")); } finally { if (File.Exists(path)) { File.Delete(path); } } }
+    [Fact] public void Journal_reconstructs_and_rejects_truncation() { string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal"); try { var journal = new FileHostUpdateExecutionJournal(path); journal.Append(new("a", "r", HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)); Assert.Single(journal.Read("r")); File.WriteAllText(path, File.ReadAllText(path)[..^3]); Assert.Throws<InvalidDataException>(() => journal.Read("r")); } finally { if (File.Exists(path)) { File.Delete(path); } } }
     [Fact] public async Task Executor_persists_transition_order_and_completion_async() { var steps = new FakeSteps(); var journal = new MemoryJournal(); var executor = new HostUpdateExecutor(steps, journal, new NoopLock(), automationPolicyRepository: new InlinePolicyRepository(Policy())); var result = await executor.ExecuteAsync(Request()); Assert.True(result.Succeeded); Assert.Equal(new[] { "preflight", "drain", "fence", "backup", "migration", "apply", "verify" }, steps.Calls); }
     [Fact]
     public async Task Executor_rejects_policy_fingerprint_drift_before_execution()
@@ -78,7 +78,7 @@ public sealed class HostUpdateExecutorTests
     [Fact]
     public async Task Reserve_reliance_ExecutionLockAndJournal_survives_restart_without_reexecution()
     {
-        string root = Directory.CreateTempSubdirectory("pf-host-update-reserve-").FullName;
+        string root = HostStateTestPaths.CreateTempSubdirectory("pf-host-update-reserve-").FullName;
         try
         {
             string replayPath = Path.Combine(root, "host-update-replay.json");
@@ -158,7 +158,7 @@ public sealed class HostUpdateExecutorTests
     [Fact]
     public void File_journal_preserves_complete_history_and_discards_interrupted_stage()
     {
-        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal");
+        string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal");
         try
         {
             FileHostUpdateExecutionJournal journal = new(path);
@@ -190,7 +190,7 @@ public sealed class HostUpdateExecutorTests
     [InlineData(HostUpdateExecutionState.Applying, "apply")]
     public async Task Real_file_restart_fails_closed_when_unmatched_unsafe_phase_cannot_be_reconciled(HostUpdateExecutionState state, string phase)
     {
-        string path = Path.Combine(Path.GetTempPath(), Guid.NewGuid() + ".journal");
+        string path = Path.Combine(HostStateTestPaths.TempRoot, Guid.NewGuid() + ".journal");
         try
         {
             HostUpdateExecutionRequest request = Request();
