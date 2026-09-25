@@ -98,7 +98,19 @@ final class HarvestUITests: ShiftTasksUITestBase {
             XCTAssertTrue(recentPage.isEnabled)
             XCTAssertTrue(recentPage.isHittable)
             recentPage.tap()
-            XCTAssertTrue(recentPage.isSelected)
+            // The page control's `.isSelected` trait follows `currentPage`,
+            // which changes inside an animated paging transition; the
+            // accessibility snapshot can lag the tap by a frame or more, so
+            // wait (bounded) for the real final selected state (#3001).
+            let recentSelected = XCTNSPredicateExpectation(
+                predicate: NSPredicate(format: "isSelected == true"),
+                object: recentPage
+            )
+            XCTAssertEqual(
+                XCTWaiter.wait(for: [recentSelected], timeout: 5),
+                .completed,
+                "Tapping the Recent page control must select the Recent page"
+            )
             if jobRow.waitForExistence(timeout: 3) { return }
         }
 
@@ -197,8 +209,10 @@ final class HarvestUITests: ShiftTasksUITestBase {
 
         app.navigationBars["Harvest Plate"].buttons["Cancel"].tap()
 
-        XCTAssertFalse(app.navigationBars["Harvest Plate"].exists,
-                       "Cancel should dismiss the harvest sheet without submitting")
+        // Sheet dismissal is animated; wait (bounded) for the real final
+        // dismissed state instead of sampling mid-animation (#3001).
+        XCTAssertTrue(app.navigationBars["Harvest Plate"].waitForNonExistence(timeout: 5),
+                      "Cancel should dismiss the harvest sheet without submitting")
         // The harvest action must remain reachable — cancelling is
         // non-destructive to the job's completed state.
         XCTAssertTrue(app.buttons["jobDetail.harvestToInventory"].waitForExistence(timeout: 3))
@@ -275,12 +289,16 @@ final class HarvestUITests: ShiftTasksUITestBase {
         XCTAssertTrue(submitButton.waitForExistence(timeout: 3))
         submitButton.tap()
 
-        let doneButton = app.buttons["Done"]
+        let doneButton = app.buttons["harvest.done"]
         XCTAssertTrue(doneButton.waitForExistence(timeout: 5),
                       "A successful harvest should present the success view with a Done action")
+        XCTAssertEqual(doneButton.label, "Done")
         doneButton.tap()
 
-        XCTAssertFalse(app.navigationBars["Harvest Plate"].exists,
-                       "Done should dismiss the harvest sheet")
+        // Sheet dismissal is animated and CI runners are slow; `.exists`
+        // sampled in the same frame as the tap can still see the outgoing
+        // sheet. Wait (bounded) for the real final dismissed state (#3001).
+        XCTAssertTrue(app.navigationBars["Harvest Plate"].waitForNonExistence(timeout: 5),
+                      "Done should dismiss the harvest sheet")
     }
 }
