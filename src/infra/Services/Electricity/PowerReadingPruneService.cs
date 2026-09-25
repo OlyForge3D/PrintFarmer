@@ -14,10 +14,12 @@ namespace Farm.Infrastructure.Services.Electricity;
 public class PowerReadingPruneService(
     IServiceScopeFactory scopeFactory,
     ILogger<PowerReadingPruneService> logger,
-    Farm.Infrastructure.Services.HostUpdates.PowerReadingPruneFenceFlag? hostUpdateFence = null) : BackgroundService
+    Farm.Infrastructure.Services.HostUpdates.PowerReadingPruneFenceFlag? hostUpdateFence = null,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private const int RetentionDays = 90;
     private readonly TimeSpan _interval = TimeSpan.FromHours(24);
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -31,14 +33,14 @@ public class PowerReadingPruneService(
                 if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
                 {
                     await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                    await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                    await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
                 }
                 else
                 {
                     await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
                     AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-                    DateTime cutoff = DateTime.UtcNow.AddDays(-RetentionDays);
+                    DateTime cutoff = _timeProvider.GetUtcNow().UtcDateTime.AddDays(-RetentionDays);
                     int deleted = await db.PowerReadings
                         .Where(r => r.RecordedAt < cutoff)
                         .ExecuteDeleteAsync(stoppingToken);
@@ -70,15 +72,15 @@ public class PowerReadingPruneService(
 
     private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
     {
-        DateTimeOffset until = DateTimeOffset.UtcNow + _interval;
-        while (DateTimeOffset.UtcNow < until)
+        DateTimeOffset until = _timeProvider.GetUtcNow() + _interval;
+        while (_timeProvider.GetUtcNow() < until)
         {
             if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
             {
                 return true;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
         return false;
