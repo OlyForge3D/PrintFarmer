@@ -9,6 +9,7 @@ namespace Farm.Infrastructure.Services.Electricity;
 /// <summary>
 /// Background service that deletes <see cref="Domain.PowerReading"/> rows older than 90 days
 /// (the hot-retention window). Runs once per day.
+/// Shutdown cancellation during a prune pass is not reported as an error.
 /// </summary>
 public class PowerReadingPruneService(
     IServiceScopeFactory scopeFactory,
@@ -50,6 +51,10 @@ public class PowerReadingPruneService(
                             RetentionDays);
                     }
                 }
+            }
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                break;
             }
             catch (Exception ex)
             {
