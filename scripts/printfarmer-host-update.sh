@@ -49,7 +49,7 @@ if [[ "${1:-}" == "--config" ]]; then
 fi
 [[ -n "$config" ]] || fail_usage "--config <absolute-json-path> must be the first argument"
 is_absolute "$config" || fail_usage "--config must be an absolute path"
-[[ -f "$config" ]] || fail_usage "--config file does not exist"
+# Existence/readability is proven by the CLI (exit 3): a test here cannot tell denied from absent.
 
 cli_dir="${PRINTFARMER_HOST_UPDATE_CLI_DIR:-}"
 [[ -n "$cli_dir" ]] && is_absolute "$cli_dir" || fail_usage "PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory"

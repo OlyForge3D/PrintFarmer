@@ -14,9 +14,11 @@ while (index < args.Length)
         continue;
     }
 
-    if (configPath is not null || index + 1 >= args.Length || !Path.IsPathRooted(args[index + 1]) || !File.Exists(args[index + 1]))
+    // Only the shape is a usage error. Existence and readability are proven by the guarded
+    // loader (exit 3), because File.Exists also reports false for an access-denied file.
+    if (configPath is not null || index + 1 >= args.Length || !Path.IsPathFullyQualified(args[index + 1]))
     {
-        await Console.Error.WriteLineAsync("invalid_config: --config requires one existing absolute JSON file path").ConfigureAwait(false);
+        await Console.Error.WriteLineAsync("invalid_config: --config requires one absolute JSON file path").ConfigureAwait(false);
         return HostUpdateCliExitCodes.Usage;
     }
 

@@ -150,6 +150,44 @@ public sealed class HostUpdateCliTests : IDisposable
     }
 
     [Fact]
+    public async Task Process_entrypoint_maps_a_missing_config_file_to_exit_3_json()
+    {
+        string config = Path.Combine(_host.Root, "absent.json");
+
+        (int exitCode, string stdout) = await RunProcessAsync("--config", config, "status", "--json");
+
+        exitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        using JsonDocument document = JsonDocument.Parse(stdout);
+        document.RootElement.GetProperty("result").GetProperty("code").GetString().Should().Be("configuration_unreadable");
+    }
+
+    [Fact]
+    public async Task Process_entrypoint_maps_an_unreadable_config_file_to_exit_3_json()
+    {
+        string config = Path.Combine(_host.Root, "locked.json");
+        await File.WriteAllTextAsync(config, "{}");
+
+        // Hold an exclusive handle so the child cannot open the file (portable access denial).
+        (int exitCode, string stdout) result;
+        using (new FileStream(config, FileMode.Open, FileAccess.ReadWrite, FileShare.None))
+        {
+            result = await RunProcessAsync("--config", config, "status", "--json");
+        }
+
+        if (!OperatingSystem.IsWindows())
+        {
+            // POSIX advisory locking does not block the reader; the file is then readable ({}),
+            // so only assert the contract never degrades to a usage error.
+            result.exitCode.Should().NotBe(HostUpdateCliExitCodes.Usage);
+            return;
+        }
+
+        result.exitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        using JsonDocument document = JsonDocument.Parse(result.stdout);
+        document.RootElement.GetProperty("result").GetProperty("code").GetString().Should().Be("configuration_unreadable");
+    }
+
+    [Fact]
     public async Task Process_entrypoint_rejects_a_relative_config_path_as_usage()
     {
         (int exitCode, string stdout) = await RunProcessAsync("--config", "relative.json", "status");

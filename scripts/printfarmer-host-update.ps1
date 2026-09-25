@@ -110,8 +110,9 @@ while ($index -lt $rawArgs.Count) {
 if ($null -eq $config) { Exit-Usage '-Config <absolute-json-path> is required' }
 if ($null -eq $command) { Exit-Usage 'missing command (status or recover)' }
 
-if (-not (Test-FullyQualified $config) -or -not (Test-Path -LiteralPath $config -PathType Leaf)) {
-    Exit-Usage '-Config must be an existing absolute JSON file path'
+# Existence/readability is proven by the CLI (exit 3): Test-Path cannot tell denied from absent.
+if (-not (Test-FullyQualified $config)) {
+    Exit-Usage '-Config must be an absolute JSON file path'
 }
 
 $cliDir = $env:PRINTFARMER_HOST_UPDATE_CLI_DIR

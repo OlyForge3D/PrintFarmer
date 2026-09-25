@@ -89,7 +89,9 @@ expect_passthrough "recover confirm passes through" \
 
 expect_usage "missing --config refused" status
 expect_usage "relative --config refused" --config host-update.json status
-expect_usage "missing config file refused" --config "$TEST_ROOT/missing.json" status
+expect_passthrough "missing config file is left to the CLI (exit 3)" \
+    "$(printf '%s\n' "$dll" --config "$TEST_ROOT/missing.json" status)" \
+    --config "$TEST_ROOT/missing.json" status
 expect_usage "unknown command refused" --config "$CONFIG" apply
 expect_usage "unknown option refused" --config "$CONFIG" status --compose-file /tmp/x.yml
 expect_usage "path-like release refused" --config "$CONFIG" status --release 'stable:../../etc'

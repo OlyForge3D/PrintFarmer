@@ -234,7 +234,10 @@ own arguments (names case-insensitive, values case-sensitive) rather than using
 PowerShell parameter binding, so a usage error never prompts. `help` (or
 `--help`) prints usage without a config. A malformed or unreadable config file
 is reported by the CLI as exit 3 (`configuration_unreadable`), honouring
-`--json`. `PRINTFARMER_DOTNET` may name an
+`--json`. A missing config file is also exit 3, because the wrappers and CLI
+check only that `--config` is absolute and leave existence to the loader (an
+existence probe cannot tell an absent file from an access-denied one).
+`PRINTFARMER_DOTNET` may name an
 absolute `dotnet` host. `--request-id` is optional and must match the binding
 recorded in the journal.
 
