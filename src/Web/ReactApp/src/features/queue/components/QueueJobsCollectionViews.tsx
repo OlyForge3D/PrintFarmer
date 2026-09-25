@@ -4,7 +4,7 @@ import clsx from "clsx";
 import { AlertTriangle, Clock, DollarSign, FolderOpen, Layers, Palette, Timer } from "lucide-react";
 import type { QueuedPrintJobWithFileMetaDto } from "@/services/printQueueService";
 import { PrintJobPriority, type DispatchUploadProgressDto } from "@/types/api";
-import { isRecoveryBlocked } from "@/features/dispatch-recovery/utils";
+import { isDispatchIndeterminate, isRecoveryBlocked } from "@/features/dispatch-recovery/utils";
 
 const DUE_SOON_HOURS = 24;
 
@@ -89,12 +89,15 @@ function QueueJobActions({
   onDispatch,
   onSchedule,
   dispatchBlocked = false,
+  dispatchIndeterminate = false,
 }: {
   jobId: string;
   status: string;
   hasAssignedPrinter: boolean;
   /** Hides Start Print while the job is held (e.g. OperatorRecoveryRequired). */
   dispatchBlocked?: boolean;
+  /** Hides Start Print and Cancel while an unknown dispatch awaits reconciliation. */
+  dispatchIndeterminate?: boolean;
   dispatchingJobId: string | null;
   cancelingJobId: string | null;
   dispatchUploadProgressByJobId?: Record<string, DispatchUploadProgressDto>;
@@ -118,7 +121,7 @@ function QueueJobActions({
 
   return (
     <div className="flex gap-1.5 flex-wrap">
-      {(status === "Queued" || status === "Assigned") && hasAssignedPrinter && !dispatchBlocked && (
+      {(status === "Queued" || status === "Assigned") && hasAssignedPrinter && !dispatchBlocked && !dispatchIndeterminate && (
         <Button
           onClick={(e) => {
             e.stopPropagation();
@@ -186,7 +189,7 @@ function QueueJobActions({
           Abort
         </Button>
       )}
-      {status !== "Completed" && status !== "Cancelled" && (
+      {status !== "Completed" && status !== "Cancelled" && !dispatchIndeterminate && (
         <Button
           onClick={(e) => {
             e.stopPropagation();
@@ -337,6 +340,7 @@ function QueueJobCommon({
               status={status}
               hasAssignedPrinter={Boolean(jobWrapper.assignedPrinter)}
               dispatchBlocked={isRecoveryBlocked(jobWrapper.job)}
+              dispatchIndeterminate={isDispatchIndeterminate(jobWrapper.job)}
               dispatchingJobId={dispatchingJobId}
               cancelingJobId={cancelingJobId}
               dispatchUploadProgressByJobId={dispatchUploadProgressByJobId}

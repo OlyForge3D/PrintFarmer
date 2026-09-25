@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useId, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { AlertTriangle } from 'lucide-react';
 import { Modal } from '@/common/components/modals/Modal';
@@ -85,6 +85,7 @@ export function DispatchRecoveryModal({
   const [note, setNote] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [pendingSubmission, setPendingSubmission] = useState<PendingSubmission | null>(null);
+  const submittingRef = useRef(false);
 
   // Any change to the reviewed claim (revision bump, new attempt, new ETag)
   // invalidates prior confirmations: the operator must re-confirm.
@@ -125,9 +126,20 @@ export function DispatchRecoveryModal({
   };
 
   const handleSubmit = async () => {
-    if (!canSubmit || !resource || !snapshot?.etag) {
+    // Synchronous re-entry guard: a second click before the pending state
+    // re-renders must not start a parallel request with a different key.
+    if (submittingRef.current || !canSubmit || !resource || !snapshot?.etag) {
       return;
     }
+    submittingRef.current = true;
+    try {
+      await submit(resource, snapshot.etag);
+    } finally {
+      submittingRef.current = false;
+    }
+  };
+
+  const submit = async (resource: DispatchReconciliationSnapshot['resource'], etag: string) => {
     const trimmedNote = note.trim();
     const body: DispatchRecoveryRequest = {
       dispatchAttemptId: resource.dispatchAttemptId as string,
@@ -150,7 +162,7 @@ export function DispatchRecoveryModal({
     try {
       result = await recover.mutateAsync({
         printerId,
-        etag: snapshot.etag,
+        etag,
         idempotencyKey: pending.key,
         body,
       });

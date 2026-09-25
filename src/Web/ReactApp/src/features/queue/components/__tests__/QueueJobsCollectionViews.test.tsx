@@ -87,6 +87,41 @@ describe("Queue view mode + collection renderers", () => {
     expect(onCancel).toHaveBeenCalledWith("job-1");
   });
 
+  it.each([
+    ["list", QueueJobsListView],
+    ["card", QueueJobsCardView],
+  ] as const)(
+    "%s view hides Start Print and Cancel while an unknown dispatch awaits reconciliation (R3044-V01)",
+    (_mode, View) => {
+      const base = createMockJob();
+      const job = createMockJob({
+        job: {
+          ...base.job,
+          status: "Assigned",
+          dispatchResult: {
+            outcome: "Unknown",
+            requiresReconciliation: true,
+          } as unknown as NonNullable<QueuedPrintJobWithFileMetaDto["job"]["dispatchResult"]>,
+        },
+      });
+
+      render(<View jobs={[job]} onCancel={vi.fn()} onDispatch={vi.fn()} />);
+
+      expect(screen.queryByRole("button", { name: "Start Print" })).not.toBeInTheDocument();
+      expect(screen.queryByRole("button", { name: "Cancel" })).not.toBeInTheDocument();
+    },
+  );
+
+  it("list view still offers Start Print and Cancel for an assigned job with a settled dispatch", () => {
+    const base = createMockJob();
+    const job = createMockJob({ job: { ...base.job, status: "Assigned" } });
+
+    render(<QueueJobsListView jobs={[job]} onCancel={vi.fn()} onDispatch={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: "Start Print" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Cancel" })).toBeInTheDocument();
+  });
+
   it("card view falls back to the live printer thumbnail for an active external print", () => {
     // External print: no local gcode thumbnail, but the printer reports one live.
     const job = createMockJob({

@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { AuthContext } from '@/common/contexts/auth-context';
+import { apiClient } from '@/services/api';
 import {
   clearDispatchRecoveryBlock,
   getDispatchReconciliation,
@@ -13,6 +14,7 @@ import type {
   DispatchRecoveryClearResult,
   DispatchRecoveryRequest,
   DispatchRecoveryResult,
+  QueuedPrintJobWithFileMetaDto,
 } from '@/types/api';
 
 export const dispatchRecoveryKeys = {
@@ -114,6 +116,42 @@ export function useClearDispatchRecoveryBlock() {
     mutationFn: ({ jobId, jobETag }) => clearDispatchRecoveryBlock({ jobId, jobETag }),
     onSettled: (_data, _error, variables) =>
       invalidateDispatchRecoveryState(qc, variables.printerId),
+  });
+}
+
+const CANDIDATE_PAGE_SIZE = 1000;
+const CANDIDATE_MAX_PAGES = 20;
+
+/**
+ * Unfiltered, fully paged active-queue read used only to discover dispatch
+ * recovery candidates, so dashboard filters and table pagination can never
+ * hide an indeterminate claim or a recovery-held job. Keyed under
+ * `queue-jobs` so every queue invalidation refreshes it.
+ */
+export function useDispatchRecoveryCandidates(options: { enabled?: boolean } = {}) {
+  return useQuery({
+    queryKey: ['queue-jobs', 'dispatch-recovery-candidates'] as const,
+    queryFn: async () => {
+      const all: QueuedPrintJobWithFileMetaDto[] = [];
+      for (let page = 0; page < CANDIDATE_MAX_PAGES; page += 1) {
+        const batch = (await apiClient.getAnalyticsQueueJobs(
+          undefined,
+          undefined,
+          undefined,
+          'priority',
+          CANDIDATE_PAGE_SIZE,
+          page * CANDIDATE_PAGE_SIZE
+        )) as QueuedPrintJobWithFileMetaDto[];
+        all.push(...batch);
+        if (batch.length < CANDIDATE_PAGE_SIZE) {
+          break;
+        }
+      }
+      return all;
+    },
+    enabled: options.enabled ?? true,
+    staleTime: RECONCILIATION_STALE_TIME_MS,
+    refetchInterval: RECONCILIATION_STALE_TIME_MS,
   });
 }
 

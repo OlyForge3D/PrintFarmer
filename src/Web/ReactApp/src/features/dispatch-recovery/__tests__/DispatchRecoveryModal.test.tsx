@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { act, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 
@@ -119,6 +119,35 @@ describe('DispatchRecoveryModal', () => {
     expect(screen.getByText(/has no revision tag/)).toBeInTheDocument();
     await user.click(screen.getByLabelText(physicalLabel));
     expect(screen.getByRole('button', { name: submitName })).toBeDisabled();
+  });
+
+  it('ignores a second click before the pending state re-renders (R3044-V03)', async () => {
+    const user = userEvent.setup();
+    let resolveRecover: (value: unknown) => void = () => {};
+    recoverDispatchClaim.mockReturnValue(
+      new Promise((resolve) => {
+        resolveRecover = resolve;
+      })
+    );
+    renderModal();
+
+    await user.click(screen.getByLabelText(physicalLabel));
+    const submit = screen.getByRole('button', { name: submitName });
+    act(() => {
+      submit.click();
+      submit.click();
+    });
+
+    await waitFor(() => expect(recoverDispatchClaim).toHaveBeenCalledTimes(1));
+    await act(async () => {
+      resolveRecover({
+        kind: 'recovered',
+        httpStatus: 200,
+        etag: '"rev-2"',
+        resource: { ...snapshot().resource, hasIndeterminateClaim: false, recoveryAuditId: 'a' },
+      });
+    });
+    expect(recoverDispatchClaim).toHaveBeenCalledTimes(1);
   });
 
   it('submits the reviewed claim with If-Match and an idempotency key', async () => {

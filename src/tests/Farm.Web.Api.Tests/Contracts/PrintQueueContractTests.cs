@@ -172,6 +172,7 @@ public sealed class PrintQueueContractTests : IAsyncLifetime
             "harvestedAt",
             "slicerEngine",
             "progressPercent",
+            "blockedReasonCode",
         })
         {
             JsonContractAssertions.AssertMissingKey(root, propertyName);
@@ -337,9 +338,51 @@ public sealed class PrintQueueContractTests : IAsyncLifetime
         return printerId;
     }
 
-    private async Task<Guid> SeedMinimalPrintJobAsync()
+    /// <summary>
+    /// Recovery-held job (#2993): <c>blockedReasonCode</c> is a camelCase string-enum token on
+    /// both the authoritative job read and the queue-analytics list the React dashboard uses to
+    /// find held jobs regardless of table filters.
+    /// </summary>
+    [Fact]
+    public async Task GetJob_RecoveryBlockedJob_SerializesBlockedReasonCodeAsStringTokenAsync()
     {
-        Guid jobId = Guid.Parse("8fef6e78-93d6-41ff-904a-c06a00a80b5f");
+        Guid jobId = await SeedMinimalPrintJobAsync(
+            Guid.Parse("5b1f0c1e-2a8b-4b53-9c1d-2993a0b1c0de"),
+            JobBlockedReasonCode.OperatorRecoveryRequired);
+
+        using HttpClient client = await _factory.CreateAdminClientAsync(
+            username: "wire-contract-print-job-blocked",
+            email: "wire-contract-print-job-blocked@example.com");
+
+        using HttpResponseMessage jobResponse = await client.GetAsync($"/api/job-queue/{jobId}");
+        _ = jobResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using (JsonDocument jobDocument = JsonDocument.Parse(await jobResponse.Content.ReadAsStringAsync()))
+        {
+            JsonContractAssertions.AssertEnumToken(
+                jobDocument.RootElement,
+                "blockedReasonCode",
+                "OperatorRecoveryRequired");
+        }
+
+        using HttpResponseMessage listResponse = await client.GetAsync("/api/job-queue-analytics?limit=1000");
+        _ = listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        using JsonDocument listDocument = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        JsonElement entry = listDocument.RootElement.EnumerateArray().Single(item =>
+            string.Equals(
+                item.GetProperty("job").GetProperty("id").GetString(),
+                jobId.ToString(),
+                StringComparison.OrdinalIgnoreCase));
+        JsonContractAssertions.AssertEnumToken(
+            entry.GetProperty("job"),
+            "blockedReasonCode",
+            "OperatorRecoveryRequired");
+    }
+
+    private async Task<Guid> SeedMinimalPrintJobAsync(
+        Guid? id = null,
+        JobBlockedReasonCode? blockedReasonCode = null)
+    {
+        Guid jobId = id ?? Guid.Parse("8fef6e78-93d6-41ff-904a-c06a00a80b5f");
         DateTime createdAt = new(2026, 8, 30, 18, 0, 0, DateTimeKind.Utc);
 
         using IServiceScope scope = _factory.Services.CreateScope();
@@ -357,6 +400,7 @@ public sealed class PrintQueueContractTests : IAsyncLifetime
             CreatedAt = createdAt,
             UpdatedAt = createdAt,
             QueuedAt = createdAt,
+            BlockedReasonCode = blockedReasonCode,
         });
 
         _ = await db.SaveChangesAsync();

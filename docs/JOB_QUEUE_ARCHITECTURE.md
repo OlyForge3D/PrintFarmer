@@ -435,6 +435,12 @@ calls the four routes through `services/api/dispatchRecoveryApi.ts`.
   escalation level, sender state, and last redacted evidence phase. It offers
   no cancel or retry action. The resource polls every 30 seconds only while a
   claim is indeterminate; queue SignalR events invalidate it otherwise.
+  Queue-dashboard candidates come from an unfiltered, fully paged queue read,
+  so filters and pagination cannot hide a warning. A banner stays mounted
+  until the reconciliation read reports the claim closed, and a recorded
+  recovery notice (with its audit link) stays until the operator dismisses it.
+  Queue views hide Start Print and Cancel while a job's dispatch outcome is
+  `Unknown` and still requires reconciliation.
 - **Recovery.** The Recover action appears only when the server reports
   `recoveryPermission`. The modal requires the physical-check confirmation, and
   also sender isolation when `senderSettled` is not `true` or the server

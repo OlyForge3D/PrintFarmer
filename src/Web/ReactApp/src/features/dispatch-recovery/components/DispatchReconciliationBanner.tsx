@@ -1,4 +1,4 @@
-import { useId, useState } from 'react';
+import { useEffect, useId, useState } from 'react';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import { Button } from '@/common/components/ui';
 import { useDispatchReconciliation } from '@/features/dispatch-recovery/hooks/useDispatchRecovery';
@@ -10,6 +10,11 @@ export interface DispatchReconciliationBannerProps {
   printerId: string;
   printerName: string;
   className?: string;
+  /**
+   * Called once the authoritative reconciliation read reports no open claim
+   * (and no pending recovery notice), so a host can stop tracking the printer.
+   */
+  onClaimClosed?: (printerId: string) => void;
 }
 
 interface RecordedRecovery {
@@ -28,6 +33,7 @@ export function DispatchReconciliationBanner({
   printerId,
   printerName,
   className,
+  onClaimClosed,
 }: DispatchReconciliationBannerProps) {
   const headingId = useId();
   const reconciliation = useDispatchReconciliation(printerId);
@@ -39,6 +45,13 @@ export function DispatchReconciliationBanner({
   const resource = snapshot?.resource;
   const canRecover = resource?.recoveryPermission === true;
   const displayName = resource?.printerName || printerName;
+  const claimClosed = resource !== undefined && !resource.hasIndeterminateClaim && recorded === null;
+
+  useEffect(() => {
+    if (claimClosed) {
+      onClaimClosed?.(printerId);
+    }
+  }, [claimClosed, onClaimClosed, printerId]);
 
   const auditModal = (
     <DispatchRecoveryAuditModal

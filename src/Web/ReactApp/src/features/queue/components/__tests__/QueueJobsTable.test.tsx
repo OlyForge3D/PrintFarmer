@@ -384,6 +384,28 @@ describe("QueueJobsTable Component", () => {
     render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
 
     expect(screen.getByText("Outcome unknown")).toBeInTheDocument();
+    // R3044-V01: the print may have started, so ordinary start/cancel must not
+    // be offered in place of operator recovery.
+    expect(screen.queryByRole("button", { name: /^Start print/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /^Cancel/ })).not.toBeInTheDocument();
+  });
+
+  it("keeps Start print and Cancel for an unknown outcome that no longer needs reconciliation", () => {
+    const job = createMockJob({
+      job: {
+        ...createMockJob().job,
+        status: "Assigned",
+        dispatchResult: {
+          outcome: "Unknown",
+          requiresReconciliation: false,
+        } as unknown as NonNullable<QueuedPrintJobWithFileMetaDto["job"]["dispatchResult"]>,
+      },
+    });
+
+    render(<QueueJobsTable jobs={[job]} onCancel={vi.fn()} />);
+
+    expect(screen.getByRole("button", { name: /^Start print/ })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /^Cancel/ })).toBeInTheDocument();
   });
 
   it("qualifies the Schedule accessible name without changing its visible label", () => {

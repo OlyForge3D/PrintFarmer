@@ -43,6 +43,25 @@ export function isRecoveryBlocked(
   return job?.blockedReasonCode === 'OperatorRecoveryRequired';
 }
 
+/**
+ * The job's latest dispatch outcome is unknown and awaits reconciliation: the
+ * print may have physically started, so ordinary start/cancel actions must not
+ * be offered in place of operator recovery.
+ */
+export function isDispatchIndeterminate(
+  job:
+    | {
+        dispatchResult?: {
+          outcome?: DispatchAttemptOutcome | string | null;
+          requiresReconciliation?: boolean | null;
+        } | null;
+      }
+    | null
+    | undefined
+): boolean {
+  return job?.dispatchResult?.outcome === 'Unknown' && job.dispatchResult.requiresReconciliation === true;
+}
+
 export function formatClaimAge(seconds: number | null | undefined): string {
   if (seconds == null || !Number.isFinite(seconds) || seconds < 0) {
     return 'unknown';
