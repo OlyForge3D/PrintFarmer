@@ -155,6 +155,33 @@ public sealed class HostUpdateCliPhysicalReconciliationTests : IDisposable, IAsy
     }
 
     [Fact]
+    public async Task A_retained_move_barrier_after_dead_lettering_invalidates_the_token_and_is_never_cleared()
+    {
+        SeedPendingRelease();
+        (string? drift, string stale) = await TokensAsync();
+        CliHostDatabase.HoldDeadLetteredMoveBarrier(_host.DatabasePath);
+
+        CliRun refused = await ConfirmAsync(drift, stale);
+
+        refused.ExitCode.Should().Be(HostUpdateCliExitCodes.PhysicalReconciliationPending);
+        Envelope(refused).GetProperty("result").GetProperty("code").GetString().Should().Be("physical_reconciliation_mismatch");
+        File.Exists(_host.AdmissionClosedPath).Should().BeTrue("the barrier was not part of the reconciled inventory");
+
+        JsonElement physical = await PreviewPhysicalAsync();
+        JsonElement idle = physical.GetProperty("printers").EnumerateArray()
+            .Single(p => p.GetProperty("printerName").GetString() == "Idle printer");
+        JsonElement barrier = idle.GetProperty("uncertainOutcomes").EnumerateArray().Single();
+        barrier.GetProperty("kind").GetString().Should().Be("physical_control_barrier");
+        barrier.GetProperty("reference").GetString().Should().Be(CliHostDatabase.DeadLetteredMoveCommand.ToString("D"));
+        barrier.GetProperty("state").GetString().Should().Be("move:requires_reconciliation");
+
+        (await ConfirmAsync(drift, physical.GetProperty("reconciliationToken").GetString())).ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        CliHostDatabase.ReadBarrier(_host.DatabasePath).Should().Be(
+            ((Guid?)CliHostDatabase.DeadLetteredMoveCommand, true),
+            "recovery never clears a physical barrier; the operator resolves it outside recovery");
+    }
+
+    [Fact]
     public async Task A_token_before_the_rollback_is_durable_is_refused_before_side_effects()
     {
         _host.SeedRecoveryRequired();

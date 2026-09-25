@@ -29,6 +29,12 @@ public static class HostUpdatePhysicalReconciliationCodes
     /// <summary>A dispatch claim that is in progress, has an unknown outcome, or requires reconciliation.</summary>
     public const string DispatchOutcomeUncertain = "dispatch_outcome_uncertain";
 
+    /// <summary>
+    /// A durable physical-I/O barrier (move, control or start) still held on the printer's dispatch
+    /// state, including one retained for manual reconciliation after its command row was dead-lettered.
+    /// </summary>
+    public const string PhysicalControlBarrier = "physical_control_barrier";
+
     /// <summary>The fixed replay policy reported to operators.</summary>
     public const string ReplayPolicy = "recovery_never_replays_or_issues_printer_commands";
 
@@ -133,6 +139,16 @@ public sealed class DbHostUpdatePrinterCommandInventoryReader(AppDbContext db) :
                 || attempt.Outcome == DispatchAttemptOutcome.Unknown)
             .Select(attempt => new { attempt.PrinterId, attempt.Id, attempt.Outcome })
             .ToListAsync(cancellationToken).ConfigureAwait(false);
+        var barriers = await db.PrinterDispatchStates.AsNoTracking()
+            .Where(state => state.PhysicalControlCommandId != null)
+            .Select(state => new
+            {
+                state.PrinterId,
+                CommandId = state.PhysicalControlCommandId!.Value,
+                Operation = state.PhysicalControlOperation,
+                state.PhysicalControlRequiresReconciliation,
+            })
+            .ToListAsync(cancellationToken).ConfigureAwait(false);
 
         var outcomes = new Dictionary<Guid, List<HostUpdateUncertainPhysicalOutcome>>();
         void Add(Guid printerId, HostUpdateUncertainPhysicalOutcome outcome)
@@ -158,6 +174,12 @@ public sealed class DbHostUpdatePrinterCommandInventoryReader(AppDbContext db) :
         foreach (var attempt in attempts)
         {
             Add(attempt.PrinterId, new(HostUpdatePhysicalReconciliationCodes.DispatchOutcomeUncertain, attempt.Id.ToString("D"), attempt.Outcome.ToString()));
+        }
+
+        foreach (var barrier in barriers)
+        {
+            string retention = barrier.PhysicalControlRequiresReconciliation ? "requires_reconciliation" : "held";
+            Add(barrier.PrinterId, new(HostUpdatePhysicalReconciliationCodes.PhysicalControlBarrier, barrier.CommandId.ToString("D"), $"{barrier.Operation ?? "unknown"}:{retention}"));
         }
 
         var names = printers.ToDictionary(printer => printer.Id, printer => (string?)printer.Name);

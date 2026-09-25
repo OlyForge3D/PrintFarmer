@@ -367,7 +367,10 @@ recorded in the journal.
     (read-only) from the application database, one entry per printer with
     its uncertain outcomes (`print_job_active`, `physical_command_in_flight`
     for pending/processing dispatch outbox rows, `dispatch_outcome_uncertain`
-    for in-progress, unknown or reconciliation-required dispatch attempts),
+    for in-progress, unknown or reconciliation-required dispatch attempts,
+    `physical_control_barrier` for a move/control/start barrier still held on
+    the printer's dispatch state, including one retained for manual review
+    after its command row was dead-lettered),
     the `state` (`ready_to_record`, `recorded`, `complete`, `after_rollback`,
     `operator_required`, `inventory_unavailable` or `record_unreadable`) and,
     only when the rollback is already done and just the fence is pending, the

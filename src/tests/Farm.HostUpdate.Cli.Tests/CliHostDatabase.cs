@@ -20,6 +20,7 @@ internal static class CliHostDatabase
     public static readonly Guid PrintingJob = Guid.Parse("1a000000-0000-0000-0000-000000000001");
     public static readonly Guid LeasedStartCommand = Guid.Parse("2a000000-0000-0000-0000-000000000001");
     public static readonly Guid UnknownAttempt = Guid.Parse("3b000000-0000-0000-0000-000000000001");
+    public static readonly Guid DeadLetteredMoveCommand = Guid.Parse("4c000000-0000-0000-0000-000000000001");
 
     private static readonly Lazy<byte[]> Template = new(BuildTemplate, LazyThreadSafetyMode.ExecutionAndPublication);
 
@@ -69,6 +70,41 @@ internal static class CliHostDatabase
         attempt.Outcome = DispatchAttemptOutcome.Rejected;
         attempt.RequiresReconciliation = false;
         db.SaveChanges();
+    }
+
+    /// <summary>
+    /// Changes the inventory after a preview: a move on the idle printer lost its response, so its
+    /// command row was dead-lettered for manual review while the physical barrier stays held.
+    /// </summary>
+    public static void HoldDeadLetteredMoveBarrier(string databasePath)
+    {
+        using AppDbContext db = Open(databasePath);
+        db.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+        {
+            Id = DeadLetteredMoveCommand,
+            Sequence = 2,
+            AggregateType = "Printer",
+            AggregateId = IdlePrinter,
+            PrinterId = IdlePrinter,
+            EventType = "PrintFarmer.Queue.BackendControlCommand.v1",
+            Status = QueueOutboxEventStatus.DeadLettered,
+            FailureCode = "manual_control_reconciliation_required",
+        });
+        db.PrinterDispatchStates.Add(new PrinterDispatchState
+        {
+            PrinterId = IdlePrinter,
+            PhysicalControlCommandId = DeadLetteredMoveCommand,
+            PhysicalControlOperation = "move",
+            PhysicalControlRequiresReconciliation = true,
+        });
+        db.SaveChanges();
+    }
+
+    public static (Guid? CommandId, bool RequiresReconciliation) ReadBarrier(string databasePath)
+    {
+        using AppDbContext db = Open(databasePath);
+        PrinterDispatchState state = db.PrinterDispatchStates.AsNoTracking().Single(s => s.PrinterId == IdlePrinter);
+        return (state.PhysicalControlCommandId, state.PhysicalControlRequiresReconciliation);
     }
 
     public static (QueueOutboxEventStatus Command, DispatchAttemptOutcome Attempt, bool RequiresReconciliation, PrintJobStatus Job) ReadCommandState(string databasePath)

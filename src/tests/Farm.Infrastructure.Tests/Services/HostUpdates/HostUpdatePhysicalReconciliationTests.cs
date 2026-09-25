@@ -162,19 +162,24 @@ public sealed class HostUpdatePhysicalReconciliationTests : IDisposable
         using var connection = new SqliteConnection("Data Source=:memory:");
         await connection.OpenAsync();
         DbContextOptions<AppDbContext> options = new DbContextOptionsBuilder<AppDbContext>().UseSqlite(connection).Options;
-        Guid printing = Guid.NewGuid(), unknown = Guid.NewGuid(), idle = Guid.NewGuid(), orphan = Guid.NewGuid();
+        Guid printing = Guid.NewGuid(), unknown = Guid.NewGuid(), idle = Guid.NewGuid(), orphan = Guid.NewGuid(), moved = Guid.NewGuid();
+        Guid control = Guid.NewGuid();
         Guid job = Guid.NewGuid(), command = Guid.NewGuid(), published = Guid.NewGuid(), attempt = Guid.NewGuid(), settledAttempt = Guid.NewGuid();
         await using (var seed = new AppDbContext(options))
         {
             await seed.Database.EnsureCreatedAsync();
             await seed.Database.ExecuteSqlRawAsync("PRAGMA foreign_keys = OFF;");
-            seed.Printers.AddRange(new Printer { Id = printing, Name = "A", ServerUrl = "http://a" }, new Printer { Id = unknown, Name = "B", ServerUrl = "http://b" }, new Printer { Id = idle, Name = "C", ServerUrl = "http://c" });
+            seed.Printers.AddRange(new Printer { Id = printing, Name = "A", ServerUrl = "http://a" }, new Printer { Id = unknown, Name = "B", ServerUrl = "http://b" }, new Printer { Id = idle, Name = "C", ServerUrl = "http://c" }, new Printer { Id = moved, Name = "D", ServerUrl = "http://d" });
+            seed.PrinterDispatchStates.AddRange(
+                new PrinterDispatchState { PrinterId = idle },
+                new PrinterDispatchState { PrinterId = moved, PhysicalControlCommandId = control, PhysicalControlOperation = "move", PhysicalControlRequiresReconciliation = true });
             seed.PrintJobs.AddRange(
                 new PrintJob { Id = job, Name = "j", AssignedPrinterId = printing, Status = PrintJobStatus.Printing },
                 new PrintJob { Id = Guid.NewGuid(), Name = "done", AssignedPrinterId = idle, Status = PrintJobStatus.Completed });
             seed.QueueDispatchOutbox.AddRange(
                 new QueueDispatchOutbox { Id = command, Sequence = 1, AggregateType = "PrintJob", AggregateId = job, PrinterId = printing, EventType = "start.v1", Status = QueueOutboxEventStatus.Processing },
-                new QueueDispatchOutbox { Id = published, Sequence = 2, AggregateType = "PrintJob", AggregateId = job, PrinterId = idle, EventType = "start.v1", Status = QueueOutboxEventStatus.Published });
+                new QueueDispatchOutbox { Id = published, Sequence = 2, AggregateType = "PrintJob", AggregateId = job, PrinterId = idle, EventType = "start.v1", Status = QueueOutboxEventStatus.Published },
+                new QueueDispatchOutbox { Id = control, Sequence = 3, AggregateType = "Printer", AggregateId = moved, PrinterId = moved, EventType = "control.v1", Status = QueueOutboxEventStatus.DeadLettered, FailureCode = "manual_control_reconciliation_required" });
             seed.QueueDispatchAttempts.AddRange(
                 new QueueDispatchAttempt { Id = attempt, PrinterId = unknown, AttemptNumber = 1, Outcome = DispatchAttemptOutcome.Unknown },
                 new QueueDispatchAttempt { Id = Guid.NewGuid(), PrinterId = orphan, AttemptNumber = 1, Outcome = DispatchAttemptOutcome.Rejected, RequiresReconciliation = true },
@@ -185,15 +190,18 @@ public sealed class HostUpdatePhysicalReconciliationTests : IDisposable
         await using var db = new AppDbContext(options);
         HostUpdatePrinterCommandInventory inventory = await new DbHostUpdatePrinterCommandInventoryReader(db).ReadAsync(CancellationToken.None);
 
-        inventory.Printers.Select(p => p.PrinterId).Should().Equal(new[] { printing, unknown, idle, orphan }.Order());
+        inventory.Printers.Select(p => p.PrinterId).Should().Equal(new[] { printing, unknown, idle, orphan, moved }.Order());
         inventory.Printers.Single(p => p.PrinterId == printing).UncertainOutcomes.Should().Equal(
             new HostUpdateUncertainPhysicalOutcome(HostUpdatePhysicalReconciliationCodes.PhysicalCommandInFlight, command.ToString("D"), "start.v1:Processing"),
             new HostUpdateUncertainPhysicalOutcome(HostUpdatePhysicalReconciliationCodes.PrintJobActive, job.ToString("D"), "Printing"));
         inventory.Printers.Single(p => p.PrinterId == unknown).UncertainOutcomes.Should().ContainSingle()
             .Which.Should().Be(new HostUpdateUncertainPhysicalOutcome(HostUpdatePhysicalReconciliationCodes.DispatchOutcomeUncertain, attempt.ToString("D"), "Unknown"));
-        inventory.Printers.Single(p => p.PrinterId == idle).UncertainOutcomes.Should().BeEmpty();
+        inventory.Printers.Single(p => p.PrinterId == idle).UncertainOutcomes.Should().BeEmpty("a dispatch state without a barrier is settled");
+        inventory.Printers.Single(p => p.PrinterId == moved).UncertainOutcomes.Should().ContainSingle(
+            "a barrier retained after its command was dead-lettered for manual review still needs physical reconciliation")
+            .Which.Should().Be(new HostUpdateUncertainPhysicalOutcome(HostUpdatePhysicalReconciliationCodes.PhysicalControlBarrier, control.ToString("D"), "move:requires_reconciliation"));
         inventory.Printers.Single(p => p.PrinterId == orphan).PrinterName.Should().BeNull("an outcome on a deleted printer is still surfaced");
-        inventory.UncertainOutcomeCount.Should().Be(4);
+        inventory.UncertainOutcomeCount.Should().Be(5);
         db.ChangeTracker.Entries().Should().BeEmpty("the inventory is read with no tracking and never saved");
     }
 
