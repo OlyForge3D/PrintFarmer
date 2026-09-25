@@ -5,10 +5,13 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Tests;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Farm.Modules.Administration.Tests.Controllers;
@@ -193,6 +196,33 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
         JsonObject heartbeatAfterSave = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
         heartbeatAfterSave["rowVersion"]!.GetValue<string>().Should().Be(token);
         (await admin.PostAsJsonAsync(endpoint, afterSave)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task BulkPost_AbsentTelemetry_DoesNotPersistClientHeartbeatAsync()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        const string endpoint = "/api/settings/NetworkDiscovery";
+        JsonObject section = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        section.Remove("rowVersion");
+        section["clientTimeoutMs"] = 900;
+        section["lastHeartbeat"] = DateTime.UtcNow.AddYears(10).ToString("O");
+
+        using HttpResponseMessage saved = await admin.PostAsJsonAsync(
+            "/api/settings", new JsonObject { [NetworkDiscoverySettings.SectionName] = section });
+
+        saved.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonObject read = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        read["clientTimeoutMs"]!.GetValue<int>().Should().Be(900);
+        read.ContainsKey("lastHeartbeat").Should().BeFalse("liveness is never client input");
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        string sectionJson = await db.AppSettingsEntities.AsNoTracking()
+            .Where(e => e.Key == NetworkDiscoverySettings.SectionName)
+            .Select(e => e.SettingsJson).SingleAsync();
+        sectionJson.Should().NotContain("lastHeartbeat");
+        (await db.AppSettingsEntities.AnyAsync(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey))
+            .Should().BeFalse("a settings save must not create heartbeat telemetry");
     }
 
     [Fact]

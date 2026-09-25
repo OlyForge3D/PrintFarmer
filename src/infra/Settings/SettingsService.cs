@@ -93,10 +93,7 @@ public class SettingsService : ISettingsService
         NetworkDiscoverySettings? discovery = settings as NetworkDiscoverySettings;
         if (discovery is not null)
         {
-            // Liveness is server telemetry, never client input: a checked save must not write a
-            // client-supplied timestamp, and it retires the legacy in-section mirror.
-            discovery.LastHeartbeat = null;
-            discovery.HeartbeatTelemetryUnreadable = false;
+            ClearHeartbeatForPersistence(discovery);
             heartbeatJson = await db.AppSettingsEntities.AsNoTracking()
                 .Where(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey)
                 .Select(e => e.SettingsJson).FirstOrDefaultAsync(ct);
@@ -140,9 +137,20 @@ public class SettingsService : ISettingsService
         Type type = typeof(T);
         AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>() ?? throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting]. Only AppSettings can be persisted to DB.");
         long? originWatermark = CaptureOriginWatermark();
+        string? heartbeatJson = null;
+        NetworkDiscoverySettings? discovery = settings as NetworkDiscoverySettings;
+        if (discovery is not null)
+        {
+            ClearHeartbeatForPersistence(discovery);
+            heartbeatJson = ReadHeartbeatTelemetry();
+        }
 
         // Persist to DB (AppSettings only)
         string json = JsonSerializer.Serialize(settings);
+        if (discovery is not null && heartbeatJson is not null)
+        {
+            ApplyHeartbeatTelemetry(discovery, heartbeatJson);
+        }
 
         // Use repository to persist settings
         // Note: This is called from non-async context, so we use sync over async as a workaround
@@ -296,10 +304,17 @@ public class SettingsService : ISettingsService
             }
 
             // Runtime telemetry has its own row so heartbeats cannot invalidate an editor's token.
-            if (instance is NetworkDiscoverySettings discovery
-                && settingsByKey.TryGetValue(NetworkDiscoverySettings.HeartbeatStorageKey, out AppSettingsEntity? heartbeat))
+            if (instance is NetworkDiscoverySettings discovery)
             {
-                ApplyHeartbeatTelemetry(discovery, heartbeat.SettingsJson);
+                if (settingsByKey.TryGetValue(NetworkDiscoverySettings.HeartbeatStorageKey, out AppSettingsEntity? heartbeat))
+                {
+                    ApplyHeartbeatTelemetry(discovery, heartbeat.SettingsJson);
+                }
+                else if (discovery.LastHeartbeat is DateTime legacyHeartbeat)
+                {
+                    // A pre-#2973 mirror is only a fallback, and it gets the same plausibility check.
+                    AcceptHeartbeat(discovery, legacyHeartbeat, NetworkDiscoverySettings.SectionName);
+                }
             }
 
             newSettings[key] = instance;
@@ -333,6 +348,11 @@ public class SettingsService : ISettingsService
             return;
         }
 
+        AcceptHeartbeat(discovery, heartbeat, NetworkDiscoverySettings.HeartbeatStorageKey);
+    }
+
+    private void AcceptHeartbeat(NetworkDiscoverySettings discovery, DateTime heartbeat, string sourceKey)
+    {
         heartbeat = heartbeat.Kind switch
         {
             DateTimeKind.Local => heartbeat.ToUniversalTime(),
@@ -341,12 +361,12 @@ public class SettingsService : ISettingsService
         };
 
         // Heartbeats are written with the server's UtcNow, so a far-future value can only come
-        // from corruption and would otherwise suppress staleness detection indefinitely.
+        // from corruption or client input and would otherwise suppress staleness detection.
         if (heartbeat > DateTime.UtcNow + HeartbeatClockSkewTolerance)
         {
             _logger.LogWarning(
-                "Discovery heartbeat telemetry '{TelemetryKey}' is {AheadSeconds:F0}s in the future; discovery liveness is unknown until the next heartbeat",
-                NetworkDiscoverySettings.HeartbeatStorageKey,
+                "Discovery heartbeat from '{TelemetryKey}' is {AheadSeconds:F0}s in the future; discovery liveness is unknown until the next heartbeat",
+                sourceKey,
                 (heartbeat - DateTime.UtcNow).TotalSeconds);
             MarkHeartbeatUnreadable(discovery);
             return;
@@ -354,6 +374,24 @@ public class SettingsService : ISettingsService
 
         discovery.LastHeartbeat = heartbeat;
         discovery.HeartbeatTelemetryUnreadable = false;
+    }
+
+    /// <summary>
+    /// Liveness is server telemetry, never client input: no save path may persist a
+    /// client-supplied timestamp, and every save retires the legacy in-section mirror.
+    /// </summary>
+    private static void ClearHeartbeatForPersistence(NetworkDiscoverySettings discovery)
+    {
+        discovery.LastHeartbeat = null;
+        discovery.HeartbeatTelemetryUnreadable = false;
+    }
+
+    private string? ReadHeartbeatTelemetry()
+    {
+        using AppDbContext db = _dbContextFactory.CreateDbContext();
+        return db.AppSettingsEntities.AsNoTracking()
+            .Where(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey)
+            .Select(e => e.SettingsJson).FirstOrDefault();
     }
 
     private static void MarkHeartbeatUnreadable(NetworkDiscoverySettings discovery)
