@@ -15,6 +15,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <!-- Read-only printer command inventory for the physical reconciliation gate (issue #2999). -->
+    <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.11" />
+    <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.3" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="../../infra/Farm.Infrastructure.csproj" />
   </ItemGroup>
 

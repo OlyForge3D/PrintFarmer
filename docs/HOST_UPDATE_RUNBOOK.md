@@ -17,10 +17,10 @@ This runbook is part of #2664. It does not prove that manual or offline
 recovery is complete. **Do not enable managed installation on the strength of
 this guide.** The host-local status/recovery CLI (#2980) now ships as a signed
 package with a verifying installer and generated host configuration (#3045);
-see [Failure and recovery](#failure-and-recovery). The following delivery gates
-are still open:
+see [Failure and recovery](#failure-and-recovery). After a rollback it keeps
+writers fenced until the operator records a physical printer command
+reconciliation (#2999). The following delivery gates are still open:
 
-- the physical printer reconciliation gate (#2999)
 - complete offline bundles (#2981)
 - isolated recovery and rollout evidence (#2982)
 
@@ -207,15 +207,14 @@ fixed-operation wrappers. #2998 added drift reapproval and the downtime preview.
 #3047 and #3050 added journaled authorization and manifest-binding baselines.
 #3041 publishes the CLI as a signed, self-contained package for a declared host
 matrix. #3045 adds a verifying installer, generated host configuration and
-per-archive SBOMs.
+per-archive SBOMs. #2999 keeps writers fenced after a rollback until the
+operator records a physical printer command reconciliation.
 
-This gap still blocks a claim of complete recovery support:
-
-- a physical printer command reconciliation gate (#2999)
-
-Provider and topology stop conditions are covered with fake adapters (#3000);
-live provider evidence belongs to #2982. While that gap is open, retain protected host evidence for the deployment
-owner. Do not invent a recovery command, edit journal JSON, delete locks, or run
+Provider and topology stop conditions are covered with fake adapters (#3000;
+see [Provider and topology stop conditions](#provider-and-topology-stop-conditions)).
+Live PostgreSQL, SQL Server and Docker evidence (#2982) still blocks a claim of
+complete recovery support. While that gap is open, retain protected host
+evidence for the deployment owner. Do not invent a recovery command, edit journal JSON, delete locks, or run
 the installer against a possibly migrated database. Directly reading a file is
 not journal integrity verification or authorization to release a fence.
 
@@ -443,6 +442,19 @@ recorded in the journal.
     recovery does to the fence.
   - `drift`: the drift items since authorization, a configuration fingerprint,
     and, when drift exists, the `reapprovalToken`.
+  - `physicalReconciliation` (#2999): the printer command inventory read
+    (read-only) from the application database, one entry per printer with
+    its uncertain outcomes (`print_job_active`, `physical_command_in_flight`
+    for pending/processing dispatch outbox rows, `dispatch_outcome_uncertain`
+    for in-progress, unknown or reconciliation-required dispatch attempts,
+    `physical_control_barrier` for a move/control/start barrier still held on
+    the printer's dispatch state, including one retained for manual review
+    after its command row was dead-lettered),
+    the `state` (`ready_to_record`, `recorded`, `complete`, `after_rollback`,
+    `operator_required`, `inventory_unavailable` or `record_unreadable`) and,
+    only when the rollback is already done and just the fence is pending, the
+    `reconciliationToken`. `replayPolicy` is always
+    `recovery_never_replays_or_issues_printer_commands`.
 - `recover --confirm <release>` requires the release retyped exactly. It first
   proves that the configured root, compose files, owned directories, database
   and host tools are visible in this namespace (existence only; nothing is
@@ -450,6 +462,34 @@ recorded in the journal.
   authorization and `--reapprove-drift <token>` does not carry the token the
   current `--preview` printed. Only then does it run the shared coordinator under
   the execution lock.
+
+Physical printer command reconciliation (#2999) gates the writer fence release,
+not the rollback itself. Once a rollback has completed, the coordinator keeps
+admission fenced with a `FenceReleasePending` outcome (CLI exit 13, detail
+suffix `|physical_reconciliation_pending`) until a reconciliation record for
+that release and request exists. The gate is registered in the shared recovery
+engine, so the API recover path stays fenced too until the CLI records it. An
+unreadable record also keeps the fence closed
+(`|physical_reconciliation_unreadable:<type>`). To record it:
+
+1. Run `recover --preview` and review every printer listed under
+   `physicalReconciliation`. Physically inspect each one and reconcile its
+   state with the listed job, outbox and dispatch-attempt outcomes by hand. A
+   restored database cannot undo a physical print.
+2. Re-run `recover --confirm <release> --printers-reconciled <token>` (PowerShell:
+   `-PrintersReconciled <token>`) with the `physical-<32 hex>` token that
+   preview printed. The token binds the release, the request and a SHA-256 of
+   the canonical inventory. Any change to the inventory invalidates it
+   (`physical_reconciliation_mismatch`, exit 13), so preview again.
+3. The CLI writes a hashed record to
+   `<StateDirectory>/physical-reconciliation/` and then runs the coordinator,
+   which releases the fence. A token given before the rollback has completed
+   is refused with exit 6 (`physical_reconciliation_not_ready`).
+
+Neither the CLI nor the coordinator ever replays, cancels, retries or issues a
+printer command, or clears a dispatch lease. The inventory is only ever read,
+through a read-only, no-tracking database context, and the CLI has no printer
+backend client in its service graph.
 
 Drift reapproval (#2998) compares the journaled authorization with the host
 now. Since #3047 the executor also journals an authorization baseline on the
@@ -510,6 +550,7 @@ reports `manifest_binding_drift` so an unreadable or changed binding is never hi
 | 10 | Needs operator (including no restorable backup, or canceled) | Follow the coordinated restoration procedure below. |
 | 11 | Fence release pending | Writers stay fenced. Re-run `recover --confirm` once the fence adapter is reachable. |
 | 12 | Drift not reapproved, or the installed state changed after evaluation (`drift_reapproval_stale`) | Run `--preview`, review every drift item with the deployment owner, then re-run `--confirm` with `--reapprove-drift <token>` only if recovery toward the recorded prior state is still correct. |
+| 13 | Physical printer reconciliation not recorded, or the token no longer matches the inventory | Writers stay fenced. Run `--preview`, physically reconcile every listed printer, then re-run `--confirm` with `--printers-reconciled <token>`. Never send printer commands to test recovery. |
 
 Known limits of the current CLI:
 
@@ -557,8 +598,10 @@ Known limits of the current CLI:
   which builds the archive with the release packaging code, verifies it
   against its checksum list, extracts it and runs the CLI with `dotnet` poisoned
   on `PATH`.
-- There is no physical command reconciliation gate yet (#2999). Provider and
-  topology coverage uses fake process and health adapters only (#3000, see
+- The physical reconciliation inventory is proven against SQLite only; the
+  PostgreSQL and SQL Server inventory readers are built but not yet exercised
+  by tests (live evidence belongs to #2982). Provider and topology coverage
+  uses fake process and health adapters only (#3000, see
   [Provider and topology stop conditions](#provider-and-topology-stop-conditions));
   it is not a live PostgreSQL, SQL Server or Docker proof. macOS has no package (see
   [Install the signed CLI package](#install-the-signed-cli-package)).
@@ -623,7 +666,9 @@ For coordinated restoration, the approved recovery procedure must:
 5. Reconcile every affected printer's physical state with queue/start/control
    outcomes before allowing new dispatch. A DB restore cannot undo a physical
    print. Never replay uncertain starts, moves or control commands, clear
-   leases blindly, or use real printer commands as recovery smoke tests.
+   leases blindly, or use real printer commands as recovery smoke tests. The
+   CLI enforces this step for the writer fence: it stays closed until
+   `--printers-reconciled` records the reconciliation (exit 13).
 6. Reconcile selected versus observed channel and refresh trusted metadata and
    installed observations on reconnect before new eligibility. Retain both
    channels' replay records and failure history; do not let recovery artifacts
@@ -632,7 +677,6 @@ For coordinated restoration, the approved recovery procedure must:
 This checklist is a safety boundary, **not a tested provider-specific restore
 script**. Remaining delivery is tracked by:
 
-- #2999: the physical printer reconciliation gate
 - #2981: complete bundles
 - #2982: isolated recovery and authorized rollout evidence
 

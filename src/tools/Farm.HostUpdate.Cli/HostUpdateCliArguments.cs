@@ -29,6 +29,8 @@ internal sealed partial class HostUpdateCliArguments
 
     public string? ReapprovalToken { get; private set; }
 
+    public string? PhysicalReconciliationToken { get; private set; }
+
     public static bool TryParse(IReadOnlyList<string> args, out HostUpdateCliArguments? parsed, out string? error)
     {
         parsed = null;
@@ -120,6 +122,15 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.ReapprovalToken = token;
                     break;
+                case "--printers-reconciled" when command == HostUpdateCliCommand.Recover:
+                    if (!TryValue(args, ref i, out string? physicalToken))
+                    {
+                        error = "missing_value:--printers-reconciled";
+                        return false;
+                    }
+
+                    result.PhysicalReconciliationToken = physicalToken;
+                    break;
                 default:
                     error = "unknown_option:" + option;
                     return false;
@@ -174,6 +185,21 @@ internal sealed partial class HostUpdateCliArguments
                     return false;
                 }
             }
+
+            if (result.PhysicalReconciliationToken is not null)
+            {
+                if (!result.Confirm)
+                {
+                    error = "printers_reconciled_requires_confirm";
+                    return false;
+                }
+
+                if (!PhysicalReconciliationTokenPattern().IsMatch(result.PhysicalReconciliationToken))
+                {
+                    error = "invalid_printers_reconciled_token";
+                    return false;
+                }
+            }
         }
 
         parsed = result;
@@ -197,4 +223,7 @@ internal sealed partial class HostUpdateCliArguments
 
     [GeneratedRegex("^drift-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
     private static partial Regex ReapprovalTokenPattern();
+
+    [GeneratedRegex("^physical-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
+    private static partial Regex PhysicalReconciliationTokenPattern();
 }

@@ -166,7 +166,8 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     public async Task Duplicate_confirm_after_a_host_restart_is_a_durable_no_op(string provider, string topology)
     {
         IConfiguration configuration = SeedCoordinatedRestore(provider, topology);
-        (await ConfirmAsync(configuration)).ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        CliRun first = await ConfirmAsync(configuration);
+        first.ExitCode.Should().Be(HostUpdateCliExitCodes.Success, first.Output);
         _processes.Clear();
 
         // Every CLI invocation builds a fresh process-local service graph, exactly like a restarted host.
@@ -269,7 +270,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
         CliRun unapproved = await ConfirmAsync(current);
         CliRun preview = await RunAsync(current, "recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json");
         string token = Result(preview).GetProperty("drift").GetProperty("reapprovalToken").GetString()!;
-        CliRun reapproved = await RunAsync(current, "recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", token, "--json");
+        CliRun reapproved = await ConfirmAsync(current, "--reapprove-drift", token);
 
         unapproved.ExitCode.Should().Be(HostUpdateCliExitCodes.DriftUnapproved, unapproved.Output);
         Result(unapproved).GetProperty("details").EnumerateArray().Select(e => e.GetString()).Should().Contain(HostUpdateRecoveryDrift.ConfigurationDrift);
@@ -513,8 +514,42 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     private InstalledHostState ReadInstalledState() =>
         JsonSerializer.Deserialize<InstalledHostState>(File.ReadAllText(Path.Combine(_host.StateDirectory, "installed-state.json")))!;
 
-    private Task<CliRun> ConfirmAsync(IConfiguration configuration) =>
-        RunAsync(configuration, "recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--json");
+    // Issue #2999: once the rollback is durable the fence is released only after the operator
+    // records the previewed physical reconciliation token, so a confirm that stops for it is
+    // followed by the operator's reconciling confirm (which never restores or re-applies).
+    private async Task<CliRun> ConfirmAsync(IConfiguration configuration, params string[] extraArgs)
+    {
+        string[] confirm = ["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, .. extraArgs, "--json"];
+        CliRun run = await RunAsync(configuration, confirm);
+        if (run.ExitCode != HostUpdateCliExitCodes.PhysicalReconciliationPending)
+        {
+            return run;
+        }
+
+        string? token = await PhysicalTokenAsync(configuration);
+        return token is null ? run : await RunAsync(configuration, [.. confirm, "--printers-reconciled", token]);
+    }
+
+    private async Task<string?> PhysicalTokenAsync(IConfiguration configuration)
+    {
+        CliRun preview = await RunAsync(configuration, "recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json");
+        try
+        {
+            using JsonDocument document = JsonDocument.Parse(preview.Output);
+            return document.RootElement.TryGetProperty("result", out JsonElement result)
+                && result.ValueKind == JsonValueKind.Object
+                && result.TryGetProperty("physicalReconciliation", out JsonElement physical)
+                && physical.ValueKind == JsonValueKind.Object
+                && physical.TryGetProperty("reconciliationToken", out JsonElement token)
+                && token.ValueKind == JsonValueKind.String
+                ? token.GetString()
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
 
     private async Task<CliRun> RunAsync(IConfiguration configuration, params string[] args)
     {
@@ -528,6 +563,7 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     {
         services.AddSingleton<IHostUpdateProcessRunner>(_processes);
         services.AddSingleton<IHostUpdateManifestBindingReader>(new UnboundManifestBindingReader());
+        services.AddSingleton<IHostUpdatePrinterCommandInventoryReader>(new EmptyPrinterCommandInventoryReader());
         services.AddHttpClient(HostUpdateRecoveryEngineRegistration.HealthClientName)
             .ConfigurePrimaryHttpMessageHandler(() => new HealthHandler(_health));
         if (_fence is not null)
@@ -543,6 +579,13 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     {
         public Task<string> ReadAsync(string releaseId, CancellationToken cancellationToken) =>
             Task.FromResult(ReadOnlyHostUpdateManifestBindingReader.NoBinding);
+    }
+
+    /// <summary>No provider connection: the test hosts have no printer command awaiting reconciliation.</summary>
+    private sealed class EmptyPrinterCommandInventoryReader : IHostUpdatePrinterCommandInventoryReader
+    {
+        public Task<HostUpdatePrinterCommandInventory> ReadAsync(CancellationToken cancellationToken) =>
+            Task.FromResult(new HostUpdatePrinterCommandInventory([]));
     }
 
     private sealed record ProviderCase(string DbProvider, string? ConnectionString, string Tool, string DumpFile, string? Password, string? PasswordVariable);
