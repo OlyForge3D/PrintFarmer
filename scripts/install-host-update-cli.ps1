@@ -262,7 +262,8 @@ function Invoke-Install([string[]] $Arguments) {
 # Nested JSON with string leaves, read by the CLI's JSON provider exactly as the equivalent
 # environment variables. Values never appear in errors because they may hold credentials.
 function ConvertTo-HostUpdateConfig([string] $EnvFile) {
-    $values = [ordered]@{}
+    # Ordinal: [ordered]@{} is case-insensitive and would silently merge case-only duplicates.
+    $values = [System.Collections.Specialized.OrderedDictionary]::new([System.StringComparer]::Ordinal)
     foreach ($raw in [System.IO.File]::ReadAllLines($EnvFile)) {
         $line = $raw.TrimEnd("`r")
         if ($line -match '^[ \t]*#' -or -not $line.Contains('=')) { continue }

@@ -220,13 +220,14 @@ exit 0
 
     foreach ($case in @(
             @('a value with $', 'ConnectionStrings__Default=Password=SECRET$x'),
-            @('a case-only duplicate key', 'HostUpdateExecution__rootdirectory=/SECRET'),
-            @('a key that is both value and section', 'HostUpdateExecution__RootDirectory__Child=SECRET'),
-            @('a malformed key segment', 'HostUpdateExecution__Bad___Key=SECRET'))) {
+            @('a case-only duplicate key', 'HostUpdateExecution__rootdirectory=/SECRET', 'differs only in case'),
+            @('a key that is both value and section', 'HostUpdateExecution__RootDirectory__Child=SECRET', 'both a value and a section'),
+            @('a malformed key segment', 'HostUpdateExecution__Bad___Key=SECRET', 'malformed configuration key'))) {
         [System.IO.File]::WriteAllText($envFile, "HostUpdateExecution__RootDirectory=$stateRoot`n$($case[1])`n")
         $before = [System.IO.File]::ReadAllBytes($config)
         $result = Invoke-Installer @('write-config', '-EnvFile', $envFile, '-Output', $config)
         Check "$($case[0]) is refused and the existing config is kept" ($result.ExitCode -eq 1 -and
+            ($case.Count -lt 3 -or $result.Output.Contains($case[2])) -and
             [System.Linq.Enumerable]::SequenceEqual([byte[]] $before, [byte[]] [System.IO.File]::ReadAllBytes($config)))
         Check "$($case[0]) error does not print the value" (-not $result.Output.Contains('SECRET'))
     }
