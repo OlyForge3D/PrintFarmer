@@ -44,41 +44,43 @@
 
 ## Ralph, Go!
 
-Scheduled automations use `.copilot/skills/ralph-loop/automation.md` and its
-verified host profile, not this CLI issue-only prompt. Squad CLI 0.11.0 filters
-issues before reading this file; changing this prose cannot make
-`squad watch --execute` recover blocked-parent draft PRs. Use the checked-in
-bootstrap for the existing App automations; do not start a terminal watcher.
-
-If invoked interactively, scan existing PRs (including drafts) before new issues.
-Follow `.github/ralph-reference.md` and the shared recovery/ownership protocol.
-Parallelize only independent work; shared-file corrections and integration must
-have one verified owner. Unknown remote ownership blocks duplicate dispatch.
+Read this file for your full instructions.  Follow ALL sections.
+MAXIMIZE PARALLELISM — spawn agents for ALL actionable issues simultaneously.
 
 ### Issue Selection
 
 Work on every open, unblocked, unassigned issue labeled `squad` or `squad:{member}`.
 Skip issues that are assigned to a human, blocked, or marked `status:on-hold`.
 
+PrintFarmer rules:
+- Scan open PRs (including drafts) first: route review feedback and CI failures
+  to the PR author, and merge approved PRs per `.github/ralph-reference.md`.
+- Priority: `priority:p0` > `p1` > `p2` > `p3`; within a priority, children of open
+  `priority:p0`/`p1` epics first, then oldest. `TEST ONLY` spikes go last.
+- Skip issues labelled `go:no` or `status:needs-analysis` without `go:yes`. For
+  `go:needs-research`, post findings as an issue comment, then remove
+  `go:needs-research`; no PR is needed unless files change.
+- **Claim before starting:** another machine may also run Ralph. Skip any issue
+  that already has an assignee or an open PR linked by `Closes #N`. Before
+  starting, assign the issue to yourself (`gh issue edit N --add-assignee @me`),
+  re-read it, and stop if it now also has another claim or linked PR.
+- Skip `needs:xcode` issues unless this machine's capabilities include `xcode`,
+  and run at most one of them at a time per Mac.
+- Parallelize only independent work: issues that edit the same files go to one agent.
+
+### Pull Requests
+
+Branch `squad/{issue}-{slug}` from `development`, open a draft PR with the `squad`
+label and `Closes #N`, then follow the review gate in `.github/copilot-instructions.md`
+("Readiness and Merge Review Gate"). Merge only `squad`-labelled PRs with a
+passing `squad/pre-pr-verdict`, using `gh pr merge --match-head-commit <sha>`.
+
 ### Post-Task Actions
 
-<!-- Uncomment and customize to add post-task hooks, e.g. Teams notifications:
-
-After completing work on each issue:
-- Post a brief summary to the team channel via your Teams MCP tool.
-- Update the issue with a progress comment if no PR has been opened yet.
--->
+After completing work on an issue, unassign yourself if no PR was opened, and
+leave a one-line status comment.
 
 ### Escalation
 
 If you are blocked on an issue, comment on it explaining why, add a `status:blocked`
-label, and move to the next actionable item.  Do not halt the loop.
-
-### Mobile Job Admission & Evidence
-
-For any issue gated on mobile/iOS QA evidence or a `<!-- ralph-claim -->` comment, follow
-`.github/ralph-reference.md`'s "Mobile/iOS Job Admission & Evidence Reconciliation"
-section before acting: never treat session-local evidence as recoverable, always
-reconcile a claim against the `scripts/ci/ralph-macos-ssh.mjs` ledger rather than trusting
-the comment text, and never fabricate evidence, close the issue, or merge a PR to clear a
-block.
+label, unassign yourself, and move to the next actionable item.  Do not halt the loop.

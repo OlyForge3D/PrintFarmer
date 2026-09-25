@@ -198,6 +198,104 @@ public class VerifiedReleaseEvidenceMapperTests
             ["api", "frontend", "slicer-host", "discovery", "slicer-worker"]);
         dto.Services.Should().OnlyContain(service =>
             service.PlatformDigest == platformDigest && service.IndexDigest == indexDigest);
+        dto.ExecutionTargets.Select(target => target.ServiceId).Should().BeEquivalentTo(manifestServices);
+        dto.ExecutionTargets.Should().OnlyContain(target =>
+            target.Platform == "linux-amd64" && target.PlatformDigest == platformDigest);
+    }
+
+    public static IEnumerable<object[]> NoncanonicalDigests()
+    {
+        string canonical = "sha256:" + new string('a', 64);
+        string[] invalidDigests =
+        [
+            "sha256:" + new string('A', 64),
+            "sha256:" + new string('a', 63) + "B",
+            "SHA256:" + new string('a', 64),
+            "sha256:" + new string('g', 64),
+            canonical[..^1],
+            canonical + "a",
+            " " + canonical,
+            canonical + "\n",
+            string.Empty,
+        ];
+        foreach (string serviceId in new[] { "api", "monolith" })
+        {
+            foreach (bool indexDigest in new[] { false, true })
+            {
+                foreach (string digest in invalidDigests)
+                {
+                    yield return [serviceId, indexDigest, digest];
+                }
+            }
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(NoncanonicalDigests))]
+    public void ToEvidenceDto_NoncanonicalChildOrIndexDigest_RejectsWithoutNormalizing(
+        string serviceId, bool indexDigest, string digest)
+    {
+        string canonical = "sha256:" + new string('a', 64);
+        Dictionary<string, string> childDigests = new(StringComparer.Ordinal)
+        {
+            ["api/linux-amd64"] = canonical,
+            ["monolith/linux-amd64"] = canonical,
+        };
+        Dictionary<string, string> indexDigests = IndexDigests("api", "monolith");
+        if (indexDigest)
+        {
+            indexDigests[serviceId] = digest;
+        }
+        else
+        {
+            childDigests[$"{serviceId}/linux-amd64"] = digest;
+        }
+        SignedReleaseMetadata metadata = new(
+            "stable", 1, true, Identity(), childDigests, "1.0.0",
+            indexDigests, Platforms("api", "monolith"));
+
+        Action act = () => metadata.ToEvidenceDto("linux-amd64");
+
+        act.Should().Throw<InvalidDataException>().WithMessage($"*'{serviceId}'*");
+        (indexDigest ? indexDigests[serviceId] : childDigests[$"{serviceId}/linux-amd64"])
+            .Should().Be(digest);
+    }
+
+    [Theory]
+    [InlineData("missing-child")]
+    [InlineData("missing-index")]
+    [InlineData("duplicate-platform")]
+    [InlineData("unknown-service")]
+    public void ToEvidenceDto_InvalidMonolithEvidence_Rejects(string defect)
+    {
+        Dictionary<string, string> children = new(StringComparer.Ordinal)
+        {
+            ["api/linux-amd64"] = "sha256:" + new string('b', 64),
+            ["monolith/linux-amd64"] = "sha256:" + new string('c', 64),
+        };
+        Dictionary<string, string> indexes = IndexDigests("api", "monolith");
+        Dictionary<string, IReadOnlyList<string>> platforms = Platforms("api", "monolith");
+        switch (defect)
+        {
+            case "missing-child":
+                children.Remove("monolith/linux-amd64");
+                break;
+            case "missing-index":
+                indexes.Remove("monolith");
+                break;
+            case "duplicate-platform":
+                platforms["monolith"] = ["linux-amd64", "linux-amd64"];
+                break;
+            case "unknown-service":
+                platforms["unknown"] = ["linux-amd64"];
+                break;
+        }
+        SignedReleaseMetadata metadata = new(
+            "stable", 1, true, Identity(), children, "1.0.0", indexes, platforms);
+
+        Action act = () => metadata.ToEvidenceDto("linux-amd64");
+
+        act.Should().Throw<InvalidDataException>();
     }
 
     [Fact]

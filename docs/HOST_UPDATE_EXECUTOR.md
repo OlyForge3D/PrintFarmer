@@ -57,6 +57,21 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
 
 ## Concrete adapters (`src/infra/Services/HostUpdates/`)
 
+Signed release mapping keeps inventory requirements separate from execution
+targets. On `linux-amd64`, the mapper retains six canonical execution IDs,
+including `monolith`, with their authenticated platform child digests; inventory
+still contains five observed services and uses its `discovery` / `slicer-worker`
+aliases. Both child and index digests must use canonical lowercase SHA-256
+grammar; the mapper rejects rather than normalizes other forms.
+
+The candidate adapter validates explicit execution targets without replacing an
+incomplete set from inventory. The inventory fallback is used only when no
+explicit targets exist. Missing, duplicate, or unknown targets still report
+`verified_release_target_set_invalid`. Current `linux-arm64` signed manifests
+lack a worker child, so their five execution targets remain fail-closed; no
+worker digest is synthesized. Passing this target check does not bypass the
+separate readiness, admission, or authorization requirements.
+
 | Step | Adapter | Notes |
 |---|---|---|
 | Preflight | `HostUpdatePreflightCheck` | Revalidates installed version/digests, provider allowlist, disk free space, and every configured migration target's provider name before anything else runs. |

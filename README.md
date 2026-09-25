@@ -20,7 +20,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 | **Use the API** | [API Reference](./docs/API.md) |
 | **Explore features** | [Features Guide](./docs/FEATURES.md) |
 | **Contribute code** | [Development Guide](./docs/DEVELOPMENT.md) |
-| **Operate Squad automations** | [Shared host-bound Ralph policy](./.github/ralph-reference.md#shared-scheduled-automations) |
+| **Run Ralph (Squad work monitor)** | [Ralph reference](./.github/ralph-reference.md#how-ralph-runs-here) |
 | **Fix an issue** | [Troubleshooting Guide](./docs/TROUBLESHOOTING.md) |
 | **Browse all docs** | [Documentation Index](./docs/INDEX.md) |
 
@@ -195,7 +195,6 @@ See the **[Architecture Guide](./docs/ARCHITECTURE.md)** for system design, data
 **Operations:**
 - **[Deployment Guide](./docs/DEPLOYMENT.md)** - Docker, environments, configuration
 - **[Worker Authentication](./docs/WORKER_AUTHENTICATION.md)** - Slicer registry, service, and job-route credentials
-- **[Ralph Native Role Setup](./docs/ralph-macos-migration.md)** - Mini coordinator, native Mac/Windows consumers, PrintFarmer-owned Ralph Worker executing Squad member charters without modifying Squad, explicit category/model validation, correlated startup recovery and preservation-first package renewal
 - **[Development Guide](./docs/DEVELOPMENT.md)** - Code style, testing, contribution workflow
 - **[Troubleshooting Guide](./docs/TROUBLESHOOTING.md)** - Common issues and solutions
 
