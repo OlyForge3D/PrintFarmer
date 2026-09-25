@@ -18,7 +18,8 @@
     • Agent persona, tone, or verbosity for session output
 
   YOU CANNOT override via this file:
-    • Parallelism — Ralph always spawns agents for all actionable issues simultaneously
+    • Parallelism — Ralph spawns agents for all actionable issues simultaneously,
+      bounded only by this host's limits (see "Host Limits", which takes precedence)
     • Core eligibility filter (squad/squad:* label required, not blocked, not assigned)
     • The underlying `gh` / Copilot CLI command used to spawn each session
 
@@ -50,21 +51,45 @@ up to this host's limits (see "Host Limits" below).
 
 ### Host Limits
 
-Read `~/.squad/machine-capabilities.json` before starting or resuming any issue.
-If it has `maxConcurrent`, never exceed it:
-- `maxConcurrent.xcode` — issue sessions for `needs:xcode` issues.
-- `maxConcurrent.other` — issue sessions for every other issue.
+These limits take precedence over every "parallel" or "all simultaneously"
+instruction in this file, `.github/ralph-reference.md` and the Squad templates.
 
-Count every issue session you started on this host that is running, idle with
-unmerged work, or interrupted, and that is not yet merged, blocked, or handed
-off. Review sub-agents run inside their issue session and do not count
-separately. When both slots are full, start nothing new: advance an existing
-session instead, and leave other issues unassigned so another host can take them.
-Resume interrupted sessions one slot at a time, highest priority first.
+Before starting or resuming any issue, read `~/.squad/machine-capabilities.json`:
+- No file, or no `maxConcurrent` key: this host is uncapped.
+- `maxConcurrent.xcode` limits `needs:xcode` issue sessions and
+  `maxConcurrent.other` limits all other issue sessions. A missing, non-integer
+  or negative value means 1; 0 means that category never runs on this host.
+- File present but unreadable or invalid JSON: use 1 for both, and say so in
+  your round report.
+
+**Occupied slots.** Each round, list the issue sessions you created: in the app,
+`get_sessions_status` entries whose creator is you; under `squad watch --execute`,
+the agents you spawned in this run. A session holds its category's slot while it
+is running, idle with unmerged work, or interrupted, until its PR merges, its
+issue is blocked, or it is released. Review sub-agents run inside their issue
+session and do not count.
+
+- When a category is at its limit, start nothing new in that category. The other
+  category may still start work up to its own limit.
+- Resume an idle or interrupted session by messaging it (`send_session_message`).
+  Never create a second session for an issue that already has one.
+- A session that cannot be resumed (worktree gone, repeated failure) goes through
+  Escalation below, which releases its slot.
+- Over the limit (for example after a crash): resume only the highest-priority
+  sessions that fit, and leave the rest paused.
+- A paused session that has pushed a branch or opened a PR keeps its claim; comment
+  once "Paused on <machine>: waiting for a slot". A paused session with nothing
+  pushed is released: push any local commits first, then unassign the issue and
+  comment "Released by <machine>: no slot", so another host can take it.
+- Leave issues you have not started unassigned so another host can take them.
+
+`squad watch --execute` does not enforce these limits: squad-cli 0.13.1 ignores
+`--max-concurrent` on that path and hands every eligible issue to one Ralph
+invocation. The cap depends entirely on Ralph following this section, so on a
+capped host prefer an in-app "Ralph, go" session, which can see its child sessions.
 
 The Mac mini sets `{ "xcode": 1, "other": 1 }` because it runs out of memory
-with more. When running `squad watch --execute` there, pass `--max-concurrent 2`.
-A host without `maxConcurrent` is uncapped.
+with more.
 
 ### Issue Selection
 
