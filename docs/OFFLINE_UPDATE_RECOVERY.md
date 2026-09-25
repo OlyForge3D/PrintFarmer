@@ -13,12 +13,18 @@ post_date: "2026-09-24"
 
 ## Current support
 
-**A complete managed-update/offline recovery bundle is not shipped by this
-documentation change.** `deploy-docker.sh --prepare-offline` prepares legacy
+**A complete managed-update/offline recovery bundle is not shipped yet.**
+`deploy-docker.sh --prepare-offline` prepares legacy
 deployment materials and image caches. It is not a signed complete release,
 bounded trusted importer, host recovery CLI, or proof of coordinated restore.
 Do not use it to update an installation that needs #2664's recovery guarantees.
 There is no supported skip-verification, force-import or replay-reset option.
+
+The first delivered slice (#2981) is a
+[verified release-metadata bundle](#verified-release-metadata-bundle-first-slice):
+it carries the original signed release bytes and the host-update CLI to a
+network-denied host and verifies them with bounded extraction. It is explicitly
+**not installable** and grants no rollout authority.
 
 Connected installations need a proven minimum host-local recovery path but do
 not need to hand-carry a bundle. Disconnected installations additionally need
@@ -40,6 +46,61 @@ bundle complete; this table is not an archive layout or an implementation.
 | Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. |
 | Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. No reliance on the API, package manager, registry or internet being available during recovery. |
 | Installation-specific protected backup | Coordinated databases, models/G-code/profiles/artifacts, keys, certificates and config at the same consistency point. Keep private material access-controlled and separate from the redistributable release bundle. Never include publisher credentials. |
+
+## Verified release-metadata bundle (first slice)
+
+`scripts/ci/offline-update-bundle.mjs` covers only the first two table rows and
+the host-update CLI archives. It reuses the existing signed release outputs;
+it does not create a new manifest format, signer or publisher.
+
+Assemble on a connected host from a downloaded release asset directory:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs assemble \
+  --release-assets ./release-assets --channel stable \
+  --output ./printfarmer-offline.tar [--version <v>] [--runtime <rid>]... \
+  [--trusted-root ./trusted_root.json]
+```
+
+Verify on the network-denied host into a staging directory that must not
+already exist:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs verify \
+  --bundle ./printfarmer-offline.tar --channel stable \
+  --trusted-root ./trusted_root.json --staging ./offline-staging
+```
+
+The bundle is a flat, uncompressed ustar archive. Its first member,
+`offline-bundle.json`, is an unsigned index; every trusted fact is re-derived
+from the signed members, never from the index. Members are the exact
+`update-manifest.json` and its `.sigstore.json` bundle, the CLI `SHA256SUMS`
+and its `.sigstore.json` bundle, and the selected CLI archives.
+
+`verify` fails closed unless all of the following hold:
+
+- The archive parses within fixed size and member-count limits before any file
+  is written: no links, traversal, absolute paths, PAX/long names, duplicates,
+  unexpected members or trailing data.
+- Cosign `verify-blob --trusted-root` accepts both signature bundles for the
+  release workflow identity on `main` or `development`, using only the supplied
+  trusted root (no network lookup).
+- The manifest channel (and version, when given) matches the operator's
+  `--channel`/`--version`, and every CLI archive matches its signed SHA-256.
+
+Only then are members written with exclusive-create semantics; on any failure
+the staging directory is removed. A successful run writes
+`offline-bundle-verification.json` recording the verified identities.
+
+The index always states `installable: false` and `rolloutAuthorization: false`;
+`contents.images`, `contents.infrastructure`, `contents.priorRecoverySet` and
+`contents.recoveryInstructions` are `false`. Remaining work under #2658:
+
+- #3061: application and infrastructure image archives.
+- #3062: prior recovery set and protected-backup references.
+- #3063: host-local import with Bash/PowerShell parity and bound recovery
+  instructions.
+- #3064: replay protection, channel continuity and offline trust expiry.
 
 ## Import and continuity rules
 
