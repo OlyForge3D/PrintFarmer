@@ -278,9 +278,9 @@ final class ShiftTasksGroupedUITests: ShiftTasksUITestBase {
 final class ShiftTasksFailedRefreshUITests: ShiftTasksUITestBase {
     override var waitsForNavigationReadiness: Bool { true }
 
-    override func setUp() async throws {
+    override func setUp() {
         executionTimeAllowance = 60
-        try await super.setUp()
+        super.setUp()
     }
 
     override var shiftTaskScenarioLaunchArguments: [String] {
