@@ -38,8 +38,11 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateWriterFencingTests : IDisposable
 {
-    // A paused writer acknowledges once per ~250 ms loop iteration; two observations prove
-    // the loop is live and re-checking rather than latched after its first acknowledgement.
+    // A paused writer acknowledges twice per ~250 ms loop iteration (once at the top-of-loop
+    // paused branch before its delay, and again at the interval-boundary wait which returns
+    // immediately while paused — see the corrected cadence block on the paused-loop cycle
+    // rate test below). Observing the full pair proves the loop actually iterated rather than
+    // latched after its first acknowledgement.
     private const int AcknowledgementsPerPausedIteration = 2;
 
     private readonly SqliteConnection _connection;
