@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -807,6 +807,109 @@ for (const gate of [
         }
       }
       assert.equal(await readFile(baselinePath, "utf8"), baselineJson);
+    } finally {
+      await rm(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+}
+
+// #2828: the CLI success branch and the compiler argument vector are bound
+// end to end. The stub records every invocation's argv and cwd, so silently
+// pointing either gate at a different project (or dropping --noEmit) fails
+// here instead of quietly checking the wrong file set while reporting green.
+for (const gate of [
+  {
+    name: "application",
+    script: "typecheck-app.mjs",
+    baselineFile: "app-typecheck-baseline.json",
+    baseline,
+    project: "tsconfig.app.json",
+    listedFile: "src/services/example.ts",
+    successMessage:
+      "Application type-check passed with 0 diagnostic(s), 1 application file(s), and 0/0 @ts-nocheck file(s).\n",
+  },
+  {
+    name: "test",
+    script: "typecheck-tests.mjs",
+    baselineFile: "test-typecheck-baseline.json",
+    baseline: { minimumTestFileCount: 1 },
+    project: "tsconfig.test.json",
+    listedFile: "src/test/example.test.ts",
+    successMessage:
+      "Test type-check passed with 0 direct test diagnostic(s), 0 imported application diagnostic(s), and 1 test file(s).\n",
+  },
+]) {
+  test(`${gate.name} CLI exits 0 with its summary and invokes tsc with the exact bound arguments (#2828)`, async () => {
+    const fixtureDirectory = await mkdtemp(
+      path.join(tmpdir(), `typecheck-${gate.name}-argv-`),
+    );
+
+    try {
+      await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+      await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+        recursive: true,
+      });
+      for (const script of [
+        gate.script,
+        "typecheck-app-core.mjs",
+        "typecheck-tests-core.mjs",
+      ]) {
+        await cp(
+          path.join(scriptsDirectory, script),
+          path.join(fixtureDirectory, "scripts", script),
+        );
+      }
+      await writeFile(
+        path.join(fixtureDirectory, "scripts", gate.baselineFile),
+        JSON.stringify(gate.baseline),
+      );
+      const listedFile = path.join(fixtureDirectory, gate.listedFile);
+      await mkdir(path.dirname(listedFile), { recursive: true });
+      await writeFile(listedFile, "export const checked = 1;\n");
+      const invocationLogPath = path.join(fixtureDirectory, "invocations.log");
+      await writeFile(
+        path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+        [
+          `require("node:fs").appendFileSync(${JSON.stringify(invocationLogPath)}, JSON.stringify({ argv: process.argv.slice(2), cwd: process.cwd() }) + "\\n");`,
+          'if (process.argv.includes("--listFilesOnly")) {',
+          `  process.stdout.write(${JSON.stringify(`${gate.listedFile}\n`)});`,
+          "}",
+        ].join("\n"),
+      );
+
+      const result = spawnSync(
+        process.execPath,
+        [path.join(fixtureDirectory, "scripts", gate.script)],
+        { encoding: "utf8", timeout: 10_000 },
+      );
+
+      assert.equal(result.error, undefined, result.error?.message);
+      assert.equal(result.status, 0, result.stderr);
+      assert.equal(result.stdout, "");
+      assert.equal(result.stderr, gate.successMessage);
+
+      const invocations = (await readFile(invocationLogPath, "utf8"))
+        .split("\n")
+        .filter(Boolean)
+        .map((line) => JSON.parse(line));
+      const compilerArguments = [
+        "-p",
+        gate.project,
+        "--noEmit",
+        "--pretty",
+        "false",
+      ];
+      assert.deepEqual(
+        invocations.map(({ argv }) => argv),
+        [compilerArguments, [...compilerArguments, "--listFilesOnly"]],
+      );
+      // `-p` is resolved against cwd, so the project directory is part of
+      // the bound contract too. realpath both sides: tmpdir can be a
+      // symlink (e.g. macOS /var -> /private/var).
+      const expectedCwd = realpathSync(fixtureDirectory);
+      for (const { cwd } of invocations) {
+        assert.equal(realpathSync(cwd), expectedCwd);
+      }
     } finally {
       await rm(fixtureDirectory, { recursive: true, force: true });
     }
