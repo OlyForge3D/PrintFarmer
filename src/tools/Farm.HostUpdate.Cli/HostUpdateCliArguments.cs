@@ -8,6 +8,7 @@ internal enum HostUpdateCliCommand
     Help,
     Status,
     Recover,
+    OfflineAdmit,
 }
 
 /// <summary>Strict, fixed-grammar argument parser: unknown or repeated options are usage errors.</summary>
@@ -31,6 +32,10 @@ internal sealed partial class HostUpdateCliArguments
 
     public string? PhysicalReconciliationToken { get; private set; }
 
+    public string? Staging { get; private set; }
+
+    public string? Channel { get; private set; }
+
     public static bool TryParse(IReadOnlyList<string> args, out HostUpdateCliArguments? parsed, out string? error)
     {
         parsed = null;
@@ -45,6 +50,7 @@ internal sealed partial class HostUpdateCliArguments
         {
             "status" => HostUpdateCliCommand.Status,
             "recover" => HostUpdateCliCommand.Recover,
+            "offline-admit" => HostUpdateCliCommand.OfflineAdmit,
             "help" or "--help" or "-h" => HostUpdateCliCommand.Help,
             _ => null,
         };
@@ -83,7 +89,25 @@ internal sealed partial class HostUpdateCliArguments
                 case "--json":
                     result.Json = true;
                     break;
-                case "--release":
+                case "--staging" when command == HostUpdateCliCommand.OfflineAdmit:
+                    if (!TryValue(args, ref i, out string? staging))
+                    {
+                        error = "missing_value:--staging";
+                        return false;
+                    }
+
+                    result.Staging = staging;
+                    break;
+                case "--channel" when command == HostUpdateCliCommand.OfflineAdmit:
+                    if (!TryValue(args, ref i, out string? channel))
+                    {
+                        error = "missing_value:--channel";
+                        return false;
+                    }
+
+                    result.Channel = channel;
+                    break;
+                case "--release" when command != HostUpdateCliCommand.OfflineAdmit:
                     if (!TryValue(args, ref i, out string? release))
                     {
                         error = "missing_value:--release";
@@ -147,6 +171,21 @@ internal sealed partial class HostUpdateCliArguments
         {
             error = "invalid_request_id";
             return false;
+        }
+
+        if (command == HostUpdateCliCommand.OfflineAdmit)
+        {
+            if (result.Staging is null || !Path.IsPathFullyQualified(result.Staging))
+            {
+                error = result.Staging is null ? "missing_option:--staging" : "staging_not_absolute";
+                return false;
+            }
+
+            if (result.Channel is not ("stable" or "insider"))
+            {
+                error = result.Channel is null ? "missing_option:--channel" : "invalid_channel";
+                return false;
+            }
         }
 
         if (command == HostUpdateCliCommand.Recover)

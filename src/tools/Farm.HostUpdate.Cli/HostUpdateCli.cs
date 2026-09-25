@@ -23,6 +23,7 @@ public static partial class HostUpdateCli
           printfarmer-host-update status [--release <releaseId>] [--json]
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --preview [--json]
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
+          printfarmer-host-update offline-admit --staging <absolute-verified-staging-dir> --channel <stable|insider> [--json]
 
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
@@ -35,6 +36,10 @@ public static partial class HostUpdateCli
         After a rollback, admission stays fenced until every printer has been physically checked
         and that is recorded with the exact --printers-reconciled token printed by --preview.
         Recovery never replays, cancels or issues a printer command.
+
+        offline-admit records an offline bundle that the import tool already verified in the
+        durable replay store (issue #3064). It refuses a replayed, downgraded or cross-channel
+        release; it installs nothing and is not rollout authorization.
 
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,
         5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending,
@@ -138,9 +143,12 @@ public static partial class HostUpdateCli
                 return await EmitAsync(output, parsed.Json, HostUpdateCliExitCodes.ConfigurationUnproven, new CliFailure("root_directory_not_visible", [])).ConfigureAwait(false);
             }
 
-            return parsed.Command == HostUpdateCliCommand.Status
-                ? await StatusAsync(provider, parsed, output, cancellationToken).ConfigureAwait(false)
-                : await RecoverAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false);
+            return parsed.Command switch
+            {
+                HostUpdateCliCommand.Status => await StatusAsync(provider, parsed, output, cancellationToken).ConfigureAwait(false),
+                HostUpdateCliCommand.OfflineAdmit => await HostUpdateOfflineAdmission.RunAsync(provider, configuration, parsed, output, cancellationToken).ConfigureAwait(false),
+                _ => await RecoverAsync(provider, configuration, options, parsed, output, cancellationToken).ConfigureAwait(false),
+            };
         }
     }
 
@@ -466,7 +474,7 @@ public static partial class HostUpdateCli
     /// Takes the execution lock for the CLI's own reads without rewriting the lock file when it
     /// already exists; only a host that has never taken the lock gets the empty sentinel created.
     /// </summary>
-    private static IHostUpdateExecutionLease? TryAcquireLock(IServiceProvider provider)
+    internal static IHostUpdateExecutionLease? TryAcquireLock(IServiceProvider provider)
     {
         try
         {
@@ -497,12 +505,12 @@ public static partial class HostUpdateCli
         }
     }
 
-    private static bool IsStateFailure(Exception exception) =>
+    internal static bool IsStateFailure(Exception exception) =>
         exception is InvalidDataException or IOException or UnauthorizedAccessException or JsonException
             or HostUpdateSubsystemUnavailableException or HostUpdateInstalledStateCorruptException
             or NotSupportedException or System.Security.SecurityException;
 
-    private static string StateFailureCode(Exception exception) => exception switch
+    internal static string StateFailureCode(Exception exception) => exception switch
     {
         InvalidDataException data when !string.IsNullOrWhiteSpace(data.Message) && JournalCode().IsMatch(data.Message) => data.Message,
         HostUpdateSubsystemUnavailableException => "state_unavailable",
@@ -525,7 +533,7 @@ public static partial class HostUpdateCli
             .Distinct(StringComparer.Ordinal)];
     }
 
-    private static async Task<int> EmitAsync(TextWriter output, bool json, int exitCode, object report)
+    internal static async Task<int> EmitAsync(TextWriter output, bool json, int exitCode, object report)
     {
         if (json)
         {
@@ -586,7 +594,7 @@ public static partial class HostUpdateCli
     [GeneratedRegex("^journal_[a-z_]+$", RegexOptions.CultureInvariant)]
     private static partial Regex JournalCode();
 
-    private sealed record CliFailure(string Code, string[] Details);
+    internal sealed record CliFailure(string Code, string[] Details);
 
     private sealed record ReleaseSummary(string ReleaseId, HostUpdateExecutionState State, string Phase, DateTimeOffset RecordedAt);
 
