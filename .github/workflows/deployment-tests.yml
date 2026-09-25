@@ -6,6 +6,9 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/fix-*.sh'
       - 'scripts/printfarmer-host-update.*'
+      - 'scripts/common-utils.sh'
+      - 'scripts/ci/host-update-cli-package.mjs'
+      - 'src/tools/Farm.HostUpdate.Cli/**'
       - 'scripts/docker/**'
       - 'docs/**'
       - 'tests/**'
@@ -20,6 +23,9 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/fix-*.sh'
       - 'scripts/printfarmer-host-update.*'
+      - 'scripts/common-utils.sh'
+      - 'scripts/ci/host-update-cli-package.mjs'
+      - 'src/tools/Farm.HostUpdate.Cli/**'
       - 'scripts/docker/**'
       - 'docs/**'
       - 'tests/**'
@@ -165,6 +171,48 @@ jobs:
       - name: Run PowerShell wrapper tests
         shell: pwsh
         run: pwsh -NoProfile -NonInteractive -File tests/test-host-update-cli-wrapper.ps1
+
+  host-update-cli-package-tests:
+    # Issue #3041: build the real self-contained host-update CLI archive for
+    # each supported runtime with the release packaging code, verify it against
+    # its checksum list, extract it the way the runbook installs it, and run the
+    # CLI with dotnet poisoned on PATH. This is the supported-host matrix.
+    name: Host-update CLI package (${{ matrix.rid }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            rid: linux-x64
+          - os: ubuntu-24.04-arm
+            rid: linux-arm64
+          - os: windows-latest
+            rid: win-x64
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
+        with:
+          node-version: 24
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Package and smoke-test the Linux CLI
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash tests/test-host-update-cli-package.sh
+
+      - name: Package and smoke-test the Windows CLI
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: pwsh -NoProfile -NonInteractive -File tests/test-host-update-cli-package.ps1
 
   split-topology-route-smoke:
     # Issue #2239: tests/test-compose-generator.sh (above) proves the

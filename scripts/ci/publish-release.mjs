@@ -16,6 +16,8 @@ import { emitBuildMetadata } from './release-metadata.mjs';
 import { command, imageRepository, rejectExistingImages, verifyImages, publishImageTags } from './release-set.mjs';
 import { releaseNotes } from './release-notes.mjs';
 import { buildManifest, deriveSequence, validateManifest } from './release-manifest.mjs';
+import { hostUpdateCliAssets, hostUpdateCliSumsBundleName, hostUpdateCliSumsName, packageHostUpdateCli,
+  verifyHostUpdateCliSums } from './host-update-cli-package.mjs';
 
 export async function rejectExistingVersion(api, tag) {
   requireThat(!await api(`git/ref/tags/${tag}`, { allowMissing: true }), `Tag ${tag} already exists; choose a new version`);
@@ -67,6 +69,9 @@ export function buildImages(release, source, assets, run = command, rejectImages
   execute('node', ['scripts/compliance/create-license-inventory.mjs', '--version', release.tag,
     '--revision', release.sourceCommit, '--output', join(assets, 'license-inventory.json')]);
   emitBuildMetadata(release, source);
+  // Issue #3041: self-contained host-update recovery CLI archives plus the checksum list the
+  // sign job signs. Built before the images so a CLI build failure publishes nothing.
+  packageHostUpdateCli(release, source, assets, { run });
   const digests = {};
   const baseUrl = `https://github.com/${repository}/releases/download/${release.tag}`;
   for (const [name, { target, platforms }] of Object.entries(components)) {
@@ -136,6 +141,7 @@ export function releaseAssets(release) {
     'update-manifest.json', 'update-manifest.sigstore.json',
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
+    ...hostUpdateCliAssets(release.version),
   ];
 }
 
@@ -154,6 +160,19 @@ function manifestSignatureIdentity(channel) {
   requireThat(['stable', 'insider'].includes(channel), 'Invalid release channel for signature identity');
   const ref = channel === 'stable' ? 'main' : 'development';
   return `https://github.com/${repository}/${workflow}@refs/heads/${ref}`;
+}
+
+// Issue #3041: the host-update CLI checksum list is signed by the same workflow identity as the
+// manifest, and must still name exactly the archives about to be uploaded.
+function verifyHostUpdateCliBeforeUpload(assets, run, release) {
+  const sumsPath = join(assets, hostUpdateCliSumsName(release.version));
+  const bundlePath = join(assets, hostUpdateCliSumsBundleName(release.version));
+  requireThat(readFileSync(bundlePath).length > 0,
+    'Missing host-update CLI checksum signature bundle immediately before upload');
+  verifyHostUpdateCliSums(assets, release.version);
+  run('cosign', ['verify-blob', '--bundle', bundlePath,
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    '--certificate-identity', manifestSignatureIdentity(release.channel), sumsPath]);
 }
 
 function verifyManifestSignatureBeforeUpload(assets, run, channel) {
@@ -182,6 +201,7 @@ export async function publishRelease(release, assets, api, {
   // Verify before creating the permanent Git tag or draft release. The later
   // verification immediately before upload protects the exact bytes after any
   // fallible draft-release operations.
+  verifyHostUpdateCliBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
@@ -197,6 +217,7 @@ export async function publishRelease(release, assets, api, {
     body: notes, draft: true, prerelease: release.channel === 'insider', make_latest: 'false',
   } });
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
+  verifyHostUpdateCliBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);

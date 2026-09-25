@@ -56,8 +56,8 @@ exit [int](`$env:FAKE_EXIT ?? '0')
         else { Fail "$Name (exit $($run.ExitCode), cli invoked: $($run.Invoked))" }
     }
 
-    function Expect-Passthrough([string] $Name, [string[]] $Expected, [string[]] $WrapperArgs) {
-        $run = Invoke-Wrapper $WrapperArgs
+    function Expect-Passthrough([string] $Name, [string[]] $Expected, [string[]] $WrapperArgs, [hashtable] $Environment = @{}) {
+        $run = Invoke-Wrapper $WrapperArgs $Environment
         $actual = if ($run.Invoked) { Get-Content -LiteralPath $argsLog -Raw } else { '' }
         if ($run.ExitCode -eq 0 -and $run.Invoked -and $actual -ceq ($Expected -join "`n")) { Pass $Name }
         else { Fail "$Name (exit $($run.ExitCode), args: $actual)" }
@@ -98,6 +98,44 @@ exit [int](`$env:FAKE_EXIT ?? '0')
 
     $exitRun = Invoke-Wrapper @('-Config', $config, 'recover', '-Release', 'stable:1.2.3', '-Confirm', 'stable:1.2.3') @{ FAKE_EXIT = '11' }
     if ($exitRun.ExitCode -eq 11) { Pass 'CLI exit code preserved' } else { Fail "CLI exit code preserved (exit $($exitRun.ExitCode))" }
+
+    # Issue #3041: a self-contained package launcher runs directly, without a dotnet host.
+    $appHostDir = Join-Path $testRoot 'apphost-cli'
+    New-Item -ItemType Directory -Path $appHostDir | Out-Null
+    $appHostName = $IsWindows ? 'Farm.HostUpdate.Cli.exe' : 'Farm.HostUpdate.Cli'
+    $appHost = Join-Path $appHostDir $appHostName
+    if ($IsWindows) {
+        # A placeholder is enough: the refusal below happens before anything is launched.
+        Set-Content -LiteralPath $appHost -Value '' -NoNewline
+    } else {
+        Set-Content -LiteralPath $appHost -Value "#!/bin/sh`nprintf '%s\n' `"`$@`" > '$argsLog'`nexit `${FAKE_EXIT:-0}`n" -NoNewline
+        chmod +x $appHost
+        $appRun = Invoke-Wrapper @('-Config', $config, 'status', '-Json') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $appHostDir; PRINTFARMER_DOTNET = $null; FAKE_EXIT = '10' }
+        $appArgs = if ($appRun.Invoked) { (Get-Content -LiteralPath $argsLog -Raw).TrimEnd("`n") } else { '' }
+        if ($appRun.ExitCode -eq 10 -and $appArgs -ceq (@('--config', $config, 'status', '--json') -join "`n")) { Pass 'self-contained launcher runs directly and preserves its exit code' }
+        else { Fail "self-contained launcher runs directly (exit $($appRun.ExitCode), args: $appArgs)" }
+    }
+
+    Expect-Usage 'PRINTFARMER_DOTNET refused for a self-contained launcher' @('-Config', $config, 'status') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $appHostDir }
+
+    # An installed package resolves its CLI from cli\ beside the wrapper when no directory is given.
+    $packageDir = Join-Path $testRoot 'package'
+    New-Item -ItemType Directory -Path (Join-Path $packageDir 'cli') -Force | Out-Null
+    Copy-Item -LiteralPath $wrapper -Destination $packageDir
+    Set-Content -LiteralPath (Join-Path $packageDir 'host-update-cli-package.json') -Value '{}'
+    $packageDll = Join-Path $packageDir 'cli' 'Farm.HostUpdate.Cli.dll'
+    Set-Content -LiteralPath $packageDll -Value '' -NoNewline
+    $packagedWrapper = Join-Path $packageDir 'printfarmer-host-update.ps1'
+    $savedWrapper = $wrapper
+    try {
+        $wrapper = $packagedWrapper
+        Expect-Passthrough 'installed package resolves cli beside the wrapper' @($packageDll, '--config', $config, 'status') @('-Config', $config, 'status') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $null }
+        Remove-Item -LiteralPath (Join-Path $packageDir 'host-update-cli-package.json')
+        Expect-Usage 'no package marker means no default CLI dir' @('-Config', $config, 'status') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $null }
+    }
+    finally {
+        $wrapper = $savedWrapper
+    }
 
     if ($script:failures -gt 0) {
         Write-Host "$($script:failures) PowerShell wrapper test(s) failed"
