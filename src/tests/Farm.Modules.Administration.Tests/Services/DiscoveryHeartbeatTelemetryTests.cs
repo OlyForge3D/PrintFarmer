@@ -19,12 +19,14 @@ namespace Farm.Modules.Administration.Tests.Services;
 /// <summary>
 /// Regression coverage for issue #2995: corrupt discovery heartbeat telemetry must not break
 /// settings loading or checked saves, and must be reported as unknown liveness. Also covers
-/// issue #3019: a checked save never persists a client-supplied heartbeat.
+/// issue #3019: a checked save never persists a client-supplied heartbeat, and issue #3023: the
+/// unchecked <see cref="SettingsService.Save{T}"/> used by bulk <c>POST /api/settings</c> doesn't either.
 /// </summary>
 public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
 {
     private readonly SqliteConnection _connection = new("Data Source=:memory:");
     private readonly DbContextOptions<AppDbContext> _options;
+    private readonly List<AppDbContext> _repositoryContexts = [];
 
     public DiscoveryHeartbeatTelemetryTests()
     {
@@ -195,6 +197,112 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
     }
 
     [Fact]
+    public async Task BulkSave_AbsentTelemetry_NeverPersistsClientHeartbeatAsync()
+    {
+        DateTime fabricated = DateTime.UtcNow.AddYears(10);
+        NetworkDiscoverySettings submitted = new() { ClientTimeoutMs = 800, LastHeartbeat = fabricated };
+        SettingsService service = CreateService();
+
+        service.Save(submitted);
+
+        submitted.LastHeartbeat.Should().BeNull("telemetry is absent and client input is never authoritative");
+        submitted.HeartbeatTelemetryUnreadable.Should().BeFalse();
+        service.Get<NetworkDiscoverySettings>().LastHeartbeat.Should().BeNull();
+        await AssertSectionHasNoHeartbeatAsync();
+        NetworkDiscoverySettings reloaded = CreateService().Get<NetworkDiscoverySettings>();
+        reloaded.ClientTimeoutMs.Should().Be(800);
+        reloaded.LastHeartbeat.Should().BeNull("a bulk save must not fabricate liveness for later reads");
+        reloaded.HeartbeatTelemetryUnreadable.Should().BeFalse();
+        await using AppDbContext db = new(_options);
+        (await db.AppSettingsEntities.AnyAsync(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey))
+            .Should().BeFalse("a settings save must not create heartbeat telemetry");
+    }
+
+    [Fact]
+    public async Task BulkSave_AbsentTelemetry_RetiresLegacyMirrorAsync()
+    {
+        DateTime legacy = DateTime.UtcNow.AddMinutes(-3);
+        SeedSection(NetworkDiscoverySettings.SectionName, new NetworkDiscoverySettings { LastHeartbeat = legacy });
+        SettingsService service = CreateService();
+        NetworkDiscoverySettings current = service.Get<NetworkDiscoverySettings>();
+        current.LastHeartbeat.Should().Be(legacy);
+
+        // Mirrors the apply-env endpoint, which re-saves the cached instance.
+        service.Save(current);
+
+        service.Get<NetworkDiscoverySettings>().LastHeartbeat.Should().BeNull();
+        await AssertSectionHasNoHeartbeatAsync();
+        CreateService().Get<NetworkDiscoverySettings>().LastHeartbeat.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task BulkSave_ValidTelemetry_CachesTelemetryWithoutMirroringItAsync()
+    {
+        DateTime heartbeat = DateTime.UtcNow.AddSeconds(-5);
+        SeedTelemetry(JsonSerializer.Serialize(heartbeat));
+        SettingsService service = CreateService();
+
+        service.Save(new NetworkDiscoverySettings { LastHeartbeat = DateTime.UtcNow.AddYears(10) });
+
+        service.Get<NetworkDiscoverySettings>().LastHeartbeat.Should().Be(heartbeat);
+        await AssertSectionHasNoHeartbeatAsync();
+        CreateService().Get<NetworkDiscoverySettings>().LastHeartbeat.Should().Be(heartbeat);
+    }
+
+    [Fact]
+    public void BulkSave_CorruptTelemetry_ReportsUnknownLivenessWithoutMirroring()
+    {
+        SeedTelemetry("{not json");
+        Mock<ILogger<SettingsService>> logger = new();
+        SettingsService service = CreateService(logger.Object);
+        logger.Invocations.Clear();
+
+        service.Save(new NetworkDiscoverySettings { LastHeartbeat = DateTime.UtcNow });
+
+        NetworkDiscoverySettings cached = service.Get<NetworkDiscoverySettings>();
+        cached.LastHeartbeat.Should().BeNull();
+        cached.HeartbeatTelemetryUnreadable.Should().BeTrue();
+        VerifyTelemetryWarning(logger);
+    }
+
+    [Fact]
+    public void Load_FutureLegacyMirror_ReportsUnknownLiveness()
+    {
+        SeedSection(NetworkDiscoverySettings.SectionName, new NetworkDiscoverySettings
+        {
+            ClientTimeoutMs = 700,
+            LastHeartbeat = DateTime.UtcNow.AddYears(10),
+        });
+        Mock<ILogger<SettingsService>> logger = new();
+
+        NetworkDiscoverySettings discovery = CreateService(logger.Object).Get<NetworkDiscoverySettings>();
+
+        discovery.ClientTimeoutMs.Should().Be(700);
+        discovery.LastHeartbeat.Should().BeNull("a far-future legacy mirror must not suppress staleness detection");
+        discovery.HeartbeatTelemetryUnreadable.Should().BeTrue();
+        logger.Verify(
+            l => l.Log(
+                LogLevel.Warning,
+                It.IsAny<EventId>(),
+                It.Is<It.IsAnyType>((state, _) => state.ToString()!.Contains($"'{NetworkDiscoverySettings.SectionName}'")),
+                It.IsAny<Exception?>(),
+                It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
+            Times.Once);
+    }
+
+    [Fact]
+    public void Load_LegacyMirrorWithinClockSkewTolerance_IsAccepted()
+    {
+        DateTime legacy = DateTime.UtcNow.AddMinutes(1);
+        SeedSection(NetworkDiscoverySettings.SectionName, new NetworkDiscoverySettings { LastHeartbeat = legacy });
+
+        NetworkDiscoverySettings discovery = CreateService().Get<NetworkDiscoverySettings>();
+
+        discovery.HeartbeatTelemetryUnreadable.Should().BeFalse();
+        discovery.LastHeartbeat.Should().Be(legacy);
+    }
+
+    [Fact]
     public async Task HeartbeatAfterCorruption_RestoresLivenessWithoutChangingEditableRevisionAsync()
     {
         SettingsService seeder = CreateService();
@@ -292,9 +400,19 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
         factory.Setup(f => f.CreateDbContext()).Returns(() => new AppDbContext(_options));
         factory.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new AppDbContext(_options));
+        AppDbContext repositoryContext = new(_options);
+        _repositoryContexts.Add(repositoryContext);
         return new SettingsService(new ConfigurationBuilder().Build(), factory.Object,
-            logger ?? NullLogger<SettingsService>.Instance, new Mock<IAppSettingsRepository>(MockBehavior.Strict).Object);
+            logger ?? NullLogger<SettingsService>.Instance, new EfAppSettingsRepository(repositoryContext));
     }
 
-    public void Dispose() => _connection.Dispose();
+    public void Dispose()
+    {
+        foreach (AppDbContext context in _repositoryContexts)
+        {
+            context.Dispose();
+        }
+
+        _connection.Dispose();
+    }
 }

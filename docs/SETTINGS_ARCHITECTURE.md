@@ -188,19 +188,24 @@ separately stored liveness timestamp.
 
 Once the telemetry row exists it is the only source of `lastHeartbeat`; any
 timestamp embedded in the editable section is ignored. Liveness is never client
-input: a checked save (`POST /api/settings/NetworkDiscovery`) discards any
-submitted `lastHeartbeat`, returns the value from the telemetry row, and does
-not write `lastHeartbeat` into the section. When there is no trusted heartbeat,
-`lastHeartbeat` is omitted from the JSON response rather than sent as `null`.
-Rows written before #2973 may still embed a legacy timestamp. Reads use it only
-as a fallback while no telemetry row exists. The first checked save deletes
+input. Every settings save discards any submitted `lastHeartbeat`, never writes
+it into the section, and never creates the telemetry row. This covers the
+checked per-key save (`POST /api/settings/NetworkDiscovery`), the legacy batch
+`POST /api/settings`, and other callers of the unchecked `SettingsService.Save<T>`,
+such as `POST /api/network-discovery/settings/apply-env`. The saved value and the
+cache carry the telemetry row's timestamp instead. When there is no trusted
+heartbeat, `lastHeartbeat` is omitted from the JSON response rather than sent as
+`null`. Rows written before #2973 may still embed a legacy timestamp. Reads use
+it only as a fallback while no telemetry row exists, and apply the same
+five-minute future-skew check as telemetry. The first save of any kind deletes
 the legacy mirror, so until the next heartbeat creates the telemetry row, the
 section reports no heartbeat.
 
 If the telemetry row holds an unreadable timestamp (invalid JSON or value) or one
-more than five minutes in the future, settings load and checked save log a
+more than five minutes in the future, settings load and every save log a
 warning and report no heartbeat (`lastHeartbeat` omitted) without falling back
-to the legacy value. Unrelated settings still load. The background-service
+to the legacy value. A legacy fallback more than five minutes in the future is
+treated the same way. Unrelated settings still load. The background-service
 monitor widget reports discovery liveness as unknown until the next heartbeat
 overwrites the row; the settings API cannot distinguish this from a service
 that has never sent a heartbeat.
