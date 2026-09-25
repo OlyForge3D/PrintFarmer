@@ -1416,19 +1416,24 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
     // MARK: C — real signalR is disconnected (not orphaned) when demo supersedes
 
     func testSwitchToDemoDisconnectsDisplacedRealSignalR() async throws {
-        try XCTSkipIf(true, "Temporary quarantine (#2692): CI hangs awaiting demo-switch disconnect; restore after deterministic synchronization.")
-
         let reg = registry()
         _ = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
         try reg.setActive(id: reg.servers[0].id)
 
         let recorder = SignalRFactoryRecorder(barrierOnFirst: false)
         defer { recorder.close() } // I: unstrand recorder barriers on failure
+        // #2692: the default startup offline-queue sync is an unawaited MainActor Task
+        // that invalidates the replay authority (no credentials here). If it runs while
+        // switchToDemo is suspended in its file-backed `offlineWriteQueue.unbind`, the
+        // demo transition fails closed and never reaches `disconnect()`. Disable that
+        // task and use an in-memory outbox so only the transition under test runs.
         let container = ServiceContainer(
             serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
             farmSnapshotAuthority: FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!),
             farmSnapshotStore: FarmSnapshotStore(authority: FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("t2"))!)), rootURL: newRoot()),
             farmSnapshotOwnerStore: ownerStore(),
+            synchronizeOfflineQueueOnStartup: false,
+            offlineWriteQueueStore: InMemoryOfflineWriteQueueStore(),
             signalRServiceFactory: recorder.factory
         )
         // The initial real signalR (created for the active server at init).
@@ -1439,7 +1444,11 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         realService?.disconnectHook = { disconnected.signal() }
 
         // Entering demo must disconnect that EXACT displaced real instance, not orphan it.
-        await container.switchToDemo()
+        // A fenced (false) transition never disconnects, so fail fast instead of awaiting
+        // a barrier that cannot arrive.
+        let switched = await container.switchToDemo()
+        XCTAssertTrue(switched, "switchToDemo must complete for the disconnect proof")
+        guard switched else { return }
         await disconnected.waitUntilArrived()
 
         XCTAssertTrue(realService?.disconnectCalled ?? false, "displaced real signalR must be disconnected on demo")
