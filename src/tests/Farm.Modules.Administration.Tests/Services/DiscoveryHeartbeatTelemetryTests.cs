@@ -18,7 +18,8 @@ namespace Farm.Modules.Administration.Tests.Services;
 
 /// <summary>
 /// Regression coverage for issue #2995: corrupt discovery heartbeat telemetry must not break
-/// settings loading or checked saves, and must be reported as unknown liveness.
+/// settings loading or checked saves, and must be reported as unknown liveness. Also covers
+/// issue #3019: a checked save never persists a client-supplied heartbeat.
 /// </summary>
 public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
 {
@@ -135,6 +136,65 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
     }
 
     [Fact]
+    public async Task CheckedSave_AbsentTelemetry_NeverPersistsClientHeartbeatAsync()
+    {
+        DateTime fabricated = DateTime.UtcNow;
+        SettingsService creator = CreateService();
+        SettingsSectionSnapshot created = await creator.SaveWithConcurrencyCheckAsync(
+            new NetworkDiscoverySettings { LastHeartbeat = fabricated }, SettingsSectionSnapshot.AbsentRowVersion);
+        ((NetworkDiscoverySettings)created.Value).LastHeartbeat.Should().BeNull();
+        await AssertSectionHasNoHeartbeatAsync();
+
+        SettingsSectionSnapshot updated = await CreateService().SaveWithConcurrencyCheckAsync(
+            new NetworkDiscoverySettings { ClientTimeoutMs = 800, LastHeartbeat = fabricated }, created.RowVersion);
+
+        NetworkDiscoverySettings updatedValue = (NetworkDiscoverySettings)updated.Value;
+        updatedValue.ClientTimeoutMs.Should().Be(800);
+        updatedValue.LastHeartbeat.Should().BeNull("telemetry is absent and client input is never authoritative");
+        updatedValue.HeartbeatTelemetryUnreadable.Should().BeFalse();
+        await AssertSectionHasNoHeartbeatAsync();
+        NetworkDiscoverySettings reloaded = CreateService().Get<NetworkDiscoverySettings>();
+        reloaded.ClientTimeoutMs.Should().Be(800);
+        reloaded.LastHeartbeat.Should().BeNull("a checked save must not fabricate liveness for later reads");
+        await using AppDbContext db = new(_options);
+        (await db.AppSettingsEntities.AnyAsync(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey))
+            .Should().BeFalse("a settings save must not create heartbeat telemetry");
+    }
+
+    [Fact]
+    public async Task CheckedSave_AbsentTelemetry_RetiresLegacyMirrorAsync()
+    {
+        DateTime legacy = DateTime.UtcNow.AddMinutes(-3);
+        SeedSection(NetworkDiscoverySettings.SectionName, new NetworkDiscoverySettings { LastHeartbeat = legacy });
+        SettingsService service = CreateService();
+        service.Get<NetworkDiscoverySettings>().LastHeartbeat.Should().Be(legacy, "reads keep the pre-#2973 fallback until a save or heartbeat");
+        string rowVersion = service.GetSectionSnapshot(NetworkDiscoverySettings.SectionName).RowVersion;
+
+        SettingsSectionSnapshot saved = await service.SaveWithConcurrencyCheckAsync(
+            new NetworkDiscoverySettings { ClientTimeoutMs = 600, LastHeartbeat = legacy }, rowVersion);
+
+        ((NetworkDiscoverySettings)saved.Value).LastHeartbeat.Should().BeNull();
+        await AssertSectionHasNoHeartbeatAsync();
+        CreateService().Get<NetworkDiscoverySettings>().LastHeartbeat.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task CheckedSave_ValidTelemetry_ReturnsTelemetryWithoutMirroringItAsync()
+    {
+        SettingsSectionSnapshot seeded = await CreateService().SaveWithConcurrencyCheckAsync(
+            new NetworkDiscoverySettings(), SettingsSectionSnapshot.AbsentRowVersion);
+        DateTime heartbeat = DateTime.UtcNow.AddSeconds(-5);
+        SeedTelemetry(JsonSerializer.Serialize(heartbeat));
+
+        SettingsSectionSnapshot saved = await CreateService().SaveWithConcurrencyCheckAsync(
+            new NetworkDiscoverySettings { LastHeartbeat = DateTime.UtcNow.AddDays(-1) }, seeded.RowVersion);
+
+        ((NetworkDiscoverySettings)saved.Value).LastHeartbeat.Should().Be(heartbeat);
+        await AssertSectionHasNoHeartbeatAsync();
+        CreateService().Get<NetworkDiscoverySettings>().LastHeartbeat.Should().Be(heartbeat);
+    }
+
+    [Fact]
     public async Task HeartbeatAfterCorruption_RestoresLivenessWithoutChangingEditableRevisionAsync()
     {
         SettingsService seeder = CreateService();
@@ -193,6 +253,14 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
                 It.IsAny<Exception?>(),
                 It.IsAny<Func<It.IsAnyType, Exception?, string>>()),
             Times.Once);
+
+    private async Task AssertSectionHasNoHeartbeatAsync()
+    {
+        await using AppDbContext db = new(_options);
+        AppSettingsEntity section = await db.AppSettingsEntities.AsNoTracking()
+            .SingleAsync(e => e.Key == NetworkDiscoverySettings.SectionName);
+        section.SettingsJson.Should().NotContain("lastHeartbeat");
+    }
 
     private void SeedSection(string key, IAppSetting settings)
     {
