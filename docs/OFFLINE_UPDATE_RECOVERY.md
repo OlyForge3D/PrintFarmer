@@ -13,12 +13,16 @@ post_date: "2026-09-24"
 
 ## Current support
 
-**A complete managed-update/offline recovery bundle is not shipped yet.**
-`deploy-docker.sh --prepare-offline` prepares legacy
-deployment materials and image caches. It is not a signed complete release,
-bounded trusted importer, host recovery CLI, or proof of coordinated restore.
-Do not use it to update an installation that needs #2664's recovery guarantees.
-There is no supported skip-verification, force-import or replay-reset option.
+**A complete managed-update/offline recovery bundle is not shipped yet** (#2981).
+`deploy-docker.sh --prepare-offline` prepares legacy deployment materials and
+image caches. It is not a signed complete release, a bounded trusted importer,
+or proof of coordinated restore. Do not use it to update an installation that
+needs #2664's recovery guarantees. The signed host-local status/recovery CLI
+package (#2980, #3041) is a separate release asset. It can be carried to a
+disconnected host as described in the
+[runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package), but it is only
+one item in the bundle below. There is no supported skip-verification,
+force-import or replay-reset option.
 
 The first delivered slice (#2981) is a
 [verified release-metadata bundle](#verified-release-metadata-bundle-first-slice):
@@ -44,7 +48,7 @@ bundle complete; this table is not an archive layout or an implementation.
 | Offline verification evidence and tooling | Preserve provenance and approved trust-root continuity, expiry/revocation evidence and pinned verification tools. Bundle-supplied signer material cannot enroll itself. Verification must work after source branch movement without live ancestry lookup. |
 | Target application and infrastructure images | Include every selected platform/service image, database/runtime/proxy/add-on dependency and required worker under the supported topology contract. Six published application images alone are not every installation's infrastructure. Verify archive content against immutable identity; no missing-image downloads or builds. |
 | Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. |
-| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. No reliance on the API, package manager, registry or internet being available during recovery. |
+| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list, the Cosign bundle (#3041), per-archive SBOMs and the verifying installer (#3045) are the status/recovery tool. No reliance on the API, package manager, registry or internet being available during recovery. |
 | Installation-specific protected backup | Coordinated databases, models/G-code/profiles/artifacts, keys, certificates and config at the same consistency point. Keep private material access-controlled and separate from the redistributable release bundle. Never include publisher credentials. |
 
 ## Verified release-metadata bundle (first slice)
@@ -79,7 +83,8 @@ The bundle is a flat, uncompressed ustar archive. Its first member,
 `offline-bundle.json`, is an unsigned index; every trusted fact is re-derived
 from the signed members, never from the index. Members are the exact
 `update-manifest.json` and its `.sigstore.json` bundle, the CLI `SHA256SUMS`
-and its `.sigstore.json` bundle, and the selected CLI archives.
+and its `.sigstore.json` bundle, and each selected runtime's CLI archive
+together with its SPDX SBOM (`.spdx.json`).
 
 `verify` fails closed unless all of the following hold:
 
@@ -92,7 +97,10 @@ and its `.sigstore.json` bundle, and the selected CLI archives.
   `development` for insider), using only the supplied trusted root (no network
   lookup).
 - The manifest channel (and version, when given) matches the operator's
-  `--channel`/`--version`, and every CLI archive matches its signed SHA-256.
+  `--channel`/`--version`, the signed CLI checksum list names exactly every
+  supported archive and SBOM, every carried CLI archive and SBOM matches its
+  signed SHA-256, and each carried SBOM is a structurally valid SPDX 2.x
+  document.
 
 The staging directory is created exclusively and members are written with
 exclusive-create semantics into its `.unverified/` quarantine subdirectory.
@@ -182,6 +190,11 @@ allowed metadata must still work.
 No fallback network request, local build, fabricated recovery success or
 physical printer command is acceptable. Retain full failure evidence, prove
 fences stay closed on uncertainty, and confirm safe post-restore reconciliation.
-Implementation is tracked in #2980 (host-local CLI) and #2981 (complete
-bundles); #2982 owns this matrix and separately authorized staging/pilot
-evidence. #2664 remains open until its full retained acceptance is complete.
+The host-local CLI is delivered (#2980). Its open recovery gaps are:
+
+- physical printer reconciliation (#2999)
+- provider and topology coverage (#3000)
+
+Complete bundles are tracked in #2981. #2982 owns this matrix and separately
+authorized staging/pilot evidence. #2664 remains open until its full retained
+acceptance is complete.

@@ -22,8 +22,8 @@ import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { deriveSequence, manifestDigest, validateManifest } from './release-manifest.mjs';
 import { parseTag, repository, requireThat, workflow } from './release-policy.mjs';
-import { hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSumsBundleName, hostUpdateCliSumsName,
-  parseSums } from './host-update-cli-package.mjs';
+import { hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
+  hostUpdateCliSumsName, parseSums, validateHostUpdateCliSbom } from './host-update-cli-package.mjs';
 
 export const offlineBundleIndexName = 'offline-bundle.json';
 export const offlineBundleVerificationName = 'offline-bundle-verification.json';
@@ -89,9 +89,14 @@ export function expectedMembers(version) {
     [hostUpdateCliSumsName(version), 'cli-sums'],
     [hostUpdateCliSumsBundleName(version), 'cli-sums-signature'],
   ]);
-  for (const rid of hostUpdateCliRuntimes) members.set(hostUpdateCliArchiveName(version, rid), 'cli-archive');
+  for (const rid of hostUpdateCliRuntimes) {
+    members.set(hostUpdateCliArchiveName(version, rid), 'cli-archive');
+    members.set(hostUpdateCliSbomName(version, rid), 'cli-sbom');
+  }
   return members;
 }
+
+const isRuntimeMember = role => role === 'cli-archive' || role === 'cli-sbom';
 
 // ---------------------------------------------------------------------------------------------
 // Release identity: taken only from the signed manifest bytes, and cross-checked against the
@@ -126,20 +131,37 @@ export function manifestIdentity(bytes, expectedChannel, expectedVersion) {
   };
 }
 
-function verifyCliSums(bytes, version, archives) {
+// The signed checksum list names every runtime's archive and SPDX SBOM (#3045). Each carried runtime
+// must bring both, byte-identical to the signed entries, and each SBOM must be structurally valid.
+function verifyCliSums(bytes, version, carried, readMember) {
   let entries;
   try {
     entries = parseSums(bytes.toString('utf8'));
   } catch (error) {
     throw new Error(`Offline bundle CLI checksum list is invalid: ${error.message}`);
   }
-  const expected = hostUpdateCliRuntimes.map(rid => hostUpdateCliArchiveName(version, rid));
+  const expected = hostUpdateCliRuntimes.flatMap(rid =>
+    [hostUpdateCliArchiveName(version, rid), hostUpdateCliSbomName(version, rid)]);
   requireThat(entries.size === expected.length && expected.every(name => entries.has(name)),
-    'Offline bundle CLI checksum list does not name exactly the supported archives');
-  requireThat(archives.length > 0, 'Offline bundle carries no host-update CLI archive');
-  for (const { name, sha256 } of archives) {
-    requireThat(entries.get(name) === sha256, `Offline bundle CLI archive does not match the signed checksum list: ${name}`);
+    'Offline bundle CLI checksum list does not name exactly the supported archives and SBOMs');
+  const names = new Set(carried.map(file => file.name));
+  const runtimes = hostUpdateCliRuntimes.filter(rid => names.has(hostUpdateCliArchiveName(version, rid)));
+  requireThat(runtimes.length > 0, 'Offline bundle carries no host-update CLI archive');
+  for (const rid of hostUpdateCliRuntimes) {
+    requireThat(names.has(hostUpdateCliArchiveName(version, rid)) === names.has(hostUpdateCliSbomName(version, rid)),
+      `Offline bundle must carry the host-update CLI archive and SBOM together: ${rid}`);
   }
+  for (const { name, role, sha256 } of carried) {
+    requireThat(entries.get(name) === sha256, `Offline bundle CLI asset does not match the signed checksum list: ${name}`);
+    if (role === 'cli-sbom') {
+      try {
+        validateHostUpdateCliSbom(readMember(name).toString('utf8'), name);
+      } catch (error) {
+        throw new Error(`Offline bundle ${error.message}`);
+      }
+    }
+  }
+  return runtimes;
 }
 
 // Cosign authenticates the exact bytes and the channel's release workflow identity. When a trusted
@@ -358,15 +380,17 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
   const assets = resolve(releaseAssets);
   const manifestBytes = readSmallFile(join(assets, manifestName), 'Release manifest', limits.maxMetadataBytes);
   const identity = manifestIdentity(manifestBytes, channel, version);
-  const selected = new Set(runtimes.map(rid => hostUpdateCliArchiveName(identity.version, rid)));
+  const selected = new Set(runtimes.flatMap(rid =>
+    [hostUpdateCliArchiveName(identity.version, rid), hostUpdateCliSbomName(identity.version, rid)]));
   const roles = expectedMembers(identity.version);
-  const files = [...roles].filter(([name, role]) => role !== 'cli-archive' || selected.has(name)).map(([name, role]) => {
+  const files = [...roles].filter(([name, role]) => !isRuntimeMember(role) || selected.has(name)).map(([name, role]) => {
     const { size, sha256 } = hashFile(join(assets, name), `Release asset ${name}`);
     requireThat(size <= roleLimit(role, limits), `Release asset exceeds its size limit: ${name}`);
     return { name, role, size, sha256 };
   }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   verifyCliSums(readSmallFile(join(assets, hostUpdateCliSumsName(identity.version)), 'CLI checksum list',
-    limits.maxMetadataBytes), identity.version, files.filter(file => file.role === 'cli-archive'));
+    limits.maxMetadataBytes), identity.version, files.filter(file => isRuntimeMember(file.role)),
+  name => readSmallFile(join(assets, name), `Release asset ${name}`, limits.maxMetadataBytes));
   verifySignatures(assets, identity, { run, trustedRoot, version: identity.version });
   const index = {
     schema: 1,
@@ -489,7 +513,7 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       requireThat(file.size <= roleLimit(file.role, limits), `Offline bundle member exceeds its size limit: ${file.name}`);
     }
     for (const [name, role] of roles) {
-      if (role !== 'cli-archive') {
+      if (!isRuntimeMember(role)) {
         requireThat(index.files.some(file => file.name === name), `Offline bundle is missing required member: ${name}`);
       }
     }
@@ -519,13 +543,12 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     requireThat(JSON.stringify(index.release) === JSON.stringify(identity),
       'Offline bundle index identity does not equal the signed manifest identity');
     requireThat(index.manifestDigest === manifestDigest(manifestBytes), 'Offline bundle manifest digest mismatch');
-    const archives = index.files.filter(file => file.role === 'cli-archive');
-    const runtimes = hostUpdateCliRuntimes.filter(rid =>
-      archives.some(file => file.name === hostUpdateCliArchiveName(identity.version, rid)));
+    const runtimes = verifyCliSums(readSmallFile(join(quarantine, hostUpdateCliSumsName(identity.version)),
+      'Offline bundle CLI checksum list', limits.maxMetadataBytes), identity.version,
+    index.files.filter(file => isRuntimeMember(file.role)),
+    name => readSmallFile(join(quarantine, name), `Offline bundle member ${name}`, limits.maxMetadataBytes));
     requireThat(JSON.stringify(index.contents.cliRuntimes) === JSON.stringify(runtimes),
       'Offline bundle runtime list does not match its archives');
-    verifyCliSums(readSmallFile(join(quarantine, hostUpdateCliSumsName(identity.version)), 'Offline bundle CLI checksum list',
-      limits.maxMetadataBytes), identity.version, archives);
     verifySignatures(quarantine, identity, { run, trustedRoot: root, version: identity.version });
     const record = {
       schema: 1,

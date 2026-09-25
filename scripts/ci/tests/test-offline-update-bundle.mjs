@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import test from 'node:test';
 import { components } from '../release-policy.mjs';
 import { buildManifest } from '../release-manifest.mjs';
-import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSumsBundleName,
+import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName } from '../host-update-cli-package.mjs';
 import { assembleOfflineBundle, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
   offlineBundleVerificationName, parseArguments, releaseSigningIdentity, tarHeader,
@@ -51,6 +51,11 @@ function cosign({ requireOffline }) {
   return { run, calls };
 }
 
+function spdx(rid) {
+  return `${JSON.stringify({ spdxVersion: 'SPDX-2.3', SPDXID: 'SPDXRef-DOCUMENT', name: `cli-${rid}`,
+    packages: [{ SPDXID: 'SPDXRef-Package-cli', name: 'printfarmer-host-update-cli' }] })}\n`;
+}
+
 function fixture(channel = 'stable') {
   const root = mkdtempSync(join(tmpdir(), 'offline-bundle-'));
   const release = releases[channel];
@@ -63,8 +68,11 @@ function fixture(channel = 'stable') {
     const name = hostUpdateCliArchiveName(release.version, rid);
     const bytes = Buffer.from(`archive ${rid} ${'x'.repeat(700)}`);
     writeFileSync(join(assets, name), bytes);
-    return { name, sha256: sha256(bytes) };
-  });
+    const sbomName = hostUpdateCliSbomName(release.version, rid);
+    const sbom = Buffer.from(spdx(rid));
+    writeFileSync(join(assets, sbomName), sbom);
+    return [{ name, sha256: sha256(bytes) }, { name: sbomName, sha256: sha256(sbom) }];
+  }).flat();
   const sums = Buffer.from(formatSums(archives));
   writeFileSync(join(assets, hostUpdateCliSumsName(release.version)), sums);
   writeFileSync(join(assets, hostUpdateCliSumsBundleName(release.version)), sign(sums, channel));
@@ -162,6 +170,8 @@ test('a runtime subset carries only the selected archive but the full signed che
     const record = verify(context);
     assert.deepEqual(record.cliRuntimes, ['linux-arm64']);
     assert.ok(existsSync(join(context.staging, hostUpdateCliSumsName(context.release.version))));
+    assert.ok(existsSync(join(context.staging, hostUpdateCliSbomName(context.release.version, 'linux-arm64'))));
+    assert.equal(existsSync(join(context.staging, hostUpdateCliSbomName(context.release.version, 'win-x64'))), false);
     assert.equal(existsSync(join(context.staging, hostUpdateCliArchiveName(context.release.version, 'win-x64'))), false);
   } finally {
     context.cleanup();
@@ -244,6 +254,75 @@ test('an archive outside the signed checksum list is rejected during assembly', 
     writeFileSync(join(context.assets, hostUpdateCliArchiveName(context.release.version, 'linux-x64')), 'substituted');
     assert.throws(() => assemble(context), /does not match the signed checksum list/);
     assert.equal(existsSync(context.bundle), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+// Re-signs a CLI checksum list so tests can prove checks beyond the signature itself.
+function resignSums(context, entries) {
+  const sums = Buffer.from(formatSums(entries));
+  writeFileSync(join(context.assets, hostUpdateCliSumsName(context.release.version)), sums);
+  writeFileSync(join(context.assets, hostUpdateCliSumsBundleName(context.release.version)), sign(sums, context.release.channel));
+}
+
+function assetEntries(context, names) {
+  return names.map(name => ({ name, sha256: sha256(readFileSync(join(context.assets, name))) }));
+}
+
+// Builds a bundle straight from the assets with a caller-chosen member list, bypassing assembly checks.
+function forgeBundle(context, { drop = () => false, prepare = () => {} } = {}) {
+  const { index } = assemble(context, { output: `${context.bundle}.template` });
+  rmSync(`${context.bundle}.template`, { force: true });
+  prepare();
+  index.files = index.files.filter(file => !drop(file.name)).map(file => {
+    const bytes = readFileSync(join(context.assets, file.name));
+    return { ...file, size: bytes.length, sha256: sha256(bytes) };
+  });
+  const indexBytes = Buffer.from(`${JSON.stringify(index, undefined, 2)}\n`);
+  writeTar(context.bundle, [
+    { header: tarHeader({ name: offlineBundleIndexName, size: indexBytes.length }), data: indexBytes },
+    ...index.files.map(file => member(file.name, readFileSync(join(context.assets, file.name)))),
+  ]);
+}
+
+test('every CLI SBOM must be listed in the signed checksum list', () => {
+  const context = fixture('stable');
+  try {
+    const { version } = context.release;
+    resignSums(context, assetEntries(context, hostUpdateCliRuntimes.map(rid => hostUpdateCliArchiveName(version, rid))));
+    assert.throws(() => assemble(context), /does not name exactly the supported archives and SBOMs/);
+    assert.equal(existsSync(context.bundle), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a signed but structurally invalid CLI SBOM is rejected on both sides', () => {
+  const context = fixture('stable');
+  try {
+    const { version } = context.release;
+    const corrupt = () => {
+      writeFileSync(join(context.assets, hostUpdateCliSbomName(version, 'linux-x64')), '{"spdxVersion":"SPDX-2.3","packages":[]}\n');
+      resignSums(context, assetEntries(context, hostUpdateCliRuntimes.flatMap(rid =>
+        [hostUpdateCliArchiveName(version, rid), hostUpdateCliSbomName(version, rid)])));
+    };
+    forgeBundle(context, { prepare: corrupt });
+    rejectsWithoutStaging(context, /not an SPDX 2\.x document with packages/);
+    rmSync(context.bundle);
+    assert.throws(() => assemble(context), /not an SPDX 2\.x document with packages/);
+    assert.equal(existsSync(context.bundle), false);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a carried CLI archive without its SBOM is rejected before import', () => {
+  const context = fixture('stable');
+  try {
+    const sbom = hostUpdateCliSbomName(context.release.version, 'linux-x64');
+    forgeBundle(context, { drop: name => name === sbom });
+    rejectsWithoutStaging(context, /archive and SBOM together: linux-x64/);
   } finally {
     context.cleanup();
   }

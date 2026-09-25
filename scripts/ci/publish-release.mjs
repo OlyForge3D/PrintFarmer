@@ -70,8 +70,14 @@ export function buildImages(release, source, assets, run = command, rejectImages
     '--revision', release.sourceCommit, '--output', join(assets, 'license-inventory.json')]);
   emitBuildMetadata(release, source);
   // Issue #3041: self-contained host-update recovery CLI archives plus the checksum list the
-  // sign job signs. Built before the images so a CLI build failure publishes nothing.
-  packageHostUpdateCli(release, source, assets, { run });
+  // sign job signs. Built before the images so a CLI build failure publishes nothing. Issue
+  // #3045: each archive's staged tree is also scanned into an SPDX SBOM bound by that list. It
+  // is a component inventory, not license-enriched: the compliance inventory excludes /tools/.
+  packageHostUpdateCli(release, source, assets, {
+    run,
+    sbom: ({ stage, sbomPath, rid }) => execute('syft', [`dir:${stage}`, '-o', `spdx-json=${sbomPath}`,
+      '--source-name', `printfarmer-host-update-cli-${rid}`, '--source-version', release.version]),
+  });
   const digests = {};
   const baseUrl = `https://github.com/${repository}/releases/download/${release.tag}`;
   for (const [name, { target, platforms }] of Object.entries(components)) {
