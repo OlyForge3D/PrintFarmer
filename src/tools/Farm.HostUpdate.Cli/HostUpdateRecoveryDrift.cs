@@ -4,7 +4,6 @@ using System.Text;
 using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
-using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.HostUpdate.Cli;
@@ -33,8 +32,10 @@ internal sealed record HostUpdatePolicyObservation(bool Available, long Revision
 }
 
 /// <summary>
-/// Detects drift since the recorded authorization (issue #2998): host platform, standing policy
-/// revision/fingerprint/channel, and the prior installed state. It never resolves mutable tags,
+/// Detects drift since the recorded authorization (issues #2998, #3047): host platform, standing
+/// policy revision/fingerprint/channel, and -- against the baseline journaled on the
+/// <c>accepted</c> activity -- the prior installed state, configuration and release trust root.
+/// It never resolves mutable tags,
 /// never trusts unsigned material, and never writes: the host-state root is opened with
 /// <see cref="HostStatePath.OpenReadOnly"/>, which skips the write probe.
 /// </summary>
@@ -47,6 +48,9 @@ internal static class HostUpdateRecoveryDrift
     public const string ChannelDrift = "channel_drift";
     public const string PriorStateChanged = "prior_state_changed_since_authorization";
     public const string PriorStateMatchesTarget = "prior_state_matches_target";
+    public const string AuthorizationBaselineUnrecorded = "authorization_baseline_unrecorded";
+    public const string ConfigurationDrift = "configuration_drift";
+    public const string TrustRootDrift = "trust_root_drift";
 
     private const string TokenPrefix = "drift-";
 
@@ -111,7 +115,8 @@ internal static class HostUpdateRecoveryDrift
         HostUpdateRecoveryOutcomeRecord? existingOutcome,
         HostUpdatePolicyObservation policy,
         string? currentPlatform,
-        string configurationFingerprint)
+        string configurationFingerprint,
+        string? currentTrustRootFingerprint = null)
     {
         ArgumentNullException.ThrowIfNull(recorded);
         ArgumentNullException.ThrowIfNull(activities);
@@ -149,19 +154,56 @@ internal static class HostUpdateRecoveryDrift
         // Once a recovery attempt has durably rolled back, the installed state is the one it wrote
         // itself; the prior-identity comparison only applies before any successful rollback.
         bool priorComparable = existingOutcome is null || existingOutcome.Outcome == HostUpdateRecoveryOutcome.NeedsOperator;
-        if (priorComparable && installed is not null && activities.Count > 0)
+        HostUpdateAuthorizationBaseline? baseline = AuthorizationBaseline(activities);
+        string trustRootFingerprint = currentTrustRootFingerprint ?? HostUpdateTrustRoot.Fingerprint;
+        if (!HostUpdateTrustRoot.IsPinned(recorded.TrustRoot))
         {
+            items.Add(new(TrustRootDrift, recorded.TrustRoot, "unpinned"));
+        }
+
+        if (baseline is null)
+        {
+            items.Add(new(AuthorizationBaselineUnrecorded, "none", $"schema={HostUpdateAuthorizationBaseline.CurrentSchemaVersion}"));
+        }
+        else
+        {
+            if (!string.Equals(baseline.ConfigurationFingerprint, configurationFingerprint, StringComparison.Ordinal))
+            {
+                items.Add(new(ConfigurationDrift, baseline.ConfigurationFingerprint, configurationFingerprint));
+            }
+
+            if (!string.Equals(baseline.TrustRootFingerprint, trustRootFingerprint, StringComparison.Ordinal))
+            {
+                items.Add(new(TrustRootDrift, baseline.TrustRootFingerprint, trustRootFingerprint));
+            }
+        }
+
+        if (priorComparable && baseline is not null)
+        {
+            // Content comparison (issue #3047, H03): any change to the installed state since
+            // authorization -- including a backdated RecordedAt or a deleted record -- is drift.
+            string installedHash = InstalledStateHash(installed);
+            if (!string.Equals(baseline.InstalledStateHash, installedHash, StringComparison.Ordinal))
+            {
+                items.Add(new(PriorStateChanged, baseline.InstalledStateHash, installed is null ? installedHash : $"{installed.ReleaseId}@{installedHash}"));
+            }
+        }
+        else if (priorComparable && installed is not null && activities.Count > 0)
+        {
+            // Legacy fallback for journals without a baseline; always accompanied by
+            // authorization_baseline_unrecorded, so it never stands alone as proof of no drift.
             DateTimeOffset authorizedAt = activities[0].RecordedAt;
             if (installed.RecordedAt > authorizedAt)
             {
                 items.Add(new(PriorStateChanged, "before:" + Timestamp(authorizedAt), $"{installed.ReleaseId}@{Timestamp(installed.RecordedAt)}"));
             }
+        }
 
-            if (string.Equals(installed.ReleaseId, recorded.ReleaseId, StringComparison.Ordinal) ||
-                string.Equals(installed.ManifestDigest, recorded.ManifestDigest, StringComparison.Ordinal))
-            {
-                items.Add(new(PriorStateMatchesTarget, $"{recorded.ReleaseId}@{recorded.ManifestDigest}", $"{installed.ReleaseId}@{installed.ManifestDigest}"));
-            }
+        if (priorComparable && installed is not null && activities.Count > 0 &&
+            (string.Equals(installed.ReleaseId, recorded.ReleaseId, StringComparison.Ordinal) ||
+             string.Equals(installed.ManifestDigest, recorded.ManifestDigest, StringComparison.Ordinal)))
+        {
+            items.Add(new(PriorStateMatchesTarget, $"{recorded.ReleaseId}@{recorded.ManifestDigest}", $"{installed.ReleaseId}@{installed.ManifestDigest}"));
         }
 
         HostUpdateDriftItem[] ordered = [.. items.OrderBy(item => item.Code, StringComparer.Ordinal)];
@@ -177,34 +219,24 @@ internal static class HostUpdateRecoveryDrift
         return new(ordered, configurationFingerprint, token);
     }
 
-    /// <summary>Content hash of the evaluated installed state (<c>none</c> when absent).</summary>
-    public static string InstalledStateHash(InstalledHostState? installed) => installed is null ? "none" : Hash(installed);
+    /// <summary>Content hash of the evaluated installed state (<c>none</c> when absent); shared with the executor's baseline.</summary>
+    public static string InstalledStateHash(InstalledHostState? installed) => HostUpdateBaselineHashes.InstalledState(installed);
+
+    /// <summary>Fingerprint of the configuration the recovery engine will act on; shared with the executor's baseline.</summary>
+    public static string ConfigurationFingerprint(HostUpdateExecutionOptions options, DatabaseProviderConfiguration database) =>
+        HostUpdateBaselineHashes.Configuration(options, database);
 
     /// <summary>
-    /// Fingerprint of the configuration the recovery engine will act on. Credentials are never
-    /// included: only the provider and, for SQLite, the data-source path contribute.
+    /// The baseline journaled when the update was authorized: the first one carried by the leading
+    /// run of <c>accepted</c> activities (a crash before preflight re-appends <c>accepted</c> with
+    /// the same host state). Null when none was recorded or the schema is not understood.
     /// </summary>
-    public static string ConfigurationFingerprint(HostUpdateExecutionOptions options, DatabaseProviderConfiguration database)
-    {
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(database);
-        return "sha256:" + Hash(new
-        {
-            options.RootDirectory,
-            options.ComposeProjectName,
-            ComposeFiles = options.ComposeFiles.Select(file => new { File = file, Sha256 = FileHash(file) }).ToArray(),
-            ServiceMappings = options.ServiceMappings
-                .OrderBy(m => m.ServiceId, StringComparer.Ordinal)
-                .Select(m => new { m.ServiceId, m.ComposeServiceName, m.ImageEnvironmentVariable, m.ImageRepository })
-                .ToArray(),
-            OwnedDirectories = options.OwnedDirectories.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new[] { p.Key, p.Value }).ToArray(),
-            OptionalOwnedDirectories = options.OptionalOwnedDirectories.Order(StringComparer.Ordinal).ToArray(),
-            HostExecutablePaths = options.HostExecutablePaths.OrderBy(p => p.Key, StringComparer.Ordinal).Select(p => new[] { p.Key, p.Value }).ToArray(),
-            ActiveServiceIds = options.ActiveServiceIds.Order(StringComparer.Ordinal).ToArray(),
-            Provider = database.Provider.ToLowerInvariant(),
-            SqliteDataSource = database.IsSqlite ? SqliteDataSource(database.ConnectionString) : null,
-        });
-    }
+    // Only the first activity describes the authorization; a later "accepted" re-append (resume after a
+    // crash) must never supply a baseline, or a legacy journal could be rebased onto post-authorization state.
+    internal static HostUpdateAuthorizationBaseline? AuthorizationBaseline(IReadOnlyList<HostUpdateExecutionActivity> activities) =>
+        activities.Count > 0 && activities[0] is { State: HostUpdateExecutionState.Accepted, Phase: "accepted", AuthorizationBaseline: { SchemaVersion: HostUpdateAuthorizationBaseline.CurrentSchemaVersion } baseline }
+            ? baseline
+            : null;
 
     internal static string ChannelName(HostUpdateExecutionChannel channel) => channel switch
     {
@@ -214,31 +246,6 @@ internal static class HostUpdateRecoveryDrift
     };
 
     private static string Timestamp(DateTimeOffset value) => value.UtcDateTime.ToString("O", System.Globalization.CultureInfo.InvariantCulture);
-
-    private static string FileHash(string path)
-    {
-        try
-        {
-            string full = Path.GetFullPath(path);
-            return File.Exists(full) ? Convert.ToHexStringLower(SHA256.HashData(File.ReadAllBytes(full))) : "missing";
-        }
-        catch (Exception exception) when (exception is IOException or UnauthorizedAccessException or ArgumentException or NotSupportedException or SecurityException)
-        {
-            return "unreadable";
-        }
-    }
-
-    private static string? SqliteDataSource(string connectionString)
-    {
-        try
-        {
-            return new SqliteConnectionStringBuilder(connectionString).DataSource;
-        }
-        catch (ArgumentException)
-        {
-            return null;
-        }
-    }
 
     private static string Hash(object value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))));

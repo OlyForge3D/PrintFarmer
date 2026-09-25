@@ -66,6 +66,12 @@ public static class HostUpdateExecutionStartup
                 options.ActiveServiceIds.ToHashSet(StringComparer.Ordinal));
         });
         services.AddScoped<IHostUpdateExecutionSteps, HostUpdateExecutionStepsAdapter>();
+
+        // Authorization-time drift baseline (issue #3047), journaled on the accepted activity.
+        services.AddScoped<IHostUpdateAuthorizationBaselineProvider>(sp => new HostUpdateAuthorizationBaselineProvider(
+            sp.GetRequiredService<IInstalledHostStateStore>(),
+            sp.GetRequiredService<HostUpdateExecutionOptions>(),
+            DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>())));
         services.AddScoped<IHostUpdateExecutor>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();

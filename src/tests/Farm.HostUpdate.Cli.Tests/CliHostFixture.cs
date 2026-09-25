@@ -1,7 +1,9 @@
 ﻿using System.Text.Json;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 
 namespace Farm.HostUpdate.Cli.Tests;
 
@@ -130,7 +132,7 @@ internal sealed class CliHostFixture : IDisposable
         return new(ReleaseId, 1, TargetManifestDigest, new string('b', 40), HostUpdateExecutionChannel.Stable, Targets(platform))
         {
             RequestId = requestId,
-            TrustRoot = "trust-root",
+            TrustRoot = HostUpdateTrustRoot.DefaultTrustRoot,
             PolicyRevision = RecordedPolicy.PolicyRevision,
             PolicyFingerprint = RecordedPolicy.Fingerprint,
             HostPlatform = platform,
@@ -196,10 +198,26 @@ internal sealed class CliHostFixture : IDisposable
         return run;
     }
 
-    public void SeedJournal(HostUpdateExecutionRequest request, params (HostUpdateExecutionState State, string Phase)[] entries)
+    /// <summary>
+    /// Seeds a journal the way the executor writes it: an <c>accepted</c> activity carrying the
+    /// authorization baseline (captured now, through the production provider) followed by
+    /// <paramref name="entries"/>. Pass <paramref name="baseline"/> to journal a specific
+    /// baseline, or <paramref name="withBaseline"/>=false to emulate a pre-#3047 journal.
+    /// </summary>
+    public void SeedJournal(
+        HostUpdateExecutionRequest request,
+        (HostUpdateExecutionState State, string Phase)[] entries,
+        HostUpdateAuthorizationBaseline? baseline = null,
+        bool withBaseline = true)
     {
         var journal = new FileHostUpdateExecutionJournal(JournalPath);
         string binding = HostUpdateRequestBinding.Compute(request);
+        journal.Append(new HostUpdateExecutionActivity("activity-accepted", request.ReleaseId, HostUpdateExecutionState.Accepted, "accepted", DateTimeOffset.UtcNow)
+        {
+            RequestBindingHash = binding,
+            RequestBinding = request,
+            AuthorizationBaseline = withBaseline ? baseline ?? CurrentBaseline() : null,
+        });
         int index = 0;
         foreach ((HostUpdateExecutionState state, string phase) in entries)
         {
@@ -211,11 +229,29 @@ internal sealed class CliHostFixture : IDisposable
         }
     }
 
-    public void SeedRecoveryRequired(HostUpdateExecutionRequest? request = null) =>
+    public void SeedJournal(HostUpdateExecutionRequest request, params (HostUpdateExecutionState State, string Phase)[] entries) =>
+        SeedJournal(request, entries, baseline: null);
+
+    /// <summary>The baseline the executor would journal for this host right now.</summary>
+    public HostUpdateAuthorizationBaseline CurrentBaseline(IConfiguration? configuration = null)
+    {
+        configuration ??= Configuration();
+        using ServiceProvider services = HostUpdateCli.BuildServices(configuration, TextWriter.Null);
+        var provider = new HostUpdateAuthorizationBaselineProvider(
+            services.GetRequiredService<IInstalledHostStateStore>(),
+            services.GetRequiredService<HostUpdateExecutionOptions>(),
+            DatabaseProviderConfiguration.FromConfiguration(configuration));
+#pragma warning disable VSTHRD002 // Synchronous test seeding over a file-backed store.
+        return provider.CaptureAsync(CancellationToken.None).GetAwaiter().GetResult();
+#pragma warning restore VSTHRD002
+    }
+
+    public void SeedRecoveryRequired(HostUpdateExecutionRequest? request = null, HostUpdateAuthorizationBaseline? baseline = null, bool withBaseline = true) =>
         SeedJournal(
             request ?? Request(),
-            (HostUpdateExecutionState.Applying, "apply:before"),
-            (HostUpdateExecutionState.RecoveryRequired, "failure"));
+            [(HostUpdateExecutionState.Applying, "apply:before"), (HostUpdateExecutionState.RecoveryRequired, "failure")],
+            baseline,
+            withBaseline);
 
     public void SeedOutcome(HostUpdateRecoveryOutcome outcome, string detail)
     {
