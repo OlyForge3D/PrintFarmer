@@ -197,12 +197,102 @@ endpoints exist.
 
 **The packaged host-local status/recovery CLI is only partially delivered.** The
 first slice of #2980 (below) adds the API-independent engine entry point and
-wrappers, but packaging, host placement, the OS matrix and
+wrappers, and #3041 publishes it as a signed, self-contained package for a
+declared host matrix. Automated installer placement and configuration
+generation (#3045) and
 provider/topology coverage are still open. That gap still blocks a claim of
 complete recovery support. Retain protected host evidence for the deployment
 owner; do not invent a recovery command, edit journal JSON, delete locks, or run
 the installer against a possibly migrated database. Directly reading a file is
 not journal integrity verification or authorization to release a fence.
+
+### Install the signed CLI package
+
+Each server release (#3041) attaches one self-contained archive per supported
+host runtime, a checksum list that names exactly those archives, and a keyless
+Cosign bundle for the checksum list, signed by the same release workflow
+identity as `update-manifest.json`:
+
+| Asset | Contents |
+| --- | --- |
+| `printfarmer-host-update-cli-v<version>-linux-x64.tar.gz` | Linux x64 CLI plus wrappers |
+| `printfarmer-host-update-cli-v<version>-linux-arm64.tar.gz` | Linux ARM64 CLI plus wrappers |
+| `printfarmer-host-update-cli-v<version>-win-x64.tar.gz` | Windows x64 CLI plus wrappers |
+| `printfarmer-host-update-cli-v<version>-SHA256SUMS` | `sha256sum` list of the three archives |
+| `printfarmer-host-update-cli-v<version>-SHA256SUMS.sigstore.json` | Cosign bundle for that list |
+
+Supported hosts:
+
+| Runtime | Host requirements |
+| --- | --- |
+| `linux-x64`, `linux-arm64` | A glibc distribution supported by .NET 10 with `libicu` and OpenSSL installed, and `bash`. musl/Alpine is not supported. |
+| `win-x64` | A Windows version supported by .NET 10, with PowerShell 7 (`pwsh`). |
+
+macOS is not packaged: an apphost cross-published from Linux is not code-signed,
+and Apple silicon refuses to run it. On macOS, and for source builds, point
+`PRINTFARMER_HOST_UPDATE_CLI_DIR` at a `dotnet publish` output of
+`src/tools/Farm.HostUpdate.Cli` built from the installed release's tag.
+
+The package needs no source checkout, API or installed .NET runtime. Each
+archive contains `cli/` (the self-contained CLI), the wrappers,
+`common-utils.sh`, `LICENSE`, `THIRD-PARTY-NOTICES.md` and
+`host-update-cli-package.json` (version, tag, channel, source commit, runtime
+and `rolloutAuthorization: false`). Members are owned by `0/0`; directories and
+launchers are `0755`, everything else `0644`. A packaged wrapper finds `cli/`
+beside itself, so `PRINTFARMER_HOST_UPDATE_CLI_DIR` is not needed, and it
+refuses `PRINTFARMER_DOTNET` because the launcher carries its own runtime.
+
+Install the CLI of the release installed on the host (the release whose API ran
+the update), into a directory named for its version. Keep the previous version
+directory until any update or recovery it may need is finished.
+
+**Linux** (stable identity shown; insider releases use
+`@refs/heads/development`):
+
+```bash
+V=1.2.3; RID=linux-x64; P=printfarmer-host-update-cli-v$V
+cosign verify-blob --bundle "$P-SHA256SUMS.sigstore.json" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main \
+  "$P-SHA256SUMS"
+grep -E "  $P-$RID\.tar\.gz\$" "$P-SHA256SUMS" | sha256sum --check --strict -
+sudo install -d -o root -g root -m 0755 "/opt/printfarmer/host-update-cli/$V"
+sudo tar -xzf "$P-$RID.tar.gz" -C "/opt/printfarmer/host-update-cli/$V" --no-same-owner
+```
+
+Keep `/opt/printfarmer/host-update-cli` root-owned and not writable by the
+service account. Store the configuration at `/etc/printfarmer/host-update.json`,
+owned by the account that owns the protected root, mode `0600`; it may contain
+connection strings.
+
+**Windows** (elevated PowerShell 7):
+
+```powershell
+$V = '1.2.3'; $P = "printfarmer-host-update-cli-v$V"
+cosign verify-blob --bundle "$P-SHA256SUMS.sigstore.json" `
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com `
+  --certificate-identity https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main `
+  "$P-SHA256SUMS"
+$expected = (Select-String -Path "$P-SHA256SUMS" -Pattern "  $([regex]::Escape("$P-win-x64.tar.gz"))$").Line.Split(' ')[0]
+if ((Get-FileHash "$P-win-x64.tar.gz" -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expected) { throw 'hash mismatch' }
+$dir = "C:\Program Files\PrintFarmer\HostUpdateCli\$V"
+New-Item -ItemType Directory -Path $dir -Force | Out-Null
+& "$env:SystemRoot\System32\tar.exe" -xzf "$P-win-x64.tar.gz" -C $dir
+```
+
+The install directory keeps the inherited `Program Files` ACL. Store the
+configuration at `C:\ProgramData\PrintFarmer\host-update.json` with inheritance
+removed and access limited to the protected-root account, `Administrators` and
+`SYSTEM` (for example `icacls <file> /inheritance:r /grant:r SYSTEM:F
+Administrators:F <account>:R`).
+
+**Offline hosts** (#2981): carry the chosen archive, the checksum list and its
+bundle unchanged. Verify the bundle on a connected host before transfer (or
+with Cosign's offline trusted-root options), and always re-check the archive
+SHA-256 against the list on the target host before extracting.
+
+Automated placement by the installer, generated host configuration and a
+per-archive SBOM are follow-up work (#3045).
 
 ### Host-local status and recovery CLI (first slice, #2980)
 
@@ -214,16 +304,16 @@ account that owns the protected root, with the same configuration the API host
 uses:
 
 ```bash
-export PRINTFARMER_HOST_UPDATE_CLI_DIR=/opt/printfarmer/host-update-cli  # contains Farm.HostUpdate.Cli.dll
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json status --json
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json status --release stable:1.2.3
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --preview
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --confirm stable:1.2.3
+CLI=/opt/printfarmer/host-update-cli/1.2.3/printfarmer-host-update.sh
+"$CLI" --config /etc/printfarmer/host-update.json status --json
+"$CLI" --config /etc/printfarmer/host-update.json status --release stable:1.2.3
+"$CLI" --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --preview
+"$CLI" --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --confirm stable:1.2.3
 ```
 
 ```powershell
-$env:PRINTFARMER_HOST_UPDATE_CLI_DIR = 'C:\PrintFarmer\host-update-cli'
-scripts\printfarmer-host-update.ps1 -Config C:\PrintFarmer\host-update.json recover -Release stable:1.2.3 -Preview
+& 'C:\Program Files\PrintFarmer\HostUpdateCli\1.2.3\printfarmer-host-update.ps1' `
+  -Config C:\ProgramData\PrintFarmer\host-update.json recover -Release stable:1.2.3 -Preview
 ```
 
 The config file uses the API's `HostUpdateExecution`, `DB_PROVIDER` and
@@ -238,7 +328,8 @@ is reported by the CLI as exit 3 (`configuration_unreadable`), honouring
 check only that `--config` is absolute and leave existence to the loader (an
 existence probe cannot tell an absent file from an access-denied one).
 `PRINTFARMER_DOTNET` may name an
-absolute `dotnet` host. `--request-id` is optional and must match the binding
+absolute `dotnet` host for a framework-dependent `dotnet publish` layout; a
+packaged self-contained launcher refuses it. `--request-id` is optional and must match the binding
 recorded in the journal.
 
 - `status` reads the lock-held journal. Without a release it lists releases
@@ -379,13 +470,17 @@ Known limits of this slice:
   `host-update-wrapper-tests`): `tests/test-host-update-cli-wrapper.sh` and
   `tests/test-host-update-cli-wrapper.ps1` both run on Ubuntu, macOS and
   Windows runners against a stub CLI. This proves argument validation and
-  exit-code pass-through only; it is not a supported-host declaration.
-- There is no published or signed package, installed host placement,
-  supported OS/distribution matrix, physical command reconciliation gate or PostgreSQL/SQL Server and
-  split-topology proof yet; those remain follow-up work under #2658. Until the
-  package exists, `PRINTFARMER_HOST_UPDATE_CLI_DIR` must point at a
-  `dotnet publish` output of `src/tools/Farm.HostUpdate.Cli` built from the
-  installed release's tag.
+  exit-code pass-through only. The real package is smoke-tested separately
+  (`host-update-cli-package-tests`: `tests/test-host-update-cli-package.sh` on
+  Linux x64 and ARM64, `tests/test-host-update-cli-package.ps1` on Windows x64),
+  which builds the archive with the release packaging code, verifies it
+  against its checksum list, extracts it and runs the CLI with `dotnet` poisoned
+  on `PATH`.
+- There is no physical command reconciliation gate or PostgreSQL/SQL Server and
+  split-topology proof yet; those remain follow-up work under #2658. The
+  installer does not yet place the package or generate its configuration
+  (#3045), and macOS has no package (see
+  [Install the signed CLI package](#install-the-signed-cli-package)).
 
 | Observation | Operator response |
 | --- | --- |
