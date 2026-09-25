@@ -15,6 +15,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Modules.Administration.Controllers;
 
@@ -25,13 +26,14 @@ public class UnifiedSettingsController(
     ISettingsService modularSettingsService,
     DiscoveryHeartbeatMonitorService discoveryMonitor,
     ILogger<UnifiedSettingsController> logger,
-    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : ControllerBase
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IOptions<JsonOptions>? mvcJsonOptions = null) : ControllerBase
 {
     private readonly ISettingsService _modularSettingsService = modularSettingsService;
     private readonly DiscoveryHeartbeatMonitorService _discoveryMonitor = discoveryMonitor;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
-    private static readonly JsonSerializerOptions SectionJsonOptions = new(JsonSerializerDefaults.Web)
+    private readonly JsonSerializerOptions _sectionJsonOptions = mvcJsonOptions?.Value.JsonSerializerOptions ?? new(JsonSerializerDefaults.Web)
     {
         Converters = { new JsonStringEnumConverter() }
     };
@@ -391,7 +393,7 @@ public class UnifiedSettingsController(
 
     /// <summary>
     /// Heartbeat endpoint for discovery service.
-    /// Updates the LastHeartbeat timestamp in NetworkDiscoverySettings to confirm service is alive.
+    /// Records telemetry separately from settings and exposes it as LastHeartbeat on settings reads.
     /// </summary>
     /// <remarks>
     /// Deliberately <c>[AllowAnonymous]</c>: the printer-discovery microservice posts this heartbeat
@@ -406,10 +408,15 @@ public class UnifiedSettingsController(
     /// here without updating the microservice would silently break discovery heartbeats.
     /// </remarks>
     /// <param name="keyName">The key name - should be "NetworkDiscovery".</param>
+    /// <param name="repository">Storage for heartbeat telemetry.</param>
+    /// <param name="cancellationToken">Request cancellation token.</param>
     /// <returns>NoContent on success.</returns>
     [AllowAnonymous]
     [HttpPost("{keyName}/heartbeat")]
-    public ActionResult SendHeartbeat(string keyName)
+    public async Task<ActionResult> SendHeartbeatAsync(
+        string keyName,
+        [FromServices] Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository repository,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -426,16 +433,16 @@ public class UnifiedSettingsController(
                 return BadRequest(new { message = "Failed to get NetworkDiscoverySettings" });
             }
 
-            // Update the heartbeat timestamp
-            currentSettings.LastHeartbeat = DateTime.UtcNow;
-
-            // Save the updated settings
-            _modularSettingsService.Save(currentSettings);
+            DateTime heartbeat = DateTime.UtcNow;
+            await repository.SetAsync(
+                NetworkDiscoverySettings.HeartbeatStorageKey,
+                JsonSerializer.Serialize(heartbeat), cancellationToken);
+            await repository.SaveChangesAsync(cancellationToken);
 
             // Notify the background service monitor so it appears in the dashboard widget
             _discoveryMonitor.OnHeartbeatReceived();
 
-            _logger.LogDebug("Heartbeat received and recorded for NetworkDiscoverySettings at {Timestamp}", currentSettings.LastHeartbeat);
+            _logger.LogDebug("Heartbeat received and recorded for NetworkDiscoverySettings at {Timestamp}", heartbeat);
 
             return NoContent();
         }
@@ -569,16 +576,16 @@ public class UnifiedSettingsController(
     {
         _ = MapKeyNameToClassName(keyName) ?? throw new ArgumentException($"Unknown settings key: {keyName}");
         Type settingsType = _modularSettingsService.GetByKey(keyName).GetType();
-        IAppSetting typedSettings = settingsValues.Deserialize(settingsType, SectionJsonOptions) as IAppSetting
+        IAppSetting typedSettings = settingsValues.Deserialize(settingsType, _sectionJsonOptions) as IAppSetting
             ?? throw new ArgumentException($"Invalid settings for key: {keyName}");
         return await _modularSettingsService.SaveWithConcurrencyCheckAsync(
             typedSettings, rowVersion, HttpContext.RequestAborted);
     }
 
-    private static JsonObject ToSectionResponse(SettingsSectionSnapshot snapshot)
+    private JsonObject ToSectionResponse(SettingsSectionSnapshot snapshot)
     {
         JsonObject response = JsonSerializer.SerializeToNode(
-            snapshot.Value, snapshot.Value.GetType(), SectionJsonOptions)!.AsObject();
+            snapshot.Value, snapshot.Value.GetType(), _sectionJsonOptions)!.AsObject();
         response["rowVersion"] = snapshot.RowVersion;
         return response;
     }

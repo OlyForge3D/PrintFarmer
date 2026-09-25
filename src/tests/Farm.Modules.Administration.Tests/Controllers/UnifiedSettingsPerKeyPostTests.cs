@@ -160,6 +160,42 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
     }
 
     [Fact]
+    public async Task Post_AfterHeartbeat_PreservesTokenAndLiveTelemetry()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        using HttpClient anonymous = _factory.CreateClient();
+        const string endpoint = "/api/settings/NetworkDiscovery";
+        JsonObject draft = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        string token = draft["rowVersion"]!.GetValue<string>();
+        draft["clientTimeoutMs"] = 700;
+
+        for (int i = 0; i < 2; i++)
+        {
+            (await anonymous.PostAsync($"{endpoint}/heartbeat", null)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+            JsonObject heartbeatRead = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+            heartbeatRead["rowVersion"]!.GetValue<string>().Should().Be(token);
+            heartbeatRead["lastHeartbeat"].Should().NotBeNull();
+        }
+
+        JsonObject beforeSave = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+        HttpResponseMessage saved = await admin.PostAsJsonAsync(endpoint, draft);
+        saved.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonObject savedBody = (await saved.Content.ReadFromJsonAsync<JsonObject>())!;
+        savedBody["lastHeartbeat"]!.GetValue<string>().Should().Be(beforeSave["lastHeartbeat"]!.GetValue<string>());
+        JsonObject afterSave = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+        afterSave["clientTimeoutMs"]!.GetValue<int>().Should().Be(700);
+        afterSave["lastHeartbeat"]!.GetValue<string>().Should().Be(beforeSave["lastHeartbeat"]!.GetValue<string>());
+        afterSave["rowVersion"]!.GetValue<string>().Should().NotBe(token);
+
+        // The same protection applies once the editable section already has a persisted revision.
+        token = afterSave["rowVersion"]!.GetValue<string>();
+        (await anonymous.PostAsync($"{endpoint}/heartbeat", null)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+        JsonObject heartbeatAfterSave = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+        heartbeatAfterSave["rowVersion"]!.GetValue<string>().Should().Be(token);
+        (await admin.PostAsJsonAsync(endpoint, afterSave)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
     public async Task Post_UpdateChannel_RoundTripsStableInsiderStableAndRejectsUnacknowledgedInsider()
     {
         using HttpClient admin = await _factory.CreateAdminClientAsync();

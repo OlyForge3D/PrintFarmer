@@ -61,7 +61,6 @@ public class SettingsService : ISettingsService
         }
 
         long? originWatermark = CaptureOriginWatermark();
-        string json = JsonSerializer.Serialize(settings, type);
         await using AppDbContext db = await _dbContextFactory.CreateDbContextAsync(ct);
         AppSettingsEntity? entity = await db.AppSettingsEntities
             .FirstOrDefaultAsync(e => e.Key == appAttr.Key, ct);
@@ -87,7 +86,18 @@ public class SettingsService : ISettingsService
             db.Entry(entity).Property(e => e.Revision).OriginalValue = expectedRevision;
         }
 
-        entity.SettingsJson = json;
+        if (settings is NetworkDiscoverySettings discovery)
+        {
+            string? heartbeatJson = await db.AppSettingsEntities.AsNoTracking()
+                .Where(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey)
+                .Select(e => e.SettingsJson).FirstOrDefaultAsync(ct);
+            if (heartbeatJson is not null)
+            {
+                discovery.LastHeartbeat = JsonSerializer.Deserialize<DateTime>(heartbeatJson);
+            }
+        }
+
+        entity.SettingsJson = JsonSerializer.Serialize(settings, type);
         entity.UpdatedAt = DateTime.UtcNow;
 
         // Even an identical payload must check and advance the revision.
@@ -119,14 +129,7 @@ public class SettingsService : ISettingsService
         ArgumentNullException.ThrowIfNull(settings);
         Type type = typeof(T);
         AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>() ?? throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting]. Only AppSettings can be persisted to DB.");
-        _settingsOriginWatermarks[appAttr.Key] = CaptureOriginWatermark();
-
-        // Atomic swap: replace the whole dictionary rather than mutating the existing
-        // instance, so a caller holding a reference to the previous _settings (e.g. a
-        // snapshot taken via reflection, or an in-flight enumeration of All) keeps
-        // seeing that instance unchanged instead of observing this update land inside
-        // it. Mirrors the pattern already used by LoadSettings/Reload.
-        _settings = new Dictionary<string, object>(_settings) { [appAttr.Key] = settings };
+        long? originWatermark = CaptureOriginWatermark();
 
         // Persist to DB (AppSettings only)
         string json = JsonSerializer.Serialize(settings);
@@ -139,7 +142,14 @@ public class SettingsService : ISettingsService
         setTask.Wait();
         Task saveTask = _settingsRepo.SaveChangesAsync();
         saveTask.Wait();
+
+        // Read the tracked entity that was committed, not a fresh revision from another writer.
+        AppSettingsEntity entity = _settingsRepo.GetAsync(appAttr.Key).GetAwaiter().GetResult()
+            ?? throw new InvalidOperationException($"Saved settings '{appAttr.Key}' could not be read.");
 #pragma warning restore VSTHRD002
+        _settings = new Dictionary<string, object>(_settings) { [appAttr.Key] = settings };
+        _settingsOriginWatermarks[appAttr.Key] = originWatermark;
+        _settingsRowVersions[appAttr.Key] = RevisionETag.Encode(entity.Revision);
     }
 
     private Dictionary<string, object> _settings = new();
@@ -215,6 +225,7 @@ public class SettingsService : ISettingsService
             .ToList();
 
         using AppDbContext dbContext = _dbContextFactory.CreateDbContext();
+        appSettingKeys.Add(NetworkDiscoverySettings.HeartbeatStorageKey);
         Dictionary<string, AppSettingsEntity> settingsByKey = new();
         if (appSettingKeys.Count > 0)
         {
@@ -272,6 +283,13 @@ public class SettingsService : ISettingsService
             if (instance is IValidatableSetting validatable)
             {
                 validatable.Validate();
+            }
+
+            // Runtime telemetry has its own row so heartbeats cannot invalidate an editor's token.
+            if (instance is NetworkDiscoverySettings discovery
+                && settingsByKey.TryGetValue(NetworkDiscoverySettings.HeartbeatStorageKey, out AppSettingsEntity? heartbeat))
+            {
+                discovery.LastHeartbeat = JsonSerializer.Deserialize<DateTime>(heartbeat.SettingsJson);
             }
 
             newSettings[key] = instance;

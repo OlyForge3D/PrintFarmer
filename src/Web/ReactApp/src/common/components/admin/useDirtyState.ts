@@ -80,8 +80,9 @@ export interface UseDirtyStateResult<T extends Record<string, unknown>> {
    * choice used to be between claiming the failed group saved and telling the
    * user the two that did save are still pending — then re-POSTing them on
    * retry. This keeps the failure dirty and lets the successes settle.
+   * Optional accepted values apply server normalization without overwriting newer edits.
    */
-  acceptKeys: (keys: (keyof T)[]) => void;
+  acceptKeys: (keys: (keyof T)[], accepted?: Partial<T>) => void;
   /** True whenever any key differs from the original. */
   isDirty: boolean;
   /** The keys whose current value no longer matches the original. */
@@ -136,17 +137,25 @@ export function useDirtyState<T extends Record<string, unknown>>(
     setValuesState(nextBaseline);
   }, [values]);
 
-  const acceptKeys = useCallback((keys: (keyof T)[]) => {
+  const acceptKeys = useCallback((keys: (keyof T)[], accepted?: Partial<T>) => {
     if (keys.length === 0) return;
-    // Only the baseline moves. `values` is left alone so a group the user is
-    // still editing does not get yanked out from under them by a save of some
-    // other group.
+    // The click-time values remain the baseline unless the server supplied a canonical value.
     setOriginal(prev => {
       const next = { ...prev };
-      for (const key of keys) next[key] = values[key];
+      for (const key of keys) next[key] = accepted?.[key] !== undefined ? accepted[key] : values[key];
       return next;
     });
-  }, [values]);
+    if (accepted) {
+      setValuesState(prev => {
+        const next = { ...prev };
+        for (const key of keys) {
+          // Adopt normalization only when no newer edit would be overwritten.
+          if (isEqual(prev[key], values[key])) next[key] = accepted[key] !== undefined ? accepted[key] : values[key];
+        }
+        return next;
+      });
+    }
+  }, [values, isEqual]);
 
   const changedKeys = useMemo<(keyof T)[]>(() => {
     const keys = new Set<keyof T>([
@@ -195,4 +204,3 @@ export function useDirtyState<T extends Record<string, unknown>>(
     original,
   };
 }
-

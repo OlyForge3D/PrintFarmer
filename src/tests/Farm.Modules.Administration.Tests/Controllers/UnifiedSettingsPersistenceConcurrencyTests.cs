@@ -27,6 +27,25 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
     }
 
     [Fact]
+    public async Task Save_LegacyThenCheckedInSameScope_UsesCommittedRevision()
+    {
+        using AppDbContext repositoryContext = new(_options);
+        Mock<IDbContextFactory<AppDbContext>> factory = new();
+        factory.Setup(f => f.CreateDbContext()).Returns(() => new AppDbContext(_options));
+        factory.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
+            .ReturnsAsync(() => new AppDbContext(_options));
+        SettingsService service = new(new ConfigurationBuilder().Build(), factory.Object,
+            NullLogger<SettingsService>.Instance, new EfAppSettingsRepository(repositoryContext));
+
+        service.Save(new UpdateChannelSettings());
+        SettingsSectionSnapshot first = service.GetSectionSnapshot("UpdateChannel");
+        first.RowVersion.Should().NotBe(SettingsSectionSnapshot.AbsentRowVersion);
+        SettingsSectionSnapshot second = await service.SaveWithConcurrencyCheckAsync(
+            new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }, first.RowVersion);
+        second.RowVersion.Should().NotBe(first.RowVersion);
+    }
+
+    [Fact]
     public async Task SaveWithConcurrencyCheck_TwoLoadedSnapshots_RejectsStaleWithoutChangingCache()
     {
         SettingsService first = CreateService();

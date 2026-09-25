@@ -178,6 +178,15 @@ their edits. Clients targeting an older server may still receive responses
 without this additive property, but the new server does not accept unguarded
 per-key writes.
 
+The explicit conflict reload discards all drafts on the settings page, including
+other groups, only after the reload succeeds. Failed reloads preserve edits.
+
+Discovery heartbeats persist under the separate `NetworkDiscovery.Heartbeat`
+telemetry key in the existing settings table. Reads still expose `lastHeartbeat`
+on NetworkDiscovery (with the legacy stored timestamp as a fallback until the
+first new heartbeat), but heartbeats never change its editable revision. A
+settings save cannot erase the separately stored liveness timestamp.
+
 The literal token `absent` represents an unpersisted configuration/default
 section. Its first save uses a unique-key-protected insert; concurrent first
 saves cannot overwrite each other. Existing sections use the portable

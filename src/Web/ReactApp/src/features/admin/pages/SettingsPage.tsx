@@ -430,6 +430,7 @@ function GroupSaveBlock({
     const changedSectionKeys = state.changedKeys.map((k) => String(k));
     const failed: string[] = [];
     const saved: string[] = [];
+    const accepted: GroupValues = {};
     const perSectionErrors: Record<string, Record<string, string>> = {};
     const perSectionMessages: Record<string, string> = {};
     let firstMessage: string | undefined;
@@ -439,7 +440,7 @@ function GroupSaveBlock({
       if (!meta) continue;
       try {
         if (conflicts.current.has(sectionKey)) {
-          throw { statusCode: 409 };
+          throw Object.assign(new Error('Reload required after settings conflict'), { statusCode: 409 });
         }
         const rowVersion = revisions.current[sectionKey];
         const savedSection = await saveSettingsValues(sectionKey, {
@@ -448,6 +449,8 @@ function GroupSaveBlock({
         });
         if (savedSection?.rowVersion !== undefined) {
           revisions.current[sectionKey] = savedSection.rowVersion;
+          // Tokens live in revisions, not in the dirty-value comparison.
+          accepted[sectionKey] = { ...savedSection, rowVersion: state.values[sectionKey]?.rowVersion };
         }
         saved.push(sectionKey);
       } catch (err) {
@@ -471,7 +474,7 @@ function GroupSaveBlock({
       // partial failure is normal — leaving the successes dirty would show the
       // user unsaved work that is already on the server, and re-POST it on the
       // next attempt. Only the groups that actually failed stay dirty.
-      state.acceptKeys(saved);
+      state.acceptKeys(saved, accepted);
       // Only errors produced by *this* attempt may remain for the sections we
       // just tried. Dropping the attempted keys first (rather than spreading
       // over `prev`) means a section that succeeded this round clears its stale
@@ -504,7 +507,7 @@ function GroupSaveBlock({
     // an edit the user made while the request was in flight would be silently
     // overwritten. `acceptKeys` moves only the baseline, which leaves that edit
     // in place and correctly still dirty.
-    state.acceptKeys(saved);
+    state.acceptKeys(saved, accepted);
     setFieldErrors({});
     setSectionErrors({});
     return { ok: true, savedLabels: changedSectionKeys.map(labelFor) };
@@ -630,7 +633,7 @@ function GroupSaveBlock({
     <div className={CARD_FLOW_CONTAINER_CLASS}>
       {Object.keys(sectionErrors).some((key) => conflicts.current.has(key)) && (
         <Button variant="secondary" className="mb-3" onClick={onReload} disabled={reloading} loading={reloading}>
-          Reload settings (discard edits)
+          Reload settings (discard all page edits)
         </Button>
       )}
       <div className={cardFlowClass(visibleCardCount)} data-testid="settings-card-flow">

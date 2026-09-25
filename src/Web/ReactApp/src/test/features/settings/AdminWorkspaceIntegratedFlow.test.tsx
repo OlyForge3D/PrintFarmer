@@ -631,7 +631,7 @@ describe('Admin workspace integrated flow (#2507)', () => {
     renderWorkspace('/admin/settings?scope=system&tab=general&sub=system');
     fireEvent.change(await screen.findByLabelText('Retention Days'), { target: { value: '45' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
-    const reload = await screen.findByRole('button', { name: 'Reload settings (discard edits)' });
+    const reload = await screen.findByRole('button', { name: 'Reload settings (discard all page edits)' });
     expect(screen.getByLabelText('Retention Days')).toHaveValue(45);
     settingsState.values.SystemLog = { ...settingsState.values.SystemLog, retentionDays: 80, rowVersion: 'v2' };
     fireEvent.click(reload);

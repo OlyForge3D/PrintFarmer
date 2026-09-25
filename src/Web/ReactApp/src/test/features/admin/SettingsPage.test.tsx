@@ -185,17 +185,34 @@ describe('SettingsPage — per-group save', () => {
     await renderPage();
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
-    await screen.findByRole('button', { name: 'Reload settings (discard edits)' });
+    await screen.findByRole('button', { name: 'Reload settings (discard all page edits)' });
     expect(screen.getByLabelText('Retention Days')).toHaveValue(45);
     expect(toastSuccessMock).not.toHaveBeenCalled();
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     await waitFor(() => expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled());
     expect(saveSettingsMock).toHaveBeenCalledTimes(1);
-    fireEvent.click(await screen.findByRole('button', { name: 'Reload settings (discard edits)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reload settings (discard all page edits)' }));
     await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(80));
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '90' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     await waitFor(() => expect(saveSettingsMock).toHaveBeenLastCalledWith('SystemLogSettings', { retentionDays: 90, rowVersion: 'remote-v2' }));
+  });
+
+  it('adopts normalized server values without treating the renewed token as an edit', async () => {
+    vi.mocked(fetchSettingsUnified).mockResolvedValueOnce({
+      SystemLogSettings: { retentionDays: 30, rowVersion: 'v1' },
+    });
+    saveSettingsMock.mockResolvedValueOnce({ retentionDays: 40, rowVersion: 'v2' });
+    await renderPage();
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(40));
+    expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '50' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenLastCalledWith(
+      'SystemLogSettings', { retentionDays: 50, rowVersion: 'v2' },
+    ));
   });
 
   it('shows the save bar once a single field is edited', async () => {
@@ -215,10 +232,10 @@ describe('SettingsPage — per-group save', () => {
     await renderPage();
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
-    fireEvent.click(await screen.findByRole('button', { name: 'Reload settings (discard edits)' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reload settings (discard all page edits)' }));
     await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Could not reload settings. Your edits are preserved.'));
     expect(screen.getByLabelText('Retention Days')).toHaveValue(45);
-    expect(screen.getByRole('button', { name: 'Reload settings (discard edits)' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Reload settings (discard all page edits)' })).toBeEnabled();
     expect(saveSettingsMock).toHaveBeenCalledTimes(1);
   });
 
