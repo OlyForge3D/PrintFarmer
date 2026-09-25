@@ -135,6 +135,13 @@ public static partial class HostUpdateCli
             .SetMinimumLevel(LogLevel.Warning)
             .AddProvider(new HostUpdateCliLoggerProvider(error)));
         services.AddHostUpdateRecoveryEngine(configuration);
+
+        // Decorate the installed-state store so a confirm is bound to the state it evaluated.
+        ServiceDescriptor installedStore = services.Last(d => d.ServiceType == typeof(IInstalledHostStateStore));
+        services.Remove(installedStore);
+        services.AddSingleton(sp => new ApprovalBoundInstalledHostStateStore(
+            (IInstalledHostStateStore)installedStore.ImplementationFactory!(sp)));
+        services.AddSingleton<IInstalledHostStateStore>(sp => sp.GetRequiredService<ApprovalBoundInstalledHostStateStore>());
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
     }
 
@@ -271,6 +278,11 @@ public static partial class HostUpdateCli
         using IServiceScope scope = provider.CreateScope();
         try
         {
+            if (args.Confirm)
+            {
+                provider.GetRequiredService<ApprovalBoundInstalledHostStateStore>().Bind(HostUpdateRecoveryDrift.InstalledStateHash(installed));
+            }
+
             if (!args.Confirm)
             {
                 HostUpdateRecoveryPlan plan = await scope.ServiceProvider.GetRequiredService<IHostUpdateRecoveryPlanner>()
@@ -296,6 +308,13 @@ public static partial class HostUpdateCli
 
             HostUpdateRecoveryResult result = await scope.ServiceProvider.GetRequiredService<IHostUpdateRecoveryCoordinator>()
                 .RecoverAsync(request, activities, cancellationToken).ConfigureAwait(false);
+            if (string.Equals(result.Detail, nameof(HostUpdateRecoveryApprovalStaleException), StringComparison.Ordinal))
+            {
+                // The installed state changed after evaluation; the coordinator refused before any
+                // restore or apply and recorded NeedsOperator. Re-run --preview to re-evaluate.
+                return await EmitAsync(output, args.Json, HostUpdateCliExitCodes.DriftUnapproved, new CliFailure("drift_reapproval_stale", [HostUpdateRecoveryDrift.PriorStateChanged])).ConfigureAwait(false);
+            }
+
             int resultCode = HostUpdateAvailabilityCodes.IsDurableUnavailable(result.Detail)
                 ? HostUpdateCliExitCodes.StateUnreadable
                 : result.Outcome switch
@@ -340,11 +359,17 @@ public static partial class HostUpdateCli
             : "drift_reapproval_mismatch";
     }
 
+    /// <summary>
+    /// Takes the execution lock for the CLI's own reads without rewriting the lock file when it
+    /// already exists; only a host that has never taken the lock gets the empty sentinel created.
+    /// </summary>
     private static IHostUpdateExecutionLease? TryAcquireLock(IServiceProvider provider)
     {
         try
         {
-            return provider.GetRequiredService<IHostUpdateExecutionLock>().Acquire(TimeSpan.Zero, CancellationToken.None);
+            string lockPath = Path.Join(provider.GetRequiredService<HostUpdateExecutionOptions>().StateDirectory, FileHostUpdateExecutionLock.FileName);
+            return FileHostUpdateExecutionLock.TryAcquireExisting(lockPath)
+                ?? provider.GetRequiredService<IHostUpdateExecutionLock>().Acquire(TimeSpan.Zero, CancellationToken.None);
         }
         catch (TimeoutException)
         {
@@ -354,12 +379,14 @@ public static partial class HostUpdateCli
 
     private static bool IsStateFailure(Exception exception) =>
         exception is InvalidDataException or IOException or UnauthorizedAccessException or JsonException
-            or HostUpdateSubsystemUnavailableException or NotSupportedException or System.Security.SecurityException;
+            or HostUpdateSubsystemUnavailableException or HostUpdateInstalledStateCorruptException
+            or NotSupportedException or System.Security.SecurityException;
 
     private static string StateFailureCode(Exception exception) => exception switch
     {
         InvalidDataException data when !string.IsNullOrWhiteSpace(data.Message) && JournalCode().IsMatch(data.Message) => data.Message,
         HostUpdateSubsystemUnavailableException => "state_unavailable",
+        HostUpdateInstalledStateCorruptException corrupt => "installed_state_corrupt:" + corrupt.Code,
         UnauthorizedAccessException => "state_access_denied",
         _ => "state_unreadable:" + exception.GetType().Name,
     };

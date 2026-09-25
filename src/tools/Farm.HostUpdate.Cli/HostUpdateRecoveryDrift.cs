@@ -172,10 +172,13 @@ internal static class HostUpdateRecoveryDrift
                 Binding = HostUpdateRequestBinding.Compute(recorded),
                 Items = ordered,
                 Configuration = configurationFingerprint,
-                Installed = installed is null ? "none" : Hash(installed),
+                Installed = InstalledStateHash(installed),
             })[..32];
         return new(ordered, configurationFingerprint, token);
     }
+
+    /// <summary>Content hash of the evaluated installed state (<c>none</c> when absent).</summary>
+    public static string InstalledStateHash(InstalledHostState? installed) => installed is null ? "none" : Hash(installed);
 
     /// <summary>
     /// Fingerprint of the configuration the recovery engine will act on. Credentials are never

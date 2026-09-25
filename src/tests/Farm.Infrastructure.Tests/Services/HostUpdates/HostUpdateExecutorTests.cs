@@ -124,6 +124,36 @@ public sealed class HostUpdateExecutorTests
         }
     }
 
+    [Fact]
+    public void TryAcquireExisting_takes_the_lock_without_creating_or_rewriting_the_file()
+    {
+        string root = Path.Combine(Path.GetTempPath(), "pf-lock-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            string lockPath = Path.Combine(root, FileHostUpdateExecutionLock.FileName);
+            Assert.Null(FileHostUpdateExecutionLock.TryAcquireExisting(lockPath));
+            Assert.False(File.Exists(lockPath));
+
+            File.WriteAllText(lockPath, "pid=1");
+            using (IHostUpdateExecutionLease? probe = FileHostUpdateExecutionLock.TryAcquireExisting(lockPath))
+            {
+                Assert.NotNull(probe);
+                Assert.Throws<TimeoutException>(() => new FileHostUpdateExecutionLock(lockPath).Acquire(TimeSpan.Zero, CancellationToken.None));
+            }
+
+            Assert.Equal("pid=1", File.ReadAllText(lockPath));
+            using (new FileHostUpdateExecutionLock(lockPath).Acquire(TimeSpan.Zero, CancellationToken.None))
+            {
+                Assert.Throws<TimeoutException>(() => FileHostUpdateExecutionLock.TryAcquireExisting(lockPath));
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static VerifiedHostUpdateCandidate Candidate() => new(
         "stable:1.2.3",
         new string('b', 40),

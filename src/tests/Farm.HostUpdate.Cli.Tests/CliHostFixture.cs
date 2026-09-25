@@ -26,6 +26,10 @@ internal sealed class CliHostFixture : IDisposable
 
         Root = Path.Combine(localData, "pf-hostupdate-cli-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(StateDirectory);
+
+        // A host that has ever run the executor already has the lock sentinel; seeding it lets
+        // Snapshot() prove read-only commands never rewrite it.
+        File.WriteAllText(LockPath, "pid=0;started=seeded");
         Directory.CreateDirectory(Path.Combine(Root, "tools"));
         Directory.CreateDirectory(Path.Combine(Root, "owned"));
         Directory.CreateDirectory(HostStateRoot);
@@ -44,12 +48,24 @@ internal sealed class CliHostFixture : IDisposable
         }
     }
 
-    /// <summary>Provisions the default standing policy the journaled authorization records.</summary>
+    /// <summary>
+    /// Provisions the default standing policy the journaled authorization records. Host-state
+    /// ownership validation supports only Windows and Linux; elsewhere nothing is provisioned, so
+    /// tests that need a readable policy report <c>policy_unverifiable</c> instead of the whole
+    /// suite failing to initialize.
+    /// </summary>
     public async Task ProvisionPolicyAsync()
     {
+        if (!HostStateSupported)
+        {
+            return;
+        }
+
         using FileHostUpdateAutomationPolicyRepository policy = PolicyRepository();
         await policy.ProvisionAsync(CancellationToken.None);
     }
+
+    public static bool HostStateSupported => OperatingSystem.IsWindows() || OperatingSystem.IsLinux();
 
     public static readonly string[] OwnedDirectoryNames = ["app-data", "model-uploads", "gcode-storage", "slicer-profiles", "data-protection-keys"];
 
@@ -213,10 +229,9 @@ internal sealed class CliHostFixture : IDisposable
         File.Exists(OutcomePath) ? JsonSerializer.Deserialize<HostUpdateRecoveryOutcomeRecord>(File.ReadAllText(OutcomePath)) : null;
 
     /// <summary>Content hash of every file under the root, used to prove a command made no writes.</summary>
-    /// <remarks>The <c>execution.lock</c> sentinel is excluded: acquiring the lock creates it, and it carries no state.</remarks>
+    /// <remarks>The seeded <c>execution.lock</c> is included: read-only commands must not rewrite it.</remarks>
     public IReadOnlyDictionary<string, string> Snapshot() =>
         Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories)
-            .Where(path => !string.Equals(path, LockPath, StringComparison.Ordinal))
             .ToDictionary(
                 path => Path.GetRelativePath(Root, path),
                 path => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))),

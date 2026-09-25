@@ -466,6 +466,35 @@ public static class HostUpdateRequestFingerprint
 }
 public sealed class FileHostUpdateExecutionLock(string path) : IHostUpdateExecutionLock
 {
+    public const string FileName = "execution.lock";
+
+    /// <summary>
+    /// Takes the same exclusive lock as <see cref="Acquire"/> without creating, truncating or
+    /// writing the lock file, so read-only probes leave the host byte-for-byte unchanged.
+    /// Returns <c>null</c> when the lock file does not exist yet.
+    /// </summary>
+    /// <exception cref="TimeoutException">Another holder has the lock.</exception>
+    public static IHostUpdateExecutionLease? TryAcquireExisting(string lockPath)
+    {
+        HostStateFileSecurity.RejectReparseTarget(lockPath);
+        try
+        {
+            return new Lease(new FileStream(lockPath, FileMode.Open, FileAccess.Read, FileShare.None));
+        }
+        catch (FileNotFoundException)
+        {
+            return null;
+        }
+        catch (DirectoryNotFoundException)
+        {
+            return null;
+        }
+        catch (IOException)
+        {
+            throw new TimeoutException("host_update_lock_timeout");
+        }
+    }
+
     public IHostUpdateExecutionLease Acquire(TimeSpan timeout, CancellationToken cancellationToken)
     {
         Directory.CreateDirectory(Path.GetDirectoryName(path) ?? ".");

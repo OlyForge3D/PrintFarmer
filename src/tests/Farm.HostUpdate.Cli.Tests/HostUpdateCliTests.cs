@@ -420,8 +420,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
 
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
         Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("namespace_unproven");
-        _host.Snapshot().Should().BeEquivalentTo(before);
-        File.Exists(_host.LockPath).Should().BeFalse();
+        _host.Snapshot().Should().BeEquivalentTo(before, "the seeded lock sentinel is not rewritten either");
     }
 
     [Fact]
@@ -440,13 +439,15 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         recorded.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
         recorded.Detail.Should().Be("coordinated_restore");
 
-        // A new process against the same root (no shared memory) must be a durable no-op.
-        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+        // A new process against the same root (no shared memory) must be a durable no-op. The
+        // coordinator still takes (and so rewrites) the execution lock, which carries no state.
+        string lockKey = Path.GetRelativePath(_host.Root, _host.LockPath);
+        var before = _host.Snapshot().Where(pair => pair.Key != lockKey).ToDictionary(StringComparer.Ordinal);
         CliRun second = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId]);
 
         second.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
         second.Output.Should().Contain("outcome: RolledBack");
-        _host.Snapshot().Should().BeEquivalentTo(before);
+        _host.Snapshot().Where(pair => pair.Key != lockKey).Should().BeEquivalentTo(before);
     }
 
     [Fact]
@@ -655,8 +656,10 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         JsonElement downtime = result.GetProperty("downtime");
         downtime.GetProperty("impact").GetString().Should().Be("service_restart");
         downtime.GetProperty("affectedServices").EnumerateArray().Select(e => e.GetString()).Should().Equal("api", "frontend", "monolith");
-        downtime.GetProperty("maxExpectedSeconds").GetInt32().Should().Be(options.ApplyTimeoutSeconds + options.VerifyTimeoutSeconds);
-        downtime.GetProperty("basis").GetString().Should().Be("upper_bound_from_configured_timeouts");
+        downtime.GetProperty("timeoutBudgetSeconds").GetInt32()
+            .Should().Be((4 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds, "three pulls plus one compose up, then verify");
+        downtime.GetProperty("unboundedSteps").EnumerateArray().Select(e => e.GetString()).Should().Equal("health_check_final_pass");
+        downtime.GetProperty("basis").GetString().Should().Be("sum_of_configured_timeouts_not_an_upper_bound");
 
         JsonElement fence = result.GetProperty("writerFence");
         fence.GetProperty("admissionClosed").GetBoolean().Should().BeTrue();
@@ -694,8 +697,11 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         JsonElement downtime = result.GetProperty("downtime");
         downtime.GetProperty("impact").GetString().Should().Be("restore_and_service_restart");
         downtime.GetProperty("restoredTargets").EnumerateArray().Select(e => e.GetString()).Should().Equal("app-data", "database");
-        downtime.GetProperty("maxExpectedSeconds").GetInt32()
-            .Should().Be(options.BackupTimeoutSeconds + options.ApplyTimeoutSeconds + options.VerifyTimeoutSeconds);
+        int applyAndVerify = (4 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds;
+        downtime.GetProperty("timeoutBudgetSeconds").GetInt32()
+            .Should().Be(options.BackupTimeoutSeconds + applyAndVerify, "only the database target is a timed restore process");
+        downtime.GetProperty("unboundedSteps").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("backup_checksum_verification", "owned_directory_copy", "health_check_final_pass");
 
         JsonElement backup = result.GetProperty("backupEvidence");
         backup.GetProperty("found").GetBoolean().Should().BeTrue();
@@ -717,7 +723,91 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
 
         JsonElement downtime = Envelope(run).GetProperty("result").GetProperty("downtime");
         downtime.GetProperty("impact").GetString().Should().Be("operator_required");
-        downtime.TryGetProperty("maxExpectedSeconds", out _).Should().BeFalse("no automatic path has no bound");
+        downtime.TryGetProperty("timeoutBudgetSeconds", out _).Should().BeFalse("no automatic path has no budget");
+    }
+
+    [Fact]
+    public async Task Corrupt_installed_state_is_state_unreadable_for_preview_and_confirm()
+    {
+        _host.SeedRecoveryRequired();
+        File.WriteAllText(Path.Combine(_host.StateDirectory, "installed-state.json"), "{not json");
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun preview = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+        CliRun confirm = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--json"]);
+
+        preview.ExitCode.Should().Be(HostUpdateCliExitCodes.StateUnreadable);
+        Envelope(preview).GetProperty("result").GetProperty("code").GetString().Should().Be("installed_state_corrupt:json_invalid");
+        confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.StateUnreadable);
+        _host.Snapshot().Should().BeEquivalentTo(before);
+        _host.ReadOutcome().Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Preview_takes_the_execution_lock_without_rewriting_it()
+    {
+        _host.SeedRecoveryRequired();
+        string lockBefore = File.ReadAllText(_host.LockPath);
+        DateTime writtenBefore = File.GetLastWriteTimeUtc(_host.LockPath);
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.NeedsOperator);
+        File.ReadAllText(_host.LockPath).Should().Be(lockBefore);
+        File.GetLastWriteTimeUtc(_host.LockPath).Should().Be(writtenBefore);
+    }
+
+    [Fact]
+    public async Task Approval_bound_store_refuses_a_state_that_changed_after_evaluation()
+    {
+        var inner = new MutableInstalledStateStore(Installed("stable:1.2.2"));
+        var store = new ApprovalBoundInstalledHostStateStore(inner);
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(await inner.ReadAsync(CancellationToken.None)));
+        inner.State = Installed("stable:1.2.1");
+
+        Func<Task> read = () => store.ReadAsync(CancellationToken.None);
+
+        await read.Should().ThrowAsync<HostUpdateRecoveryApprovalStaleException>();
+        (await store.ReadAsync(CancellationToken.None))!.ReleaseId.Should().Be("stable:1.2.1", "the binding is consumed by the decision read");
+    }
+
+    [Fact]
+    public async Task Approval_bound_store_passes_the_evaluated_state_and_absence()
+    {
+        var inner = new MutableInstalledStateStore(Installed("stable:1.2.2"));
+        var store = new ApprovalBoundInstalledHostStateStore(inner);
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(await inner.ReadAsync(CancellationToken.None)));
+        (await store.ReadAsync(CancellationToken.None))!.ReleaseId.Should().Be("stable:1.2.2");
+
+        inner.State = null;
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(null));
+        (await store.ReadAsync(CancellationToken.None)).Should().BeNull();
+
+        inner.State = Installed("stable:1.2.2");
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(null));
+        Func<Task> appeared = () => store.ReadAsync(CancellationToken.None);
+        await appeared.Should().ThrowAsync<HostUpdateRecoveryApprovalStaleException>();
+    }
+
+    private static InstalledHostState Installed(string releaseId) =>
+        new(
+            releaseId,
+            "sha256:" + new string('9', 64),
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["api"] = "sha256:" + new string('1', 64) },
+            "api",
+            new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
+
+    private sealed class MutableInstalledStateStore(InstalledHostState? state) : IInstalledHostStateStore
+    {
+        public InstalledHostState? State { get; set; } = state;
+
+        public Task<InstalledHostState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult(State);
+
+        public Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken)
+        {
+            State = state;
+            return Task.CompletedTask;
+        }
     }
 
     private async Task<string> PreviewTokenAsync()

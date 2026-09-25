@@ -256,10 +256,14 @@ recorded in the journal.
     per-service child digests), plus the current host platform.
   - `downtime`: `impact` (`service_restart`, `restore_and_service_restart`,
     `none` or `operator_required`), affected services, restored backup targets
-    and `maxExpectedSeconds`. The bound is derived from the configured
-    `ApplyTimeoutSeconds`, `VerifyTimeoutSeconds` and `BackupTimeoutSeconds`
-    (`basis: upper_bound_from_configured_timeouts`); it is not a measurement,
-    and it is omitted when no automatic path exists.
+    and `timeoutBudgetSeconds`: one `ApplyTimeoutSeconds` per image pull plus
+    one for `compose up`, `VerifyTimeoutSeconds` plus one
+    `VerifyPollIntervalSeconds`, and one `BackupTimeoutSeconds` per restored
+    non-directory target (`basis: sum_of_configured_timeouts_not_an_upper_bound`).
+    It is an estimate, not an upper bound or a measurement: `unboundedSteps`
+    lists the steps with no configured timeout (`backup_checksum_verification`,
+    `owned_directory_copy`, `health_check_final_pass`). It is omitted when no
+    automatic path exists.
   - `backupEvidence`: the latest backup manifest for the release, its targets,
     file count and bytes, and how many recorded files are present at their
     recorded length. Presence is not a checksum verification.
@@ -286,7 +290,7 @@ the host now:
 | `policy_unverifiable` | The standing policy could not be read (host state disabled, root insecure, missing or corrupt). |
 | `policy_revision_drift` / `policy_fingerprint_drift` | The standing automatic-update policy changed since authorization. |
 | `channel_drift` | The policy channel no longer matches the authorized channel. |
-| `prior_state_changed_since_authorization` | The installed state was rewritten after the authorization was recorded. |
+| `prior_state_changed_since_authorization` | The installed state's recorded time is later than the authorization. This is a timestamp heuristic, not content provenance: no authorization-time baseline of the prior state exists yet (#3047), so always review `identity.prior` before confirming. |
 | `prior_state_matches_target` | The installed state already reports the target release or manifest. |
 
 The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
@@ -312,18 +316,24 @@ nothing to reapprove.
 | 7 | Execution lock held | Another executor or recovery is active. Wait; never delete the lock. |
 | 10 | Needs operator (including no restorable backup, or canceled) | Follow the coordinated restoration procedure below. |
 | 11 | Fence release pending | Writers stay fenced. Re-run `recover --confirm` once the fence adapter is reachable. |
-| 12 | Drift not reapproved | Run `--preview`, review every drift item with the deployment owner, then re-run `--confirm` with `--reapprove-drift <token>` only if recovery toward the recorded prior state is still correct. |
+| 12 | Drift not reapproved, or the installed state changed after evaluation (`drift_reapproval_stale`) | Run `--preview`, review every drift item with the deployment owner, then re-run `--confirm` with `--reapprove-drift <token>` only if recovery toward the recorded prior state is still correct. |
 
 Known limits of this slice:
 
-- `state/execution.lock` is a sentinel created by any lock acquisition, even
-  `status` and `--preview`. It carries no state; its presence does not mean an
-  update ran, and it must not be deleted by hand.
+- `status`, `--preview` and the CLI's own reads before `--confirm` take the
+  execution lock without rewriting an existing `state/execution.lock`. Only a
+  host that has never taken the lock gets the sentinel created. It carries no
+  state, and it must not be deleted by hand. The coordinator run by `--confirm`
+  rewrites it as any executor does.
 - Recovery reads the journal under the lock, releases it, then the coordinator
   re-acquires it (the API follows the same pattern). A concurrent executor
   could append in that window, so run recovery only while execution is
-  otherwise idle. Drift is likewise evaluated in that window; a change between
-  the drift check and the coordinator's lock is not re-checked.
+  otherwise idle. The installed state is bound across that window: if the
+  coordinator's decision read (under its lock, before any restore or apply)
+  does not match the state the CLI evaluated, recovery fails closed with exit
+  12 `drift_reapproval_stale` and a durable `NeedsOperator` outcome; re-run
+  `--preview`. Policy and platform are not re-checked in that window because
+  the coordinator does not consume them.
 - A non-empty configured `ComposeFiles` list replaces the built-in
   `docker-compose.daily-registry.yml` default for both the API and the CLI
   (#2997); list every compose file the installation applies, in `-f` order.

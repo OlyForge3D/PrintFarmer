@@ -29,14 +29,17 @@ internal sealed record HostUpdateTargetIdentity(
 internal sealed record HostUpdateRecoveryIdentity(HostUpdatePriorIdentity? Prior, HostUpdateTargetIdentity Target, string? CurrentPlatform);
 
 /// <summary>
-/// Expected service impact. <c>MaxExpectedSeconds</c> is an upper bound derived from the configured
-/// engine timeouts, not a measurement; <c>null</c> means no automatic path exists.
+/// Expected service impact. <c>TimeoutBudgetSeconds</c> is the sum of the configured engine
+/// timeouts that bound the recovery's external processes and health polling. It is an estimate,
+/// not an upper bound: the steps in <c>UnboundedSteps</c> have no configured timeout. <c>null</c>
+/// means no automatic path exists.
 /// </summary>
 internal sealed record HostUpdateDowntimePreview(
     string Impact,
     string[] AffectedServices,
     string[] RestoredTargets,
-    int? MaxExpectedSeconds,
+    int? TimeoutBudgetSeconds,
+    string[] UnboundedSteps,
     string Basis);
 
 internal sealed record HostUpdateBackupEvidence(
@@ -68,7 +71,10 @@ internal sealed record HostUpdateDriftPreview(
 /// <summary>Builds the side-effect-free <c>recover --preview</c> details (issue #2998).</summary>
 internal static class HostUpdateRecoveryPreview
 {
-    public const string UpperBoundBasis = "upper_bound_from_configured_timeouts";
+    public const string TimeoutBudgetBasis = "sum_of_configured_timeouts_not_an_upper_bound";
+    public const string HealthCheckFinalPass = "health_check_final_pass";
+    public const string BackupChecksumVerification = "backup_checksum_verification";
+    public const string OwnedDirectoryCopy = "owned_directory_copy";
 
     public static HostUpdateRecoveryIdentity Identity(HostUpdateExecutionRequest request, InstalledHostState? installed, string? currentPlatform) =>
         new(
@@ -97,21 +103,31 @@ internal static class HostUpdateRecoveryPreview
         HostUpdateExecutionOptions options)
     {
         string[] priorServices = installed is null ? [] : [.. installed.ServiceDigests.Keys.Order(StringComparer.Ordinal)];
-        int applyAndVerify = options.ApplyTimeoutSeconds + options.VerifyTimeoutSeconds;
+
+        // Apply runs one bounded "docker image pull" per service plus one "compose up"; verify
+        // polls until its deadline, then may finish one more pass plus a poll interval.
+        int applyAndVerify = ((priorServices.Length + 1) * options.ApplyTimeoutSeconds)
+            + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds;
+        string[] restored = backup is null ? [] : [.. (backup.TargetNames ?? []).Order(StringComparer.Ordinal)];
+
+        // Each non-directory target is one restore process bounded by the backup timeout; owned
+        // directories are copied back without a timeout.
+        int restoreProcesses = restored.Count(name => !options.OwnedDirectories.ContainsKey(name));
         return plan.Kind switch
         {
             HostUpdateRecoveryPlanKind.ImageOnlyRollback =>
-                new("service_restart", priorServices, [], applyAndVerify, UpperBoundBasis),
+                new("service_restart", priorServices, [], applyAndVerify, [HealthCheckFinalPass], TimeoutBudgetBasis),
             HostUpdateRecoveryPlanKind.CoordinatedRestore =>
                 new(
                     "restore_and_service_restart",
                     priorServices,
-                    backup is null ? [] : [.. backup.TargetNames.Order(StringComparer.Ordinal)],
-                    options.BackupTimeoutSeconds + (installed is null ? 0 : applyAndVerify),
-                    UpperBoundBasis),
+                    restored,
+                    (restoreProcesses * options.BackupTimeoutSeconds) + (installed is null ? 0 : applyAndVerify),
+                    installed is null ? [BackupChecksumVerification, OwnedDirectoryCopy] : [BackupChecksumVerification, OwnedDirectoryCopy, HealthCheckFinalPass],
+                    TimeoutBudgetBasis),
             HostUpdateRecoveryPlanKind.FenceReleaseOnly or HostUpdateRecoveryPlanKind.AlreadyRolledBack =>
-                new("none", [], [], 0, UpperBoundBasis),
-            _ => new("operator_required", [], [], null, UpperBoundBasis),
+                new("none", [], [], 0, [], TimeoutBudgetBasis),
+            _ => new("operator_required", [], [], null, [], TimeoutBudgetBasis),
         };
     }
 

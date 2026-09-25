@@ -94,7 +94,9 @@ while [[ $# -gt 0 ]]; do
             shift 2
             ;;
         --reapprove-drift)
+            [[ -z "${seen_drift:-}" ]] || fail_usage "--reapprove-drift may be given only once"
             [[ $# -ge 2 && "$2" =~ $DRIFT_TOKEN_RE ]] || fail_usage "--reapprove-drift requires the drift-<32 hex> token printed by --preview"
+            seen_drift=1
             args+=("$1" "$2")
             shift 2
             ;;
