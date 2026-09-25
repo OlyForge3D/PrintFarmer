@@ -159,15 +159,15 @@ internal sealed class CliHostFixture : IDisposable
         replaced.Available.Should().BeTrue();
     }
 
+    /// <summary>The default split topology's active services (<see cref="HostUpdateExecutionOptions.ActiveServiceIds"/>).</summary>
+    public static readonly string[] SplitServices = ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker"];
+
     /// <summary>Records the prior verified installation; by default well before the journaled authorization.</summary>
-    public void SeedInstalledState(DateTimeOffset? recordedAt = null, string releaseId = "stable:1.2.2")
+    public void SeedInstalledState(DateTimeOffset? recordedAt = null, string releaseId = "stable:1.2.2", IReadOnlyList<string>? services = null)
     {
-        var digests = new Dictionary<string, string>(StringComparer.Ordinal)
-        {
-            ["api"] = "sha256:" + new string('1', 64),
-            ["frontend"] = "sha256:" + new string('2', 64),
-            ["monolith"] = "sha256:" + new string('3', 64),
-        };
+        var digests = (services ?? SplitServices)
+            .Select((service, index) => (service, digest: "sha256:" + new string((char)('1' + index), 64)))
+            .ToDictionary(pair => pair.service, pair => pair.digest, StringComparer.Ordinal);
         var platforms = digests.Keys.ToDictionary(k => k, _ => CurrentPlatform, StringComparer.Ordinal);
         var state = new InstalledHostState(
             releaseId,
@@ -260,10 +260,10 @@ internal sealed class CliHostFixture : IDisposable
     }
 
     /// <summary>The baseline the executor would journal for this host right now.</summary>
-    public HostUpdateAuthorizationBaseline CurrentBaseline(IConfiguration? configuration = null)
+    public HostUpdateAuthorizationBaseline CurrentBaseline(IConfiguration? configuration = null, Action<IServiceCollection>? configureServices = null)
     {
         configuration ??= Configuration();
-        using ServiceProvider services = HostUpdateCli.BuildServices(configuration, TextWriter.Null);
+        using ServiceProvider services = HostUpdateCli.BuildServices(configuration, TextWriter.Null, configureServices);
         var provider = new HostUpdateAuthorizationBaselineProvider(
             services.GetRequiredService<IInstalledHostStateStore>(),
             services.GetRequiredService<HostUpdateExecutionOptions>(),

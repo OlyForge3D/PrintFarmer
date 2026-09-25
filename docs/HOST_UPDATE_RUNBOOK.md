@@ -21,7 +21,6 @@ see [Failure and recovery](#failure-and-recovery). After a rollback it keeps
 writers fenced until the operator records a physical printer command
 reconciliation (#2999). The following delivery gates are still open:
 
-- provider and topology coverage (#3000)
 - complete offline bundles (#2981)
 - isolated recovery and rollout evidence (#2982)
 
@@ -211,12 +210,11 @@ matrix. #3045 adds a verifying installer, generated host configuration and
 per-archive SBOMs. #2999 keeps writers fenced after a rollback until the
 operator records a physical printer command reconciliation.
 
-This gap still blocks a claim of complete recovery support:
-
-- PostgreSQL/SQL Server and monolith/split topology coverage (#3000)
-
-While that gap is open, retain protected host evidence for the deployment
-owner. Do not invent a recovery command, edit journal JSON, delete locks, or run
+Provider and topology stop conditions are covered with fake adapters (#3000;
+see [Provider and topology stop conditions](#provider-and-topology-stop-conditions)).
+Live PostgreSQL, SQL Server and Docker evidence (#2982) still blocks a claim of
+complete recovery support. While that gap is open, retain protected host
+evidence for the deployment owner. Do not invent a recovery command, edit journal JSON, delete locks, or run
 the installer against a possibly migrated database. Directly reading a file is
 not journal integrity verification or authorization to release a fence.
 
@@ -531,8 +529,9 @@ The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
 variables), the same keys the API host uses. The token binds the recorded
 request, the drift items, the configuration fingerprint (root, compose files and
 their content hashes, service mappings, owned directories, host tool paths,
-provider and SQLite path, never connection-string secrets), the installed
-state and the observed manifest binding. Any further change invalidates it (`drift_reapproval_mismatch`); a token
+provider, SQLite path, database server identity and `DatabaseExternallyOwned`,
+never connection-string secrets), the installed state and the observed manifest
+binding. Any further change invalidates it (`drift_reapproval_mismatch`); a token
 supplied when nothing drifted is refused (`drift_reapproval_unexpected`). The
 refusal lists the drift codes but never prints the token, so reapproval
 requires reading `--preview`. A release with a recorded `RolledBack` outcome has
@@ -601,10 +600,40 @@ Known limits of the current CLI:
   on `PATH`.
 - The physical reconciliation inventory is proven against SQLite only; the
   PostgreSQL and SQL Server inventory readers are built but not yet exercised
-  by tests (#3000).
-- There is no PostgreSQL/SQL Server and monolith/split topology proof (#3000)
-  yet. macOS has no package (see
+  by tests (live evidence belongs to #2982). Provider and topology coverage
+  uses fake process and health adapters only (#3000, see
+  [Provider and topology stop conditions](#provider-and-topology-stop-conditions));
+  it is not a live PostgreSQL, SQL Server or Docker proof. macOS has no package (see
   [Install the signed CLI package](#install-the-signed-cli-package)).
+
+#### Provider and topology stop conditions
+
+`status`, `--preview` and `--confirm` are regression-tested for SQLite, local
+and external PostgreSQL, and local and external SQL Server, each on the split
+(`api`, `frontend`, `slicer-host`, `printer-discovery`, `orcaslicer-worker`)
+and monolith (`monolith`) topologies. Both `AppDbContext` and
+`SlicerDbContext` use `ConnectionStrings:Default`, so recovery restores one
+`database` target; a split database is refused by preflight
+(`split_database_not_supported`). The CLI stops, before any restore, image pull
+or compose command, when:
+
+| Condition | Result | Operator response |
+| --- | --- | --- |
+| Database provider, server (host/port or data source), database name, or `DatabaseExternallyOwned` changed after authorization | Exit 12 `drift_reapproval_required` (`configuration_drift`) | Confirm with the deployment owner that the configured database is the one the backup came from. Never reapprove a retarget to a different server. |
+| `DatabaseExternallyOwned` is `true` and the manifest includes `database` | Exit 10 `NeedsOperator` (`database_externally_owned`) in both `--preview` and `--confirm`; no restore tool is required or run. The executor also leaves the `database` target unmapped, so any other path fails closed with `restore_target_unmapped` | The database owner restores it with their own procedure; this host never restores an externally owned database. |
+| The recorded prior state's services differ from `ActiveServiceIds` (topology changed since the update) | Exit 10 `NeedsOperator` (`prior_state_topology_mismatch`), even after drift reapproval | Do not force a restore onto a different topology. Restore the matching compose configuration or recover manually. |
+| Aggregate `/health` unreachable or unhealthy after restore | Exit 10 `NeedsOperator`; admission stays closed | Diagnose the API; do not reopen writers by hand. |
+| Fence release fails after a successful restore | Exit 11; a repeat `--confirm` only redrives the release | Re-run `--confirm` once the fence adapter is reachable. It never repeats the restore. |
+
+A journal authorized by a build before #3000 fingerprinted only the provider
+and SQLite path. On an otherwise unchanged host, its first recovery with this
+build reports `configuration_drift` once. Before you reapprove, confirm that
+the configured database server, database name and `DatabaseExternallyOwned`
+match the host the release ran on.
+
+Connection-string credentials are never part of the fingerprint, a process
+argument or CLI output; PostgreSQL and SQL Server restores receive the password
+through the environment only (`PGPASSWORD`, `SQLCMDPASSWORD`).
 
 | Observation | Operator response |
 | --- | --- |
@@ -648,7 +677,6 @@ For coordinated restoration, the approved recovery procedure must:
 This checklist is a safety boundary, **not a tested provider-specific restore
 script**. Remaining delivery is tracked by:
 
-- #3000: provider and topology coverage
 - #2981: complete bundles
 - #2982: isolated recovery and authorized rollout evidence
 

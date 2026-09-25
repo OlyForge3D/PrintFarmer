@@ -174,9 +174,18 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateRecoveryOutcomeStore outcomeStore,
     IHostUpdateFenceCoordinator? fenceCoordinator = null,
     IHostUpdateExecutionLock? executionLock = null,
-    IHostUpdatePhysicalReconciliationGate? physicalReconciliationGate = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
+    IHostUpdatePhysicalReconciliationGate? physicalReconciliationGate = null,
+    HostUpdateExecutionOptions? executionOptions = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
 {
     private const string FenceReleaseFailureSeparator = "|";
+
+    /// <summary>The recorded prior services differ from the configured split/monolith topology.</summary>
+    public const string PriorStateTopologyMismatch = "prior_state_topology_mismatch";
+
+    /// <summary>The backup includes the database but this host does not own it, so it is never restored here.</summary>
+    public const string DatabaseExternallyOwnedStop = "database_externally_owned";
+
+    private const string HostUpdateDatabaseTargetName = "database";
 
     private const string PolicyDriftedFenceReleaseDetail = "policy_drifted_before_side_effects";
 
@@ -448,6 +457,15 @@ public sealed class HostUpdateRecoveryCoordinator(
             return new(HostUpdateRecoveryPlanKind.NeedsOperator, "prior_image_state_missing_after_apply_started", null, null);
         }
 
+        // The prior state is re-applied service-for-service and then verified against the
+        // configured topology. A split/monolith mismatch would only surface after images were
+        // pulled and containers recreated, so it stops here before any restore or apply.
+        if (priorState is not null && executionOptions is { ActiveServiceIds.Length: > 0 } &&
+            !priorState.ServiceDigests.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(executionOptions.ActiveServiceIds))
+        {
+            return new(HostUpdateRecoveryPlanKind.NeedsOperator, PriorStateTopologyMismatch, priorState, null);
+        }
+
         if (priorState is not null && compatibilityEvaluator.SupportsImageOnlyRollback(priorState, activities))
         {
             return new(HostUpdateRecoveryPlanKind.ImageOnlyRollback, "image_only_rollback", priorState, null);
@@ -455,6 +473,14 @@ public sealed class HostUpdateRecoveryCoordinator(
 
         (HostUpdateBackupManifest Manifest, string RunDirectory)? located =
             await manifestLocator.FindLatestAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
+        if (located is not null && executionOptions is { DatabaseExternallyOwned: true } &&
+            located.Value.Manifest.TargetNames.Contains(HostUpdateDatabaseTargetName, StringComparer.Ordinal))
+        {
+            // This host never restores a database it does not own, so preview and confirm both
+            // stop here rather than advertising a restore the executor would refuse.
+            return new(HostUpdateRecoveryPlanKind.NeedsOperator, DatabaseExternallyOwnedStop, priorState, null);
+        }
+
         return located is null
             ? new(HostUpdateRecoveryPlanKind.NeedsOperator, "no_backup_available", priorState, null)
             : new(HostUpdateRecoveryPlanKind.CoordinatedRestore, "coordinated_restore", priorState, located);

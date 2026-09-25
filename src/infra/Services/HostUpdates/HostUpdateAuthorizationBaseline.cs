@@ -78,7 +78,8 @@ public static class HostUpdateBaselineHashes
 
     /// <summary>
     /// Fingerprint of the configuration the recovery engine acts on. Credentials are never
-    /// included: only the provider and, for SQLite, the data-source path contribute.
+    /// included: only the provider, the database ownership, the SQLite data-source path and the
+    /// PostgreSQL/SQL Server host, port and database name contribute.
     /// </summary>
     public static string Configuration(HostUpdateExecutionOptions options, DatabaseProviderConfiguration database)
     {
@@ -99,8 +100,57 @@ public static class HostUpdateBaselineHashes
             ActiveServiceIds = options.ActiveServiceIds.Order(StringComparer.Ordinal).ToArray(),
             Provider = database.Provider.ToLowerInvariant(),
             SqliteDataSource = database.IsSqlite ? SqliteDataSource(database.ConnectionString) : null,
+            DatabaseServer = DatabaseServerIdentity(database),
+            options.DatabaseExternallyOwned,
         });
     }
+
+    /// <summary>
+    /// Credential-free identity of the PostgreSQL/SQL Server instance a restore would target, so
+    /// retargeting the host at another server or database (including a different external server)
+    /// is authorization drift rather than a silent restore onto the wrong instance.
+    /// </summary>
+    internal static string? DatabaseServerIdentity(DatabaseProviderConfiguration database)
+    {
+        try
+        {
+            if (database.IsPostgres)
+            {
+                var builder = new Npgsql.NpgsqlConnectionStringBuilder(database.ConnectionString);
+                return string.Create(
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    $"{(builder.Host ?? "localhost").ToLowerInvariant()}:{builder.Port}/{builder.Database}");
+            }
+
+            if (database.IsSqlServer)
+            {
+                // Parsed with the provider-neutral builder: nothing here opens a connection, so the
+                // SqlClient builder's transport settings (and CodeQL's Encrypt check) do not apply.
+                // That builder keeps each alias as a separate key, so every supplied server and
+                // catalog alias is fingerprinted: changing any of them is drift, whichever one
+                // SqlClient would treat as effective. Server names are case-insensitive; catalog
+                // names are kept exact because a case-sensitive collation can distinguish them.
+                var builder = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = database.ConnectionString };
+                return string.Join(
+                    ";",
+                    SqlServerIdentityKeys
+                        .Where(builder.ContainsKey)
+                        .Select(key => $"{key}={SqlServerIdentityValue(key, builder[key]?.ToString())}"));
+            }
+        }
+        catch (Exception exception) when (exception is ArgumentException or FormatException or KeyNotFoundException or InvalidOperationException)
+        {
+            return "unparseable";
+        }
+
+        return null;
+    }
+
+    private static readonly string[] SqlServerIdentityKeys =
+        ["data source", "server", "address", "addr", "network address", "initial catalog", "database"];
+
+    private static string? SqlServerIdentityValue(string key, string? value) =>
+        key is "initial catalog" or "database" ? value : value?.Trim().ToLowerInvariant();
 
     internal static string Hash(object value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))));

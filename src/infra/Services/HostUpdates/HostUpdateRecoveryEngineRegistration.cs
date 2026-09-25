@@ -259,12 +259,18 @@ public static class HostUpdateRecoveryEngineRegistration
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             DatabaseProviderConfiguration dbConfig = DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>());
-            var restoreCommandsByTarget = new Dictionary<string, Func<string, HostUpdateRestoreCommand>>(StringComparer.Ordinal)
+            var restoreCommandsByTarget = new Dictionary<string, Func<string, HostUpdateRestoreCommand>>(StringComparer.Ordinal);
+
+            // A customer-managed external database is never restored by this host: leaving the
+            // target unmapped makes any manifest naming it fail closed (restore_target_unmapped)
+            // before the restore executor runs a single command.
+            if (!options.DatabaseExternallyOwned)
             {
-                ["database"] = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(
+                restoreCommandsByTarget["database"] = HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(
                     dbConfig,
-                    sp.GetRequiredService<IHostUpdateExecutableResolver>()),
-            };
+                    sp.GetRequiredService<IHostUpdateExecutableResolver>());
+            }
+
             var directoryRestoreTargetsByName = new Dictionary<string, string>(options.OwnedDirectories, StringComparer.Ordinal);
             return new ProcessHostUpdateRestoreExecutor(
                 sp.GetRequiredService<IHostUpdateProcessRunner>(),
