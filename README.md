@@ -16,6 +16,7 @@ A **production-ready** React TypeScript dashboard for managing multiple 3D print
 | **Understand the system** | [Architecture Overview](./docs/ARCHITECTURE.md) |
 | **Choose hardware for your farm** | [Deployment Hardware Guide](./docs/DEPLOYMENT_HARDWARE.md) |
 | **Deploy to production** | [Deployment Guide](./docs/DEPLOYMENT.md) |
+| **Plan an installation update or recovery** | [Operator Runbook and Current Limits](./docs/HOST_UPDATE_RUNBOOK.md) |
 | **Set up pgAdmin** | [pgAdmin Setup Guide](./docs/PGADMIN_SETUP.md) |
 | **Use the API** | [API Reference](./docs/API.md) |
 | **Explore features** | [Features Guide](./docs/FEATURES.md) |

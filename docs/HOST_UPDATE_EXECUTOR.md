@@ -12,6 +12,14 @@ failure. There is still no automatic/unattended execution path.
 
 ## Configuration: `HostUpdateExecutionOptions`
 
+For operator setup, current admin routes, policy opt-out and incident stop
+conditions, use the [installation update runbook](HOST_UPDATE_RUNBOOK.md).
+The sections below include historical implementation snapshots, not rollout
+authorization. Current DI includes target-image migration and a hosted scheduler
+when protected host state is enabled, but still registers unavailable candidate
+readiness and admission-fence adapters. A complete host-local/offline recovery
+path remains a delivery gate; see [offline recovery](OFFLINE_UPDATE_RECOVERY.md).
+
 Bound from the `HostUpdateExecution` configuration section (see
 `src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`). Root and general executor
 settings are validated by `HostUpdateExecutionOptionsValidator`; executable mappings are

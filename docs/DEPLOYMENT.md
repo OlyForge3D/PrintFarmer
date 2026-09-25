@@ -487,24 +487,20 @@ curl -H "X-Forwarded-For: 1.2.3.4" -X POST https://your-host/api/auth/login
 
 ## Offline Deployment
 
-For deployments without internet access:
+The installer's `--prepare-offline` mode prepares legacy deployment materials
+and cached images. **It is not a complete signed managed-update or recovery
+bundle.** Image availability does not establish trusted release identity,
+replay continuity, complete infrastructure coverage or a recoverable
+database/blob/key consistency point. Do not treat a subsequent installer run
+as a network-denied safe update or rollback.
 
-```bash
-# On machine WITH internet:
-./scripts/deploy-docker.sh --prepare-offline
-
-# Transfer ./docker-images to offline machine, then:
-
-# On machine WITHOUT internet:
-./scripts/deploy-docker.sh
-# Script auto-detects and loads cached images
-```
-
-### Smart Image Caching
-- Images automatically cached on first deployment
-- Cache location: `~/.printfarmer/images-cache.json`
-- Auto-reused on subsequent deployments
-- No manual flag needed
+Use the [installation update runbook](HOST_UPDATE_RUNBOOK.md) for setup,
+manual authorization, automatic policy and failure handling. The
+[offline delivery requirements](OFFLINE_UPDATE_RECOVERY.md) distinguish
+existing caching from the remaining bounded import/export, host-local recovery
+tooling and isolated restore evidence. Managed offline update support must
+remain blocked until those gates pass; there is no download/build fallback or
+skip-verification recovery path.
 
 ## ARM / Raspberry Pi Deployment
 
