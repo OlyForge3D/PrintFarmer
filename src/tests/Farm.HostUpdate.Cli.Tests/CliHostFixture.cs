@@ -2,6 +2,7 @@
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
+using Microsoft.Data.Sqlite;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -43,7 +44,8 @@ internal sealed class CliHostFixture : IDisposable
         File.WriteAllText(ComposeFile, "services: {}\n");
         File.WriteAllText(DockerPath, string.Empty);
         File.WriteAllText(Sqlite3Path, string.Empty);
-        File.WriteAllText(DatabasePath, string.Empty);
+        CreateDatabase();
+        SeedManifestBinding(TargetManifestDigest);
         foreach (string name in OwnedDirectoryNames)
         {
             Directory.CreateDirectory(Path.Combine(Root, "owned", name));
@@ -232,6 +234,40 @@ internal sealed class CliHostFixture : IDisposable
     public void SeedJournal(HostUpdateExecutionRequest request, params (HostUpdateExecutionState State, string Phase)[] entries) =>
         SeedJournal(request, entries, baseline: null);
 
+    /// <summary>
+    /// Writes (or, for <see langword="null"/>, deletes) the database manifest binding for
+    /// <see cref="ReleaseId"/> exactly as <see cref="VerifiedReleaseManifestBindingStore"/> persists it.
+    /// </summary>
+    public void SeedManifestBinding(string? manifestDigest, string? rawJson = null)
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Pooling = false }.ToString());
+        connection.Open();
+        using SqliteCommand delete = connection.CreateCommand();
+        delete.CommandText = "DELETE FROM \"AppSettingsEntities\" WHERE \"Key\" = $key";
+        delete.Parameters.AddWithValue("$key", VerifiedReleaseManifestBindingStore.KeyFor(ReleaseId));
+        delete.ExecuteNonQuery();
+        if (manifestDigest is null && rawJson is null)
+        {
+            return;
+        }
+
+        using SqliteCommand insert = connection.CreateCommand();
+        insert.CommandText = "INSERT INTO \"AppSettingsEntities\" (\"Key\", \"SettingsJson\", \"UpdatedAt\", \"Revision\") VALUES ($key, $json, $at, 1)";
+        insert.Parameters.AddWithValue("$key", VerifiedReleaseManifestBindingStore.KeyFor(ReleaseId));
+        insert.Parameters.AddWithValue("$json", rawJson ?? JsonSerializer.Serialize(new { ReleaseId, ManifestDigest = manifestDigest }));
+        insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
+        insert.ExecuteNonQuery();
+    }
+
+    private void CreateDatabase()
+    {
+        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Pooling = false }.ToString());
+        connection.Open();
+        using SqliteCommand create = connection.CreateCommand();
+        create.CommandText = "CREATE TABLE \"AppSettingsEntities\" (\"Id\" INTEGER PRIMARY KEY AUTOINCREMENT, \"Key\" TEXT NOT NULL UNIQUE, \"SettingsJson\" TEXT NOT NULL, \"UpdatedAt\" TEXT NOT NULL, \"Revision\" INTEGER NOT NULL)";
+        create.ExecuteNonQuery();
+    }
+
     /// <summary>The baseline the executor would journal for this host right now.</summary>
     public HostUpdateAuthorizationBaseline CurrentBaseline(IConfiguration? configuration = null)
     {
@@ -240,9 +276,10 @@ internal sealed class CliHostFixture : IDisposable
         var provider = new HostUpdateAuthorizationBaselineProvider(
             services.GetRequiredService<IInstalledHostStateStore>(),
             services.GetRequiredService<HostUpdateExecutionOptions>(),
-            DatabaseProviderConfiguration.FromConfiguration(configuration));
+            DatabaseProviderConfiguration.FromConfiguration(configuration),
+            services.GetRequiredService<IHostUpdateManifestBindingReader>());
 #pragma warning disable VSTHRD002 // Synchronous test seeding over a file-backed store.
-        return provider.CaptureAsync(CancellationToken.None).GetAwaiter().GetResult();
+        return provider.CaptureAsync(Request(), CancellationToken.None).GetAwaiter().GetResult();
 #pragma warning restore VSTHRD002
     }
 
