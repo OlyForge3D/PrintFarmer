@@ -1,7 +1,7 @@
 ﻿using System.Net;
 using System.Net.Sockets;
 
-namespace Farm.Infrastructure.Tests.TestSupport;
+namespace Farm.Infrastructure.Tests.Infrastructure.TestSupport;
 
 public sealed class LoopbackHttpListenerTests
 {

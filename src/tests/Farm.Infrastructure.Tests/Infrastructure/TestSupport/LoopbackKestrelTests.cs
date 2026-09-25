@@ -5,7 +5,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 
-namespace Farm.Infrastructure.Tests.TestSupport;
+namespace Farm.Infrastructure.Tests.Infrastructure.TestSupport;
 
 public sealed class LoopbackKestrelTests
 {
