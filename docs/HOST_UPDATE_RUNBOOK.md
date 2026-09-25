@@ -370,6 +370,10 @@ bundle unchanged. Verify the bundle on a connected host before transfer (or
 with Cosign's offline trusted-root options), and always re-check the archive
 SHA-256 against the list on the target host before extracting. The installer
 accepts the same three files unchanged through `--asset-dir` / `-AssetDir`.
+`scripts/ci/offline-update-bundle.mjs` packages and verifies these signed
+release bytes for transfer; see the
+[verified release-metadata bundle](OFFLINE_UPDATE_RECOVERY.md#verified-release-metadata-bundle-first-slice).
+Such a bundle is not installable and grants no rollout authority.
 
 ### Host-local status and recovery CLI
 
