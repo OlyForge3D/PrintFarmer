@@ -200,6 +200,103 @@ env -u PRINTFARMER_HOST_UPDATE_CLI_DIR PRINTFARMER_DOTNET="$FAKE_DOTNET" \
 [[ "$code" -eq 2 && ! -f "$ARGS_LOG" ]] && pass "no package marker means no default CLI dir" \
     || fail "no package marker means no default CLI dir (exit $code)"
 
+# Issue #3063: host-local offline bundle import. It needs no --config or CLI directory and runs the
+# offline bundle tool on node with a fixed, pre-validated argument vector. The PowerShell test
+# asserts the identical vector, which is the Bash/PowerShell parity contract.
+FAKE_NODE="$TEST_ROOT/fake-node"
+FAKE_TOOL="$TEST_ROOT/offline-update-bundle.mjs"
+FAKE_COSIGN="$TEST_ROOT/fake-cosign"
+: > "$FAKE_TOOL"
+cp "$FAKE_DOTNET" "$FAKE_NODE"
+cp "$FAKE_DOTNET" "$FAKE_COSIGN"
+chmod +x "$FAKE_NODE" "$FAKE_COSIGN"
+BUNDLE="$TEST_ROOT/printfarmer-offline-update.tar"
+ROOT_JSON="$TEST_ROOT/trusted_root.json"
+STAGING="$TEST_ROOT/staging"
+RECORDS="$TEST_ROOT/records"
+import_base=(import --bundle "$BUNDLE" --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON"
+    --staging "$STAGING" --records "$RECORDS" --operator ops.alice@site-1)
+
+run_import() {
+    rm -f "$ARGS_LOG"
+    local code=0
+    env -u PRINTFARMER_HOST_UPDATE_CLI_DIR -u PRINTFARMER_DOTNET -u PRINTFARMER_COSIGN -u PRINTFARMER_DOCKER \
+        PRINTFARMER_NODE="$FAKE_NODE" PRINTFARMER_OFFLINE_BUNDLE_TOOL="$FAKE_TOOL" "$@" \
+        > "$TEST_ROOT/stdout.log" 2> "$TEST_ROOT/stderr.log" || code=$?
+    return "$code"
+}
+
+expect_import() {
+    local name="$1" expected="$2"
+    shift 2
+    local code=0
+    run_import bash "$WRAPPER" "$@" || code=$?
+    if [[ "$code" -eq 0 && -f "$ARGS_LOG" && "$(cat "$ARGS_LOG")" == "$expected" ]]; then
+        pass "$name"
+    else
+        fail "$name (exit $code, args: $(tr '\n' ' ' < "$ARGS_LOG" 2>/dev/null || true))"
+    fi
+}
+
+expect_import_usage() {
+    local name="$1"
+    shift
+    local code=0
+    run_import "$@" || code=$?
+    if [[ "$code" -eq 2 && ! -f "$ARGS_LOG" && ! -s "$TEST_ROOT/stdout.log" ]]; then
+        pass "$name"
+    else
+        fail "$name (exit $code, tool invoked: $([[ -f "$ARGS_LOG" ]] && echo yes || echo no))"
+    fi
+}
+
+expect_import "import passes a fixed argument vector to the bundle tool" \
+    "$(printf '%s\n' "$FAKE_TOOL" import --bundle "$BUNDLE" --channel stable --version 1.2.3 --trusted-root "$ROOT_JSON" \
+        --staging "$STAGING" --records "$RECORDS" --operator ops.alice@site-1)" \
+    "${import_base[@]}"
+expect_import "import options are normalised to a fixed order" \
+    "$(printf '%s\n' "$FAKE_TOOL" import --bundle "$BUNDLE" --channel insider --version 1.2.3-rc.1 --trusted-root "$ROOT_JSON" \
+        --staging "$STAGING" --records "$RECORDS" --operator ops --prior-recovery-set "$TEST_ROOT/prior" \
+        --protected-backup "$TEST_ROOT/backup.json")" \
+    import --protected-backup "$TEST_ROOT/backup.json" --operator ops --records "$RECORDS" --prior-recovery-set "$TEST_ROOT/prior" \
+    --staging "$STAGING" --trusted-root "$ROOT_JSON" --version 1.2.3-rc.1 --channel insider --bundle "$BUNDLE"
+
+rm -f "$ARGS_LOG"
+code=0
+env -u PRINTFARMER_HOST_UPDATE_CLI_DIR -u PRINTFARMER_DOTNET -u PRINTFARMER_DOCKER PRINTFARMER_NODE="$FAKE_NODE" \
+    PRINTFARMER_OFFLINE_BUNDLE_TOOL="$FAKE_TOOL" PRINTFARMER_COSIGN="$FAKE_COSIGN" \
+    bash "$WRAPPER" "${import_base[@]}" > /dev/null 2>&1 || code=$?
+if [[ "$code" -eq 0 && "$(tail -n 2 "$ARGS_LOG" 2>/dev/null)" == "$(printf '%s\n' --cosign "$FAKE_COSIGN")" ]]; then
+    pass "import forwards an absolute PRINTFARMER_COSIGN"
+else
+    fail "import forwards an absolute PRINTFARMER_COSIGN (exit $code)"
+fi
+
+code=0
+FAKE_EXIT=1 run_import bash "$WRAPPER" "${import_base[@]}" || code=$?
+[[ "$code" -eq 1 && -f "$ARGS_LOG" ]] && pass "import preserves the refused exit code" || fail "import preserves the refused exit code (exit $code)"
+
+expect_import_usage "import refuses --config" bash "$WRAPPER" "${import_base[@]}" --config "$CONFIG"
+expect_import_usage "import refuses a missing required option" bash "$WRAPPER" import --bundle "$BUNDLE" --channel stable \
+    --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS"
+expect_import_usage "import refuses a duplicate option" bash "$WRAPPER" "${import_base[@]}" --channel stable
+expect_import_usage "import refuses a relative bundle path" bash "$WRAPPER" import --bundle bundle.tar --channel stable \
+    --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS" --operator ops
+expect_import_usage "import refuses a relative records path" bash "$WRAPPER" import --bundle "$BUNDLE" --channel stable \
+    --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records records --operator ops
+expect_import_usage "import refuses an unknown channel" bash "$WRAPPER" import --bundle "$BUNDLE" --channel Stable \
+    --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS" --operator ops
+expect_import_usage "import refuses shell metacharacters in the version" bash "$WRAPPER" import --bundle "$BUNDLE" --channel stable \
+    --version '1;rm' --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS" --operator ops
+expect_import_usage "import refuses a malformed operator" bash "$WRAPPER" import --bundle "$BUNDLE" --channel stable \
+    --version 1.2.3 --trusted-root "$ROOT_JSON" --staging "$STAGING" --records "$RECORDS" --operator '-ops'
+expect_import_usage "import refuses a verification bypass option" bash "$WRAPPER" "${import_base[@]}" --skip-verification true
+expect_import_usage "import refuses a missing option value" bash "$WRAPPER" "${import_base[@]}" --prior-recovery-set
+expect_import_usage "import refuses a relative PRINTFARMER_NODE" env PRINTFARMER_NODE=node bash "$WRAPPER" "${import_base[@]}"
+expect_import_usage "import refuses a relative PRINTFARMER_COSIGN" env PRINTFARMER_COSIGN=cosign bash "$WRAPPER" "${import_base[@]}"
+expect_import_usage "import refuses a missing bundle tool" env PRINTFARMER_OFFLINE_BUNDLE_TOOL="$TEST_ROOT/missing.mjs" \
+    bash "$WRAPPER" "${import_base[@]}"
+
 if [[ "$failures" -gt 0 ]]; then
     printf '%d wrapper test(s) failed\n' "$failures" >&2
     exit 1

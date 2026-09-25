@@ -375,6 +375,35 @@ release bytes for transfer; see the
 [verified release-metadata bundle](OFFLINE_UPDATE_RECOVERY.md#verified-release-metadata-bundle-first-slice).
 Such a bundle is not installable and grants no rollout authority.
 
+To bring a complete offline bundle onto a disconnected host, use the wrapper's
+`import` subcommand (#3063). It needs no `--config`, verifies the bundle
+against the operator-supplied `trusted_root.json`, refuses any bundle without
+its images, signed infrastructure list and signed recovery instructions, loads
+only verified images and writes one durable, redacted decision record per
+attempt (exit 0 imported, 1 refused, 2 usage error):
+
+```bash
+/opt/printfarmer/host-update-cli/1.2.3/printfarmer-host-update.sh import \
+  --bundle /srv/offline/printfarmer-offline.tar --channel stable --version 1.2.3 \
+  --trusted-root /srv/offline/trusted_root.json --staging /srv/offline/staging-1 \
+  --records /var/lib/printfarmer/offline-decisions --operator ops.alice
+```
+
+```powershell
+& 'C:\Program Files\PrintFarmer\HostUpdateCli\1.2.3\printfarmer-host-update.ps1' import `
+  -Bundle D:\offline\printfarmer-offline.tar -Channel stable -Version 1.2.3 `
+  -TrustedRoot D:\offline\trusted_root.json -Staging D:\offline\staging-1 `
+  -Records D:\PrintFarmer\offline-decisions -Operator ops.alice
+```
+
+An installed CLI package does not carry the Node.js bundle tool, so set
+`PRINTFARMER_OFFLINE_BUNDLE_TOOL` to an approved absolute copy of
+`scripts/ci/offline-update-bundle.mjs` (and optionally `PRINTFARMER_NODE`,
+`PRINTFARMER_COSIGN`, `PRINTFARMER_DOCKER`). An imported bundle is still not an
+update offer or installation; see
+[recovery instructions and host-local import](OFFLINE_UPDATE_RECOVERY.md#recovery-instructions-and-host-local-import-3063)
+for the complete contract and record format.
+
 ### Host-local status and recovery CLI
 
 `Farm.HostUpdate.Cli` (`src/tools/Farm.HostUpdate.Cli`) runs the same

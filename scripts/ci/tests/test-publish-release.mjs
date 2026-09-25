@@ -18,6 +18,8 @@ const spdxFixture = name => `${JSON.stringify({ spdxVersion: 'SPDX-2.3', SPDXID:
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
 import { infrastructureImagesDocument, infrastructureImagesName, infrastructureImagesSignatureName, infrastructureLockKind,
   infrastructureLockPath, mediaTypes, validateInfrastructureImages } from '../offline-bundle-images.mjs';
+import { recoveryInstructionsDocument, recoveryInstructionsName, recoveryInstructionsSignatureName }
+  from '../offline-recovery-instructions.mjs';
 
 // Issue #3061: a synthetic registry for the pinned infrastructure lock -- one multi-platform index
 // and one single-manifest image -- whose raw bytes hash to the pinned digests.
@@ -618,6 +620,9 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     `${registry.lock.images[1].reference}@${registry.lock.images[1].digest}`].sort());
   assert.deepEqual(validateInfrastructureImages(readFileSync(join(assets, infrastructureImagesName)),
     infrastructureIdentity(release)), registry.lock.images);
+  // Issue #3063: the recovery instructions are generated from the same release identity.
+  assert.deepEqual(readFileSync(join(assets, recoveryInstructionsName)),
+    recoveryInstructionsDocument(infrastructureIdentity(release)));
   const movedPin = infrastructureRegistry();
   const buildsBeforeMovedPin = builds.length;
   assert.throws(() => buildImages(release, source, assets, (name, args) => {
@@ -667,6 +672,12 @@ function publishFixture(t, channel = 'insider') {
     infrastructureImagesDocument(infrastructureIdentity(chosen), infrastructureRegistry().lock));
   writeFileSync(join(assets, infrastructureImagesSignatureName), JSON.stringify({
     sha256: createHash('sha256').update(readFileSync(join(assets, infrastructureImagesName))).digest('hex'),
+    issuer: manifestIssuer,
+    identity: manifestIdentityFor(chosen.channel),
+  }));
+  writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(infrastructureIdentity(chosen)));
+  writeFileSync(join(assets, recoveryInstructionsSignatureName), JSON.stringify({
+    sha256: createHash('sha256').update(readFileSync(join(assets, recoveryInstructionsName))).digest('hex'),
     issuer: manifestIssuer,
     identity: manifestIdentityFor(chosen.channel),
   }));
@@ -782,6 +793,29 @@ test('the signed infrastructure image list is uploaded and verified before taggi
     { ...infrastructureIdentity(chosen), sourceCommit: head }, infrastructureRegistry().lock));
   await assert.rejects(publishRelease(chosen, assets, api, deps), /not bound to this release identity/);
   assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a list for another release must stop before tagging');
+});
+
+test('the signed recovery instructions are uploaded and verified before tagging and before upload', async t => {
+  for (const channel of ['stable', 'insider']) {
+    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
+    assert.ok(files.includes(recoveryInstructionsName) && files.includes(recoveryInstructionsSignatureName));
+    await publishRelease(chosen, assets, api, deps);
+    const checks = calls.flatMap((call, index) =>
+      call.command === 'cosign' && call.args[7].endsWith(recoveryInstructionsName) ? [index] : []);
+    assert.equal(checks.length, 2);
+    for (const index of checks) {
+      assert.match(calls[index].args[2], /offline-recovery-instructions\.sigstore\.json$/);
+      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
+    }
+    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
+    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
+    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
+  }
+  const { chosen, assets, api, deps, calls } = publishFixture(t);
+  writeFileSync(join(assets, recoveryInstructionsName), recoveryInstructionsDocument(
+    { ...infrastructureIdentity(chosen), buildId: '999' }));
+  await assert.rejects(publishRelease(chosen, assets, api, deps), /not the exact release-bound instructions/);
+  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'instructions for another build must stop before tagging');
 });
 
 test('host-update CLI checksum list is canonical and names exactly the supported archives and SBOMs', t => {
@@ -901,6 +935,16 @@ test('missing, tampered or wrong-identity signing evidence blocks publication be
     }],
     ['infrastructure list signed by another identity', (assets) => {
       const path = join(assets, infrastructureImagesSignatureName);
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
+        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
+    }],
+    ['missing recovery instructions bundle', (assets) => rmSync(join(assets, recoveryInstructionsSignatureName))],
+    ['empty recovery instructions bundle', (assets) => writeFileSync(join(assets, recoveryInstructionsSignatureName), '')],
+    ['tampered recovery instructions', (assets) => writeFileSync(join(assets, recoveryInstructionsName),
+      readFileSync(join(assets, recoveryInstructionsName), 'utf8').replace('"rolloutAuthorization": false',
+        '"rolloutAuthorization": true'))],
+    ['recovery instructions signed by another identity', (assets) => {
+      const path = join(assets, recoveryInstructionsSignatureName);
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
         identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
     }],

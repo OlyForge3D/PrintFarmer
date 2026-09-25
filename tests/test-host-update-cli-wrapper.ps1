@@ -140,6 +140,77 @@ exit [int](`$env:FAKE_EXIT ?? '0')
         $wrapper = $savedWrapper
     }
 
+    # Issue #3063: host-local offline bundle import. It needs no -Config or CLI directory and runs the
+    # offline bundle tool on node with a fixed, pre-validated argument vector identical to the Bash
+    # wrapper's (asserted by tests/test-host-update-cli-wrapper.sh) — the parity contract.
+    $fakeNode = Join-Path $testRoot 'fake-node.ps1'
+    Copy-Item -LiteralPath $fakeDotnet -Destination $fakeNode
+    $fakeCosign = Join-Path $testRoot 'fake-cosign.ps1'
+    Copy-Item -LiteralPath $fakeDotnet -Destination $fakeCosign
+    $fakeTool = Join-Path $testRoot 'offline-update-bundle.mjs'
+    Set-Content -LiteralPath $fakeTool -Value '' -NoNewline
+    $bundle = Join-Path $testRoot 'printfarmer-offline-update.tar'
+    $rootJson = Join-Path $testRoot 'trusted_root.json'
+    $staging = Join-Path $testRoot 'staging'
+    $records = Join-Path $testRoot 'records'
+    $prior = Join-Path $testRoot 'prior'
+    $backup = Join-Path $testRoot 'backup.json'
+    $importEnv = @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $null; PRINTFARMER_DOTNET = $null; PRINTFARMER_NODE = $fakeNode
+        PRINTFARMER_OFFLINE_BUNDLE_TOOL = $fakeTool; PRINTFARMER_COSIGN = $null; PRINTFARMER_DOCKER = $null }
+    function With-Env([hashtable] $Overrides) {
+        $merged = @{}
+        foreach ($key in $importEnv.Keys) { $merged[$key] = $importEnv[$key] }
+        foreach ($key in $Overrides.Keys) { $merged[$key] = $Overrides[$key] }
+        return $merged
+    }
+    $importBase = @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3', '-TrustedRoot', $rootJson,
+        '-Staging', $staging, '-Records', $records, '-Operator', 'ops.alice@site-1')
+
+    Expect-Passthrough 'import passes a fixed argument vector to the bundle tool' @($fakeTool, 'import', '--bundle', $bundle,
+        '--channel', 'stable', '--version', '1.2.3', '--trusted-root', $rootJson, '--staging', $staging, '--records', $records,
+        '--operator', 'ops.alice@site-1') $importBase $importEnv
+    Expect-Passthrough 'import options are normalised to a fixed order' @($fakeTool, 'import', '--bundle', $bundle,
+        '--channel', 'insider', '--version', '1.2.3-rc.1', '--trusted-root', $rootJson, '--staging', $staging, '--records', $records,
+        '--operator', 'ops', '--prior-recovery-set', $prior, '--protected-backup', $backup) @('import', '-ProtectedBackup', $backup,
+        '-Operator', 'ops', '-Records', $records, '-PriorRecoverySet', $prior, '-Staging', $staging, '-TrustedRoot', $rootJson,
+        '-Version', '1.2.3-rc.1', '-Channel', 'insider', '-Bundle', $bundle) $importEnv
+    Expect-Passthrough 'import parameter names are case-insensitive' @($fakeTool, 'import', '--bundle', $bundle,
+        '--channel', 'stable', '--version', '1.2.3', '--trusted-root', $rootJson, '--staging', $staging, '--records', $records,
+        '--operator', 'ops') @('import', '-bundle', $bundle, '-CHANNEL', 'stable', '-version', '1.2.3', '-trustedroot', $rootJson,
+        '-staging', $staging, '-records', $records, '-operator', 'ops') $importEnv
+
+    $cosignRun = Invoke-Wrapper $importBase (With-Env @{ PRINTFARMER_COSIGN = $fakeCosign })
+    $cosignArgs = if ($cosignRun.Invoked) { @((Get-Content -LiteralPath $argsLog -Raw) -split "`n") } else { @() }
+    if ($cosignRun.ExitCode -eq 0 -and $cosignArgs.Count -ge 2 -and $cosignArgs[-2] -ceq '--cosign' -and $cosignArgs[-1] -ceq $fakeCosign) {
+        Pass 'import forwards an absolute PRINTFARMER_COSIGN'
+    } else { Fail "import forwards an absolute PRINTFARMER_COSIGN (exit $($cosignRun.ExitCode))" }
+
+    $refusedRun = Invoke-Wrapper $importBase (With-Env @{ FAKE_EXIT = '1' })
+    if ($refusedRun.ExitCode -eq 1 -and $refusedRun.Invoked) { Pass 'import preserves the refused exit code' }
+    else { Fail "import preserves the refused exit code (exit $($refusedRun.ExitCode))" }
+
+    Expect-Usage 'import refuses -Config' ($importBase + @('-Config', $config)) $importEnv
+    Expect-Usage 'import refuses a missing required option' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records) $importEnv
+    Expect-Usage 'import refuses a duplicate option' ($importBase + @('-Channel', 'stable')) $importEnv
+    Expect-Usage 'import refuses a relative bundle path' @('import', '-Bundle', 'bundle.tar', '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
+    Expect-Usage 'import refuses a relative records path' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', 'records', '-Operator', 'ops') $importEnv
+    Expect-Usage 'import refuses an unknown channel' @('import', '-Bundle', $bundle, '-Channel', 'Stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
+    Expect-Usage 'import refuses shell metacharacters in the version' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1;rm',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', 'ops') $importEnv
+    Expect-Usage 'import refuses a malformed operator' @('import', '-Bundle', $bundle, '-Channel', 'stable', '-Version', '1.2.3',
+        '-TrustedRoot', $rootJson, '-Staging', $staging, '-Records', $records, '-Operator', '-ops') $importEnv
+    Expect-Usage 'import refuses a verification bypass option' ($importBase + @('-SkipVerification', 'true')) $importEnv
+    Expect-Usage 'import refuses a bash-style option' ($importBase + @('--prior-recovery-set', $prior)) $importEnv
+    Expect-Usage 'import refuses a missing option value' ($importBase + @('-PriorRecoverySet')) $importEnv
+    Expect-Usage 'import refuses a miscased command' (@('Import') + $importBase[1..($importBase.Count - 1)]) $importEnv
+    Expect-Usage 'import refuses a relative PRINTFARMER_NODE' $importBase (With-Env @{ PRINTFARMER_NODE = 'node' })
+    Expect-Usage 'import refuses a relative PRINTFARMER_COSIGN' $importBase (With-Env @{ PRINTFARMER_COSIGN = 'cosign' })
+    Expect-Usage 'import refuses a missing bundle tool' $importBase (With-Env @{ PRINTFARMER_OFFLINE_BUNDLE_TOOL = (Join-Path $testRoot 'missing.mjs') })
+
     if ($script:failures -gt 0) {
         Write-Host "$($script:failures) PowerShell wrapper test(s) failed"
         exit 1

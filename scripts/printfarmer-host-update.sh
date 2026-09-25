@@ -8,6 +8,11 @@
 #   printfarmer-host-update.sh --config /abs/host-update.json status [--release <id>] [--json]
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --preview [--json]
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
+#   printfarmer-host-update.sh import --bundle /abs/bundle.tar --channel <stable|insider> --version <v> --trusted-root /abs/trusted_root.json --staging /abs/new-dir --records /abs/records-dir --operator <id> [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
+#
+# `import` (issue #3063) verifies a signed offline update bundle without network access, loads only
+# its verified images into the local Docker engine and writes one durable, redacted decision record
+# under --records. It needs no --config and never installs, activates or authorizes a rollout.
 #
 # --reapprove-drift takes the token printed by `recover --preview` when the host drifted since the
 # recorded authorization (CLI exit 12). --printers-reconciled takes the physical-<32 hex> token
@@ -20,6 +25,11 @@
 #                                    Farm.HostUpdate.Cli.dll runs on the dotnet host.
 #   PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH;
 #                                    refused for a self-contained package)
+#   PRINTFARMER_NODE                 import only: absolute path to node (optional; default: node on PATH)
+#   PRINTFARMER_OFFLINE_BUNDLE_TOOL  import only: absolute path to offline-update-bundle.mjs (default:
+#                                    ci/offline-update-bundle.mjs beside this wrapper in a repository checkout)
+#   PRINTFARMER_COSIGN               import only: absolute path to cosign (optional; default: cosign on PATH)
+#   PRINTFARMER_DOCKER               import only: absolute path to docker (optional; default: docker on PATH)
 #
 # Exit codes are the CLI's (see docs/HOST_UPDATE_RUNBOOK.md); the wrapper itself only ever
 # returns 2 for a usage or setup error, before the CLI runs.
@@ -33,9 +43,12 @@ readonly RELEASE_RE='^(stable|insider):[0-9A-Za-z.+-]{1,128}$'
 readonly REQUEST_RE='^[A-Za-z0-9._:-]{1,128}$'
 readonly DRIFT_TOKEN_RE='^drift-[0-9a-f]{32}$'
 readonly PHYSICAL_TOKEN_RE='^physical-[0-9a-f]{32}$'
+readonly CHANNEL_RE='^(stable|insider)$'
+readonly VERSION_RE='^[0-9A-Za-z.+-]{1,128}$'
+readonly OPERATOR_RE='^[A-Za-z0-9][A-Za-z0-9._@-]{0,63}$'
 
 usage() {
-    sed -n '8,10p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
+    sed -n '8,11p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
 }
 
 fail_usage() {
@@ -48,9 +61,80 @@ is_absolute() {
     [[ "$1" == /* ]]
 }
 
+optional_executable() {
+    # $1 = environment variable name, $2 = default command name
+    local value="${!1:-}"
+    if [[ -z "$value" ]]; then
+        printf '%s' "$2"
+        return
+    fi
+    is_absolute "$value" && [[ -f "$value" && -x "$value" ]] || fail_usage "$1 must be an absolute executable path"
+    printf '%s' "$value"
+}
+
+run_import() {
+    local seen=" "
+    local bundle="" channel="" version="" trusted_root="" staging="" records="" operator=""
+    local prior="" backup=""
+    while [[ $# -gt 0 ]]; do
+        local option="$1"
+        case "$option" in
+            --bundle|--channel|--version|--trusted-root|--staging|--records|--operator|--prior-recovery-set|--protected-backup) ;;
+            *) fail_usage "unsupported argument: $option" ;;
+        esac
+        [[ "$seen" != *" $option "* ]] || fail_usage "$option may be given only once"
+        [[ $# -ge 2 && -n "$2" ]] || fail_usage "$option requires a value"
+        seen+="$option "
+        local value="$2"
+        shift 2
+        case "$option" in
+            --channel)
+                [[ "$value" =~ $CHANNEL_RE ]] || fail_usage "--channel must be stable or insider"
+                channel="$value" ;;
+            --version)
+                [[ "$value" =~ $VERSION_RE ]] || fail_usage "--version requires [0-9A-Za-z.+-]{1,128}"
+                version="$value" ;;
+            --operator)
+                [[ "$value" =~ $OPERATOR_RE ]] || fail_usage "--operator requires [A-Za-z0-9][A-Za-z0-9._@-]{0,63}"
+                operator="$value" ;;
+            *)
+                is_absolute "$value" || fail_usage "$option must be an absolute path"
+                case "$option" in
+                    --bundle) bundle="$value" ;;
+                    --trusted-root) trusted_root="$value" ;;
+                    --staging) staging="$value" ;;
+                    --records) records="$value" ;;
+                    --prior-recovery-set) prior="$value" ;;
+                    --protected-backup) backup="$value" ;;
+                esac ;;
+        esac
+    done
+    local option
+    for option in --bundle --channel --version --trusted-root --staging --records --operator; do
+        [[ "$seen" == *" $option "* ]] || fail_usage "import requires $option"
+    done
+
+    local node_host tool cosign_host docker_host
+    node_host="$(optional_executable PRINTFARMER_NODE node)"
+    cosign_host="$(optional_executable PRINTFARMER_COSIGN cosign)"
+    docker_host="$(optional_executable PRINTFARMER_DOCKER docker)"
+    tool="${PRINTFARMER_OFFLINE_BUNDLE_TOOL:-$SCRIPT_DIR/ci/offline-update-bundle.mjs}"
+    is_absolute "$tool" && [[ -f "$tool" ]] || fail_usage "PRINTFARMER_OFFLINE_BUNDLE_TOOL must be an absolute path to offline-update-bundle.mjs"
+
+    local -a tool_args=(import --bundle "$bundle" --channel "$channel" --version "$version"
+        --trusted-root "$trusted_root" --staging "$staging" --records "$records" --operator "$operator")
+    if [[ -n "$prior" ]]; then tool_args+=(--prior-recovery-set "$prior"); fi
+    if [[ -n "$backup" ]]; then tool_args+=(--protected-backup "$backup"); fi
+    if [[ -n "${PRINTFARMER_COSIGN:-}" ]]; then tool_args+=(--cosign "$cosign_host"); fi
+    if [[ -n "${PRINTFARMER_DOCKER:-}" ]]; then tool_args+=(--docker "$docker_host"); fi
+
+    exec "$node_host" "$tool" "${tool_args[@]}"
+}
+
 config=""
 case "${1:-}" in
     help|--help|-h) usage; exit 0 ;;
+    import) shift; run_import "$@" ;;
 esac
 if [[ "${1:-}" == "--config" ]]; then
     [[ $# -ge 2 ]] || fail_usage "--config requires a value"

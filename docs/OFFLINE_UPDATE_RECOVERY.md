@@ -28,7 +28,10 @@ The first delivered slice (#2981) is a
 [verified release-metadata bundle](#verified-release-metadata-bundle-first-slice):
 it carries the original signed release bytes and the host-update CLI to a
 network-denied host and verifies them with bounded extraction. It is explicitly
-**not installable** and grants no rollout authority.
+**not installable** and grants no rollout authority. A
+[host-local import command](#recovery-instructions-and-host-local-import-3063)
+(#3063) verifies a complete bundle, loads only its verified images and records
+every decision durably; it still installs, activates and authorizes nothing.
 
 Connected installations need a proven minimum host-local recovery path but do
 not need to hand-carry a bundle. Disconnected installations additionally need
@@ -158,12 +161,16 @@ digest and protected-backup reference; it is `false` when the bundle binds no
 prior set.
 
 The prior set does not yet include prior images or effective configuration;
-those follow host-local import (#3063). A bound
+those remain future work under #2981. A bound
 prior set is recovery-only material and never a new offer or implicit channel
 consent.
 
 The index always states `installable: false` and `rolloutAuthorization: false`;
-`contents.recoveryInstructions` is `false`. `contents.priorRecoverySet` is
+replay protection and rollout eligibility are #3064.
+`contents.recoveryInstructions` is `true` only when the bundle carries the
+signed, release-bound
+[recovery instructions](#recovery-instructions-and-host-local-import-3063)
+together with their signature bundle. `contents.priorRecoverySet` is
 `true` only when the bundle binds a complete prior set with its
 protected-backup reference. `contents.images` and `contents.infrastructure` are
 both `true` when the bundle carries the image set described below and both
@@ -172,8 +179,8 @@ part of the set, is rejected. Remaining work under #2658:
 
 - #3061 (delivered): application and infrastructure image archives.
 - #3062 (delivered): prior recovery set and protected-backup references.
-- #3063: host-local import with Bash/PowerShell parity and bound recovery
-  instructions.
+- #3063 (delivered): host-local import with Bash/PowerShell parity and bound
+  recovery instructions.
 - #3064: replay protection, channel continuity and offline trust expiry.
 
 ### Application and infrastructure images (#3061)
@@ -243,6 +250,88 @@ signed bytes alone, requires the record to name exactly that set, re-hashes and
 re-verifies every archive before loading any of them, and streams the same open file to `docker load` (Docker Engine 25 or later for
 OCI archive support). It never pulls, builds or fetches anything; a changed
 archive or a staging directory without a verified image set is rejected.
+
+## Recovery instructions and host-local import (#3063)
+
+Every release publishes `offline-recovery-instructions.json` and its
+`offline-recovery-instructions.sigstore.json` bundle, signed with the same
+workflow identity as the manifest. The document is generated from the release
+identity alone (tag, version, channel, source branch and commit, build ID and
+sequence) and names only four fixed wrapper operations for that one release,
+each with its exact Bash and PowerShell argument vector: `offline-bundle-import`,
+`host-update-status`, `host-update-recover-preview` and
+`host-update-recover-confirm`. Host paths and the operator are placeholders such
+as `<bundle.tar>`; there is no shell text, URL, credential or caller-chosen
+command. It states `rolloutAuthorization: false`.
+
+`assemble` packages the pair automatically when both files are present in the
+release asset directory, and rejects one without the other. `verify` requires
+Cosign to accept the signature bundle for the channel's release workflow
+identity and the document to be **byte-for-byte** the document regenerated from
+the signed manifest identity, so a re-signed, edited, wrong-release or
+unflagged copy is rejected. The verification record then names the
+instructions' SHA-256 and operation IDs.
+
+Import on the network-denied host with the one documented command for each
+platform (the paths must be absolute; `--staging` must not exist yet and
+`--records` must be an existing directory kept outside replaced containers and
+restored application databases):
+
+```bash
+scripts/printfarmer-host-update.sh import \
+  --bundle /srv/offline/printfarmer-offline.tar --channel stable --version 1.2.3 \
+  --trusted-root /srv/offline/trusted_root.json --staging /srv/offline/staging-1 \
+  --records /var/lib/printfarmer/offline-decisions --operator ops.alice \
+  [--prior-recovery-set /abs/dir] [--protected-backup /abs/reference.json]
+```
+
+```powershell
+pwsh -File scripts\printfarmer-host-update.ps1 import `
+  -Bundle D:\offline\printfarmer-offline.tar -Channel stable -Version 1.2.3 `
+  -TrustedRoot D:\offline\trusted_root.json -Staging D:\offline\staging-1 `
+  -Records D:\PrintFarmer\offline-decisions -Operator ops.alice `
+  [-PriorRecoverySet D:\abs\dir] [-ProtectedBackup D:\abs\reference.json]
+```
+
+Both wrappers accept exactly the same options, validate them the same way
+(absolute paths, `stable`/`insider`, `[0-9A-Za-z.+-]{1,128}` versions and
+`[A-Za-z0-9][A-Za-z0-9._@-]{0,63}` operators), refuse a usage error with exit 2
+before anything runs, and run `node offline-update-bundle.mjs import` with an
+identical argument vector; the wrapper tests assert that parity. `import` needs
+Node.js, a pinned Cosign and Docker Engine 25 or later on the host. Set
+`PRINTFARMER_NODE`, `PRINTFARMER_COSIGN` and `PRINTFARMER_DOCKER` to absolute
+executables to avoid `PATH` lookup. In a repository checkout the tool is
+`scripts/ci/offline-update-bundle.mjs`; an installed CLI package does not carry
+it, so point `PRINTFARMER_OFFLINE_BUNDLE_TOOL` at an approved copy.
+
+`import` runs `verify` into the new staging directory, then requires a complete
+bundle: the release-selected application images, the signed infrastructure
+image list with its images, and the signed recovery instructions. A bundle that
+verifies but lacks any of them is **not installable for import** and is
+refused. It then runs `load`, which re-authenticates the staged metadata and
+loads only verified archives. It exits 0 when imported and 1 when refused. A
+refusal after verification succeeded removes the staging directory. A refusal
+during `docker load` may leave some verified, content-addressed images in the
+engine; they are inert and are never tagged as active or started.
+
+Every decision, including every refusal, is written as one record
+`<records>/<decidedAt>-<decisionId>.json`: created exclusively (POSIX mode
+`0600`), fsynced, then renamed into place (and the directory fsynced on POSIX),
+so a leftover `.<name>.partial` file is never a decision. A record holds the decision
+ID and time, operator, outcome (`imported` or `refused`), a bounded reason,
+the expected channel and version, the bundle SHA-256, the signed release
+identity, the verified manifest, image, recovery-instruction and prior-set
+digests, the loaded image digests, `installable: false` and
+`rolloutAuthorization: false`. Reasons are redacted: supplied paths are replaced
+by placeholders such as `<bundle>`, any other host path by `<path>`, control
+characters are removed and the text is capped at 512 characters. Usage errors
+(a malformed operator, version or channel, or a missing or linked records
+directory) are rejected before a record can be written.
+
+An imported record is evidence that the bytes were verified and loaded. It is
+not an update offer, an installation or channel consent; applying a release
+still follows the [operator runbook](HOST_UPDATE_RUNBOOK.md), and replay
+high-water marks and trust expiry are #3064.
 
 ## Import and continuity rules
 
