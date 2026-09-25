@@ -1,5 +1,4 @@
 ﻿using System.Net;
-using System.Net.Sockets;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -680,14 +679,13 @@ public sealed class SdcpClientParsingTests
         // a server-initiated WebSocket ping frame during a normal operation.
         // The server sends a ping, waits briefly for the pong (handled automatically
         // by .NET's ClientWebSocket), then sends the status response.
-        int port = GetFreeTcpPort();
         bool pongReceived = false;
 
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development
         });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
 
         WebApplication app = builder.Build();
         app.UseWebSockets();
@@ -736,7 +734,7 @@ public sealed class SdcpClientParsingTests
 
         try
         {
-            string baseUrl = $"http://127.0.0.1:{port}";
+            string baseUrl = app.GetLoopbackBaseUrl();
             var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
             using var httpClient = new HttpClient();
             var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
@@ -840,13 +838,11 @@ public sealed class SdcpClientParsingTests
     /// </summary>
     private static async Task<SdcpTestEnvironment> CreateSdcpServerAsync(string responsePayload)
     {
-        int port = GetFreeTcpPort();
-
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development
         });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
 
         WebApplication app = builder.Build();
         app.UseWebSockets();
@@ -874,7 +870,7 @@ public sealed class SdcpClientParsingTests
 
         await app.StartAsync();
 
-        string baseUrl = $"http://127.0.0.1:{port}";
+        string baseUrl = app.GetLoopbackBaseUrl();
         var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
         var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
@@ -884,13 +880,11 @@ public sealed class SdcpClientParsingTests
 
     private static async Task<SdcpTestEnvironment> CreateSdcpStartServerAsync(int startAck)
     {
-        int port = GetFreeTcpPort();
-
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development
         });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
 
         WebApplication app = builder.Build();
         app.UseWebSockets();
@@ -942,7 +936,7 @@ public sealed class SdcpClientParsingTests
 
         await app.StartAsync();
 
-        string baseUrl = $"http://127.0.0.1:{port}";
+        string baseUrl = app.GetLoopbackBaseUrl();
         var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
         var httpClient = new HttpClient(new SuccessfulHttpHandler());
         var client = new SdcpClient(
@@ -956,14 +950,13 @@ public sealed class SdcpClientParsingTests
     private static async Task<(SdcpTestEnvironment Environment, Func<int> StatusRequestCount)>
         CreateSdcpLostStartAckServerAsync()
     {
-        int port = GetFreeTcpPort();
         int statusRequestCount = 0;
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
             new WebApplicationOptions
             {
                 EnvironmentName = Environments.Development,
             });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
         WebApplication app = builder.Build();
         app.UseWebSockets();
         app.Map("/websocket", async context =>
@@ -1006,7 +999,7 @@ public sealed class SdcpClientParsingTests
         });
         await app.StartAsync();
 
-        string baseUrl = $"http://127.0.0.1:{port}";
+        string baseUrl = app.GetLoopbackBaseUrl();
         var httpClient = new HttpClient(new SuccessfulHttpHandler());
         var client = new SdcpClient(
             httpClient,
@@ -1025,13 +1018,11 @@ public sealed class SdcpClientParsingTests
     private static async Task<SdcpTestEnvironment> CreateSdcpHistoryServerAsync(
         string idsResponse, Dictionary<string, string> detailResponses)
     {
-        int port = GetFreeTcpPort();
-
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development
         });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
 
         WebApplication app = builder.Build();
         app.UseWebSockets();
@@ -1090,7 +1081,7 @@ public sealed class SdcpClientParsingTests
 
         await app.StartAsync();
 
-        string baseUrl = $"http://127.0.0.1:{port}";
+        string baseUrl = app.GetLoopbackBaseUrl();
         var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
         var client = new SdcpClient(httpClient, logger.Object, new Farm.Infrastructure.Settings.BackendTimeoutSettings());
@@ -1100,13 +1091,12 @@ public sealed class SdcpClientParsingTests
 
     private static async Task<SdcpTestEnvironment> CreateSilentSdcpServerAsync()
     {
-        int port = GetFreeTcpPort();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
             new WebApplicationOptions
             {
                 EnvironmentName = Environments.Development,
             });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
         WebApplication app = builder.Build();
         app.UseWebSockets();
         app.Map("/websocket", async context =>
@@ -1142,18 +1132,17 @@ public sealed class SdcpClientParsingTests
         return new SdcpTestEnvironment(
             app,
             client,
-            $"http://127.0.0.1:{port}");
+            app.GetLoopbackBaseUrl());
     }
 
     private static async Task<SdcpTestEnvironment> CreateRejectingSdcpServerAsync()
     {
-        int port = GetFreeTcpPort();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
             new WebApplicationOptions
             {
                 EnvironmentName = Environments.Development,
             });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
         WebApplication app = builder.Build();
         app.Map("/websocket", context =>
         {
@@ -1170,7 +1159,7 @@ public sealed class SdcpClientParsingTests
         return new SdcpTestEnvironment(
             app,
             client,
-            $"http://127.0.0.1:{port}");
+            app.GetLoopbackBaseUrl());
     }
 
     /// <summary>
@@ -1231,32 +1220,6 @@ public sealed class SdcpClientParsingTests
         });
     }
 
-    private static int GetFreeTcpPort()
-    {
-        // Bind to port 0 to get an OS-assigned ephemeral port. Re-verify availability before
-        // returning to reduce the TOCTOU race window in CI (port grabbed between Stop and bind).
-        for (int attempt = 0; attempt < 10; attempt++)
-        {
-            using TcpListener listener = new(IPAddress.Loopback, 0);
-            listener.Start();
-            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            listener.Stop();
-
-            try
-            {
-                using TcpListener verify = new(IPAddress.Loopback, port);
-                verify.Start();
-                verify.Stop();
-                return port;
-            }
-            catch (SocketException)
-            {
-                // Port was grabbed between allocation and verification; retry.
-            }
-        }
-
-        throw new InvalidOperationException("Unable to allocate a free TCP port after 10 attempts.");
-    }
 
     /// <summary>
     /// Wraps the Kestrel app, SdcpClient, and base URL for easy test cleanup.
