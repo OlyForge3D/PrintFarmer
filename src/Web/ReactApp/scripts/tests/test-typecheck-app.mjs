@@ -207,9 +207,12 @@ test("evaluate binds showListFilesOutput to the correct flag for every synchrono
       expectedShow: false,
     },
     {
-      name: "compiler exits nonzero (1) with no file diagnostics",
+      name: "compiler exits nonzero (2) with no file diagnostics",
       overrides: {
-        compilerResult: { status: 1, signal: null, error: undefined },
+        // status 2 passes the unexpected-status guard (status === 0 || 2) and
+        // reaches the "nonzero without file diagnostics" return; status 1 would
+        // be intercepted earlier and leave that return unpinned (#2984 review).
+        compilerResult: { status: 2, signal: null, error: undefined },
         output: "",
       },
       expectedOk: false,
