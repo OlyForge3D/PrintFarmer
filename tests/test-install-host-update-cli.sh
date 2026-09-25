@@ -227,6 +227,10 @@ printf 'HostUpdateExecution__RootDirectory=%s\n' "$STATE_ROOT" >"$ENV"
 check "a symlinked output is refused" \
     "[[ \$(write_config --env-file '$ENV' --output '$TEST_ROOT/link.json') == 1 && ! -e '$TEST_ROOT/elsewhere.json' ]]"
 check "a relative env file is a usage error" "[[ \$(write_config --env-file deploy.env --output '$CONFIG') == 2 ]]"
+ln -s "$STATE_ROOT" "$TEST_ROOT/state-link"
+printf 'HostUpdateExecution__RootDirectory=%s\n' "$TEST_ROOT/state-link" >"$ENV"
+check "a symlinked state root is not trusted as the config owner" \
+    "[[ \$(write_config --env-file '$ENV' --output '$CONFIG') == 0 && \$(ls -ld '$CONFIG' | awk '{print \$3}') == \$(id -un) ]] && grep -q 'not an absolute, non-link directory' '$TEST_ROOT/out.log'"
 
 # deploy-docker.sh opt-in hook: run the real function against a recording stub installer.
 HOOK_DIR="$TEST_ROOT/hook"
@@ -259,6 +263,8 @@ check "deploy hook dry run installs nothing" \
     "[[ \$(run_hook true $STABLE) == 0 && ! -s '$HOOK_LOG' ]] && grep -q 'DRY RUN' '$TEST_ROOT/hook.out'"
 check "deploy hook installs then writes config from the absolute env file" \
     "[[ \$(run_hook false $STABLE /media/assets) == 0 ]] && diff -q <(printf 'install --version $STABLE --asset-dir /media/assets\nwrite-config --env-file $HOOK_DIR/.env\n') '$HOOK_LOG' >/dev/null"
+check "deploy hook makes a relative asset directory absolute" \
+    "[[ \$(run_hook false $STABLE offline) == 0 ]] && head -n 1 '$HOOK_LOG' | grep -qx -- 'install --version $STABLE --asset-dir $HOOK_DIR/offline'"
 check "deploy hook warns and continues when the root is not configured" \
     "[[ \$(HOOK_WRITE_RC=3 run_hook false $STABLE) == 0 ]] && grep -q '^WARN' '$TEST_ROOT/hook.out'"
 check "deploy hook fails the deployment when install fails" \

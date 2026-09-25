@@ -1748,7 +1748,7 @@ function Install-HostUpdateCliIfRequested {
     $envPath = [System.IO.Path]::GetFullPath($EnvFilePath, (Get-Location).Path)
     $installArgs = @('install', '-Version', $HostUpdateCliVersion)
     if (-not [string]::IsNullOrWhiteSpace($HostUpdateCliAssets)) {
-        $installArgs += @('-AssetDir', $HostUpdateCliAssets)
+        $installArgs += @('-AssetDir', [System.IO.Path]::GetFullPath($HostUpdateCliAssets, (Get-Location).Path))
     }
 
     Write-Info "Installing signed host-update CLI $HostUpdateCliVersion..."

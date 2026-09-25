@@ -287,8 +287,9 @@ The runtime is detected from the host; musl/Alpine and macOS are refused.
 `write-config` writes `host-update.json` from only the deployment `.env`'s
 `HostUpdateExecution__*`, `HostUpdates__HostState__*`, `DB_PROVIDER` and
 `ConnectionStrings__Default` keys (last value wins); other secrets are never
-copied. On Linux the file is mode `0600`, owned by the owner of
-`HostUpdateExecution__RootDirectory` (override with `--owner`). On Windows
+copied. The file's owner is the owner of `HostUpdateExecution__RootDirectory`
+when that is an absolute, non-link directory, otherwise the current account
+(override with `--owner`/`-Owner`). On Linux the file is mode `0600`. On Windows
 inheritance is removed; `SYSTEM` and `Administrators` get full control and the
 owner account read. Values containing `$`, case-only duplicate keys, a key that
 is both a value and a section, and malformed key segments are refused without

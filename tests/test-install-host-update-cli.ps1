@@ -257,6 +257,17 @@ exit 0
     New-Item -ItemType Directory -Path (Join-Path $testRoot 'dir.json') | Out-Null
     Check 'a directory output is refused' ((Invoke-Installer @('write-config', '-EnvFile', $envFile, '-Output', (Join-Path $testRoot 'dir.json'))).ExitCode -eq 1)
     Check 'a relative env file is a usage error' ((Invoke-Installer @('write-config', '-EnvFile', 'deploy.env', '-Output', $config)).ExitCode -eq 2)
+    $stateLink = Join-Path $testRoot 'state-link'
+    if ($IsWindows) { New-Item -ItemType Junction -Path $stateLink -Target $stateRoot | Out-Null } else { New-Item -ItemType SymbolicLink -Path $stateLink -Target $stateRoot | Out-Null }
+    [System.IO.File]::WriteAllText($envFile, "HostUpdateExecution__RootDirectory=$stateLink`n")
+    $result = Invoke-Installer @('write-config', '-EnvFile', $envFile, '-Output', $config)
+    $linkOwnerSafe = if ($IsWindows) {
+        (@((Get-Acl -LiteralPath $config).GetAccessRules($true, $true, [System.Security.Principal.SecurityIdentifier]) |
+            ForEach-Object { $_.IdentityReference.Value } | Sort-Object -Unique) -join ',') -eq
+            ((@('S-1-5-18', 'S-1-5-32-544', [System.Security.Principal.WindowsIdentity]::GetCurrent().User.Value) | Sort-Object -Unique) -join ',')
+    } else { $true }
+    Check 'a linked state root is not trusted as the config owner' ($result.ExitCode -eq 0 -and $linkOwnerSafe -and
+        $result.Output.Contains('not an absolute, non-link directory'))
 
     # deploy-docker.ps1 opt-in hook: run the real function against a recording stub installer.
     $hookDir = Join-Path $testRoot 'hook'
@@ -287,6 +298,9 @@ exit [int]$env:HOOK_INSTALL_RC
     $hook = Invoke-Hook '1.2.3' $assets
     Check 'deploy hook installs then writes config from the absolute env file' ($hook.ExitCode -eq 0 -and
         ($hook.Log -join '|') -ceq "install -Version 1.2.3 -AssetDir $assets|write-config -EnvFile $(Join-Path $hookDir '.env')")
+    $hook = Invoke-Hook '1.2.3' 'offline'
+    Check 'deploy hook makes a relative asset directory absolute' ($hook.ExitCode -eq 0 -and
+        $hook.Log[0] -ceq "install -Version 1.2.3 -AssetDir $(Join-Path $hookDir 'offline')")
     $hook = Invoke-Hook '1.2.3' -WriteRc 3
     Check 'deploy hook warns and continues when the root is not configured' ($hook.ExitCode -eq 0 -and $hook.Output.Contains('was not written'))
     $hook = Invoke-Hook '1.2.3' -InstallRc 1

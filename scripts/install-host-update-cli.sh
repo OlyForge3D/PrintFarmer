@@ -16,7 +16,8 @@
 # write-config  Writes an owner-only (0600) host-update.json (default /etc/printfarmer/host-update.json)
 #               from the deployment .env's HostUpdateExecution__*, HostUpdates__HostState__*,
 #               DB_PROVIDER and ConnectionStrings__Default. The owner defaults to the owner of
-#               HostUpdateExecution__RootDirectory, or the current user when it does not exist.
+#               HostUpdateExecution__RootDirectory when it is an absolute, non-link directory,
+#               otherwise the current user.
 #
 # Exit codes: 0 done; 1 verification, validation or installation failed (nothing placed or
 # written); 2 usage; 3 write-config only: HostUpdateExecution__RootDirectory is not configured,
@@ -335,9 +336,11 @@ cmd_write_config() {
     if [[ -z "$owner" ]]; then
         local root
         root="$(LC_ALL=C awk '{ sub(/\r$/, "") } index($0, "=") > 0 && substr($0, 1, index($0, "=") - 1) == "HostUpdateExecution__RootDirectory" { value = substr($0, index($0, "=") + 1) } END { print value }' "$env_file")"
-        if [[ -e "$root" ]]; then
+        if [[ "$root" == /* && -d "$root" && ! -L "$root" ]]; then
             owner="$(owner_of "$root")" || fail "Could not read the owner of $root"
         else
+            [[ ! -e "$root" && ! -L "$root" ]] ||
+                log_warn "HostUpdateExecution__RootDirectory is not an absolute, non-link directory; host-update.json is owned by the current user" >&2
             owner="$(id -un)"
         fi
     fi

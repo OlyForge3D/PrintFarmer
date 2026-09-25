@@ -26,7 +26,8 @@
                   ConnectionStrings__Default. On Windows inheritance is removed and only SYSTEM,
                   Administrators (full control) and the owner account (read) have access; elsewhere
                   the file is mode 0600. The owner defaults to the owner of
-                  HostUpdateExecution__RootDirectory when it exists.
+                  HostUpdateExecution__RootDirectory when it is an absolute, non-link directory,
+                  otherwise the current account.
 
     Exit codes: 0 done; 1 verification, validation or installation failed (nothing placed or
     written); 2 usage; 3 write-config only: HostUpdateExecution__RootDirectory is not configured,
@@ -433,10 +434,15 @@ function Invoke-WriteConfig([string[]] $Arguments) {
     $config = ConvertTo-HostUpdateConfig $envFile
     $owner = [string] $options['Owner']
     if (-not $owner) {
-        if (Test-Path -LiteralPath $config.RootDirectory) {
-            $owner = Get-ItemOwner $config.RootDirectory
-        } elseif (-not $IsWindows) {
-            $owner = [string] (& id -un)
+        $rootDirectory = [string] $config.RootDirectory
+        if ((Test-FullyQualified $rootDirectory) -and (Test-Path -LiteralPath $rootDirectory -PathType Container) -and
+            -not (Test-Link $rootDirectory)) {
+            $owner = Get-ItemOwner $rootDirectory
+        } else {
+            if (Test-Path -LiteralPath $rootDirectory) {
+                [Console]::Error.WriteLine('HostUpdateExecution__RootDirectory is not an absolute, non-link directory; host-update.json is owned by the current account')
+            }
+            $owner = if ($IsWindows) { [System.Security.Principal.WindowsIdentity]::GetCurrent().Name } else { [string] (& id -un) }
         }
     }
     if (-not $IsWindows -and $owner) {

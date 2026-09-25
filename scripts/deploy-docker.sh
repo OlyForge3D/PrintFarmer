@@ -7515,7 +7515,12 @@ install_host_update_cli_if_requested() {
 
     local -a install_args=(install --version "$HOST_UPDATE_CLI_VERSION")
     if [ -n "${HOST_UPDATE_CLI_ASSETS:-}" ]; then
-        install_args+=(--asset-dir "$HOST_UPDATE_CLI_ASSETS")
+        local asset_dir="$HOST_UPDATE_CLI_ASSETS"
+        case "$asset_dir" in
+            /*) ;;
+            *) asset_dir="$(pwd)/$asset_dir" ;;
+        esac
+        install_args+=(--asset-dir "$asset_dir")
     fi
 
     local -a elevate=()
