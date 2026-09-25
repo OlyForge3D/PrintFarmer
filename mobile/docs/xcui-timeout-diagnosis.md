@@ -204,14 +204,16 @@ harness therefore makes the next occurrence fail fast and name its cause.
   bounded by the navigation budget, and otherwise fails with
   `App launch is not ready`.
 - **Snapshot attribution.** A failed shell snapshot reports either that the app
-  main run loop kept turning, so XCTest automation stalled, or that it stopped
-  at a stated offset from the snapshot start, so the app main thread was
-  blocked.
+  main run loop kept turning, or that it stopped at a stated offset from the
+  snapshot start, so the app main thread was blocked. A live app is attributed
+  to an XCTest automation stall only when the snapshot ran for more than 5s.
 - **Launch attribution.** Issues that XCTest records inside `app.launch()` are
   annotated with the newest beat's pid and timing. A pid that beats after the
   launch began shows that an app main thread was running, and matches the
   `Terminate …:<pid>` line when the old instance survived termination. Silence
-  longer than 5s attributes the stall to XCTest or the simulator.
+  longer than 5s attributes the stall to XCTest or the simulator. Only the
+  `setUp()` launch is bracketed; relaunches inside a test body keep XCTest's
+  unannotated failure.
 
 ### After-correction evidence
 

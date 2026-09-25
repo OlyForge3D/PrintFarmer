@@ -275,13 +275,16 @@ final class AppMainThreadHeartbeat {
 
     /// Classifies a failed snapshot using only locally read heartbeat state.
     func snapshotAttribution(startedAt: TimeInterval) -> String {
-        let elapsed = Self.seconds(max(0, now() - startedAt))
+        let duration = max(0, now() - startedAt)
+        let elapsed = Self.seconds(duration)
         guard let beat = lastBeat, let age else {
             return "\(diagnostic) (snapshot ran \(elapsed))"
         }
         if age <= Self.staleAfter {
-            return "\(diagnostic); the app main run loop kept turning during the \(elapsed) snapshot, "
-                + "so XCTest automation stalled rather than the app main thread"
+            let turning = "\(diagnostic); the app main run loop kept turning during the \(elapsed) snapshot"
+            // A quick non-timeout failure is not evidence that automation stalled.
+            guard duration > Self.staleAfter else { return turning }
+            return turning + ", so XCTest automation stalled rather than the app main thread"
         }
         let offset = beat - startedAt
         let relation = offset >= 0
@@ -1378,6 +1381,14 @@ final class UIWaitBudgetTests: XCTestCase {
         let attribution = probe.snapshotAttribution(startedAt: 107)
         XCTAssertTrue(attribution.contains("last beat 0.25s ago"), attribution)
         XCTAssertTrue(attribution.contains("XCTest automation stalled"), attribution)
+    }
+
+    func testQuickSnapshotFailureWithALiveAppDrawsNoStallConclusion() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { clock - 0.25 })
+        clock = 107.4
+        let attribution = probe.snapshotAttribution(startedAt: 107)
+        XCTAssertTrue(attribution.hasSuffix("kept turning during the 0.40s snapshot"), attribution)
     }
 
     func testSnapshotFailureKeepsTheUnderlyingErrorAndAttribution() {
