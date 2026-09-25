@@ -161,6 +161,23 @@ private final class ParkingOfflineWriteQueueStore: OfflineWriteQueueStoring, @un
     }
 }
 
+/// #3016: records the `serverID` of every API client the container builds, so a
+/// test can prove whether a no-active-server rebuild (`serverID == nil`) happened.
+private final class APIClientServerIDRecorder: @unchecked Sendable {
+    private let lock = NSLock()
+    private var recorded: [UUID?] = []
+
+    func record(_ serverID: UUID?) {
+        lock.lock(); defer { lock.unlock() }
+        recorded.append(serverID)
+    }
+
+    var serverIDs: [UUID?] {
+        lock.lock(); defer { lock.unlock() }
+        return recorded
+    }
+}
+
 /// Container-level authority proofs (issue #816, Gates A/B, blocker). Uses the
 /// real `ServiceContainer` + `ServerRegistry` with an injected snapshot trio.
 @MainActor
@@ -1475,16 +1492,20 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         XCTAssertNil(container.apiClient, "demo composition preserved")
     }
 
-    // MARK: #3004 — overlapping offline sync must not spuriously fence demo entry
+    // MARK: #3004 / #3016 — overlapping offline sync must not spuriously fence teardown
 
     /// Without `credentialedOwner`, `syncOfflineWriteQueue()` takes its unbound path,
     /// which invalidates the replay authority without any server/demo transition.
     /// With it, the active server has a valid token and owner, so a sync can bind.
-    private func makeDemoOverlapContainer(
+    /// `observeRegistry` lets registry changes drive the reconciliation worker
+    /// (`switchToNoActiveServer`, #3016).
+    private func makeOfflineUnbindOverlapContainer(
         recorder: SignalRFactoryRecorder,
         store: any OfflineWriteQueueStoring,
-        credentialedOwner: UUID? = nil
-    ) throws -> (container: ServiceContainer, serverID: UUID) {
+        credentialedOwner: UUID? = nil,
+        observeRegistry: Bool = false,
+        apiClientServerIDs: APIClientServerIDRecorder? = nil
+    ) throws -> (container: ServiceContainer, serverID: UUID, registry: ServerRegistry) {
         let reg = registry()
         let owners = ownerStore()
         let server = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
@@ -1503,13 +1524,14 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             serverRegistry: reg,
             credentialsStore: credentials,
             userDefaultsBox: box(),
-            observeRegistry: false,
+            observeRegistry: observeRegistry,
             farmSnapshotAuthority: FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!),
             farmSnapshotStore: FarmSnapshotStore(authority: FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("t2"))!)), rootURL: newRoot()),
             farmSnapshotOwnerStore: owners,
             synchronizeOfflineQueueOnStartup: false,
             offlineWriteQueueStore: store,
             apiClientFactory: { baseURL, generation, accessToken, authSessionToken, serverID in
+                apiClientServerIDs?.record(serverID)
                 let identity = accessToken.flatMap { token in
                     serverID.map {
                         AuthenticatedIdentity(
@@ -1528,7 +1550,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
             },
             signalRServiceFactory: recorder.factory
         )
-        return (container, server.id)
+        return (container, server.id, reg)
     }
 
     func testSwitchToDemoCompletesWhenOverlappingOfflineSyncInvalidatesReplayAuthority() async throws {
@@ -1536,7 +1558,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         defer { recorder.close() }
         let loadGate = AsyncBarrier()
         defer { loadGate.close() }
-        let (container, _) = try makeDemoOverlapContainer(
+        let (container, _, _) = try makeOfflineUnbindOverlapContainer(
             recorder: recorder,
             store: ParkingOfflineWriteQueueStore(loadGate: loadGate)
         )
@@ -1566,7 +1588,7 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         let loadGate = AsyncBarrier()
         defer { loadGate.close() }
         let owner = UUID()
-        let (container, serverID) = try makeDemoOverlapContainer(
+        let (container, serverID, _) = try makeOfflineUnbindOverlapContainer(
             recorder: recorder,
             store: ParkingOfflineWriteQueueStore(loadGate: loadGate),
             credentialedOwner: owner
@@ -1597,6 +1619,84 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         XCTAssertNotNil(container.apiClient, "the newer real composition stays current")
         XCTAssertFalse(container.signalRService is DemoSignalRService, "demo composition must not be applied")
         XCTAssertFalse(container.authService is DemoAuthService, "demo composition must not be applied")
+    }
+
+    func testNoActiveServerTeardownCompletesWhenOverlappingOfflineSyncInvalidatesReplayAuthority() async throws {
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: false)
+        defer { recorder.close() }
+        let loadGate = AsyncBarrier()
+        defer { loadGate.close() }
+        let (container, _, reg) = try makeOfflineUnbindOverlapContainer(
+            recorder: recorder,
+            store: ParkingOfflineWriteQueueStore(loadGate: loadGate),
+            observeRegistry: true
+        )
+        let realService = try XCTUnwrap(recorder.service(forHost: "a.example.com"))
+        let originalClient = try XCTUnwrap(container.apiClient)
+
+        // Park the worker's switchToNoActiveServer inside `offlineWriteQueue.unbind`.
+        try reg.setActive(id: nil)
+        await loadGate.waitUntilArrived()
+
+        // A non-transition invalidation + unbind completes while the teardown is parked.
+        await container.syncOfflineWriteQueue()
+        XCTAssertNil(container.currentOfflineWriteReplayIdentity)
+        loadGate.release()
+        await container.awaitActiveServerSettled()
+
+        XCTAssertTrue(realService.disconnectCalled, "a non-transition replay-authority invalidation must not abandon the no-active teardown")
+        XCTAssertEqual(recorder.createdBaseURLs.count, 2, "the no-active composition must be rebuilt")
+        XCTAssertFalse(container.apiClient === originalClient, "the real server composition must be replaced")
+        XCTAssertNil(container.printerControlsComposition, "no active server composition remains")
+        XCTAssertNil(container.currentOfflineWriteReplayIdentity)
+        let boundAfterTeardown = await container.offlineWriteQueue.boundIdentity
+        XCTAssertNil(boundAfterTeardown, "outbox stays unbound with no active server")
+    }
+
+    func testNoActiveServerTeardownSupersededByCompetingServerTransitionDuringUnbind() async throws {
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: false)
+        defer { recorder.close() }
+        let loadGate = AsyncBarrier()
+        defer { loadGate.close() }
+        let owner = UUID()
+        let apiClientServerIDs = APIClientServerIDRecorder()
+        let (container, serverID, reg) = try makeOfflineUnbindOverlapContainer(
+            recorder: recorder,
+            store: ParkingOfflineWriteQueueStore(loadGate: loadGate),
+            credentialedOwner: owner,
+            observeRegistry: true,
+            apiClientServerIDs: apiClientServerIDs
+        )
+        XCTAssertEqual(apiClientServerIDs.serverIDs, [serverID], "precondition: credentialed initial composition")
+
+        // Park the worker's switchToNoActiveServer inside `offlineWriteQueue.unbind`.
+        try reg.setActive(id: nil)
+        await loadGate.waitUntilArrived()
+
+        // A genuine competing transition (none -> A) lands while the teardown is parked.
+        // `switchToReal()` records the `.server(A)` target and advances the transition
+        // epoch synchronously, so the ordering does not depend on the registry
+        // observer's deferred Task.
+        try reg.setActive(id: serverID)
+        container.switchToReal()
+        XCTAssertEqual(apiClientServerIDs.serverIDs, [serverID, serverID], "precondition: newer A composition built")
+        loadGate.release()
+        await container.awaitActiveServerSettled()
+
+        // The superseded teardown must stop at the epoch fence: no re-invalidation
+        // retry, and never a no-active-server rebuild (`serverID == nil`).
+        XCTAssertFalse(apiClientServerIDs.serverIDs.contains(where: { $0 == nil }), "a superseded no-active teardown must never rebuild the no-server composition")
+        // initial + switchToReal + the worker's A reconciliation. A teardown that
+        // retried past the epoch fence would disconnect the newer A signalR and
+        // replace it (`replaceSignalRAfterSupersededSwitch`), creating a fourth.
+        XCTAssertEqual(recorder.createdBaseURLs.count, 3, "a superseded no-active teardown must not tear down the newer composition")
+        XCTAssertEqual(apiClientServerIDs.serverIDs.last, serverID, "the newer server composition is current")
+        XCTAssertNotNil(container.apiClient)
+        XCTAssertEqual(container.printerControlsComposition?.identity.serverID, serverID, "the newer server composition settles")
+        let newerIdentity = OfflineWriteReplayIdentity(serverID: serverID, userID: owner)
+        XCTAssertEqual(container.currentOfflineWriteReplayIdentity, newerIdentity, "newer replay authority binding established")
+        let boundAfterRelease = await container.offlineWriteQueue.boundIdentity
+        XCTAssertEqual(boundAfterRelease, newerIdentity, "newer outbox binding established")
     }
 
     // MARK: Structural helper — records factory-created services + a first-disconnect barrier

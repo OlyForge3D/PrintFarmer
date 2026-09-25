@@ -267,9 +267,12 @@ public static partial class HostUpdateCli
         string configurationFingerprint = HostUpdateRecoveryDrift.ConfigurationFingerprint(options, database);
         string? currentPlatform = HostUpdateRecoveryDrift.CurrentPlatform();
 
-        // A terminal RolledBack outcome makes confirm a durable no-op, so there is nothing to reapprove.
-        HostUpdateDriftReport drift = existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack }
-            ? new HostUpdateDriftReport([], configurationFingerprint, null)
+        // A terminal RolledBack outcome makes confirm a durable no-op, so there is nothing to reapprove;
+        // the manifest binding is still observed and reported so an unreadable one is never hidden.
+        bool rolledBack = existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack };
+        string observedManifestBinding = await ReadManifestBindingAsync(provider, request.ReleaseId, cancellationToken).ConfigureAwait(false);
+        HostUpdateDriftReport drift = rolledBack
+            ? HostUpdateRecoveryDrift.DetectAfterRollback(request, activities, installed, configurationFingerprint, observedManifestBinding)
             : HostUpdateRecoveryDrift.Detect(
                 request,
                 activities,
@@ -277,9 +280,10 @@ public static partial class HostUpdateCli
                 existingOutcome,
                 HostUpdateRecoveryDrift.ReadPolicy(configuration),
                 currentPlatform,
-                configurationFingerprint);
+                configurationFingerprint,
+                observedManifestBinding);
 
-        if (args.Confirm)
+        if (args.Confirm && !rolledBack)
         {
             string? driftRefusal = DriftRefusal(drift, args.ReapprovalToken);
             if (driftRefusal is not null)
@@ -457,6 +461,23 @@ public static partial class HostUpdateCli
         catch (TimeoutException)
         {
             return null;
+        }
+    }
+
+    /// <summary>
+    /// Reads the database manifest binding read-only (issue #3050). Any failure becomes an
+    /// <c>unreadable:&lt;type&gt;</c> observation, which drift detection always treats as drift; the
+    /// message is dropped because provider errors can carry connection details.
+    /// </summary>
+    private static async Task<string> ReadManifestBindingAsync(IServiceProvider provider, string releaseId, CancellationToken cancellationToken)
+    {
+        try
+        {
+            return await provider.GetRequiredService<IHostUpdateManifestBindingReader>().ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return HostUpdateRecoveryDrift.ManifestBindingUnreadablePrefix + exception.GetType().Name;
         }
     }
 

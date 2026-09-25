@@ -214,7 +214,7 @@ public sealed class HostUpdateCliPhysicalReconciliationTests : IDisposable, IAsy
     {
         SeedPendingRelease();
         (string? drift, string physical) = await TokensAsync();
-        File.WriteAllText(_host.DatabasePath, "not a database");
+        CliHostDatabase.BreakInventory(_host.DatabasePath);
 
         JsonElement preview = await PreviewPhysicalAsync();
         CliRun run = await ConfirmAsync(drift, physical);

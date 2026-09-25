@@ -100,6 +100,16 @@ internal static class CliHostDatabase
         db.SaveChanges();
     }
 
+    /// <summary>
+    /// Makes the printer command inventory unreadable while leaving the settings table (and so the
+    /// manifest-binding drift evidence) intact, isolating the inventory failure path.
+    /// </summary>
+    public static void BreakInventory(string databasePath)
+    {
+        using AppDbContext db = Open(databasePath);
+        db.Database.ExecuteSqlRaw("DROP TABLE \"QueueDispatchAttempts\";");
+    }
+
     public static (Guid? CommandId, bool RequiresReconciliation) ReadBarrier(string databasePath)
     {
         using AppDbContext db = Open(databasePath);
