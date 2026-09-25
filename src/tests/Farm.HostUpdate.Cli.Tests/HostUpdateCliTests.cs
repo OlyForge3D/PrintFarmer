@@ -292,7 +292,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
     {
         _host.SeedRecoveryRequired();
         string[] lines = File.ReadAllLines(_host.JournalPath);
-        lines[0] = lines[0].Replace("apply:before", "apply:tampered", StringComparison.Ordinal);
+        lines[1] = lines[1].Replace("apply:before", "apply:tampered", StringComparison.Ordinal);
         File.WriteAllLines(_host.JournalPath, lines);
 
         CliRun status = await RunAsync(["status", "--release", CliHostFixture.ReleaseId, "--json"]);
@@ -563,6 +563,142 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         DriftCodes(Envelope(run).GetProperty("result").GetProperty("drift")).Should().Equal("prior_state_changed_since_authorization");
     }
 
+    // --- Issue #3047: authorization-time baselines ----------------------------------------------
+
+    [HostStateFact]
+    public async Task Prior_state_rewritten_with_a_backdated_timestamp_is_drift()
+    {
+        _host.SeedInstalledState(recordedAt: DateTimeOffset.UtcNow.AddDays(-1));
+        _host.SeedRecoveryRequired();
+        _host.SeedInstalledState(recordedAt: DateTimeOffset.UtcNow.AddDays(-2), releaseId: "stable:1.2.1");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement drift = Envelope(run).GetProperty("result").GetProperty("drift");
+        DriftCodes(drift).Should().Equal("prior_state_changed_since_authorization");
+        drift.GetProperty("items")[0].GetProperty("observed").GetString().Should().StartWith("stable:1.2.1@sha256:");
+    }
+
+    [HostStateFact]
+    public async Task Prior_state_deleted_after_authorization_is_drift()
+    {
+        _host.SeedInstalledState();
+        _host.SeedRecoveryRequired();
+        File.Delete(Path.Combine(_host.StateDirectory, "installed-state.json"));
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement item = Envelope(run).GetProperty("result").GetProperty("drift").GetProperty("items")[0];
+        item.GetProperty("code").GetString().Should().Be("prior_state_changed_since_authorization");
+        item.GetProperty("observed").GetString().Should().Be(HostUpdateBaselineHashes.NoInstalledState);
+    }
+
+    [HostStateFact]
+    public async Task Journal_without_a_baseline_requires_reapproval_and_keeps_the_timestamp_fallback()
+    {
+        _host.SeedRecoveryRequired(withBaseline: false);
+
+        CliRun unrecorded = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+        _host.SeedInstalledState(recordedAt: DateTimeOffset.UtcNow.AddHours(1));
+        CliRun rewritten = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        DriftCodes(Envelope(unrecorded).GetProperty("result").GetProperty("drift")).Should().Equal("authorization_baseline_unrecorded");
+        DriftCodes(Envelope(rewritten).GetProperty("result").GetProperty("drift"))
+            .Should().Equal("authorization_baseline_unrecorded", "prior_state_changed_since_authorization");
+    }
+
+    [HostStateFact]
+    public async Task Confirm_against_a_journal_without_a_baseline_is_refused_with_exit_12()
+    {
+        _host.SeedRecoveryRequired(withBaseline: false);
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun refused = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--json"]);
+
+        refused.ExitCode.Should().Be(HostUpdateCliExitCodes.DriftUnapproved);
+        Envelope(refused).GetProperty("result").GetProperty("details")[0].GetString().Should().Be("authorization_baseline_unrecorded");
+        _host.Snapshot().Should().BeEquivalentTo(before);
+
+        CliRun approved = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", await PreviewTokenAsync(), "--json"]);
+
+        approved.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+    }
+
+    [HostStateFact]
+    public async Task Configuration_change_since_authorization_is_drift()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        string authorized = _host.CurrentBaseline().ConfigurationFingerprint;
+        File.WriteAllText(_host.ComposeFile, "services: { changed: {} }\n");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement drift = Envelope(run).GetProperty("result").GetProperty("drift");
+        DriftCodes(drift).Should().Equal("configuration_drift");
+        drift.GetProperty("items")[0].GetProperty("recorded").GetString().Should().Be(authorized);
+        drift.GetProperty("items")[0].GetProperty("observed").GetString().Should().Be(drift.GetProperty("configurationFingerprint").GetString());
+    }
+
+    [HostStateFact]
+    public async Task Trust_root_change_since_authorization_is_drift()
+    {
+        _host.SeedRecoveryRequired(baseline: _host.CurrentBaseline() with { TrustRootFingerprint = "sha256:" + new string('0', 64) });
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement item = Envelope(run).GetProperty("result").GetProperty("drift").GetProperty("items")[0];
+        item.GetProperty("code").GetString().Should().Be("trust_root_drift");
+        item.GetProperty("observed").GetString().Should().Be(HostUpdateTrustRoot.Fingerprint);
+    }
+
+    [HostStateFact]
+    public async Task Unpinned_recorded_trust_root_is_drift()
+    {
+        _host.SeedRecoveryRequired(CliHostFixture.Request() with { TrustRoot = "retired-root" });
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement item = Envelope(run).GetProperty("result").GetProperty("drift").GetProperty("items")[0];
+        item.GetProperty("code").GetString().Should().Be("trust_root_drift");
+        item.GetProperty("recorded").GetString().Should().Be("retired-root");
+    }
+
+    [Fact]
+    public void Baseline_is_read_only_from_the_leading_accepted_activities_with_a_known_schema()
+    {
+        HostUpdateExecutionRequest request = CliHostFixture.Request();
+        var baseline = new HostUpdateAuthorizationBaseline(1, "none", "sha256:c", HostUpdateTrustRoot.Fingerprint);
+        HostUpdateExecutionActivity Activity(HostUpdateExecutionState state, string phase, HostUpdateAuthorizationBaseline? recorded) =>
+            new("a", request.ReleaseId, state, phase, DateTimeOffset.UtcNow) { AuthorizationBaseline = recorded };
+
+        HostUpdateRecoveryDrift.AuthorizationBaseline(
+        [
+            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline),
+            Activity(HostUpdateExecutionState.Accepted, "accepted", null),
+        ]).Should().Be(baseline, "the first accepted activity carries the authorization baseline");
+        HostUpdateRecoveryDrift.AuthorizationBaseline(
+        [
+            Activity(HostUpdateExecutionState.Accepted, "accepted", null),
+            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline),
+        ]).Should().BeNull("a legacy authorization must not be rebased by a baseline captured on resume");
+        HostUpdateRecoveryDrift.AuthorizationBaseline(
+        [
+            Activity(HostUpdateExecutionState.Accepted, "accepted", null),
+            Activity(HostUpdateExecutionState.Preflight, "preflight:before", null),
+            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline),
+        ]).Should().BeNull("a baseline journaled after execution started does not describe the authorization");
+        HostUpdateRecoveryDrift.AuthorizationBaseline(
+        [
+            Activity(HostUpdateExecutionState.Accepted, "accepted", baseline with { SchemaVersion = 2 }),
+        ]).Should().BeNull("an unknown schema is treated as unrecorded");
+    }
+
     [HostStateFact]
     public async Task Confirm_with_unapproved_drift_is_refused_with_exit_12_before_side_effects()
     {
@@ -634,8 +770,8 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
     [HostStateFact]
     public async Task Preview_reports_image_only_identity_downtime_and_writer_fence_without_writes()
     {
-        _host.SeedRecoveryRequired();
         _host.SeedInstalledState();
+        _host.SeedRecoveryRequired();
         File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
         IReadOnlyDictionary<string, string> before = _host.Snapshot();
 
@@ -679,11 +815,11 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
     [Fact]
     public async Task Preview_reports_coordinated_restore_downtime_and_backup_evidence()
     {
+        _host.SeedInstalledState();
         _host.SeedJournal(
             CliHostFixture.Request(),
             (HostUpdateExecutionState.Migrating, "migration:before"),
             (HostUpdateExecutionState.RecoveryRequired, "failure"));
-        _host.SeedInstalledState();
         _host.SeedBackup();
         IReadOnlyDictionary<string, string> before = _host.Snapshot();
 

@@ -412,9 +412,7 @@ public sealed class GitHubSignedReleaseDiscovery(HttpClient httpClient, ISignedR
                 break;
         }
 
-        string identity = channel == "stable"
-            ? "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main"
-            : "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development";
+        string identity = HostUpdateTrustRoot.CertificateIdentity(channel);
         List<ReleaseCandidate> candidates = [];
         foreach (GitHubRelease release in releases
             .Where(candidate => !candidate.Draft && candidate.Prerelease == (channel == "insider")
@@ -700,7 +698,7 @@ internal sealed class ProcessCosignRunner : ICosignProcessRunner
 
 public sealed class ProcessCosignVerifier : ISignedReleaseVerifier
 {
-    private const string Issuer = "https://token.actions.githubusercontent.com";
+    private const string Issuer = HostUpdateTrustRoot.CosignIssuer;
     private readonly CosignVerifierOptions options;
     private readonly ICosignProcessRunner runner;
     private readonly Func<string> directoryFactory;
