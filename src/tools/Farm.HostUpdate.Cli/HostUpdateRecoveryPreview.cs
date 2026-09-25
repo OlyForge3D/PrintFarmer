@@ -113,6 +113,17 @@ internal static class HostUpdateRecoveryPreview
         // Each non-directory target is one restore process bounded by the backup timeout; owned
         // directories are copied back without a timeout.
         int restoreProcesses = restored.Count(name => !options.OwnedDirectories.ContainsKey(name));
+        List<string> restoreUnbounded = [BackupChecksumVerification];
+        if (restored.Any(options.OwnedDirectories.ContainsKey))
+        {
+            restoreUnbounded.Add(OwnedDirectoryCopy);
+        }
+
+        if (installed is not null)
+        {
+            restoreUnbounded.Add(HealthCheckFinalPass);
+        }
+
         return plan.Kind switch
         {
             HostUpdateRecoveryPlanKind.ImageOnlyRollback =>
@@ -123,7 +134,7 @@ internal static class HostUpdateRecoveryPreview
                     priorServices,
                     restored,
                     (restoreProcesses * options.BackupTimeoutSeconds) + (installed is null ? 0 : applyAndVerify),
-                    installed is null ? [BackupChecksumVerification, OwnedDirectoryCopy] : [BackupChecksumVerification, OwnedDirectoryCopy, HealthCheckFinalPass],
+                    [.. restoreUnbounded],
                     TimeoutBudgetBasis),
             HostUpdateRecoveryPlanKind.FenceReleaseOnly or HostUpdateRecoveryPlanKind.AlreadyRolledBack =>
                 new("none", [], [], 0, [], TimeoutBudgetBasis),

@@ -423,7 +423,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         _host.Snapshot().Should().BeEquivalentTo(before, "the seeded lock sentinel is not rewritten either");
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_redrives_only_the_pending_fence_release_and_is_idempotent_across_restarts()
     {
         _host.SeedRecoveryRequired();
@@ -450,7 +450,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         _host.Snapshot().Where(pair => pair.Key != lockKey).Should().BeEquivalentTo(before);
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_without_backup_or_prior_state_records_needs_operator()
     {
         _host.SeedRecoveryRequired();
@@ -491,7 +491,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         run.Output.Should().Contain("12 drift not reapproved").And.Contain("--reapprove-drift <token>");
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Preview_without_drift_reports_no_reapproval()
     {
         _host.SeedRecoveryRequired();
@@ -507,7 +507,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         drift.GetProperty("configurationFingerprint").GetString().Should().MatchRegex("^sha256:[0-9a-f]{64}$");
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Policy_change_since_authorization_is_reported_as_drift()
     {
         _host.SeedRecoveryRequired();
@@ -537,7 +537,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         DriftCodes(Envelope(run).GetProperty("result").GetProperty("drift")).Should().Equal("policy_unverifiable");
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Host_platform_change_since_authorization_is_drift()
     {
         string other = CliHostFixture.CurrentPlatform == "linux-arm64" ? "linux-amd64" : "linux-arm64";
@@ -552,7 +552,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         result.GetProperty("identity").GetProperty("target").GetProperty("hostPlatform").GetString().Should().Be(other);
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Prior_state_rewritten_after_authorization_is_drift()
     {
         _host.SeedRecoveryRequired();
@@ -563,7 +563,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         DriftCodes(Envelope(run).GetProperty("result").GetProperty("drift")).Should().Equal("prior_state_changed_since_authorization");
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_with_unapproved_drift_is_refused_with_exit_12_before_side_effects()
     {
         _host.SeedRecoveryRequired();
@@ -583,7 +583,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.FenceReleasePending);
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_with_a_stale_token_is_refused()
     {
         _host.SeedRecoveryRequired();
@@ -600,7 +600,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         _host.Snapshot().Should().BeEquivalentTo(before);
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_with_a_token_when_nothing_drifted_is_refused()
     {
         _host.SeedRecoveryRequired();
@@ -615,7 +615,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         _host.Snapshot().Should().BeEquivalentTo(before);
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_with_the_previewed_token_proceeds()
     {
         _host.SeedRecoveryRequired();
@@ -631,7 +631,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         File.Exists(_host.AdmissionClosedPath).Should().BeFalse();
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Preview_reports_image_only_identity_downtime_and_writer_fence_without_writes()
     {
         _host.SeedRecoveryRequired();
@@ -712,6 +712,24 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         result.GetProperty("recoveryEvidence").GetProperty("migrationStarted").GetBoolean().Should().BeTrue();
 
         _host.Snapshot().Should().BeEquivalentTo(before);
+    }
+
+    [Theory]
+    [InlineData(new[] { "database" }, false)]
+    [InlineData(new[] { "app-data" }, true)]
+    [InlineData(new[] { "app-data", "database" }, true)]
+    public void Coordinated_restore_reports_directory_copy_only_when_a_directory_is_restored(string[] targets, bool expectDirectoryCopy)
+    {
+        var options = new HostUpdateExecutionOptions();
+        options.OwnedDirectories["app-data"] = "/srv/app-data";
+        var plan = new HostUpdateRecoveryPlan(HostUpdateRecoveryPlanKind.CoordinatedRestore, "restore", null, "/backups/run");
+        var backup = new HostUpdateBackupManifest(CliHostFixture.ReleaseId, DateTimeOffset.UnixEpoch, targets, []);
+
+        HostUpdateDowntimePreview downtime = HostUpdateRecoveryPreview.Downtime(plan, installed: null, backup, options);
+
+        downtime.UnboundedSteps.Contains("owned_directory_copy").Should().Be(expectDirectoryCopy);
+        downtime.UnboundedSteps.Should().Contain("backup_checksum_verification");
+        downtime.TimeoutBudgetSeconds.Should().Be(targets.Count(t => t != "app-data") * options.BackupTimeoutSeconds);
     }
 
     [Fact]
