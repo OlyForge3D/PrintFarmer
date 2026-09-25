@@ -1648,24 +1648,56 @@ final class UIWaitBudgetTests: XCTestCase {
 
     /// Every launch and relaunch must go through the harness entry points, so
     /// none can start the app with asynchronous AttributeGraph layouts (#3035).
+    /// A lexical guard, not a parser: it strips comments and tolerates
+    /// whitespace and line breaks, but not string literals that mimic calls.
+    /// Other apps, such as SpringBoard, are built by bundle identifier and never
+    /// launched, so they are out of scope.
     func testEveryUITestLaunchUsesHarnessEntryPoints() throws {
         let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let sources = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
-            .filter { $0.pathExtension == "swift" }
+        let enumerator = try XCTUnwrap(FileManager.default.enumerator(at: directory, includingPropertiesForKeys: nil))
+        let sources = enumerator.compactMap { $0 as? URL }.filter { $0.pathExtension == "swift" }
         XCTAssertGreaterThan(sources.count, 1, "UI-test sources not readable at \(directory.path)")
-        let rawLaunch = try Regex(#"\.launch\(\)"#)
-        let rawApplication = try Regex(#"XCUIApplication\(\)"#)
+        var launches: [String] = []
         var applicationConstructions: [String] = []
         for source in sources {
-            let lines = try String(contentsOf: source, encoding: .utf8).components(separatedBy: .newlines)
-            for (index, line) in lines.enumerated()
-            where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
-                let location = "\(source.lastPathComponent):\(index + 1)"
-                XCTAssertFalse(line.contains(rawLaunch), "Raw launch bypasses the harness at \(location)")
-                if line.contains(rawApplication) { applicationConstructions.append(location) }
-            }
+            let code = Self.strippingComments(try String(contentsOf: source, encoding: .utf8))
+            launches += try Self.locations(of: Self.rawLaunch, in: code, file: source)
+            applicationConstructions += try Self.locations(of: Self.rawApplication, in: code, file: source)
         }
+        XCTAssertEqual(launches, [], "Launch through launchForPrintFarmerUITest")
         XCTAssertEqual(applicationConstructions.count, 1, "Construct apps with printFarmerUITest: \(applicationConstructions)")
+    }
+
+    func testLaunchScanStripsCommentsAndSeesSplitCalls() throws {
+        // Assembled from pieces so the source scan of this file does not match the probe.
+        let (dot, open, close, line) = (".", "/" + "*", "*" + "/", "/" + "/")
+        let code = Self.strippingComments([
+            "\(open) app\(dot)launch()",
+            "   XCUIApplication\("()") \(close) let a = 1 \(line) app\(dot)activate()",
+            "app",
+            "    \(dot)launch( )",
+            "XCUIApplication\("(\n)")"
+        ].joined(separator: "\n"))
+        let file = URL(fileURLWithPath: "/Probe.swift")
+        XCTAssertEqual(try Self.locations(of: Self.rawLaunch, in: code, file: file), ["Probe.swift:4"])
+        XCTAssertEqual(try Self.locations(of: Self.rawApplication, in: code, file: file), ["Probe.swift:5"])
+    }
+
+    private static let rawLaunch = #"\.\s*(launch|activate)\s*\(\s*\)"#
+    private static let rawApplication = #"XCUIApplication\s*\(\s*\)"#
+
+    /// Replaces block and line comments with their newlines, so offsets keep their line numbers.
+    private static func strippingComments(_ source: String) -> String {
+        guard let comments = try? Regex(#"/\*[\s\S]*?\*/|//[^\n]*"#) else { return source }
+        return source.replacing(comments) { match in
+            String(repeating: "\n", count: source[match.range].filter { $0 == "\n" }.count)
+        }
+    }
+
+    private static func locations(of pattern: String, in code: String, file: URL) throws -> [String] {
+        try code.matches(of: Regex(pattern)).map { match in
+            "\(file.lastPathComponent):\(code[..<match.range.lowerBound].filter { $0 == "\n" }.count + 1)"
+        }
     }
 }
 
@@ -1746,13 +1778,17 @@ extension XCUIApplication {
     }
 
     /// The only launch entry point for PrintFarmer UI tests. Fails instead of
-    /// launching without the harness environment.
-    func launchForPrintFarmerUITest(file: StaticString = #filePath, line: UInt = #line) {
+    /// launching without the harness environment. `willLaunch` runs only once
+    /// the guard passes, immediately before `launch()`.
+    func launchForPrintFarmerUITest(
+        willLaunch: () -> Void = {}, file: StaticString = #filePath, line: UInt = #line
+    ) {
         let mismatches = UITestLaunchEnvironment.mismatches(in: launchEnvironment)
         guard mismatches.isEmpty else {
             XCTFail("UI-test launch is missing harness environment \(mismatches)", file: file, line: line)
             return
         }
+        willLaunch()
         launch()
     }
 }
@@ -1801,8 +1837,7 @@ class PrintFarmerUITestCase: XCTestCase {
         testBudget = UIWaitBudget(timeout: executionTimeAllowance)
         app = .printFarmerUITest(arguments: ["--uitesting"] + additionalLaunchArguments)
         appHeartbeat = .live(launchedAt: ProcessInfo.processInfo.systemUptime)
-        launchWindow.begin()
-        app.launchForPrintFarmerUITest()
+        app.launchForPrintFarmerUITest(willLaunch: launchWindow.begin)
         launchWindow.end()
         if waitsForNavigationReadiness {
             waitForAuthenticatedShell()

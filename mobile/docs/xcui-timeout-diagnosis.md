@@ -337,20 +337,26 @@ the `AG_ASYNC_LAYOUTS` string alongside `AG_PRINT_LAYOUTS` and
   the SwiftUI↔UIKit bridge.
 
 **Harness fix.** Every UI-test launch sets `AG_ASYNC_LAYOUTS=0`, so layouts
-are built synchronously and comparisons are exact. The render then converges
-on its first pass regardless of runner load. There are no retries, skips,
-timeout changes or loosened assertions.
+are built synchronously and comparisons never report a pending layout as
+changed. In the local starvation A/B this removed the stall; CI shard results
+on the fix PR are the field evidence. There are no retries, skips, timeout
+changes or loosened assertions.
 
 - `UITestLaunchEnvironment.values` holds the harness environment
   (`PFARM_UI_TESTING=1`, `AG_ASYNC_LAYOUTS=0`).
 - `XCUIApplication.printFarmerUITest(arguments:)` builds every app, and
   `launchForPrintFarmerUITest()` is the only launch entry point. It fails the
-  test rather than launching without the harness environment. The base
+  test rather than launching without the harness environment, and it opens
+  the #3013 launch window only after that check passes. The base
   `setUp()` launch, the `PrinterDetailPanelsUITests` accessibility-text
   relaunch and both `LoginFlowUITests` preserve-state relaunches use it.
-- `UIWaitBudgetTests` asserts the factory's environment, the guard's
-  mismatch detection, and scans every `PrintFarmerUITests` source so a raw
-  `XCUIApplication()` or `.launch()` fails CI.
+- `UIWaitBudgetTests` asserts the factory's environment and the guard's
+  mismatch detection. It also scans every Swift source under
+  `PrintFarmerUITests/` so that a raw `XCUIApplication()`, `.launch()` or
+  `.activate()` fails CI. The scan is lexical: it strips comments and tolerates
+  whitespace and line breaks, but it does not parse string literals. Other
+  apps, such as SpringBoard, are built by bundle identifier and never
+  launched, so they are out of scope.
 
 **Why test-only.** The livelock needs the AttributeGraph queue to be starved
 while the `NavigationSplitView` root mounts. Release builds on real devices
@@ -368,9 +374,11 @@ an Apple Feedback report and any app-side mitigation are tracked in
 - another thread is in `AG::TypeDescriptorCache::drain_queue` or
   `TypeDescriptorCache::fetch` → `make_layout`.
 
-If a launch stall shows that pair, first confirm the launch environment
-carried `AG_ASYNC_LAYOUTS=0`. A launch-class failure without it is a different
-cause.
+That pair is the #3035 signature. If it appears, check whether the launch
+carried `AG_ASYNC_LAYOUTS=0`. A launch without it is still exposed to this
+cause. A signature that recurs with it present means the switch did not take
+effect or the livelock has another trigger. A launch-class failure without the
+signature has a different cause.
 
 ### After-correction evidence
 
