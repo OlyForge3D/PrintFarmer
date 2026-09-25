@@ -43,6 +43,9 @@ public class SettingsService : ISettingsService
     private Dictionary<string, long?> _settingsOriginWatermarks = [];
     private Dictionary<string, string> _settingsRowVersions = [];
 
+    // Heartbeats are stamped with server UtcNow; allow modest skew between API instances.
+    private static readonly TimeSpan HeartbeatClockSkewTolerance = TimeSpan.FromMinutes(5);
+
     /// <inheritdoc />
     public SettingsSectionSnapshot GetSectionSnapshot(string key) =>
         new(GetByKey(key), _settingsRowVersions[key]);
@@ -93,7 +96,7 @@ public class SettingsService : ISettingsService
                 .Select(e => e.SettingsJson).FirstOrDefaultAsync(ct);
             if (heartbeatJson is not null)
             {
-                discovery.LastHeartbeat = JsonSerializer.Deserialize<DateTime>(heartbeatJson);
+                ApplyHeartbeatTelemetry(discovery, heartbeatJson);
             }
         }
 
@@ -289,7 +292,7 @@ public class SettingsService : ISettingsService
             if (instance is NetworkDiscoverySettings discovery
                 && settingsByKey.TryGetValue(NetworkDiscoverySettings.HeartbeatStorageKey, out AppSettingsEntity? heartbeat))
             {
-                discovery.LastHeartbeat = JsonSerializer.Deserialize<DateTime>(heartbeat.SettingsJson);
+                ApplyHeartbeatTelemetry(discovery, heartbeat.SettingsJson);
             }
 
             newSettings[key] = instance;
@@ -299,6 +302,57 @@ public class SettingsService : ISettingsService
         _settings = newSettings;
         _settingsOriginWatermarks = newOriginWatermarks;
         _settingsRowVersions = newRowVersions;
+    }
+
+    /// <summary>
+    /// Applies the separately stored discovery heartbeat. Unreadable or implausible telemetry
+    /// is logged and reported as unknown liveness; it never yields a heartbeat timestamp or
+    /// falls back to the legacy value embedded in the editable section.
+    /// </summary>
+    private void ApplyHeartbeatTelemetry(NetworkDiscoverySettings discovery, string heartbeatJson)
+    {
+        DateTime heartbeat;
+        try
+        {
+            heartbeat = JsonSerializer.Deserialize<DateTime>(heartbeatJson);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Discovery heartbeat telemetry '{TelemetryKey}' is not a valid timestamp; discovery liveness is unknown until the next heartbeat",
+                NetworkDiscoverySettings.HeartbeatStorageKey);
+            MarkHeartbeatUnreadable(discovery);
+            return;
+        }
+
+        heartbeat = heartbeat.Kind switch
+        {
+            DateTimeKind.Local => heartbeat.ToUniversalTime(),
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(heartbeat, DateTimeKind.Utc),
+            _ => heartbeat,
+        };
+
+        // Heartbeats are written with the server's UtcNow, so a far-future value can only come
+        // from corruption and would otherwise suppress staleness detection indefinitely.
+        if (heartbeat > DateTime.UtcNow + HeartbeatClockSkewTolerance)
+        {
+            _logger.LogWarning(
+                "Discovery heartbeat telemetry '{TelemetryKey}' is {AheadSeconds:F0}s in the future; discovery liveness is unknown until the next heartbeat",
+                NetworkDiscoverySettings.HeartbeatStorageKey,
+                (heartbeat - DateTime.UtcNow).TotalSeconds);
+            MarkHeartbeatUnreadable(discovery);
+            return;
+        }
+
+        discovery.LastHeartbeat = heartbeat;
+        discovery.HeartbeatTelemetryUnreadable = false;
+    }
+
+    private static void MarkHeartbeatUnreadable(NetworkDiscoverySettings discovery)
+    {
+        discovery.LastHeartbeat = null;
+        discovery.HeartbeatTelemetryUnreadable = true;
     }
 
     /// <summary>

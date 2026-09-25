@@ -187,6 +187,14 @@ on NetworkDiscovery (with the legacy stored timestamp as a fallback until the
 first new heartbeat), but heartbeats never change its editable revision. A
 settings save cannot erase the separately stored liveness timestamp.
 
+If the telemetry row holds an unreadable timestamp (invalid JSON or value) or one
+more than five minutes in the future, settings load and checked save log a
+warning and expose `lastHeartbeat` as `null` without falling back to the legacy
+value. Unrelated settings still load. The background-service monitor widget
+reports discovery liveness as unknown until the next heartbeat overwrites the
+row; the settings API cannot distinguish this from a service that has never
+sent a heartbeat.
+
 The literal token `absent` represents an unpersisted configuration/default
 section. Its first save uses a unique-key-protected insert; concurrent first
 saves cannot overwrite each other. Existing sections use the portable

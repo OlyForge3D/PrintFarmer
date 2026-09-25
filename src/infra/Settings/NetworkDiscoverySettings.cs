@@ -80,6 +80,13 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public DateTime? LastHeartbeat { get; set; }
 
+    /// <summary>
+    /// Runtime-only flag set when the stored heartbeat telemetry exists but cannot be trusted,
+    /// so liveness is unknown rather than merely absent. Never persisted or exposed as a setting.
+    /// </summary>
+    [JsonIgnore]
+    public bool HeartbeatTelemetryUnreadable { get; set; }
+
     public void Validate()
     {
         EnsureUniqueSubnets();
