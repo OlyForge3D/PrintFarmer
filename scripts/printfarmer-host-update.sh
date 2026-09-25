@@ -39,6 +39,9 @@ is_absolute() {
 }
 
 config=""
+case "${1:-}" in
+    help|--help|-h) usage; exit 0 ;;
+esac
 if [[ "${1:-}" == "--config" ]]; then
     [[ $# -ge 2 ]] || fail_usage "--config requires a value"
     config="$2"

@@ -108,6 +108,10 @@ PRINTFARMER_HOST_UPDATE_CLI_DIR="$CLI_DIR" PRINTFARMER_DOTNET="fake-dotnet" \
 [[ "$code" -eq 2 ]] && pass "relative PRINTFARMER_DOTNET refused" || fail "relative PRINTFARMER_DOTNET refused (exit $code)"
 
 code=0
+bash "$WRAPPER" --help > /dev/null 2>&1 || code=$?
+[[ "$code" -eq 0 ]] && pass "--help works without --config or CLI dir" || fail "--help works without --config or CLI dir (exit $code)"
+
+code=0
 FAKE_EXIT=11 run_wrapper --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 || code=$?
 [[ "$code" -eq 11 ]] && pass "CLI exit code preserved" || fail "CLI exit code preserved (exit $code)"
 

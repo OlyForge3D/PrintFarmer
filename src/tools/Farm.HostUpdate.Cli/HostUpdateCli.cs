@@ -40,15 +40,30 @@ public static partial class HostUpdateCli
         Converters = { new JsonStringEnumConverter() },
     };
 
-    public static async Task<int> RunAsync(
+    public static Task<int> RunAsync(
         IReadOnlyList<string> args,
         IConfiguration configuration,
         TextWriter output,
         TextWriter error,
         CancellationToken cancellationToken)
     {
-        ArgumentNullException.ThrowIfNull(args);
         ArgumentNullException.ThrowIfNull(configuration);
+        return RunAsync(args, () => configuration, output, error, cancellationToken);
+    }
+
+    /// <summary>
+    /// Parses the command first, then loads configuration, so a malformed or unreadable
+    /// configuration source still honours the exit-code and <c>--json</c> contract (exit 3).
+    /// </summary>
+    public static async Task<int> RunAsync(
+        IReadOnlyList<string> args,
+        Func<IConfiguration> configurationFactory,
+        TextWriter output,
+        TextWriter error,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(configurationFactory);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
@@ -65,6 +80,18 @@ public static partial class HostUpdateCli
             return HostUpdateCliExitCodes.Success;
         }
 
+        IConfiguration configuration;
+        try
+        {
+            configuration = configurationFactory();
+        }
+        catch (Exception exception) when (exception is InvalidDataException or FormatException or IOException
+            or UnauthorizedAccessException or JsonException or System.Security.SecurityException)
+        {
+            // The message may contain host paths; only the exception type is reported.
+            return await EmitAsync(output, parsed.Json, HostUpdateCliExitCodes.ConfigurationUnproven, new CliFailure("configuration_unreadable", [exception.GetType().Name])).ConfigureAwait(false);
+        }
+
         ServiceProvider provider;
         HostUpdateExecutionOptions options;
         try
@@ -75,6 +102,11 @@ public static partial class HostUpdateCli
         catch (OptionsValidationException exception)
         {
             return await EmitAsync(output, parsed.Json, HostUpdateCliExitCodes.ConfigurationUnproven, new CliFailure("configuration_invalid", exception.Failures.ToArray())).ConfigureAwait(false);
+        }
+        catch (InvalidOperationException exception)
+        {
+            // Binder conversion failures (e.g. a non-boolean Enabled value).
+            return await EmitAsync(output, parsed.Json, HostUpdateCliExitCodes.ConfigurationUnproven, new CliFailure("configuration_invalid", [exception.GetType().Name])).ConfigureAwait(false);
         }
 
         await using (provider.ConfigureAwait(false))

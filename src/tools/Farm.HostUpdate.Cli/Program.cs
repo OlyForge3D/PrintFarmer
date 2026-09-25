@@ -24,13 +24,17 @@ while (index < args.Length)
     index += 2;
 }
 
-var builder = new ConfigurationBuilder();
-if (configPath is not null)
+IConfiguration LoadConfiguration()
 {
-    builder.AddJsonFile(configPath, optional: false, reloadOnChange: false);
-}
+    var builder = new ConfigurationBuilder();
+    if (configPath is not null)
+    {
+        builder.AddJsonFile(configPath, optional: false, reloadOnChange: false);
+    }
 
-builder.AddEnvironmentVariables();
+    builder.AddEnvironmentVariables();
+    return builder.Build();
+}
 
 using var cancellation = new CancellationTokenSource();
 Console.CancelKeyPress += (_, eventArgs) =>
@@ -39,4 +43,4 @@ Console.CancelKeyPress += (_, eventArgs) =>
     cancellation.Cancel();
 };
 
-return await HostUpdateCli.RunAsync(remaining, builder.Build(), Console.Out, Console.Error, cancellation.Token).ConfigureAwait(false);
+return await HostUpdateCli.RunAsync(remaining, LoadConfiguration, Console.Out, Console.Error, cancellation.Token).ConfigureAwait(false);

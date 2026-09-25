@@ -229,7 +229,12 @@ scripts\printfarmer-host-update.ps1 -Config C:\PrintFarmer\host-update.json reco
 The config file uses the API's `HostUpdateExecution`, `DB_PROVIDER` and
 connection-string keys; environment variables override it. The wrappers accept
 only absolute paths and validated release/request identifiers, and refuse
-anything else with exit 2 before the CLI runs. `PRINTFARMER_DOTNET` may name an
+anything else with exit 2 before the CLI runs. The PowerShell wrapper parses its
+own arguments (names case-insensitive, values case-sensitive) rather than using
+PowerShell parameter binding, so a usage error never prompts. `help` (or
+`--help`) prints usage without a config. A malformed or unreadable config file
+is reported by the CLI as exit 3 (`configuration_unreadable`), honouring
+`--json`. `PRINTFARMER_DOTNET` may name an
 absolute `dotnet` host. `--request-id` is optional and must match the binding
 recorded in the journal.
 

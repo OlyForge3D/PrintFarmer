@@ -1,6 +1,7 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 
 namespace Farm.HostUpdate.Cli.Tests;
 
@@ -64,6 +65,130 @@ public sealed class HostUpdateCliTests : IDisposable
 
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
         Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("configuration_invalid");
+    }
+
+    [Fact]
+    public async Task Malformed_config_file_is_configuration_unproven_with_a_json_envelope()
+    {
+        string config = Path.Combine(_host.Root, "malformed.json");
+        await File.WriteAllTextAsync(config, "{ \"HostUpdateExecution\": ");
+
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        int exitCode = await HostUpdateCli.RunAsync(
+            ["status", "--json"],
+            () => new ConfigurationBuilder().AddJsonFile(config, optional: false, reloadOnChange: false).Build(),
+            output,
+            error,
+            CancellationToken.None);
+        var run = new CliRun(exitCode, output.ToString(), error.ToString());
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        JsonElement result = Envelope(run).GetProperty("result");
+        result.GetProperty("code").GetString().Should().Be("configuration_unreadable");
+        run.Output.Should().NotContain(_host.Root.Replace("\\", "\\\\", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Unreadable_config_source_is_configuration_unproven()
+    {
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        int exitCode = await HostUpdateCli.RunAsync(
+            ["status"],
+            () => throw new UnauthorizedAccessException("denied"),
+            output,
+            error,
+            CancellationToken.None);
+
+        exitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        output.ToString().Should().Contain("configuration_unreadable");
+    }
+
+    [Fact]
+    public async Task Unconvertible_option_value_is_configuration_unproven()
+    {
+        CliRun run = await RunAsync(["status", "--json"], _host.Configuration(v => v["HostUpdateExecution:DrainTimeoutSeconds"] = "notanumber"));
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("configuration_invalid");
+    }
+
+    [Fact]
+    public async Task Usage_errors_are_reported_before_configuration_is_loaded()
+    {
+        bool loaded = false;
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        int exitCode = await HostUpdateCli.RunAsync(
+            ["recover", "--release", CliHostFixture.ReleaseId],
+            () =>
+            {
+                loaded = true;
+                throw new InvalidDataException();
+            },
+            output,
+            error,
+            CancellationToken.None);
+
+        exitCode.Should().Be(HostUpdateCliExitCodes.Usage);
+        loaded.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task Process_entrypoint_maps_a_malformed_config_file_to_exit_3_json()
+    {
+        string config = Path.Combine(_host.Root, "malformed.json");
+        await File.WriteAllTextAsync(config, "not json");
+
+        (int exitCode, string stdout) = await RunProcessAsync("--config", config, "status", "--json");
+
+        exitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        using JsonDocument document = JsonDocument.Parse(stdout);
+        document.RootElement.GetProperty("exitCode").GetInt32().Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
+        document.RootElement.GetProperty("result").GetProperty("code").GetString().Should().Be("configuration_unreadable");
+    }
+
+    [Fact]
+    public async Task Process_entrypoint_rejects_a_relative_config_path_as_usage()
+    {
+        (int exitCode, string stdout) = await RunProcessAsync("--config", "relative.json", "status");
+
+        exitCode.Should().Be(HostUpdateCliExitCodes.Usage);
+        stdout.Should().BeEmpty();
+    }
+
+    private static async Task<(int ExitCode, string Stdout)> RunProcessAsync(params string[] args)
+    {
+        string dll = Path.Combine(AppContext.BaseDirectory, "Farm.HostUpdate.Cli.dll");
+        string dotnet = Environment.GetEnvironmentVariable("DOTNET_HOST_PATH") is { Length: > 0 } hostPath && File.Exists(hostPath)
+            ? hostPath
+            : "dotnet";
+        var start = new System.Diagnostics.ProcessStartInfo(dotnet)
+        {
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+        };
+        start.ArgumentList.Add(dll);
+        foreach (string arg in args)
+        {
+            start.ArgumentList.Add(arg);
+        }
+
+        // Keep ambient HostUpdateExecution__* settings from influencing the child.
+        foreach (string key in start.Environment.Keys.Where(k => k.StartsWith("HostUpdateExecution__", StringComparison.OrdinalIgnoreCase)).ToList())
+        {
+            start.Environment.Remove(key);
+        }
+
+        using var process = System.Diagnostics.Process.Start(start)!;
+        using var timeout = new CancellationTokenSource(TimeSpan.FromMinutes(1));
+        Task<string> stdout = process.StandardOutput.ReadToEndAsync(timeout.Token);
+        Task<string> stderr = process.StandardError.ReadToEndAsync(timeout.Token);
+        await process.WaitForExitAsync(timeout.Token);
+        _ = await stderr;
+        return (process.ExitCode, await stdout);
     }
 
     [Fact]
