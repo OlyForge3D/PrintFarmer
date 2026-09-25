@@ -1,5 +1,8 @@
 ﻿using System.ComponentModel.DataAnnotations;
 using System.Text.Json;
+using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
+using Farm.Infrastructure;
 using Farm.Infrastructure.Authorization;
 using Farm.Infrastructure.Logging;
 using Farm.Infrastructure.Settings;
@@ -9,8 +12,10 @@ using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
 
 namespace Farm.Modules.Administration.Controllers;
 
@@ -21,12 +26,17 @@ public class UnifiedSettingsController(
     ISettingsService modularSettingsService,
     DiscoveryHeartbeatMonitorService discoveryMonitor,
     ILogger<UnifiedSettingsController> logger,
-    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null) : ControllerBase
+    Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? coverageBroadcaster = null,
+    IOptions<JsonOptions>? mvcJsonOptions = null) : ControllerBase
 {
     private readonly ISettingsService _modularSettingsService = modularSettingsService;
     private readonly DiscoveryHeartbeatMonitorService _discoveryMonitor = discoveryMonitor;
     private readonly ILogger<UnifiedSettingsController> _logger = logger;
     private readonly Farm.Infrastructure.Services.Spoolman.IFilamentCoverageBroadcaster? _coverageBroadcaster = coverageBroadcaster;
+    private readonly JsonSerializerOptions _sectionJsonOptions = mvcJsonOptions?.Value.JsonSerializerOptions ?? new(JsonSerializerDefaults.Web)
+    {
+        Converters = { new JsonStringEnumConverter() }
+    };
 
     // Keys for settings types that own their own secret fields (encrypted tokens, etc.) and must
     // not be exposed or mutated through the generic settings surface.  Each such type has a
@@ -99,6 +109,8 @@ public class UnifiedSettingsController(
     [HttpGet]
     public ActionResult<IDictionary<string, object>> Get()
     {
+        Response.Headers.CacheControl = "no-store";
+
         // Return all settings as a dictionary with SectionName (Key) as top-level keys
         IEnumerable<SettingMetadata> allMetadata = _modularSettingsService.GetAllMetadata();
         Dictionary<string, object> result = new();
@@ -111,8 +123,7 @@ public class UnifiedSettingsController(
                 continue;
             }
 
-            object settings = _modularSettingsService.GetByKey(meta.Key);
-            result[meta.Key] = settings ?? new { };
+            result[meta.Key] = ToSectionResponse(_modularSettingsService.GetSectionSnapshot(meta.Key));
         }
 
         return Ok(result);
@@ -369,8 +380,10 @@ public class UnifiedSettingsController(
                 return NotFound($"Settings key '{keyName}' not found");
             }
 
-            object settings = _modularSettingsService.GetByKey(keyName);
-            return Ok(settings);
+            SettingsSectionSnapshot snapshot = _modularSettingsService.GetSectionSnapshot(keyName);
+            Response.Headers.CacheControl = "no-store";
+            Response.Headers.ETag = $"\"{snapshot.RowVersion}\"";
+            return Ok(ToSectionResponse(snapshot));
         }
         catch (Exception ex)
         {
@@ -380,7 +393,7 @@ public class UnifiedSettingsController(
 
     /// <summary>
     /// Heartbeat endpoint for discovery service.
-    /// Updates the LastHeartbeat timestamp in NetworkDiscoverySettings to confirm service is alive.
+    /// Records telemetry separately from settings and exposes it as LastHeartbeat on settings reads.
     /// </summary>
     /// <remarks>
     /// Deliberately <c>[AllowAnonymous]</c>: the printer-discovery microservice posts this heartbeat
@@ -395,10 +408,15 @@ public class UnifiedSettingsController(
     /// here without updating the microservice would silently break discovery heartbeats.
     /// </remarks>
     /// <param name="keyName">The key name - should be "NetworkDiscovery".</param>
+    /// <param name="repository">Storage for heartbeat telemetry.</param>
+    /// <param name="cancellationToken">Request cancellation token.</param>
     /// <returns>NoContent on success.</returns>
     [AllowAnonymous]
     [HttpPost("{keyName}/heartbeat")]
-    public ActionResult SendHeartbeat(string keyName)
+    public async Task<ActionResult> SendHeartbeatAsync(
+        string keyName,
+        [FromServices] Farm.Infrastructure.Repositories.Settings.IAppSettingsRepository repository,
+        CancellationToken cancellationToken)
     {
         try
         {
@@ -415,16 +433,16 @@ public class UnifiedSettingsController(
                 return BadRequest(new { message = "Failed to get NetworkDiscoverySettings" });
             }
 
-            // Update the heartbeat timestamp
-            currentSettings.LastHeartbeat = DateTime.UtcNow;
-
-            // Save the updated settings
-            _modularSettingsService.Save(currentSettings);
+            DateTime heartbeat = DateTime.UtcNow;
+            await repository.SetAsync(
+                NetworkDiscoverySettings.HeartbeatStorageKey,
+                JsonSerializer.Serialize(heartbeat), cancellationToken);
+            await repository.SaveChangesAsync(cancellationToken);
 
             // Notify the background service monitor so it appears in the dashboard widget
             _discoveryMonitor.OnHeartbeatReceived();
 
-            _logger.LogDebug("Heartbeat received and recorded for NetworkDiscoverySettings at {Timestamp}", currentSettings.LastHeartbeat);
+            _logger.LogDebug("Heartbeat received and recorded for NetworkDiscoverySettings at {Timestamp}", heartbeat);
 
             return NoContent();
         }
@@ -443,6 +461,8 @@ public class UnifiedSettingsController(
     /// <returns>Result of save operation for the specified section.</returns>
     [RequirePermission("system_settings", "admin")]
     [HttpPost("{keyName}")]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    [ProducesResponseType(StatusCodes.Status428PreconditionRequired)]
     public async Task<ActionResult> UpdateSettingsByKeyNameAsync(string keyName, [FromBody] object settingsValues)
     {
         // Block settings types that manage their own secret fields.
@@ -454,7 +474,40 @@ public class UnifiedSettingsController(
         try
         {
             // Use the modular settings service to save the individual settings
-            await UpdateAppSettingsPropertyAsync(keyName, settingsValues);
+            if (settingsValues is not JsonElement { ValueKind: JsonValueKind.Object } json)
+            {
+                return BadRequest(new { message = "Settings must be a JSON object." });
+            }
+
+            string? rowVersion = null;
+            if (json.TryGetProperty("rowVersion", out JsonElement token))
+            {
+                if (token.ValueKind != JsonValueKind.String)
+                {
+                    return BadRequest(new { message = "rowVersion must be a string." });
+                }
+
+                rowVersion = token.GetString();
+            }
+
+            if (string.IsNullOrWhiteSpace(rowVersion))
+            {
+                return StatusCode(
+                    StatusCodes.Status428PreconditionRequired,
+                    new { message = "Reload settings and include their rowVersion before saving." });
+            }
+
+            if (rowVersion != SettingsSectionSnapshot.AbsentRowVersion)
+            {
+                Span<byte> bytes = stackalloc byte[9];
+                if (!Convert.TryFromBase64String(rowVersion, bytes, out int written)
+                    || RevisionETag.Decode(bytes[..written]) < 1)
+                {
+                    return BadRequest(new { message = "rowVersion is not a valid settings revision." });
+                }
+            }
+
+            SettingsSectionSnapshot saved = await UpdateAppSettingsPropertyAsync(keyName, json, rowVersion);
 
             // #709 item 5: coverage thresholds changed → fleet-wide invalidation.
             if (_coverageBroadcaster is not null
@@ -465,16 +518,35 @@ public class UnifiedSettingsController(
                     HttpContext.RequestAborted).ConfigureAwait(false);
             }
 
-            return Ok();
+            Response.Headers.ETag = $"\"{saved.RowVersion}\"";
+            return Ok(ToSectionResponse(saved));
+        }
+        catch (DbUpdateConcurrencyException ex)
+        {
+            _logger.LogWarning(ex, "Settings conflict for section '{Key}'", LogSanitizer.Sanitize(keyName));
+            const string message = "These settings were modified by another request. Reload the latest settings before saving again.";
+            return Conflict(new { message, errors = new Dictionary<string, string> { [keyName] = message } });
         }
         catch (ValidationException vex)
         {
             _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(keyName), LogSanitizer.Sanitize(vex.Message));
             return BuildValidationErrorResponse(vex, keyName);
         }
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
+        {
+            _logger.LogWarning(ex, "Invalid settings payload for section '{Key}'", LogSanitizer.Sanitize(keyName));
+            return BadRequest(new { message = $"Failed to save settings for class '{keyName}': {ex.Message}" });
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            return BadRequest(new { message = $"Failed to save settings for class '{keyName}': {ex.Message}" });
+            _logger.LogError(ex, "Failed to save settings section '{Key}'", LogSanitizer.Sanitize(keyName));
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { message = "Settings could not be saved. Reload to confirm their current values before retrying." });
         }
     }
 
@@ -499,50 +571,23 @@ public class UnifiedSettingsController(
         return _keyNameToClassNameMapCache.TryGetValue(keyName, out string? className) ? className : null;
     }
 
-    private async Task UpdateAppSettingsPropertyAsync(string keyName, object settingsValues)
+    private async Task<SettingsSectionSnapshot> UpdateAppSettingsPropertyAsync(
+        string keyName, JsonElement settingsValues, string rowVersion)
     {
-        // For now, we'll use the modular settings service to save individual settings
-        // and then reload the unified AppSettings. This approach allows us to support
-        // any settings class without hardcoding specific mappings.
         _ = MapKeyNameToClassName(keyName) ?? throw new ArgumentException($"Unknown settings key: {keyName}");
+        Type settingsType = _modularSettingsService.GetByKey(keyName).GetType();
+        IAppSetting typedSettings = settingsValues.Deserialize(settingsType, _sectionJsonOptions) as IAppSetting
+            ?? throw new ArgumentException($"Invalid settings for key: {keyName}");
+        return await _modularSettingsService.SaveWithConcurrencyCheckAsync(
+            typedSettings, rowVersion, HttpContext.RequestAborted);
+    }
 
-        // Save to modular settings service (this updates the underlying configuration)
-        if (settingsValues is System.Text.Json.JsonElement jsonElement)
-        {
-            // Get the settings type from the modular service using the key
-            object currentSettings = _modularSettingsService.GetByKey(keyName);
-            Type settingsType = currentSettings.GetType();
-
-            // Deserialize the JSON to the correct type
-            object? typedSettings = JsonSerializer.Deserialize(jsonElement.GetRawText(), settingsType);
-            if (typedSettings != null)
-            {
-                // Run the same validation the bulk POST path runs. Without this, invalid values
-                // that the bulk endpoint would reject with a structured 400 would silently persist
-                // through the per-key endpoint. ValidationException bubbles to the caller, which
-                // translates it into the shared structured 400 response.
-                if (typedSettings is IValidatableSetting validatable)
-                {
-                    _logger.LogDebug("Settings POST (per-key): Validating section '{Key}'", LogSanitizer.Sanitize(keyName));
-                    validatable.Validate();
-                    _logger.LogDebug("Settings POST (per-key): Validation succeeded for section '{Key}'", LogSanitizer.Sanitize(keyName));
-                }
-
-                // Save using the modular service
-                await Task.Run(() =>
-                {
-                    System.Reflection.MethodInfo? saveMethod = typeof(ISettingsService).GetMethod("Save");
-                    if (saveMethod != null)
-                    {
-                        System.Reflection.MethodInfo genericSaveMethod = saveMethod.MakeGenericMethod(settingsType);
-                        _ = genericSaveMethod.Invoke(_modularSettingsService, new[] { typedSettings });
-                    }
-                });
-
-                // No need to reload - Save() already updated the in-memory _settings dictionary
-                // and cleared the change tracker to ensure fresh data on next query
-            }
-        }
+    private JsonObject ToSectionResponse(SettingsSectionSnapshot snapshot)
+    {
+        JsonObject response = JsonSerializer.SerializeToNode(
+            snapshot.Value, snapshot.Value.GetType(), _sectionJsonOptions)!.AsObject();
+        response["rowVersion"] = snapshot.RowVersion;
+        return response;
     }
 
     /// <summary>

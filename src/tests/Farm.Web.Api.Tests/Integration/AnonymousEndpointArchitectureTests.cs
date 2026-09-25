@@ -63,7 +63,7 @@ public sealed class AnonymousEndpointArchitectureTests
                 "GET /api/internal/slicer-host/printers/{printerId} - returns only the slicer's minimal printer projection after the configured shared service key is accepted; missing configuration fails with 503 and a missing or invalid key fails with 401 before printer access.",
             ["Farm.Modules.Administration.Controllers.UnifiedSettingsController.GetSettingsByKeyName [api/settings/{keyName}]"] =
                 "GET /api/settings/{keyName} - exposes only the discovery agent's fail-closed section allowlist.",
-            ["Farm.Modules.Administration.Controllers.UnifiedSettingsController.SendHeartbeat [api/settings/{keyName}/heartbeat]"] =
+            ["Farm.Modules.Administration.Controllers.UnifiedSettingsController.SendHeartbeatAsync [api/settings/{keyName}/heartbeat]"] =
                 "POST /api/settings/{keyName}/heartbeat - accepts only the discovery agent heartbeat section.",
             ["Farm.Modules.Identity.Controllers.UsersController.CheckAvailabilityAsync [api/users/availability]"] =
                 "GET /api/users/availability - validates registration identifiers before account creation.",

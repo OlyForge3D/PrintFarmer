@@ -161,6 +161,41 @@ data-router branch for free and would not have caught this.
 - **Partial Failure Handling**: If some sections fail validation or network save while others succeed, successful baselines advance, error messages remain pinned to failed sections, and in-flight user edits are strictly preserved.
 - **No Batch Saves**: Strictly no `saveAllSettings` or batch `POST /api/settings` calls.
 
+### Concurrent Settings Saves
+
+Each section returned by `GET /api/settings` or `GET /api/settings/{keyName}`
+includes an opaque `rowVersion` captured with its values. Keep this token with
+the draft and include it in the flat JSON body of `POST /api/settings/{keyName}`.
+The successful response contains the saved section and its new `rowVersion`;
+per-key reads and successful saves also return the quoted token as `ETag`.
+The write precondition is the JSON `rowVersion`, not an `If-Match` header.
+
+A missing token returns **428**, a malformed token **400**, and a stale token
+**409** with a section-scoped error. Reload the latest settings before trying
+again; never fetch a new token and attach it to an old draft automatically.
+Successful sections advance their own baseline/token; failed sections retain
+their edits. Clients targeting an older server may still receive responses
+without this additive property, but the new server does not accept unguarded
+per-key writes.
+
+The explicit conflict reload discards all drafts on the settings page, including
+other groups, only after the reload succeeds. Failed reloads preserve edits.
+
+Discovery heartbeats persist under the separate `NetworkDiscovery.Heartbeat`
+telemetry key in the existing settings table. Reads still expose `lastHeartbeat`
+on NetworkDiscovery (with the legacy stored timestamp as a fallback until the
+first new heartbeat), but heartbeats never change its editable revision. A
+settings save cannot erase the separately stored liveness timestamp.
+
+The literal token `absent` represents an unpersisted configuration/default
+section. Its first save uses a unique-key-protected insert; concurrent first
+saves cannot overwrite each other. Existing sections use the portable
+`AppSettingsEntity.Revision` EF concurrency token, with a single commit and
+cache publication only after success. No schema migration is required.
+The legacy batch endpoint and specialized settings endpoints retain their
+existing contracts. The iOS app currently has no caller of this generic
+per-key settings endpoint and needs no change.
+
 ## URL Contract
 
 `SettingsShell` is entirely URL-driven. Deep-links, palette navigation, and the back

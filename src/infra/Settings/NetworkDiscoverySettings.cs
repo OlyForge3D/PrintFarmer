@@ -12,6 +12,8 @@ public class NetworkDiscoverySettings : IAppSetting, IValidatableSetting
 {
     public const string SectionName = "NetworkDiscovery";
 
+    public const string HeartbeatStorageKey = "NetworkDiscovery.Heartbeat";
+
     public static string SectionKey => SectionName;
 
     [SettingDisplay(Name = "Enable discovery", Description = "Enable or disable network printer discovery.", InputType = SettingInputType.Boolean)]

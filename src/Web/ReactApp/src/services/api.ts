@@ -524,8 +524,9 @@ export class ApiClient {
   async saveSettings<T = Record<string, unknown>>(
     className: string,
     settings: T
-  ): Promise<void> {
-    await this.client.post(`/settings/${className}`, settings);
+  ): Promise<T & { rowVersion?: string }> {
+    const res = await this.client.post(`/settings/${className}`, settings);
+    return res.data;
   }
 
   async getUpdateChannelSettings(): Promise<UpdateChannelSettings> {
@@ -534,7 +535,7 @@ export class ApiClient {
 
   async updateUpdateChannelSettings(
     settings: UpdateChannelSettings,
-  ): Promise<void> {
+  ): Promise<UpdateChannelSettings> {
     return this.saveSettings("UpdateChannel", settings);
   }
 
@@ -650,7 +651,7 @@ export class ApiClient {
   }
 
   /** Update cost tracking settings. */
-  async updateCostTrackingSettings(settings: import("@/types/api").CostTrackingSettings): Promise<void> {
+  async updateCostTrackingSettings(settings: import("@/types/api").CostTrackingSettings): Promise<import("@/types/api").CostTrackingSettings> {
     return this.saveSettings("CostTracking", settings);
   }
 
