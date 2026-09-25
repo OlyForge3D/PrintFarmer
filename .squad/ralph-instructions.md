@@ -64,10 +64,20 @@ Before starting or resuming any issue, read `~/.squad/machine-capabilities.json`
 
 **Slots count running sessions, not claims.** Each round, call
 `get_sessions_status` and count, per category, the issue sessions in this project
-that are running (`is_running: true`), whoever created them. Your own Ralph
-session and non-issue sessions do not count. Under `squad watch --execute`, count
-the agents running in this invocation; agents from earlier rounds have exited.
-Review sub-agents run inside their issue session and do not count.
+that are running (`is_running: true`), whoever created them. Under
+`squad watch --execute`, count the agents running in this invocation; agents from
+earlier rounds have exited. Review sub-agents run inside their issue session and
+do not count.
+
+**Tie each session to its issue by branch, not name** (the app renames sessions
+to their PR title). An issue session's branch contains `squad/{issue}-` or
+`squad-{issue}-`, possibly after a prefix such as `jpapiez-`. When you create an
+issue session, tell it to call `rename_branch` with `squad-{issue}-{slug}` first
+if its branch lacks that pattern. Otherwise, map a session to its issue through
+`created_pr_number` and that PR's `Closes #N`. The category comes from that
+issue's `needs:xcode` label. A running `autopilot` session you cannot map
+counts against every category; report it. Your own Ralph session and
+non-`autopilot` (owner-driven) sessions do not count.
 
 A **paused** session is an issue session on this host that is idle or interrupted
 before its issue is done (PR merged, blocked, or released). It keeps its GitHub
@@ -78,17 +88,20 @@ claim but holds no slot.
 - When a category has a free slot, resume its highest-priority paused session
   first by messaging it (`send_session_message`). Under `squad watch --execute`,
   spawn one agent that continues from the issue's existing branch or PR. Start a
-  new issue in that category only when it has no paused sessions.
+  new issue in that category only when it has no resumable paused sessions. A
+  session awaiting user input or plan approval cannot be resumed by you: list it
+  in your round report for the owner, and do not let it block the category.
 - Never create a second session for an issue that already has one.
 - Over the limit (for example after a crash): message nothing beyond the limit;
-  the extra sessions become paused when their turn ends.
+  the extra sessions become paused when their turn ends. Report the
+  over-subscription and the sessions involved in your round report.
 - A paused session with an open PR keeps its claim; comment once "Paused on
   <machine>: waiting for a slot". A paused session with no open PR is released:
-  push any commits to its `squad/{issue}-{slug}` branch, unassign the issue, and
-  comment "Released by <machine>: no slot; continue from branch `<branch>`" (or
-  "nothing pushed").
-- Before starting any issue, check for an existing `squad/{issue}-*` branch and
-  continue it rather than creating a new one.
+  push any commits to its branch, unassign the issue, and comment "Released by
+  <machine>: no slot; continue from branch `<branch>`" (or "nothing pushed").
+- Before starting any issue, check for an existing remote branch containing
+  `squad/{issue}-` or `squad-{issue}-`, and continue it rather than creating a
+  new one.
 - A session that cannot be resumed (worktree gone, repeated failure) goes through
   Escalation below.
 - Leave issues you have not started unassigned so another host can take them.
