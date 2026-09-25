@@ -6,6 +6,7 @@ import type {
   DispatchRecoveryClearResult,
   DispatchRecoveryRequest,
   DispatchRecoveryResult,
+  QueuedPrintJobWithFileMetaDto,
 } from '@/types/api';
 
 /**
@@ -58,6 +59,47 @@ function failureKind(
     default:
       return 'invalid';
   }
+}
+
+export interface QueueCandidatePage {
+  jobs: QueuedPrintJobWithFileMetaDto[];
+  /**
+   * Server `X-Has-More`: whether the unscoped page was full. Authorization is
+   * applied after pagination, so a short response does not prove the end.
+   * `null` when the header is absent (older server / unexposed header).
+   */
+  hasMore: boolean | null;
+}
+
+function readHasMore(headers: unknown): boolean | null {
+  if (!headers || typeof headers !== 'object') {
+    return null;
+  }
+  const value = (headers as Record<string, unknown>)['x-has-more'];
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const normalized = value.trim().toLowerCase();
+  return normalized === 'true' ? true : normalized === 'false' ? false : null;
+}
+
+/** One unfiltered active-queue page for dispatch-recovery candidate discovery. */
+export async function getQueueCandidatePage(
+  limit: number,
+  offset: number
+): Promise<QueueCandidatePage> {
+  const params = new URLSearchParams({
+    sortBy: 'priority',
+    limit: String(limit),
+    offset: String(offset),
+  });
+  const response = await client.get<QueuedPrintJobWithFileMetaDto[]>(
+    `/job-queue-analytics?${params.toString()}`
+  );
+  return {
+    jobs: Array.isArray(response.data) ? response.data : [],
+    hasMore: readHasMore(response.headers),
+  };
 }
 
 export async function getDispatchReconciliation(

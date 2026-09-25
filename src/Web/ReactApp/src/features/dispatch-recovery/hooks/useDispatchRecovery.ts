@@ -3,11 +3,11 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { QueryClient } from '@tanstack/react-query';
 import { isAxiosError } from 'axios';
 import { AuthContext } from '@/common/contexts/auth-context';
-import { apiClient } from '@/services/api';
 import {
   clearDispatchRecoveryBlock,
   getDispatchReconciliation,
   getDispatchRecoveryAudit,
+  getQueueCandidatePage,
   recoverDispatchClaim,
 } from '@/services/api/dispatchRecoveryApi';
 import type {
@@ -134,16 +134,16 @@ export function useDispatchRecoveryCandidates(options: { enabled?: boolean } = {
     queryFn: async () => {
       const all: QueuedPrintJobWithFileMetaDto[] = [];
       for (let page = 0; page < CANDIDATE_MAX_PAGES; page += 1) {
-        const batch = (await apiClient.getAnalyticsQueueJobs(
-          undefined,
-          undefined,
-          undefined,
-          'priority',
+        const { jobs, hasMore } = await getQueueCandidatePage(
           CANDIDATE_PAGE_SIZE,
           page * CANDIDATE_PAGE_SIZE
-        )) as QueuedPrintJobWithFileMetaDto[];
-        all.push(...batch);
-        if (batch.length < CANDIDATE_PAGE_SIZE) {
+        );
+        all.push(...jobs);
+        // Authorization runs after server pagination, so a short page for a
+        // scoped caller does not prove the end; trust the server's X-Has-More
+        // and only fall back to the row count when the header is absent.
+        const more = hasMore ?? jobs.length >= CANDIDATE_PAGE_SIZE;
+        if (!more) {
           break;
         }
       }

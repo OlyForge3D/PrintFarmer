@@ -31,6 +31,7 @@ public class CorsStartupTests
         Assert.Contains("If-Match", policy.Headers);
         Assert.Contains("ETag", policy.ExposedHeaders);
         Assert.Contains("Location", policy.ExposedHeaders);
+        Assert.Contains("X-Has-More", policy.ExposedHeaders);
         Assert.False(policy.AllowAnyOrigin);
         Assert.False(policy.AllowAnyHeader);
     }

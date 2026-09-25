@@ -436,7 +436,11 @@ calls the four routes through `services/api/dispatchRecoveryApi.ts`.
   no cancel or retry action. The resource polls every 30 seconds only while a
   claim is indeterminate; queue SignalR events invalidate it otherwise.
   Queue-dashboard candidates come from an unfiltered, fully paged queue read,
-  so filters and pagination cannot hide a warning. A banner stays mounted
+  so filters and pagination cannot hide a warning. Because
+  `GET /api/job-queue-analytics` applies authorization after pagination, a
+  scoped caller can get a short page before the end; the endpoint returns
+  `X-Has-More` (`true` when the unscoped page filled `limit`) and the UI keeps
+  paging while it is `true`. A banner stays mounted
   until the reconciliation read reports the claim closed, and a recorded
   recovery notice (with its audit link) stays until the operator dismisses it.
   Queue views hide Start Print and Cancel while a job's dispatch outcome is

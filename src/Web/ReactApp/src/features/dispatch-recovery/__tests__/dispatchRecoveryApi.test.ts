@@ -7,6 +7,7 @@ import {
   clearDispatchRecoveryBlock,
   getDispatchReconciliation,
   getDispatchRecoveryAudit,
+  getQueueCandidatePage,
   recoverDispatchClaim,
 } from '@/services/api/dispatchRecoveryApi';
 
@@ -36,6 +37,24 @@ describe('dispatchRecoveryApi', () => {
   it('reports a null ETag when the server sends none', async () => {
     get.mockResolvedValue({ data: { printerId: 'p1' }, headers: {} });
     await expect(getDispatchReconciliation('p1')).resolves.toMatchObject({ etag: null });
+  });
+
+  it('reads an unfiltered candidate page and the X-Has-More continuation header', async () => {
+    get.mockResolvedValue({ data: [], headers: { 'x-has-more': 'true' } });
+
+    const page = await getQueueCandidatePage(1000, 2000);
+
+    expect(get).toHaveBeenCalledWith('/job-queue-analytics?sortBy=priority&limit=1000&offset=2000');
+    expect(page).toEqual({ jobs: [], hasMore: true });
+  });
+
+  it.each([
+    [{ 'x-has-more': 'false' }, false],
+    [{}, null],
+    [{ 'x-has-more': 'maybe' }, null],
+  ])('maps X-Has-More headers %j to %s', async (headers, expected) => {
+    get.mockResolvedValue({ data: [], headers });
+    await expect(getQueueCandidatePage(10, 0)).resolves.toMatchObject({ hasMore: expected });
   });
 
   it('sends If-Match and Idempotency-Key on recover and maps 200', async () => {

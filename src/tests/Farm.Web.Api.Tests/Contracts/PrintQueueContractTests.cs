@@ -366,6 +366,8 @@ public sealed class PrintQueueContractTests : IAsyncLifetime
 
         using HttpResponseMessage listResponse = await client.GetAsync("/api/job-queue-analytics?limit=1000");
         _ = listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        // Fewer than 1000 jobs are seeded, so the unscoped page proves the end.
+        _ = listResponse.Headers.GetValues("X-Has-More").Should().Equal("false");
         using JsonDocument listDocument = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
         JsonElement entry = listDocument.RootElement.EnumerateArray().Single(item =>
             string.Equals(

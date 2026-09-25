@@ -35,7 +35,7 @@ public static class CorsStartup
                 _ = policy.AllowCredentials();
                 _ = policy.WithHeaders("Content-Type", "Authorization", "x-correlation-id", "traceparent", "x-signalr-user-agent", "x-requested-with",
                     "Idempotency-Key", "If-Match");
-                _ = policy.WithExposedHeaders("ETag", "Location");
+                _ = policy.WithExposedHeaders("ETag", "Location", "X-Has-More");
                 _ = policy.WithMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS");
             });
         });
