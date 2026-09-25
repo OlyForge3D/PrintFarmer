@@ -239,16 +239,8 @@ public class SpoolmanServiceProbeEgressTests
 
         public static RecordingLoopbackServer Start(Func<HttpListenerRequest, (HttpStatusCode Status, string? Location)> responder)
         {
-            using System.Net.Sockets.TcpListener probe = new(IPAddress.Loopback, 0);
-            probe.Start();
-            int port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-
-            string baseUrl = $"http://127.0.0.1:{port}";
-            HttpListener listener = new();
-            listener.Prefixes.Add(baseUrl + "/");
-            listener.Start();
-            return new RecordingLoopbackServer(listener, baseUrl, responder);
+            (HttpListener listener, int port) = LoopbackHttpListener.Start();
+            return new RecordingLoopbackServer(listener, $"http://127.0.0.1:{port}", responder);
         }
 
         private async Task AcceptLoopAsync()
