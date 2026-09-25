@@ -14,8 +14,12 @@
       printfarmer-host-update.ps1 help
 
     Environment:
-      PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing Farm.HostUpdate.Cli.dll (required)
-      PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH)
+      PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing the CLI (default: cli\ beside an
+                                       installed package's wrapper). A self-contained package launcher
+                                       (Farm.HostUpdate.Cli.exe) runs directly; otherwise
+                                       Farm.HostUpdate.Cli.dll runs on the dotnet host.
+      PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH;
+                                       refused for a self-contained package)
 
     Exit codes are the CLI's (see docs/HOST_UPDATE_RUNBOOK.md); the wrapper itself only returns 2
     for a usage or setup error, before the CLI runs. Arguments are parsed by the wrapper rather
@@ -123,22 +127,39 @@ if (-not (Test-FullyQualified $config)) {
 }
 
 $cliDir = $env:PRINTFARMER_HOST_UPDATE_CLI_DIR
+# An installed package (issue #3041) carries its self-contained CLI in cli\ beside this wrapper.
+if ([string]::IsNullOrEmpty($cliDir) -and (Test-Path -LiteralPath (Join-Path $PSScriptRoot 'host-update-cli-package.json') -PathType Leaf)) {
+    $cliDir = Join-Path $PSScriptRoot 'cli'
+}
 if (-not (Test-FullyQualified $cliDir)) {
     Exit-Usage 'PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory'
 }
 
-$cliDll = Join-Path $cliDir 'Farm.HostUpdate.Cli.dll'
-if (-not (Test-Path -LiteralPath $cliDll -PathType Leaf)) {
-    Exit-Usage 'Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR'
-}
-
-$dotnetHost = 'dotnet'
-if ($env:PRINTFARMER_DOTNET) {
-    if (-not (Test-FullyQualified $env:PRINTFARMER_DOTNET) -or -not (Test-Path -LiteralPath $env:PRINTFARMER_DOTNET -PathType Leaf)) {
-        Exit-Usage 'PRINTFARMER_DOTNET must be an absolute executable path'
+$cliAppHost = Join-Path $cliDir ($IsWindows ? 'Farm.HostUpdate.Cli.exe' : 'Farm.HostUpdate.Cli')
+$launcherArgs = [System.Collections.Generic.List[string]]::new()
+if (Test-Path -LiteralPath $cliAppHost -PathType Leaf) {
+    # Self-contained package: the launcher carries its own runtime, so no dotnet host is used.
+    if ($env:PRINTFARMER_DOTNET) {
+        Exit-Usage 'PRINTFARMER_DOTNET must not be set for a self-contained CLI package'
     }
 
-    $dotnetHost = $env:PRINTFARMER_DOTNET
+    $launcher = $cliAppHost
+} else {
+    $cliDll = Join-Path $cliDir 'Farm.HostUpdate.Cli.dll'
+    if (-not (Test-Path -LiteralPath $cliDll -PathType Leaf)) {
+        Exit-Usage 'Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR'
+    }
+
+    $launcher = 'dotnet'
+    if ($env:PRINTFARMER_DOTNET) {
+        if (-not (Test-FullyQualified $env:PRINTFARMER_DOTNET) -or -not (Test-Path -LiteralPath $env:PRINTFARMER_DOTNET -PathType Leaf)) {
+            Exit-Usage 'PRINTFARMER_DOTNET must be an absolute executable path'
+        }
+
+        $launcher = $env:PRINTFARMER_DOTNET
+    }
+
+    $launcherArgs.Add($cliDll)
 }
 
 # The CLI re-validates everything, including the canonical release grammar and option combinations.
@@ -151,5 +172,5 @@ if ($null -ne $confirm) { $cliArgs.Add('--confirm'); $cliArgs.Add($confirm) }
 if ($null -ne $reapproveDrift) { $cliArgs.Add('--reapprove-drift'); $cliArgs.Add($reapproveDrift) }
 if ($json) { $cliArgs.Add('--json') }
 
-& $dotnetHost $cliDll --config $config @cliArgs
+& $launcher @launcherArgs --config $config @cliArgs
 exit $LASTEXITCODE

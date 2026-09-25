@@ -13,8 +13,12 @@
 # recorded authorization (CLI exit 12).
 #
 # Environment:
-#   PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing Farm.HostUpdate.Cli.dll (required)
-#   PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH)
+#   PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing the CLI (default: cli/ beside an
+#                                    installed package's wrapper). A self-contained package launcher
+#                                    (Farm.HostUpdate.Cli) runs directly; otherwise
+#                                    Farm.HostUpdate.Cli.dll runs on the dotnet host.
+#   PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH;
+#                                    refused for a self-contained package)
 #
 # Exit codes are the CLI's (see docs/HOST_UPDATE_RUNBOOK.md); the wrapper itself only ever
 # returns 2 for a usage or setup error, before the CLI runs.
@@ -56,13 +60,26 @@ is_absolute "$config" || fail_usage "--config must be an absolute path"
 # Existence/readability is proven by the CLI (exit 3): a test here cannot tell denied from absent.
 
 cli_dir="${PRINTFARMER_HOST_UPDATE_CLI_DIR:-}"
+# An installed package (issue #3041) carries its self-contained CLI in cli/ beside this wrapper.
+if [[ -z "$cli_dir" && -f "$SCRIPT_DIR/host-update-cli-package.json" ]]; then
+    cli_dir="$SCRIPT_DIR/cli"
+fi
 [[ -n "$cli_dir" ]] && is_absolute "$cli_dir" || fail_usage "PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory"
-cli_dll="$cli_dir/Farm.HostUpdate.Cli.dll"
-[[ -f "$cli_dll" ]] || fail_usage "Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR"
+cli_apphost="$cli_dir/Farm.HostUpdate.Cli"
+if [[ -f "$cli_apphost" ]]; then
+    # Self-contained package: the launcher carries its own runtime, so no dotnet host is used.
+    [[ -x "$cli_apphost" ]] || fail_usage "Farm.HostUpdate.Cli in PRINTFARMER_HOST_UPDATE_CLI_DIR is not executable"
+    [[ -z "${PRINTFARMER_DOTNET:-}" ]] || fail_usage "PRINTFARMER_DOTNET must not be set for a self-contained CLI package"
+    launcher=("$cli_apphost")
+else
+    cli_dll="$cli_dir/Farm.HostUpdate.Cli.dll"
+    [[ -f "$cli_dll" ]] || fail_usage "Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR"
 
-dotnet_host="${PRINTFARMER_DOTNET:-dotnet}"
-if [[ -n "${PRINTFARMER_DOTNET:-}" ]]; then
-    is_absolute "$dotnet_host" && [[ -x "$dotnet_host" ]] || fail_usage "PRINTFARMER_DOTNET must be an absolute executable path"
+    dotnet_host="${PRINTFARMER_DOTNET:-dotnet}"
+    if [[ -n "${PRINTFARMER_DOTNET:-}" ]]; then
+        is_absolute "$dotnet_host" && [[ -x "$dotnet_host" ]] || fail_usage "PRINTFARMER_DOTNET must be an absolute executable path"
+    fi
+    launcher=("$dotnet_host" "$cli_dll")
 fi
 
 [[ $# -ge 1 ]] || fail_usage "missing command"
@@ -106,4 +123,4 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-exec "$dotnet_host" "$cli_dll" --config "$config" "${args[@]}"
+exec "${launcher[@]}" --config "$config" "${args[@]}"

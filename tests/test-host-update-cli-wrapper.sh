@@ -124,6 +124,76 @@ code=0
 FAKE_EXIT=11 run_wrapper --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 || code=$?
 [[ "$code" -eq 11 ]] && pass "CLI exit code preserved" || fail "CLI exit code preserved (exit $code)"
 
+# Issue #3041: a self-contained package launcher runs directly, without a dotnet host.
+APPHOST_DIR="$TEST_ROOT/apphost-cli"
+mkdir -p "$APPHOST_DIR"
+cat > "$APPHOST_DIR/Farm.HostUpdate.Cli" <<EOF
+#!/bin/bash
+printf '%s\n' "\$@" > "$ARGS_LOG"
+exit "\${FAKE_EXIT:-0}"
+EOF
+chmod +x "$APPHOST_DIR/Farm.HostUpdate.Cli"
+
+run_apphost() {
+    rm -f "$ARGS_LOG"
+    local code=0
+    env -u PRINTFARMER_DOTNET PRINTFARMER_HOST_UPDATE_CLI_DIR="$APPHOST_DIR" \
+        bash "$WRAPPER" "$@" > /dev/null 2>&1 || code=$?
+    return "$code"
+}
+
+code=0
+FAKE_EXIT=10 run_apphost --config "$CONFIG" status --json || code=$?
+if [[ "$code" -eq 10 && -f "$ARGS_LOG" && "$(cat "$ARGS_LOG")" == "$(printf '%s\n' --config "$CONFIG" status --json)" ]]; then
+    pass "self-contained launcher runs directly and preserves its exit code"
+else
+    fail "self-contained launcher runs directly (exit $code, args: $(tr '\n' ' ' < "$ARGS_LOG" 2>/dev/null || true))"
+fi
+
+rm -f "$ARGS_LOG"
+code=0
+PRINTFARMER_HOST_UPDATE_CLI_DIR="$APPHOST_DIR" PRINTFARMER_DOTNET="$FAKE_DOTNET" \
+    bash "$WRAPPER" --config "$CONFIG" status > /dev/null 2>&1 || code=$?
+[[ "$code" -eq 2 && ! -f "$ARGS_LOG" ]] && pass "PRINTFARMER_DOTNET refused for a self-contained launcher" \
+    || fail "PRINTFARMER_DOTNET refused for a self-contained launcher (exit $code)"
+
+chmod -x "$APPHOST_DIR/Farm.HostUpdate.Cli"
+case "$(uname -s)" in
+    MINGW*|MSYS*|CYGWIN*)
+        # Git Bash reports any #! file as executable, so the mode check cannot be exercised here.
+        pass "non-executable launcher refused (skipped: no POSIX modes on Windows)"
+        ;;
+    *)
+        code=0
+        run_apphost --config "$CONFIG" status || code=$?
+        [[ "$code" -eq 2 && ! -f "$ARGS_LOG" ]] && pass "non-executable launcher refused" \
+            || fail "non-executable launcher refused (exit $code)"
+        ;;
+esac
+
+# An installed package resolves its CLI from cli/ beside the wrapper when no directory is given.
+PACKAGE_DIR="$TEST_ROOT/package"
+mkdir -p "$PACKAGE_DIR/cli"
+cp "$WRAPPER" "$REPO_ROOT/scripts/common-utils.sh" "$PACKAGE_DIR/"
+printf '{}\n' > "$PACKAGE_DIR/host-update-cli-package.json"
+: > "$PACKAGE_DIR/cli/Farm.HostUpdate.Cli.dll"
+rm -f "$ARGS_LOG"
+code=0
+env -u PRINTFARMER_HOST_UPDATE_CLI_DIR PRINTFARMER_DOTNET="$FAKE_DOTNET" \
+    bash "$PACKAGE_DIR/printfarmer-host-update.sh" --config "$CONFIG" status > /dev/null 2>&1 || code=$?
+if [[ "$code" -eq 0 && "$(cat "$ARGS_LOG" 2>/dev/null)" == "$(printf '%s\n' "$PACKAGE_DIR/cli/Farm.HostUpdate.Cli.dll" --config "$CONFIG" status)" ]]; then
+    pass "installed package resolves cli/ beside the wrapper"
+else
+    fail "installed package resolves cli/ beside the wrapper (exit $code)"
+fi
+
+rm -f "$PACKAGE_DIR/host-update-cli-package.json" "$ARGS_LOG"
+code=0
+env -u PRINTFARMER_HOST_UPDATE_CLI_DIR PRINTFARMER_DOTNET="$FAKE_DOTNET" \
+    bash "$PACKAGE_DIR/printfarmer-host-update.sh" --config "$CONFIG" status > /dev/null 2>&1 || code=$?
+[[ "$code" -eq 2 && ! -f "$ARGS_LOG" ]] && pass "no package marker means no default CLI dir" \
+    || fail "no package marker means no default CLI dir (exit $code)"
+
 if [[ "$failures" -gt 0 ]]; then
     printf '%d wrapper test(s) failed\n' "$failures" >&2
     exit 1
