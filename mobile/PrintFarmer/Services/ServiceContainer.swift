@@ -630,7 +630,7 @@ final class ServiceContainer: @unchecked Sendable {
         // C: capture the displaced real signalR and disconnect that EXACT instance so a
         // connected real receive loop cannot linger as an orphan under demo.
         let displacedSignalR = self.signalRService
-        guard await unbindOfflineWriteQueueForDemo(initialRevision: replayRevision, epoch: epoch) else {
+        guard await unbindOfflineWriteQueueForTransition(initialRevision: replayRevision, epoch: epoch) else {
             return false
         }
         await displacedSignalR.disconnect()
@@ -677,13 +677,14 @@ final class ServiceContainer: @unchecked Sendable {
         return true
     }
 
-    /// Unbinds the outbox for demo entry (#3004). Only a newer composition intent — a
-    /// transition-epoch advance — supersedes demo entry. A replay-authority
+    /// Unbinds the outbox for a composition teardown — demo entry (#3004) or the
+    /// no-active-server switch (#3016). Only a newer composition intent — a
+    /// transition-epoch advance — supersedes the teardown. A replay-authority
     /// invalidation that is not a transition (e.g. `syncOfflineWriteQueue()` on its
     /// unbound path, or session expiry) also wants the outbox unbound, so re-invalidate
     /// and retry instead of failing closed. The epoch is re-checked after every unbind
-    /// attempt, so a genuine server/demo transition still wins.
-    private func unbindOfflineWriteQueueForDemo(initialRevision: UInt64, epoch: Int) async -> Bool {
+    /// attempt, so a genuine server/demo/none transition still wins.
+    private func unbindOfflineWriteQueueForTransition(initialRevision: UInt64, epoch: Int) async -> Bool {
         var revision = initialRevision
         while true {
             let unbound = await offlineWriteQueue.unbind(authorityRevision: revision)
@@ -1232,8 +1233,7 @@ final class ServiceContainer: @unchecked Sendable {
 
     private func switchToNoActiveServer(epoch: Int) async {
         let replayRevision = offlineWriteReplayAuthority.invalidate()
-        guard await offlineWriteQueue.unbind(authorityRevision: replayRevision),
-              transitionEpoch.isCurrent(epoch) else {
+        guard await unbindOfflineWriteQueueForTransition(initialRevision: replayRevision, epoch: epoch) else {
             return
         }
         guard activeServerID != nil else { return }

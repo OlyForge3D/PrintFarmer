@@ -42,7 +42,7 @@ bundle complete; this table is not an archive layout or an implementation.
 | Offline verification evidence and tooling | Preserve provenance and approved trust-root continuity, expiry/revocation evidence and pinned verification tools. Bundle-supplied signer material cannot enroll itself. Verification must work after source branch movement without live ancestry lookup. |
 | Target application and infrastructure images | Include every selected platform/service image, database/runtime/proxy/add-on dependency and required worker under the supported topology contract. Six published application images alone are not every installation's infrastructure. Verify archive content against immutable identity; no missing-image downloads or builds. |
 | Prior recovery set | Retain complete compatible prior manifests/images and effective configuration, schema/format compatibility and backup references. Prior-channel artifacts are recovery-only under explicit verified authorization, not new offers or implicit channel consent. |
-| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list and the Cosign bundle (#3041) are the status/recovery tool. Installer placement and generated configuration are still open (#3045). No reliance on the API, package manager, registry or internet being available during recovery. |
+| Deployment and recovery tools | Package the approved host-local updater/status/recovery tool, matching templates, configuration schema, provider-native tooling and these operator instructions. The signed CLI archive, its checksum list, the Cosign bundle (#3041), per-archive SBOMs and the verifying installer (#3045) are the status/recovery tool. No reliance on the API, package manager, registry or internet being available during recovery. |
 | Installation-specific protected backup | Coordinated databases, models/G-code/profiles/artifacts, keys, certificates and config at the same consistency point. Keep private material access-controlled and separate from the redistributable release bundle. Never include publisher credentials. |
 
 ## Import and continuity rules
@@ -117,7 +117,6 @@ physical printer command is acceptable. Retain full failure evidence, prove
 fences stay closed on uncertainty, and confirm safe post-restore reconciliation.
 The host-local CLI is delivered (#2980). Its open recovery gaps are:
 
-- installer placement and generated configuration (#3045)
 - physical printer reconciliation (#2999)
 - provider and topology coverage (#3000)
 

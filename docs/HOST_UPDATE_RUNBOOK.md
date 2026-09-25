@@ -16,10 +16,10 @@ post_date: "2026-09-24"
 This runbook is part of #2664. It does not prove that manual or offline
 recovery is complete. **Do not enable managed installation on the strength of
 this guide.** The host-local status/recovery CLI (#2980) now ships as a signed
-package; see [Failure and recovery](#failure-and-recovery). The following
-delivery gates are still open:
+package with a verifying installer and generated host configuration (#3045);
+see [Failure and recovery](#failure-and-recovery). The following delivery gates
+are still open:
 
-- installer placement and generated host configuration (#3045)
 - the physical printer reconciliation gate (#2999)
 - provider and topology coverage (#3000)
 - complete offline bundles (#2981)
@@ -207,11 +207,11 @@ not complete.** #2980 added the API-independent engine entry point and its
 fixed-operation wrappers. #2998 added drift reapproval and the downtime preview.
 #3047 and #3050 added journaled authorization and manifest-binding baselines.
 #3041 publishes the CLI as a signed, self-contained package for a declared host
-matrix.
+matrix. #3045 adds a verifying installer, generated host configuration and
+per-archive SBOMs.
 
 These gaps still block a claim of complete recovery support:
 
-- installer placement and configuration generation (#3045)
 - a physical printer command reconciliation gate (#2999)
 - PostgreSQL/SQL Server and monolith/split topology coverage (#3000)
 
@@ -232,8 +232,13 @@ identity as `update-manifest.json`:
 | `printfarmer-host-update-cli-v<version>-linux-x64.tar.gz` | Linux x64 CLI plus wrappers |
 | `printfarmer-host-update-cli-v<version>-linux-arm64.tar.gz` | Linux ARM64 CLI plus wrappers |
 | `printfarmer-host-update-cli-v<version>-win-x64.tar.gz` | Windows x64 CLI plus wrappers |
-| `printfarmer-host-update-cli-v<version>-SHA256SUMS` | `sha256sum` list of the three archives |
+| `printfarmer-host-update-cli-v<version>-<runtime>.spdx.json` | SPDX SBOM of each archive's extracted contents (#3045) |
+| `printfarmer-host-update-cli-v<version>-SHA256SUMS` | `sha256sum` list of the three archives and three SBOMs |
 | `printfarmer-host-update-cli-v<version>-SHA256SUMS.sigstore.json` | Cosign bundle for that list |
+
+The SBOMs are generated with Syft from each extracted archive, so they cover the
+bundled .NET runtime. They are inventory only: they are not license-enriched,
+and the release license-compliance gate does not cover `src/tools/`.
 
 Supported hosts:
 
@@ -260,6 +265,66 @@ Install the CLI of the release installed on the host (the release whose API ran
 the update), into a directory named for its version. Keep the previous version
 directory until any update or recovery it may need is finished.
 
+#### Automated install (#3045)
+
+`scripts/install-host-update-cli.sh` (Linux) and
+`scripts/install-host-update-cli.ps1` (Windows, or Linux with PowerShell 7)
+perform the manual steps below and nothing more. They require `cosign` on
+`PATH`, never build the CLI, and never fall back to an unverified source. They
+are not rollout authorization: nothing is enabled or started.
+
+```bash
+sudo scripts/install-host-update-cli.sh install --version 1.2.3
+sudo scripts/install-host-update-cli.sh write-config --env-file /srv/printfarmer/.env
+```
+
+```powershell
+pwsh scripts\install-host-update-cli.ps1 install -Version 1.2.3
+pwsh scripts\install-host-update-cli.ps1 write-config -EnvFile C:\PrintFarmer\.env
+```
+
+`install` downloads the runtime's archive, the checksum list and its bundle
+from the release (or reads them from `--asset-dir`/`-AssetDir`), verifies the
+bundle against the release workflow identity for the version's channel
+(`main` for `X.Y.Z`, `development` for `X.Y.Z-insider.N`), checks the archive
+SHA-256, its members and `host-update-cli-package.json`, proves the CLI
+launches, and only then places it at `<install-root>/<version>` (default
+`/opt/printfarmer/host-update-cli` or `C:\Program Files\PrintFarmer\HostUpdateCli`).
+A failure places nothing. Versions are immutable: if `<install-root>/<version>`
+already exists it is accepted only when its bytes, modes (Linux) or ACLs
+(Windows) match the verified archive and its own launcher runs; otherwise it is
+refused and left untouched (remove it once no update or recovery needs it, then
+rerun). The install root must be owned by root or the installing account and
+not be group- or world-writable on Linux; on Windows it must not be owned by or
+writable by anyone other than `SYSTEM`, `Administrators`, `TrustedInstaller`
+and the installing account.
+The runtime is detected from the host; musl/Alpine and macOS are refused.
+
+`write-config` writes `host-update.json` from only the deployment `.env`'s
+`HostUpdateExecution__*`, `HostUpdates__HostState__*`, `DB_PROVIDER` and
+`ConnectionStrings__Default` keys (last value wins); other secrets are never
+copied. The file's owner is the owner of `HostUpdateExecution__RootDirectory`
+when that is an absolute, non-link directory, otherwise the current account
+(override with `--owner`/`-Owner`). On Linux the file is mode `0600`. On Windows
+inheritance is removed; `SYSTEM` and `Administrators` get full control and the
+owner account read. Values containing `$`, case-only duplicate keys, a key that
+is both a value and a section, and malformed key segments are refused without
+printing the value, and the existing file is kept.
+
+Exit codes: `0` done; `1` verification, validation or installation failed;
+`2` usage; `3` (`write-config` only) `HostUpdateExecution__RootDirectory` is
+not set, so nothing was written.
+
+The deploy scripts can run both steps after generating `.env`. It is opt-in:
+pass `--host-update-cli-version <version>` to `scripts/deploy-docker.sh` or
+`-HostUpdateCliVersion <version>` to `scripts/deploy-docker.ps1` (or set
+`HOST_UPDATE_CLI_VERSION`), plus `--host-update-cli-assets <dir>` /
+`-HostUpdateCliAssets <dir>` (`HOST_UPDATE_CLI_ASSETS`) on offline hosts. An
+install or configuration failure stops the deployment before containers start;
+exit `3` is reported as a warning. `deploy-docker.sh` uses `sudo` when not run
+as root; run `deploy-docker.ps1` from an elevated shell.
+
+#### Manual install
 **Linux** (stable identity shown; insider releases use
 `@refs/heads/development`):
 
@@ -303,10 +368,8 @@ Administrators:F <account>:R`).
 **Offline hosts** (#2981): carry the chosen archive, the checksum list and its
 bundle unchanged. Verify the bundle on a connected host before transfer (or
 with Cosign's offline trusted-root options), and always re-check the archive
-SHA-256 against the list on the target host before extracting.
-
-Automated placement by the installer, generated host configuration and a
-per-archive SBOM are follow-up work (#3045).
+SHA-256 against the list on the target host before extracting. The installer
+accepts the same three files unchanged through `--asset-dir` / `-AssetDir`.
 
 ### Host-local status and recovery CLI
 
@@ -491,9 +554,7 @@ Known limits of the current CLI:
   against its checksum list, extracts it and runs the CLI with `dotnet` poisoned
   on `PATH`.
 - There is no physical command reconciliation gate (#2999) or PostgreSQL/SQL
-  Server and monolith/split topology proof (#3000) yet. The
-  installer does not yet place the package or generate its configuration
-  (#3045), and macOS has no package (see
+  Server and monolith/split topology proof (#3000) yet. macOS has no package (see
   [Install the signed CLI package](#install-the-signed-cli-package)).
 
 | Observation | Operator response |
@@ -538,7 +599,6 @@ script**. Remaining delivery is tracked by:
 
 - #2999: the physical printer reconciliation gate
 - #3000: provider and topology coverage
-- #3045: installer placement and host configuration
 - #2981: complete bundles
 - #2982: isolated recovery and authorized rollout evidence
 
