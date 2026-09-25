@@ -60,8 +60,12 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
   `/app/data-protection-keys`); `ComposeFiles`/`ComposeProjectName`/`ServiceMappings` (the six
   canonical service ids — `api`, `frontend`, `slicer-host`, `printer-discovery`,
   `orcaslicer-worker`, `monolith` — each mapped to its compose service name, pinned-image
-  environment variable, and `ghcr.io/olyforge3d/printfarmer-*` repository); `HealthCheckBaseUrl`
-  for readiness probes.
+  environment variable, and `ghcr.io/olyforge3d/printfarmer-*` repository). A configured
+  `ComposeFiles`, `ActiveServiceIds` or `ServiceMappings` list replaces its built-in default
+  rather than extending it. An explicitly empty list fails validation. `SupportedProviderNames`
+  and the required health/writer lists stay additive (see the
+  [runbook's CLI limits](HOST_UPDATE_RUNBOOK.md#host-local-status-and-recovery-cli)).
+  `HealthCheckBaseUrl` is used for readiness probes.
 
 ## Concrete adapters (`src/infra/Services/HostUpdates/`)
 
