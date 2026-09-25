@@ -21,7 +21,6 @@ see [Failure and recovery](#failure-and-recovery). The following delivery gates
 are still open:
 
 - the physical printer reconciliation gate (#2999)
-- provider and topology coverage (#3000)
 - complete offline bundles (#2981)
 - isolated recovery and rollout evidence (#2982)
 
@@ -210,12 +209,12 @@ fixed-operation wrappers. #2998 added drift reapproval and the downtime preview.
 matrix. #3045 adds a verifying installer, generated host configuration and
 per-archive SBOMs.
 
-These gaps still block a claim of complete recovery support:
+This gap still blocks a claim of complete recovery support:
 
 - a physical printer command reconciliation gate (#2999)
-- PostgreSQL/SQL Server and monolith/split topology coverage (#3000)
 
-While those gaps are open, retain protected host evidence for the deployment
+Provider and topology stop conditions are covered with fake adapters (#3000);
+live provider evidence belongs to #2982. While that gap is open, retain protected host evidence for the deployment
 owner. Do not invent a recovery command, edit journal JSON, delete locks, or run
 the installer against a possibly migrated database. Directly reading a file is
 not journal integrity verification or authorization to release a fence.
@@ -630,7 +629,6 @@ This checklist is a safety boundary, **not a tested provider-specific restore
 script**. Remaining delivery is tracked by:
 
 - #2999: the physical printer reconciliation gate
-- #3000: provider and topology coverage
 - #2981: complete bundles
 - #2982: isolated recovery and authorized rollout evidence
 

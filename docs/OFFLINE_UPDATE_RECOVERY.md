@@ -115,10 +115,10 @@ allowed metadata must still work.
 No fallback network request, local build, fabricated recovery success or
 physical printer command is acceptable. Retain full failure evidence, prove
 fences stay closed on uncertainty, and confirm safe post-restore reconciliation.
-The host-local CLI is delivered (#2980). Its open recovery gaps are:
-
-- physical printer reconciliation (#2999)
-- provider and topology coverage (#3000)
+The host-local CLI is delivered (#2980). Its open recovery gap is physical
+printer reconciliation (#2999). Provider and topology stop conditions are
+covered with fake adapters (#3000); see
+[the runbook](HOST_UPDATE_RUNBOOK.md#provider-and-topology-stop-conditions).
 
 Complete bundles are tracked in #2981. #2982 owns this matrix and separately
 authorized staging/pilot evidence. #2664 remains open until its full retained
