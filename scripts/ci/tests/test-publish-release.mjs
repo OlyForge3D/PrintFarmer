@@ -16,6 +16,48 @@ import { formatSums, hostUpdateCliArchiveName, hostUpdateCliAssets, hostUpdateCl
 const spdxFixture = name => `${JSON.stringify({ spdxVersion: 'SPDX-2.3', SPDXID: 'SPDXRef-DOCUMENT', name,
   packages: [{ SPDXID: 'SPDXRef-Package', name: 'Farm.HostUpdate.Cli', versionInfo: '1.0.0' }] })}\n`;
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
+import { infrastructureImagesDocument, infrastructureImagesName, infrastructureImagesSignatureName, infrastructureLockKind,
+  infrastructureLockPath, mediaTypes, validateInfrastructureImages } from '../offline-bundle-images.mjs';
+
+// Issue #3061: a synthetic registry for the pinned infrastructure lock -- one multi-platform index
+// and one single-manifest image -- whose raw bytes hash to the pinned digests.
+function infrastructureRegistry() {
+  const hash = bytes => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  const amd64 = `sha256:${'1'.repeat(64)}`;
+  const arm64 = `sha256:${'2'.repeat(64)}`;
+  const indexRaw = JSON.stringify({ schemaVersion: 2, mediaType: mediaTypes.ociIndex, manifests: [
+    { mediaType: mediaTypes.ociManifest, digest: amd64, size: 1, platform: { os: 'linux', architecture: 'amd64' } },
+    { mediaType: mediaTypes.ociManifest, digest: arm64, size: 1,
+      platform: { os: 'linux', architecture: 'arm64', variant: 'v8' } },
+  ] });
+  const singleRaw = JSON.stringify({ schemaVersion: 2, mediaType: mediaTypes.dockerManifest,
+    config: { mediaType: 'application/vnd.docker.container.image.v1+json', digest: `sha256:${'3'.repeat(64)}`, size: 1 },
+    layers: [] });
+  const lock = { schema: 1, kind: infrastructureLockKind, images: [
+    { id: 'database', reference: 'registry.example.com/library/database:16', mediaType: mediaTypes.ociIndex,
+      digest: hash(indexRaw), platforms: { 'linux/amd64': amd64, 'linux/arm64': arm64 } },
+    { id: 'sqlserver', reference: 'registry.example.com/mssql/server:2022', mediaType: mediaTypes.dockerManifest,
+      digest: hash(singleRaw), platforms: { 'linux/amd64': hash(singleRaw) } },
+  ] };
+  const raw = { [`${lock.images[0].reference}@${lock.images[0].digest}`]: indexRaw,
+    [`${lock.images[1].reference}@${lock.images[1].digest}`]: singleRaw };
+  const inspections = [];
+  const handle = args => {
+    if (!args.includes('--raw') && !args.includes('{{json .Image}}')) return undefined;
+    const reference = args[3];
+    if (!reference?.startsWith('registry.example.com/')) return undefined;
+    inspections.push(reference);
+    if (args.includes('--raw')) {
+      assert.ok(reference in raw, `unexpected raw inspection ${reference}`);
+      return raw[reference];
+    }
+    return JSON.stringify({ os: 'linux', architecture: 'amd64' });
+  };
+  return { lock, handle, inspections, raw };
+}
+const infrastructureIdentity = chosen => ({ tag: chosen.tag, version: chosen.version, channel: chosen.channel,
+  sourceBranch: chosen.sourceBranch, sourceCommit: chosen.sourceCommit, buildId: String(chosen.buildId),
+  sequence: deriveSequence(chosen.version) });
 import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
   SEQUENCE_MAJOR_MAX, SEQUENCE_MINOR_MAX, SEQUENCE_PATCH_MAX, SEQUENCE_PRERELEASE_MAX,
   SEQUENCE_STABLE_SUFFIX, MINIMUM_UPDATER_VERSION } from '../release-manifest.mjs';
@@ -464,6 +506,9 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   }
   mkdirSync(join(source, '.release-assets'));
   writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
+  const registry = infrastructureRegistry();
+  mkdirSync(join(source, 'scripts', 'docker'));
+  writeFileSync(join(source, infrastructureLockPath), `${JSON.stringify(registry.lock, undefined, 2)}\n`);
   const builds = [];
   const smokes = [];
   const cliPublishes = [];
@@ -499,8 +544,9 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     if (name === 'docker' && args[1] === 'build') {
       builds.push(args);
       writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify({ 'containerimage.digest': digest }));
-    } else if (name === 'docker' && args[1] === 'imagetools') return inspectionCommand(name, args);
-    else if (name === 'docker' && args[0] === 'run') smokes.push(args);
+    } else if (name === 'docker' && args[1] === 'imagetools') {
+      return registry.handle(args) ?? inspectionCommand(name, args);
+    } else if (name === 'docker' && args[0] === 'run') smokes.push(args);
     else if (name === 'syft') {
       syftScans.push(args);
       writeFileSync(args[2].slice('spdx-json='.length), spdxFixture(args[0]));
@@ -508,6 +554,7 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     return '';
   };
   assert.deepEqual(buildImages(release, source, assets, run, () => {}), digests);
+  const firstInspections = [...registry.inspections];
   for (const file of [`PrintFarmer-${release.tag}-source.tar.gz`, `PrintFarmer-${release.tag}-source.json`]) {
     assert.ok(existsSync(join(assets, file)));
   }
@@ -566,6 +613,26 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     return run(name, args);
   }, () => {}), /frontend build failed/);
   assert.equal(builds.length - before, 1);
+  // Issue #3061: the pinned infrastructure list is registry-checked and bound to this release.
+  assert.deepEqual(firstInspections.sort(), [...Object.keys(registry.raw),
+    `${registry.lock.images[1].reference}@${registry.lock.images[1].digest}`].sort());
+  assert.deepEqual(validateInfrastructureImages(readFileSync(join(assets, infrastructureImagesName)),
+    infrastructureIdentity(release)), registry.lock.images);
+  const movedPin = infrastructureRegistry();
+  const buildsBeforeMovedPin = builds.length;
+  assert.throws(() => buildImages(release, source, assets, (name, args) => {
+    const moved = name === 'docker' && args.includes('--raw') ? movedPin.handle(args) : undefined;
+    if (moved) return moved.replace('"amd64"', '"arm64"');
+    return run(name, args);
+  }, () => {}), /Registry content does not match the pinned digest/);
+  assert.equal(builds.length, buildsBeforeMovedPin, 'a moved infrastructure pin must stop before any build');
+  const wrongChild = structuredClone(registry.lock);
+  wrongChild.images[0].platforms['linux/arm64'] = `sha256:${'9'.repeat(64)}`;
+  writeFileSync(join(source, infrastructureLockPath), JSON.stringify(wrongChild));
+  assert.throws(() => buildImages(release, source, assets, run, () => {}), /does not select the pinned linux\/arm64/);
+  rmSync(join(source, infrastructureLockPath));
+  assert.throws(() => buildImages(release, source, assets, run, () => {}), /ENOENT/);
+  assert.equal(builds.length, buildsBeforeMovedPin);
 });
 
 function publishFixture(t, channel = 'insider') {
@@ -596,6 +663,13 @@ function publishFixture(t, channel = 'insider') {
     identity: manifestIdentityFor(chosen.channel),
   }));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
+  writeFileSync(join(assets, infrastructureImagesName),
+    infrastructureImagesDocument(infrastructureIdentity(chosen), infrastructureRegistry().lock));
+  writeFileSync(join(assets, infrastructureImagesSignatureName), JSON.stringify({
+    sha256: createHash('sha256').update(readFileSync(join(assets, infrastructureImagesName))).digest('hex'),
+    issuer: manifestIssuer,
+    identity: manifestIdentityFor(chosen.channel),
+  }));
   const calls = [];
   const api = async (endpoint, options = {}) => {
     calls.push({ endpoint, ...options });
@@ -684,6 +758,30 @@ test('the host-update CLI checksum list is verified with the channel identity be
     assert.ok(cliChecks[1] > calls.findIndex(call => call.endpoint === 'releases'));
     assert.ok(cliChecks[1] < calls.findIndex(call => call.command === 'gh'));
   }
+});
+
+test('the signed infrastructure image list is uploaded and verified before tagging and before upload', async t => {
+  for (const channel of ['stable', 'insider']) {
+    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
+    assert.ok(files.includes(infrastructureImagesName) && files.includes(infrastructureImagesSignatureName));
+    await publishRelease(chosen, assets, api, deps);
+    const checks = calls.flatMap((call, index) =>
+      call.command === 'cosign' && call.args[7].endsWith(infrastructureImagesName) ? [index] : []);
+    assert.equal(checks.length, 2);
+    for (const index of checks) {
+      assert.match(calls[index].args[2], /infrastructure-images\.sigstore\.json$/);
+      assert.equal(calls[index].args[4], manifestIssuer);
+      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
+    }
+    assert.ok(checks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
+    assert.ok(checks[1] > calls.findIndex(call => call.endpoint === 'releases'));
+    assert.ok(checks[1] < calls.findIndex(call => call.command === 'gh'));
+  }
+  const { chosen, assets, api, deps, calls } = publishFixture(t);
+  writeFileSync(join(assets, infrastructureImagesName), infrastructureImagesDocument(
+    { ...infrastructureIdentity(chosen), sourceCommit: head }, infrastructureRegistry().lock));
+  await assert.rejects(publishRelease(chosen, assets, api, deps), /not bound to this release identity/);
+  assert.ok(!calls.some(call => call.endpoint === 'git/refs'), 'a list for another release must stop before tagging');
 });
 
 test('host-update CLI checksum list is canonical and names exactly the supported archives and SBOMs', t => {
@@ -787,6 +885,22 @@ test('missing, tampered or wrong-identity signing evidence blocks publication be
     }],
     ['CLI checksum signed by another identity', (assets) => {
       const path = join(assets, hostUpdateCliSumsBundleName(release.version));
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
+        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
+    }],
+    ['missing infrastructure list bundle', (assets) => rmSync(join(assets, infrastructureImagesSignatureName))],
+    ['empty infrastructure list bundle', (assets) => writeFileSync(join(assets, infrastructureImagesSignatureName), '')],
+    ['tampered infrastructure list', (assets) => writeFileSync(join(assets, infrastructureImagesName),
+      readFileSync(join(assets, infrastructureImagesName), 'utf8').replace('"linux/arm64": "sha256:2', '"linux/arm64": "sha256:4'))],
+    ['re-signed infrastructure list for another build', (assets) => {
+      const bytes = infrastructureImagesDocument({ ...infrastructureIdentity(release), buildId: '999' },
+        infrastructureRegistry().lock);
+      writeFileSync(join(assets, infrastructureImagesName), bytes);
+      writeFileSync(join(assets, infrastructureImagesSignatureName), JSON.stringify({
+        sha256: createHash('sha256').update(bytes).digest('hex'), issuer: manifestIssuer, identity: manifestIdentity }));
+    }],
+    ['infrastructure list signed by another identity', (assets) => {
+      const path = join(assets, infrastructureImagesSignatureName);
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
         identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
     }],

@@ -1,15 +1,20 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, readSync, readdirSync, rmSync,
+  writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
 import { components } from '../release-policy.mjs';
-import { buildManifest } from '../release-manifest.mjs';
+import { buildManifest, deriveSequence } from '../release-manifest.mjs';
+import { canonicalImageIndex, imageArchiveLimits, imageTarHeader, infrastructureImagesDocument, infrastructureImagesName,
+  infrastructureImagesSignatureName, infrastructureLockKind, infrastructureLockPath, mediaTypes, platformMatches,
+  validateInfrastructureLock, verifyImageArchive, verifyInfrastructureLockAgainstRegistry,
+  writeImageArchive } from '../offline-bundle-images.mjs';
 import { formatSums, hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName } from '../host-update-cli-package.mjs';
-import { assembleOfflineBundle, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
-  offlineBundleVerificationName, parseArguments, releaseSigningIdentity, tarHeader,
+import { assembleOfflineBundle, loadVerifiedImages, offlineBundleIndexName, offlineBundleLimits, offlineBundleName,
+  offlineBundleVerificationName, parseArguments, readOfflineBundleEntries, releaseSigningIdentity, tarHeader,
   verifyOfflineBundle } from '../offline-update-bundle.mjs';
 
 const sha256 = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -93,6 +98,14 @@ function verify(context, overrides = {}) {
   return verifyOfflineBundle({ bundle: context.bundle, channel: context.release.channel,
     trustedRoot: context.trustedRoot, staging: context.staging, run: cosign({ requireOffline: true }).run,
     protectedBackup: context.expectedBackup, now: () => new Date('2026-09-25T20:00:00Z'), ...overrides });
+}
+
+// Load re-authenticates the staged signed bytes offline, so the runner must answer cosign too.
+function load(context, docker, overrides = {}) {
+  const signatures = cosign({ requireOffline: true });
+  const run = (name, args, options) => (name === 'cosign' ? signatures.run(name, args) : docker(name, args, options));
+  return loadVerifiedImages({ staging: context.staging, channel: context.release.channel,
+    trustedRoot: context.trustedRoot, run, ...overrides });
 }
 
 function rejectsWithoutStaging(context, pattern, overrides) {
@@ -819,4 +832,593 @@ test('signature identity matches the release workflow identity for each channel'
   assert.equal(releaseSigningIdentity('insider'),
     'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/development');
   assert.throws(() => releaseSigningIdentity(undefined), /stable or insider/);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Issue #3061: every release-selected application and infrastructure image
+// ---------------------------------------------------------------------------------------------
+const ociConfigType = 'application/vnd.oci.image.config.v1+json';
+const ociLayerType = 'application/vnd.oci.image.layer.v1.tar';
+const ociLayoutBytes = Buffer.from('{"imageLayoutVersion":"1.0.0"}');
+const allImageMembers = [...Object.keys(components).map(id => `image-${id}.oci.tar`),
+  'infrastructure-mssql.oci.tar', 'infrastructure-nginx.oci.tar', 'infrastructure-postgres.oci.tar'].sort();
+const byName = (a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0);
+const blobName = digest => `blobs/sha256/${digest.slice('sha256:'.length)}`;
+
+function layoutWriter(layout) {
+  mkdirSync(join(layout, 'blobs', 'sha256'), { recursive: true });
+  return bytes => {
+    const data = Buffer.from(bytes);
+    writeFileSync(join(layout, 'blobs', 'sha256', sha256(data)), data);
+    return { digest: `sha256:${sha256(data)}`, size: data.length };
+  };
+}
+
+// One platform image: config (naming its os/architecture/variant), one layer and the manifest.
+function platformManifest(writeBlob, label, platform, mediaType = mediaTypes.ociManifest) {
+  const [os, architecture, variant] = platform.split('/');
+  const shape = { os, architecture, ...(variant ? { variant } : {}) };
+  const config = writeBlob(JSON.stringify({ ...shape, rootfs: { type: 'layers', diff_ids: [] } }));
+  const layer = writeBlob(`layer ${label} ${platform} ${'z'.repeat(600)}`);
+  const manifest = writeBlob(JSON.stringify({ schemaVersion: 2, mediaType,
+    config: { mediaType: ociConfigType, ...config }, layers: [{ mediaType: ociLayerType, ...layer }] }));
+  return { mediaType, ...manifest, platform: shape, config, layer };
+}
+
+// A multi-platform index as registries publish it: arm64 carries the `v8` variant, and `extra`
+// adds platforms or attestation manifests the release does not select.
+function indexImage(writeBlob, label, platforms, extra = []) {
+  const children = platforms.map(platform => platformManifest(writeBlob, label,
+    platform === 'linux/arm64' ? 'linux/arm64/v8' : platform));
+  const extras = extra.map(platform => platformManifest(writeBlob, label, platform));
+  const root = writeBlob(JSON.stringify({ schemaVersion: 2, mediaType: mediaTypes.ociIndex,
+    manifests: [...children, ...extras].map(({ mediaType, digest, size, platform }) => ({ mediaType, digest, size, platform })) }));
+  return { mediaType: mediaTypes.ociIndex, ...root, children, extras,
+    platforms: Object.fromEntries(platforms.map((platform, index) => [platform, children[index].digest])) };
+}
+
+function imageFixture(channel = 'stable') {
+  const context = fixture(channel);
+  const layout = join(context.root, 'layout');
+  const writeBlob = layoutWriter(layout);
+  const application = Object.fromEntries(Object.entries(components).map(([id, component]) =>
+    [id, indexImage(writeBlob, id, component.platforms, id === 'api' ? ['unknown/unknown'] : [])]));
+  const manifest = Buffer.from(buildManifest(context.release, Object.fromEntries(Object.entries(application).map(([id, image]) =>
+    [id, { indexDigest: image.digest, platforms: components[id].platforms, platformDigests: image.platforms }]))));
+  writeFileSync(join(context.assets, 'update-manifest.json'), manifest);
+  writeFileSync(join(context.assets, 'update-manifest.sigstore.json'), sign(manifest, channel));
+  const mssql = platformManifest(writeBlob, 'mssql', 'linux/amd64', mediaTypes.dockerManifest);
+  const nginx = indexImage(writeBlob, 'nginx', ['linux/amd64', 'linux/arm64'], ['linux/arm/v7', 'unknown/unknown']);
+  const postgres = indexImage(writeBlob, 'postgres', ['linux/amd64', 'linux/arm64']);
+  const lock = { schema: 1, kind: infrastructureLockKind, images: [
+    { id: 'mssql', reference: 'mcr.microsoft.com/mssql/server:2022-latest', mediaType: mediaTypes.dockerManifest,
+      digest: mssql.digest, platforms: { 'linux/amd64': mssql.digest } },
+    { id: 'nginx', reference: 'docker.io/library/nginx:alpine', mediaType: mediaTypes.ociIndex, digest: nginx.digest,
+      platforms: nginx.platforms },
+    { id: 'postgres', reference: 'docker.io/library/postgres:16-alpine', mediaType: mediaTypes.ociIndex,
+      digest: postgres.digest, platforms: postgres.platforms },
+  ] };
+  const identity = { ...context.release, sequence: deriveSequence(context.release.version) };
+  const writeInfrastructure = (value = lock, boundTo = identity, signedBy = channel) => {
+    const bytes = infrastructureImagesDocument(boundTo, value);
+    writeFileSync(join(context.assets, infrastructureImagesName), bytes);
+    writeFileSync(join(context.assets, infrastructureImagesSignatureName), sign(bytes, signedBy));
+    return bytes;
+  };
+  writeInfrastructure();
+  const expected = id => {
+    const image = lock.images.find(entry => entry.id === id);
+    return { id, reference: image.reference, mediaTypes: [image.mediaType], digest: image.digest, platforms: image.platforms };
+  };
+  return { ...context, layout, writeBlob, application, infrastructure: { mssql, nginx, postgres }, lock, identity,
+    writeInfrastructure, expected };
+}
+
+function withImages(body, channel = 'stable') {
+  const context = imageFixture(channel);
+  try {
+    assemble(context, { images: context.layout });
+    return body(context);
+  } finally {
+    context.cleanup();
+  }
+}
+
+function nestedEntries(data) {
+  const entries = [];
+  for (let offset = 0; offset + 512 <= data.length;) {
+    const header = data.subarray(offset, offset + 512);
+    if (header.every(byte => byte === 0)) break;
+    const name = header.subarray(0, 100).toString('latin1').replace(/\0[\s\S]*$/, '');
+    const size = Number.parseInt(header.subarray(124, 135).toString('latin1'), 8);
+    entries.push({ name, data: Buffer.from(data.subarray(offset + 512, offset + 512 + size)) });
+    offset += 512 + Math.ceil(size / 512) * 512;
+  }
+  return entries;
+}
+
+function nestedArchive(entries, { trailer = Buffer.alloc(1024) } = {}) {
+  const parts = [];
+  for (const { name, data, type } of entries) {
+    parts.push(imageTarHeader({ name, size: data.length, type }), data, Buffer.alloc((512 - (data.length % 512)) % 512));
+  }
+  parts.push(trailer);
+  return Buffer.concat(parts);
+}
+
+function verifyNested(directory, buffer, expected, limits) {
+  const path = join(directory, `nested-${sha256(buffer).slice(0, 16)}.tar`);
+  writeFileSync(path, buffer);
+  const fd = openSync(path, 'r');
+  try {
+    return verifyImageArchive(fd, 0, buffer.length, expected, limits);
+  } finally {
+    closeSync(fd);
+  }
+}
+
+function readBundle(path) {
+  const bytes = readFileSync(path);
+  const fd = openSync(path, 'r');
+  let entries;
+  try {
+    entries = readOfflineBundleEntries(fd, bytes.length);
+  } finally {
+    closeSync(fd);
+  }
+  const [head, ...rest] = entries.map(({ name, size, offset }) => ({ name, data: Buffer.from(bytes.subarray(offset, offset + size)) }));
+  return { index: JSON.parse(head.data.toString('utf8')), members: new Map(rest.map(entry => [entry.name, entry.data])) };
+}
+
+// Forges a self-consistent outer bundle (index sizes and hashes recomputed) around edited members,
+// so every rejection below comes from signature, identity or nested-image verification.
+function rewriteBundle(context, edit) {
+  const { index, members } = readBundle(context.bundle);
+  const roles = new Map(index.files.map(file => [file.name, file.role]));
+  edit({ index, members, roles });
+  const names = [...members.keys()].sort();
+  index.files = names.map(name => ({ name, role: roles.get(name), size: members.get(name).length,
+    sha256: sha256(members.get(name)) }));
+  rmSync(context.bundle);
+  writeTar(context.bundle, [member(offlineBundleIndexName, `${JSON.stringify(index, undefined, 2)}\n`),
+    ...names.map(name => member(name, members.get(name)))]);
+}
+
+function editNested(members, name, edit) {
+  const entries = nestedEntries(members.get(name));
+  members.set(name, nestedArchive(edit(entries) ?? entries));
+}
+
+function resignedInfrastructure(members, bytes, channel) {
+  members.set(infrastructureImagesName, bytes);
+  members.set(infrastructureImagesSignatureName, Buffer.from(sign(bytes, channel)));
+}
+
+test('every release-selected image round-trips through network-denied verification and a load-only import', () => {
+  const context = imageFixture('insider');
+  try {
+    const { index } = assemble(context, { images: context.layout });
+    assert.equal(index.contents.images, true);
+    assert.equal(index.contents.infrastructure, true);
+    assert.equal(index.installable, false);
+    assert.equal(index.rolloutAuthorization, false);
+    assert.deepEqual(index.files.filter(file => file.role.endsWith('-image')).map(file => file.name), allImageMembers);
+    const { run, calls } = cosign({ requireOffline: true });
+    const record = verify(context, { run });
+    assert.equal(calls.length, 3, 'manifest, CLI checksums and infrastructure list are each signature-verified');
+    assert.ok(calls.some(call => call.at(-1).endsWith(infrastructureImagesName)));
+    assert.deepEqual(readdirSync(context.staging).sort(),
+      [...readdirSync(context.assets), ...allImageMembers, offlineBundleVerificationName].sort());
+    assert.deepEqual(record.images.map(image => image.member).sort(), allImageMembers);
+    for (const image of record.images) {
+      assert.equal(image.sha256, sha256(readFileSync(join(context.staging, image.member))));
+    }
+    const api = record.images.find(image => image.id === 'api');
+    assert.equal(api.kind, 'application');
+    assert.equal(api.reference, `ghcr.io/olyforge3d/printfarmer-api:${context.release.version}`);
+    assert.equal(api.digest, context.application.api.digest);
+    assert.deepEqual(api.platforms, context.application.api.platforms);
+    const worker = record.images.find(image => image.id === 'orcaslicer-worker');
+    assert.deepEqual(Object.keys(worker.platforms), ['linux/amd64']);
+    const mssql = record.images.find(image => image.id === 'mssql');
+    assert.equal(mssql.kind, 'infrastructure');
+    assert.equal(mssql.mediaType, mediaTypes.dockerManifest);
+    assert.equal(mssql.digest, context.infrastructure.mssql.digest);
+
+    // Only the selected platform closure is carried: no arm/v7 child, no attestation manifest.
+    const nginx = context.infrastructure.nginx;
+    const carried = nestedEntries(readFileSync(join(context.staging, 'infrastructure-nginx.oci.tar'))).map(entry => entry.name);
+    assert.deepEqual(carried.slice(0, 2), ['oci-layout', 'index.json']);
+    assert.deepEqual(carried.slice(2), [nginx, ...nginx.children, ...nginx.children.map(child => child.config),
+      ...nginx.children.map(child => child.layer)].map(blob => blobName(blob.digest)).sort());
+    const alias = JSON.parse(nestedEntries(readFileSync(join(context.staging, 'infrastructure-nginx.oci.tar')))[1].data);
+    assert.equal(alias.manifests[0].annotations['io.containerd.image.name'], 'docker.io/library/nginx:alpine');
+
+    const loads = [];
+    const docker = (name, args, options) => {
+      assert.equal(name, 'docker', 'load never invokes anything but the local engine');
+      assert.deepEqual(args, ['load'], 'load never pulls, builds or tags');
+      assert.equal(typeof options?.stdin, 'number', 'the verified descriptor itself is handed to docker load');
+      const header = Buffer.alloc(512);
+      readSync(options.stdin, header, 0, 512, 0);
+      assert.equal(header.subarray(0, 10).toString('latin1'), 'oci-layout');
+      loads.push(fstatSync(options.stdin).size);
+      return '';
+    };
+    const { loaded } = load(context, docker);
+    assert.equal(loads.length, allImageMembers.length);
+    assert.deepEqual(loaded.map(image => image.member).sort(), allImageMembers);
+    assert.deepEqual(loaded.map(image => image.reference).sort(), record.images.map(image => image.reference).sort());
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('image platform matching accepts only the canonical arm64 variant', () => {
+  assert.equal(platformMatches({ os: 'linux', architecture: 'arm64', variant: 'v8' }, 'linux/arm64'), true);
+  assert.equal(platformMatches({ os: 'linux', architecture: 'arm64' }, 'linux/arm64'), true);
+  assert.equal(platformMatches({ os: 'linux', architecture: 'arm64', variant: 'v9' }, 'linux/arm64'), false);
+  assert.equal(platformMatches({ os: 'linux', architecture: 'arm', variant: 'v7' }, 'linux/arm64'), false);
+  assert.equal(platformMatches({ os: 'linux', architecture: 'amd64', variant: 'v8' }, 'linux/amd64'), false);
+  assert.equal(platformMatches({ os: 'windows', architecture: 'amd64' }, 'linux/amd64'), false);
+  assert.equal(platformMatches(undefined, 'linux/amd64'), false);
+});
+
+test('a tampered image layer is rejected before anything is imported', () => withImages(context => {
+  rewriteBundle(context, ({ members }) => editNested(members, 'image-api.oci.tar', entries => {
+    const layer = entries.find(entry => entry.name === blobName(context.application.api.children[0].layer.digest));
+    layer.data[0] ^= 1;
+  }));
+  rejectsWithoutStaging(context, /image-api\.oci\.tar failed verification: Image blob was modified/);
+}));
+
+test('a moved or non-canonical image alias is rejected', () => {
+  withImages(context => {
+    rewriteBundle(context, ({ members }) => editNested(members, 'infrastructure-postgres.oci.tar', entries => {
+      const index = JSON.parse(entries[1].data);
+      for (const key of ['io.containerd.image.name', 'org.opencontainers.image.ref.name']) {
+        index.manifests[0].annotations[key] = 'docker.io/library/postgres:latest';
+      }
+      entries[1].data = Buffer.from(JSON.stringify(index));
+    }));
+    rejectsWithoutStaging(context, /Image archive alias does not match the pinned reference: postgres/);
+  });
+  withImages(context => {
+    rewriteBundle(context, ({ members }) => editNested(members, 'infrastructure-postgres.oci.tar', entries => {
+      entries[1].data = Buffer.from(JSON.stringify(JSON.parse(entries[1].data), undefined, 1));
+    }));
+    rejectsWithoutStaging(context, /Image archive index is not canonical/);
+  });
+});
+
+test('an image archive for a different root digest is rejected even under the right alias', () => withImages(context => {
+  rewriteBundle(context, ({ members }) => {
+    const entries = nestedEntries(members.get('image-api.oci.tar'));
+    const root = JSON.parse(entries[1].data).manifests[0];
+    entries[1].data = canonicalImageIndex({ reference: `ghcr.io/olyforge3d/printfarmer-frontend:${context.release.version}` }, root);
+    members.set('image-frontend.oci.tar', nestedArchive(entries));
+  });
+  rejectsWithoutStaging(context, /image-frontend\.oci\.tar failed verification: Image archive root digest does not match/);
+}));
+
+test('a platform child that is not the pinned digest is rejected', () => withImages(context => {
+  const lock = structuredClone(context.lock);
+  lock.images[1].platforms['linux/arm64'] = context.infrastructure.nginx.extras[0].digest;
+  rewriteBundle(context, ({ members }) => resignedInfrastructure(members,
+    infrastructureImagesDocument(context.identity, lock), context.release.channel));
+  rejectsWithoutStaging(context,
+    /infrastructure-nginx\.oci\.tar failed verification: Image linux\/arm64 manifest digest does not match the pinned identity/);
+}));
+
+test('a platform manifest whose config names another platform is rejected on both sides', () => {
+  const context = imageFixture();
+  try {
+    const wrong = platformManifest(context.writeBlob, 'wrong', 'linux/arm64/v8');
+    const root = context.writeBlob(JSON.stringify({ schemaVersion: 2, mediaType: mediaTypes.ociIndex, manifests: [
+      { mediaType: wrong.mediaType, digest: wrong.digest, size: wrong.size, platform: { os: 'linux', architecture: 'amd64' } }] }));
+    const expected = { id: 'wrong', reference: 'docker.io/library/wrong:1', mediaTypes: [mediaTypes.ociIndex],
+      digest: root.digest, platforms: { 'linux/amd64': wrong.digest } };
+    const output = join(context.root, 'wrong.oci.tar');
+    assert.throws(() => writeImageArchive({ layout: context.layout, expected, output }), /Image config is not linux\/amd64/);
+    assert.equal(existsSync(output), false);
+    const blobs = [root, wrong, wrong.config, wrong.layer].map(blob => ({ name: blobName(blob.digest),
+      data: readFileSync(join(context.layout, 'blobs', 'sha256', blob.digest.slice(7))) })).sort(byName);
+    const archive = nestedArchive([{ name: 'oci-layout', data: ociLayoutBytes },
+      { name: 'index.json', data: canonicalImageIndex(expected, { mediaType: mediaTypes.ociIndex, ...root }) }, ...blobs]);
+    assert.throws(() => verifyNested(context.root, archive, expected), /Image config is not linux\/amd64/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('unselected platforms and attestation blobs are rejected when smuggled into an archive', () => withImages(context => {
+  rewriteBundle(context, ({ members }) => editNested(members, 'infrastructure-nginx.oci.tar', entries => {
+    const attestation = context.infrastructure.nginx.extras[1];
+    return [...entries.slice(0, 2), ...[...entries.slice(2), { name: blobName(attestation.digest),
+      data: readFileSync(join(context.layout, 'blobs', 'sha256', attestation.digest.slice(7))) }].sort(byName)];
+  }));
+  rejectsWithoutStaging(context, /carries blobs outside the selected platforms: nginx/);
+}));
+
+test('a missing or extra image is rejected as not the release-selected set', () => {
+  withImages(context => {
+    rewriteBundle(context, ({ members }) => members.delete('image-orcaslicer-worker.oci.tar'));
+    rejectsWithoutStaging(context, /does not carry exactly the release-selected image set/);
+  });
+  withImages(context => {
+    rewriteBundle(context, ({ members, roles }) => {
+      members.set('infrastructure-redis.oci.tar', members.get('infrastructure-nginx.oci.tar'));
+      roles.set('infrastructure-redis.oci.tar', 'infrastructure-image');
+    });
+    rejectsWithoutStaging(context, /does not carry exactly the release-selected image set/);
+  });
+  withImages(context => {
+    rewriteBundle(context, ({ members, roles }) => {
+      members.set('image-unknown.oci.tar', members.get('image-api.oci.tar'));
+      roles.set('image-unknown.oci.tar', 'application-image');
+    });
+    rejectsWithoutStaging(context, /member is not part of this release: image-unknown\.oci\.tar/);
+  });
+});
+
+test('images are all or nothing and must match the contents flags', () => {
+  withImages(context => {
+    rewriteBundle(context, ({ index }) => { index.contents.infrastructure = false; });
+    rejectsWithoutStaging(context, /contents claim material/);
+  });
+  withImages(context => {
+    rewriteBundle(context, ({ index }) => { index.contents.images = false; index.contents.infrastructure = false; });
+    rejectsWithoutStaging(context, /image members do not match its image contents flag/);
+  });
+  withImages(context => {
+    rewriteBundle(context, ({ members }) => members.delete(infrastructureImagesSignatureName));
+    rejectsWithoutStaging(context, /missing required member: infrastructure-images\.sigstore\.json/);
+  });
+  const context = fixture();
+  try {
+    assemble(context);
+    rewriteBundle(context, ({ index }) => { index.contents.images = true; index.contents.infrastructure = true; });
+    rejectsWithoutStaging(context, /image members do not match its image contents flag/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('the infrastructure image list must be signed and bound to this exact release', () => {
+  withImages(context => {
+    rewriteBundle(context, ({ members }) => members.set(infrastructureImagesName,
+      Buffer.concat([members.get(infrastructureImagesName), Buffer.from(' ')])));
+    rejectsWithoutStaging(context, /signature verification failed for infrastructure-images\.json/);
+  });
+  withImages(context => {
+    const bytes = infrastructureImagesDocument(context.identity, context.lock);
+    rewriteBundle(context, ({ members }) => resignedInfrastructure(members, bytes,
+      context.release.channel === 'stable' ? 'insider' : 'stable'));
+    rejectsWithoutStaging(context, /signature verification failed for infrastructure-images\.json/);
+  });
+  withImages(context => {
+    rewriteBundle(context, ({ members }) => resignedInfrastructure(members,
+      infrastructureImagesDocument({ ...context.identity, buildId: '99' }, context.lock), context.release.channel));
+    rejectsWithoutStaging(context, /not bound to this release identity/);
+  });
+  const context = imageFixture();
+  try {
+    context.writeInfrastructure(context.lock, { ...context.identity, sourceCommit: 'c'.repeat(40) });
+    assert.throws(() => assemble(context, { images: context.layout }), /not bound to this release identity/);
+    assert.deepEqual(readdirSync(context.root).sort(), ['assets', 'layout', 'trusted_root.json']);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('nested archive blob count and size are bounded before any blob is trusted', () => withImages(context => {
+  rejectsWithoutStaging(context, /Image archive has too many members/, { imageLimits: { ...imageArchiveLimits, maxBlobs: 3 } });
+  rejectsWithoutStaging(context, /Image archive exceeds its size limit/,
+    { imageLimits: { ...imageArchiveLimits, maxArchiveBytes: 4096 } });
+  rejectsWithoutStaging(context, /Offline bundle member exceeds its size limit: image-/,
+    { limits: { ...offlineBundleLimits, maxImageArchiveBytes: 2048 } });
+  rejectsWithoutStaging(context, /exceeds its size limit/, { imageLimits: { ...imageArchiveLimits, maxJsonBytes: 16 } });
+}));
+
+test('malformed nested archive shapes are rejected', () => {
+  const context = imageFixture();
+  try {
+    const expected = context.expected('postgres');
+    const output = join(context.root, 'postgres.oci.tar');
+    writeImageArchive({ layout: context.layout, expected, output });
+    const valid = nestedEntries(readFileSync(output));
+    assert.equal(verifyNested(context.root, nestedArchive(valid), expected).digest, expected.digest);
+    const cases = [
+      [entries => { entries[3] = { ...entries[3], name: 'etc/passwd' }; }, /not part of an OCI layout/],
+      [entries => { entries[3] = { ...entries[3], name: `../${entries[3].name}` }; }, /not part of an OCI layout/],
+      [entries => { entries[3] = { ...entries[3], type: '2' }; }, /not a regular file/],
+      [entries => { entries.splice(2, 0, { name: 'blobs/', data: Buffer.alloc(0), type: '5' }); }, /not a regular file/],
+      [entries => { [entries[2], entries[3]] = [entries[3], entries[2]]; }, /canonical order/],
+      [entries => { entries.splice(3, 0, entries[3]); }, /canonical order/],
+      [entries => { [entries[0], entries[1]] = [entries[1], entries[0]]; }, /canonical order/],
+      [entries => { entries[0] = { ...entries[0], data: Buffer.from('{"imageLayoutVersion":"2.0.0"}') }; }, /oci-layout is not supported/],
+      [entries => {
+        const index = JSON.parse(entries[1].data);
+        index.manifests.push(index.manifests[0]);
+        entries[1] = { ...entries[1], data: Buffer.from(JSON.stringify(index)) };
+      }, /must name exactly one image/],
+      [entries => { entries.splice(entries.findIndex(entry =>
+        entry.name === blobName(context.infrastructure.postgres.children[1].layer.digest)), 1); }, /Image is missing a linux\/arm64 layer/],
+    ];
+    for (const [edit, pattern] of cases) {
+      const entries = structuredClone(valid).map(entry => ({ ...entry, data: Buffer.from(entry.data) }));
+      edit(entries);
+      assert.throws(() => verifyNested(context.root, nestedArchive(entries), expected), pattern, String(pattern));
+    }
+    assert.throws(() => verifyNested(context.root, Buffer.concat([nestedArchive(valid), Buffer.alloc(512, 1)]), expected),
+      /data after its end marker|not a complete tar archive/);
+    assert.throws(() => verifyNested(context.root, nestedArchive(valid, { trailer: Buffer.alloc(512) }), expected),
+      /end marker/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('assembly fails closed on missing or modified layout content and leaves no output', () => {
+  for (const [edit, pattern] of [
+    [context => rmSync(join(context.layout, 'blobs', 'sha256', context.application.monolith.children[1].layer.digest.slice(7))),
+      /Image is missing a linux\/arm64 layer/],
+    [context => rmSync(join(context.layout, 'blobs', 'sha256', context.infrastructure.mssql.digest.slice(7))),
+      /Image layout is missing blob/],
+    [context => {
+      const path = join(context.layout, 'blobs', 'sha256', context.application.frontend.children[0].layer.digest.slice(7));
+      const bytes = readFileSync(path);
+      bytes[5] ^= 1;
+      writeFileSync(path, bytes);
+    }, /Image layout blob does not match its digest/],
+    [context => {
+      const path = join(context.layout, 'blobs', 'sha256', context.infrastructure.nginx.digest.slice(7));
+      writeFileSync(path, Buffer.concat([readFileSync(path), Buffer.from(' ')]));
+    }, /Image layout blob does not match its digest|size does not match/],
+  ]) {
+    const context = imageFixture();
+    try {
+      edit(context);
+      assert.throws(() => assemble(context, { images: context.layout }), pattern, String(pattern));
+      assert.deepEqual(readdirSync(context.root).sort(), ['assets', 'layout', 'trusted_root.json'],
+        'no bundle, partial bundle or partial image stage survives a failed assembly');
+    } finally {
+      context.cleanup();
+    }
+  }
+  const context = imageFixture();
+  try {
+    assert.throws(() => assemble(context, { images: context.layout, imageLimits: { ...imageArchiveLimits, maxBlobs: 3 } }),
+      /Image has too many blobs/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('load only accepts images that are unchanged since verification', () => {
+  withImages(context => {
+    verify(context);
+    const path = join(context.staging, 'image-slicer-host.oci.tar');
+    const bytes = readFileSync(path);
+    bytes[bytes.length - 2048] ^= 1;
+    writeFileSync(path, bytes);
+    const calls = [];
+    assert.throws(() => load(context, (...call) => calls.push(call)),
+      /changed after verification: image-slicer-host\.oci\.tar/);
+    assert.ok(calls.every(([, args]) => args[0] === 'load'));
+  });
+  const context = fixture();
+  try {
+    assemble(context);
+    const record = verify(context);
+    assert.deepEqual(record.images, []);
+    assert.throws(() => load(context, () => assert.fail('nothing to load')),
+      /holds no verified image set/);
+    assert.throws(() => load(context, () => assert.fail('never'), { staging: context.assets }),
+      /verification record is unusable/);
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('load derives expectations from the re-authenticated signed release, never the mutable record', () => {
+  const never = () => assert.fail('nothing may be loaded');
+  withImages(context => {
+    verify(context);
+    // Replace an archive AND its record entry with a self-consistent different image.
+    const recordPath = join(context.staging, offlineBundleVerificationName);
+    const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+    const victim = record.images.find(image => image.id === 'postgres');
+    const donor = record.images.find(image => image.id === 'nginx');
+    const bytes = readFileSync(join(context.staging, donor.member));
+    writeFileSync(join(context.staging, victim.member), bytes);
+    Object.assign(victim, { reference: donor.reference, mediaType: donor.mediaType, digest: donor.digest,
+      platforms: donor.platforms, size: bytes.length, sha256: sha256(bytes) });
+    writeFileSync(recordPath, JSON.stringify(record));
+    assert.throws(() => load(context, never), /infrastructure-postgres\.oci\.tar does not match the signed release/);
+  });
+  withImages(context => {
+    verify(context);
+    const recordPath = join(context.staging, offlineBundleVerificationName);
+    const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+    record.images = record.images.filter(image => image.id !== 'mssql');
+    writeFileSync(recordPath, JSON.stringify(record));
+    assert.throws(() => load(context, never), /does not name exactly the signed release-selected image set/);
+  });
+  withImages(context => {
+    verify(context);
+    // A forged infrastructure list is rejected by the offline signature check.
+    context.lock.images[1].digest = context.lock.images[2].digest;
+    writeFileSync(join(context.staging, infrastructureImagesName),
+      infrastructureImagesDocument(context.identity, context.lock));
+    assert.throws(() => load(context, never), /signature verification failed for infrastructure-images\.json/);
+  });
+  withImages(context => {
+    verify(context);
+    assert.throws(() => load(context, never, { channel: 'insider' }), /does not match the expected insider channel/);
+    assert.throws(() => load(context, never, { trustedRoot: undefined }), /requires an operator-supplied Sigstore trusted root/);
+  });
+});
+
+test('the repository infrastructure lock is valid and is proven against the registry before signing', () => {
+  const repositoryLock = validateInfrastructureLock(readFileSync(new URL(`../../../${infrastructureLockPath}`, import.meta.url)));
+  assert.deepEqual(repositoryLock.images.map(image => image.id), ['mssql', 'nginx', 'postgres']);
+  for (const image of repositoryLock.images) assert.ok(image.platforms['linux/amd64'], `${image.id} supports linux/amd64`);
+  assert.deepEqual(Object.keys(repositoryLock.images.find(image => image.id === 'postgres').platforms), ['linux/amd64', 'linux/arm64']);
+
+  const context = imageFixture();
+  try {
+    const blob = digest => readFileSync(join(context.layout, 'blobs', 'sha256', digest.slice(7)), 'utf8');
+    const registry = (overrides = {}) => (name, args) => {
+      assert.equal(name, 'docker');
+      assert.deepEqual(args.slice(0, 3), ['buildx', 'imagetools', 'inspect']);
+      const digest = args[3].slice(args[3].indexOf('@') + 1);
+      if (args[4] === '--raw') return overrides.raw?.(digest) ?? blob(digest);
+      assert.deepEqual(args.slice(4), ['--format', '{{json .Image}}']);
+      return overrides.config?.(digest) ?? blob(context.infrastructure.mssql.config.digest);
+    };
+    verifyInfrastructureLockAgainstRegistry(context.lock, registry());
+    assert.throws(() => verifyInfrastructureLockAgainstRegistry(context.lock,
+      registry({ raw: digest => `${blob(digest)} ` })), /Registry content does not match the pinned digest/);
+    const moved = structuredClone(context.lock);
+    moved.images[2].platforms['linux/arm64'] = context.infrastructure.nginx.children[1].digest;
+    assert.throws(() => verifyInfrastructureLockAgainstRegistry(moved, registry()),
+      /does not select the pinned linux\/arm64 manifest/);
+    assert.throws(() => verifyInfrastructureLockAgainstRegistry(context.lock,
+      registry({ config: () => JSON.stringify({ os: 'linux', architecture: 'arm64' }) })), /platform does not match the lock/);
+  } finally {
+    context.cleanup();
+  }
+
+  const valid = JSON.parse(readFileSync(new URL(`../../../${infrastructureLockPath}`, import.meta.url), 'utf8'));
+  for (const edit of [
+    lock => { lock.images.reverse(); },
+    lock => { lock.images[1].id = lock.images[0].id; },
+    lock => { lock.images[1].reference = 'nginx:alpine'; },
+    lock => { lock.images[1].platforms['linux/arm/v7'] = lock.images[1].platforms['linux/arm64']; },
+    lock => { lock.images[0].platforms['linux/arm64'] = lock.images[1].digest; },
+    lock => { lock.images[1].platforms['linux/arm64'] = lock.images[1].platforms['linux/amd64']; },
+    lock => { lock.images[1].mirror = 'x'; },
+    lock => { lock.kind = 'other'; },
+  ]) {
+    const lock = structuredClone(valid);
+    edit(lock);
+    assert.throws(() => validateInfrastructureLock(Buffer.from(JSON.stringify(lock))), /Infrastructure image lock/);
+  }
+});
+
+test('the command line exposes image assembly and a load-only import without bypasses', () => {
+  assert.deepEqual(parseArguments(['load', '--staging', 's', '--channel', 'stable', '--trusted-root', 't']).options,
+    { staging: 's', channel: 'stable', 'trusted-root': 't' });
+  assert.equal(parseArguments(['assemble', '--release-assets', 'a', '--channel', 'stable', '--output', 'o',
+    '--images', 'layout']).options.images, 'layout');
+  for (const argv of [
+    ['load', '--bundle', 'b'],
+    ['load', '--pull', 'true'],
+    ['load', '--skip-verification', 'true'],
+    ['verify', '--images', 'layout'],
+    ['load', '--staging', 'a', '--staging', 'b'],
+  ]) {
+    assert.throws(() => parseArguments(argv), /usage|Duplicate option/, argv.join(' '));
+  }
 });

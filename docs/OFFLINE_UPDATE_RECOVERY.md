@@ -158,21 +158,91 @@ digest and protected-backup reference; it is `false` when the bundle binds no
 prior set.
 
 The prior set does not yet include prior images or effective configuration;
-those follow the image archives (#3061) and host-local import (#3063). A bound
+those follow host-local import (#3063). A bound
 prior set is recovery-only material and never a new offer or implicit channel
 consent.
 
 The index always states `installable: false` and `rolloutAuthorization: false`;
-`contents.images`, `contents.infrastructure` and
-`contents.recoveryInstructions` are `false`. `contents.priorRecoverySet` is
+`contents.recoveryInstructions` is `false`. `contents.priorRecoverySet` is
 `true` only when the bundle binds a complete prior set with its
-protected-backup reference. Remaining work under #2658:
+protected-backup reference. `contents.images` and `contents.infrastructure` are
+both `true` when the bundle carries the image set described below and both
+`false` otherwise; a bundle that claims one without the other, or carries only
+part of the set, is rejected. Remaining work under #2658:
 
-- #3061: application and infrastructure image archives.
+- #3061 (delivered): application and infrastructure image archives.
 - #3062 (delivered): prior recovery set and protected-backup references.
 - #3063: host-local import with Bash/PowerShell parity and bound recovery
   instructions.
 - #3064: replay protection, channel continuity and offline trust expiry.
+
+### Application and infrastructure images (#3061)
+
+Every release publishes `infrastructure-images.json` and its
+`infrastructure-images.sigstore.json` bundle. The release build reads the
+repository lock `scripts/docker/infrastructure-images.lock.json`, proves every
+pinned digest (and, for multi-platform indexes, every pinned platform child)
+against the registry with `docker buildx imagetools inspect --raw`, binds the
+list to the exact release identity (tag, version, channel, source branch and
+commit, build ID and sequence) and signs it with the same workflow identity as
+the manifest. A moved or unavailable pin fails the release before any image is
+built. The offline-supported infrastructure images are PostgreSQL
+(`postgres:16-alpine`, amd64 and arm64), nginx (`nginx:alpine`, amd64 and arm64)
+and SQL Server (`mcr.microsoft.com/mssql/server:2022-latest`, amd64 only).
+Optional add-ons and monitoring images are not part of the offline-supported
+topology. To change a pin, update the lock (digests sorted by `id`) in a
+reviewed PR.
+
+To include images, gather them on the connected host into one OCI image layout
+directory, preserving digests, and pass it to `assemble --images`:
+
+```bash
+# For each application service (manifest index digest) and infrastructure pin:
+skopeo copy --all --preserve-digests \
+  docker://ghcr.io/olyforge3d/printfarmer-api@sha256:<index-digest> oci:./images:api
+skopeo copy --all --preserve-digests \
+  docker://docker.io/library/postgres:16-alpine@sha256:<pinned-digest> oci:./images:postgres
+node scripts/ci/offline-update-bundle.mjs assemble ... --images ./images
+```
+
+Only each image's pinned root, its release-selected platform manifests, their
+configs and layers are copied; the layout's own `index.json` is ignored. The
+bundle then carries one nested, uncompressed ustar OCI layout per image,
+`image-<service>.oci.tar` for each manifest service and
+`infrastructure-<id>.oci.tar` for each signed infrastructure pin, plus the signed
+infrastructure list and its bundle. Each nested archive holds exactly
+`oci-layout`, a canonical `index.json` with one descriptor naming the pinned
+digest and the alias the Compose templates use, and `blobs/sha256/<hex>` for the
+reachable closure, in canonical order.
+
+With images present, `verify` additionally requires that:
+
+- Cosign accepts `infrastructure-images.sigstore.json` for the same channel
+  identity, and the list is bound to the manifest's release identity.
+- The bundle carries exactly the release-selected image set: every manifest
+  service and every signed infrastructure pin, no missing or extra image.
+- Every nested archive stays within per-archive size, blob-count and JSON limits;
+  its alias and root digest match the signed identity; every selected platform
+  child digest matches the signed per-platform digest; configs match their
+  platform (`linux/arm64` accepts variant `v8`); every blob matches its digest and
+  size; and no unselected platform, attestation or unreachable blob is present.
+
+The verification record then lists every image with its reference, digest,
+platforms, size and SHA-256. Load them on the network-denied host with:
+
+```bash
+node scripts/ci/offline-update-bundle.mjs load --staging ./offline-staging --channel stable \
+  --trusted-root ./trusted_root.json [--cosign <path>] [--docker <path>]
+```
+
+`load` does not trust the mutable verification record for image expectations.
+It re-authenticates the staged `update-manifest.json` and
+`infrastructure-images.json` signatures offline against the operator-supplied
+trusted root, derives the required image set, digests and platforms from those
+signed bytes alone, requires the record to name exactly that set, re-hashes and
+re-verifies every archive before loading any of them, and streams the same open file to `docker load` (Docker Engine 25 or later for
+OCI archive support). It never pulls, builds or fetches anything; a changed
+archive or a staging directory without a verified image set is rejected.
 
 ## Import and continuity rules
 
