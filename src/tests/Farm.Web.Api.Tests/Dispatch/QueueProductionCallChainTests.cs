@@ -5077,7 +5077,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         var clock = new ManualTimeProvider();
         DateTime now = clock.GetUtcNow().UtcDateTime;
         DateTime claimedAt = now.AddMinutes(-11);
-        Guid startCommandId = Guid.NewGuid();
+        Guid startCommandId;
         Guid controlCommandId = Guid.NewGuid();
         await using (AppDbContext seed = CreateContext())
         {
@@ -5085,21 +5085,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             QueueDispatchAttempt attempt = await seed.QueueDispatchAttempts.SingleAsync(value => value.Id == attemptId);
             attempt.ClaimedAtUtc = claimedAt;
             attempt.BackendFileName = "clock.gcode";
-            seed.QueueDispatchOutbox.Add(new QueueDispatchOutbox
-            {
-                Id = startCommandId,
-                Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
-                AggregateType = nameof(PrintJob), AggregateId = fixture.JobId, PrinterId = fixture.PrinterId,
-                AttemptId = attemptId, EventType = BedClearAcknowledgementService.BackendStartCommandEventType,
-                PayloadJson = "{}", Status = QueueOutboxEventStatus.Processing, CreatedAtUtc = claimedAt,
-            });
-            seed.BedClearCommandRecords.Add(new BedClearCommandRecord
-            {
-                Id = Guid.NewGuid(), PrinterId = fixture.PrinterId, JobId = fixture.JobId,
-                IdempotencyKey = "clock-bed-clear", ActorSubject = "operator-1",
-                OutboxEventId = startCommandId, DispatchAttemptId = attemptId,
-                Status = BedClearCommandStatus.Pending, CreatedAtUtc = claimedAt, UpdatedAtUtc = claimedAt,
-            });
+            BedClearCommandRecord bedClear = await seed.BedClearCommandRecords.SingleAsync(
+                value => value.DispatchAttemptId == attemptId);
+            startCommandId = bedClear.OutboxEventId;
+            bedClear.UpdatedAtUtc = claimedAt;
+            QueueDispatchOutbox startCommand = await seed.QueueDispatchOutbox.SingleAsync(
+                value => value.Id == startCommandId);
+            startCommand.Status = QueueOutboxEventStatus.Processing;
+            startCommand.AttemptId = attemptId;
             if (outcome is "completed" or "failed" or "cancelled")
             {
                 seed.QueueDispatchOutbox.Add(new QueueDispatchOutbox
