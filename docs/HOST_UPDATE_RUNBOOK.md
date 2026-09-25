@@ -399,7 +399,8 @@ The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
 variables), the same keys the API host uses. The token binds the recorded
 request, the drift items, the configuration fingerprint (root, compose files and
 their content hashes, service mappings, owned directories, host tool paths,
-provider and SQLite path, never connection-string secrets) and the installed
+provider, SQLite path, database server identity and `DatabaseExternallyOwned`,
+never connection-string secrets) and the installed
 state. Any further change invalidates it (`drift_reapproval_mismatch`); a token
 supplied when nothing drifted is refused (`drift_reapproval_unexpected`). The
 refusal lists the drift codes but never prints the token, so reapproval
@@ -466,11 +467,37 @@ Known limits of this slice:
   against its checksum list, extracts it and runs the CLI with `dotnet` poisoned
   on `PATH`.
 - There is no manifest-binding (database) drift
-  detection (#3050), physical command reconciliation gate or PostgreSQL/SQL Server and
-  split-topology proof yet; those remain follow-up work under #2658. The
+  detection (#3050) or physical command reconciliation gate yet; those remain
+  follow-up work under #2658. Provider and topology coverage uses fake process
+  and health adapters only (#3000, see
+  [Provider and topology stop conditions](#provider-and-topology-stop-conditions));
+  it is not a live PostgreSQL, SQL Server or Docker proof. The
   installer does not yet place the package or generate its configuration
   (#3045), and macOS has no package (see
   [Install the signed CLI package](#install-the-signed-cli-package)).
+
+#### Provider and topology stop conditions
+
+`status`, `--preview` and `--confirm` are regression-tested for SQLite, local
+and external PostgreSQL, and local and external SQL Server, each on the split
+(`api`, `frontend`, `slicer-host`, `printer-discovery`, `orcaslicer-worker`)
+and monolith (`monolith`) topologies. Both `AppDbContext` and
+`SlicerDbContext` use `ConnectionStrings:Default`, so recovery restores one
+`database` target; a split database is refused by preflight
+(`split_database_not_supported`). The CLI stops, before any restore, image pull
+or compose command, when:
+
+| Condition | Result | Operator response |
+| --- | --- | --- |
+| Database provider, server (host/port or data source), database name, or `DatabaseExternallyOwned` changed after authorization | Exit 12 `drift_reapproval_required` (`configuration_drift`) | Confirm with the deployment owner that the configured database is the one the backup came from. Never reapprove a retarget to a different server. |
+| `DatabaseExternallyOwned` is `true` and the manifest includes `database` | Exit 10 `NeedsOperator` (`restore_target_unmapped`); no restore tool is required or run | The database owner restores it with their own procedure; this host never restores an externally owned database. |
+| The recorded prior state's services differ from `ActiveServiceIds` (topology changed since the update) | Exit 10 `NeedsOperator` (`prior_state_topology_mismatch`), even after drift reapproval | Do not force a restore onto a different topology. Restore the matching compose configuration or recover manually. |
+| Aggregate `/health` unreachable or unhealthy after restore | Exit 10 `NeedsOperator`; admission stays closed | Diagnose the API; do not reopen writers by hand. |
+| Fence release fails after a successful restore | Exit 11; a repeat `--confirm` only redrives the release | Re-run `--confirm` once the fence adapter is reachable. It never repeats the restore. |
+
+Connection-string credentials are never part of the fingerprint, a process
+argument or CLI output; PostgreSQL and SQL Server restores receive the password
+through the environment only (`PGPASSWORD`, `SQLCMDPASSWORD`).
 
 | Observation | Operator response |
 | --- | --- |

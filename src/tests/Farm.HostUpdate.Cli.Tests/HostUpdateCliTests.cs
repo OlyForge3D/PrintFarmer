@@ -791,9 +791,9 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         var options = new HostUpdateExecutionOptions();
         JsonElement downtime = result.GetProperty("downtime");
         downtime.GetProperty("impact").GetString().Should().Be("service_restart");
-        downtime.GetProperty("affectedServices").EnumerateArray().Select(e => e.GetString()).Should().Equal("api", "frontend", "monolith");
+        downtime.GetProperty("affectedServices").EnumerateArray().Select(e => e.GetString()).Should().Equal("api", "frontend", "orcaslicer-worker", "printer-discovery", "slicer-host");
         downtime.GetProperty("timeoutBudgetSeconds").GetInt32()
-            .Should().Be((4 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds, "three pulls plus one compose up, then verify");
+            .Should().Be((6 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds, "five pulls plus one compose up, then verify");
         downtime.GetProperty("unboundedSteps").EnumerateArray().Select(e => e.GetString()).Should().Equal("health_check_final_pass");
         downtime.GetProperty("basis").GetString().Should().Be("sum_of_configured_timeouts_not_an_upper_bound");
 
@@ -833,7 +833,7 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         JsonElement downtime = result.GetProperty("downtime");
         downtime.GetProperty("impact").GetString().Should().Be("restore_and_service_restart");
         downtime.GetProperty("restoredTargets").EnumerateArray().Select(e => e.GetString()).Should().Equal("app-data", "database");
-        int applyAndVerify = (4 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds;
+        int applyAndVerify = (6 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds;
         downtime.GetProperty("timeoutBudgetSeconds").GetInt32()
             .Should().Be(options.BackupTimeoutSeconds + applyAndVerify, "only the database target is a timed restore process");
         downtime.GetProperty("unboundedSteps").EnumerateArray().Select(e => e.GetString())

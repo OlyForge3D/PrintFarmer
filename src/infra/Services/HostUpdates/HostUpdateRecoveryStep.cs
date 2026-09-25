@@ -170,9 +170,13 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateDigestVerifier digestVerifier,
     IHostUpdateRecoveryOutcomeStore outcomeStore,
     IHostUpdateFenceCoordinator? fenceCoordinator = null,
-    IHostUpdateExecutionLock? executionLock = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
+    IHostUpdateExecutionLock? executionLock = null,
+    HostUpdateExecutionOptions? executionOptions = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
 {
     private const string FenceReleaseFailureSeparator = "|";
+
+    /// <summary>The recorded prior services differ from the configured split/monolith topology.</summary>
+    public const string PriorStateTopologyMismatch = "prior_state_topology_mismatch";
 
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
@@ -394,6 +398,15 @@ public sealed class HostUpdateRecoveryCoordinator(
         if (priorState is null && ApplyMayHaveStarted(activities))
         {
             return new(HostUpdateRecoveryPlanKind.NeedsOperator, "prior_image_state_missing_after_apply_started", null, null);
+        }
+
+        // The prior state is re-applied service-for-service and then verified against the
+        // configured topology. A split/monolith mismatch would only surface after images were
+        // pulled and containers recreated, so it stops here before any restore or apply.
+        if (priorState is not null && executionOptions is { ActiveServiceIds.Length: > 0 } &&
+            !priorState.ServiceDigests.Keys.ToHashSet(StringComparer.Ordinal).SetEquals(executionOptions.ActiveServiceIds))
+        {
+            return new(HostUpdateRecoveryPlanKind.NeedsOperator, PriorStateTopologyMismatch, priorState, null);
         }
 
         if (priorState is not null && compatibilityEvaluator.SupportsImageOnlyRollback(priorState, activities))

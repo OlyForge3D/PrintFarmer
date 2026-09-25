@@ -55,10 +55,16 @@ internal static class HostUpdateNamespaceProof
             .Select(entry => $"owned_directory_missing:{entry.Key}"));
 
         CheckExecutable(failures, () => resolver.Resolve("docker"), "docker");
-        CheckExecutable(
-            failures,
-            () => HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(database, resolver)(options.BackupRootDirectory).FileName,
-            "database_restore_tool");
+
+        // A customer-managed external database is never restored by this host, so its restore
+        // tool is not part of the namespace the recovery engine acts on.
+        if (!options.DatabaseExternallyOwned)
+        {
+            CheckExecutable(
+                failures,
+                () => HostUpdateDatabaseBackupTargetFactory.CreateRestoreCommand(database, resolver)(options.BackupRootDirectory).FileName,
+                "database_restore_tool");
+        }
 
         if (database.IsSqlite)
         {

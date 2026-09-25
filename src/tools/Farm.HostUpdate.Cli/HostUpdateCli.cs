@@ -60,11 +60,24 @@ public static partial class HostUpdateCli
     /// Parses the command first, then loads configuration, so a malformed or unreadable
     /// configuration source still honours the exit-code and <c>--json</c> contract (exit 3).
     /// </summary>
-    public static async Task<int> RunAsync(
+    public static Task<int> RunAsync(
         IReadOnlyList<string> args,
         Func<IConfiguration> configurationFactory,
         TextWriter output,
         TextWriter error,
+        CancellationToken cancellationToken) =>
+        RunAsync(args, configurationFactory, output, error, configureServices: null, cancellationToken);
+
+    /// <summary>
+    /// Test seam: <paramref name="configureServices"/> runs after the shared engine registration so
+    /// host process and network boundaries can be replaced with fakes. Production never passes it.
+    /// </summary>
+    internal static async Task<int> RunAsync(
+        IReadOnlyList<string> args,
+        Func<IConfiguration> configurationFactory,
+        TextWriter output,
+        TextWriter error,
+        Action<IServiceCollection>? configureServices,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(args);
@@ -101,7 +114,7 @@ public static partial class HostUpdateCli
         HostUpdateExecutionOptions options;
         try
         {
-            provider = BuildServices(configuration, error);
+            provider = BuildServices(configuration, error, configureServices);
             options = provider.GetRequiredService<HostUpdateExecutionOptions>();
         }
         catch (OptionsValidationException exception)
@@ -127,7 +140,7 @@ public static partial class HostUpdateCli
         }
     }
 
-    internal static ServiceProvider BuildServices(IConfiguration configuration, TextWriter error)
+    internal static ServiceProvider BuildServices(IConfiguration configuration, TextWriter error, Action<IServiceCollection>? configureServices = null)
     {
         var services = new ServiceCollection();
         services.AddSingleton(configuration);
@@ -142,6 +155,7 @@ public static partial class HostUpdateCli
         services.AddSingleton(sp => new ApprovalBoundInstalledHostStateStore(
             (IInstalledHostStateStore)installedStore.ImplementationFactory!(sp)));
         services.AddSingleton<IInstalledHostStateStore>(sp => sp.GetRequiredService<ApprovalBoundInstalledHostStateStore>());
+        configureServices?.Invoke(services);
         return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
     }
 
