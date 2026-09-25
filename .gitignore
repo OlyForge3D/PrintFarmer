@@ -152,7 +152,6 @@ snapshots/
 .squad/.cache/
 # Machine-local Squad scope overrides (per-dev-machine, never shared)
 .squad/machine-local.md
-# Ralph's per-round delta-scan state (runtime cache, never shared)
 
 # Temp/debug artifacts
 .artifacts/
