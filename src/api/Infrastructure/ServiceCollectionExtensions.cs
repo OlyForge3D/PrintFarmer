@@ -195,6 +195,14 @@ public static class ServiceCollectionExtensions
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IQueueResourceAuthorizationService, Farm.Infrastructure.Services.Queue.QueueResourceAuthorizationService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IPrinterPhysicalActuationService, Farm.Infrastructure.Services.Queue.PrinterPhysicalActuationService>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchClaimService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchClaimService>();
+
+        // Issue #2859: operator escape hatch for indeterminate pre-start claims and its
+        // versioned, validated escalation policy (escalation never releases a claim).
+        _ = services.AddScoped<Farm.Infrastructure.Services.Queue.Dispatch.IDispatchRecoveryService, Farm.Infrastructure.Services.Queue.Dispatch.DispatchRecoveryService>();
+        _ = services.AddOptions<Farm.Infrastructure.Services.Queue.Dispatch.DispatchEscalationOptions>()
+            .Bind(configuration.GetSection(Farm.Infrastructure.Services.Queue.Dispatch.DispatchEscalationOptions.SectionName))
+            .ValidateOnStart();
+        _ = services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<Farm.Infrastructure.Services.Queue.Dispatch.DispatchEscalationOptions>, Farm.Infrastructure.Services.Queue.Dispatch.DispatchEscalationOptionsValidator>();
         _ = services.AddScoped<Farm.Infrastructure.Services.Queue.IBedClearAcknowledgementService, Farm.Infrastructure.Services.Queue.BedClearAcknowledgementService>();
 
         // #1731: direct membership-change SignalR hint, wired into printer-group/printer/user mutations.
@@ -926,6 +934,9 @@ public static class ServiceCollectionExtensions
 
             // Queue reconciliation service for unknown dispatch outcomes (orphaned Starting jobs).
             _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.QueueReconciliationService>();
+
+            // Durable once-only escalation notifications for indeterminate claims (#2859).
+            _ = services.AddHostedService<Farm.Infrastructure.Services.Queue.Dispatch.DispatchEscalationService>();
 
             // Camera health monitor - periodic HTTP probes of camera snapshot URLs
             _ = services.AddHostedService<Farm.Infrastructure.Services.Cameras.CameraHealthMonitorService>();

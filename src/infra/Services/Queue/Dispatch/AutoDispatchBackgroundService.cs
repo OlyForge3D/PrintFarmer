@@ -247,6 +247,8 @@ public sealed class AutoDispatchBackgroundService(
                 && db.PrintJobs.Any(j =>
                     j.Status == PrintJobStatus.Queued
                     && j.QueuedAt <= startupAt
+                    && (j.BlockedReasonCode == null
+                        || j.BlockedReasonCode != JobBlockedReasonCode.OperatorRecoveryRequired)
                     && (j.AssignedPrinterId == null || j.AssignedPrinterId == p.Id)))
             .Select(p => p.Id)
             .ToListAsync(ct);
@@ -460,6 +462,7 @@ public sealed class AutoDispatchBackgroundService(
             .AsNoTracking()
             .Where(job => job.Status == PrintJobStatus.Queued
                 && (job.AssignedPrinterId == null || job.AssignedPrinterId == printerId))
+            .WhereNotOperatorRecoveryBlocked()
             .OrderByPriorityDescending()
             .Take(20) // reasonable batch to score
             .ToListAsync(ct);

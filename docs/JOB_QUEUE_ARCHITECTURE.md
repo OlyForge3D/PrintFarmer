@@ -363,6 +363,63 @@ The safety invariants for this boundary are:
 - UI, API, and persistence tests prove both the positive recovery path and the
   negative path: unproven absence never releases the printer automatically.
 
+#### Implemented recovery disposition
+
+The implementation (`DispatchRecoveryService`, `DispatchRecoveryController`)
+resolves the open points of the contract above as follows:
+
+- **Distinct disposition.** An accepted recovery sets the attempt to the
+  terminal, non-retryable `DispatchAttemptOutcome.OperatorRecovered`
+  (`errorCode: "operator_recovery"`). It never records backend rejection,
+  cancellation, completion, or acceptance. Pending start-command outbox rows
+  for the attempt are dead-lettered (`operator_recovery`), pending control rows
+  are superseded (`superseded_by_operator_recovery`), and the attempt's
+  bed-clear record is invalidated. Successor barriers are untouched.
+- **Deliberate next action.** A job that was `Starting` returns to `Queued`
+  with `blockedReasonCode: "OperatorRecoveryRequired"`; `AssignedPrinterId` and
+  queue position are unchanged. The dispatch claim gate and every automatic
+  dispatch path (auto, batch, idle-window, startup requeue) skip such jobs
+  until an operator calls
+  `POST /api/dispatch/jobs/{jobId}/recovery/clear` with `If-Match: <job ETag>`
+  and `queue:reconcile`. Clearing is audited and emits
+  `PrintFarmer.Queue.DispatchRecoveryCleared.v1`.
+- **Sender cessation (fail closed).** Recovery is refused with `409
+  rejected_sender_live` while any sender for the attempt may still be live: a
+  foreign physical barrier, a `Processing` start command that has not recorded
+  `backend_outcome_unknown`, or a `Processing` control command. The start
+  sender records `BackendSenderSettledAtUtc` when its backend I/O ends; without
+  that evidence the request must also carry `"senderIsolationConfirmed": true`
+  (the operator attests the printer is isolated from the backend), otherwise it
+  returns `409 rejected_sender_isolation_required`. Unknown cessation never
+  releases.
+- **Request body.** Beyond the fields above, the body accepts optional
+  `senderIsolationConfirmed` and `clientReportedAtUtc`. Actor identity and
+  `actorRecordedAtUtc`/`serverRecordedAtUtc` are always server-derived; the
+  client time is stored only as client-reported. Notes are limited to 1000
+  characters.
+- **Protected journal.** Evidence lives in the append-only
+  `DispatchRecoveryJournalEntries` table (PostgreSQL and SQL Server
+  migrations), not `QueueOperationAudits` or the generic idempotency store. It
+  has no cascading relationships, is excluded from retention pruning, and
+  `AppDbContext` rejects any update or delete. Accepted and denied decisions
+  (`rejected_not_indeterminate` 409, `rejected_stale` 412, sender-live and
+  isolation 409) are journaled with their exact response for replay; key reuse
+  with a different fingerprint returns `409 idempotency_key_reused`.
+- **Revision churn.** The ETag is the printer dispatch-state revision. The
+  reconciliation scanner advances it on every pass, so clients must refetch
+  the resource and send a new `Idempotency-Key` after a `412`.
+- **Escalation.** `DispatchEscalationService` scans unresolved claims every
+  `Queue:DispatchEscalation:ScanInterval` (default 1 minute) and, for each due
+  threshold (`Warning` immediately, `Operational` 15 minutes, `Critical`
+  1 hour, `HardLimit` 24 hours, configurable and validated as positive and
+  strictly increasing, versioned by `PolicyRevision`), inserts one
+  `DispatchEscalationMarkers` row — unique per attempt, policy revision, and
+  threshold — plus a `PrintFarmer.Queue.DispatchIndeterminateEscalated.v1`
+  outbox event in the same transaction. Escalation never modifies the claim.
+- **Authorization scope.** Reads require printer `View` scope; recover requires
+  printer `Manage` scope and clear requires job `Manage` scope. Out-of-scope
+  resources return `404`.
+
 The minimum validation matrix covers authorization denial, wrong-printer and
 stale-revision conflicts, duplicate/replayed assertions, concurrent
 reconciliation, atomic rollback when audit or release persistence fails,

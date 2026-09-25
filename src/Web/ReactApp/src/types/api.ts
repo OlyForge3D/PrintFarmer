@@ -2173,7 +2173,7 @@ export interface JobQueuePrintJob {
   dispatchResult?: {
     attemptId?: string | null;
     attemptNumber?: number | null;
-    outcome: "InProgress" | "Accepted" | "Rejected" | "FailedBeforeStart" | "Unknown";
+    outcome: "InProgress" | "Accepted" | "Rejected" | "FailedBeforeStart" | "Unknown" | "OperatorRecovered";
     backendAcceptedAtUtc?: string | null;
     errorCode?: string | null;
     isRetryable: boolean;
@@ -2781,7 +2781,8 @@ export type DispatchAttemptOutcome =
   | 'Rejected'
   | 'FailedBeforeStart'
   | 'Unknown'
-  | 'InProgress';
+  | 'InProgress'
+  | 'OperatorRecovered';
 
 export interface DispatchAttemptResultDto {
   attemptId?: string | null;
