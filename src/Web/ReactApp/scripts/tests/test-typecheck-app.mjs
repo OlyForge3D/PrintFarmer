@@ -147,37 +147,233 @@ test("does not request list-file output for an unrelated diagnostic failure", ()
   assert.equal(result.showListFilesOutput, false);
 });
 
-test("returns a boolean list-file output contract for every evaluation path", () => {
+// Pins each explicit `showListFilesOutput` return in evaluate() by strict
+// equality (#2853). A typeof-only assertion would silently pass if a branch
+// flipped its flag from false to true or vice versa -- but the CLI only
+// prints listing output when the flag is true, so that flip would either
+// suppress diagnostic listings on real failures or leak them on failures
+// where the listing is meaningless. Naming each scenario and asserting the
+// expected flag by strict equality makes such a regression fail loudly.
+test("evaluate binds showListFilesOutput to the correct flag for every synchronous path (#2853)", () => {
   const timeoutError = Object.assign(new Error("spawnSync tsc ETIMEDOUT"), {
     code: "ETIMEDOUT",
   });
+
   const scenarios = [
-    {},
-    { baseline: null },
     {
-      compilerResult: { status: null, signal: "SIGKILL", error: undefined },
-    },
-    { compilerResult: { status: null, signal: null, error: timeoutError } },
-    { output: "error TS18003: No inputs were found in config file." },
-    {
-      compilerResult: { status: 1, signal: null, error: undefined },
-      output: "",
+      name: "invalid baseline (null) short-circuits before compilerResult is read",
+      overrides: { baseline: null },
+      expectedOk: false,
+      expectedShow: false,
     },
     {
-      compilerResult: { status: 2, signal: null, error: undefined },
-      output: "",
+      name: "compiler timeout (ETIMEDOUT) is a bounded non-completion",
+      overrides: {
+        compilerResult: { status: null, signal: null, error: timeoutError },
+      },
+      expectedOk: false,
+      expectedShow: false,
     },
     {
-      listFilesResult: { status: 2, signal: null, error: undefined },
+      name: "compiler killed by a signal (SIGKILL) is a non-completion",
+      overrides: {
+        compilerResult: { status: null, signal: "SIGKILL", error: undefined },
+      },
+      expectedOk: false,
+      expectedShow: false,
     },
-    { baseline: { ...baseline, minimumAppFileCount: 2 } },
     {
-      output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+      name: "compiler with a null status and no signal is a non-completion",
+      overrides: {
+        compilerResult: { status: null, signal: null, error: undefined },
+      },
+      expectedOk: false,
+      expectedShow: false,
+    },
+    {
+      name: "global diagnostic (TS18003) is fatal without a listing request",
+      overrides: {
+        output: "error TS18003: No inputs were found in config file.",
+      },
+      expectedOk: false,
+      expectedShow: false,
+    },
+    {
+      name: "compiler exits with an unexpected status (5) rather than 0 or 2",
+      overrides: {
+        compilerResult: { status: 5, signal: null, error: undefined },
+      },
+      expectedOk: false,
+      expectedShow: false,
+    },
+    {
+      name: "compiler exits nonzero (2) with no file diagnostics",
+      overrides: {
+        // status 2 passes the unexpected-status guard (status === 0 || 2) and
+        // reaches the "nonzero without file diagnostics" return; status 1 would
+        // be intercepted earlier and leave that return unpinned (#2984 review).
+        compilerResult: { status: 2, signal: null, error: undefined },
+        output: "",
+      },
+      expectedOk: false,
+      expectedShow: false,
+    },
+    {
+      name: "list-files spawn exits nonzero (cannot enumerate the project)",
+      overrides: {
+        listFilesResult: { status: 2, signal: null, error: undefined },
+      },
+      expectedOk: false,
+      expectedShow: true,
+    },
+    {
+      name: "diagnostic failure alone does not request listing output",
+      overrides: {
+        output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+      },
+      expectedOk: false,
+      expectedShow: false,
+    },
+    {
+      name: "success return never requests listing output",
+      overrides: {},
+      expectedOk: true,
+      expectedShow: false,
     },
   ];
 
-  for (const overrides of scenarios) {
-    assert.equal(typeof evaluateGate(overrides).showListFilesOutput, "boolean");
+  for (const scenario of scenarios) {
+    const result = evaluateGate(scenario.overrides);
+    assert.equal(result.ok, scenario.expectedOk, `${scenario.name}: ok`);
+    assert.equal(
+      result.showListFilesOutput,
+      scenario.expectedShow,
+      `${scenario.name}: showListFilesOutput`,
+    );
+  }
+});
+
+// The remaining paths (file-floor, @ts-nocheck, combined) route through
+// countApplicationFiles / countNoCheckFiles, which read real files off disk,
+// so they need on-disk fixtures rather than an override table (#2853).
+test("evaluate: file-floor failure alone requests listing output (#2853)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-floor-only-"),
+  );
+
+  try {
+    // Empty src/ => 0 application files; minimumAppFileCount = 1 trips the
+    // floor. The compile pass is clean (0 diagnostics matches baseline) and
+    // the listing spawn is clean, so ONLY the floor gate fails -- which is
+    // exactly the branch that must set showListFilesOutput=true.
+    await mkdir(path.join(fixtureDirectory, "src/services"), {
+      recursive: true,
+    });
+    const result = evaluate({
+      baseline: {
+        applicationNoCheckFileCount: 0,
+        minimumAppFileCount: 1,
+      },
+      compilerResult: { status: 0, signal: null, error: undefined },
+      listFilesResult: { status: 0, signal: null, error: undefined },
+      output: "",
+      listFilesOutput: "",
+      directory: fixtureDirectory,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.showListFilesOutput, true);
+    assert.match(
+      result.message,
+      /found 0 application file\(s\); expected at least 1/,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("evaluate: @ts-nocheck-only failure does not request listing output (#2853)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-nocheck-only-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src/services"), {
+      recursive: true,
+    });
+    const nocheckPath = "src/services/nocheck.ts";
+    await writeFile(
+      path.join(fixtureDirectory, nocheckPath),
+      "// @ts-nocheck\nexport const a = 1;\n",
+    );
+
+    // Compile pass and floor both pass; the ONLY gate that fails is the
+    // @ts-nocheck count (1 observed vs 0 baseline). That failure lives in
+    // the combined-failures block and must NOT set showListFilesOutput,
+    // because the listing does not help diagnose it -- the offending path
+    // list is already in the failure message itself.
+    const result = evaluate({
+      baseline: {
+        applicationNoCheckFileCount: 0,
+        minimumAppFileCount: 1,
+      },
+      compilerResult: { status: 0, signal: null, error: undefined },
+      listFilesResult: { status: 0, signal: null, error: undefined },
+      output: "",
+      listFilesOutput: nocheckPath,
+      directory: fixtureDirectory,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.showListFilesOutput, false);
+    assert.match(
+      result.message,
+      /found 1 @ts-nocheck file\(s\) under src\/; expected exact count 0/,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("evaluate: combined floor + diagnostic failure reports both and requests listing (#2853)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-combined-"),
+  );
+
+  try {
+    // Zero application files on disk (floor fails) AND the compile output
+    // carries two file diagnostics under strict-zero (any diagnostic fails).
+    // Accumulating both failures in a single evaluate call proves the
+    // combined-failures block still reports them together -- and, because
+    // the floor participates, still sets showListFilesOutput=true even
+    // though a bare diagnostic failure on its own does not.
+    await mkdir(path.join(fixtureDirectory, "src/services"), {
+      recursive: true,
+    });
+    const result = evaluate({
+      baseline: {
+        applicationNoCheckFileCount: 0,
+        minimumAppFileCount: 2,
+      },
+      compilerResult: { status: 2, signal: null, error: undefined },
+      listFilesResult: { status: 0, signal: null, error: undefined },
+      output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+      listFilesOutput: "",
+      directory: fixtureDirectory,
+    });
+
+    assert.equal(result.ok, false);
+    assert.equal(result.showListFilesOutput, true);
+    assert.match(
+      result.message,
+      /found 0 application file\(s\); expected at least 2/,
+    );
+    assert.match(
+      result.message,
+      /measured 2 diagnostic\(s\); expected zero diagnostics/,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
   }
 });
 
@@ -490,9 +686,8 @@ test("CLI prints nonempty list-file output when the application file floor fails
     await writeFile(
       path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
       [
-        'const listedPath = "src/services/known.ts";',
-        'if (process.argv.includes("--listFilesOnly")) {',
-        "  process.stdout.write(`${listedPath}\\n`);",
+        `if (process.argv.includes("--listFilesOnly")) {`,
+        `  process.stdout.write(${JSON.stringify(`${listedPath}\n`)});`,
         "}",
       ].join("\n"),
     );
@@ -509,7 +704,88 @@ test("CLI prints nonempty list-file output when the application file floor fails
       /TypeScript application compiler found 1 application file\(s\); expected at least 2/,
     );
     assert.match(result.stdout, /tsc --listFilesOnly output:\n/);
-    assert.match(result.stdout, new RegExp(listedPath.replace("/", "\\/")));
+    assert.ok(
+      result.stdout.includes(listedPath),
+      `expected stdout to include ${listedPath}; got: ${result.stdout}`,
+    );
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("CLI omits the list-file output label when the successful listing is empty (trim guard, #2853)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-empty-listing-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    for (const script of [
+      "typecheck-app.mjs",
+      "typecheck-app-core.mjs",
+      "typecheck-tests-core.mjs",
+    ]) {
+      await cp(
+        path.join(scriptsDirectory, script),
+        path.join(fixtureDirectory, "scripts", script),
+      );
+    }
+    // Zero-diagnostic baseline with a positive floor: the compile pass has
+    // no diagnostics, so it succeeds; the listing pass exits 0 but writes
+    // whitespace-only output; the floor then fails, which sets
+    // evaluation.showListFilesOutput=true. The trim guard in
+    // typecheck-app.mjs (`evaluation.showListFilesOutput && listFilesOutput.trim()`)
+    // is therefore the only thing standing between the CLI and a bare
+    // `tsc --listFilesOnly output:` label on stdout with nothing under it.
+    // Deleting `&& listFilesOutput.trim()` must make the label-absence
+    // assertion below fail.
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
+      JSON.stringify({
+        applicationNoCheckFileCount: 0,
+        minimumAppFileCount: 1,
+      }),
+    );
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        `if (process.argv.includes("--listFilesOnly")) {`,
+        // Whitespace-only, so listFilesOutput is truthy but
+        // listFilesOutput.trim() is empty -- the trim guard's precise job.
+        `  process.stdout.write("   \\n\\t\\n");`,
+        "} else {",
+        "  // no diagnostics -- compile pass succeeds",
+        "}",
+      ].join("\n"),
+    );
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-app.mjs")],
+      { encoding: "utf8", timeout: 30_000 },
+    );
+    // Guard against a harness watchdog masking a hang as the behavior
+    // under test -- same pattern as the timeout fixture below.
+    assert.notEqual(
+      result.error?.code,
+      "ETIMEDOUT",
+      `test-harness watchdog fired: ${result.stderr}`,
+    );
+
+    assert.notEqual(result.status, 0);
+    assert.match(
+      result.stderr,
+      /TypeScript application compiler found 0 application file\(s\); expected at least 1/,
+    );
+    // The trim guard MUST suppress the label when the successful listing
+    // is whitespace-only. If the guard is removed, an empty
+    // `tsc --listFilesOnly output:` header prints to stdout with nothing
+    // under it -- meaningless noise that hides the real failure.
+    assert.doesNotMatch(result.stdout, /--listFilesOnly output:/);
+    assert.doesNotMatch(result.stderr, /Application type-check passed/);
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }
