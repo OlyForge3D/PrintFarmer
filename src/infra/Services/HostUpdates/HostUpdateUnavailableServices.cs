@@ -137,7 +137,7 @@ public sealed class UnavailableHostUpdateExecutionRequestResolver : IHostUpdateE
         Task.FromResult(HostUpdateExecutionResolutionResult.Fail(UnavailableReason));
 }
 
-public sealed class UnavailableHostUpdateRecoveryCoordinator : IHostUpdateRecoveryCoordinator, IHostUpdateAvailability
+public sealed class UnavailableHostUpdateRecoveryCoordinator : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner, IHostUpdateAvailability
 {
     public bool IsAvailable => false;
 
@@ -148,6 +148,12 @@ public sealed class UnavailableHostUpdateRecoveryCoordinator : IHostUpdateRecove
         IReadOnlyList<HostUpdateExecutionActivity> activities,
         CancellationToken cancellationToken) =>
         Task.FromResult(new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, UnavailableReason));
+
+    public Task<HostUpdateRecoveryPlan> PlanAsync(
+        HostUpdateExecutionRequest failedRequest,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken) =>
+        Task.FromResult(new HostUpdateRecoveryPlan(HostUpdateRecoveryPlanKind.NeedsOperator, UnavailableReason, null, null));
 }
 
 public sealed class UnavailableHostUpdateExecutionLock : IHostUpdateExecutionLock, IHostUpdateAvailability
