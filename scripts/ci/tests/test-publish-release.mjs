@@ -9,8 +9,12 @@ import { components, compareVersions, parseTag, validateVersion, verifyEnvironme
 import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
 import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
-import { formatSums, hostUpdateCliArchiveName, hostUpdateCliAssets, hostUpdateCliRuntimes, hostUpdateCliSumsBundleName,
-  hostUpdateCliSumsName, packageHostUpdateCli, parseSums, verifyHostUpdateCliSums } from '../host-update-cli-package.mjs';
+import { formatSums, hostUpdateCliArchiveName, hostUpdateCliAssets, hostUpdateCliRuntimes, hostUpdateCliSbomName,
+  hostUpdateCliSumsBundleName, hostUpdateCliSumsName, packageHostUpdateCli, parseSums, validateHostUpdateCliSbom,
+  verifyHostUpdateCliSums } from '../host-update-cli-package.mjs';
+
+const spdxFixture = name => `${JSON.stringify({ spdxVersion: 'SPDX-2.3', SPDXID: 'SPDXRef-DOCUMENT', name,
+  packages: [{ SPDXID: 'SPDXRef-Package', name: 'Farm.HostUpdate.Cli', versionInfo: '1.0.0' }] })}\n`;
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
 import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
   SEQUENCE_MAJOR_MAX, SEQUENCE_MINOR_MAX, SEQUENCE_PATCH_MAX, SEQUENCE_PRERELEASE_MAX,
@@ -464,6 +468,8 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   const smokes = [];
   const cliPublishes = [];
   const cliArchives = [];
+  const syftScans = [];
+  const enrichments = [];
   const run = (name, args) => {
     if (name === 'git') return sha;
     if (name === 'dotnet' && args[0] === 'publish') {
@@ -495,7 +501,10 @@ test('actual build loop passes the six targets/platforms and source metadata, st
       writeFileSync(args[args.indexOf('--metadata-file') + 1], JSON.stringify({ 'containerimage.digest': digest }));
     } else if (name === 'docker' && args[1] === 'imagetools') return inspectionCommand(name, args);
     else if (name === 'docker' && args[0] === 'run') smokes.push(args);
-    else if (name === 'syft') writeFileSync(args[2].slice('spdx-json='.length), '{}');
+    else if (name === 'syft') {
+      syftScans.push(args);
+      writeFileSync(args[2].slice('spdx-json='.length), spdxFixture(args[0]));
+    } else if (name === 'node' && args[0] === 'scripts/compliance/enrich-sbom.mjs') enrichments.push(args);
     return '';
   };
   assert.deepEqual(buildImages(release, source, assets, run, () => {}), digests);
@@ -533,8 +542,18 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     assert.ok(wrapper);
   }
   const sums = readFileSync(join(assets, `printfarmer-host-update-cli-v${release.version}-SHA256SUMS`), 'utf8');
-  assert.equal(sums.trim().split('\n').length, 3);
-  assert.deepEqual(verifyHostUpdateCliSums(assets, release.version).size, 3);
+  assert.equal(sums.trim().split('\n').length, 6);
+  assert.deepEqual(verifyHostUpdateCliSums(assets, release.version).size, 6);
+  const cliScans = syftScans.filter(args => args[0].startsWith('dir:'));
+  assert.deepEqual(cliScans.map(args => args[args.indexOf('--source-name') + 1]),
+    hostUpdateCliRuntimes.map(rid => `printfarmer-host-update-cli-${rid}`));
+  for (const rid of hostUpdateCliRuntimes) {
+    const sbom = join(assets, hostUpdateCliSbomName(release.version, rid));
+    assert.ok(cliScans.some(args => args[2] === `spdx-json=${sbom}`), `SBOM scanned for ${rid}`);
+    assert.ok(!enrichments.some(args => args[args.indexOf('--sbom') + 1] === sbom),
+      `CLI SBOM is a component inventory, not license-enriched, for ${rid}`);
+  }
+  assert.equal(syftScans.indexOf(cliScans[0]), 0, 'CLI SBOMs are produced before any image scan');
   const beforeCli = builds.length;
   assert.throws(() => buildImages(release, source, assets, (name, args) => {
     if (name === 'dotnet' && args[0] === 'publish' && args.includes('linux-arm64')) throw new Error('cli publish failed');
@@ -555,10 +574,13 @@ function publishFixture(t, channel = 'insider') {
   const files = releaseAssets(chosen);
   for (const file of files) writeFileSync(join(assets, file), 'asset');
   const cliSums = join(assets, hostUpdateCliSumsName(chosen.version));
-  writeFileSync(cliSums, formatSums(hostUpdateCliRuntimes.map(rid => {
+  writeFileSync(cliSums, formatSums(hostUpdateCliRuntimes.flatMap(rid => {
     const name = hostUpdateCliArchiveName(chosen.version, rid);
+    const sbom = hostUpdateCliSbomName(chosen.version, rid);
     writeFileSync(join(assets, name), `archive ${rid}`);
-    return { name, sha256: createHash('sha256').update(`archive ${rid}`).digest('hex') };
+    writeFileSync(join(assets, sbom), spdxFixture(rid));
+    return [{ name, sha256: createHash('sha256').update(`archive ${rid}`).digest('hex') },
+      { name: sbom, sha256: createHash('sha256').update(spdxFixture(rid)).digest('hex') }];
   })));
   writeFileSync(join(assets, hostUpdateCliSumsBundleName(chosen.version)), JSON.stringify({
     sha256: createHash('sha256').update(readFileSync(cliSums)).digest('hex'),
@@ -664,13 +686,16 @@ test('the host-update CLI checksum list is verified with the channel identity be
   }
 });
 
-test('host-update CLI checksum list is canonical and names exactly the supported archives', t => {
+test('host-update CLI checksum list is canonical and names exactly the supported archives and SBOMs', t => {
   assert.deepEqual([...hostUpdateCliRuntimes], ['linux-x64', 'linux-arm64', 'win-x64']);
   assert.throws(() => hostUpdateCliArchiveName('1.2.3', 'osx-arm64'), /Unsupported host-update CLI runtime/);
   assert.deepEqual(hostUpdateCliAssets('1.2.3'), [
     'printfarmer-host-update-cli-v1.2.3-linux-x64.tar.gz',
     'printfarmer-host-update-cli-v1.2.3-linux-arm64.tar.gz',
     'printfarmer-host-update-cli-v1.2.3-win-x64.tar.gz',
+    'printfarmer-host-update-cli-v1.2.3-linux-x64.spdx.json',
+    'printfarmer-host-update-cli-v1.2.3-linux-arm64.spdx.json',
+    'printfarmer-host-update-cli-v1.2.3-win-x64.spdx.json',
     'printfarmer-host-update-cli-v1.2.3-SHA256SUMS',
     'printfarmer-host-update-cli-v1.2.3-SHA256SUMS.sigstore.json',
   ]);
@@ -685,19 +710,33 @@ test('host-update CLI checksum list is canonical and names exactly the supported
   const assets = workspace(t);
   const version = '1.2.3';
   const write = entries => writeFileSync(join(assets, hostUpdateCliSumsName(version)), formatSums(entries));
-  const entries = hostUpdateCliRuntimes.map(rid => {
+  const entries = hostUpdateCliRuntimes.flatMap(rid => {
     const name = hostUpdateCliArchiveName(version, rid);
+    const sbom = hostUpdateCliSbomName(version, rid);
     writeFileSync(join(assets, name), rid);
-    return { name, sha256: createHash('sha256').update(rid).digest('hex') };
+    writeFileSync(join(assets, sbom), spdxFixture(rid));
+    return [{ name, sha256: createHash('sha256').update(rid).digest('hex') },
+      { name: sbom, sha256: createHash('sha256').update(spdxFixture(rid)).digest('hex') }];
   });
   write(entries);
-  assert.equal(verifyHostUpdateCliSums(assets, version).size, 3);
+  assert.equal(verifyHostUpdateCliSums(assets, version).size, 6);
+  write(entries.filter(entry => !entry.name.endsWith('.spdx.json')));
+  assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives and SBOMs/);
   write(entries.slice(1));
   assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives/);
   write([...entries, { name: 'extra.tar.gz', sha256: hash }]);
   assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives/);
   write(entries.map((entry, index) => index === 2 ? { ...entry, sha256: hash } : entry));
   assert.throws(() => verifyHostUpdateCliSums(assets, version), /hash mismatch/);
+  const sbom = hostUpdateCliSbomName(version, 'win-x64');
+  writeFileSync(join(assets, sbom), '{}');
+  write(entries.map(entry => entry.name === sbom
+    ? { ...entry, sha256: createHash('sha256').update('{}').digest('hex') } : entry));
+  assert.throws(() => verifyHostUpdateCliSums(assets, version), /not an SPDX 2\.x document/);
+  for (const bad of ['not json', '[]', '{"spdxVersion":"SPDX-2.3","SPDXID":"SPDXRef-DOCUMENT","packages":[]}',
+    '{"spdxVersion":"CycloneDX","SPDXID":"SPDXRef-DOCUMENT","packages":[{}]}']) {
+    assert.throws(() => validateHostUpdateCliSbom(bad, sbom), /SBOM/, bad);
+  }
 });
 
 test('host-update CLI packaging refuses a missing launcher or source commit and cleans its stage', t => {
@@ -735,6 +774,9 @@ test('missing, tampered or wrong-identity signing evidence blocks publication be
     ['missing CLI checksum bundle', (assets) => rmSync(join(assets, hostUpdateCliSumsBundleName(release.version)))],
     ['empty CLI checksum bundle', (assets) => writeFileSync(join(assets, hostUpdateCliSumsBundleName(release.version)), '')],
     ['tampered CLI archive', (assets) => writeFileSync(join(assets, hostUpdateCliArchiveName(release.version, 'linux-x64')), 'evil')],
+    ['missing CLI SBOM', (assets) => rmSync(join(assets, hostUpdateCliSbomName(release.version, 'linux-arm64')))],
+    ['tampered CLI SBOM', (assets) => writeFileSync(join(assets, hostUpdateCliSbomName(release.version, 'linux-x64')),
+      spdxFixture('tampered'))],
     ['re-hashed CLI checksum list', (assets) => {
       const archive = hostUpdateCliArchiveName(release.version, 'win-x64');
       writeFileSync(join(assets, archive), 'evil');

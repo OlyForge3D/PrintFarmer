@@ -8,6 +8,8 @@ on:
       - 'scripts/printfarmer-host-update.*'
       - 'scripts/common-utils.sh'
       - 'scripts/ci/host-update-cli-package.mjs'
+      - 'scripts/install-host-update-cli.*'
+      - 'scripts/deploy-docker.ps1'
       - 'src/tools/Farm.HostUpdate.Cli/**'
       - 'scripts/docker/**'
       - 'docs/**'
@@ -25,6 +27,8 @@ on:
       - 'scripts/printfarmer-host-update.*'
       - 'scripts/common-utils.sh'
       - 'scripts/ci/host-update-cli-package.mjs'
+      - 'scripts/install-host-update-cli.*'
+      - 'scripts/deploy-docker.ps1'
       - 'src/tools/Farm.HostUpdate.Cli/**'
       - 'scripts/docker/**'
       - 'docs/**'
@@ -213,6 +217,40 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: pwsh -NoProfile -NonInteractive -File tests/test-host-update-cli-package.ps1
+
+  host-update-cli-installer-tests:
+    # Issue #3045: the signed host-update CLI installer must verify the Cosign
+    # identity, checksum, members and manifest before placing anything, and
+    # write-config must emit owner-only host-update.json from only the
+    # host-update keys of a deployment .env. Both suites use fixture release
+    # assets and a stub cosign. They also exercise the opt-in deploy-docker
+    # hooks. Linux and Windows are the supported installer hosts.
+    name: Host-update CLI installer tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-dotnet@a98b56852c35b8e3190ac28c8c2271da59106c68  # v6
+        if: runner.os == 'Windows'
+        with:
+          dotnet-version: '10.0.x'
+
+      - name: Run Bash installer tests
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash tests/test-install-host-update-cli.sh
+
+      - name: Run PowerShell installer tests
+        shell: pwsh
+        run: pwsh -NoProfile -NonInteractive -File tests/test-install-host-update-cli.ps1
 
   split-topology-route-smoke:
     # Issue #2239: tests/test-compose-generator.sh (above) proves the
