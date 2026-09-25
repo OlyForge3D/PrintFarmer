@@ -1,6 +1,4 @@
-﻿using System.Net;
-using System.Net.Sockets;
-using System.Net.WebSockets;
+﻿using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Farm.Backend.Plugin.Sdcp;
@@ -19,14 +17,12 @@ public sealed class SdcpClientWebSocketFragmentationTests
     [Fact]
     public async Task GetStatusAsync_WhenStatusResponseIsFragmentedAcrossFrames_ParsesStateCorrectly()
     {
-        int port = GetFreeTcpPort();
-
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development
         });
 
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
 
         await using WebApplication app = builder.Build();
 
@@ -74,7 +70,7 @@ public sealed class SdcpClientWebSocketFragmentationTests
 
         await app.StartAsync();
 
-        string baseUrl = $"http://127.0.0.1:{port}";
+        string baseUrl = app.GetLoopbackBaseUrl();
 
         var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
         using var httpClient = new HttpClient();
@@ -88,30 +84,4 @@ public sealed class SdcpClientWebSocketFragmentationTests
         await app.StopAsync();
     }
 
-    private static int GetFreeTcpPort()
-    {
-        // Bind to port 0 to get an OS-assigned ephemeral port. Re-verify availability before
-        // returning to reduce the TOCTOU race window in CI (port grabbed between Stop and bind).
-        for (int attempt = 0; attempt < 10; attempt++)
-        {
-            using TcpListener listener = new(IPAddress.Loopback, 0);
-            listener.Start();
-            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            listener.Stop();
-
-            try
-            {
-                using TcpListener verify = new(IPAddress.Loopback, port);
-                verify.Start();
-                verify.Stop();
-                return port;
-            }
-            catch (SocketException)
-            {
-                // Port was grabbed between allocation and verification; retry.
-            }
-        }
-
-        throw new InvalidOperationException("Unable to allocate a free TCP port after 10 attempts.");
-    }
 }

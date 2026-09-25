@@ -1,5 +1,4 @@
 ﻿using System.Collections.Concurrent;
-using System.Net;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -100,13 +99,11 @@ public sealed class SdcpClientBusyTests
     private static async Task<SdcpTestEnvironment> CreateSdcpMultiResponseServerAsync(
         ConcurrentQueue<string> responseQueue)
     {
-        int port = GetFreeTcpPort();
-
         WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = Environments.Development
         });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
 
         WebApplication app = builder.Build();
         app.UseWebSockets();
@@ -134,14 +131,14 @@ public sealed class SdcpClientBusyTests
             await ws.CloseAsync(WebSocketCloseStatus.NormalClosure, "done", context.RequestAborted);
         });
 
-        await app.StartAsync();
+        return await app.StartOnLoopbackAsync(baseUrl =>
+        {
+            var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
+            using var httpClient = new System.Net.Http.HttpClient();
+            var client = new SdcpClient(httpClient, logger.Object, new BackendTimeoutSettings());
 
-        string baseUrl = $"http://127.0.0.1:{port}";
-        var logger = new Mock<ILogger<SdcpClient>>(MockBehavior.Loose);
-        using var httpClient = new System.Net.Http.HttpClient();
-        var client = new SdcpClient(httpClient, logger.Object, new BackendTimeoutSettings());
-
-        return new SdcpTestEnvironment(app, client, baseUrl);
+            return new SdcpTestEnvironment(app, client, baseUrl);
+        });
     }
 
     private static string BuildCommandAckResponse(int cmd, int ack) =>
@@ -168,32 +165,6 @@ public sealed class SdcpClientBusyTests
             Topic = string.Empty
         });
 
-    private static int GetFreeTcpPort()
-    {
-        // Bind to port 0 to get an OS-assigned ephemeral port. Re-verify availability before
-        // returning to reduce the TOCTOU race window in CI (port grabbed between Stop and bind).
-        for (int attempt = 0; attempt < 10; attempt++)
-        {
-            using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-            listener.Start();
-            int port = ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
-            listener.Stop();
-
-            try
-            {
-                using var verify = new System.Net.Sockets.TcpListener(IPAddress.Loopback, port);
-                verify.Start();
-                verify.Stop();
-                return port;
-            }
-            catch (System.Net.Sockets.SocketException)
-            {
-                // Port was grabbed between allocation and verification; retry.
-            }
-        }
-
-        throw new InvalidOperationException("Unable to allocate a free TCP port after 10 attempts.");
-    }
 
     private sealed class SdcpTestEnvironment(WebApplication app, SdcpClient client, string baseUrl)
         : IAsyncDisposable
