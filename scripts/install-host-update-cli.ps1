@@ -91,7 +91,8 @@ function Test-TreeEqual([string] $Expected, [string] $Actual) {
         if (-not $right.TryGetValue($entry.Key, [ref] $value) -or $value -cne $entry.Value) { return $false }
     }
     if (-not $IsWindows) {
-        $owners = foreach ($root in $Expected, $Actual) { (& find $root -printf '%u:%g %P\n' | Sort-Object -CaseSensitive) -join "`n" }
+        # find also covers the version directory itself, which Get-ChildItem does not list.
+        $owners = foreach ($root in $Expected, $Actual) { (& find $root -printf '%y %m %u:%g %P\n' | Sort-Object -CaseSensitive) -join "`n" }
         if ($owners[0] -cne $owners[1]) { return $false }
     }
     return $true

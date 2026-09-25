@@ -172,6 +172,13 @@ exit 0
         Check 'a same-version placement with a non-executable launcher is refused' ($result.ExitCode -eq 1 -and
             $result.Output.Contains('differs from the verified release'))
         & chmod a+x -- $placedLauncher
+        $placedVersion = Join-Path $root '1.2.3'
+        & chmod 0777 -- $placedVersion
+        $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
+        Check 'a world-writable same-version directory is refused and left untouched' ($result.ExitCode -eq 1 -and
+            $result.Output.Contains('differs from the verified release') -and
+            ((Get-Item -LiteralPath $placedVersion).UnixFileMode -band [System.IO.UnixFileMode]::OtherWrite))
+        & chmod 0755 -- $placedVersion
     }
     $result = Invoke-Installer @('install', '-Version', '1.2.3', '-Runtime', $runtime, '-AssetDir', $assets, '-InstallRoot', $root)
     Check 'a restored placement is accepted again' ($result.ExitCode -eq 0)

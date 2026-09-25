@@ -140,6 +140,10 @@ chmod a-x "$ROOT/$STABLE/cli/Farm.HostUpdate.Cli"
 check "a same-version placement with a non-executable launcher is refused and left untouched" \
     "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 1 && ! -x '$ROOT/$STABLE/cli/Farm.HostUpdate.Cli' ]] && grep -q 'differs from the verified release' '$TEST_ROOT/out.log'"
 chmod a+x "$ROOT/$STABLE/cli/Farm.HostUpdate.Cli"
+chmod 0777 "$ROOT/$STABLE"
+check "a world-writable same-version directory is refused and left untouched" \
+    "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 1 && \$(stat -c %a '$ROOT/$STABLE') == 777 ]] && grep -q 'differs from the verified release' '$TEST_ROOT/out.log'"
+chmod 0755 "$ROOT/$STABLE"
 if [[ "$(id -u)" == "0" ]] && id nobody >/dev/null 2>&1; then
     mkdir -p "$TEST_ROOT/foreign-root" && chown nobody "$TEST_ROOT/foreign-root" && chmod 0755 "$TEST_ROOT/foreign-root"
     check "an install root owned by another account is refused" \
