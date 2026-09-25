@@ -135,7 +135,9 @@ your session output: a **Host** line (`<machine>`, its limits, and the slots in
 use per category) and, below it, only the items that apply: an unreadable
 capabilities file; over-subscription and the sessions involved; unmapped
 running sessions; sessions paused or released this round; sessions awaiting
-owner input or plan approval; and stale claims (see "Issue Selection"). In the
+owner input or plan approval; claims you stopped on because their history was
+unreadable or their election ambiguous; and stale claims (see "Issue
+Selection"). In the
 in-session loop, add the full "Ralph on the Board" block from
 `.github/ralph-reference.md` at each periodic check-in and when Ralph stops.
 Under `squad watch --execute`, the spawned session's final message is the
@@ -173,15 +175,22 @@ PrintFarmer rules:
   full timeline (`gh api --paginate repos/{owner}/{repo}/issues/N/timeline`).
   The winning claim is the "Claimed by" comment with the lowest comment ID
   posted after the issue's last `unassigned` event, counting only comments by
-  the assignee's account. Start only if the issue is still assigned, has no
-  linked PR, and the winning claim names this machine. Otherwise stop, and do
-  not unassign: the assignee belongs to the winning host too. If you cannot
-  read the full history, stop and report it. This narrows but does not close
-  the race; GitHub has no atomic claim.
+  the assignee's account. The election is ambiguous if any of those "Claimed
+  by" comments was edited (`updated_at` differs from `created_at`) or has the
+  same `created_at` second as that `unassigned` event. Start only if the issue
+  is still assigned, has no linked PR, the election is not ambiguous, and the
+  winning claim names this machine. Otherwise stop, and do not unassign: the
+  assignee belongs to the winning host too. If you cannot read the full
+  history, or the election is ambiguous, stop and report it; the owner
+  resolves it by unassigning, which starts a new election. Never edit or delete
+  a "Claimed by" comment. GitHub cannot show that a marker was deleted, or
+  edited so it no longer reads as a claim, so either hands the claim to the
+  next marker; only the owner may do that, as an override. This narrows but
+  does not close the race; GitHub has no atomic claim.
 - **Stale claims:** a claim is stale when the issue is assigned, has no open PR
   linked by `Closes #N`, and has had no comment or branch push for 24 hours.
   Report it in your round report with the machine named by its winning claim,
-  or "no marker". Do not release it yourself: a quiet build, or a
+  "no marker", or "ambiguous marker". Do not release it yourself: a quiet build, or a
   `squad watch --execute` agent that `get_sessions_status` cannot see, looks
   the same as a dead claim. Releasing it is the owner's call.
   `squad watch --execute` never sees assigned issues, so only an in-app

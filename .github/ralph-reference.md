@@ -20,20 +20,28 @@ state store or scheduled coordinator/consumer layer on top of it (see #2966).
   or an open PR is claimed, so skip it. Every host uses the same GitHub account,
   so Ralph also comments "Claimed by <machine>" when it claims an issue. The
   claim comment from the assignee's account with the lowest comment ID after
-  the issue was last unassigned wins. Declare each
+  the issue was last unassigned wins. An edited marker, or one in the same
+  second as that unassignment, makes the election ambiguous: every host stops
+  and reports it, and the owner re-runs it by unassigning. Ralph never edits or
+  deletes a marker. Declare each
   host's tooling in `~/.squad/machine-capabilities.json`; issues labelled
   `needs:xcode`, and PR work on them, run only on a host whose `capabilities`
   include `xcode` (the Mac).
 - **Stranded claims:** nothing expires a claim, and Ralph never releases one
   itself. In-app Ralph reports claims with no linked PR and no activity for
   24 hours (see "Stale claims" in `.squad/ralph-instructions.md`). To sweep by
-  hand, list claimed issues with no linked PR, then release any with no live
-  session or `squad watch` agent on its host by unassigning it and commenting
-  where its branch is:
+  hand, list claimed issues with no linked PR. Immediately before releasing
+  each one, re-check that it is still assigned, has no linked PR, has had no
+  comment or branch push for 24 hours, and has no live session or `squad watch`
+  agent on its host; the list's `updatedAt` alone does not show branch pushes.
+  Release it by unassigning it and commenting where its branch is:
 
   ```bash
   gh issue list --state open --label squad --search "assignee:@me -linked:pr" \
     --json number,title,updatedAt
+  # Last push to an issue branch (empty output means no push):
+  gh api "repos/OlyForge3D/PrintFarmer/activity?ref=refs/heads/<branch>&activity_type=push&per_page=1" \
+    --jq '.[0].timestamp'
   ```
 - **Per-host limits:** a host may cap concurrent issue sessions with
   `"maxConcurrent": { "xcode": 1, "other": 1 }` in the same file. The Mac mini
