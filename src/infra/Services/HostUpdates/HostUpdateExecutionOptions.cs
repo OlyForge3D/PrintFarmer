@@ -183,7 +183,10 @@ public sealed class HostUpdateExecutionOptions
     /// <summary>
     /// Maps each canonical release service id to its compose service name, pinned-image
     /// environment variable, and immutable image repository. Defaults match the split-topology
-    /// registry deployment; override per-topology as needed.
+    /// registry deployment; override per-topology as needed. A configured list replaces this
+    /// default (issue #3051), so list every service this host maps; an empty list, an entry
+    /// missing a field, a duplicate <c>ServiceId</c>, or an <see cref="ActiveServiceIds"/> entry
+    /// with no mapping fails startup validation.
     /// </summary>
     public HostUpdateServiceMappingOptions[] ServiceMappings { get; set; } =
     [

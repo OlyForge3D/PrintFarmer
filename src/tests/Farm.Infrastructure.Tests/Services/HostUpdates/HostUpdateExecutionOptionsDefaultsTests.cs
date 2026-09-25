@@ -72,9 +72,128 @@ public class HostUpdateExecutionOptionsDefaultsTests
         options.ActiveServiceIds.Should().Equal(new HostUpdateExecutionOptions().ActiveServiceIds);
     }
 
+    [Fact]
+    public void ConfiguredServiceMappings_ReplaceBuiltInDefault()
+    {
+        HostUpdateExecutionOptions options = BindThroughRegistration(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:ServiceMappings:0:ServiceId"] = "monolith",
+            ["HostUpdateExecution:ServiceMappings:0:ComposeServiceName"] = "printfarmer",
+            ["HostUpdateExecution:ServiceMappings:0:ImageEnvironmentVariable"] = "PRINTFARMER_IMAGE",
+            ["HostUpdateExecution:ServiceMappings:0:ImageRepository"] = "ghcr.io/olyforge3d/printfarmer-monolith",
+        });
+
+        options.ServiceMappings.Should().ContainSingle().Which.Should().BeEquivalentTo(new HostUpdateServiceMappingOptions(
+            "monolith",
+            "printfarmer",
+            "PRINTFARMER_IMAGE",
+            "ghcr.io/olyforge3d/printfarmer-monolith"));
+    }
+
+    [Fact]
+    public void UnconfiguredServiceMappings_KeepBuiltInDefault()
+    {
+        HostUpdateExecutionOptions options = BindThroughRegistration(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:ComposeProjectName"] = "printfarmer",
+        });
+
+        options.ServiceMappings.Should().BeEquivalentTo(
+            new HostUpdateExecutionOptions().ServiceMappings,
+            config => config.WithStrictOrdering());
+    }
+
+    [Fact]
+    public void PartialServiceMappingOverride_IsNotMergedAndFailsValidation()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = BindThroughRegistration(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = root,
+            ["HostUpdateExecution:ServiceMappings:0:ImageRepository"] = "registry.example/printfarmer-api",
+        });
+
+        options.ServiceMappings.Should().ContainSingle();
+        ValidateOptionsResult result = new HostUpdateExecutionOptionsValidator().Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("is missing a required field");
+    }
+
+    [Fact]
+    public void ReplacedServiceMappingsMissingAnActiveService_FailsValidatedOptionsResolution()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        using ServiceProvider provider = BuildRegistrationProvider(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = root,
+            ["HostUpdateExecution:ServiceMappings:0:ServiceId"] = "monolith",
+            ["HostUpdateExecution:ServiceMappings:0:ComposeServiceName"] = "printfarmer",
+            ["HostUpdateExecution:ServiceMappings:0:ImageEnvironmentVariable"] = "PRINTFARMER_IMAGE",
+            ["HostUpdateExecution:ServiceMappings:0:ImageRepository"] = "ghcr.io/olyforge3d/printfarmer-monolith",
+        });
+
+        Action resolve = () => _ = provider.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value;
+
+        resolve.Should().Throw<OptionsValidationException>()
+            .WithMessage("*ActiveServiceIds must each have a ServiceMappings entry; unmapped: api,frontend,slicer-host,printer-discovery,orcaslicer-worker*");
+    }
+
+    [Fact]
+    public void ReplacedServiceMappingsCoveringActiveServices_PassValidatedOptionsResolution()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        using ServiceProvider provider = BuildRegistrationProvider(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = root,
+            ["HostUpdateExecution:ActiveServiceIds:0"] = "monolith",
+            ["HostUpdateExecution:ServiceMappings:0:ServiceId"] = "monolith",
+            ["HostUpdateExecution:ServiceMappings:0:ComposeServiceName"] = "printfarmer",
+            ["HostUpdateExecution:ServiceMappings:0:ImageEnvironmentVariable"] = "PRINTFARMER_IMAGE",
+            ["HostUpdateExecution:ServiceMappings:0:ImageRepository"] = "ghcr.io/olyforge3d/printfarmer-monolith",
+        });
+
+        HostUpdateExecutionOptions options = provider.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value;
+
+        options.ActiveServiceIds.Should().Equal("monolith");
+        options.ServiceMappings.Should().ContainSingle().Which.ServiceId.Should().Be("monolith");
+    }
+
+    private static ServiceProvider BuildRegistrationProvider(Dictionary<string, string?> values)
+    {
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        var services = new ServiceCollection();
+        services.AddHostUpdateRecoveryEngine(configuration);
+        return services.BuildServiceProvider();
+    }
+
+    [Fact]
+    public void DuplicateConfiguredServiceMapping_FailsValidatedOptionsResolution()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        var values = new Dictionary<string, string?> { ["HostUpdateExecution:RootDirectory"] = root };
+        for (int index = 0; index < 2; index++)
+        {
+            values[$"HostUpdateExecution:ServiceMappings:{index}:ServiceId"] = "api";
+            values[$"HostUpdateExecution:ServiceMappings:{index}:ComposeServiceName"] = "api";
+            values[$"HostUpdateExecution:ServiceMappings:{index}:ImageEnvironmentVariable"] = "PRINTFARMER_API_IMAGE";
+            values[$"HostUpdateExecution:ServiceMappings:{index}:ImageRepository"] = "ghcr.io/olyforge3d/printfarmer-api";
+        }
+
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        var services = new ServiceCollection();
+        services.AddHostUpdateRecoveryEngine(configuration);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Action resolve = () => _ = provider.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value;
+
+        resolve.Should().Throw<OptionsValidationException>().WithMessage("*duplicate ServiceId: api*");
+    }
+
     [Theory]
     [InlineData("ActiveServiceIds", "ActiveServiceIds must list at least one active service")]
     [InlineData("ComposeFiles", "ComposeFiles must list at least one compose file")]
+    [InlineData("ServiceMappings", "ServiceMappings must map at least one service")]
     public void ExplicitlyEmptyTopologyList_FailsValidatedOptionsResolution(string key, string expectedFailure)
     {
         // JSON "[]" and an empty environment variable both surface as a present, empty-string value.

@@ -348,6 +348,12 @@ Known limits of this slice:
   `RequiredAggregateHealthResultNames` and `RequiredFencedWriterNames` stay
   additive: configured entries extend the built-in set and can never drop a
   code-owned provider check, health result or fenced writer.
+- `ServiceMappings` also replaces its default when configured (#3051). List
+  every service this host maps, each with `ServiceId`, `ComposeServiceName`,
+  `ImageEnvironmentVariable` and `ImageRepository`; a partial override of one
+  default entry is not merged. An empty list, an entry missing a field, a
+  duplicate `ServiceId`, or an `ActiveServiceIds` entry with no mapping fails
+  startup validation.
 - Wrapper parity is regression-tested in CI (`deployment-tests.yml`,
   `host-update-wrapper-tests`): `tests/test-host-update-cli-wrapper.sh` and
   `tests/test-host-update-cli-wrapper.ps1` both run on Ubuntu, macOS and

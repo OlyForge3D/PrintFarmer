@@ -133,6 +133,36 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
                     failures.Add($"HostUpdateExecution:ServiceMappings entry for '{mapping.ServiceId}' is missing a required field.");
                 }
             }
+
+            string[] duplicateServiceIds = [.. options.ServiceMappings
+                .Where(mapping => !string.IsNullOrWhiteSpace(mapping.ServiceId))
+                .GroupBy(mapping => mapping.ServiceId, StringComparer.Ordinal)
+                .Where(group => group.Count() > 1)
+                .Select(group => group.Key)];
+            if (duplicateServiceIds.Length > 0)
+            {
+                failures.Add(
+                    "HostUpdateExecution:ServiceMappings must map each service once; duplicate ServiceId: "
+                    + string.Join(',', duplicateServiceIds)
+                    + ".");
+            }
+
+            if (options.ActiveServiceIds is { Length: > 0 })
+            {
+                var mappedServiceIds = options.ServiceMappings
+                    .Select(mapping => mapping.ServiceId)
+                    .ToHashSet(StringComparer.Ordinal);
+                string[] unmappedActiveServiceIds = [.. options.ActiveServiceIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id) && !mappedServiceIds.Contains(id))
+                    .Distinct(StringComparer.Ordinal)];
+                if (unmappedActiveServiceIds.Length > 0)
+                {
+                    failures.Add(
+                        "HostUpdateExecution:ActiveServiceIds must each have a ServiceMappings entry; unmapped: "
+                        + string.Join(',', unmappedActiveServiceIds)
+                        + ".");
+                }
+            }
         }
 
         if (options.MinimumFreeBytes <= 0)
