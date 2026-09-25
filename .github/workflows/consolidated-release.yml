@@ -187,6 +187,20 @@ jobs:
           cosign verify-blob --bundle "$BUNDLE" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$EXPECTED_IDENTITY" "$SUMS"
+      - name: Sign exact infrastructure image list
+        env:
+          LIST: release-assets/infrastructure-images.json
+          BUNDLE: signed-release/infrastructure-images.sigstore.json
+          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
+          sha256sum "$LIST" > signed-release/infrastructure-images.sha256
+          cosign sign-blob --yes --bundle "$BUNDLE" "$LIST"
+          cosign verify-blob --bundle "$BUNDLE" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$EXPECTED_IDENTITY" "$LIST"
       - name: Upload immutable signature evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -234,6 +248,8 @@ jobs:
           cp signed-release/update-manifest.sigstore.json release-assets/update-manifest.sigstore.json
           sha256sum --check signed-release/host-update-cli-sums.sha256
           cp "signed-release/$CLI_SUMS_BUNDLE" "release-assets/$CLI_SUMS_BUNDLE"
+          sha256sum --check signed-release/infrastructure-images.sha256
+          cp signed-release/infrastructure-images.sigstore.json release-assets/infrastructure-images.sigstore.json
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24
