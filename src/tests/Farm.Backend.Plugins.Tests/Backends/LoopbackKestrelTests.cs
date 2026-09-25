@@ -76,4 +76,30 @@ public sealed class LoopbackKestrelTests
         FluentActions.Invoking(() => app.Services.GetRequiredService<IServer>())
             .Should().Throw<ObjectDisposedException>();
     }
+
+    [Fact]
+    public async Task StartOnLoopbackAsync_WhenStopAlsoThrows_StillDisposesAndRethrowsOriginal()
+    {
+        WebApplicationBuilder builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            EnvironmentName = Environments.Development
+        });
+        builder.ListenOnEphemeralLoopbackPort();
+        builder.Services.AddHostedService<ThrowOnStopHostedService>();
+        WebApplication app = builder.Build();
+
+        Func<Task> act = () => app.StartOnLoopbackAsync<object>(_ => throw new InvalidOperationException("boom"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("boom");
+        FluentActions.Invoking(() => app.Services.GetRequiredService<IServer>())
+            .Should().Throw<ObjectDisposedException>();
+    }
+
+    private sealed class ThrowOnStopHostedService : IHostedService
+    {
+        public Task StartAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+        public Task StopAsync(CancellationToken cancellationToken) =>
+            throw new InvalidOperationException("stop failed");
+    }
 }

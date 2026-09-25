@@ -42,14 +42,22 @@ internal static class LoopbackKestrel
         }
         catch
         {
+            // Each stage is guarded separately so a failed stop still disposes, and the
+            // original failure is the one rethrown.
             try
             {
                 await app.StopAsync();
+            }
+            catch
+            {
+            }
+
+            try
+            {
                 await app.DisposeAsync();
             }
             catch
             {
-                // Preserve the original failure.
             }
 
             throw;
