@@ -497,10 +497,11 @@ as a network-denied safe update or rollback.
 Use the [installation update runbook](HOST_UPDATE_RUNBOOK.md) for setup,
 manual authorization, automatic policy and failure handling. The
 [offline delivery requirements](OFFLINE_UPDATE_RECOVERY.md) distinguish
-existing caching from the remaining bounded import/export, host-local recovery
-tooling and isolated restore evidence. Managed offline update support must
-remain blocked until those gates pass; there is no download/build fallback or
-skip-verification recovery path.
+existing caching from the remaining bounded import/export (#2981) and isolated
+restore evidence (#2982). The signed host-local status/recovery CLI is
+available as a release asset. Its remaining gaps are listed in the runbook.
+Managed offline update support must remain blocked until those gates pass.
+There is no download/build fallback or skip-verification recovery path.
 
 ### Legacy fresh-install materials
 
