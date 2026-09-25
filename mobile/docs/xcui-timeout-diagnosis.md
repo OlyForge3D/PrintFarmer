@@ -177,6 +177,42 @@ not a broken matrix expansion. Shared API contract changes also select iOS
 coverage. A green build alone is not proof that XCUI executed; check the
 selected jobs and their retained test results.
 
+### Launch-readiness heartbeat (#3013)
+
+Two iPad CI failures stalled before the first shell observation. On PR #3011
+shard 2, the first `app.snapshot()` returned
+`XCTPerformOnMainRunLoop work timed out after 60.0s` after a normal launch. On
+PR #3015 shard 3, `Launch` spent about 100s in `Terminate <previous pid>` and
+then reported that the app did not have a process ID. Neither artifact can
+tell a blocked app main thread from XCTest or simulator starvation. The
+harness therefore makes the next occurrence fail fast and name its cause.
+
+- **Heartbeat.** In UI-test mode only, `UITestMainThreadHeartbeat` publishes
+  `pid << 42 | uptime-ms` as Darwin notification state
+  (`com.olyforge3d.printfarmer.uitesting.main-heartbeat`) from a 0.5s
+  main-run-loop timer in `.common` mode. The runner reads it with
+  `notify_get_state`, which performs no accessibility query. Both processes
+  share the host uptime clock.
+- **Watchdog.** After the first beat, a background timer aborts the app once
+  the main run loop has not turned for 20s of contiguous one-second ticks. The
+  test then fails at about 25s instead of waiting for the 60s snapshot timeout,
+  and the crash keeps the blocked main-thread backtrace. A gap of more than 3s
+  between ticks, which means the whole process was suspended, restarts the
+  count.
+- **Launch gate.** `waitForAuthenticatedShell` requires a beat from this launch
+  that is at most 5s old before its first snapshot. It polls for at most 5s,
+  bounded by the navigation budget, and otherwise fails with
+  `App launch is not ready`.
+- **Snapshot attribution.** A failed shell snapshot reports either that the app
+  main run loop kept turning, so XCTest automation stalled, or that it stopped
+  at a stated offset from the snapshot start, so the app main thread was
+  blocked.
+- **Launch attribution.** Issues that XCTest records inside `app.launch()` are
+  annotated with the newest beat's pid and timing. A pid that beats after the
+  launch began shows that an app main thread was running, and matches the
+  `Terminate …:<pid>` line when the old instance survived termination. Silence
+  longer than 5s attributes the stall to XCTest or the simulator.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test
