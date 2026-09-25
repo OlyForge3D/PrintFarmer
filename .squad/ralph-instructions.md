@@ -62,31 +62,41 @@ Before starting or resuming any issue, read `~/.squad/machine-capabilities.json`
 - File present but unreadable or invalid JSON: use 1 for both, and say so in
   your round report.
 
-**Occupied slots.** Each round, list the issue sessions you created: in the app,
-`get_sessions_status` entries whose creator is you; under `squad watch --execute`,
-the agents you spawned in this run. A session holds its category's slot while it
-is running, idle with unmerged work, or interrupted, until its PR merges, its
-issue is blocked, or it is released. Review sub-agents run inside their issue
-session and do not count.
+**Slots count running sessions, not claims.** Each round, call
+`get_sessions_status` and count, per category, the issue sessions in this project
+that are running (`is_running: true`), whoever created them. Your own Ralph
+session and non-issue sessions do not count. Under `squad watch --execute`, count
+the agents running in this invocation; agents from earlier rounds have exited.
+Review sub-agents run inside their issue session and do not count.
 
-- When a category is at its limit, start nothing new in that category. The other
-  category may still start work up to its own limit.
-- Resume an idle or interrupted session by messaging it (`send_session_message`).
-  Never create a second session for an issue that already has one.
+A **paused** session is an issue session on this host that is idle or interrupted
+before its issue is done (PR merged, blocked, or released). It keeps its GitHub
+claim but holds no slot.
+
+- When a category is at its limit, start and resume nothing in that category.
+  The other category may still work up to its own limit.
+- When a category has a free slot, resume its highest-priority paused session
+  first by messaging it (`send_session_message`). Under `squad watch --execute`,
+  spawn one agent that continues from the issue's existing branch or PR. Start a
+  new issue in that category only when it has no paused sessions.
+- Never create a second session for an issue that already has one.
+- Over the limit (for example after a crash): message nothing beyond the limit;
+  the extra sessions become paused when their turn ends.
+- A paused session with an open PR keeps its claim; comment once "Paused on
+  <machine>: waiting for a slot". A paused session with no open PR is released:
+  push any commits to its `squad/{issue}-{slug}` branch, unassign the issue, and
+  comment "Released by <machine>: no slot; continue from branch `<branch>`" (or
+  "nothing pushed").
+- Before starting any issue, check for an existing `squad/{issue}-*` branch and
+  continue it rather than creating a new one.
 - A session that cannot be resumed (worktree gone, repeated failure) goes through
-  Escalation below, which releases its slot.
-- Over the limit (for example after a crash): resume only the highest-priority
-  sessions that fit, and leave the rest paused.
-- A paused session that has pushed a branch or opened a PR keeps its claim; comment
-  once "Paused on <machine>: waiting for a slot". A paused session with nothing
-  pushed is released: push any local commits first, then unassign the issue and
-  comment "Released by <machine>: no slot", so another host can take it.
+  Escalation below.
 - Leave issues you have not started unassigned so another host can take them.
 
 `squad watch --execute` does not enforce these limits: squad-cli 0.13.1 ignores
 `--max-concurrent` on that path and hands every eligible issue to one Ralph
 invocation. The cap depends entirely on Ralph following this section, so on a
-capped host prefer an in-app "Ralph, go" session, which can see its child sessions.
+capped host prefer an in-app "Ralph, go" session, which can see every session.
 
 The Mac mini sets `{ "xcode": 1, "other": 1 }` because it runs out of memory
 with more.

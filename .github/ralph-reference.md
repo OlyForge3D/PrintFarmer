@@ -17,7 +17,8 @@ state store or scheduled coordinator/consumer layer on top of it (see #2966).
 - **Per-host limits:** a host may cap concurrent issue sessions with
   `"maxConcurrent": { "xcode": 1, "other": 1 }` in the same file. The Mac mini
   uses exactly that; hosts without `maxConcurrent` are uncapped. Ralph, not the
-  CLI, enforces it: see "Host Limits" in `.squad/ralph-instructions.md`.
+  CLI, enforces it (see "Host Limits" in `.squad/ralph-instructions.md`), so a
+  capped host should run in-app "Ralph, go" rather than `squad watch`.
 
 ## Ralph — Work Monitor
 
