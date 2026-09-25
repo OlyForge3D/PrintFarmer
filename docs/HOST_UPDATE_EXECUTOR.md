@@ -125,6 +125,17 @@ not bootstrap an updater, make unsigned legacy releases eligible, or change the 
 boundary. No protected bootstrap or operator assertion is supported; signed verification remains required before
 managed eligibility can be established.
 
+## Scheduler adapter lifecycle
+
+`HostUpdateSchedulerExecutorAdapter` guards each linked cancellation source and
+active operation before entering its lifecycle lock. If setup or a pre-armed
+cancellation callback throws, cleanup removes only that exact request generation,
+disposes the source, and completes the operation's shutdown wait before the
+exception propagates. The same request ID can then be scheduled again; a refused
+duplicate cannot remove or disable cancellation of an already-running generation.
+This in-memory lifecycle cleanup does not release the executor's durable writer
+fence or change admission and rollout requirements.
+
 ## DI wiring
 
 `HostUpdateExecutionStartup.AddHostUpdateExecution` (`src/api/Startup/HostUpdateExecutionStartup.cs`,
