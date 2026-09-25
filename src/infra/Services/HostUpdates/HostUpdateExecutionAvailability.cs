@@ -331,7 +331,10 @@ public sealed class HostUpdateExecutionAvailabilityProvider(
                 continue;
             }
 
-            if (last == HostUpdateExecutionState.RecoveryRequired)
+            // Journaled recovery records a confirmed rollback as Completed/recovery:rolled_back
+            // rather than fence-release:after, so both terminal shapes consult the outcome store.
+            if (last == HostUpdateExecutionState.RecoveryRequired ||
+                (last == HostUpdateExecutionState.Completed && string.Equals(activities[^1].Phase, "recovery:rolled_back", StringComparison.Ordinal)))
             {
                 HostUpdateRecoveryOutcomeRecord? outcome = await recoveryOutcomeStore.ReadAsync(releaseId, cancellationToken).ConfigureAwait(false);
                 if (outcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
