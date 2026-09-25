@@ -32,16 +32,18 @@ state store or scheduled coordinator/consumer layer on top of it (see #2966).
   24 hours (see "Stale claims" in `.squad/ralph-instructions.md`). To sweep by
   hand, list claimed issues with no linked PR. Immediately before releasing
   each one, re-check that it is still assigned, has no linked PR, has had no
-  comment or branch push for 24 hours, and has no live session or `squad watch`
-  agent on its host; the list's `updatedAt` alone does not show branch pushes.
+  comment or branch activity (push, force push or creation) for 24 hours, and
+  has no live session or `squad watch` agent on its host; the list's
+  `updatedAt` alone does not show branch activity.
   Release it by unassigning it and commenting where its branch is:
 
   ```bash
   gh issue list --state open --label squad --search "assignee:@me -linked:pr" \
     --json number,title,updatedAt
-  # Last push to an issue branch (empty output means no push):
-  gh api "repos/OlyForge3D/PrintFarmer/activity?ref=refs/heads/<branch>&activity_type=push&per_page=1" \
-    --jq '.[0].timestamp'
+  # Latest activity of any type (push, force_push, branch_creation, ...) on an
+  # issue branch; do not filter by activity_type. Empty output means none recorded:
+  gh api "repos/OlyForge3D/PrintFarmer/activity?ref=refs/heads/<branch>&per_page=1" \
+    --jq '.[0] // empty | "\(.activity_type) \(.timestamp)"'
   ```
 - **Per-host limits:** a host may cap concurrent issue sessions with
   `"maxConcurrent": { "xcode": 1, "other": 1 }` in the same file. The Mac mini

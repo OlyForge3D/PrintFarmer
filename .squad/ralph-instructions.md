@@ -188,7 +188,8 @@ PrintFarmer rules:
   next marker; only the owner may do that, as an override. This narrows but
   does not close the race; GitHub has no atomic claim.
 - **Stale claims:** a claim is stale when the issue is assigned, has no open PR
-  linked by `Closes #N`, and has had no comment or branch push for 24 hours.
+  linked by `Closes #N`, and has had no comment or branch activity (push,
+  force push or creation) for 24 hours.
   Report it in your round report with the machine named by its winning claim,
   "no marker", or "ambiguous marker". Do not release it yourself: a quiet build, or a
   `squad watch --execute` agent that `get_sessions_status` cannot see, looks
