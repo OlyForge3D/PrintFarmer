@@ -133,21 +133,33 @@ also enforces any tighter allowance assigned in a test body. No XCTest
 allowance or action timeout is increased, and unauthenticated/loading-scenario
 suites do not opt into this precondition.
 
-Login navigation explicitly dismisses an observed "Save Password?" alert using
-"Not Now". The password prompt can arrive after the sidebar opens; snapshot-only
-polling otherwise cannot trigger XCTest's implicit interruption handler. The
-login-only allowlist checks the public alert root before taking a shell snapshot
-or revealing its sidebar. Only an existing alert is then snapshotted;
+Login navigation explicitly dismisses an observed "Save Password?" prompt
+(an alert, or on iPhone a sheet as described below) using "Not Now". The
+password prompt can arrive after the sidebar opens; snapshot-only polling
+otherwise cannot trigger XCTest's implicit interruption handler. The login-only
+allowlist checks the public alert and sheet roots before taking a shell snapshot
+or revealing its sidebar. Only an existing interruption is then snapshotted;
 the query stays in the target application's public accessibility context.
 An observed interruption takes precedence over navigation behind it, even when
-the application's snapshot omits the alert. Other suites do not perform that extra query.
-The same original action deadline covers dismissal and navigation. Only this
-named alert/button pair is allowed. Login permits one conditional repeat of this
-idempotent dismissal only if a new snapshot still shows the same alert identity
-and frame and its Not Now button remains enabled and hittable. Disappearance,
-changed alerts and expired budgets never authorize another tap. Other suites
+the application's snapshot omits the interruption. Other suites do not perform
+that extra query. The same original action deadline covers dismissal and
+navigation. Only this named title/button pair is allowed. Login permits one
+conditional repeat of this idempotent dismissal only if a new snapshot still
+shows the same interruption identity and frame and its Not Now button remains
+enabled and hittable. Disappearance, changed interruptions and expired budgets
+never authorize another tap. Other suites
 do not opt into that repeat. No credentials are saved, no physical command is
 retried, and no product behavior changes.
+
+On iOS 26.5 iPhone the system presents the same prompt as a `Sheet` titled
+"Save Password?" in the app's own accessibility tree, not as an `Alert`; iPad
+still presents an `Alert` (#3032). The login query therefore checks the
+allowlisted title as an alert and then as a sheet, still in the target
+application's context. A sheet blocks navigation
+only when its title is allowlisted, so app action sheets and suites without an
+allowlist resolve as before. Not-ready diagnostics list any alert or sheet
+titles in the snapshot, and each dismissal prints a
+`note: dismissed live navigation interruption` line.
 
 ### Login and cold-offline readiness (#2829)
 
@@ -158,10 +170,10 @@ but cannot cancel an in-flight synchronous XCUI call. Cold-offline shell tests
 establish this readiness (including a positively observed sidebar reveal)
 before starting the unchanged eight-second Attention destination lookup.
 
-After a permitted alert dismissal, disappearance has a three-second grace
-within that same navigation budget. Login's single unchanged-alert retry
-does not restart the grace. Unknown, changed, non-hittable, and persistent
-alerts fail closed with the last observation, dismissal count, and reason.
+After a permitted alert or allowlisted-sheet dismissal, disappearance has a
+three-second grace within that same navigation budget. Login's single
+unchanged-interruption retry does not restart the grace. Unknown, changed,
+non-hittable, and persistent interruptions fail closed with the last observation, dismissal count, and reason.
 Late application snapshots are retained for diagnostics without authorizing
 navigation or starting another query.
 

@@ -86,6 +86,11 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
             ShellNode(.button, label: "Not Now"),
             ShellNode(.button, label: "Save")
         ])
+        // iOS 26.5 presents the same prompt as a sheet in the app's own tree (#3032).
+        let sheet = ShellNode(.sheet, label: "Save Password?", children: [
+            ShellNode(.button, label: "Not Now"),
+            ShellNode(.button, label: "Save")
+        ])
         let unknown = ShellNode(.alert, label: "Allow access?", children: [
             ShellNode(.button, label: "Not Now")
         ])
@@ -95,11 +100,18 @@ final class LoginFlowUITests: PrintFarmerUITestCase {
         let loading = ShellObservation(ShellNode(.application))
         let embedded = ShellObservation(ShellNode(.application, children: [alert]))
         let embeddedUnknown = ShellObservation(ShellNode(.application, children: [unknown]))
+        let embeddedSheet = ShellObservation(
+            ShellNode(.application, children: [sheet]),
+            interruptionSheetTitles: Set(navigationAlertDismissals.keys)
+        )
         let scenarios: [(String, [ShellNode?], [ShellObservation], Bool, String, Int)] = [
             ("no interruption", [nil], [ready], true, "none", 0),
             ("separate alert root", [alert, nil], [loading, ready], true, "none", 1),
             ("late alert", [nil, alert, nil], [loading, loading, ready], true, "none", 1),
             ("application-only alert", [nil, nil], [embedded, ready], true, "none", 1),
+            ("separate sheet root", [sheet, nil], [loading, ready], true, "none", 1),
+            ("late sheet", [nil, sheet, nil], [loading, loading, ready], true, "none", 1),
+            ("application-only sheet", [nil, nil], [embeddedSheet, ready], true, "none", 1),
             ("unknown alert", [nil], [embeddedUnknown], true, "interruption rejected by dismissal allowlist", 0),
             ("non-hittable dismissal", [alert], [ready], false, "interruption dismissal is not hittable", 0),
             ("unchanged retry", [alert, alert, nil], [loading, loading, ready], true, "none", 2),
