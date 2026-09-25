@@ -32,7 +32,9 @@ param(
     [switch]$AutoAdmin,
     [string]$AutoAdminUsername = "",
     [string]$AutoAdminPassword = "",
-    [string]$AutoAdminEmail = ""
+    [string]$AutoAdminEmail = "",
+    [string]$HostUpdateCliVersion = $env:HOST_UPDATE_CLI_VERSION,
+    [string]$HostUpdateCliAssets = $env:HOST_UPDATE_CLI_ASSETS
 )
 
 $ErrorActionPreference = "Stop"
@@ -148,6 +150,11 @@ function Show-Help {
     Write-Host ""
     Write-Host "DEPLOYMENT OPTIONS:"
     Write-Host "    -DryRun                    Validate configuration without deploying"
+    Write-Host "    -HostUpdateCliVersion VER  Opt in to installing the signed host-update recovery CLI (X.Y.Z or"
+    Write-Host "                               X.Y.Z-insider.N) and writing host-update.json from .env. Requires cosign"
+    Write-Host "                               and an elevated shell. Not rollout authorization. Env: HOST_UPDATE_CLI_VERSION"
+    Write-Host "    -HostUpdateCliAssets DIR   Read the CLI archive, SHA256SUMS and its bundle from DIR (offline hosts)."
+    Write-Host "                               Env: HOST_UPDATE_CLI_ASSETS"
     Write-Host "    -NonInteractive            Automated deployment (CI/CD mode)"
     Write-Host "    -TearDown                  Stop and remove containers/volumes (preserve images)"
     Write-Host "    -Redeploy                  Restart existing deployment with same config"
@@ -1729,6 +1736,39 @@ function Verify-Deployment {
     }
 }
 
+# Installs the signed host-update recovery CLI and writes its host configuration when the
+# operator opts in with -HostUpdateCliVersion (issue #3045). Packaging only: nothing here
+# enables or starts a host update.
+function Install-HostUpdateCliIfRequested {
+    param([string]$EnvFilePath = ".env")
+
+    if ([string]::IsNullOrWhiteSpace($HostUpdateCliVersion)) { return }
+
+    $installer = Join-Path $PSScriptRoot "install-host-update-cli.ps1"
+    $envPath = [System.IO.Path]::GetFullPath($EnvFilePath, (Get-Location).Path)
+    $installArgs = @('install', '-Version', $HostUpdateCliVersion)
+    if (-not [string]::IsNullOrWhiteSpace($HostUpdateCliAssets)) {
+        $installArgs += @('-AssetDir', $HostUpdateCliAssets)
+    }
+
+    Write-Info "Installing signed host-update CLI $HostUpdateCliVersion..."
+    & pwsh -NoProfile -File $installer @installArgs
+    if ($LASTEXITCODE -ne 0) {
+        Write-ErrorMsg "Host-update CLI installation failed; nothing was placed. See docs/HOST_UPDATE_RUNBOOK.md."
+        exit 1
+    }
+
+    & pwsh -NoProfile -File $installer write-config -EnvFile $envPath
+    switch ($LASTEXITCODE) {
+        0 { Write-Success "Host-update CLI installed and host-update.json written" }
+        3 { Write-Warning "HostUpdateExecution__RootDirectory is not set in $envPath; host-update.json was not written" }
+        default {
+            Write-ErrorMsg "Writing host-update.json failed (exit $LASTEXITCODE). See docs/HOST_UPDATE_RUNBOOK.md."
+            exit 1
+        }
+    }
+}
+
 function Redeploy-Deployment {
     Write-Header "Redeploying PrintFarmer"
     Write-Info "Using repository-supported OrcaSlicer version $script:SupportedOrcaSlicerVersion"
@@ -1768,6 +1808,8 @@ function Redeploy-Deployment {
         Write-ErrorMsg "Failed to regenerate docker-compose.yml"
         exit 1
     }
+
+    Install-HostUpdateCliIfRequested -EnvFilePath ".env"
     
     Write-Info "Stopping existing containers..."
     try {
@@ -2022,6 +2064,9 @@ if (-not (Confirm-DeploymentSettings -Settings $config)) {
 if ($DryRun) {
     Write-Success "Dry-run validation successful!"
     Write-Info "Configuration is valid and ready for deployment"
+    if (-not [string]::IsNullOrWhiteSpace($HostUpdateCliVersion)) {
+        Write-Info "[DRY RUN] Would install host-update CLI $HostUpdateCliVersion and write host-update.json from .env"
+    }
     Write-Info "Remove -DryRun flag to proceed with actual deployment"
     exit 0
 }
@@ -2134,6 +2179,8 @@ if (-not (Generate-EnvFile -Config $config -OutputPath ".env")) {
     Write-ErrorMsg "Failed to generate .env file"
     exit 1
 }
+
+Install-HostUpdateCliIfRequested -EnvFilePath ".env"
 
 # Deploy
 Write-Header "Starting Deployment"

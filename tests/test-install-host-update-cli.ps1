@@ -235,6 +235,41 @@ exit 0
     New-Item -ItemType Directory -Path (Join-Path $testRoot 'dir.json') | Out-Null
     Check 'a directory output is refused' ((Invoke-Installer @('write-config', '-EnvFile', $envFile, '-Output', (Join-Path $testRoot 'dir.json'))).ExitCode -eq 1)
     Check 'a relative env file is a usage error' ((Invoke-Installer @('write-config', '-EnvFile', 'deploy.env', '-Output', $config)).ExitCode -eq 2)
+
+    # deploy-docker.ps1 opt-in hook: run the real function against a recording stub installer.
+    $hookDir = Join-Path $testRoot 'hook'
+    New-Item -ItemType Directory -Path $hookDir | Out-Null
+    Set-Content -LiteralPath (Join-Path $hookDir 'install-host-update-cli.ps1') -Value @'
+Add-Content -LiteralPath $env:HOOK_LOG -Value ($args -join ' ')
+if ($args[0] -eq 'write-config') { exit [int]$env:HOOK_WRITE_RC }
+exit [int]$env:HOOK_INSTALL_RC
+'@
+    $deployAst = [System.Management.Automation.Language.Parser]::ParseFile((Join-Path $repoRoot 'scripts/deploy-docker.ps1'), [ref]$null, [ref]$null)
+    $hookFn = $deployAst.Find({ param($n) $n -is [System.Management.Automation.Language.FunctionDefinitionAst] -and $n.Name -ceq 'Install-HostUpdateCliIfRequested' }, $true).Extent.Text
+    Set-Content -LiteralPath (Join-Path $hookDir 'run.ps1') -Value (@(
+            'function Write-Info([string]$m) { Write-Host $m }; function Write-Success([string]$m) { Write-Host $m }; function Write-ErrorMsg([string]$m) { Write-Host "ERR $m" }',
+            '$HostUpdateCliVersion = $env:HOOK_VERSION; $HostUpdateCliAssets = $env:HOOK_ASSETS',
+            $hookFn,
+            "Set-Location -LiteralPath '$hookDir'; Install-HostUpdateCliIfRequested; exit 0") -join "`n")
+    $env:HOOK_LOG = Join-Path $hookDir 'log'
+    function Invoke-Hook([string]$Version, [string]$Assets = '', [int]$InstallRc = 0, [int]$WriteRc = 0) {
+        Remove-Item -LiteralPath $env:HOOK_LOG -ErrorAction SilentlyContinue
+        $env:HOOK_VERSION = $Version; $env:HOOK_ASSETS = $Assets; $env:HOOK_INSTALL_RC = $InstallRc; $env:HOOK_WRITE_RC = $WriteRc
+        $output = (& $pwshPath -NoProfile -File (Join-Path $hookDir 'run.ps1') 2>&1 | Out-String)
+        [pscustomobject]@{ ExitCode = $LASTEXITCODE; Output = $output
+            Log = @(if (Test-Path -LiteralPath $env:HOOK_LOG) { Get-Content -LiteralPath $env:HOOK_LOG }) }
+    }
+    $hook = Invoke-Hook ''
+    Check 'deploy hook is a no-op without a version' ($hook.ExitCode -eq 0 -and $hook.Log.Count -eq 0)
+    $assets = Join-Path $testRoot 'assets'
+    $hook = Invoke-Hook '1.2.3' $assets
+    Check 'deploy hook installs then writes config from the absolute env file' ($hook.ExitCode -eq 0 -and
+        ($hook.Log -join '|') -ceq "install -Version 1.2.3 -AssetDir $assets|write-config -EnvFile $(Join-Path $hookDir '.env')")
+    $hook = Invoke-Hook '1.2.3' -WriteRc 3
+    Check 'deploy hook warns and continues when the root is not configured' ($hook.ExitCode -eq 0 -and $hook.Output.Contains('was not written'))
+    $hook = Invoke-Hook '1.2.3' -InstallRc 1
+    Check 'deploy hook fails the deployment when install fails' ($hook.ExitCode -eq 1 -and $hook.Log.Count -eq 1)
+    Check 'deploy hook fails the deployment when write-config fails' ((Invoke-Hook '1.2.3' -WriteRc 1).ExitCode -eq 1)
 } finally {
     $env:PATH = $savedPath
     Remove-Item -LiteralPath $testRoot -Recurse -Force -ErrorAction SilentlyContinue
