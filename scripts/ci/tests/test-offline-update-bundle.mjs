@@ -134,6 +134,26 @@ for (const channel of ['stable', 'insider']) {
   });
 }
 
+test('members stay quarantined until authentication succeeds and the record is written last', () => {
+  const context = fixture();
+  try {
+    assemble(context);
+    const { run: authenticate } = cosign({ requireOffline: true });
+    const observed = [];
+    const run = (name, args) => {
+      observed.push(readdirSync(context.staging).sort());
+      return authenticate(name, args);
+    };
+    verify(context, { run });
+    assert.ok(observed.length > 0);
+    for (const listing of observed) assert.deepEqual(listing, ['.unverified'], 'unauthenticated members must not be published');
+    assert.equal(existsSync(join(context.staging, '.unverified')), false);
+    assert.ok(existsSync(join(context.staging, offlineBundleVerificationName)));
+  } finally {
+    context.cleanup();
+  }
+});
+
 test('a runtime subset carries only the selected archive but the full signed checksum list', () => {
   const context = fixture('insider');
   try {

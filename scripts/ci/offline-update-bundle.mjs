@@ -15,7 +15,8 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  closeSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, rmSync, writeSync,
+  closeSync, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, rmdirSync, rmSync,
+  writeSync,
 } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -27,6 +28,7 @@ import { hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSumsBundl
 export const offlineBundleIndexName = 'offline-bundle.json';
 export const offlineBundleVerificationName = 'offline-bundle-verification.json';
 export const offlineBundleKind = 'printfarmer-offline-bundle';
+const quarantineDirectoryName = '.unverified';
 const manifestName = 'update-manifest.json';
 const manifestSignatureName = 'update-manifest.sigstore.json';
 const oidcIssuer = 'https://token.actions.githubusercontent.com';
@@ -484,9 +486,12 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     requireThat(dirname(stagingReal) === parent, 'Staging directory resolved outside its parent');
     const inside = relative(stagingReal, root);
     requireThat(inside.startsWith('..') || isAbsolute(inside), 'Trusted root must not be inside the staging directory');
+    // Members stay in a quarantine subdirectory until every check passes; the verification record is written last.
+    const quarantine = join(stagingReal, quarantineDirectoryName);
+    mkdirSync(quarantine, { mode: 0o700 });
     const hashes = new Map();
     for (const entry of entries.slice(1)) {
-      const out = openSync(join(stagingReal, entry.name), 'wx', 0o644);
+      const out = openSync(join(quarantine, entry.name), 'wx', 0o644);
       try {
         hashes.set(entry.name, copyRange(fd, entry.offset, entry.size, out));
       } finally {
@@ -496,7 +501,7 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     for (const file of index.files) {
       requireThat(hashes.get(file.name) === file.sha256, `Offline bundle member was modified: ${file.name}`);
     }
-    const manifestBytes = readSmallFile(join(stagingReal, manifestName), 'Offline bundle manifest', limits.maxMetadataBytes);
+    const manifestBytes = readSmallFile(join(quarantine, manifestName), 'Offline bundle manifest', limits.maxMetadataBytes);
     const identity = manifestIdentity(manifestBytes, channel, version);
     requireThat(JSON.stringify(index.release) === JSON.stringify(identity),
       'Offline bundle index identity does not equal the signed manifest identity');
@@ -506,9 +511,9 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       archives.some(file => file.name === hostUpdateCliArchiveName(identity.version, rid)));
     requireThat(JSON.stringify(index.contents.cliRuntimes) === JSON.stringify(runtimes),
       'Offline bundle runtime list does not match its archives');
-    verifyCliSums(readSmallFile(join(stagingReal, hostUpdateCliSumsName(identity.version)), 'Offline bundle CLI checksum list',
+    verifyCliSums(readSmallFile(join(quarantine, hostUpdateCliSumsName(identity.version)), 'Offline bundle CLI checksum list',
       limits.maxMetadataBytes), identity.version, archives);
-    verifySignatures(stagingReal, identity, { run, trustedRoot: root, version: identity.version });
+    verifySignatures(quarantine, identity, { run, trustedRoot: root, version: identity.version });
     const record = {
       schema: 1,
       decision: 'verified-not-installable',
@@ -521,6 +526,12 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       rolloutAuthorization: false,
       verifiedAt: now().toISOString(),
     };
+    for (const entry of entries.slice(1)) {
+      requireThat(!lstatSync(join(stagingReal, entry.name), { throwIfNoEntry: false }),
+        `Staging directory was modified during verification: ${entry.name}`);
+      renameSync(join(quarantine, entry.name), join(stagingReal, entry.name));
+    }
+    rmdirSync(quarantine);
     const recordFd = openSync(join(stagingReal, offlineBundleVerificationName), 'wx', 0o644);
     try {
       writeAll(recordFd, Buffer.from(`${JSON.stringify(record, undefined, 2)}\n`));

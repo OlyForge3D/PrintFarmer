@@ -49,9 +49,13 @@ bundle complete; this table is not an archive layout or an implementation.
 
 ## Verified release-metadata bundle (first slice)
 
-`scripts/ci/offline-update-bundle.mjs` covers only the first two table rows and
-the host-update CLI archives. It reuses the existing signed release outputs;
-it does not create a new manifest format, signer or publisher.
+`scripts/ci/offline-update-bundle.mjs` covers the original signed manifest row,
+the bounded-verification part of the offline verification row, and the
+host-update CLI archives. It does not package Node.js, Cosign or trust-root
+continuity/expiry/revocation evidence: the operator provisions a pinned Cosign
+and an approved `trusted_root.json` out of band, and trust continuity is #3064.
+It reuses the existing signed release outputs; it does not create a new
+manifest format, signer or publisher.
 
 Assemble on a connected host from a downloaded release asset directory:
 
@@ -82,15 +86,21 @@ and its `.sigstore.json` bundle, and the selected CLI archives.
 - The archive parses within fixed size and member-count limits before any file
   is written: no links, traversal, absolute paths, PAX/long names, duplicates,
   unexpected members or trailing data.
+- Every member matches its SHA-256 as streamed from the bundle.
 - Cosign `verify-blob --trusted-root` accepts both signature bundles for the
-  release workflow identity on `main` or `development`, using only the supplied
-  trusted root (no network lookup).
+  release workflow identity of the expected channel (`main` for stable,
+  `development` for insider), using only the supplied trusted root (no network
+  lookup).
 - The manifest channel (and version, when given) matches the operator's
   `--channel`/`--version`, and every CLI archive matches its signed SHA-256.
 
-Only then are members written with exclusive-create semantics; on any failure
-the staging directory is removed. A successful run writes
-`offline-bundle-verification.json` recording the verified identities.
+The staging directory is created exclusively and members are written with
+exclusive-create semantics into its `.unverified/` quarantine subdirectory.
+Only after every check passes are they moved to the staging root, and
+`offline-bundle-verification.json` is written last. On any caught failure the
+staging directory is removed. **Only the presence of the verification record
+marks success;** a staging directory left by an interrupted run (for example
+with `.unverified/` and no record) is untrusted and must be deleted.
 
 The index always states `installable: false` and `rolloutAuthorization: false`;
 `contents.images`, `contents.infrastructure`, `contents.priorRecoverySet` and
