@@ -124,8 +124,12 @@ public static class HostUpdateBaselineHashes
 
             if (database.IsSqlServer)
             {
-                var builder = new Microsoft.Data.SqlClient.SqlConnectionStringBuilder(database.ConnectionString);
-                return $"{builder.DataSource.ToLowerInvariant()}/{builder.InitialCatalog}";
+                // Parsed with the provider-neutral builder: nothing here opens a connection, so the
+                // SqlClient builder's transport settings (and CodeQL's Encrypt check) do not apply.
+                var builder = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = database.ConnectionString };
+                string dataSource = FirstValue(builder, "Data Source", "Server", "Address", "Addr", "Network Address") ?? string.Empty;
+                string catalog = FirstValue(builder, "Initial Catalog", "Database") ?? string.Empty;
+                return $"{dataSource.Trim().ToLowerInvariant()}/{catalog.Trim()}";
             }
         }
         catch (Exception exception) when (exception is ArgumentException or FormatException or KeyNotFoundException or InvalidOperationException)
@@ -135,6 +139,10 @@ public static class HostUpdateBaselineHashes
 
         return null;
     }
+
+    private static string? FirstValue(System.Data.Common.DbConnectionStringBuilder builder, params string[] keys) =>
+        keys.Select(key => builder.TryGetValue(key, out object? value) ? value?.ToString() : null)
+            .FirstOrDefault(value => !string.IsNullOrWhiteSpace(value));
 
     internal static string Hash(object value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))));
