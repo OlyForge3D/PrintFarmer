@@ -173,6 +173,20 @@ jobs:
           cosign verify-blob --bundle "$BUNDLE" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$EXPECTED_IDENTITY" "$MANIFEST"
+      - name: Sign exact host-update CLI checksum list
+        env:
+          SUMS: release-assets/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS
+          BUNDLE: signed-release/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json
+          EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
+          EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_WORKFLOW_REF" = "${GITHUB_REPOSITORY}/.github/workflows/consolidated-release.yml@refs/heads/${EXPECTED_IDENTITY_REF}"
+          sha256sum "$SUMS" > signed-release/host-update-cli-sums.sha256
+          cosign sign-blob --yes --bundle "$BUNDLE" "$SUMS"
+          cosign verify-blob --bundle "$BUNDLE" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$EXPECTED_IDENTITY" "$SUMS"
       - name: Upload immutable signature evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -212,10 +226,14 @@ jobs:
           name: release-signature-${{ github.run_id }}
           path: signed-release
       - name: Bind signature to exact manifest bytes
+        env:
+          CLI_SUMS_BUNDLE: printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json
         run: |
           set -euo pipefail
           sha256sum --check signed-release/update-manifest.sha256
           cp signed-release/update-manifest.sigstore.json release-assets/update-manifest.sigstore.json
+          sha256sum --check signed-release/host-update-cli-sums.sha256
+          cp "signed-release/$CLI_SUMS_BUNDLE" "release-assets/$CLI_SUMS_BUNDLE"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24

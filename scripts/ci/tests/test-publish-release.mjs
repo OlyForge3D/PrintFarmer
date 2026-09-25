@@ -875,6 +875,16 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
     '${{ steps.publisher.outputs.token }}');
   assert.match(publishSteps.find(step => step.name === 'Bind signature to exact manifest bytes').run,
     /sha256sum --check signed-release\/update-manifest\.sha256/);
+  const cliSign = signSteps.find(step => step.name === 'Sign exact host-update CLI checksum list');
+  assert.ok(signSteps.indexOf(cliSign) > signSteps.findIndex(step => step.name === 'Verify owner dispatch and environment policy'));
+  assert.equal(cliSign.env.SUMS, 'release-assets/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS');
+  assert.equal(cliSign.env.EXPECTED_IDENTITY, manifestIdentityTemplate);
+  assert.match(cliSign.run, /sha256sum "\$SUMS" > signed-release\/host-update-cli-sums\.sha256/);
+  assert.match(cliSign.run, /cosign sign-blob --yes --bundle "\$BUNDLE" "\$SUMS"/);
+  assert.match(cliSign.run, /cosign verify-blob --bundle "\$BUNDLE" \\\n\s+--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com \\\n\s+--certificate-identity "\$EXPECTED_IDENTITY" "\$SUMS"/);
+  const bind = publishSteps.find(step => step.name === 'Bind signature to exact manifest bytes');
+  assert.match(bind.run, /sha256sum --check signed-release\/host-update-cli-sums\.sha256\n\s*cp "signed-release\/\$CLI_SUMS_BUNDLE" "release-assets\/\$CLI_SUMS_BUNDLE"/);
+  assert.equal(bind.env.CLI_SUMS_BUNDLE, 'printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json');
   assert.equal(publishSteps.find(step => step.name === 'Verify owner dispatch immediately before credentials').run,
     'node scripts/ci/publish-release.mjs verify');
   assert.ok(publishSteps.some(step => step.uses?.startsWith('docker/setup-buildx-action@')));
