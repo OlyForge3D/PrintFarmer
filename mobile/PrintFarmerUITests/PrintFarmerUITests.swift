@@ -61,9 +61,10 @@ final class UIWaitBudget {
             return ShellObservation(ShellNode(.application))
         }
         if let interruption, !interruption.frame.isEmpty {
-            return ShellObservation(ShellNode(
-                .application, frame: interruption.frame, children: [interruption]
-            ))
+            return ShellObservation(
+                ShellNode(.application, frame: interruption.frame, children: [interruption]),
+                interruptionSheetTitles: [interruption.label]
+            )
         }
         guard remaining > 0 else { return ShellObservation(ShellNode(.application)) }
         lastOperation = "application shell snapshot"
@@ -413,8 +414,12 @@ struct ShellSnapshotFailure: Error, CustomStringConvertible {
 
         var descendants: [ShellNode] { children.flatMap { [$0] + $0.descendants } }
 
+        /// iOS 26.5 exposes the system "Save Password?" prompt as a `.sheet`
+        /// in the app's own accessibility tree, not as an `.alert` (#3032).
+        static let interruptionTypes: Set<XCUIElement.ElementType> = [.alert, .sheet]
+
         func dismissalButton(allowedTitles: [String: String]) -> ShellNode? {
-            guard type == .alert,
+            guard Self.interruptionTypes.contains(type),
                   let buttonTitle = allowedTitles[label] ?? allowedTitles[identifier] else { return nil }
             return descendants.first {
                 $0.type == .button && $0.enabled && $0.label == buttonTitle
@@ -461,15 +466,24 @@ struct ShellSnapshotFailure: Error, CustomStringConvertible {
         let blockingAlert: ShellNode?
         private let readinessAnchors: [String]
         private let rootDiagnostic: String
-        init(_ root: ShellNode) {
+
+        /// Every alert blocks navigation. A sheet blocks only when its title is
+        /// an allowlisted interruption, so app action sheets keep their behavior.
+        init(_ root: ShellNode, interruptionSheetTitles: Set<String> = []) {
             let visible = root.descendants.filter {
                 !$0.frame.isEmpty && $0.frame.intersects(root.frame)
             }
             readinessAnchors = visible.map(\.identifier).filter {
                 $0 == "launchSplash" || $0 == "loginView" || $0.hasPrefix("navigation.")
             }
-            rootDiagnostic = "root=\(root.frame); tab bars=\(root.descendants.filter { $0.type == .tabBar }.map(\.frame))"
-            blockingAlert = visible.first { $0.type == .alert }
+            let interruptions = root.descendants
+                .filter { ShellNode.interruptionTypes.contains($0.type) }
+                .map { "\($0.type == .alert ? "alert" : "sheet"):\($0.label)" }
+            rootDiagnostic = "root=\(root.frame); tab bars=\(root.descendants.filter { $0.type == .tabBar }.map(\.frame)); "
+                + "interruptions=\(interruptions)"
+            blockingAlert = visible.first {
+                $0.type == .alert || ($0.type == .sheet && interruptionSheetTitles.contains($0.label))
+            }
             if blockingAlert != nil || visible.contains(where: {
                 $0.identifier == "launchSplash" || $0.identifier == "navigation.shellLoading"
             }) {
@@ -555,7 +569,9 @@ struct ShellSnapshotFailure: Error, CustomStringConvertible {
         }
 
         var diagnostic: String {
-            if let blockingAlert { return "alert; title=\(blockingAlert.label)" }
+            if let blockingAlert {
+                return "\(blockingAlert.type == .sheet ? "sheet" : "alert"); title=\(blockingAlert.label)"
+            }
             return switch state {
             case .notReady: "not ready; anchors=\(readinessAnchors); \(rootDiagnostic)"
             case .collapsed(let toggle): "collapsed; toggle=\(toggle.label)"
@@ -597,6 +613,90 @@ final class UIWaitBudgetTests: XCTestCase {
             ShellNode(.button, label: "Not Now", enabled: false),
             ShellNode(.button, label: "Save")
         ]).dismissalButton(allowedTitles: allowed))
+    }
+
+    private func passwordSheet(title: String = "Save Password?") -> ShellNode {
+        ShellNode(.sheet, label: title, children: [
+            ShellNode(.button, label: "Not Now"),
+            ShellNode(.button, label: "Save")
+        ])
+    }
+
+    func testOnlyAllowlistedSheetBlocksNavigationBehindIt() {
+        func observation(_ sheet: ShellNode, titles: Set<String>) -> ShellObservation {
+            ShellObservation(ShellNode(.application, children: [
+                ShellNode(.tabBar, children: [ShellNode(.button, identifier: "tab.attention")]),
+                sheet
+            ]), interruptionSheetTitles: titles)
+        }
+        let blocked = observation(passwordSheet(), titles: ["Save Password?"])
+        XCTAssertEqual(blocked.blockingAlert?.label, "Save Password?")
+        XCTAssertFalse(blocked.isLaunchReady)
+        XCTAssertNil(blocked.destination(tab: "tab.attention", sidebar: "sidebar.attention", title: "Attention"))
+        XCTAssertEqual(blocked.diagnostic, "sheet; title=Save Password?")
+
+        // App action sheets and suites without an allowlist keep resolving as before.
+        for unblocked in [
+            observation(passwordSheet(), titles: []),
+            observation(passwordSheet(title: "Delete printer?"), titles: ["Save Password?"])
+        ] {
+            XCTAssertNil(unblocked.blockingAlert)
+            XCTAssertTrue(unblocked.isLaunchReady)
+        }
+    }
+
+    func testAllowedSheetDismissalNeverChoosesSaveOrAnUnknownSheet() {
+        let allowed = ["Save Password?": "Not Now"]
+        XCTAssertEqual(passwordSheet().dismissalButton(allowedTitles: allowed)?.label, "Not Now")
+        XCTAssertNil(passwordSheet(title: "Delete printer?").dismissalButton(allowedTitles: allowed))
+        XCTAssertNil(passwordSheet().dismissalButton(allowedTitles: [:]))
+        XCTAssertNil(ShellNode(.sheet, label: "Save Password?", children: [
+            ShellNode(.button, label: "Save")
+        ]).dismissalButton(allowedTitles: allowed))
+    }
+
+    func testNotReadyDiagnosticNamesUnlistedInterruptions() {
+        let observation = ShellObservation(ShellNode(.application, children: [
+            ShellNode(.sheet, label: "Save Password?", frame: .zero)
+        ]))
+        XCTAssertTrue(observation.diagnostic.hasSuffix("interruptions=[\"sheet:Save Password?\"]"),
+                      observation.diagnostic)
+    }
+
+    func testSeparateSheetRootIsDismissedBeforeObservingShell() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 5, now: { clock })
+        var operations: [String] = []
+        var dismissed = false
+        let result = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: {
+                        operations.append("interruption")
+                        clock += 0.1
+                        return dismissed ? nil : self.passwordSheet()
+                    },
+                    observeApplication: {
+                        operations.append("shell")
+                        clock += 0.1
+                        return self.sidebar()
+                    }
+                )
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in XCTFail("No navigation"); return false },
+            leadingEdge: { _ in XCTFail("No navigation"); return false },
+            dismissInterruption: {
+                XCTAssertEqual($0.type, .sheet)
+                XCTAssertEqual($0.dismissalButton(allowedTitles: ["Save Password?": "Not Now"])?.label, "Not Now")
+                operations.append("dismiss")
+                dismissed = true
+                return true
+            },
+            pause: { clock += 0.2 }
+        )
+        XCTAssertEqual(result, true)
+        XCTAssertEqual(operations, ["interruption", "dismiss", "interruption", "shell"])
     }
 
     func testSeparateAlertRootIsDismissedBeforeObservingOrRevealingShell() {
@@ -1785,13 +1885,17 @@ class PrintFarmerUITestCase: XCTestCase {
     private func liveNavigationDriver(budget: UIWaitBudget) -> ShellNavigationDriver {
         ShellNavigationDriver(
             observeInterruption: { titles in
+                // Both queries stay in the target application's accessibility
+                // context (#2829); iOS 26.5 presents Save Password as a sheet (#3032).
                 for title in titles {
-                    let alert = self.app.alerts[title]
-                    guard budget.exists(alert, named: "target application navigation interruption: \(title)") else {
-                        continue
-                    }
-                    return try budget.perform("observed alert snapshot") {
-                        ShellNode(try alert.snapshot())
+                    for (kind, query) in [("alert", self.app.alerts), ("sheet", self.app.sheets)] {
+                        let interruption = query[title]
+                        guard budget.exists(
+                            interruption, named: "target application navigation interruption: \(kind) \(title)"
+                        ) else { continue }
+                        return try budget.perform("observed \(kind) snapshot") {
+                            ShellNode(try interruption.snapshot())
+                        }
                     }
                 }
                 return nil
@@ -1799,7 +1903,10 @@ class PrintFarmerUITestCase: XCTestCase {
             observeApplication: {
                 let started = ProcessInfo.processInfo.systemUptime
                 do {
-                    return ShellObservation(ShellNode(try self.app.snapshot()))
+                    return ShellObservation(
+                        ShellNode(try self.app.snapshot()),
+                        interruptionSheetTitles: Set(self.navigationAlertDismissals.keys)
+                    )
                 } catch {
                     guard let heartbeat = self.appHeartbeat else { throw error }
                     throw ShellSnapshotFailure(
@@ -1824,13 +1931,16 @@ class PrintFarmerUITestCase: XCTestCase {
                 return self.performSidebarLeadingEdge(budget: budget)
             },
             isDismissalHittable: { alert, button in
-                let container = self.observedElement(alert, within: self.app.alerts)
+                let container = self.observedElement(alert, within: self.app.descendants(matching: alert.type))
                 let dismissal = self.observedElement(button, within: container.buttons)
                 return dismissal.isHittable
             },
             tapDismissal: { alert, button in
-                let container = self.observedElement(alert, within: self.app.alerts)
+                let container = self.observedElement(alert, within: self.app.descendants(matching: alert.type))
                 self.observedElement(button, within: container.buttons).tap()
+                // Grep-able evidence that the live allowlisted dismissal ran (#3032).
+                print("note: dismissed live navigation interruption "
+                    + "\(alert.type == .sheet ? "sheet" : "alert") '\(alert.label)' via '\(button.label)'")
                 return true
             }
         )

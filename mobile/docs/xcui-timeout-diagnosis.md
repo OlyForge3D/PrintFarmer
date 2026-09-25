@@ -149,6 +149,15 @@ changed alerts and expired budgets never authorize another tap. Other suites
 do not opt into that repeat. No credentials are saved, no physical command is
 retried, and no product behavior changes.
 
+On iOS 26.5 the system presents the same prompt as a `Sheet` titled "Save
+Password?" in the app's own accessibility tree, not as an `Alert` (#3032). The
+login query therefore checks the allowlisted title as an alert and then as a
+sheet, still in the target application's context. A sheet blocks navigation
+only when its title is allowlisted, so app action sheets and suites without an
+allowlist resolve as before. Not-ready diagnostics list any alert or sheet
+titles in the snapshot, and each dismissal prints a
+`note: dismissed live navigation interruption` line.
+
 ### Login and cold-offline readiness (#2829)
 
 Navigation readiness has a 60-second child budget, bounded by the existing
