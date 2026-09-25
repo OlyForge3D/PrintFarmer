@@ -904,6 +904,155 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
   }
 });
 
+// Mirrors DEFAULT_MAX_BUFFER in typecheck-app.mjs. If the production default
+// changes, the just-under/just-over-default fixtures below fail loudly
+// rather than silently testing the wrong boundary.
+const PRODUCTION_DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
+
+// Runs the real typecheck-app.mjs CLI against a stub `tsc` whose compile
+// (non --listFilesOnly) spawn writes exactly `payloadBytes` bytes to stdout:
+// one baseline-matching file diagnostic, then non-diagnostic padding. With a
+// large enough spawnSync maxBuffer the gate passes; once the payload exceeds
+// the maxBuffer that actually reached spawnSync, Node fails the spawn with
+// ENOBUFS and the gate reports a non-completing compiler. That makes the
+// CLI outcome a direct observation of the effective spawn option, not of
+// clampedOverride's return value (#2865).
+async function runMaxBufferFixture({ envMaxBuffer, payloadBytes }) {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-app-max-buffer-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+    await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+      recursive: true,
+    });
+    for (const script of [
+      "typecheck-app.mjs",
+      "typecheck-app-core.mjs",
+      "typecheck-tests-core.mjs",
+    ]) {
+      await cp(
+        path.join(scriptsDirectory, script),
+        path.join(fixtureDirectory, "scripts", script),
+      );
+    }
+    await writeFile(
+      path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
+      JSON.stringify(baseline),
+    );
+    const diagnosticLine = `${fileDiagnostic}\n`;
+    assert.ok(payloadBytes > diagnosticLine.length);
+    // process.exitCode (not process.exit) so a large write to a pipe drains
+    // fully before the stub exits on platforms where pipe writes are async.
+    await writeFile(
+      path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+      [
+        'if (process.argv.includes("--listFilesOnly")) {',
+        '  process.stdout.write("src/services/example.ts\\n");',
+        "} else {",
+        `  process.stdout.write(${JSON.stringify(diagnosticLine)} + ".".repeat(${payloadBytes - diagnosticLine.length}));`,
+        "  process.exitCode = 2;",
+        "}",
+      ].join("\n"),
+    );
+
+    const env = { ...process.env };
+    delete env.TYPECHECK_APP_MAX_BUFFER;
+    if (envMaxBuffer !== undefined) {
+      env.TYPECHECK_APP_MAX_BUFFER = envMaxBuffer;
+    }
+
+    const result = spawnSync(
+      process.execPath,
+      [path.join(fixtureDirectory, "scripts/typecheck-app.mjs")],
+      {
+        encoding: "utf8",
+        env,
+        // The CLI echoes the compiler output, so this harness buffer must
+        // comfortably exceed the largest payload used below.
+        maxBuffer: 4 * PRODUCTION_DEFAULT_MAX_BUFFER,
+        timeout: 60_000,
+      },
+    );
+    assert.equal(
+      result.error,
+      undefined,
+      `test harness spawn failed: ${result.error?.message}`,
+    );
+    return result;
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+}
+
+function assertGatePassed(result, label) {
+  assert.equal(result.status, 0, `${label}: ${result.stderr}`);
+  assert.match(result.stderr, /Application type-check passed/, label);
+}
+
+function assertBufferExceeded(result, label) {
+  assert.notEqual(result.status, 0, label);
+  assert.match(
+    result.stderr,
+    /TypeScript application compiler did not complete successfully/,
+    label,
+  );
+  assert.doesNotMatch(result.stderr, /Application type-check passed/, label);
+}
+
+test("CLI applies a below-default TYPECHECK_APP_MAX_BUFFER to the actual spawnSync maxBuffer (#2865)", async () => {
+  const override = 4096;
+
+  // Positive control: under the override, the stub's output is accepted.
+  assertGatePassed(
+    await runMaxBufferFixture({
+      envMaxBuffer: String(override),
+      payloadBytes: override - 512,
+    }),
+    "payload below the override must pass",
+  );
+  // Without the override, the default buffer accepts this payload, so the
+  // failure below is attributable to the override alone.
+  assertGatePassed(
+    await runMaxBufferFixture({ payloadBytes: override + 512 }),
+    "payload above the override must pass under the default buffer",
+  );
+  // Fails if the override never reaches spawnSync (e.g. maxBuffer hard-wired
+  // to DEFAULT_MAX_BUFFER, or the env var not read at the buffer call site).
+  assertBufferExceeded(
+    await runMaxBufferFixture({
+      envMaxBuffer: String(override),
+      payloadBytes: override + 512,
+    }),
+    "payload above a below-default override must exceed the spawn buffer",
+  );
+});
+
+test("CLI never lets an above-default TYPECHECK_APP_MAX_BUFFER enlarge the actual spawnSync maxBuffer (#2865)", async () => {
+  const oversized = "999999999";
+
+  // Positive control: just under the production default still passes, so
+  // the failure below is the buffer boundary rather than the fixture.
+  assertGatePassed(
+    await runMaxBufferFixture({
+      envMaxBuffer: oversized,
+      payloadBytes: PRODUCTION_DEFAULT_MAX_BUFFER - 1024,
+    }),
+    "payload below the default must pass",
+  );
+  // Fails if clampedOverride is bypassed at the buffer call site (e.g.
+  // `Number(process.env.TYPECHECK_APP_MAX_BUFFER) || DEFAULT_MAX_BUFFER`),
+  // which would let the env var enlarge the buffer past the default.
+  assertBufferExceeded(
+    await runMaxBufferFixture({
+      envMaxBuffer: oversized,
+      payloadBytes: PRODUCTION_DEFAULT_MAX_BUFFER + 1024,
+    }),
+    "an above-default override must not enlarge the spawn buffer",
+  );
+});
+
 test("CLI fails closed with a nonzero exit on a malformed baseline JSON instead of silently falling through (blocking item 4)", async () => {
   const fixtureDirectory = await mkdtemp(
     path.join(tmpdir(), "typecheck-app-malformed-baseline-"),
