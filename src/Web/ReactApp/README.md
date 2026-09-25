@@ -62,6 +62,11 @@ exercise the gate harnesses and run their compiler or source-coverage checks.
 Both compiler gates require zero diagnostics; replacing one error with another
 cannot pass, and fixing all errors requires no diagnostic-baseline update.
 Keep the file-coverage floors and application `@ts-nocheck` guard intact.
+`npm run test:coverage` runs all three gates first (`pretest:coverage`), so it
+fails locally whenever the exact application `@ts-nocheck` count drops without
+regenerating `applicationNoCheckFileCount` in the same commit. On Windows, the
+real-symlink dedup harness test needs Developer Mode or an elevated shell and
+skips otherwise; an injected-resolver test covers the same dedup on every host.
 See [testing patterns](../../../docs/TESTING_PATTERNS.md) for the policy.
 
 ### Using Shared Components
