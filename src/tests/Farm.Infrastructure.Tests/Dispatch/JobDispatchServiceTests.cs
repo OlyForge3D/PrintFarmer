@@ -44,6 +44,7 @@ public sealed class JobDispatchServiceTests : IDisposable
     [Fact]
     public async Task DispatchJobAsync_DownstreamFailure_PersistsAssignmentAndSpoolBeforeSingleBroadcast()
     {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
         bool broadcastObserved = false;
         Mock<IPrintJobManagementService> management = new(MockBehavior.Strict);
         management
@@ -68,7 +69,9 @@ public sealed class JobDispatchServiceTests : IDisposable
             });
         Mock<IFilamentCoverageBroadcaster> broadcaster = Broadcaster(
             () => broadcastObserved = true);
-        JobDispatchService service = CreateService(management, broadcaster, SpoolmanWithFilament(73));
+        JobDispatchService service = CreateService(
+            management, broadcaster, SpoolmanWithFilament(73),
+            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
 
         QueuedPrintJobDto result = await service.DispatchJobAsync(
             _jobId,
@@ -78,6 +81,10 @@ public sealed class JobDispatchServiceTests : IDisposable
             CancellationToken.None);
 
         _db.ChangeTracker.Clear();
+        DispatchLog log = await _db.DispatchLogs.SingleAsync();
+        log.CreatedAtUtc.Should().Be(now.UtcDateTime);
+        log.CreatedDate.Should().Be(now);
+        log.UpdatedDate.Should().Be(now);
         PrintJob persisted = await _db.PrintJobs.SingleAsync(x => x.Id == _jobId);
         persisted.AssignedPrinterId.Should().Be(_printerId);
         persisted.SpoolmanSpoolId.Should().Be(41);
@@ -389,12 +396,36 @@ public sealed class JobDispatchServiceTests : IDisposable
         GC.SuppressFinalize(this);
     }
 
+    [Fact]
+    public async Task FindCandidatesAsync_WithFakeClock_PersistsAllAuditTimestamps()
+    {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        Mock<IDispatchScorer> scorer = new(MockBehavior.Strict);
+        scorer.Setup(value => value.ScorePrintersForJobAsync(_jobId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([Score()]);
+        JobDispatchService service = CreateService(
+            new Mock<IPrintJobManagementService>(MockBehavior.Strict),
+            new Mock<IFilamentCoverageBroadcaster>(MockBehavior.Strict),
+            SpoolmanWithFilament(73), scorer,
+            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
+
+        _ = await service.FindCandidatesAsync(_jobId);
+
+        _db.ChangeTracker.Clear();
+        DispatchLog log = await _db.DispatchLogs.SingleAsync();
+        log.CreatedAtUtc.Should().Be(now.UtcDateTime);
+        log.CreatedDate.Should().Be(now);
+        log.UpdatedDate.Should().Be(now);
+        log.Action.Should().Be(DispatchAction.Suggested);
+    }
+
     private JobDispatchService CreateService(
         Mock<IPrintJobManagementService> management,
         Mock<IFilamentCoverageBroadcaster> broadcaster,
         Mock<ISpoolmanService> spoolman,
         Mock<IDispatchScorer>? scorer = null,
-        Mock<IPartOutputSnapshotService>? snapshots = null)
+        Mock<IPartOutputSnapshotService>? snapshots = null,
+        TimeProvider? timeProvider = null)
     {
         snapshots ??= new Mock<IPartOutputSnapshotService>();
         snapshots
@@ -411,7 +442,8 @@ public sealed class JobDispatchServiceTests : IDisposable
             broadcaster.Object,
             snapshots.Object,
             resourceAuthorization: null,
-            positionAllocator: CreateAllocatorMock().Object);
+            positionAllocator: CreateAllocatorMock().Object,
+            timeProvider: timeProvider);
     }
 
     private static Mock<IQueuePositionAllocator> CreateAllocatorMock()

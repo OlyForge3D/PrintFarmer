@@ -75,6 +75,12 @@ public class DiscoveryHeartbeatMonitorService(
             return;
         }
 
+        if (settings.HeartbeatTelemetryUnreadable)
+        {
+            _serviceMonitor.ReportError(ServiceId, "Stored heartbeat is unreadable — discovery service liveness is unknown");
+            return;
+        }
+
         if (settings.LastHeartbeat is null)
         {
             _serviceMonitor.ReportError(ServiceId, "No heartbeat received — discovery service may not be running");

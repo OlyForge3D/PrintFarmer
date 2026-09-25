@@ -1,5 +1,11 @@
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { ghApiMaxBuffer } from '../gh-api.mjs';
 import {
   evaluateGate,
   rosterFromLabels,
@@ -7,6 +13,7 @@ import {
 import {
   bindStatusToHead,
   exitCodeFor,
+  loadSquadVerdict,
   selectSquadVerdict,
   verdictContext,
   verdictWorkflowPath,
@@ -605,4 +612,140 @@ test('rerunning an older approval cannot supersede a newer rejection', () => {
       runId === replayedApproval.run.id ? replayedApproval.run : rejection.run,
   });
   assert.equal(verdict.classification, 'INVALID');
+});
+
+// Transport-size regressions (#2988): a large-but-legitimate GitHub response
+// must verify, and a response that overflows the bounded transport, or any
+// other reader failure, must fail closed rather than yield REVIEWED/APPROVED.
+
+function liveApiResponses(evidence) {
+  const repository = evidence.pull.base.repo.full_name;
+  const { default_branch_contains_run: _derived, ...rawRun } = evidence.run;
+  return {
+    [`repos/${repository}/pulls/${evidence.pull.number}`]: evidence.pull,
+    [`repos/${repository}/commits/${reviewedHeadSha}/statuses?per_page=100`]:
+      [evidence.status],
+    [`repos/${repository}/actions/runs/${evidence.run.id}`]: rawRun,
+    [`repos/${repository}/compare/${evidence.run.head_sha}...development`]:
+      { status: 'ahead' },
+  };
+}
+
+function comparePath(evidence) {
+  return `repos/${evidence.pull.base.repo.full_name}/compare/` +
+    `${evidence.run.head_sha}...development`;
+}
+
+test('loadSquadVerdict accepts the fixture through the live API reader shape', async () => {
+  const evidence = fixture();
+  const responses = liveApiResponses(evidence);
+  const verdict = await loadSquadVerdict({
+    api: async (apiPath) => {
+      assert.ok(apiPath in responses, apiPath);
+      return responses[apiPath];
+    },
+    pull: evidence.pull,
+  });
+  assert.equal(verdict.classification, 'REVIEWED');
+});
+
+test('loadSquadVerdict never yields evidence when a provenance read fails', async () => {
+  const evidence = fixture();
+  const responses = liveApiResponses(evidence);
+  const overflow = Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' });
+  for (const failingPath of [
+    comparePath(evidence),
+    `repos/OlyForge3D/PrintFarmer/actions/runs/${evidence.run.id}`,
+    `repos/OlyForge3D/PrintFarmer/commits/${reviewedHeadSha}/statuses?per_page=100`,
+  ]) {
+    await assert.rejects(
+      loadSquadVerdict({
+        api: async (apiPath) => {
+          if (apiPath === failingPath) throw overflow;
+          return responses[apiPath];
+        },
+        pull: evidence.pull,
+      }),
+      (error) => error === overflow,
+      failingPath,
+    );
+  }
+});
+
+test('loadSquadVerdict fails closed when the workflow-content read overflows', async () => {
+  const evidence = fixture();
+  evidence.run.event = 'pull_request_review';
+  evidence.run.head_branch = 'dev/jpapiez/some-branch';
+  const responses = liveApiResponses(evidence);
+  const verdict = await loadSquadVerdict({
+    api: async (apiPath) => {
+      if (apiPath.includes('/contents/')) {
+        throw Object.assign(new Error('spawnSync gh ENOBUFS'), { code: 'ENOBUFS' });
+      }
+      return responses[apiPath];
+    },
+    pull: evidence.pull,
+  });
+  assert.equal(verdict.classification, 'INVALID');
+});
+
+const verifierCli = fileURLToPath(new URL('../verify-squad-verdict.mjs', import.meta.url));
+
+// Runs the real CLI against a fake `gh` on PATH that serves the fixture and
+// pads the compare response to `comparePadBytes`, exercising the CLI's actual
+// execFileSync transport end to end.
+function runVerifierCli(comparePadBytes) {
+  const evidence = fixture();
+  const directory = mkdtempSync(path.join(tmpdir(), 'verify-squad-verdict-'));
+  try {
+    const responses = Object.fromEntries(
+      Object.entries(liveApiResponses(evidence))
+        .map(([apiPath, body]) => [`/${apiPath}`, body]),
+    );
+    const responsesFile = path.join(directory, 'responses.json');
+    writeFileSync(responsesFile, JSON.stringify(responses));
+    const fakeGh = path.join(directory, 'gh');
+    writeFileSync(fakeGh, `#!${process.execPath}
+const responses = require(${JSON.stringify(responsesFile)});
+const [, , command, apiPath] = process.argv;
+if (command !== 'api' || !(apiPath in responses)) {
+  process.stderr.write('unexpected gh call: ' + process.argv.slice(2).join(' '));
+  process.exit(1);
+}
+let body = responses[apiPath];
+if (apiPath.includes('/compare/')) {
+  body = { ...body, padding: 'x'.repeat(${comparePadBytes}) };
+}
+process.stdout.write(JSON.stringify(body));
+`);
+    chmodSync(fakeGh, 0o755);
+    return spawnSync(process.execPath, [
+      verifierCli,
+      '--repo', evidence.pull.base.repo.full_name,
+      '--pr', String(evidence.pull.number),
+      '--json',
+    ], {
+      encoding: 'utf8',
+      env: { ...process.env, PATH: `${directory}${path.delimiter}${process.env.PATH}` },
+      maxBuffer: 1024 * 1024,
+    });
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test('CLI verifies when a compare response exceeds Node\'s 1 MiB default buffer (#2988)', () => {
+  const run = runVerifierCli(2 * 1024 * 1024);
+  assert.equal(run.status, 0, run.stderr);
+  const verdict = JSON.parse(run.stdout);
+  assert.equal(verdict.classification, 'REVIEWED');
+  assert.equal(verdict.reviewedHeadSha, reviewedHeadSha);
+});
+
+test('CLI fails closed when a compare response overflows the bounded transport', () => {
+  const run = runVerifierCli(ghApiMaxBuffer);
+  assert.equal(run.status, 1);
+  assert.equal(run.stdout, '');
+  assert.match(run.stderr, /exceeded the 33554432-byte transport limit/);
+  assert.doesNotMatch(run.stderr, /REVIEWED|APPROVED/);
 });

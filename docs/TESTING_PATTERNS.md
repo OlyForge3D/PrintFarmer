@@ -2,6 +2,26 @@
 
 This document captures common patterns and best practices discovered during test development for PrintFarmer.
 
+## Queue lifecycle clocks
+
+Inject the same `TimeProvider` into dispatch claims, reconciliation, the SignalR
+outbox publisher, and the print-job repository when testing a connected lifecycle.
+Forward it to `QueueAuditWriter.Add` and `AddLifecycleOutboxEventAsync`; omitting it
+uses the system clock even when the caller has a fake clock. `DispatchLog` requires
+a caller-owned instant and initializes all three creation timestamps from it.
+Its private parameterless constructor is only for EF materialization.
+
+Pin exact persisted timestamps after reloading the context, not merely
+`timestamp <= DateTime.UtcNow`. Cover strict stale-lease/attempt boundaries,
+inclusive retry/lookback boundaries, preserved acceptance/end timestamps, and
+completion sampled after delivery. Advance fake timers for polling rather than
+sleeping. `QueueProductionCallChainTests` contains the reconciliation/publisher
+clock cases, including timer cancellation.
+
+This first wave (#2880) does not make every queue service deterministic:
+second-wave service clocks, upload-progress timing, retention, and settings
+timestamps are tracked separately in #2972.
+
 ## React printer response contracts
 
 `npm run typecheck:app` and `npm run typecheck:test` reject every diagnostic,
@@ -497,6 +517,44 @@ force them to pass on an unprovisioned local host:
 - **A downstream timeout** caused by the unprovisioned provider above.
 - **A SQLite active-statement/collation error** — an ordering/locking difference in the
   SQLite native library between the CI Linux runners and local macOS.
+
+### Host-state persistence platform prerequisites
+
+Production `HostStateFileSecurity` (`src/infra/Services/HostUpdates/HostStateStorage.cs`)
+is fail-closed on two host properties, and `Farm.Infrastructure.Tests` must never relax
+either check to make a local run pass (issue #2977):
+
+- **No symlink/reparse path components.** Any symlink in a host-state path is rejected
+  with `host_state_reparse_path_rejected`. The default macOS `TMPDIR`
+  (`/var/folders/...`) goes through the `/var` -> `/private/var` symlink, so host-update
+  tests build host-state paths from `HostStateTestPaths.TempRoot` or
+  `HostStateTestPaths.CreateTempSubdirectory(prefix)` (in
+  `src/tests/Farm.Infrastructure.Tests/Services/HostUpdates/HostStateTestPlatform.cs`),
+  which resolve `Path.GetTempPath()` to its physical path once. They do not use
+  `Path.GetTempPath()` / `Directory.CreateTempSubdirectory()` directly. If the temp
+  directory cannot be resolved, each test that uses `HostStateTestPaths` fails with a
+  message that says to point `TMPDIR` at a physical directory.
+- **Owner validation is Linux- (or Windows-attestation-) only.** A validated host-state
+  root needs the Linux `statx` owner check or `WindowsSecurityAttested`. On every other
+  platform, including macOS, root validation fails closed with
+  `host_state_unix_owner_validation_unavailable`. Tests that need a validated root use
+  `[HostStateOwnerValidationFact]` / `[HostStateOwnerValidationTheory]`, which xUnit
+  reports as **skipped with that reason** rather than failed.
+  `HostStateRoot_FailsClosedWhereUnixOwnerValidationIsUnavailable`
+  (`[HostStateOwnerValidationUnavailableFact]`) runs only on those platforms. It asserts
+  that both a secure root and an insecure root are rejected with that code, and that
+  nothing is written.
+
+With both in place, this supported local command reports no host-state failures on macOS.
+It shows the owner-validation skips. CI on Linux runs every owner-validation case and
+skips only `HostStateRoot_FailsClosedWhereUnixOwnerValidationIsUnavailable`, which does
+not apply there:
+
+```bash
+cd src
+dotnet test tests/Farm.Infrastructure.Tests/Farm.Infrastructure.Tests.csproj -c Debug \
+  --settings ./vstest.runsettings --filter "FullyQualifiedName~Services.HostUpdates"
+```
 
 ## Useful Commands
 

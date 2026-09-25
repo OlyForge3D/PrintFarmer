@@ -149,6 +149,123 @@ changed alerts and expired budgets never authorize another tap. Other suites
 do not opt into that repeat. No credentials are saved, no physical command is
 retried, and no product behavior changes.
 
+### Login and cold-offline readiness (#2829)
+
+Navigation readiness has a 60-second child budget, bounded by the existing
+absolute test deadline. This is separate from XCTest's watchdog: it prevents
+repeated unready snapshots from consuming the general 600-second allowance,
+but cannot cancel an in-flight synchronous XCUI call. Cold-offline shell tests
+establish this readiness (including a positively observed sidebar reveal)
+before starting the unchanged eight-second Attention destination lookup.
+
+After a permitted alert dismissal, disappearance has a three-second grace
+within that same navigation budget. Login's single unchanged-alert retry
+does not restart the grace. Unknown, changed, non-hittable, and persistent
+alerts fail closed with the last observation, dismissal count, and reason.
+Late application snapshots are retained for diagnostics without authorizing
+navigation or starting another query.
+
+`LoginFlowUITests/testNavigationAdapterUsesLoginDismissalPolicy` runs the
+base navigation adapter with the login suite's actual allowlist and retry
+configuration, injecting only the remote XCUI boundary. It covers absent,
+separate-root, application-only, late, unknown, non-hittable, persistent,
+changed, and retry-success interruptions. Live login and cold-offline suites
+still require separate approved iPhone and iPad evidence.
+
+The skips investigated in #2829 were intentional iOS path-selection results,
+not a broken matrix expansion. Shared API contract changes also select iOS
+coverage. A green build alone is not proof that XCUI executed; check the
+selected jobs and their retained test results.
+
+### Launch-readiness heartbeat (#3013)
+
+Two iPad CI failures stalled before the first shell observation. On PR #3011
+shard 2, the first `app.snapshot()` returned
+`XCTPerformOnMainRunLoop work timed out after 60.0s` after a normal launch. On
+PR #3015 shard 3, `Launch` spent about 100s in `Terminate <previous pid>` and
+then reported that the app did not have a process ID. Neither artifact can
+tell a blocked app main thread from XCTest or simulator starvation. The
+harness therefore makes the next occurrence fail fast and name its cause.
+
+- **Heartbeat.** In UI-test mode only, `UITestMainThreadHeartbeat` publishes
+  `pid << 42 | uptime-ms` as Darwin notification state
+  (`com.olyforge3d.printfarmer.uitesting.main-heartbeat`) from a
+  main-run-loop timer in `.common` mode. The timer first fires on the first
+  run-loop turn and then every 0.5s; nothing is published before a callback.
+  The runner reads the state with `notify_get_state`, which performs no
+  accessibility query. Both processes share the host uptime clock.
+- **Watchdog.** Armed in the first timer callback, before that callback
+  publishes, so any beat the runner accepts is guarded. A background timer
+  then aborts the app once the main run loop has not turned for 20s of
+  contiguous one-second ticks. The test then fails in about 25-30s instead of
+  waiting for the 60s snapshot timeout, and the crash keeps the blocked
+  main-thread backtrace. A gap of more than 3s between ticks, which means the
+  whole process was suspended, restarts the count.
+- **Launch gate.** `waitForAuthenticatedShell` requires a beat from this
+  launch that is at most 5s old before its first snapshot. Beats from the pid
+  that was publishing before `app.launch()` never count, because a terminating
+  instance can keep beating. It polls for at most 5s, bounded by the
+  navigation budget, and otherwise fails with `App launch is not ready`.
+- **Snapshot attribution.** A failed shell snapshot reports either that the app
+  main run loop kept turning, or that it stopped at a stated offset from the
+  snapshot start, so the app main thread was blocked or the app exited; the
+  watchdog crash report, if any, separates the two. A live app is attributed
+  to an XCTest automation stall only when the snapshot ran for more than 5s.
+- **Launch attribution.** Issues that XCTest records inside `app.launch()` are
+  annotated with the newest beat's pid and timing. A pid that beats after the
+  launch began shows that an app main thread was running, and matches the
+  `Terminate …:<pid>` line when the old instance survived termination. Silence
+  longer than 5s attributes the stall to XCTest or the simulator. Only the
+  `setUp()` launch is bracketed; relaunches inside a test body keep XCTest's
+  unannotated failure.
+
+### Synchronous setUp and tearDown (#3021)
+
+Under Xcode 27, a failure recorded in `setUp()` with
+`continueAfterFailure = false` makes XCTest run the tear-down sequence inside
+the failing call, from a nested run loop on the main thread. When
+`PrintFarmerUITestCase` used an async `@MainActor` setUp, that nested wait ran
+inside the setUp job on the main queue. The async `@MainActor` tearDown could
+never start, and the runner idled at 0% CPU until the invocation ceiling.
+Xcode 26.6 kept executing after the failure, so CI did not show the hang.
+
+The base class now uses **synchronous** `setUp()` and `tearDown()`:
+
+- XCTest calls them on the main thread. They inherit its nonisolated
+  signature, so the main-actor work runs inside `MainActor.assumeIsolated`,
+  which traps if that ever changes.
+- The async `setUp()` and `tearDown()` are `nonisolated override final` and
+  only call `super`. A subclass that adds an async override fails to compile,
+  so the deadlock cannot come back through a subclass. Subclasses override
+  the synchronous methods, as `ShiftTasksFailedRefreshUITests` does.
+- Failures are still recorded where they happen. The #3013 heartbeat gate,
+  snapshot attribution and launch-window annotation are unchanged. On
+  Xcode 27, a failing setUp stops the test before its body runs (the probes
+  below). Xcode 26.6 was not available locally. With the earlier async setUp
+  it ran the body after a setUp failure (#3015 shard 3), and whether it still
+  does with synchronous setUp is unverified.
+
+Deferring readiness failures to the test body was rejected. XCTest also
+records failures inside `app.launch()`, which the harness cannot defer. A
+deferred failure would also let setUp continue against an app that is not
+ready, which defeats fail-fast.
+
+Evidence on Xcode 27.0 (27A266a), iOS 26.5 (23F77), iPhone 17. The probes
+were temporary and are not committed:
+
+| Scenario | Before | After |
+|---|---|---|
+| Readiness assertion fails in setUp (zero navigation budget) | Failed at 3.56s, then hung after `Tear Down` until the 240s invocation ceiling (exit 124) | Failed at 1.99s; tearDown finished; test ended at 2.00s |
+| App main thread blocked 45s from +2s (#3013 path) | Hang reported in #3021 | Failed at 23.07s with `app main thread was blocked or the app exited`; tearDown finished |
+| `XCTFail` inside the launch window | n/a | Annotated with the heartbeat; tearDown finished at 0.05s |
+| Failure in a test body | Tear-down completed | Tear-down completed |
+
+Pass path: `HarvestUITests`, `LoginFlowUITests`,
+`ShiftTasksFailedRefreshUITests` and `UIWaitBudgetTests` passed 69/69 on
+iPhone 17. `JobDetailIPadNavigationUITests` passed 3/3 on iPad Pro 13-inch
+(M5); the iPad `ShiftTasksFailedRefreshUITests` skip is the existing #2624
+quarantine.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test

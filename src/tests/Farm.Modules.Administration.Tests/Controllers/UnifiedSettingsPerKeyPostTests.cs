@@ -3,11 +3,15 @@ using System.Net;
 using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
+using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Settings;
 using Farm.Web.Api.Tests;
 using Farm.Web.Api.Tests.TestInfrastructure;
 using FluentAssertions;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Farm.Modules.Administration.Tests.Controllers;
@@ -138,7 +142,7 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
             MaxConcurrentRequests = 10,
         };
 
-        HttpResponseMessage saveResp = await admin.PostAsJsonAsync(
+        HttpResponseMessage saveResp = await PostWithCurrentRevisionAsync(admin,
             $"/api/settings/{NetworkDiscoverySettings.SectionName}",
             payload);
 
@@ -159,16 +163,79 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
     }
 
     [Fact]
+    public async Task Post_AfterHeartbeat_PreservesTokenAndLiveTelemetry()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        using HttpClient anonymous = _factory.CreateClient();
+        const string endpoint = "/api/settings/NetworkDiscovery";
+        JsonObject draft = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        string token = draft["rowVersion"]!.GetValue<string>();
+        draft["clientTimeoutMs"] = 700;
+
+        for (int i = 0; i < 2; i++)
+        {
+            (await anonymous.PostAsync($"{endpoint}/heartbeat", null)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+            JsonObject heartbeatRead = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+            heartbeatRead["rowVersion"]!.GetValue<string>().Should().Be(token);
+            heartbeatRead["lastHeartbeat"].Should().NotBeNull();
+        }
+
+        JsonObject beforeSave = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+        HttpResponseMessage saved = await admin.PostAsJsonAsync(endpoint, draft);
+        saved.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonObject savedBody = (await saved.Content.ReadFromJsonAsync<JsonObject>())!;
+        savedBody["lastHeartbeat"]!.GetValue<string>().Should().Be(beforeSave["lastHeartbeat"]!.GetValue<string>());
+        JsonObject afterSave = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+        afterSave["clientTimeoutMs"]!.GetValue<int>().Should().Be(700);
+        afterSave["lastHeartbeat"]!.GetValue<string>().Should().Be(beforeSave["lastHeartbeat"]!.GetValue<string>());
+        afterSave["rowVersion"]!.GetValue<string>().Should().NotBe(token);
+
+        // The same protection applies once the editable section already has a persisted revision.
+        token = afterSave["rowVersion"]!.GetValue<string>();
+        (await anonymous.PostAsync($"{endpoint}/heartbeat", null)).StatusCode.Should().Be(HttpStatusCode.NoContent);
+        JsonObject heartbeatAfterSave = (await anonymous.GetFromJsonAsync<JsonObject>(endpoint))!;
+        heartbeatAfterSave["rowVersion"]!.GetValue<string>().Should().Be(token);
+        (await admin.PostAsJsonAsync(endpoint, afterSave)).StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    [Fact]
+    public async Task BulkPost_AbsentTelemetry_DoesNotPersistClientHeartbeatAsync()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        const string endpoint = "/api/settings/NetworkDiscovery";
+        JsonObject section = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        section.Remove("rowVersion");
+        section["clientTimeoutMs"] = 900;
+        section["lastHeartbeat"] = DateTime.UtcNow.AddYears(10).ToString("O");
+
+        using HttpResponseMessage saved = await admin.PostAsJsonAsync(
+            "/api/settings", new JsonObject { [NetworkDiscoverySettings.SectionName] = section });
+
+        saved.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonObject read = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        read["clientTimeoutMs"]!.GetValue<int>().Should().Be(900);
+        read.ContainsKey("lastHeartbeat").Should().BeFalse("liveness is never client input");
+        await using AsyncServiceScope scope = _factory.Services.CreateAsyncScope();
+        AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+        string sectionJson = await db.AppSettingsEntities.AsNoTracking()
+            .Where(e => e.Key == NetworkDiscoverySettings.SectionName)
+            .Select(e => e.SettingsJson).SingleAsync();
+        sectionJson.Should().NotContain("lastHeartbeat");
+        (await db.AppSettingsEntities.AnyAsync(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey))
+            .Should().BeFalse("a settings save must not create heartbeat telemetry");
+    }
+
+    [Fact]
     public async Task Post_UpdateChannel_RoundTripsStableInsiderStableAndRejectsUnacknowledgedInsider()
     {
         using HttpClient admin = await _factory.CreateAdminClientAsync();
         string endpoint = $"/api/settings/{UpdateChannelSettings.SectionName}";
 
-        (await admin.PostAsJsonAsync(
+        (await PostWithCurrentRevisionAsync(admin,
             endpoint,
             new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
-        (await admin.PostAsJsonAsync(
+        (await PostWithCurrentRevisionAsync(admin,
             endpoint,
             new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
@@ -179,11 +246,11 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
         insider.Should().BeEquivalentTo(
             new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = true });
 
-        (await admin.PostAsJsonAsync(
+        (await PostWithCurrentRevisionAsync(admin,
             endpoint,
             new UpdateChannelSettings { Channel = "stable", InsiderAcknowledged = false }))
             .StatusCode.Should().Be(HttpStatusCode.OK);
-        HttpResponseMessage rejected = await admin.PostAsJsonAsync(
+        HttpResponseMessage rejected = await PostWithCurrentRevisionAsync(admin,
             endpoint,
             new UpdateChannelSettings { Channel = "insider", InsiderAcknowledged = false });
 
@@ -218,7 +285,7 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
             DiscoverySubnets = new List<string> { "not-a-cidr" },
         };
 
-        HttpResponseMessage resp = await admin.PostAsJsonAsync(
+        HttpResponseMessage resp = await PostWithCurrentRevisionAsync(admin,
             $"/api/settings/{NetworkDiscoverySettings.SectionName}",
             payload);
 
@@ -270,7 +337,7 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
             DiscoverySubnets = new List<string> { "10.0.0.0/foo" },
         };
 
-        HttpResponseMessage resp = await admin.PostAsJsonAsync(
+        HttpResponseMessage resp = await PostWithCurrentRevisionAsync(admin,
             $"/api/settings/{NetworkDiscoverySettings.SectionName}",
             payload);
 
@@ -313,5 +380,68 @@ public class UnifiedSettingsPerKeyPostTests : IClassFixture<UnifiedSettingsPerKe
             new { EnableTelegram = true });
 
         resp.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
+    public async Task Post_MissingRowVersion_Returns428()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        using HttpResponseMessage response = await admin.PostAsJsonAsync(
+            "/api/settings/UpdateChannel", new UpdateChannelSettings());
+        ((int)response.StatusCode).Should().Be(428);
+    }
+
+    [Theory]
+    [InlineData("*")]
+    [InlineData("not-base64")]
+    [InlineData("AQ==")]
+    public async Task Post_InvalidRowVersion_Returns400(string rowVersion)
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        using HttpResponseMessage response = await admin.PostAsJsonAsync(
+            "/api/settings/UpdateChannel", new { channel = "stable", rowVersion });
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+    }
+
+    [Fact]
+    public async Task Post_TwoTabsWithSameRevision_RejectsStaleSaveAndAllowsExplicitReload()
+    {
+        using HttpClient admin = await _factory.CreateAdminClientAsync();
+        const string endpoint = "/api/settings/UpdateChannel";
+        JsonObject original = (await admin.GetFromJsonAsync<JsonObject>(endpoint))!;
+        string originalRevision = original["rowVersion"]!.GetValue<string>();
+        original["channel"] = "insider";
+        original["insiderAcknowledged"] = true;
+
+        using HttpResponseMessage first = await admin.PostAsJsonAsync(endpoint, original);
+        first.StatusCode.Should().Be(HttpStatusCode.OK);
+        JsonObject saved = (await first.Content.ReadFromJsonAsync<JsonObject>())!;
+        saved["rowVersion"]!.GetValue<string>().Should().NotBe(originalRevision);
+        first.Headers.ETag!.Tag.Should().Be($"\"{saved["rowVersion"]!.GetValue<string>()}\"");
+
+        original["channel"] = "stable";
+        original["insiderAcknowledged"] = false;
+        using HttpResponseMessage stale = await admin.PostAsJsonAsync(endpoint, original);
+        stale.StatusCode.Should().Be(HttpStatusCode.Conflict);
+        JsonObject error = (await stale.Content.ReadFromJsonAsync<JsonObject>())!;
+        error["message"]!.GetValue<string>().Should().Contain("Reload");
+        error["errors"]!["UpdateChannel"]!.GetValue<string>().Should().Contain("modified");
+
+        JsonObject all = (await admin.GetFromJsonAsync<JsonObject>("/api/settings"))!;
+        all["UpdateChannel"]!["rowVersion"]!.GetValue<string>()
+            .Should().Be(saved["rowVersion"]!.GetValue<string>());
+        all["UpdateChannel"]!["channel"]!.GetValue<string>().Should().Be("insider");
+        using HttpResponseMessage reloaded = await PostWithCurrentRevisionAsync(
+            admin, endpoint, new UpdateChannelSettings { Channel = "stable" });
+        reloaded.StatusCode.Should().Be(HttpStatusCode.OK);
+    }
+
+    private static async Task<HttpResponseMessage> PostWithCurrentRevisionAsync<T>(
+        HttpClient client, string endpoint, T values)
+    {
+        JsonObject current = (await client.GetFromJsonAsync<JsonObject>(endpoint))!;
+        JsonObject payload = JsonSerializer.SerializeToNode(values)!.AsObject();
+        payload["rowVersion"] = current["rowVersion"]!.GetValue<string>();
+        return await client.PostAsJsonAsync(endpoint, payload);
     }
 }

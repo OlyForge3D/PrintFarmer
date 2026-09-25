@@ -1,4 +1,5 @@
 import XCTest
+import notify
 
 /// Stops starting remote work after one monotonic deadline. An in-flight XCUI
 /// query still needs XCTest's enabled per-test watchdog to interrupt a stall.
@@ -37,6 +38,18 @@ final class UIWaitBudget {
     }
 
     private(set) var lastShellObservation = "not observed"
+    private(set) var shellFailure = "none"
+    private(set) var interruptionDismissalAttempts = 0
+
+    func rejectInterruption(_ reason: String) -> Bool {
+        shellFailure = reason
+        return false
+    }
+
+    var shellDiagnostic: String {
+        "\(diagnostic); failure=\(shellFailure); dismissal attempts=\(interruptionDismissalAttempts); "
+            + "last snapshot: \(lastShellObservation)"
+    }
 
     func observeShell(
         observeInterruption: () throws -> ShellNode?,
@@ -52,8 +65,11 @@ final class UIWaitBudget {
                 .application, frame: interruption.frame, children: [interruption]
             ))
         }
-        return try perform("application shell snapshot", observeApplication)
-            ?? ShellObservation(ShellNode(.application))
+        guard remaining > 0 else { return ShellObservation(ShellNode(.application)) }
+        lastOperation = "application shell snapshot"
+        // Retain a late snapshot for diagnosis only. waitForShell rejects it
+        // before resolving navigation or starting any further remote work.
+        return try observeApplication()
     }
 
     func waitForShell<T>(
@@ -69,22 +85,56 @@ final class UIWaitBudget {
         var usedLeadingEdge = false
         var dismissedAlert: ShellNode?
         var retriedInterruptionDismissal = false
+        var dismissalDeadline: TimeInterval?
         while remaining > 0 {
-            guard let observation = try perform("shell snapshot", observe) else { return nil }
-            lastShellObservation = observation.diagnostic
+            if let dismissalDeadline, now() >= dismissalDeadline {
+                shellFailure = "interruption did not disappear after dismissal"
+                return nil
+            }
+            guard let observation = try perform("shell snapshot", {
+                let observation = try observe()
+                lastShellObservation = observation.diagnostic
+                return observation
+            }) else {
+                shellFailure = "snapshot exceeded navigation deadline"
+                return nil
+            }
             if let alert = observation.blockingAlert {
                 if let previous = dismissedAlert {
+                    guard dismissalDeadline != nil else {
+                        shellFailure = "interruption reappeared after disappearance"
+                        return nil
+                    }
                     guard alert.identifier == previous.identifier, alert.label == previous.label,
-                          alert.frame == previous.frame else { return nil }
+                          alert.frame == previous.frame else {
+                        shellFailure = "interruption changed after dismissal"
+                        return nil
+                    }
+                }
+                if let dismissalDeadline, now() >= dismissalDeadline {
+                    shellFailure = "interruption did not disappear after dismissal"
+                    return nil
                 }
                 if dismissedAlert == nil || (retryUnchangedInterruption && !retriedInterruptionDismissal) {
                     retriedInterruptionDismissal = dismissedAlert != nil
                     dismissedAlert = alert
+                    interruptionDismissalAttempts += 1
                     guard perform("dismiss observed alert: \(alert.label)", {
                         dismissInterruption(alert)
-                    }) == true else { return nil }
+                    }) == true else {
+                        if remaining == 0 {
+                            shellFailure = "interruption dismissal exceeded navigation deadline"
+                        } else if shellFailure == "none" {
+                            shellFailure = "interruption dismissal rejected"
+                        }
+                        return nil
+                    }
+                    // Neither the optional retry nor repeated observations can
+                    // renew the original disappearance grace.
+                    if dismissalDeadline == nil { dismissalDeadline = min(deadline, now() + 3) }
                 }
             } else {
+                dismissalDeadline = nil
                 if let result = perform("resolve observed shell", { resolve(observation) }) ?? nil {
                     return result
                 }
@@ -106,6 +156,7 @@ final class UIWaitBudget {
                 if let pause { pause() } else { self.pause() }
             }
         }
+        shellFailure = "navigation deadline exhausted"
         return nil
     }
 
@@ -128,6 +179,200 @@ final class UIWaitBudget {
             RunLoop.current.run(until: Date().addingTimeInterval(delay))
         }
     }
+}
+
+/// Reads the app's UI-test main-run-loop heartbeat (#3013) from Darwin
+/// notification state. Reading performs no accessibility query, so it can gate
+/// and explain shell snapshots without adding XCTest remote work.
+@MainActor
+final class AppMainThreadHeartbeat {
+    /// Matches `UITestMainThreadHeartbeat.notificationName` in the app target.
+    nonisolated static let notificationName = "com.olyforge3d.printfarmer.uitesting.main-heartbeat"
+    /// The app beats every 0.5s; an older beat means its main run loop is not turning.
+    nonisolated static let staleAfter: TimeInterval = 5
+    static let launchGrace: TimeInterval = 5
+
+    /// One published beat: the app's uptime and process ID.
+    struct Beat: Equatable, Sendable {
+        let uptime: TimeInterval
+        let pid: Int32
+    }
+
+    /// Inverse of `UITestMainThreadHeartbeat.state(forUptime:pid:)` in the app target.
+    nonisolated static func decode(_ state: UInt64) -> Beat? {
+        guard state > 0 else { return nil }
+        let uptimeBits: UInt64 = 42
+        return Beat(
+            uptime: TimeInterval(state & ((1 << uptimeBits) - 1)) / 1000,
+            pid: Int32(truncatingIfNeeded: state >> uptimeBits)
+        )
+    }
+
+    nonisolated private static let liveToken: Int32? = {
+        var token: Int32 = NOTIFY_TOKEN_INVALID
+        return notify_register_check(notificationName, &token) == NOTIFY_STATUS_OK ? token : nil
+    }()
+
+    /// Newest raw state from any app instance. Thread-safe; performs no XCUI work.
+    nonisolated static func liveState() -> UInt64? {
+        guard let token = liveToken else { return nil }
+        var state: UInt64 = 0
+        return notify_get_state(token, &state) == NOTIFY_STATUS_OK ? state : nil
+    }
+
+    private let launchFloor: TimeInterval
+    private let previousPid: Int32?
+    private let now: () -> TimeInterval
+    private let readState: () -> UInt64?
+
+    /// `previousPid` is the instance that was publishing before this launch.
+    /// It may keep beating while XCTest terminates it, so it never counts.
+    init(
+        launchedAt: TimeInterval,
+        previousPid: Int32? = nil,
+        now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        readState: @escaping () -> UInt64?
+    ) {
+        // The app publishes whole milliseconds of the same host uptime clock.
+        launchFloor = (launchedAt * 1000).rounded(.down) / 1000
+        self.previousPid = previousPid
+        self.now = now
+        self.readState = readState
+    }
+
+    /// Call before `app.launch()`, so the current publisher is recorded as previous.
+    static func live(launchedAt: TimeInterval) -> AppMainThreadHeartbeat {
+        AppMainThreadHeartbeat(
+            launchedAt: launchedAt,
+            previousPid: liveState().flatMap(decode)?.pid,
+            readState: liveState
+        )
+    }
+
+    /// Newest beat from the launched instance; earlier beats and the previous
+    /// instance are ignored.
+    var newestBeat: Beat? {
+        guard let beat = readState().flatMap(Self.decode),
+              beat.uptime >= launchFloor,
+              beat.pid != previousPid else { return nil }
+        return beat
+    }
+
+    var lastBeat: TimeInterval? { newestBeat?.uptime }
+
+    var age: TimeInterval? { lastBeat.map { max(0, now() - $0) } }
+
+    var diagnostic: String {
+        guard let beat = newestBeat, let age else { return "app main-thread heartbeat: none since launch" }
+        return "app main-thread heartbeat: last beat \(Self.seconds(age)) ago from pid \(beat.pid)"
+    }
+
+    /// Polls local notification state, never XCUI, for a beat no older than
+    /// `staleAfter`. Returns nil when responsive, otherwise the failure reason.
+    func awaitResponsive(
+        budget: UIWaitBudget,
+        grace: TimeInterval = launchGrace,
+        pause: (() -> Void)? = nil
+    ) -> String? {
+        let deadline = now() + min(grace, budget.remaining)
+        while true {
+            if let age, age <= Self.staleAfter { return nil }
+            guard now() < deadline else { break }
+            if let pause { pause() } else { budget.pause(upTo: min(0.1, deadline - now())) }
+        }
+        guard let age else {
+            return "app published no main-run-loop heartbeat since launch; \(budget.diagnostic)"
+        }
+        return "app main run loop has not turned for \(Self.seconds(age)); \(budget.diagnostic)"
+    }
+
+    /// Classifies a failed snapshot using only locally read heartbeat state.
+    func snapshotAttribution(startedAt: TimeInterval) -> String {
+        let duration = max(0, now() - startedAt)
+        let elapsed = Self.seconds(duration)
+        guard let beat = lastBeat, let age else {
+            return "\(diagnostic) (snapshot ran \(elapsed))"
+        }
+        let offset = beat - startedAt
+        let relation = offset >= 0
+            ? "\(Self.seconds(offset)) after the snapshot started"
+            : "\(Self.seconds(-offset)) before the snapshot started"
+        if age > Self.staleAfter {
+            // Silence alone cannot separate a blocked main thread from an exit;
+            // the watchdog's crash report, if any, decides.
+            return "\(diagnostic); its last beat was \(relation) and none followed during the "
+                + "\(elapsed) snapshot, so the app main thread was blocked or the app exited"
+        }
+        guard offset >= 0 else {
+            return "\(diagnostic); its last beat was \(relation)"
+        }
+        let turning = "\(diagnostic); the app main run loop kept turning during the \(elapsed) snapshot"
+        // A quick non-timeout failure is not evidence that automation stalled.
+        guard duration > Self.staleAfter else { return turning }
+        return turning + ", so XCTest automation stalled rather than the app main thread"
+    }
+
+    private static func seconds(_ value: TimeInterval) -> String {
+        String(format: "%.2fs", value)
+    }
+}
+
+/// Brackets `XCUIApplication.launch()` so failures XCTest records inside it,
+/// such as a missing process ID after a stalled terminate or launch (#3013),
+/// say which app instance, if any, had a running main thread meanwhile.
+/// Nonisolated because XCTest may record issues from any thread.
+final class AppLaunchHeartbeatWindow: @unchecked Sendable {
+    private let lock = NSLock()
+    private var startedAt: TimeInterval?
+    private let now: @Sendable () -> TimeInterval
+    private let readState: @Sendable () -> UInt64?
+
+    init(
+        now: @escaping @Sendable () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
+        readState: @escaping @Sendable () -> UInt64? = AppMainThreadHeartbeat.liveState
+    ) {
+        self.now = now
+        self.readState = readState
+    }
+
+    func begin() { lock.withLock { startedAt = now() } }
+
+    func end() { lock.withLock { startedAt = nil } }
+
+    /// Nil outside a launch; otherwise how the newest beat relates to it.
+    func attribution() -> String? {
+        guard let startedAt = lock.withLock({ startedAt }) else { return nil }
+        let current = now()
+        let elapsed = Self.seconds(max(0, current - startedAt))
+        // Beats arrive every 0.5s, so silence is only evidence once it outlasts staleness.
+        let silenceIsEvidence = current - startedAt > AppMainThreadHeartbeat.staleAfter
+        guard let beat = readState().flatMap(AppMainThreadHeartbeat.decode) else {
+            let quiet = "app main-thread heartbeat: none from any instance during the \(elapsed) launch"
+            return silenceIsEvidence ? quiet + ", so no app main thread ran while XCTest launched the app" : quiet
+        }
+        let offset = beat.uptime - startedAt
+        guard offset >= 0 else {
+            let quiet = "app main-thread heartbeat: pid \(beat.pid) last beat \(Self.seconds(-offset)) before "
+                + "launch began and no instance beat during the \(elapsed) launch"
+            guard silenceIsEvidence else { return quiet }
+            return quiet + ", so XCTest or the simulator stalled while no app main thread was running"
+        }
+        return "app main-thread heartbeat: pid \(beat.pid) beat \(Self.seconds(offset)) after launch began "
+            + "(\(Self.seconds(max(0, current - beat.uptime))) ago, \(elapsed) into the launch); "
+            + "an app main thread was running while XCTest launched the app"
+    }
+
+    private static func seconds(_ value: TimeInterval) -> String {
+        String(format: "%.2fs", value)
+    }
+}
+
+/// A shell snapshot error annotated with the app heartbeat at failure time.
+struct ShellSnapshotFailure: Error, CustomStringConvertible {
+    let underlying: Error
+    let attribution: String
+
+    var description: String { "\(underlying); \(attribution)" }
 }
 
     /// Values copied from XCTest's public snapshot API. All tree traversal below
@@ -214,10 +459,16 @@ final class UIWaitBudget {
 
         let state: State
         let blockingAlert: ShellNode?
+        private let readinessAnchors: [String]
+        private let rootDiagnostic: String
         init(_ root: ShellNode) {
             let visible = root.descendants.filter {
                 !$0.frame.isEmpty && $0.frame.intersects(root.frame)
             }
+            readinessAnchors = visible.map(\.identifier).filter {
+                $0 == "launchSplash" || $0 == "loginView" || $0.hasPrefix("navigation.")
+            }
+            rootDiagnostic = "root=\(root.frame); tab bars=\(root.descendants.filter { $0.type == .tabBar }.map(\.frame))"
             blockingAlert = visible.first { $0.type == .alert }
             if blockingAlert != nil || visible.contains(where: {
                 $0.identifier == "launchSplash" || $0.identifier == "navigation.shellLoading"
@@ -306,7 +557,7 @@ final class UIWaitBudget {
         var diagnostic: String {
             if let blockingAlert { return "alert; title=\(blockingAlert.label)" }
             return switch state {
-            case .notReady: "not ready"
+            case .notReady: "not ready; anchors=\(readinessAnchors); \(rootDiagnostic)"
             case .collapsed(let toggle): "collapsed; toggle=\(toggle.label)"
             case .compact: "compact; roots=\(roots.map(\.key))"
             case .sidebar: "sidebar; roots=\(roots.map(\.key))"
@@ -575,6 +826,93 @@ final class UIWaitBudgetTests: XCTestCase {
                        "Starting another action must never renew the overall allowance")
     }
 
+    func testReadinessChildCannotConsumeTheWholeTestAllowanceOrRenewItsDeadline() {
+        var clock: TimeInterval = 0
+        let testBudget = UIWaitBudget(timeout: 600, now: { clock })
+        clock = 15
+        let readiness = testBudget.child(timeout: 60)
+        let result: Bool? = readiness.waitForShell(
+            observe: { ShellObservation(ShellNode(.application)) },
+            resolve: { _ in nil },
+            reveal: { _ in XCTFail("No sidebar"); return false },
+            leadingEdge: { _ in XCTFail("No sidebar"); return false },
+            pause: { clock += 1 }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(clock, 75)
+        XCTAssertEqual(testBudget.remaining, 525)
+        XCTAssertNil(readiness.perform("expired") { XCTFail("No renewed budget"); return true })
+        clock = 590
+        XCTAssertEqual(testBudget.child(timeout: 60).remaining, 10)
+    }
+
+    func testApplicationSnapshotOverrunRetainsStateWithoutAcceptingIt() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        let result: Bool? = budget.waitForShell(
+            observe: {
+                budget.observeShell(
+                    observeInterruption: { nil },
+                    observeApplication: { clock = 3; return self.sidebar() }
+                )
+            },
+            resolve: { _ in XCTFail("Late snapshot cannot authorize navigation"); return true },
+            reveal: { _ in XCTFail("No post-deadline work"); return false },
+            leadingEdge: { _ in XCTFail("No post-deadline work"); return false },
+            pause: { XCTFail("No post-deadline work") }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(budget.lastOperation, "application shell snapshot")
+        XCTAssertTrue(budget.lastShellObservation.contains("sidebar.overview"))
+    }
+
+    func testPersistentInterruptionStopsBeforeAnotherObservationAfterDisappearanceGrace() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 600, now: { clock })
+        var observations = 0
+        let result: Bool? = budget.waitForShell(
+            observe: {
+                observations += 1
+                return ShellObservation(ShellNode(.application, children: [self.passwordAlert()]))
+            },
+            resolve: { _ in XCTFail("No navigation behind alert"); return true },
+            reveal: { _ in XCTFail("No navigation behind alert"); return false },
+            leadingEdge: { _ in XCTFail("No navigation behind alert"); return false },
+            dismissInterruption: { _ in true },
+            retryUnchangedInterruption: true,
+            pause: { clock += 1 }
+        )
+        XCTAssertNil(result)
+        XCTAssertEqual(clock, 3)
+        XCTAssertEqual(observations, 3)
+        XCTAssertEqual(budget.interruptionDismissalAttempts, 2)
+        XCTAssertEqual(budget.shellFailure, "interruption did not disappear after dismissal")
+    }
+
+    func testDismissedAlertDoesNotLimitSubsequentShellReadinessToDisappearanceGrace() {
+        var clock: TimeInterval = 0
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let result = budget.waitForShell(
+            observe: {
+                if clock == 0 {
+                    return ShellObservation(ShellNode(.application, children: [self.passwordAlert()]))
+                }
+                return clock < 10 ? ShellObservation(ShellNode(.application)) : self.sidebar()
+            },
+            resolve: { $0.isLaunchReady ? true : nil },
+            reveal: { _ in XCTFail("No collapsed sidebar"); return false },
+            leadingEdge: { _ in XCTFail("No collapsed sidebar"); return false },
+            dismissInterruption: { _ in true },
+            retryUnchangedInterruption: true,
+            pause: { clock += 1 }
+        )
+        XCTAssertEqual(result, true)
+        XCTAssertEqual(clock, 10)
+        XCTAssertEqual(budget.interruptionDismissalAttempts, 1)
+        XCTAssertEqual(budget.remaining, 50)
+        XCTAssertEqual(budget.shellFailure, "none")
+    }
+
     func testNavigationReadinessIncludesSidebarRevealBeforeDestinationBudgetStarts() {
         var clock: TimeInterval = 0
         let testBudget = UIWaitBudget(timeout: 60, now: { clock })
@@ -706,7 +1044,8 @@ final class UIWaitBudgetTests: XCTestCase {
         )
         XCTAssertNil(result)
         XCTAssertEqual(budget.lastOperation, "shell snapshot")
-        XCTAssertEqual(budget.lastShellObservation, "not observed")
+        XCTAssertEqual(budget.lastShellObservation, "collapsed; toggle=Show Sidebar")
+        XCTAssertEqual(budget.shellFailure, "snapshot exceeded navigation deadline")
     }
 
     func testTitleFallbackAndIdentifierPriorityAreResolvedInTheSameTree() {
@@ -986,6 +1325,210 @@ final class UIWaitBudgetTests: XCTestCase {
         XCTAssertFalse(called)
         XCTAssertEqual(budget.lastOperation, "none")
     }
+
+    // MARK: - App main-thread heartbeat (#3013)
+
+    private func heartbeat(
+        launchedAt: TimeInterval = 100, clock: @escaping () -> TimeInterval, beat: @escaping () -> TimeInterval?
+    ) -> AppMainThreadHeartbeat {
+        AppMainThreadHeartbeat(launchedAt: launchedAt, now: clock) {
+            beat().map { UInt64($0 * 1000) }
+        }
+    }
+
+    func testFreshHeartbeatAdmitsLaunchSnapshotWithoutWaiting() {
+        var clock: TimeInterval = 105
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { 104.7 })
+        XCTAssertNil(probe.awaitResponsive(budget: budget, pause: { XCTFail("No wait"); clock += 1 }))
+        XCTAssertEqual(budget.lastOperation, "none", "The heartbeat gate performs no XCUI work")
+    }
+
+    func testBeatFromAnEarlierProcessIsNotLaunchReadiness() {
+        var clock: TimeInterval = 100.5
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { 99.9 })
+        var pauses = 0
+        let failure = probe.awaitResponsive(budget: budget, pause: { pauses += 1; clock += 1 })
+        XCTAssertEqual(pauses, 5)
+        XCTAssertEqual(clock, 105.5, "Launch grace bounds the wait, not XCTest's 60s snapshot timeout")
+        XCTAssertTrue(failure?.contains("no main-run-loop heartbeat since launch") == true, failure ?? "nil")
+        XCTAssertEqual(probe.diagnostic, "app main-thread heartbeat: none since launch")
+    }
+
+    func testStalledMainRunLoopFailsLaunchReadinessWithinGrace() {
+        var clock: TimeInterval = 120
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { 110 })
+        let failure = probe.awaitResponsive(budget: budget, pause: { clock += 0.5 })
+        XCTAssertEqual(clock, 125)
+        XCTAssertTrue(failure?.contains("has not turned for 15.00s") == true, failure ?? "nil")
+    }
+
+    func testResumedMainRunLoopWithinGraceIsResponsive() {
+        var clock: TimeInterval = 120
+        var beat: TimeInterval = 110
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { beat })
+        XCTAssertNil(probe.awaitResponsive(budget: budget, pause: { clock += 0.5; beat = clock }))
+        XCTAssertEqual(clock, 120.5)
+    }
+
+    func testHeartbeatGraceNeverExceedsTheRemainingTestBudget() {
+        var clock: TimeInterval = 100
+        let budget = UIWaitBudget(timeout: 2, now: { clock })
+        let probe = heartbeat(clock: { clock }, beat: { nil })
+        XCTAssertNotNil(probe.awaitResponsive(budget: budget, pause: { clock += 0.5 }))
+        XCTAssertEqual(clock, 102)
+    }
+
+    func testSnapshotStallIsAttributedToTheAppWhenItsMainRunLoopStopped() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { 107.5 })
+        clock = 167.5
+        let attribution = probe.snapshotAttribution(startedAt: 107)
+        XCTAssertTrue(attribution.contains("last beat was 0.50s after the snapshot started"), attribution)
+        XCTAssertTrue(attribution.contains("app main thread was blocked or the app exited"), attribution)
+        XCTAssertTrue(attribution.contains("60.50s snapshot"), attribution)
+    }
+
+    func testSnapshotStallIsAttributedToXCTestWhenTheAppKeptBeating() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { clock - 0.25 })
+        clock = 167
+        let attribution = probe.snapshotAttribution(startedAt: 107)
+        XCTAssertTrue(attribution.contains("last beat 0.25s ago"), attribution)
+        XCTAssertTrue(attribution.contains("XCTest automation stalled"), attribution)
+    }
+
+    func testRecentBeatFromBeforeTheSnapshotIsReportedWithoutAConclusion() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { 106.5 })
+        clock = 108
+        XCTAssertEqual(
+            probe.snapshotAttribution(startedAt: 107),
+            "app main-thread heartbeat: last beat 1.50s ago from pid 0; "
+                + "its last beat was 0.50s before the snapshot started"
+        )
+    }
+
+    func testQuickSnapshotFailureWithALiveAppDrawsNoStallConclusion() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { clock - 0.25 })
+        clock = 107.4
+        let attribution = probe.snapshotAttribution(startedAt: 107)
+        XCTAssertTrue(attribution.hasSuffix("kept turning during the 0.40s snapshot"), attribution)
+    }
+
+    func testSnapshotFailureKeepsTheUnderlyingErrorAndAttribution() {
+        struct Stall: Error, CustomStringConvertible { var description: String { "timed out" } }
+        let failure = ShellSnapshotFailure(underlying: Stall(), attribution: "app main thread was blocked")
+        XCTAssertEqual("\(failure)", "timed out; app main thread was blocked")
+    }
+
+    func testHeartbeatNotificationNameMatchesTheAppContract() {
+        // Contract with UITestMainThreadHeartbeat.notificationName in the app target.
+        XCTAssertEqual(
+            AppMainThreadHeartbeat.notificationName, "com.olyforge3d.printfarmer.uitesting.main-heartbeat"
+        )
+    }
+
+    func testPreviousInstanceBeatingAfterLaunchIsNotReadinessButTheNewInstanceIs() {
+        var clock: TimeInterval = 100
+        var state = (UInt64(30_978) << 42) | 99_900
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = AppMainThreadHeartbeat(launchedAt: 100, previousPid: 30_978, now: { clock }) { state }
+        var pauses = 0
+        let failure = probe.awaitResponsive(budget: budget, pause: {
+            pauses += 1
+            clock += 1
+            state = (UInt64(30_978) << 42) | UInt64(clock * 1000)
+        })
+        XCTAssertEqual(pauses, 5, "The terminating instance's fresh beats never admit the launch")
+        XCTAssertTrue(failure?.contains("no main-run-loop heartbeat since launch") == true, failure ?? "nil")
+
+        state = (UInt64(31_004) << 42) | UInt64(clock * 1000)
+        XCTAssertNil(probe.awaitResponsive(budget: budget, pause: { XCTFail("No wait") }))
+        XCTAssertEqual(probe.newestBeat?.pid, 31_004)
+    }
+
+    func testHeartbeatStateDecodesPidAndUptimeAndNamesThePidInDiagnostics() {
+        let state = (UInt64(30_978) << 42) | 104_700
+        XCTAssertEqual(AppMainThreadHeartbeat.decode(state), .init(uptime: 104.7, pid: 30_978))
+        XCTAssertNil(AppMainThreadHeartbeat.decode(0))
+        let probe = AppMainThreadHeartbeat(launchedAt: 100, now: { 105 }) { state }
+        XCTAssertEqual(probe.diagnostic, "app main-thread heartbeat: last beat 0.30s ago from pid 30978")
+    }
+
+    private final class LaunchClock: @unchecked Sendable {
+        var now: TimeInterval = 100
+        var state: UInt64?
+    }
+
+    private func launchWindow(_ clock: LaunchClock) -> AppLaunchHeartbeatWindow {
+        AppLaunchHeartbeatWindow(now: { clock.now }, readState: { clock.state })
+    }
+
+    func testLaunchWindowOnlyAnnotatesIssuesRecordedDuringLaunch() {
+        let clock = LaunchClock()
+        let window = launchWindow(clock)
+        XCTAssertNil(window.attribution())
+        window.begin()
+        XCTAssertNotNil(window.attribution())
+        window.end()
+        XCTAssertNil(window.attribution())
+    }
+
+    func testLaunchStallWithNoRunningAppIsAttributedToXCTestOrTheSimulator() {
+        let clock = LaunchClock()
+        clock.state = (UInt64(30_978) << 42) | 99_000
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 203
+        let attribution = window.attribution() ?? "nil"
+        XCTAssertTrue(attribution.contains("pid 30978 last beat 1.00s before launch began"), attribution)
+        XCTAssertTrue(attribution.contains("during the 103.00s launch"), attribution)
+        XCTAssertTrue(attribution.contains("XCTest or the simulator stalled"), attribution)
+    }
+
+    func testLaunchStallWhileAnAppKeepsBeatingNamesThatInstance() {
+        let clock = LaunchClock()
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 203
+        clock.state = (UInt64(30_978) << 42) | 202_500
+        let attribution = window.attribution() ?? "nil"
+        XCTAssertTrue(attribution.contains("pid 30978 beat 102.50s after launch began"), attribution)
+        XCTAssertTrue(attribution.contains("0.50s ago"), attribution)
+        XCTAssertTrue(attribution.contains("an app main thread was running"), attribution)
+    }
+
+    func testLaunchStallWithoutAnyHeartbeatSaysNoAppRan() {
+        let clock = LaunchClock()
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 110
+        let attribution = window.attribution() ?? "nil"
+        XCTAssertTrue(attribution.contains("none from any instance during the 10.00s launch"), attribution)
+        XCTAssertTrue(attribution.contains("so no app main thread ran"), attribution)
+    }
+
+    func testBriefLaunchSilenceIsReportedWithoutAConclusion() {
+        let clock = LaunchClock()
+        clock.state = (UInt64(97_582) << 42) | 99_970
+        let window = launchWindow(clock)
+        window.begin()
+        clock.now = 101
+        XCTAssertEqual(
+            window.attribution(),
+            "app main-thread heartbeat: pid 97582 last beat 0.03s before launch began "
+                + "and no instance beat during the 1.00s launch"
+        )
+        clock.state = nil
+        XCTAssertEqual(
+            window.attribution(), "app main-thread heartbeat: none from any instance during the 1.00s launch"
+        )
+    }
 }
 
 struct RenderedShellRoot {
@@ -1001,6 +1544,18 @@ struct RenderedShellRoot {
     var key: String {
         identifier.isEmpty ? title : identifier
     }
+}
+
+/// The live XCUI boundary is injectable so tests exercise the base adapter
+/// with the login suite's actual policy, not a second copy of its allowlist.
+@MainActor
+struct ShellNavigationDriver {
+    var observeInterruption: ([String]) throws -> ShellNode?
+    var observeApplication: () throws -> ShellObservation
+    var reveal: (ShellNode) -> Bool
+    var leadingEdge: (ShellNode) -> Bool
+    var isDismissalHittable: (ShellNode, ShellNode) -> Bool
+    var tapDismissal: (ShellNode, ShellNode) -> Bool
 }
 
 #if PFARM_TIMEOUT_DIAGNOSTICS
@@ -1035,33 +1590,76 @@ class PrintFarmerUITestCase: XCTestCase {
 
     var app: XCUIApplication!
     private var testBudget: UIWaitBudget?
+    private var appHeartbeat: AppMainThreadHeartbeat?
+    nonisolated private let launchWindow = AppLaunchHeartbeatWindow()
 
     /// Extra launch arguments contributed by a subclass, applied before the
     /// app launches. Base tests run in the authenticated operator-shell
     /// bootstrap; override to select a different explicit launch mode.
     var additionalLaunchArguments: [String] { [] }
     var waitsForNavigationReadiness: Bool { false }
+    var navigationReadinessTimeout: TimeInterval { 60 }
     var navigationAlertDismissals: [String: String] { [:] }
     var retryUnchangedNavigationAlertDismissal: Bool { false }
 
-    override func setUp() async throws {
-        try await super.setUp()
+    /// Synchronous on purpose (#3021). Xcode 27 interrupts a failing test by
+    /// running tear-down inside the call that recorded the failure. From an
+    /// async `@MainActor` setUp, that nested wait holds the main queue, so an
+    /// async tearDown can never start and the runner idles.
+    ///
+    /// The synchronous overrides inherit XCTest's nonisolated signature, but
+    /// XCTest calls them on the main thread; `assumeIsolated` traps otherwise.
+    /// The unchecked `test` reference only satisfies the static region check
+    /// for handing `self` to that main-actor closure.
+    override func setUp() {
+        super.setUp()
         continueAfterFailure = false
+        nonisolated(unsafe) let test = self
+        MainActor.assumeIsolated { test.launchForTest() }
+    }
+
+    private func launchForTest() {
         testBudget = UIWaitBudget(timeout: executionTimeAllowance)
         app = XCUIApplication()
         app.launchEnvironment["PFARM_UI_TESTING"] = "1"
         app.launchArguments.append("--uitesting")
         app.launchArguments.append(contentsOf: additionalLaunchArguments)
+        appHeartbeat = .live(launchedAt: ProcessInfo.processInfo.systemUptime)
+        launchWindow.begin()
         app.launch()
+        launchWindow.end()
         if waitsForNavigationReadiness {
             waitForAuthenticatedShell()
         }
     }
 
-    override func tearDown() async throws {
-        app = nil
-        testBudget = nil
+    override func tearDown() {
+        nonisolated(unsafe) let test = self
+        MainActor.assumeIsolated {
+            test.app = nil
+            test.testBudget = nil
+            test.appHeartbeat = nil
+        }
+        launchWindow.end()
+        super.tearDown()
+    }
+
+    /// Sealed off the main actor so no subclass can reintroduce an async
+    /// `@MainActor` setUp or tearDown and with it the #3021 deadlock.
+    nonisolated override final func setUp() async throws {
+        try await super.setUp()
+    }
+
+    nonisolated override final func tearDown() async throws {
         try await super.tearDown()
+    }
+
+    /// Annotates failures XCTest records inside `app.launch()` (#3013).
+    nonisolated override func record(_ issue: XCTIssue) {
+        guard let attribution = launchWindow.attribution() else { return super.record(issue) }
+        var issue = issue
+        issue.compactDescription += "; \(attribution)"
+        super.record(issue)
     }
 
     // MARK: - Helpers
@@ -1073,12 +1671,18 @@ class PrintFarmerUITestCase: XCTestCase {
         guard let testBudget else {
             return XCTFail("Shell readiness requires the existing test allowance", file: file, line: line)
         }
-        let ready = waitForObservedShell(budget: testBudget, file: file, line: line) {
+        let budget = testBudget.child(timeout: navigationReadinessTimeout)
+        // A blocked main thread would otherwise hold the first snapshot for
+        // XCTest's full 60s accessibility timeout (#3013).
+        if let appHeartbeat, let failure = appHeartbeat.awaitResponsive(budget: budget) {
+            return recordQueryFailure("App launch is not ready: \(failure)", file: file, line: line)
+        }
+        let ready = waitForObservedShell(budget: budget, file: file, line: line) {
             $0.isLaunchReady ? true : nil
         }
         XCTAssertEqual(
             ready, true,
-            "Authenticated shell did not finish launching within the test allowance; \(testBudget.diagnostic)",
+            "Authenticated shell did not finish launching; \(budget.shellDiagnostic)",
             file: file,
             line: line
         )
@@ -1178,17 +1782,12 @@ class PrintFarmerUITestCase: XCTestCase {
         observedElement(node, within: app.navigationBars.descendants(matching: .button))
     }
 
-    private func waitForObservedShell<T>(
-        budget: UIWaitBudget,
-        file: StaticString = #filePath,
-        line: UInt = #line,
-        resolve: (ShellObservation) -> T?
-    ) -> T? {
-        do {
-            let observeInterruption: () throws -> ShellNode? = navigationAlertDismissals.isEmpty ? { nil } : {
-                for title in self.navigationAlertDismissals.keys.sorted() {
+    private func liveNavigationDriver(budget: UIWaitBudget) -> ShellNavigationDriver {
+        ShellNavigationDriver(
+            observeInterruption: { titles in
+                for title in titles {
                     let alert = self.app.alerts[title]
-                    guard budget.exists(alert, named: "navigation interruption: \(title)") else {
+                    guard budget.exists(alert, named: "target application navigation interruption: \(title)") else {
                         continue
                     }
                     return try budget.perform("observed alert snapshot") {
@@ -1196,51 +1795,88 @@ class PrintFarmerUITestCase: XCTestCase {
                     }
                 }
                 return nil
+            },
+            observeApplication: {
+                let started = ProcessInfo.processInfo.systemUptime
+                do {
+                    return ShellObservation(ShellNode(try self.app.snapshot()))
+                } catch {
+                    guard let heartbeat = self.appHeartbeat else { throw error }
+                    throw ShellSnapshotFailure(
+                        underlying: error, attribution: heartbeat.snapshotAttribution(startedAt: started)
+                    )
+                }
+            },
+            reveal: { node in
+                let toggle = self.observedToggle(node)
+                guard budget.perform("hittable observed sidebar toggle", {
+                    toggle.isHittable
+                }) == true else { return false }
+                return budget.perform("tap observed sidebar toggle", {
+                    toggle.tap()
+                    return true
+                }) == true
+            },
+            leadingEdge: { node in
+                guard budget.perform("hittable observed Show Sidebar", {
+                    self.observedToggle(node).isHittable
+                }) == true else { return false }
+                return self.performSidebarLeadingEdge(budget: budget)
+            },
+            isDismissalHittable: { alert, button in
+                let container = self.observedElement(alert, within: self.app.alerts)
+                let dismissal = self.observedElement(button, within: container.buttons)
+                return dismissal.isHittable
+            },
+            tapDismissal: { alert, button in
+                let container = self.observedElement(alert, within: self.app.alerts)
+                self.observedElement(button, within: container.buttons).tap()
+                return true
             }
+        )
+    }
+
+    func waitForObservedShell<T>(
+        budget: UIWaitBudget,
+        driver: ShellNavigationDriver? = nil,
+        pause: (() -> Void)? = nil,
+        file: StaticString = #filePath,
+        line: UInt = #line,
+        resolve: (ShellObservation) -> T?
+    ) -> T? {
+        let driver = driver ?? liveNavigationDriver(budget: budget)
+        do {
             return try budget.waitForShell(
                 observe: {
                     try budget.observeShell(
-                        observeInterruption: observeInterruption,
-                        observeApplication: { ShellObservation(ShellNode(try self.app.snapshot())) }
+                        observeInterruption: {
+                            try driver.observeInterruption(self.navigationAlertDismissals.keys.sorted())
+                        },
+                        observeApplication: driver.observeApplication
                     )
                 },
                 resolve: resolve,
-                reveal: { node in
-                    let toggle = self.observedToggle(node)
-                    guard budget.perform("hittable observed sidebar toggle", {
-                        toggle.isHittable
-                    }) == true else { return false }
-                    return budget.perform("tap observed sidebar toggle", {
-                        toggle.tap()
-                        return true
-                    }) == true
-                },
-                leadingEdge: { node in
-                    guard budget.perform("hittable observed Show Sidebar", {
-                        self.observedToggle(node).isHittable
-                    }) == true else { return false }
-                    return self.performSidebarLeadingEdge(budget: budget)
-                },
+                reveal: driver.reveal,
+                leadingEdge: driver.leadingEdge,
                 dismissInterruption: { alert in
                     guard let button = alert.dismissalButton(allowedTitles: self.navigationAlertDismissals) else {
-                        return false
+                        return budget.rejectInterruption("interruption rejected by dismissal allowlist")
                     }
-                    let container = self.observedElement(alert, within: self.app.alerts)
-                    let dismissal = self.observedElement(button, within: container.buttons)
                     guard budget.perform("hittable observed alert dismissal", {
-                        dismissal.isHittable
-                    }) == true else { return false }
+                        driver.isDismissalHittable(alert, button)
+                    }) == true else {
+                        return budget.rejectInterruption("interruption dismissal is not hittable")
+                    }
                     return budget.perform("tap observed alert dismissal", {
-                        dismissal.tap()
-                        return true
+                        driver.tapDismissal(alert, button)
                     }) == true
                 },
-                retryUnchangedInterruption: retryUnchangedNavigationAlertDismissal
+                retryUnchangedInterruption: retryUnchangedNavigationAlertDismissal,
+                pause: pause
             )
         } catch {
             recordQueryFailure(
-                "Shell snapshot failed: \(error); \(budget.diagnostic); "
-                    + "last snapshot: \(budget.lastShellObservation)",
+                "Shell snapshot failed: \(error); \(budget.shellDiagnostic)",
                 file: file, line: line
             )
             return nil
@@ -1292,8 +1928,7 @@ class PrintFarmerUITestCase: XCTestCase {
             return element
         }) { return element }
         recordQueryFailure(
-            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.diagnostic); "
-                + "last snapshot: \(budget.lastShellObservation)",
+            "Missing \(tabIdentifier) or \(sidebarIdentifier); \(budget.shellDiagnostic)",
             file: file,
             line: line
         )

@@ -38,9 +38,19 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateWriterFencingTests : IDisposable
 {
-    // A paused writer acknowledges once per ~250 ms loop iteration; two observations prove
-    // the loop is live and re-checking rather than latched after its first acknowledgement.
+    // The liveness observation threshold for a paused writer: two acknowledgements suffice to
+    // prove the loop is re-checking rather than latched after its first acknowledgement. The
+    // two loop shapes covered here reach this threshold differently — outbox-style writers
+    // (e.g. QueueOutboxPublisherService, PowerReadingPruneService, QueueRetentionPruneService)
+    // acknowledge twice per ~250 ms iteration (top-of-loop paused branch + interval-boundary
+    // wait — see the corrected cadence block on the paused-loop cycle rate test below), while
+    // continue-style consumers (e.g. BackendStartCommandConsumerService,
+    // BackendControlCommandConsumerService, BedClearAcknowledgementExpiryService) acknowledge
+    // once per iteration and reach the pair across two iterations.
     private const int AcknowledgementsPerPausedIteration = 2;
+
+    // The prune services' paused-branch and interval-wait delay, advanced on the manual clock.
+    private static readonly TimeSpan PausedLoopCadence = TimeSpan.FromMilliseconds(250);
 
     private readonly SqliteConnection _connection;
 
@@ -366,23 +376,86 @@ public class HostUpdateWriterFencingTests : IDisposable
     public async Task PowerReadingPruneService_WhilePauseRequested_NeverOpensScope()
     {
         CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var clock = new ManualTimeProvider();
         var fence = new PowerReadingPruneFenceFlag();
         await fence.RequestPauseAsync(CancellationToken.None);
 
         var sut = new PowerReadingPruneService(
             scopeFactory,
             NullLogger<PowerReadingPruneService>.Instance,
-            fence);
+            fence,
+            clock);
         await RunHostedServiceAsync(sut, async () =>
         {
-            await WaitForPauseAcknowledgementsAsync(
-                fence,
-                () => fence.AcknowledgementCount,
-                AcknowledgementsPerPausedIteration + 1);
+            await AssertPausedPruneLoopCadenceAsync(clock, fence, () => fence.AcknowledgementCount);
 
-            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
             scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
         });
+    }
+
+    [Fact]
+    public async Task PowerReadingPruneService_PauseResumePause_CountsOnlyCurrentEpochAcknowledgements()
+    {
+        CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var clock = new ManualTimeProvider();
+        var fence = new PowerReadingPruneFenceFlag();
+        await fence.RequestPauseAsync(CancellationToken.None);
+
+        var sut = new PowerReadingPruneService(
+            scopeFactory,
+            NullLogger<PowerReadingPruneService>.Instance,
+            fence,
+            clock);
+        await RunHostedServiceAsync(sut, async () =>
+        {
+            // Epoch 1 leaves the loop parked on its paused-branch delay (two timers armed).
+            await AssertPausedPruneLoopCadenceAsync(clock, fence, () => fence.AcknowledgementCount);
+
+            await fence.ResumeAsync(CancellationToken.None);
+            fence.AcknowledgementCount.Should().Be(0, "ResumeAsync closes the pause epoch and resets its acknowledgements");
+
+            // Completing the paused delay after resume moves the loop into its 24 h interval
+            // wait, which must neither acknowledge a closed epoch nor start a prune pass.
+            clock.Advance(PausedLoopCadence);
+            await clock.WaitForArmedTimersAsync(3, "the post-resume interval-wait delay");
+            fence.AcknowledgementCount.Should().Be(0);
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeFalse();
+
+            // Epoch 2: the interval wait observes the new pause and acknowledges at the boundary,
+            // then the next top-of-loop paused branch acknowledges again before parking.
+            await fence.RequestPauseAsync(CancellationToken.None);
+            clock.Advance(PausedLoopCadence);
+            await clock.WaitForArmedTimersAsync(4, "the second epoch's paused-branch delay");
+
+            fence.AcknowledgementCount.Should().Be(AcknowledgementsPerPausedIteration,
+                "the second epoch must start from zero rather than inheriting epoch 1's acknowledgements");
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+            scopeFactory.ScopesOpened.Should().Be(0, "no prune pass may run across the pause/resume/pause cycle");
+        });
+    }
+
+    [Fact]
+    public async Task InMemoryHostUpdateWriterActivityFlag_ResumeAsync_ResetsAcknowledgementCountEachCycle()
+    {
+        var fence = new InMemoryHostUpdateWriterActivityFlag();
+
+        for (int cycle = 1; cycle <= 3; cycle++)
+        {
+            await fence.RequestPauseAsync(CancellationToken.None);
+            fence.AcknowledgementCount.Should().Be(0, $"cycle {cycle} must not inherit earlier epochs' acknowledgements");
+
+            await fence.AcknowledgePausedAsync(CancellationToken.None);
+            fence.AcknowledgementCount.Should().Be(1, $"cycle {cycle} observed exactly one acknowledgement");
+            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+
+            await fence.ResumeAsync(CancellationToken.None);
+            fence.AcknowledgementCount.Should().Be(0, $"ResumeAsync must reset the counter at the end of cycle {cycle}");
+            fence.IsAcknowledged.Should().BeFalse();
+            (await fence.IsPauseRequestedAsync(CancellationToken.None)).Should().BeFalse();
+
+            await fence.AcknowledgePausedAsync(CancellationToken.None);
+            fence.AcknowledgementCount.Should().Be(0, "an acknowledgement with no pending pause is ignored");
+        }
     }
 
     [Fact]
@@ -394,7 +467,8 @@ public class HostUpdateWriterFencingTests : IDisposable
         var sut = new PowerReadingPruneService(
             scopeFactory,
             NullLogger<PowerReadingPruneService>.Instance,
-            fence);
+            fence,
+            new ManualTimeProvider());
 
         await RunHostedServiceAsync(sut, async () =>
         {
@@ -407,6 +481,7 @@ public class HostUpdateWriterFencingTests : IDisposable
     public async Task QueueRetentionPruneService_WhilePauseRequested_NeverRunsOncePass()
     {
         CountingScopeFactory scopeFactory = BuildCountingScopeFactory();
+        var clock = new ManualTimeProvider();
         var fence = new QueueRetentionPruneFenceFlag();
         await fence.RequestPauseAsync(CancellationToken.None);
 
@@ -415,15 +490,12 @@ public class HostUpdateWriterFencingTests : IDisposable
             scopeFactory,
             Options.Create(settings),
             NullLogger<QueueRetentionPruneService>.Instance,
-            fence);
+            fence,
+            clock);
         await RunHostedServiceAsync(sut, async () =>
         {
-            await WaitForPauseAcknowledgementsAsync(
-                fence,
-                () => fence.AcknowledgementCount,
-                AcknowledgementsPerPausedIteration + 1);
+            await AssertPausedPruneLoopCadenceAsync(clock, fence, () => fence.AcknowledgementCount);
 
-            (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
             scopeFactory.ScopesOpened.Should().Be(0, "the fenced writer must not touch the database while a pause is pending");
         });
     }
@@ -439,13 +511,38 @@ public class HostUpdateWriterFencingTests : IDisposable
             scopeFactory,
             Options.Create(settings),
             NullLogger<QueueRetentionPruneService>.Instance,
-            fence);
+            fence,
+            new ManualTimeProvider());
 
         await RunHostedServiceAsync(sut, async () =>
         {
             await scopeFactory.FirstScopeOpened.Task.WaitAsync(TimeSpan.FromSeconds(10));
             scopeFactory.ScopesOpened.Should().BeGreaterThan(0, "an unpaused fence must not block normal pruning");
         });
+    }
+
+    /// <summary>
+    /// Drives one paused cycle of an outbox-style prune loop on the manual clock and asserts its
+    /// exact acknowledgement cadence. The top-of-loop paused branch acknowledges and parks on
+    /// its 250 ms delay; advancing one cadence step completes that delay, the interval-boundary
+    /// wait returns immediately while paused (second acknowledgement), and the next top-of-loop
+    /// paused branch acknowledges again (third) before parking on a fresh delay. Exact counts
+    /// also prove the paused loop does not busy-spin between delays.
+    /// </summary>
+    private static async Task AssertPausedPruneLoopCadenceAsync(
+        ManualTimeProvider clock,
+        IHostUpdateWriterActivityFlag fence,
+        Func<int> acknowledgementCount)
+    {
+        await clock.WaitForArmedTimersAsync(1, "the first paused-branch delay");
+        acknowledgementCount().Should().Be(1, "the top-of-loop paused branch acknowledges once before its delay");
+        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
+
+        clock.Advance(PausedLoopCadence);
+        await clock.WaitForArmedTimersAsync(2, "the second paused-branch delay");
+        acknowledgementCount().Should().Be(AcknowledgementsPerPausedIteration + 1,
+            "one paused cycle adds an interval-boundary and a top-of-loop acknowledgement");
+        (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
     }
 
     [Fact]
@@ -539,10 +636,18 @@ public class HostUpdateWriterFencingTests : IDisposable
 
         await RunHostedServiceAsync(service, async () =>
         {
-            await WaitForPauseAcknowledgementsAsync(fence, () => fence.AcknowledgementCount, 2);
+            // ResumeAsync resets the per-epoch counter, so the second epoch is observed through
+            // its own count and the first epoch through the snapshot taken just before resume.
+            await WaitForPauseAcknowledgementsAsync(
+                fence,
+                () => epochController.SecondEpochAcknowledgementCount,
+                1);
 
             epochController.EpochFlips.Should().Be(1);
-            fence.AcknowledgementCount.Should().Be(2);
+            epochController.AcknowledgementsBeforeResume.Should().Be(1,
+                "the first epoch must be acknowledged before the interceptor resumes it");
+            fence.AcknowledgementCount.Should().Be(1,
+                "the second epoch must be acknowledged and must not inherit the first epoch's count");
             (await fence.IsPausedAsync(CancellationToken.None)).Should().BeTrue();
         });
     }
@@ -712,8 +817,17 @@ public class HostUpdateWriterFencingTests : IDisposable
     {
         private int _firstPauseRequested;
         private int _epochFlips;
+        private int _secondEpochOpened;
+        private int _acknowledgementsBeforeResume = -1;
 
         public int EpochFlips => Volatile.Read(ref _epochFlips);
+
+        /// <summary>First-epoch acknowledgement count captured immediately before the resume.</summary>
+        public int AcknowledgementsBeforeResume => Volatile.Read(ref _acknowledgementsBeforeResume);
+
+        /// <summary>Second-epoch acknowledgements, or zero until the second pause has been requested.</summary>
+        public int SecondEpochAcknowledgementCount =>
+            Volatile.Read(ref _secondEpochOpened) == 1 ? fence.AcknowledgementCount : 0;
 
         public IDisposable? BeginScope<TState>(TState state)
             where TState : notnull => null;
@@ -733,6 +847,7 @@ public class HostUpdateWriterFencingTests : IDisposable
                     StringComparison.Ordinal) &&
                 Interlocked.Exchange(ref _epochFlips, 1) == 0)
             {
+                Volatile.Write(ref _acknowledgementsBeforeResume, fence.AcknowledgementCount);
                 Task resume = fence.ResumeAsync(CancellationToken.None);
                 if (!resume.IsCompletedSuccessfully)
                 {
@@ -746,6 +861,8 @@ public class HostUpdateWriterFencingTests : IDisposable
                     throw new InvalidOperationException(
                         "The in-memory test fence must transition epochs synchronously.");
                 }
+
+                Volatile.Write(ref _secondEpochOpened, 1);
             }
         }
 
@@ -1048,6 +1165,195 @@ public class HostUpdateWriterFencingTests : IDisposable
             Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
 
         public void Dispose() => Disposed = true;
+    }
+
+    /// <summary>
+    /// Deterministic <see cref="TimeProvider"/> for the prune-service fence tests: wall-clock
+    /// time and timers move only when <see cref="Advance"/> is called, so the services' paused
+    /// cadence and interval waits are driven by the test instead of real sleeps. Real time is
+    /// used only as a deadlock watchdog in <see cref="WaitForArmedTimersAsync"/>.
+    /// </summary>
+    private sealed class ManualTimeProvider : TimeProvider
+    {
+        private static readonly TimeSpan Watchdog = TimeSpan.FromSeconds(10);
+
+        private readonly object _gate = new();
+        private readonly List<ManualTimer> _timers = [];
+        private readonly List<(int Count, TaskCompletionSource Signal)> _waiters = [];
+        private DateTimeOffset _utcNow = new(2026, 1, 1, 0, 0, 0, TimeSpan.Zero);
+        private int _timersArmed;
+
+        public int TimersArmed
+        {
+            get
+            {
+                lock (_gate)
+                {
+                    return _timersArmed;
+                }
+            }
+        }
+
+        public override DateTimeOffset GetUtcNow()
+        {
+            lock (_gate)
+            {
+                return _utcNow;
+            }
+        }
+
+        public override ITimer CreateTimer(TimerCallback callback, object? state, TimeSpan dueTime, TimeSpan period)
+        {
+            var timer = new ManualTimer(this, callback, state);
+            lock (_gate)
+            {
+                _timers.Add(timer);
+            }
+
+            _ = timer.Change(dueTime, period);
+            return timer;
+        }
+
+        /// <summary>Moves time forward and fires every timer that became due.</summary>
+        public void Advance(TimeSpan delta)
+        {
+            List<ManualTimer> due = [];
+            lock (_gate)
+            {
+                _utcNow += delta;
+                foreach (ManualTimer timer in _timers)
+                {
+                    if (timer.TryTakeDueLocked(_utcNow))
+                    {
+                        due.Add(timer);
+                    }
+                }
+            }
+
+            foreach (ManualTimer timer in due)
+            {
+                timer.Fire();
+            }
+        }
+
+        /// <summary>Waits until at least <paramref name="count"/> timers have been armed in total.</summary>
+        public async Task WaitForArmedTimersAsync(int count, string expectation)
+        {
+            Task signal;
+            lock (_gate)
+            {
+                if (_timersArmed >= count)
+                {
+                    return;
+                }
+
+                var waiter = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+                _waiters.Add((count, waiter));
+                signal = waiter.Task;
+            }
+
+            try
+            {
+                await signal.WaitAsync(Watchdog);
+            }
+            catch (TimeoutException)
+            {
+                throw new Xunit.Sdk.XunitException(
+                    $"Deadlock watchdog: expected {count} armed timer(s) ({expectation}) but observed " +
+                    $"{TimersArmed} within {Watchdog}.");
+            }
+        }
+
+        private bool Arm(ManualTimer timer, TimeSpan dueTime, TimeSpan period)
+        {
+            List<TaskCompletionSource> released = [];
+            lock (_gate)
+            {
+                if (!timer.SetScheduleLocked(dueTime == Timeout.InfiniteTimeSpan ? null : _utcNow + dueTime, period))
+                {
+                    return false;
+                }
+
+                if (dueTime != Timeout.InfiniteTimeSpan)
+                {
+                    _timersArmed++;
+                    for (int i = _waiters.Count - 1; i >= 0; i--)
+                    {
+                        if (_waiters[i].Count <= _timersArmed)
+                        {
+                            released.Add(_waiters[i].Signal);
+                            _waiters.RemoveAt(i);
+                        }
+                    }
+                }
+            }
+
+            foreach (TaskCompletionSource signal in released)
+            {
+                _ = signal.TrySetResult();
+            }
+
+            return true;
+        }
+
+        private void Remove(ManualTimer timer)
+        {
+            lock (_gate)
+            {
+                _ = _timers.Remove(timer);
+            }
+        }
+
+        private sealed class ManualTimer(ManualTimeProvider clock, TimerCallback callback, object? state) : ITimer
+        {
+            private DateTimeOffset? _due;
+            private TimeSpan _period = Timeout.InfiniteTimeSpan;
+            private bool _disposed;
+
+            public bool Change(TimeSpan dueTime, TimeSpan period) => clock.Arm(this, dueTime, period);
+
+            public bool SetScheduleLocked(DateTimeOffset? due, TimeSpan period)
+            {
+                if (_disposed)
+                {
+                    return false;
+                }
+
+                _due = due;
+                _period = period;
+                return true;
+            }
+
+            public bool TryTakeDueLocked(DateTimeOffset now)
+            {
+                if (_disposed || _due is not DateTimeOffset due || due > now)
+                {
+                    return false;
+                }
+
+                _due = _period == Timeout.InfiniteTimeSpan || _period <= TimeSpan.Zero ? null : due + _period;
+                return true;
+            }
+
+            public void Fire() => callback(state);
+
+            public void Dispose()
+            {
+                lock (clock._gate)
+                {
+                    _disposed = true;
+                    _due = null;
+                }
+
+                clock.Remove(this);
+            }
+
+            public ValueTask DisposeAsync()
+            {
+                Dispose();
+                return ValueTask.CompletedTask;
+            }
+        }
     }
 
     private sealed class IgnoringCancellationBackgroundService : BackgroundService

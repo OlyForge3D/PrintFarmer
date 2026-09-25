@@ -4980,6 +4980,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
     [Trait("Category", "DbHeavy")]
     public async Task OutboxPublisher_CrashAfterLease_RecoversGenericEventForRedelivery()
     {
+        var clock = new ManualTimeProvider();
+        DateTime now = clock.GetUtcNow().UtcDateTime;
         await using (AppDbContext seed = CreateContext())
         {
             await seed.Database.MigrateAsync();
@@ -4995,8 +4997,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 PayloadJson = "{}",
                 Status = QueueOutboxEventStatus.Processing,
                 AttemptCount = 1,
-                LastAttemptedAtUtc = DateTime.UtcNow.AddHours(-1),
-                CreatedAtUtc = DateTime.UtcNow.AddHours(-1),
+                LastAttemptedAtUtc = now.AddHours(-1),
+                CreatedAtUtc = now.AddHours(-1),
             });
             await seed.SaveChangesAsync();
             await transaction.CommitAsync();
@@ -5012,7 +5014,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             var publisher = new QueueOutboxPublisherService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 Mock.Of<IHubContext<PrinterHub>>(),
-                NullLogger<QueueOutboxPublisherService>.Instance);
+                NullLogger<QueueOutboxPublisherService>.Instance,
+                timeProvider: clock);
 
             await publisher.RecoverStaleLeasesAsync(CancellationToken.None);
         }
@@ -5020,13 +5023,351 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         await using AppDbContext verify = CreateContext();
         QueueDispatchOutbox recovered = await verify.QueueDispatchOutbox.SingleAsync();
         recovered.Status.Should().Be(QueueOutboxEventStatus.Pending);
-        recovered.RetryAfterUtc.Should().BeOnOrBefore(DateTime.UtcNow);
+        recovered.RetryAfterUtc.Should().Be(now);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "DbHeavy")]
+    public async Task CancelJobAsync_FakeClock_PersistsLocalAndControlIntentAuditTimestamps(bool active)
+    {
+        var clock = new ManualTimeProvider();
+        await using AppDbContext db = CreateContext();
+        Fixture fixture;
+        if (active)
+        {
+            (fixture, _) = await SeedUnknownReconciliationAttemptAsync("cancel-clock");
+        }
+        else
+        {
+            fixture = await SeedCalibrationAsync(db, withAck: false);
+        }
+
+        PrintJob job = await db.PrintJobs.SingleAsync(value => value.Id == fixture.JobId);
+        await CreateManagementService(db, timeProvider: clock).CancelJobAsync(
+            fixture.JobId.ToString(), "operator-1", Convert.ToBase64String(job.RowVersion!));
+
+        db.ChangeTracker.Clear();
+        QueueOperationAudit audit = await db.QueueOperationAudits.SingleAsync(
+            value => value.PrintJobId == fixture.JobId && value.Operation == QueueAuditOperations.JobCancel);
+        audit.OccurredAtUtc.Should().Be(clock.GetUtcNow().UtcDateTime);
+        audit.Outcome.Should().Be(QueueAuditOutcomes.Success);
+        if (active)
+        {
+            QueueDispatchOutbox command = await db.QueueDispatchOutbox.SingleAsync(
+                value => value.AggregateId == fixture.JobId && value.EventType == BackendControlCommandConsumerService.EventType);
+            command.CreatedAtUtc.Should().Be(clock.GetUtcNow().UtcDateTime);
+        }
+    }
+
+    [Theory]
+    [InlineData("active", PrintJobStatus.Printing)]
+    [InlineData("completed", PrintJobStatus.Completed)]
+    [InlineData("failed", PrintJobStatus.Failed)]
+    [InlineData("cancelled", PrintJobStatus.Cancelled)]
+    [InlineData("absent", PrintJobStatus.Assigned)]
+    [InlineData("unknown", PrintJobStatus.Starting)]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_FakeClock_PersistsTransitionAndHelperTimestamps(
+        string outcome, PrintJobStatus expectedStatus)
+    {
+        const string backendId = "clock-reconciliation";
+        (Fixture fixture, Guid attemptId) = await SeedUnknownReconciliationAttemptAsync(backendId);
+        var clock = new ManualTimeProvider();
+        DateTime now = clock.GetUtcNow().UtcDateTime;
+        DateTime claimedAt = now.AddMinutes(-11);
+        Guid startCommandId;
+        Guid controlCommandId = Guid.NewGuid();
+        await using (AppDbContext seed = CreateContext())
+        {
+            await using var transaction = await seed.Database.BeginTransactionAsync();
+            QueueDispatchAttempt attempt = await seed.QueueDispatchAttempts.SingleAsync(value => value.Id == attemptId);
+            attempt.ClaimedAtUtc = claimedAt;
+            attempt.BackendFileName = "clock.gcode";
+            BedClearCommandRecord bedClear = await seed.BedClearCommandRecords.SingleAsync(
+                value => value.DispatchAttemptId == attemptId);
+            startCommandId = bedClear.OutboxEventId;
+            bedClear.UpdatedAtUtc = claimedAt;
+            QueueDispatchOutbox startCommand = await seed.QueueDispatchOutbox.SingleAsync(
+                value => value.Id == startCommandId);
+            startCommand.Status = QueueOutboxEventStatus.Processing;
+            startCommand.AttemptId = attemptId;
+            if (outcome is "completed" or "failed" or "cancelled")
+            {
+                seed.QueueDispatchOutbox.Add(new QueueDispatchOutbox
+                {
+                    Id = controlCommandId,
+                    Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                    AggregateType = nameof(PrintJob),
+                    AggregateId = fixture.JobId,
+                    PrinterId = fixture.PrinterId,
+                    AttemptId = attemptId,
+                    EventType = BackendControlCommandConsumerService.EventType,
+                    PayloadJson = "{\"operation\":\"cancel\"}",
+                    Status = QueueOutboxEventStatus.Pending,
+                    CreatedAtUtc = claimedAt,
+                });
+            }
+
+            await seed.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        Mock<IPrintersService> printers = CreateQuiescentHistoryProbe(
+            fixture.PrinterId, backendId,
+            HistoryListProbeResult.Authoritative(new HistoryListResponse()));
+        printers.Setup(value => value.GetStatusDtoAsync(fixture.PrinterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(
+                fixture.PrinterId,
+                IsOnline: outcome != "unknown",
+                State: outcome == "active" ? "printing" : "idle",
+                FileName: "clock.gcode"));
+        if (outcome is "completed" or "failed" or "cancelled")
+        {
+            printers.Setup(value => value.ProbeHistoryJobAsync(
+                    fixture.PrinterId, backendId, It.IsAny<CancellationToken>()))
+                .ReturnsAsync(HistoryJobProbeResult.Found(new HistoryJob
+                {
+                    JobId = backendId,
+                    Filename = "clock.gcode",
+                    Status = outcome,
+                    StartTime = new DateTimeOffset(claimedAt).ToUnixTimeSeconds(),
+                }));
+        }
+
+        await RunReconciliationAsync(printers.Object, clock);
+
+        await using AppDbContext verify = CreateContext();
+        QueueDispatchAttempt reconciled = await verify.QueueDispatchAttempts.SingleAsync(value => value.Id == attemptId);
+        reconciled.LastReconciledAtUtc.Should().Be(now);
+        reconciled.UpdatedAtUtc.Should().Be(now);
+        PrintJob job = await verify.PrintJobs.SingleAsync(value => value.Id == fixture.JobId);
+        job.Status.Should().Be(expectedStatus);
+        QueueOperationAudit audit = await verify.QueueOperationAudits.SingleAsync(
+            value => value.DispatchAttemptId == attemptId && value.Operation == QueueAuditOperations.Reconciliation);
+        audit.OccurredAtUtc.Should().Be(now);
+        QueueDispatchOutbox evt = await verify.QueueDispatchOutbox.OrderByDescending(value => value.Sequence).FirstAsync();
+        evt.CreatedAtUtc.Should().Be(now);
+        if (outcome != "unknown")
+        {
+            job.UpdatedAt.Should().Be(now);
+            JobStateHistory history = await verify.JobStateHistories
+                .Where(value => value.JobId == fixture.JobId)
+                .OrderByDescending(value => value.TransitionedAtUtc == now)
+                .FirstAsync();
+            history.TransitionedAtUtc.Should().Be(now);
+            history.CreatedAt.Should().Be(now);
+            (await verify.BedClearCommandRecords.SingleAsync(value => value.OutboxEventId == startCommandId))
+                .UpdatedAtUtc.Should().Be(now);
+            (await verify.QueueDispatchOutbox.SingleAsync(value => value.Id == startCommandId))
+                .CompletedAtUtc.Should().Be(now);
+        }
+
+        if (outcome is "active" or "completed" or "failed" or "cancelled")
+        {
+            reconciled.BackendAcceptedAtUtc.Should().Be(now);
+        }
+
+        if (outcome is "completed" or "failed" or "cancelled" or "absent")
+        {
+            reconciled.TerminalAtUtc.Should().Be(now);
+        }
+
+        if (outcome is "completed" or "failed" or "cancelled")
+        {
+            job.ActualEndTime.Should().Be(now);
+            (await verify.QueueDispatchOutbox.SingleAsync(value => value.Id == controlCommandId))
+                .CompletedAtUtc.Should().Be(now);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task Reconciler_FakeClock_UsesStrictStaleBoundary()
+    {
+        (Fixture fixture, Guid attemptId) = await SeedUnknownReconciliationAttemptAsync("boundary");
+        var clock = new ManualTimeProvider();
+        DateTime now = clock.GetUtcNow().UtcDateTime;
+        await using (AppDbContext seed = CreateContext())
+        {
+            QueueDispatchAttempt attempt = await seed.QueueDispatchAttempts.SingleAsync(value => value.Id == attemptId);
+            attempt.Outcome = DispatchAttemptOutcome.InProgress;
+            attempt.RequiresReconciliation = false;
+            attempt.ClaimedAtUtc = now.AddMinutes(-10);
+            await seed.SaveChangesAsync();
+        }
+
+        var printers = new Mock<IPrintersService>(MockBehavior.Strict);
+        printers.Setup(value => value.GetStatusDtoAsync(fixture.PrinterId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new PrinterStatusDto(fixture.PrinterId, IsOnline: false, State: null));
+        await RunReconciliationAsync(printers.Object, clock);
+        printers.Verify(value => value.GetStatusDtoAsync(fixture.PrinterId, It.IsAny<CancellationToken>()), Times.Never);
+        clock.Advance(TimeSpan.FromTicks(1));
+        await RunReconciliationAsync(printers.Object, clock);
+        printers.Verify(value => value.GetStatusDtoAsync(fixture.PrinterId, It.IsAny<CancellationToken>()), Times.Once);
+        await using AppDbContext verify = CreateContext();
+        (await verify.QueueDispatchAttempts.SingleAsync(value => value.Id == attemptId))
+            .UpdatedAtUtc.Should().Be(now.AddTicks(1));
+    }
+
+    [Fact]
+    [Trait("Category", "DbHeavy")]
+    public async Task OutboxPublisher_FakeClock_PreservesLeaseAndDueBoundariesAndCommandExclusions()
+    {
+        var clock = new ManualTimeProvider();
+        DateTime now = clock.GetUtcNow().UtcDateTime;
+        var rows = new List<QueueDispatchOutbox>();
+        await using (AppDbContext seed = CreateContext())
+        {
+            await seed.Database.MigrateAsync();
+            await using var transaction = await seed.Database.BeginTransactionAsync();
+            foreach ((string type, QueueOutboxEventStatus status, DateTime? retry) in new[]
+            {
+                ("clock-event", QueueOutboxEventStatus.Processing, (DateTime?)null),
+                ("clock-event", QueueOutboxEventStatus.Pending, (DateTime?)now),
+                ("clock-event", QueueOutboxEventStatus.Pending, (DateTime?)now.AddTicks(1)),
+                (BedClearAcknowledgementService.BackendStartCommandEventType, QueueOutboxEventStatus.Processing, (DateTime?)null),
+                (BackendControlCommandConsumerService.EventType, QueueOutboxEventStatus.Processing, (DateTime?)null),
+                (BedClearAcknowledgementService.BackendStartCommandEventType, QueueOutboxEventStatus.Pending, (DateTime?)now),
+                (BackendControlCommandConsumerService.EventType, QueueOutboxEventStatus.Pending, (DateTime?)now),
+            })
+            {
+                var row = new QueueDispatchOutbox
+                {
+                    Id = Guid.NewGuid(),
+                    Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
+                    AggregateType = nameof(PrintJob),
+                    AggregateId = Guid.NewGuid(),
+                    EventType = type,
+                    Status = status,
+                    PayloadJson = "{}",
+                    LastAttemptedAtUtc = type == "clock-event" ? now.AddMinutes(-10) : now.AddHours(-1),
+                    RetryAfterUtc = retry,
+                    CreatedAtUtc = now.AddHours(-1),
+                };
+                rows.Add(row);
+                seed.QueueDispatchOutbox.Add(row);
+            }
+
+            await seed.SaveChangesAsync();
+            await transaction.CommitAsync();
+        }
+
+        await using ServiceProvider provider = new ServiceCollection()
+            .AddDbContext<AppDbContext>(options => options.UseSqlite(
+                _connectionString, sqlite => sqlite.MigrationsAssembly("Farm.Migrations.Sqlite")))
+            .BuildServiceProvider();
+        using var publisher = new QueueOutboxPublisherService(
+            provider.GetRequiredService<IServiceScopeFactory>(), CreateHubContext(),
+            NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
+        await publisher.RecoverStaleLeasesAsync(CancellationToken.None);
+        await publisher.ProcessPendingEventsAsync(CancellationToken.None);
+        await using (AppDbContext verify = CreateContext())
+        {
+            List<QueueDispatchOutbox> persisted = await verify.QueueDispatchOutbox.OrderBy(value => value.Sequence).ToListAsync();
+            persisted[0].Status.Should().Be(QueueOutboxEventStatus.Processing);
+            persisted[1].Status.Should().Be(QueueOutboxEventStatus.Published);
+            persisted[1].LastAttemptedAtUtc.Should().Be(now);
+            persisted[1].CompletedAtUtc.Should().Be(now);
+            persisted[2].Status.Should().Be(QueueOutboxEventStatus.Pending);
+            persisted.Skip(3).Select(value => value.Status).Should().Equal(rows.Skip(3).Select(value => value.Status));
+        }
+
+        clock.Advance(TimeSpan.FromTicks(1));
+        await publisher.RecoverStaleLeasesAsync(CancellationToken.None);
+        await using AppDbContext recovered = CreateContext();
+        QueueDispatchOutbox stale = await recovered.QueueDispatchOutbox.SingleAsync(value => value.Id == rows[0].Id);
+        stale.Status.Should().Be(QueueOutboxEventStatus.Pending);
+        stale.RetryAfterUtc.Should().Be(now.AddTicks(1));
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(3)]
+    [InlineData(9)]
+    [InlineData(10)]
+    public async Task OutboxPublisher_FakeClock_RetryAndDeadLetterUseSendCompletionTime(int attemptCount)
+    {
+        var clock = new ManualTimeProvider();
+        DateTime now = clock.GetUtcNow().UtcDateTime;
+        var proxy = new Mock<IClientProxy>();
+        proxy.Setup(value => value.SendCoreAsync(It.IsAny<string>(), It.IsAny<object?[]>(), It.IsAny<CancellationToken>()))
+            .Returns(() =>
+            {
+                clock.Advance(TimeSpan.FromSeconds(2));
+                return Task.FromException(new InvalidOperationException("delivery failed"));
+            });
+        var clients = new Mock<IHubClients>();
+        clients.Setup(value => value.Group(It.IsAny<string>())).Returns(proxy.Object);
+        var hub = new Mock<IHubContext<PrinterHub>>();
+        hub.SetupGet(value => value.Clients).Returns(clients.Object);
+        using var publisher = new QueueOutboxPublisherService(
+            Mock.Of<IServiceScopeFactory>(), hub.Object,
+            NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
+        var row = new QueueDispatchOutbox
+        {
+            Id = Guid.NewGuid(),
+            AggregateId = Guid.NewGuid(),
+            AggregateType = nameof(PrintJob),
+            EventType = "clock-event",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Processing,
+            CreatedAtUtc = now.AddDays(-1),
+            AttemptCount = attemptCount,
+        };
+
+        await publisher.ProcessSingleEventAsync(row, CancellationToken.None);
+
+        row.LastError.Should().Be("delivery failed");
+        row.CreatedAtUtc.Should().Be(now.AddDays(-1));
+        if (attemptCount == 10)
+        {
+            row.Status.Should().Be(QueueOutboxEventStatus.DeadLettered);
+            row.CompletedAtUtc.Should().Be(now.AddSeconds(2));
+        }
+        else
+        {
+            row.Status.Should().Be(QueueOutboxEventStatus.Pending);
+            row.RetryAfterUtc.Should().Be(now.AddSeconds(2 + 10 * Math.Pow(2, attemptCount - 1)));
+            row.CompletedAtUtc.Should().BeNull();
+        }
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task QueuePolling_FakeClock_AdvancesAndCancelsTimers(bool reconciliation)
+    {
+        var clock = new ManualTimeProvider();
+        using var reconciler = new QueueReconciliationService(
+            Mock.Of<IServiceScopeFactory>(), NullLogger<QueueReconciliationService>.Instance, timeProvider: clock);
+        using var publisher = new QueueOutboxPublisherService(
+            Mock.Of<IServiceScopeFactory>(), CreateHubContext(),
+            NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
+        using var cancellation = new CancellationTokenSource();
+        async Task<bool> WaitAsync() => reconciliation
+            ? await reconciler.WaitForIntervalOrPauseAsync(cancellation.Token)
+            : await publisher.WaitForIntervalOrPauseAsync(cancellation.Token);
+
+        Task<bool> interval = WaitAsync();
+        interval.IsCompleted.Should().BeFalse();
+        clock.Advance(reconciliation ? TimeSpan.FromMinutes(2) : TimeSpan.FromSeconds(5));
+        (await interval.WaitAsync(TimeSpan.FromSeconds(5))).Should().BeFalse();
+
+        Task<bool> cancelledInterval = WaitAsync();
+        cancelledInterval.IsCompleted.Should().BeFalse();
+        await cancellation.CancelAsync();
+        Func<Task> waitForCancellation = async () => await cancelledInterval.WaitAsync(TimeSpan.FromSeconds(5));
+        await waitForCancellation.Should().ThrowAsync<OperationCanceledException>();
     }
 
     [Fact]
     [Trait("Category", "DbHeavy")]
     public async Task OutboxPublisher_SkipsDiscoveryHintAndSendsPersistedEnvelope()
     {
+        var clock = new ManualTimeProvider();
+        DateTime occurredAt = clock.GetUtcNow().UtcDateTime.AddDays(-1);
         Guid calibrationAttemptId = Guid.NewGuid();
         QueueDispatchOutbox row;
         await using (AppDbContext seed = CreateContext())
@@ -5044,7 +5385,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 SchemaVersion = QueueEventSchemaVersions.Current,
                 PayloadJson = "{}",
                 Status = QueueOutboxEventStatus.Processing,
-                CreatedAtUtc = DateTime.UtcNow,
+                CreatedAtUtc = occurredAt,
             };
             seed.QueueDispatchOutbox.Add(row);
             await seed.SaveChangesAsync();
@@ -5057,6 +5398,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 It.IsAny<string>(),
                 It.IsAny<object?[]>(),
                 It.IsAny<CancellationToken>()))
+            .Callback(() => clock.Advance(TimeSpan.FromSeconds(3)))
             .Returns(Task.CompletedTask);
         var clients = new Mock<IHubClients>();
         clients
@@ -5074,10 +5416,21 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             var publisher = new QueueOutboxPublisherService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
                 hub.Object,
-                NullLogger<QueueOutboxPublisherService>.Instance);
+                NullLogger<QueueOutboxPublisherService>.Instance,
+                timeProvider: clock);
 
             await publisher.ProcessSingleEventAsync(row, CancellationToken.None);
         }
+
+        row.CompletedAtUtc.Should().Be(clock.GetUtcNow().UtcDateTime);
+        row.Status.Should().Be(QueueOutboxEventStatus.Published);
+        proxy.Verify(client => client.SendCoreAsync(
+            "queueevent",
+            It.Is<object?[]>(arguments =>
+                ((QueueEventEnvelope)arguments[0]!).OccurredAtUtc == occurredAt &&
+                ((QueueEventEnvelope)arguments[0]!).EventId == row.Id &&
+                ((QueueEventEnvelope)arguments[0]!).Sequence == row.Sequence),
+            It.IsAny<CancellationToken>()), Times.Once);
 
         // #1731: the outbox publisher no longer broadcasts "queueresourceschanged" for
         // ordinary job/dispatch/bed-clear lifecycle events -- that hint is now sent only
@@ -7277,7 +7630,7 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             candidate.AttemptId == attemptId)).Should().BeFalse();
     }
 
-    private async Task RunReconciliationAsync(IPrintersService printers)
+    private async Task RunReconciliationAsync(IPrintersService printers, TimeProvider? timeProvider = null)
     {
         ServiceProvider provider = new ServiceCollection()
             .AddDbContext<AppDbContext>(options => options.UseSqlite(
@@ -7290,7 +7643,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         {
             var reconciler = new QueueReconciliationService(
                 provider.GetRequiredService<IServiceScopeFactory>(),
-                NullLogger<QueueReconciliationService>.Instance);
+                NullLogger<QueueReconciliationService>.Instance,
+                timeProvider: timeProvider);
             await reconciler.ReconcileStaleAttemptsAsync(CancellationToken.None);
         }
     }
@@ -7335,9 +7689,10 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
         AppDbContext db,
         IPrintersService? printers = null,
         IStoragePathService? storage = null,
-        IPrinterStatusSnapshotReader? statusReader = null) =>
+        IPrinterStatusSnapshotReader? statusReader = null,
+        TimeProvider? timeProvider = null) =>
         new(
-            new EfPrintJobManagementRepository(db),
+            new EfPrintJobManagementRepository(db, timeProvider),
             NullLogger<PrintJobManagementService>.Instance,
             printers ?? Mock.Of<IPrintersService>(),
             storage ?? Mock.Of<IStoragePathService>(),
@@ -7349,7 +7704,8 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 statusReader ?? DispatchTestDoubles.NoTelemetryReader()),
             appDbContext: db,
             outboxSequenceAllocator: new DbOutboxSequenceAllocator(),
-            queuePositionAllocator: new QueuePositionAllocator(db));
+            queuePositionAllocator: new QueuePositionAllocator(db),
+            timeProvider: timeProvider);
 
     private static IHubContext<PrinterHub> CreateHubContext()
     {

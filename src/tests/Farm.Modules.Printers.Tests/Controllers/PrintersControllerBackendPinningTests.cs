@@ -13,6 +13,7 @@ using Farm.Infrastructure.Services.Printers;
 using Farm.Modules.Printers.Controllers;
 using Farm.Modules.Printers.Controllers.Requests;
 using Farm.Modules.PrintQueue.Controllers.Responses;
+using Farm.Testing.Shared;
 using FluentAssertions;
 using FluentValidation;
 using Microsoft.AspNetCore.Http;
@@ -232,9 +233,9 @@ public class PrintersControllerBackendPinningTests
 
         public static LoopbackDigestServer Start(string? additionalHostPrefix = null)
         {
-            int port = GetFreeLoopbackPort();
-            HttpListener listener = new();
-
+            // LoopbackHttpListener retries on a failed Start() with a fresh port, so no
+            // probe-then-release window can hand this server a port another host took (#3029).
+            //
             // HttpListener routes incoming requests to a registered prefix by matching the
             // request's Host header, not just the socket's bound address. The test client sends
             // a Host header of the original (non-loopback) hostname to prove it's preserved
@@ -247,21 +248,11 @@ public class PrintersControllerBackendPinningTests
             //    exact Host match against registered prefixes (no admin concept applies to "+"
             //    there, since it is just a plain socket bind), so a plain loopback prefix 404s
             //    any request whose Host header doesn't literally match "127.0.0.1".
-            listener.Prefixes.Add(
+            (HttpListener listener, int port) = LoopbackHttpListener.Start(candidate =>
                 additionalHostPrefix is not null && !OperatingSystem.IsWindows()
-                    ? $"http://+:{port}/"
-                    : $"http://127.0.0.1:{port}/");
-            listener.Start();
+                    ? $"http://+:{candidate}/"
+                    : $"http://127.0.0.1:{candidate}/");
             return new LoopbackDigestServer(listener, port);
-        }
-
-        private static int GetFreeLoopbackPort()
-        {
-            using System.Net.Sockets.TcpListener probe = new(IPAddress.Loopback, 0);
-            probe.Start();
-            int port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-            return port;
         }
 
         private async Task AcceptLoopAsync()

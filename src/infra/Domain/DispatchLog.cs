@@ -9,6 +9,19 @@ namespace Farm.Infrastructure.Domain;
 /// </summary>
 public class DispatchLog
 {
+    // EF materializes the persisted timestamps rather than sampling a clock.
+    private DispatchLog()
+    {
+    }
+
+    /// <summary>Creates an audit entry with one caller-owned UTC instant.</summary>
+    public DispatchLog(DateTimeOffset createdAt)
+    {
+        CreatedAtUtc = createdAt.UtcDateTime;
+        CreatedDate = createdAt.ToUniversalTime();
+        UpdatedDate = CreatedDate;
+    }
+
     public Guid Id { get; set; }
 
     /// <summary>The print job being dispatched.</summary>
@@ -64,11 +77,11 @@ public class DispatchLog
     public string? ErrorMessage { get; set; }
 
     /// <summary>UTC timestamp of when this action occurred.</summary>
-    public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime CreatedAtUtc { get; set; }
 
     /// <summary>When this record was created.</summary>
-    public DateTimeOffset CreatedDate { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset CreatedDate { get; set; }
 
     /// <summary>When this record was last updated.</summary>
-    public DateTimeOffset UpdatedDate { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedDate { get; set; }
 }

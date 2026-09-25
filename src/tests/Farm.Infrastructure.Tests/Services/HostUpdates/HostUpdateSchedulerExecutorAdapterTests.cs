@@ -1,4 +1,4 @@
-#pragma warning disable VSTHRD003
+﻿#pragma warning disable VSTHRD003
 using Farm.Infrastructure.Services.HostUpdates;
 using Xunit;
 
@@ -102,6 +102,88 @@ public sealed class HostUpdateSchedulerExecutorAdapterTests
 
         Assert.Equal(HostUpdateExecutorResult.Refused, response.Result);
         Assert.Equal("canceled_at_safe_checkpoint", response.Reason);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task ExecuteAsync_LifecycleSetupThrows_ReleasesOperationAndAllowsRetryAsync(bool throwFromCancellationCallback)
+    {
+        CapturingExecutor executor = new(new HostUpdateExecutionResult(Request().ReleaseId, HostUpdateExecutionState.Completed, null, []));
+        CancellationTokenSource? capturedCancellation = null;
+        Task? capturedCompletion = null;
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64")
+        {
+            OnOperationRegisteredForTests = (cancellation, completion) =>
+            {
+                capturedCancellation = cancellation;
+                capturedCompletion = completion;
+                if (!throwFromCancellationCallback)
+                {
+                    throw new InvalidOperationException("lifecycle_setup_failed");
+                }
+
+                _ = cancellation.Token.Register(static () => throw new InvalidOperationException("lifecycle_setup_failed"));
+            }
+        };
+
+        if (throwFromCancellationCallback)
+        {
+            adapter.PreArmCancellation(new HostUpdateCancellationSignal("request-1", "operation-1"));
+        }
+
+        Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
+        if (throwFromCancellationCallback)
+        {
+            AggregateException exception = await Assert.ThrowsAsync<AggregateException>(() => execution);
+            Assert.Equal("lifecycle_setup_failed", Assert.IsType<InvalidOperationException>(Assert.Single(exception.InnerExceptions)).Message);
+        }
+        else
+        {
+            InvalidOperationException exception = await Assert.ThrowsAsync<InvalidOperationException>(() => execution);
+            Assert.Equal("lifecycle_setup_failed", exception.Message);
+        }
+
+        Assert.NotNull(capturedCancellation);
+        Assert.Throws<ObjectDisposedException>(() => capturedCancellation.Token);
+        Assert.NotNull(capturedCompletion);
+        Assert.True(capturedCompletion.IsCompletedSuccessfully);
+        Assert.Empty(executor.Requests);
+
+        adapter.OnOperationRegisteredForTests = null;
+        HostUpdateExecutorResponse retry = await Task.Run(
+            () => adapter.ExecuteAsync(Request(operationToken: "operation-2"), default)).WaitAsync(TimeSpan.FromSeconds(5));
+
+        Assert.Equal(HostUpdateExecutorResult.Accepted, retry.Result);
+        Assert.Single(executor.Requests);
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_DuplicateRequest_RefusesWithoutRemovingActiveOperationAsync()
+    {
+        GatedExecutor executor = new();
+        using HostUpdateSchedulerExecutorAdapter adapter = new(executor, "linux-amd64");
+        Task<HostUpdateExecutorResponse> execution = adapter.ExecuteAsync(Request(), default);
+        await executor.Started;
+
+        try
+        {
+            HostUpdateExecutorResponse duplicate = await adapter.ExecuteAsync(Request(operationToken: "operation-2"), default);
+
+            Assert.Equal(HostUpdateExecutorResult.Refused, duplicate.Result);
+            Assert.Equal("request_already_running", duplicate.Reason);
+            await adapter.SignalSafeCheckpointCancellationAsync(new HostUpdateCancellationSignal("request-1", "operation-1"), default);
+            HostUpdateExecutorResponse response = await execution.WaitAsync(TimeSpan.FromSeconds(5));
+
+            Assert.Equal(HostUpdateExecutorResult.Refused, response.Result);
+            Assert.Equal("canceled_at_safe_checkpoint", response.Reason);
+            Assert.Equal(1, executor.CancellationObservedCount);
+        }
+        finally
+        {
+            executor.Release();
+            await execution;
+        }
     }
 
     [Fact]

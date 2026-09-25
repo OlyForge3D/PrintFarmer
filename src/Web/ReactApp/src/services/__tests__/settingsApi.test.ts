@@ -109,11 +109,13 @@ describe('settingsApi', () => {
       const values = {
         theme: 'light',
         autoSave: true,
+        rowVersion: 'absent',
       };
 
-      vi.mocked(client.post).mockResolvedValue({ data: undefined });
+      const saved = { ...values, rowVersion: 'new-revision' };
+      vi.mocked(client.post).mockResolvedValue({ data: saved });
 
-      await saveSettingsValues(keyName, values);
+      await expect(saveSettingsValues(keyName, values)).resolves.toEqual(saved);
 
       expect(client.post).toHaveBeenCalledWith(`/settings/${keyName}`, values);
     });

@@ -130,7 +130,10 @@ export function toRealPath(
   return platform === "win32" ? real.toLowerCase() : real;
 }
 
-export function countTestFiles(listFilesOutput, directory) {
+// `realPathOptions` is forwarded verbatim to toRealPath so the symlink dedup
+// can be exercised with an injected resolver on hosts that cannot create
+// symlinks (#2828). Production callers omit it.
+export function countTestFiles(listFilesOutput, directory, realPathOptions) {
   const seen = new Set();
 
   for (const path of listFilesOutput.split(/\r?\n/)) {
@@ -148,7 +151,7 @@ export function countTestFiles(listFilesOutput, directory) {
 
     // Realpath-normalize so a symlink to an already-counted file cannot
     // inflate the count a second time.
-    seen.add(toRealPath(absolute));
+    seen.add(toRealPath(absolute, realPathOptions));
   }
 
   return seen.size;

@@ -16,6 +16,8 @@ import XCTest
 @MainActor
 final class ColdOfflineShellUITests: PrintFarmerUITestCase {
 
+    override var waitsForNavigationReadiness: Bool { true }
+
     override var additionalLaunchArguments: [String] {
         ["--uitesting-cold-offline-shell"]
     }

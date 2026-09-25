@@ -9,9 +9,10 @@ namespace Farm.Infrastructure.Repositories.Queue;
 /// <summary>
 /// EF Core implementation of print job management repository.
 /// </summary>
-public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobManagementRepository
+public class EfPrintJobManagementRepository(AppDbContext context, TimeProvider? timeProvider = null) : IPrintJobManagementRepository
 {
     private readonly AppDbContext _context = context ?? throw new ArgumentNullException(nameof(context));
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     // ============= BASIC CRUD OPERATIONS =============
     public async Task<PrintJob?> GetByIdAsync(Guid id, CancellationToken ct = default)
@@ -309,7 +310,7 @@ public class EfPrintJobManagementRepository(AppDbContext context) : IPrintJobMan
 
     public async Task<double> GetAverageWaitTimeMinutesAsync(Guid? printerModelId = null, int lookbackDays = 30, CancellationToken ct = default)
     {
-        DateTime cutoff = DateTime.UtcNow.AddDays(-lookbackDays);
+        DateTime cutoff = _timeProvider.GetUtcNow().UtcDateTime.AddDays(-lookbackDays);
 
         IQueryable<PrintJob> query = _context.PrintJobs
             .Where(j => j.Status == PrintJobStatus.Completed
