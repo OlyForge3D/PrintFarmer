@@ -156,6 +156,41 @@ permission.
 surface: `[RequirePermission("system_settings", "admin")]`-gated execute/recover endpoints that
 bind one immutable request per call. Both endpoints now gate on the same `HostUpdateExecutionAvailabilityHolder` the availability hosted service maintains: a new execute request that arrives while the executor reports `Unavailable` is rejected with `503 Service Unavailable` and the exact reasons before it reaches `IHostUpdateExecutor`; matching resume/recovery stays available for the authenticated release identity when restart reconciliation has fenced a nonterminal prior release — see `HostUpdateControllerAvailabilityTests`. Replay/duplicate-submission protection relies on the executor's file-based journal/lock plus the durable request fingerprint. If migration or apply has a `:before` journal receipt without the matching `:after`, the executor first requires operation-specific proof before continuing: migration must show every registered context has no pending migrations, and apply must show the exact requested running digests. If either proof is unavailable or negative, it records `RecoveryRequired` with `uncertain_side_effect:<phase>:<reason>` so an operator must recover while fences remain closed.
 
+### Policy drift after fencing (#2823)
+
+The executor re-reads the standing automation policy under the execution lock
+and rejects the request with `policy_drifted` when its revision or fingerprint
+no longer matches. The outcome depends on how far this request's journal got:
+
+- **No fence started** (a brand-new request, or a journal that stops before
+  `fence:before`): no journal entry is written and no writer is paused, so the
+  same request resumes normally once the policy matches again.
+- **Fence started, release nonterminal**: writers may be paused, so the
+  executor appends a request-bound `RecoveryRequired` activity with phase
+  `failure:policy_drifted`. The release no longer resumes; the operator
+  recover path (API or host-local CLI) becomes reachable instead of returning
+  `not_in_recovery`. The marker is not appended when the release is already
+  terminal (`Completed`/`RecoveryRequired`) or when any journal entry carries
+  a different request binding.
+- **Recovery before unsafe side effects**: when `failure:policy_drifted` is the
+  only recorded failure and the journal has no migration, apply, verify or
+  `Completed` activity, recovery plans `FenceReleaseOnly`
+  (`policy_drifted_before_side_effects`). It performs no restore, image apply,
+  digest verification or installed-state write; it persists
+  `FenceReleasePending`, applies the physical printer reconciliation gate, and
+  then releases the fence idempotently before recording `RolledBack`, the same
+  crash-safe sequence as a real rollback.
+- **Unsafe side effects may have started** (`migration:before` or later): the
+  normal fail-closed recovery decision applies (image-only rollback,
+  coordinated restore, or `NeedsOperator`), and writers stay fenced until that
+  path succeeds.
+
+Restart reconciliation treats a release whose last journal entry is
+`Completed`/`recovery:rolled_back` as resolved only when the recovery outcome
+store holds a plain `RolledBack` record; otherwise it re-fences writers as for
+any other nonterminal release. See `HostUpdatePolicyDriftFenceRecoveryTests`
+and `HostUpdateExecutionAvailabilityTests`.
+
 ## Known limitations
 
 - The verify adapter persists each verified target's platform alongside its digest

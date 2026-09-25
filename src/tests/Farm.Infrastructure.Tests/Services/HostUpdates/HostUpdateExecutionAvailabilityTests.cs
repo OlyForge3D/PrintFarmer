@@ -1311,6 +1311,59 @@ public class HostUpdateExecutionAvailabilityTests
         }
     }
 
+    [Theory]
+    [InlineData(HostUpdateRecoveryOutcome.RolledBack, false)]
+    [InlineData(HostUpdateRecoveryOutcome.FenceReleasePending, true)]
+    [InlineData(null, true)]
+    public async Task CheckAsync_ReleaseCompletedByJournaledRecovery_ReFencesOnlyWithoutDurableRolledBack(
+        HostUpdateRecoveryOutcome? outcome,
+        bool expectFenced)
+    {
+        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string composeFile = Path.Combine(root, "compose.yml");
+        await File.WriteAllTextAsync(composeFile, "services: {}");
+        try
+        {
+            var journal = new FakeJournal();
+            journal.Append(new HostUpdateExecutionActivity("a1", "release-5", HostUpdateExecutionState.RecoveryRequired, "failure:policy_drifted", DateTimeOffset.UtcNow));
+            journal.Append(new HostUpdateExecutionActivity("a2", "release-5", HostUpdateExecutionState.RecoveryRequired, "recovery:started", DateTimeOffset.UtcNow));
+            journal.Append(new HostUpdateExecutionActivity("a3", "release-5", HostUpdateExecutionState.Completed, "recovery:rolled_back", DateTimeOffset.UtcNow));
+            var outcomeStore = new FakeRecoveryOutcomeStore();
+            if (outcome is not null)
+            {
+                outcomeStore.Seed(new HostUpdateRecoveryOutcomeRecord("release-5", outcome.Value, "policy_drifted_before_side_effects", DateTimeOffset.UtcNow));
+            }
+
+            var admission = new FakeFenceableWriter("api-admission");
+            var provider = new HostUpdateExecutionAvailabilityProvider(
+                ValidOptions(root, composeFile),
+                journal,
+                [new FakeMigrationTarget()],
+                [new FakeBackupTarget()],
+                [admission],
+                new FakeProcessRunner(dockerAvailable: true),
+                outcomeStore,
+                new TestExecutableResolver());
+
+            HostUpdateExecutionAvailability result = await provider.CheckAsync(CancellationToken.None);
+
+            if (expectFenced)
+            {
+                result.Reasons.Should().Contain("restart_reconciliation_pending:release-5:Completed");
+                admission.QuiesceCallCount.Should().BeGreaterThanOrEqualTo(1);
+            }
+            else
+            {
+                result.Reasons.Should().NotContain(r => r.StartsWith("restart_reconciliation_pending", StringComparison.Ordinal));
+                admission.QuiesceCallCount.Should().Be(0);
+            }
+        }
+        finally
+        {
+            Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Fact]
     public async Task CheckAsync_ReleaseCompletedByRealExecutor_DoesNotReFenceOrReportPending()
     {
