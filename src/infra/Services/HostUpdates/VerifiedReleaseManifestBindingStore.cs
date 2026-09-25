@@ -44,7 +44,7 @@ public sealed class VerifiedReleaseManifestBindingStore(IAppSettingsRepository r
         ArgumentException.ThrowIfNullOrWhiteSpace(manifestDigest);
 
         string key = KeyFor(releaseId);
-        AppSettingsEntity? existing = await ReadAsync(key, cancellationToken);
+        AppSettingsEntity? existing = await ReadAsync(key, cancellationToken).ConfigureAwait(false);
         if (existing is not null)
         {
             if (ParseDigest(releaseId, existing.SettingsJson) != manifestDigest)

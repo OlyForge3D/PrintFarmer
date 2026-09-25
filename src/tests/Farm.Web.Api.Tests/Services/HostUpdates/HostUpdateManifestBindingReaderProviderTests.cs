@@ -67,8 +67,11 @@ public sealed class HostUpdateManifestBindingReaderProviderTests
         Assert.False(File.Exists(path), "a read-only open must never create the database");
     }
 
-    [Fact]
-    public async Task Invalid_binding_json_throws_instead_of_reporting_no_binding()
+    [Theory]
+    [InlineData("{")]
+    [InlineData("{\"ReleaseId\":\"{release}\",\"ManifestDigest\":\"none\"}")]
+    [InlineData("{\"ReleaseId\":\"{release}\",\"ManifestDigest\":\"sha256:ABC\"}")]
+    public async Task Invalid_binding_throws_instead_of_reporting_no_binding(string settingsJson)
     {
         string path = Path.Combine(Path.GetTempPath(), $"pf-binding-invalid-{Guid.NewGuid():N}.db");
         string connectionString = new SqliteConnectionStringBuilder { DataSource = path, Pooling = false }.ToString();
@@ -79,7 +82,7 @@ public sealed class HostUpdateManifestBindingReaderProviderTests
             await using (var context = new AppDbContext(options))
             {
                 _ = await context.Database.EnsureCreatedAsync();
-                _ = context.AppSettingsEntities.Add(new AppSettingsEntity { Key = VerifiedReleaseManifestBindingStore.KeyFor(releaseId), SettingsJson = "{", UpdatedAt = DateTime.UtcNow });
+                _ = context.AppSettingsEntities.Add(new AppSettingsEntity { Key = VerifiedReleaseManifestBindingStore.KeyFor(releaseId), SettingsJson = settingsJson.Replace("{release}", releaseId, StringComparison.Ordinal), UpdatedAt = DateTime.UtcNow });
                 _ = await context.SaveChangesAsync();
             }
 

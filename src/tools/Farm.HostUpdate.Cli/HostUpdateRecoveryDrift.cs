@@ -186,15 +186,9 @@ internal static class HostUpdateRecoveryDrift
                 items.Add(new(TrustRootDrift, baseline.TrustRootFingerprint, trustRootFingerprint));
             }
 
-            // Issue #3050: a missing baseline value, an unobserved or unreadable binding, or any
-            // difference is drift. An unreadable binding never counts as "no drift".
-            string recordedBinding = baseline.ManifestBinding ?? ManifestBindingUnrecorded;
-            string observedBinding = observedManifestBinding ?? ManifestBindingUnreadablePrefix + "unobserved";
-            if (baseline.ManifestBinding is null
-                || observedBinding.StartsWith(ManifestBindingUnreadablePrefix, StringComparison.Ordinal)
-                || !string.Equals(recordedBinding, observedBinding, StringComparison.Ordinal))
+            if (ManifestBindingItem(baseline, observedManifestBinding) is { } bindingItem)
             {
-                items.Add(new(ManifestBindingDrift, recordedBinding, observedBinding));
+                items.Add(bindingItem);
             }
         }
 
@@ -226,6 +220,63 @@ internal static class HostUpdateRecoveryDrift
             items.Add(new(PriorStateMatchesTarget, $"{recorded.ReleaseId}@{recorded.ManifestDigest}", $"{installed.ReleaseId}@{installed.ManifestDigest}"));
         }
 
+        return Report(recorded, items, configurationFingerprint, installed, observedManifestBinding);
+    }
+
+    /// <summary>
+    /// Drift for a terminal <c>RolledBack</c> outcome: the installed state is the one the rollback
+    /// wrote, so only the database-side manifest binding is compared (issue #3050). An unreadable
+    /// binding is still reported, never hidden behind the durable no-op.
+    /// </summary>
+    public static HostUpdateDriftReport DetectAfterRollback(
+        HostUpdateExecutionRequest recorded,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        InstalledHostState? installed,
+        string configurationFingerprint,
+        string? observedManifestBinding)
+    {
+        ArgumentNullException.ThrowIfNull(recorded);
+        ArgumentNullException.ThrowIfNull(activities);
+
+        var items = new List<HostUpdateDriftItem>();
+        HostUpdateAuthorizationBaseline? baseline = AuthorizationBaseline(activities);
+        if (baseline is not null && ManifestBindingItem(baseline, observedManifestBinding) is { } bindingItem)
+        {
+            items.Add(bindingItem);
+        }
+        else if (baseline is null && ObservedUnreadable(observedManifestBinding) is { } unreadable)
+        {
+            items.Add(new(ManifestBindingDrift, ManifestBindingUnrecorded, unreadable));
+        }
+
+        return Report(recorded, items, configurationFingerprint, installed, observedManifestBinding);
+    }
+
+    // Issue #3050: a missing baseline value, an unobserved or unreadable binding, or any
+    // difference is drift. An unreadable binding never counts as "no drift".
+    private static HostUpdateDriftItem? ManifestBindingItem(HostUpdateAuthorizationBaseline baseline, string? observedManifestBinding)
+    {
+        string recordedBinding = baseline.ManifestBinding ?? ManifestBindingUnrecorded;
+        string observedBinding = ObservedUnreadable(observedManifestBinding) ?? observedManifestBinding!;
+        return baseline.ManifestBinding is null
+            || observedBinding.StartsWith(ManifestBindingUnreadablePrefix, StringComparison.Ordinal)
+            || !string.Equals(recordedBinding, observedBinding, StringComparison.Ordinal)
+                ? new(ManifestBindingDrift, recordedBinding, observedBinding)
+                : null;
+    }
+
+    private static string? ObservedUnreadable(string? observedManifestBinding) =>
+        observedManifestBinding is null
+            ? ManifestBindingUnreadablePrefix + "unobserved"
+            : observedManifestBinding.StartsWith(ManifestBindingUnreadablePrefix, StringComparison.Ordinal) ? observedManifestBinding : null;
+
+    private static HostUpdateDriftReport Report(
+        HostUpdateExecutionRequest recorded,
+        List<HostUpdateDriftItem> items,
+        string configurationFingerprint,
+        InstalledHostState? installed,
+        string? observedManifestBinding)
+    {
         HostUpdateDriftItem[] ordered = [.. items.OrderBy(item => item.Code, StringComparer.Ordinal)];
         string? token = ordered.Length == 0
             ? null

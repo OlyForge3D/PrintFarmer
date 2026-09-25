@@ -310,7 +310,7 @@ its guarantee is that the reader issues only that `SELECT` and rolls back.
 | `configuration_drift` | The configuration fingerprint differs from the one recorded at authorization (for example a changed compose file, service mapping, owned directory, tool path or database provider). The CLI and the API host must read the same configuration for this to be meaningful. |
 | `trust_root_drift` | The authorization named a trust root this build does not pin, or the pinned trust-root fingerprint changed since authorization (for example the CLI came from a different release). |
 | `prior_state_changed_since_authorization` | The installed state's content differs from the baseline recorded at authorization, including a deleted or backdated record (`observed` is `none` when it was deleted). For a journal without a baseline this falls back to the older timestamp heuristic and is always accompanied by `authorization_baseline_unrecorded`. |
-| `manifest_binding_drift` | The database manifest binding for the release differs from the one recorded at authorization, was deleted (`observed` is `none`), or could not be read (`observed` is `unreadable:<ExceptionType>`; the message is withheld because provider errors can carry connection details). An unreadable binding is always drift, never `no drift`. A schema-1 baseline, written before #3050, reports `recorded` as `unrecorded`. |
+| `manifest_binding_drift` | The database manifest binding for the release differs from the one recorded at authorization, was deleted (`observed` is `none`), or could not be read or is not a canonical `sha256:<64 lowercase hex>` digest (`observed` is `unreadable:<ExceptionType>`; the message is withheld because provider errors can carry connection details). An unreadable binding is always drift, never `no drift`. A schema-1 baseline, written before #3050, reports `recorded` as `unrecorded`. |
 | `prior_state_matches_target` | The installed state already reports the target release or manifest. |
 
 The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
@@ -323,7 +323,8 @@ state and the observed manifest binding. Any further change invalidates it (`dri
 supplied when nothing drifted is refused (`drift_reapproval_unexpected`). The
 refusal lists the drift codes but never prints the token, so reapproval
 requires reading `--preview`. A release with a recorded `RolledBack` outcome has
-nothing to reapprove.
+nothing to reapprove: `--confirm` stays a durable no-op, but `--preview` still
+reports `manifest_binding_drift` so an unreadable or changed binding is never hidden.
 
 | Exit | Meaning | Operator response |
 | --- | --- | --- |

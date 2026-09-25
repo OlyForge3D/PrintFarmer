@@ -63,9 +63,18 @@ public sealed class ReadOnlyHostUpdateManifestBindingReader(DatabaseProviderConf
         }
 
         await transaction.RollbackAsync(cancellationToken).ConfigureAwait(false);
-        return value is null or DBNull
-            ? NoBinding
-            : VerifiedReleaseManifestBindingStore.ParseDigest(releaseId, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+        if (value is null or DBNull)
+        {
+            return NoBinding;
+        }
+
+        string digest = VerifiedReleaseManifestBindingStore.ParseDigest(releaseId, Convert.ToString(value, System.Globalization.CultureInfo.InvariantCulture) ?? string.Empty);
+
+        // Only a canonical digest may be journaled or printed; anything else (including the
+        // literal NoBinding sentinel) is unreadable, never an absent binding.
+        return HostUpdateValidation.IsCanonicalDigest(digest)
+            ? digest
+            : throw new InvalidDataException($"Persisted manifest binding for release '{releaseId}' is not a canonical digest.");
     }
 
     internal static DbConnection CreateReadOnlyConnection(DatabaseProviderConfiguration database)

@@ -253,13 +253,12 @@ public static partial class HostUpdateCli
         string configurationFingerprint = HostUpdateRecoveryDrift.ConfigurationFingerprint(options, database);
         string? currentPlatform = HostUpdateRecoveryDrift.CurrentPlatform();
 
-        // A terminal RolledBack outcome makes confirm a durable no-op, so there is nothing to reapprove.
+        // A terminal RolledBack outcome makes confirm a durable no-op, so there is nothing to reapprove;
+        // the manifest binding is still observed and reported so an unreadable one is never hidden.
         bool rolledBack = existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack };
-        string? observedManifestBinding = rolledBack
-            ? null
-            : await ReadManifestBindingAsync(provider, request.ReleaseId, cancellationToken).ConfigureAwait(false);
+        string observedManifestBinding = await ReadManifestBindingAsync(provider, request.ReleaseId, cancellationToken).ConfigureAwait(false);
         HostUpdateDriftReport drift = rolledBack
-            ? new HostUpdateDriftReport([], configurationFingerprint, null)
+            ? HostUpdateRecoveryDrift.DetectAfterRollback(request, activities, installed, configurationFingerprint, observedManifestBinding)
             : HostUpdateRecoveryDrift.Detect(
                 request,
                 activities,
@@ -270,7 +269,7 @@ public static partial class HostUpdateCli
                 configurationFingerprint,
                 observedManifestBinding);
 
-        if (args.Confirm)
+        if (args.Confirm && !rolledBack)
         {
             string? driftRefusal = DriftRefusal(drift, args.ReapprovalToken);
             if (driftRefusal is not null)
