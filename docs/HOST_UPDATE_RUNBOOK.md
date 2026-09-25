@@ -274,13 +274,23 @@ Known limits of this slice:
   re-acquires it (the API follows the same pattern). A concurrent executor
   could append in that window, so run recovery only while execution is
   otherwise idle.
-- .NET configuration binding **appends** configured `ComposeFiles` entries to
-  the built-in default rather than replacing it, so the default relative
-  compose path must also exist in the CLI's working directory or the namespace
-  proof fails. This matches the API's availability probe.
-- There is no drift reapproval, downtime preview, physical command
-  reconciliation gate, published package or PostgreSQL/SQL Server and
-  split-topology proof yet; those remain #2980 follow-up work under #2658.
+- A non-empty configured `ComposeFiles` list replaces the built-in
+  `docker-compose.daily-registry.yml` default for both the API and the CLI
+  (#2997); list every compose file the installation applies, in `-f` order.
+  The built-in default applies only when no `ComposeFiles` entry is configured;
+  a blank entry fails startup validation.
+- Wrapper parity is regression-tested in CI (`deployment-tests.yml`,
+  `host-update-wrapper-tests`): `tests/test-host-update-cli-wrapper.sh` and
+  `tests/test-host-update-cli-wrapper.ps1` both run on Ubuntu, macOS and
+  Windows runners against a stub CLI. This proves argument validation and
+  exit-code pass-through only; it is not a supported-host declaration.
+- There is no published or signed package, installed host placement,
+  supported OS/distribution matrix, drift reapproval, downtime preview,
+  physical command reconciliation gate or PostgreSQL/SQL Server and
+  split-topology proof yet; those remain follow-up work under #2658. Until the
+  package exists, `PRINTFARMER_HOST_UPDATE_CLI_DIR` must point at a
+  `dotnet publish` output of `src/tools/Farm.HostUpdate.Cli` built from the
+  installed release's tag.
 
 | Observation | Operator response |
 | --- | --- |

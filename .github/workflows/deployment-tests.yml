@@ -5,6 +5,7 @@ on:
     paths:
       - 'scripts/deploy-docker.sh'
       - 'scripts/fix-*.sh'
+      - 'scripts/printfarmer-host-update.*'
       - 'scripts/docker/**'
       - 'docs/**'
       - 'tests/**'
@@ -18,6 +19,7 @@ on:
     paths:
       - 'scripts/deploy-docker.sh'
       - 'scripts/fix-*.sh'
+      - 'scripts/printfarmer-host-update.*'
       - 'scripts/docker/**'
       - 'docs/**'
       - 'tests/**'
@@ -137,6 +139,32 @@ jobs:
           test_postgres_runtime_secrets_not_baked
           test_postgres_compose_config_resolves_password_for_api_and_slicer_host
           test_postgres_passwordless_connection_string_fails_fast
+
+  host-update-wrapper-tests:
+    # Issue #2997 (R3002-V03): the host-update recovery CLI wrappers must
+    # validate arguments and preserve CLI exit codes identically on every
+    # runner OS. Both suites use a stub dotnet host, so no build or Docker is
+    # needed. This proves wrapper parity only, not a supported-host matrix.
+    name: Host-update CLI wrapper tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+
+      - name: Run Bash wrapper tests
+        shell: bash
+        run: bash tests/test-host-update-cli-wrapper.sh
+
+      - name: Run PowerShell wrapper tests
+        shell: pwsh
+        run: pwsh -NoProfile -NonInteractive -File tests/test-host-update-cli-wrapper.ps1
 
   split-topology-route-smoke:
     # Issue #2239: tests/test-compose-generator.sh (above) proves the

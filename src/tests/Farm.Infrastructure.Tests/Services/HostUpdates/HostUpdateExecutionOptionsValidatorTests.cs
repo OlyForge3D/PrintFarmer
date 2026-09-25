@@ -336,6 +336,21 @@ public class HostUpdateExecutionOptionsValidatorTests
         result.FailureMessage.Should().Contain("ComposeFiles");
     }
 
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    public void Validate_BlankComposeFileEntry_Fails(string entry)
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ComposeFiles = ["/opt/printfarmer/docker-compose.yml", entry];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("ComposeFiles entries must not be empty");
+    }
+
     [Fact]
     public void Validate_ServiceMappingMissingField_Fails()
     {

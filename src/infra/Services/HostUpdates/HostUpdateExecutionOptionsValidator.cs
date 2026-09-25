@@ -103,6 +103,10 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
         {
             failures.Add("HostUpdateExecution:ComposeFiles must list at least one compose file.");
         }
+        else if (options.ComposeFiles.Any(string.IsNullOrWhiteSpace))
+        {
+            failures.Add("HostUpdateExecution:ComposeFiles entries must not be empty.");
+        }
 
         if (options.ServiceMappings is null || options.ServiceMappings.Length == 0)
         {
