@@ -532,8 +532,8 @@ either check to make a local run pass (issue #2977):
   `src/tests/Farm.Infrastructure.Tests/Services/HostUpdates/HostStateTestPlatform.cs`),
   which resolve `Path.GetTempPath()` to its physical path once. They do not use
   `Path.GetTempPath()` / `Directory.CreateTempSubdirectory()` directly. If the temp
-  directory cannot be resolved, every test fails with a message that says to point
-  `TMPDIR` at a physical directory.
+  directory cannot be resolved, each test that uses `HostStateTestPaths` fails with a
+  message that says to point `TMPDIR` at a physical directory.
 - **Owner validation is Linux- (or Windows-attestation-) only.** A validated host-state
   root needs the Linux `statx` owner check or `WindowsSecurityAttested`. On every other
   platform, including macOS, root validation fails closed with
@@ -546,7 +546,9 @@ either check to make a local run pass (issue #2977):
   nothing is written.
 
 With both in place, this supported local command reports no host-state failures on macOS.
-It shows the owner-validation skips, and CI on Linux runs every case:
+It shows the owner-validation skips. CI on Linux runs every owner-validation case and
+skips only `HostStateRoot_FailsClosedWhereUnixOwnerValidationIsUnavailable`, which does
+not apply there:
 
 ```bash
 cd src
