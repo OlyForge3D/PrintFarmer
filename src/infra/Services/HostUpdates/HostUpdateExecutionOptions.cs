@@ -185,7 +185,8 @@ public sealed class HostUpdateExecutionOptions
     /// environment variable, and immutable image repository. Defaults match the split-topology
     /// registry deployment; override per-topology as needed. A configured list replaces this
     /// default (issue #3051), so list every service this host maps; an empty list, an entry
-    /// missing a field, or a duplicate <c>ServiceId</c> fails startup validation.
+    /// missing a field, a duplicate <c>ServiceId</c>, or an <see cref="ActiveServiceIds"/> entry
+    /// with no mapping fails startup validation.
     /// </summary>
     public HostUpdateServiceMappingOptions[] ServiceMappings { get; set; } =
     [

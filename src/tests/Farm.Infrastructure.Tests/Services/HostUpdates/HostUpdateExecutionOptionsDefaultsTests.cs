@@ -121,6 +121,53 @@ public class HostUpdateExecutionOptionsDefaultsTests
     }
 
     [Fact]
+    public void ReplacedServiceMappingsMissingAnActiveService_FailsValidatedOptionsResolution()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        using ServiceProvider provider = BuildRegistrationProvider(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = root,
+            ["HostUpdateExecution:ServiceMappings:0:ServiceId"] = "monolith",
+            ["HostUpdateExecution:ServiceMappings:0:ComposeServiceName"] = "printfarmer",
+            ["HostUpdateExecution:ServiceMappings:0:ImageEnvironmentVariable"] = "PRINTFARMER_IMAGE",
+            ["HostUpdateExecution:ServiceMappings:0:ImageRepository"] = "ghcr.io/olyforge3d/printfarmer-monolith",
+        });
+
+        Action resolve = () => _ = provider.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value;
+
+        resolve.Should().Throw<OptionsValidationException>()
+            .WithMessage("*ActiveServiceIds must each have a ServiceMappings entry; unmapped: api,frontend,slicer-host,printer-discovery,orcaslicer-worker*");
+    }
+
+    [Fact]
+    public void ReplacedServiceMappingsCoveringActiveServices_PassValidatedOptionsResolution()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        using ServiceProvider provider = BuildRegistrationProvider(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = root,
+            ["HostUpdateExecution:ActiveServiceIds:0"] = "monolith",
+            ["HostUpdateExecution:ServiceMappings:0:ServiceId"] = "monolith",
+            ["HostUpdateExecution:ServiceMappings:0:ComposeServiceName"] = "printfarmer",
+            ["HostUpdateExecution:ServiceMappings:0:ImageEnvironmentVariable"] = "PRINTFARMER_IMAGE",
+            ["HostUpdateExecution:ServiceMappings:0:ImageRepository"] = "ghcr.io/olyforge3d/printfarmer-monolith",
+        });
+
+        HostUpdateExecutionOptions options = provider.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value;
+
+        options.ActiveServiceIds.Should().Equal("monolith");
+        options.ServiceMappings.Should().ContainSingle().Which.ServiceId.Should().Be("monolith");
+    }
+
+    private static ServiceProvider BuildRegistrationProvider(Dictionary<string, string?> values)
+    {
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(values).Build();
+        var services = new ServiceCollection();
+        services.AddHostUpdateRecoveryEngine(configuration);
+        return services.BuildServiceProvider();
+    }
+
+    [Fact]
     public void DuplicateConfiguredServiceMapping_FailsValidatedOptionsResolution()
     {
         string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");

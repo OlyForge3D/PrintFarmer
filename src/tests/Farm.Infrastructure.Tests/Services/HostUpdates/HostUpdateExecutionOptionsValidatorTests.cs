@@ -397,6 +397,20 @@ public class HostUpdateExecutionOptionsValidatorTests
     }
 
     [Fact]
+    public void Validate_ActiveServiceWithoutMapping_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ActiveServiceIds = ["api", "frontend"];
+        options.ServiceMappings = [new("api", "api", "PRINTFARMER_API_IMAGE", "ghcr.io/olyforge3d/printfarmer-api")];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("ActiveServiceIds must each have a ServiceMappings entry; unmapped: frontend");
+    }
+
+    [Fact]
     public void Validate_ServiceMappingMissingField_Fails()
     {
         string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");

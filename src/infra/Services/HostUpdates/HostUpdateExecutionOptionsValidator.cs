@@ -146,6 +146,23 @@ public sealed class HostUpdateExecutionOptionsValidator : IValidateOptions<HostU
                     + string.Join(',', duplicateServiceIds)
                     + ".");
             }
+
+            if (options.ActiveServiceIds is { Length: > 0 })
+            {
+                var mappedServiceIds = options.ServiceMappings
+                    .Select(mapping => mapping.ServiceId)
+                    .ToHashSet(StringComparer.Ordinal);
+                string[] unmappedActiveServiceIds = [.. options.ActiveServiceIds
+                    .Where(id => !string.IsNullOrWhiteSpace(id) && !mappedServiceIds.Contains(id))
+                    .Distinct(StringComparer.Ordinal)];
+                if (unmappedActiveServiceIds.Length > 0)
+                {
+                    failures.Add(
+                        "HostUpdateExecution:ActiveServiceIds must each have a ServiceMappings entry; unmapped: "
+                        + string.Join(',', unmappedActiveServiceIds)
+                        + ".");
+                }
+            }
         }
 
         if (options.MinimumFreeBytes <= 0)
