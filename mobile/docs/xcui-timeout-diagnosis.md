@@ -278,6 +278,108 @@ iPhone 17. `JobDetailIPadNavigationUITests` passed 3/3 on iPad Pro 13-inch
 (M5); the iPad `ShiftTasksFailedRefreshUITests` skip is the existing #2624
 quarantine.
 
+### Launch-time render livelock (#3035)
+
+After #3013 made launch stalls fail fast, CI kept producing launch-class
+failures on iOS 26.5: `kAXErrorCannotComplete` on the first shell snapshot,
+`does not have a process ID`, `Lost connection to the application`, and the
+20s heartbeat watchdog abort. About 9 of 86 iPad jobs and 1 of 86 iPhone jobs
+failed this way between 2026-09-24 22:30Z and 2026-09-25 15:00Z.
+
+**Mechanism.** On iOS 26, AttributeGraph builds the type layout descriptors it
+uses to compare old and new attribute values **asynchronously** by default
+(runtime switch `AG_ASYNC_LAYOUTS`):
+
+- `TypeDescriptorCache::fetch` queues a missing layout on a low-priority
+  (utility QoS) global queue, `drain_queue`, and returns no layout.
+- Until the layout exists, comparisons report **not equal**.
+- During `render`, SwiftUI's `NavigationSplitRepresentable` →
+  `NavigationStackCoordinator.updateNavigationController` and
+  `UIHostingController.sizingOptionsDidChange` re-invalidate the root
+  `_UIHostingView`. That cycle converges only through value equality.
+- While layouts are pending, every pass looks changed, so Core Animation
+  re-lays out the root hosting view inside the **same**
+  `CA::Transaction::commit`. The main thread never returns to the run loop.
+- On a 3-vCPU CI runner already busy with XCTest, accessibility, SpringBoard
+  and the simulator, the utility thread is starved. The spinning main thread,
+  at user-interactive QoS, occupies a core itself, so the starvation sustains
+  itself.
+
+Apple does not document the switch. The reverse-engineered AttributeGraph
+source at [jcmosc/Compute](https://github.com/jcmosc/Compute)
+(`Sources/ComputeCxx/Comparison/LayoutDescriptor.cpp`) shows the fetch and
+comparison behavior. The iOS 26.5 runtime's `AttributeGraph` binary contains
+the `AG_ASYNC_LAYOUTS` string alongside `AG_PRINT_LAYOUTS` and
+`AG_PREFETCH_LAYOUTS`.
+
+**Evidence.**
+
+- All four CI iPad crash reports (pids 31622, 32420, 38340 and 39981) show the
+  main thread inside one CA commit → `_UIHostingView.layoutSubviews` →
+  `ViewGraphRootValueUpdater.render`. They are sampled in different render
+  phases: `GraphHost.flushTransactions`, `NavigationStackCoordinator.updateNavigationController`,
+  `_wrappedProcessTraitChanges` recursion and `DisplayList.ViewUpdater.render`.
+  In every report, a utility-QoS thread is still in
+  `AG::TypeDescriptorCache::drain_queue` → `make_layout` →
+  `swift_conformsToProtocol` 20s into the stall.
+- A local A/B on iPad Pro 13-inch (M5), iOS 26.5 (23F77), Debug build, used a
+  temporary probe that saturated the utility-QoS pool at launch while a
+  background thread measured main-queue latency:
+
+  | `AG_ASYNC_LAYOUTS` | 8s utility starvation | AttributeGraph cache hits |
+  | --- | --- | --- |
+  | default (on) | Main thread stalled 6.26s and 6.31s from the splash-to-shell transition until starvation ended; 10s starvation gave 8.28s | 2.56M and 2.78M in one run (a normal launch is about 2.5k) |
+  | `0` | No stall; one 0.25s blip at process start | Layouts built synchronously |
+
+- `sample` of the stalled local app put 1419 of 1419 samples in the same CA
+  commit and render stack as CI. Temporary body-evaluation logs stayed at 3–4
+  per view, so this is not an app-state or `onChange` storm. The loop is inside
+  the SwiftUI↔UIKit bridge.
+
+**Harness fix.** Every UI-test launch sets `AG_ASYNC_LAYOUTS=0`, so layouts
+are built synchronously and comparisons never report a pending layout as
+changed. In the local starvation A/B this removed the stall; CI shard results
+on the fix PR are the field evidence. There are no retries, skips, timeout
+changes or loosened assertions.
+
+- `UITestLaunchEnvironment.values` holds the harness environment
+  (`PFARM_UI_TESTING=1`, `AG_ASYNC_LAYOUTS=0`).
+- `XCUIApplication.printFarmerUITest(arguments:)` builds every app, and
+  `launchForPrintFarmerUITest()` is the only launch entry point. It fails the
+  test rather than launching without the harness environment, and it opens
+  the #3013 launch window only after that check passes. The base
+  `setUp()` launch, the `PrinterDetailPanelsUITests` accessibility-text
+  relaunch and both `LoginFlowUITests` preserve-state relaunches use it.
+- `UIWaitBudgetTests` asserts the factory's environment and the guard's
+  mismatch detection. It also scans every Swift source under
+  `PrintFarmerUITests/` so that a raw `XCUIApplication()`, `.launch()` or
+  `.activate()` fails CI. The scan is lexical: it strips comments and tolerates
+  whitespace and line breaks, but it does not parse string literals. Other
+  apps, such as SpringBoard, are built by bundle identifier and never
+  launched, so they are out of scope.
+
+**Why test-only.** The livelock needs the AttributeGraph queue to be starved
+while the `NavigationSplitView` root mounts. Release builds on real devices
+are far less exposed: there is no accessibility bundle-load storm, the
+conformance scan is smaller and XCTest does not compete for cores. The switch
+is undocumented, so the production app does not set it. Production exposure,
+an Apple Feedback report and any app-side mitigation are tracked in
+[#3067](https://github.com/OlyForge3D/PrintFarmer/issues/3067).
+
+**Recognizing the signature.** In a watchdog crash report or a `sample`:
+
+- the main thread is in one `CA::Transaction::commit` →
+  `_UIHostingView.layoutSubviews` → `ViewGraphRootValueUpdater.render`, often
+  under `NavigationSplitRepresentable` or `NavigationStackCoordinator`;
+- another thread is in `AG::TypeDescriptorCache::drain_queue` or
+  `TypeDescriptorCache::fetch` → `make_layout`.
+
+That pair is the #3035 signature. If it appears, check whether the launch
+carried `AG_ASYNC_LAYOUTS=0`. A launch without it is still exposed to this
+cause. A signature that recurs with it present means the switch did not take
+effect or the livelock has another trigger. A launch-class failure without the
+signature has a different cause.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test

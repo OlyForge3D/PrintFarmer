@@ -263,14 +263,12 @@ final class AdvancedPrinterControlsNotNowUITests: PrintFarmerUITestCase {
 
     private func relaunchAuthenticatedPreservingState() {
         app.terminate()
-        app = XCUIApplication()
-        app.launchEnvironment["PFARM_UI_TESTING"] = "1"
-        app.launchArguments = [
+        app = .printFarmerUITest(arguments: [
             "--uitesting",
             "--uitesting-preserve-state",
             "-isDemoModeActive", "NO"
-        ]
-        app.launch()
+        ])
+        app.launchForPrintFarmerUITest()
     }
 
     private func openSettingsFromAccount() {
@@ -324,14 +322,12 @@ final class AdvancedPrinterControlsEnableUITests: PrintFarmerUITestCase {
 
     private func relaunchAuthenticatedPreservingState() {
         app.terminate()
-        app = XCUIApplication()
-        app.launchEnvironment["PFARM_UI_TESTING"] = "1"
-        app.launchArguments = [
+        app = .printFarmerUITest(arguments: [
             "--uitesting",
             "--uitesting-preserve-state",
             "-isDemoModeActive", "NO"
-        ]
-        app.launch()
+        ])
+        app.launchForPrintFarmerUITest()
     }
 
     private func openSettingsFromAccount() {
