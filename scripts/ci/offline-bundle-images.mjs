@@ -461,13 +461,19 @@ export function verifyImageArchive(fd, base, length, expected, limits = imageArc
 // ---------------------------------------------------------------------------------------------
 function openBlob(layout, digest) {
   const path = join(layout, 'blobs', 'sha256', digest.slice('sha256:'.length));
-  const link = lstatSync(path, { throwIfNoEntry: false });
-  requireThat(link?.isFile() && !link.isSymbolicLink(), `Image layout is missing blob ${digest}`);
-  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  let fd;
+  try {
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
+  } catch {
+    throw new Error(`Image layout is missing blob ${digest}`);
+  }
+  // Checked after opening, on the descriptor: the path must still name this same regular file
+  // (not a link to it), so nothing swapped between lookup and use is ever read.
   const opened = fstatSync(fd);
-  if (!opened.isFile() || opened.dev !== link.dev || opened.ino !== link.ino) {
+  const link = lstatSync(path, { throwIfNoEntry: false });
+  if (!opened.isFile() || !link?.isFile() || opened.dev !== link.dev || opened.ino !== link.ino) {
     closeSync(fd);
-    throw new Error(`Image layout blob changed while being opened: ${digest}`);
+    throw new Error(`Image layout blob is not a regular file or changed while being opened: ${digest}`);
   }
   return { fd, size: opened.size };
 }
@@ -504,7 +510,7 @@ export function writeImageArchive({ layout, expected, output, limits = imageArch
   const rootBytes = source.read(expected.digest);
   const root = { mediaType: JSON.parse(rootBytes.toString('utf8')).mediaType, digest: expected.digest, size: rootBytes.length };
   const closure = imageClosure(source, root, expected, limits);
-  const out = openSync(output, 'wx', 0o644);
+  const out = openSync(output, 'wx+', 0o644);
   try {
     const member = (name, bytes) => {
       writeAll(out, imageTarHeader({ name, size: bytes.length }));
@@ -525,22 +531,14 @@ export function writeImageArchive({ layout, expected, output, limits = imageArch
       }
     }
     writeAll(out, Buffer.alloc(block * 2));
+    // Prove the written archive with the importer's own verifier, on the same descriptor, before it
+    // is bundled.
+    const verified = verifyImageArchive(out, 0, fstatSync(out).size, expected, limits);
     closeSync(out);
+    return verified;
   } catch (error) {
     try { closeSync(out); } catch { /* already closed */ }
     rmSync(output, { force: true });
     throw error;
   }
-  // Prove the written archive with the importer's own verifier before it is bundled.
-  const fd = openSync(output, 'r');
-  let verified;
-  try {
-    verified = verifyImageArchive(fd, 0, fstatSync(fd).size, expected, limits);
-  } catch (error) {
-    closeSync(fd);
-    rmSync(output, { force: true });
-    throw error;
-  }
-  closeSync(fd);
-  return verified;
 }
