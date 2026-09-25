@@ -38,11 +38,15 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateWriterFencingTests : IDisposable
 {
-    // A paused writer acknowledges twice per ~250 ms loop iteration (once at the top-of-loop
-    // paused branch before its delay, and again at the interval-boundary wait which returns
-    // immediately while paused — see the corrected cadence block on the paused-loop cycle
-    // rate test below). Observing the full pair proves the loop actually iterated rather than
-    // latched after its first acknowledgement.
+    // The liveness observation threshold for a paused writer: two acknowledgements suffice to
+    // prove the loop is re-checking rather than latched after its first acknowledgement. The
+    // two loop shapes covered here reach this threshold differently — outbox-style writers
+    // (e.g. QueueOutboxPublisherService, PowerReadingPruneService, QueueRetentionPruneService)
+    // acknowledge twice per ~250 ms iteration (top-of-loop paused branch + interval-boundary
+    // wait — see the corrected cadence block on the paused-loop cycle rate test below), while
+    // continue-style consumers (e.g. BackendStartCommandConsumerService,
+    // BackendControlCommandConsumerService, BedClearAcknowledgementExpiryService) acknowledge
+    // once per iteration and reach the pair across two iterations.
     private const int AcknowledgementsPerPausedIteration = 2;
 
     private readonly SqliteConnection _connection;
