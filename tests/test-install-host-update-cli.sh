@@ -74,8 +74,8 @@ JSON
         symlink) ln -s /etc/passwd "$stage/cli/link" ;;
     esac
     if [[ "$variant" == traversal ]]; then
-        (cd "$stage/x" && tar -czf "$dir/$prefix-$RID.tar.gz" ../evil ../cli 2>/dev/null) ||
-            (cd "$stage/x" && tar -czf "$dir/$prefix-$RID.tar.gz" -P ../evil ../cli)
+        # -P keeps the ../ prefix that both GNU tar and bsdtar strip by default.
+        (cd "$stage/x" && tar -czPf "$dir/$prefix-$RID.tar.gz" ../evil)
     else
         tar -czf "$dir/$prefix-$RID.tar.gz" -C "$stage" .
     fi
@@ -130,18 +130,18 @@ check "insider identity is the development-branch release workflow" \
 check "same-version reinstall replaces the placement" \
     "[[ \$(run_install --version $STABLE --asset-dir '$ASSETS' --install-root '$ROOT') == 0 && -d '$ROOT/$STABLE/cli' ]]"
 
-check "a failed signature places nothing" \
-    "[[ \$(COSIGN_FAIL=1 run_install --version 2.0.0 --asset-dir '$TEST_ROOT/none' --install-root '$ROOT') == 1 ]]"
 make_release 2.0.0 "$TEST_ROOT/v2"
 check "signature failure exits 1 and places nothing" \
     "[[ \$(COSIGN_FAIL=1 run_install --version 2.0.0 --asset-dir '$TEST_ROOT/v2' --install-root '$ROOT') == 1 && ! -e '$ROOT/2.0.0' ]] && grep -q 'not signed by the main release workflow' '$TEST_ROOT/out.log'"
 check "missing cosign fails closed" \
     "[[ \$(PATH=/usr/bin:/bin run_install --version 2.0.0 --asset-dir '$TEST_ROOT/v2' --install-root '$ROOT') == 1 && ! -e '$ROOT/2.0.0' ]]"
 
-for variant in mismatch missing-entry manifest symlink traversal; do
+for case in 'mismatch:SHA-256 mismatch' 'missing-entry:does not name' 'manifest:manifest does not match' \
+    'symlink:link or special file' 'traversal:unsafe member name'; do
+    variant="${case%%:*}"
     make_release 3.0.0 "$TEST_ROOT/$variant" "$variant"
-    check "$variant archive is refused and places nothing" \
-        "[[ \$(run_install --version 3.0.0 --asset-dir '$TEST_ROOT/$variant' --install-root '$ROOT') == 1 && ! -e '$ROOT/3.0.0' ]]"
+    check "$variant archive is refused for the right reason and places nothing" \
+        "[[ \$(run_install --version 3.0.0 --asset-dir '$TEST_ROOT/$variant' --install-root '$ROOT') == 1 && ! -e '$ROOT/3.0.0' ]] && grep -q '${case#*:}' '$TEST_ROOT/out.log'"
 done
 
 check "a CLI that cannot run on this host keeps the previous placement" \
