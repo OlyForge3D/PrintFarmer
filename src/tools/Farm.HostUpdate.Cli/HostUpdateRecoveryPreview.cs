@@ -178,7 +178,7 @@ internal static class HostUpdateRecoveryPreview
         string afterRecovery = plan.Kind switch
         {
             HostUpdateRecoveryPlanKind.ImageOnlyRollback or HostUpdateRecoveryPlanKind.CoordinatedRestore or HostUpdateRecoveryPlanKind.FenceReleaseOnly
-                => "writers_fenced_until_rollback_then_released",
+                => "writers_fenced_until_rollback_and_physical_reconciliation",
             HostUpdateRecoveryPlanKind.AlreadyRolledBack => "unchanged",
             _ => admissionClosed ? "remains_fenced" : "unchanged",
         };

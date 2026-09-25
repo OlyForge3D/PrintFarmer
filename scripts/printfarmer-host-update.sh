@@ -7,10 +7,11 @@
 #
 #   printfarmer-host-update.sh --config /abs/host-update.json status [--release <id>] [--json]
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --preview [--json]
-#   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--reapprove-drift <token>] [--json]
+#   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
 #
 # --reapprove-drift takes the token printed by `recover --preview` when the host drifted since the
-# recorded authorization (CLI exit 12).
+# recorded authorization (CLI exit 12). --printers-reconciled takes the physical-<32 hex> token
+# printed by `recover --preview` once every listed printer is physically reconciled (CLI exit 13).
 #
 # Environment:
 #   PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing the CLI (default: cli/ beside an
@@ -31,6 +32,7 @@ source "$SCRIPT_DIR/common-utils.sh"
 readonly RELEASE_RE='^(stable|insider):[0-9A-Za-z.+-]{1,128}$'
 readonly REQUEST_RE='^[A-Za-z0-9._:-]{1,128}$'
 readonly DRIFT_TOKEN_RE='^drift-[0-9a-f]{32}$'
+readonly PHYSICAL_TOKEN_RE='^physical-[0-9a-f]{32}$'
 
 usage() {
     sed -n '8,10p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
@@ -114,6 +116,13 @@ while [[ $# -gt 0 ]]; do
             [[ -z "${seen_drift:-}" ]] || fail_usage "--reapprove-drift may be given only once"
             [[ $# -ge 2 && "$2" =~ $DRIFT_TOKEN_RE ]] || fail_usage "--reapprove-drift requires the drift-<32 hex> token printed by --preview"
             seen_drift=1
+            args+=("$1" "$2")
+            shift 2
+            ;;
+        --printers-reconciled)
+            [[ -z "${seen_physical:-}" ]] || fail_usage "--printers-reconciled may be given only once"
+            [[ $# -ge 2 && "$2" =~ $PHYSICAL_TOKEN_RE ]] || fail_usage "--printers-reconciled requires the physical-<32 hex> token printed by --preview"
+            seen_physical=1
             args+=("$1" "$2")
             shift 2
             ;;

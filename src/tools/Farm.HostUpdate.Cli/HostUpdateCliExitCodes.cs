@@ -35,4 +35,11 @@ public static class HostUpdateCliExitCodes
     /// token from <c>recover --preview</c> (issue #2998). Nothing was changed.
     /// </summary>
     public const int DriftUnapproved = 12;
+
+    /// <summary>
+    /// The rollback is durable but admission stays fenced until an operator records, with the
+    /// exact <c>--printers-reconciled</c> token from <c>recover --preview</c>, that every affected
+    /// printer was physically reconciled (issue #2999). No printer command was issued or replayed.
+    /// </summary>
+    public const int PhysicalReconciliationPending = 13;
 }

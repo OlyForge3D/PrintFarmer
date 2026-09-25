@@ -44,7 +44,7 @@ internal sealed class CliHostFixture : IDisposable
         File.WriteAllText(ComposeFile, "services: {}\n");
         File.WriteAllText(DockerPath, string.Empty);
         File.WriteAllText(Sqlite3Path, string.Empty);
-        CreateDatabase();
+        File.WriteAllBytes(DatabasePath, CliHostDatabase.TemplateBytes);
         SeedManifestBinding(TargetManifestDigest);
         foreach (string name in OwnedDirectoryNames)
         {
@@ -257,15 +257,6 @@ internal sealed class CliHostFixture : IDisposable
         insert.Parameters.AddWithValue("$json", rawJson ?? JsonSerializer.Serialize(new { ReleaseId, ManifestDigest = manifestDigest }));
         insert.Parameters.AddWithValue("$at", DateTimeOffset.UtcNow.ToString("O", System.Globalization.CultureInfo.InvariantCulture));
         insert.ExecuteNonQuery();
-    }
-
-    private void CreateDatabase()
-    {
-        using var connection = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = DatabasePath, Pooling = false }.ToString());
-        connection.Open();
-        using SqliteCommand create = connection.CreateCommand();
-        create.CommandText = "CREATE TABLE \"AppSettingsEntities\" (\"Id\" INTEGER PRIMARY KEY AUTOINCREMENT, \"Key\" TEXT NOT NULL UNIQUE, \"SettingsJson\" TEXT NOT NULL, \"UpdatedAt\" TEXT NOT NULL, \"Revision\" INTEGER NOT NULL)";
-        create.ExecuteNonQuery();
     }
 
     /// <summary>The baseline the executor would journal for this host right now.</summary>

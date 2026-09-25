@@ -279,6 +279,14 @@ public static class HostUpdateRecoveryEngineRegistration
                 ? new UnconfiguredHostUpdateRecoveryOutcomeStore()
                 : new FileHostUpdateRecoveryOutcomeStore(Path.Join(options.StateDirectory, "recovery-outcomes"));
         });
+        services.AddSingleton<IHostUpdatePhysicalReconciliationStore>(sp =>
+        {
+            HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
+            return string.IsNullOrWhiteSpace(options.RootDirectory)
+                ? new UnconfiguredHostUpdatePhysicalReconciliationStore()
+                : new FileHostUpdatePhysicalReconciliationStore(Path.Join(options.StateDirectory, "physical-reconciliation"));
+        });
+        services.AddSingleton<IHostUpdatePhysicalReconciliationGate>(sp => sp.GetRequiredService<IHostUpdatePhysicalReconciliationStore>());
         services.AddScoped<IHostUpdateRecoveryCoordinator>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
