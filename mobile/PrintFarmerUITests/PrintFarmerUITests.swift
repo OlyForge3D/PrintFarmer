@@ -1629,6 +1629,44 @@ final class UIWaitBudgetTests: XCTestCase {
             window.attribution(), "app main-thread heartbeat: none from any instance during the 1.00s launch"
         )
     }
+
+    func testHarnessApplicationCarriesSynchronousLayoutEnvironment() {
+        let app = XCUIApplication.printFarmerUITest(arguments: ["--uitesting", "--uitesting-preserve-state"])
+        XCTAssertEqual(app.launchEnvironment["AG_ASYNC_LAYOUTS"], "0")
+        XCTAssertEqual(app.launchEnvironment["PFARM_UI_TESTING"], "1")
+        XCTAssertEqual(app.launchArguments, ["--uitesting", "--uitesting-preserve-state"])
+        XCTAssertEqual(UITestLaunchEnvironment.mismatches(in: app.launchEnvironment), [])
+    }
+
+    func testLaunchGuardRejectsEnvironmentWithoutSynchronousLayouts() {
+        XCTAssertEqual(UITestLaunchEnvironment.mismatches(in: [:]), ["AG_ASYNC_LAYOUTS", "PFARM_UI_TESTING"])
+        XCTAssertEqual(
+            UITestLaunchEnvironment.mismatches(in: ["PFARM_UI_TESTING": "1", "AG_ASYNC_LAYOUTS": "1"]),
+            ["AG_ASYNC_LAYOUTS"]
+        )
+    }
+
+    /// Every launch and relaunch must go through the harness entry points, so
+    /// none can start the app with asynchronous AttributeGraph layouts (#3035).
+    func testEveryUITestLaunchUsesHarnessEntryPoints() throws {
+        let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+        let sources = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)
+            .filter { $0.pathExtension == "swift" }
+        XCTAssertGreaterThan(sources.count, 1, "UI-test sources not readable at \(directory.path)")
+        let rawLaunch = try Regex(#"\.launch\(\)"#)
+        let rawApplication = try Regex(#"XCUIApplication\(\)"#)
+        var applicationConstructions: [String] = []
+        for source in sources {
+            let lines = try String(contentsOf: source, encoding: .utf8).components(separatedBy: .newlines)
+            for (index, line) in lines.enumerated()
+            where !line.trimmingCharacters(in: .whitespaces).hasPrefix("//") {
+                let location = "\(source.lastPathComponent):\(index + 1)"
+                XCTAssertFalse(line.contains(rawLaunch), "Raw launch bypasses the harness at \(location)")
+                if line.contains(rawApplication) { applicationConstructions.append(location) }
+            }
+        }
+        XCTAssertEqual(applicationConstructions.count, 1, "Construct apps with printFarmerUITest: \(applicationConstructions)")
+    }
 }
 
 struct RenderedShellRoot {
@@ -1678,6 +1716,47 @@ final class QueryTimeoutDiagnosticUITests: PrintFarmerUITestCase {
 }
 #endif
 
+/// Environment every PrintFarmer UI-test launch carries. Create apps with
+/// `XCUIApplication.printFarmerUITest(arguments:)` and launch them with
+/// `launchForPrintFarmerUITest()`, so no launch or relaunch can drop a key.
+enum UITestLaunchEnvironment {
+    /// `AG_ASYNC_LAYOUTS=0` (#3035). iOS 26 AttributeGraph builds type layouts
+    /// on a low-priority queue and compares values as unequal until they exist.
+    /// On a contended CI runner that queue starves, and the NavigationSplitView
+    /// root re-lays out inside one Core Animation commit until it drains, so the
+    /// main thread never returns to the run loop. Synchronous layouts keep
+    /// equality exact. Test-only; see `mobile/docs/xcui-timeout-diagnosis.md`.
+    static let values: [String: String] = [
+        "PFARM_UI_TESTING": "1",
+        "AG_ASYNC_LAYOUTS": "0"
+    ]
+
+    /// Harness keys that are absent from `environment` or hold another value.
+    static func mismatches(in environment: [String: String]) -> [String] {
+        values.keys.sorted().filter { environment[$0] != values[$0] }
+    }
+}
+
+extension XCUIApplication {
+    static func printFarmerUITest(arguments: [String]) -> XCUIApplication {
+        let app = XCUIApplication()
+        app.launchEnvironment.merge(UITestLaunchEnvironment.values) { _, harness in harness }
+        app.launchArguments = arguments
+        return app
+    }
+
+    /// The only launch entry point for PrintFarmer UI tests. Fails instead of
+    /// launching without the harness environment.
+    func launchForPrintFarmerUITest(file: StaticString = #filePath, line: UInt = #line) {
+        let mismatches = UITestLaunchEnvironment.mismatches(in: launchEnvironment)
+        guard mismatches.isEmpty else {
+            XCTFail("UI-test launch is missing harness environment \(mismatches)", file: file, line: line)
+            return
+        }
+        launch()
+    }
+}
+
 /// Base class for all PrintFarmer UI tests.
 ///
 /// Launches the app with `--uitesting` so the app switches to the
@@ -1720,13 +1799,10 @@ class PrintFarmerUITestCase: XCTestCase {
 
     private func launchForTest() {
         testBudget = UIWaitBudget(timeout: executionTimeAllowance)
-        app = XCUIApplication()
-        app.launchEnvironment["PFARM_UI_TESTING"] = "1"
-        app.launchArguments.append("--uitesting")
-        app.launchArguments.append(contentsOf: additionalLaunchArguments)
+        app = .printFarmerUITest(arguments: ["--uitesting"] + additionalLaunchArguments)
         appHeartbeat = .live(launchedAt: ProcessInfo.processInfo.systemUptime)
         launchWindow.begin()
-        app.launch()
+        app.launchForPrintFarmerUITest()
         launchWindow.end()
         if waitsForNavigationReadiness {
             waitForAuthenticatedShell()

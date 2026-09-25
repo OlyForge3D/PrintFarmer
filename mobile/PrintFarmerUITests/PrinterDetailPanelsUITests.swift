@@ -186,7 +186,7 @@ final class PrinterDetailPanelsUITests: PrintFarmerUITestCase {
             "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL",
             "-pf_theme_mode", "dark"
         ]
-        app.launch()
+        app.launchForPrintFarmerUITest()
         openFirstPrinterDetail()
         XCTAssertTrue(app.otherElements["printer.detail.readingColumn"].waitForExistence(timeout: 8))
         let identityScroll = app.scrollViews["printer.detail.identity.scroll"]
