@@ -502,6 +502,28 @@ tooling and isolated restore evidence. Managed offline update support must
 remain blocked until those gates pass; there is no download/build fallback or
 skip-verification recovery path.
 
+### Legacy fresh-install materials
+
+For a **new installation only**, the existing Bash installer can prepare and
+load its legacy cache. Run from the repository root on each machine:
+
+```bash
+# Connected preparation machine:
+./scripts/deploy-docker.sh --prepare-offline
+
+# Transfer the output directory reported by preparation, and the matching
+# repository checkout, to the new installation host. Then load that cache:
+./scripts/deploy-docker.sh --deploy-offline --images-dir /absolute/path/to/docker-images
+```
+
+The second command continues into deployment configuration; it is not a
+verification-only import. Inspect `./scripts/deploy-docker.sh --help` for
+installation options and prerequisites before running it. Cache loading can
+omit optional OrcaSlicer materials and does not prove the subsequent
+installation can finish without network access or builds. These commands are
+not an upgrade/restore procedure for an existing farm and do not satisfy the
+complete offline update requirements above.
+
 ## ARM / Raspberry Pi Deployment
 
 PrintFarmer supports ARM64 platforms (Raspberry Pi 4/5, Orange Pi, etc.) with automatic platform detection and graceful feature degradation.

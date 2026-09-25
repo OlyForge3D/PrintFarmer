@@ -173,6 +173,8 @@ accepted revision. If the store is unavailable, disablement is **unconfirmed**.
 
 Windows are in **UTC**, start inclusive and end exclusive, expressed in whole
 hours; start `0`, end `24` is all day, and start `22`, end `6` spans midnight.
+The policy API rejects start hours outside `0..23` and end hours outside
+`1..24` with `400 policy_invalid`; read back the accepted policy after saving.
 Choose a window allowing drain, backups and recovery, not just download time.
 Do not assume a saved local-time string changes scheduler policy.
 
