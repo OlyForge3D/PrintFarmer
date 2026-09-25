@@ -100,6 +100,14 @@ function verify(context, overrides = {}) {
     protectedBackup: context.expectedBackup, now: () => new Date('2026-09-25T20:00:00Z'), ...overrides });
 }
 
+// Load re-authenticates the staged signed bytes offline, so the runner must answer cosign too.
+function load(context, docker, overrides = {}) {
+  const signatures = cosign({ requireOffline: true });
+  const run = (name, args, options) => (name === 'cosign' ? signatures.run(name, args) : docker(name, args, options));
+  return loadVerifiedImages({ staging: context.staging, channel: context.release.channel,
+    trustedRoot: context.trustedRoot, run, ...overrides });
+}
+
 function rejectsWithoutStaging(context, pattern, overrides) {
   assert.throws(() => verify(context, overrides), pattern);
   assert.equal(existsSync(context.staging), false, 'a failed import must leave no staging directory');
@@ -1037,7 +1045,7 @@ test('every release-selected image round-trips through network-denied verificati
       loads.push(fstatSync(options.stdin).size);
       return '';
     };
-    const { loaded } = loadVerifiedImages({ staging: context.staging, run: docker });
+    const { loaded } = load(context, docker);
     assert.equal(loads.length, allImageMembers.length);
     assert.deepEqual(loaded.map(image => image.member).sort(), allImageMembers);
     assert.deepEqual(loaded.map(image => image.reference).sort(), record.images.map(image => image.reference).sort());
@@ -1295,7 +1303,7 @@ test('load only accepts images that are unchanged since verification', () => {
     bytes[bytes.length - 2048] ^= 1;
     writeFileSync(path, bytes);
     const calls = [];
-    assert.throws(() => loadVerifiedImages({ staging: context.staging, run: (...call) => calls.push(call) }),
+    assert.throws(() => load(context, (...call) => calls.push(call)),
       /changed after verification: image-slicer-host\.oci\.tar/);
     assert.ok(calls.every(([, args]) => args[0] === 'load'));
   });
@@ -1304,13 +1312,52 @@ test('load only accepts images that are unchanged since verification', () => {
     assemble(context);
     const record = verify(context);
     assert.deepEqual(record.images, []);
-    assert.throws(() => loadVerifiedImages({ staging: context.staging, run: () => assert.fail('nothing to load') }),
+    assert.throws(() => load(context, () => assert.fail('nothing to load')),
       /holds no verified image set/);
-    assert.throws(() => loadVerifiedImages({ staging: context.assets, run: () => assert.fail('never') }),
+    assert.throws(() => load(context, () => assert.fail('never'), { staging: context.assets }),
       /verification record is unusable/);
   } finally {
     context.cleanup();
   }
+});
+
+test('load derives expectations from the re-authenticated signed release, never the mutable record', () => {
+  const never = () => assert.fail('nothing may be loaded');
+  withImages(context => {
+    verify(context);
+    // Replace an archive AND its record entry with a self-consistent different image.
+    const recordPath = join(context.staging, offlineBundleVerificationName);
+    const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+    const victim = record.images.find(image => image.id === 'postgres');
+    const donor = record.images.find(image => image.id === 'nginx');
+    const bytes = readFileSync(join(context.staging, donor.member));
+    writeFileSync(join(context.staging, victim.member), bytes);
+    Object.assign(victim, { reference: donor.reference, mediaType: donor.mediaType, digest: donor.digest,
+      platforms: donor.platforms, size: bytes.length, sha256: sha256(bytes) });
+    writeFileSync(recordPath, JSON.stringify(record));
+    assert.throws(() => load(context, never), /infrastructure-postgres\.oci\.tar does not match the signed release/);
+  });
+  withImages(context => {
+    verify(context);
+    const recordPath = join(context.staging, offlineBundleVerificationName);
+    const record = JSON.parse(readFileSync(recordPath, 'utf8'));
+    record.images = record.images.filter(image => image.id !== 'mssql');
+    writeFileSync(recordPath, JSON.stringify(record));
+    assert.throws(() => load(context, never), /does not name exactly the signed release-selected image set/);
+  });
+  withImages(context => {
+    verify(context);
+    // A forged infrastructure list is rejected by the offline signature check.
+    context.lock.images[1].digest = context.lock.images[2].digest;
+    writeFileSync(join(context.staging, infrastructureImagesName),
+      infrastructureImagesDocument(context.identity, context.lock));
+    assert.throws(() => load(context, never), /signature verification failed for infrastructure-images\.json/);
+  });
+  withImages(context => {
+    verify(context);
+    assert.throws(() => load(context, never, { channel: 'insider' }), /does not match the expected insider channel/);
+    assert.throws(() => load(context, never, { trustedRoot: undefined }), /requires an operator-supplied Sigstore trusted root/);
+  });
 });
 
 test('the repository infrastructure lock is valid and is proven against the registry before signing', () => {
@@ -1361,7 +1408,8 @@ test('the repository infrastructure lock is valid and is proven against the regi
 });
 
 test('the command line exposes image assembly and a load-only import without bypasses', () => {
-  assert.deepEqual(parseArguments(['load', '--staging', 's']).options, { staging: 's' });
+  assert.deepEqual(parseArguments(['load', '--staging', 's', '--channel', 'stable', '--trusted-root', 't']).options,
+    { staging: 's', channel: 'stable', 'trusted-root': 't' });
   assert.equal(parseArguments(['assemble', '--release-assets', 'a', '--channel', 'stable', '--output', 'o',
     '--images', 'layout']).options.images, 'layout');
   for (const argv of [

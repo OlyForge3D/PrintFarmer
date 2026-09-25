@@ -231,11 +231,16 @@ The verification record then lists every image with its reference, digest,
 platforms, size and SHA-256. Load them on the network-denied host with:
 
 ```bash
-node scripts/ci/offline-update-bundle.mjs load --staging ./offline-staging [--docker <path>]
+node scripts/ci/offline-update-bundle.mjs load --staging ./offline-staging --channel stable \
+  --trusted-root ./trusted_root.json [--cosign <path>] [--docker <path>]
 ```
 
-`load` requires the verification record, re-hashes and re-verifies each archive,
-and streams the same open file to `docker load` (Docker Engine 25 or later for
+`load` does not trust the mutable verification record for image expectations.
+It re-authenticates the staged `update-manifest.json` and
+`infrastructure-images.json` signatures offline against the operator-supplied
+trusted root, derives the required image set, digests and platforms from those
+signed bytes alone, requires the record to name exactly that set, re-hashes and
+re-verifies every archive before loading any of them, and streams the same open file to `docker load` (Docker Engine 25 or later for
 OCI archive support). It never pulls, builds or fetches anything; a changed
 archive or a staging directory without a verified image set is rejected.
 

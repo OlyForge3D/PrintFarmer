@@ -25,9 +25,10 @@
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
-  closeSync, constants, fstatSync, lstatSync, mkdirSync, openSync, readSync, realpathSync, renameSync, rmdirSync, rmSync,
+  closeSync, constants, fstatSync, lstatSync, mkdirSync, mkdtempSync, openSync, readSync, realpathSync, renameSync, rmdirSync, rmSync,
   writeSync,
 } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { deriveSequence, manifestDigest, validateManifest } from './release-manifest.mjs';
@@ -870,15 +871,27 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
 }
 
 // ---------------------------------------------------------------------------------------------
-// Load (network-denied host): hands only verified image archives to the local engine. It reads
-// the verification record, re-hashes and re-verifies each archive on one open descriptor and
-// passes that same descriptor to `docker load` as stdin, so a path swapped after verification is
-// never read. Nothing is pulled, built or fetched.
+// Load (network-denied host): hands only verified image archives to the local engine. The
+// staging directory's verification record is mutable, so it never supplies expectations: load
+// re-authenticates the staged signed manifest and infrastructure list offline against the
+// operator's trusted root (from private copies, so the verified bytes are the parsed bytes) and
+// derives the required set, digests and platforms from them alone. Every archive is opened once,
+// re-hashed and re-verified on that descriptor before anything is loaded, and the same descriptor
+// is passed to `docker load` as stdin, so a path swapped after verification is never read.
+// Nothing is pulled, built or fetched.
 // ---------------------------------------------------------------------------------------------
-export function loadVerifiedImages({ staging, run, limits = offlineBundleLimits, imageLimits = imageArchiveLimits }) {
+export function loadVerifiedImages({ staging, channel, trustedRoot, run, limits = offlineBundleLimits,
+  imageLimits = imageArchiveLimits }) {
+  requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
+  requireThat(typeof trustedRoot === 'string' && trustedRoot.length > 0,
+    'Loading images requires an operator-supplied Sigstore trusted root (--trusted-root)');
   requireThat(typeof staging === 'string' && staging.length > 0, 'A verified staging directory is required');
   const directory = realpathSync(resolve(staging));
+  const root = realpathSync(resolve(trustedRoot));
+  requireThat(lstatSync(root).isFile(), 'Trusted root must be a regular file');
+  const inside = relative(directory, root);
+  requireThat(inside.startsWith('..') || isAbsolute(inside), 'Trusted root must not be inside the staging directory');
   let record;
   try {
     record = JSON.parse(readSmallFile(join(directory, offlineBundleVerificationName), 'Offline bundle verification record',
@@ -888,26 +901,71 @@ export function loadVerifiedImages({ staging, run, limits = offlineBundleLimits,
   }
   requireThat(record?.schema === 1 && record.decision === 'verified-not-installable' && Array.isArray(record.images) &&
     record.images.length > 0, 'Staging directory holds no verified image set');
-  const loaded = [];
+  const signed = {};
+  for (const name of [manifestName, manifestSignatureName, infrastructureImagesName, infrastructureImagesSignatureName]) {
+    signed[name] = readSmallFile(join(directory, name), `Staged signed file ${name}`, limits.maxMetadataBytes);
+  }
+  const identity = manifestIdentity(signed[manifestName], channel);
+  requireThat(JSON.stringify(record.release) === JSON.stringify(identity),
+    'Offline bundle verification record does not match the staged signed manifest');
+  const copies = mkdtempSync(join(tmpdir(), 'printfarmer-offline-load-'));
+  try {
+    for (const [name, bytes] of Object.entries(signed)) {
+      const out = openSync(join(copies, name), 'wx', 0o600);
+      try {
+        writeAll(out, bytes);
+      } finally {
+        closeSync(out);
+      }
+    }
+    for (const [file, bundle] of [[manifestName, manifestSignatureName],
+      [infrastructureImagesName, infrastructureImagesSignatureName]]) {
+      try {
+        run('cosign', ['verify-blob', '--trusted-root', root, '--bundle', join(copies, bundle),
+          '--certificate-oidc-issuer', oidcIssuer, '--certificate-identity', releaseSigningIdentity(identity.channel),
+          join(copies, file)]);
+      } catch (error) {
+        throw new Error(`Offline bundle signature verification failed for ${file}: ${error.message}`);
+      }
+    }
+  } finally {
+    rmSync(copies, { force: true, recursive: true });
+  }
+  const required = requiredImages(validateManifest(signed[manifestName].toString('utf8')),
+    validateInfrastructureImages(signed[infrastructureImagesName], identity));
+  const recorded = new Map();
   for (const image of record.images) {
     requireThat(image && typeof image.member === 'string' && sha256Pattern.test(image.sha256 ?? '') &&
-      (image.member === applicationImageMember(image.id) || infrastructureImageArchivePattern.test(image.member)),
+      Number.isSafeInteger(image.size) && !recorded.has(image.member),
     'Offline bundle verification record image entry is invalid');
     requireMemberName(image.member);
-    const expected = { id: image.id, reference: image.reference, mediaTypes: [image.mediaType], digest: image.digest,
-      platforms: image.platforms };
-    const { fd, size } = openRegularFile(join(directory, image.member), `Verified image ${image.member}`);
-    try {
-      requireThat(size === image.size && copyRange(fd, 0, size) === image.sha256,
-        `Verified image changed after verification: ${image.member}`);
-      verifyImageArchive(fd, 0, size, expected, imageLimits);
-      run('docker', ['load'], { stdin: fd });
-    } finally {
-      closeSync(fd);
-    }
-    loaded.push({ member: image.member, reference: image.reference, digest: image.digest });
+    recorded.set(image.member, image);
   }
-  return { loaded };
+  requireThat([...recorded.keys()].sort().join() === required.map(image => image.member).sort().join(),
+    'Offline bundle verification record does not name exactly the signed release-selected image set');
+  const opened = [];
+  try {
+    for (const expected of required) {
+      const image = recorded.get(expected.member);
+      const file = openRegularFile(join(directory, expected.member), `Verified image ${expected.member}`);
+      opened.push({ expected, fd: file.fd });
+      requireThat(file.size === image.size && copyRange(file.fd, 0, file.size) === image.sha256,
+        `Verified image changed after verification: ${expected.member}`);
+      try {
+        verifyImageArchive(file.fd, 0, file.size, expected, imageLimits);
+      } catch (error) {
+        throw new Error(`Verified image ${expected.member} does not match the signed release: ${error.message}`);
+      }
+    }
+    const loaded = [];
+    for (const { expected, fd } of opened) {
+      run('docker', ['load'], { stdin: fd });
+      loaded.push({ member: expected.member, reference: expected.reference, digest: expected.digest });
+    }
+    return { loaded };
+  } finally {
+    for (const { fd } of opened) closeSync(fd);
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -921,7 +979,8 @@ const usage = `usage:
   node scripts/ci/offline-update-bundle.mjs verify --bundle <bundle.tar> --channel <stable|insider>
     --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--prior-recovery-set <dir>]
     [--protected-backup <reference.json>] [--cosign <path>]
-  node scripts/ci/offline-update-bundle.mjs load --staging <verified-dir> [--docker <path>]`;
+  node scripts/ci/offline-update-bundle.mjs load --staging <verified-dir> --channel <stable|insider>
+    --trusted-root <trusted_root.json> [--cosign <path>] [--docker <path>]`;
 
 export function parseArguments(argv) {
   const [command, ...rest] = argv;
@@ -930,7 +989,7 @@ export function parseArguments(argv) {
       'prior-release-assets', 'prior-mode', 'protected-backup'],
     verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'prior-recovery-set', 'protected-backup',
       'cosign'],
-    load: ['staging', 'docker'],
+    load: ['staging', 'channel', 'trusted-root', 'cosign', 'docker'],
   };
   requireThat(Object.hasOwn(allowed, command ?? ''), usage);
   const options = {};
@@ -973,7 +1032,8 @@ async function main(argv) {
       cliRuntimes: index.contents.cliRuntimes, images: index.contents.images,
       priorRecoverySet: index.priorRecoverySet?.release ?? false, installable: false }, undefined, 2));
   } else if (command === 'load') {
-    console.log(JSON.stringify(loadVerifiedImages({ staging: options.staging, run }), undefined, 2));
+    console.log(JSON.stringify(loadVerifiedImages({ staging: options.staging, channel: options.channel,
+      trustedRoot: options['trusted-root'], run }), undefined, 2));
   } else {
     const record = verifyOfflineBundle({ bundle: options.bundle, channel: options.channel, version: options.version,
       trustedRoot: options['trusted-root'], staging: options.staging, priorRecoverySet: options['prior-recovery-set'],
