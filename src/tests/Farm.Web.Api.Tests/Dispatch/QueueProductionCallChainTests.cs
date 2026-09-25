@@ -5099,9 +5099,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
                 {
                     Id = controlCommandId,
                     Sequence = await new DbOutboxSequenceAllocator().AllocateAsync(seed),
-                    AggregateType = nameof(PrintJob), AggregateId = fixture.JobId, PrinterId = fixture.PrinterId,
-                    AttemptId = attemptId, EventType = BackendControlCommandConsumerService.EventType,
-                    PayloadJson = "{\"operation\":\"cancel\"}", Status = QueueOutboxEventStatus.Pending, CreatedAtUtc = claimedAt,
+                    AggregateType = nameof(PrintJob),
+                    AggregateId = fixture.JobId,
+                    PrinterId = fixture.PrinterId,
+                    AttemptId = attemptId,
+                    EventType = BackendControlCommandConsumerService.EventType,
+                    PayloadJson = "{\"operation\":\"cancel\"}",
+                    Status = QueueOutboxEventStatus.Pending,
+                    CreatedAtUtc = claimedAt,
                 });
             }
 
@@ -5302,9 +5307,14 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
         var row = new QueueDispatchOutbox
         {
-            Id = Guid.NewGuid(), AggregateId = Guid.NewGuid(), AggregateType = nameof(PrintJob),
-            EventType = "clock-event", PayloadJson = "{}", Status = QueueOutboxEventStatus.Processing,
-            CreatedAtUtc = now.AddDays(-1), AttemptCount = attemptCount,
+            Id = Guid.NewGuid(),
+            AggregateId = Guid.NewGuid(),
+            AggregateType = nameof(PrintJob),
+            EventType = "clock-event",
+            PayloadJson = "{}",
+            Status = QueueOutboxEventStatus.Processing,
+            CreatedAtUtc = now.AddDays(-1),
+            AttemptCount = attemptCount,
         };
 
         await publisher.ProcessSingleEventAsync(row, CancellationToken.None);
