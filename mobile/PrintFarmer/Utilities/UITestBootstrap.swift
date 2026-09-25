@@ -926,8 +926,10 @@ enum UITestMainThreadHeartbeat {
     static func start() {
         guard timer == nil,
               notify_register_check(notificationName, &token) == NOTIFY_STATUS_OK else { return }
-        publish()
-        let timer = Timer(timeInterval: interval, repeats: true) { _ in
+        // Fires on the first main-run-loop turn, then every `interval`. Nothing
+        // is published before a callback, so a published beat always means the
+        // run loop turned and the watchdog is armed.
+        let timer = Timer(fire: Date(), interval: interval, repeats: true) { _ in
             MainActor.assumeIsolated { beat() }
         }
         // Common modes keep beating while UIKit tracks touches or scrolling.
@@ -947,12 +949,13 @@ enum UITestMainThreadHeartbeat {
     nonisolated static let uptimeMask: UInt64 = (1 << uptimeBits) - 1
 
     private static func beat() {
-        publish()
-        // Arm only once the run loop turns, so slow initial rendering before
-        // the first timer fire is never reported as a stall.
+        // Arm before the first publish so the runner never admits a launch
+        // that the watchdog is not yet guarding. Arming only once the run loop
+        // turns means slow initial rendering is never reported as a stall.
         if beats.increment() == 1 {
             UITestMainThreadWatchdog(beats: beats, limit: stallLimit).start()
         }
+        publish()
     }
 
     private static func publish() {

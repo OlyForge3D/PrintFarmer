@@ -221,27 +221,40 @@ final class AppMainThreadHeartbeat {
     }
 
     private let launchFloor: TimeInterval
+    private let previousPid: Int32?
     private let now: () -> TimeInterval
     private let readState: () -> UInt64?
 
+    /// `previousPid` is the instance that was publishing before this launch.
+    /// It may keep beating while XCTest terminates it, so it never counts.
     init(
         launchedAt: TimeInterval,
+        previousPid: Int32? = nil,
         now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
         readState: @escaping () -> UInt64?
     ) {
         // The app publishes whole milliseconds of the same host uptime clock.
         launchFloor = (launchedAt * 1000).rounded(.down) / 1000
+        self.previousPid = previousPid
         self.now = now
         self.readState = readState
     }
 
+    /// Call before `app.launch()`, so the current publisher is recorded as previous.
     static func live(launchedAt: TimeInterval) -> AppMainThreadHeartbeat {
-        AppMainThreadHeartbeat(launchedAt: launchedAt, readState: liveState)
+        AppMainThreadHeartbeat(
+            launchedAt: launchedAt,
+            previousPid: liveState().flatMap(decode)?.pid,
+            readState: liveState
+        )
     }
 
-    /// Newest beat from this launch; beats published before it are ignored.
+    /// Newest beat from the launched instance; earlier beats and the previous
+    /// instance are ignored.
     var newestBeat: Beat? {
-        guard let beat = readState().flatMap(Self.decode), beat.uptime >= launchFloor else { return nil }
+        guard let beat = readState().flatMap(Self.decode),
+              beat.uptime >= launchFloor,
+              beat.pid != previousPid else { return nil }
         return beat
     }
 
@@ -280,18 +293,23 @@ final class AppMainThreadHeartbeat {
         guard let beat = lastBeat, let age else {
             return "\(diagnostic) (snapshot ran \(elapsed))"
         }
-        if age <= Self.staleAfter {
-            let turning = "\(diagnostic); the app main run loop kept turning during the \(elapsed) snapshot"
-            // A quick non-timeout failure is not evidence that automation stalled.
-            guard duration > Self.staleAfter else { return turning }
-            return turning + ", so XCTest automation stalled rather than the app main thread"
-        }
         let offset = beat - startedAt
         let relation = offset >= 0
             ? "\(Self.seconds(offset)) after the snapshot started"
             : "\(Self.seconds(-offset)) before the snapshot started"
-        return "\(diagnostic); the app main run loop stopped \(relation) and did not resume "
-            + "during the \(elapsed) snapshot, so the app main thread was blocked"
+        if age > Self.staleAfter {
+            // Silence alone cannot separate a blocked main thread from an exit;
+            // the watchdog's crash report, if any, decides.
+            return "\(diagnostic); its last beat was \(relation) and none followed during the "
+                + "\(elapsed) snapshot, so the app main thread was blocked or the app exited"
+        }
+        guard offset >= 0 else {
+            return "\(diagnostic); its last beat was \(relation)"
+        }
+        let turning = "\(diagnostic); the app main run loop kept turning during the \(elapsed) snapshot"
+        // A quick non-timeout failure is not evidence that automation stalled.
+        guard duration > Self.staleAfter else { return turning }
+        return turning + ", so XCTest automation stalled rather than the app main thread"
     }
 
     private static func seconds(_ value: TimeInterval) -> String {
@@ -1369,8 +1387,8 @@ final class UIWaitBudgetTests: XCTestCase {
         let probe = heartbeat(clock: { clock }, beat: { 107.5 })
         clock = 167.5
         let attribution = probe.snapshotAttribution(startedAt: 107)
-        XCTAssertTrue(attribution.contains("stopped 0.50s after the snapshot started"), attribution)
-        XCTAssertTrue(attribution.contains("app main thread was blocked"), attribution)
+        XCTAssertTrue(attribution.contains("last beat was 0.50s after the snapshot started"), attribution)
+        XCTAssertTrue(attribution.contains("app main thread was blocked or the app exited"), attribution)
         XCTAssertTrue(attribution.contains("60.50s snapshot"), attribution)
     }
 
@@ -1381,6 +1399,17 @@ final class UIWaitBudgetTests: XCTestCase {
         let attribution = probe.snapshotAttribution(startedAt: 107)
         XCTAssertTrue(attribution.contains("last beat 0.25s ago"), attribution)
         XCTAssertTrue(attribution.contains("XCTest automation stalled"), attribution)
+    }
+
+    func testRecentBeatFromBeforeTheSnapshotIsReportedWithoutAConclusion() {
+        var clock: TimeInterval = 107
+        let probe = heartbeat(clock: { clock }, beat: { 106.5 })
+        clock = 108
+        XCTAssertEqual(
+            probe.snapshotAttribution(startedAt: 107),
+            "app main-thread heartbeat: last beat 1.50s ago from pid 0; "
+                + "its last beat was 0.50s before the snapshot started"
+        )
     }
 
     func testQuickSnapshotFailureWithALiveAppDrawsNoStallConclusion() {
@@ -1395,6 +1424,32 @@ final class UIWaitBudgetTests: XCTestCase {
         struct Stall: Error, CustomStringConvertible { var description: String { "timed out" } }
         let failure = ShellSnapshotFailure(underlying: Stall(), attribution: "app main thread was blocked")
         XCTAssertEqual("\(failure)", "timed out; app main thread was blocked")
+    }
+
+    func testHeartbeatNotificationNameMatchesTheAppContract() {
+        // Contract with UITestMainThreadHeartbeat.notificationName in the app target.
+        XCTAssertEqual(
+            AppMainThreadHeartbeat.notificationName, "com.olyforge3d.printfarmer.uitesting.main-heartbeat"
+        )
+    }
+
+    func testPreviousInstanceBeatingAfterLaunchIsNotReadinessButTheNewInstanceIs() {
+        var clock: TimeInterval = 100
+        var state = (UInt64(30_978) << 42) | 99_900
+        let budget = UIWaitBudget(timeout: 60, now: { clock })
+        let probe = AppMainThreadHeartbeat(launchedAt: 100, previousPid: 30_978, now: { clock }) { state }
+        var pauses = 0
+        let failure = probe.awaitResponsive(budget: budget, pause: {
+            pauses += 1
+            clock += 1
+            state = (UInt64(30_978) << 42) | UInt64(clock * 1000)
+        })
+        XCTAssertEqual(pauses, 5, "The terminating instance's fresh beats never admit the launch")
+        XCTAssertTrue(failure?.contains("no main-run-loop heartbeat since launch") == true, failure ?? "nil")
+
+        state = (UInt64(31_004) << 42) | UInt64(clock * 1000)
+        XCTAssertNil(probe.awaitResponsive(budget: budget, pause: { XCTFail("No wait") }))
+        XCTAssertEqual(probe.newestBeat?.pid, 31_004)
     }
 
     func testHeartbeatStateDecodesPidAndUptimeAndNamesThePidInDiagnostics() {
