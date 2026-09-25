@@ -217,39 +217,19 @@ public sealed class HostUpdateController(
             return AvailabilityProblem(ex);
         }
 
-        if (activities.Count == 0)
+        // The same resolver backs the host-local recovery CLI, so both surfaces share one binding rule.
+        HostUpdateRecoveryRequestResolution resolution = HostUpdateRecoveryRequestResolver.Resolve(activities, body?.RequestId);
+        if (resolution.ErrorCode == HostUpdateRecoveryRequestResolver.NoHistory)
         {
             return NotFound();
         }
 
-        if (activities[^1].State != HostUpdateExecutionState.RecoveryRequired)
+        if (!resolution.Succeeded)
         {
-            return Conflict(new { code = "not_in_recovery" });
+            return Conflict(new { code = resolution.ErrorCode });
         }
 
-        HostUpdateExecutionRequest[] journalRequests = activities.Select(activity => activity.RequestBinding)
-            .Where(binding => binding is not null)
-            .Select(binding => binding!)
-            .ToArray();
-        string[] journalBindings = activities.Select(activity => activity.RequestBindingHash)
-            .Where(binding => !string.IsNullOrWhiteSpace(binding))
-            .Select(binding => binding!)
-            .Distinct(StringComparer.Ordinal)
-            .ToArray();
-        if (journalRequests.Length != activities.Count || journalBindings.Length != 1 ||
-            journalRequests.Any(binding => !string.Equals(HostUpdateRequestBinding.Compute(binding), journalBindings[0], StringComparison.Ordinal)))
-        {
-            string code = journalRequests.Length == 0 || journalBindings.Length == 0 ? "recovery_binding_missing" : "recovery_binding_mismatch";
-            return Conflict(new { code });
-        }
-
-        // Every journal request already hashed to the single recorded binding above, so the
-        // first entry is the authoritative failed request; no second equality sweep is needed.
-        HostUpdateExecutionRequest failedRequest = journalRequests[0];
-        if (!string.IsNullOrWhiteSpace(body?.RequestId) && !string.Equals(body.RequestId, failedRequest.RequestId, StringComparison.Ordinal))
-        {
-            return Conflict(new { code = "recovery_request_mismatch" });
-        }
+        HostUpdateExecutionRequest failedRequest = resolution.Request!;
 
         HostUpdateRecoveryResult result;
         try

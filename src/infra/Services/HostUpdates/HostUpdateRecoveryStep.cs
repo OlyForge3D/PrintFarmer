@@ -24,6 +24,41 @@ public enum HostUpdateRecoveryOutcome
 /// <summary>Durable, immutable record of one recovery attempt.</summary>
 public sealed record HostUpdateRecoveryResult(HostUpdateRecoveryOutcome Outcome, string Detail);
 
+/// <summary>The recovery path <see cref="IHostUpdateRecoveryCoordinator.RecoverAsync"/> would take.</summary>
+public enum HostUpdateRecoveryPlanKind
+{
+    /// <summary>A terminal <see cref="HostUpdateRecoveryOutcome.RolledBack"/> is already recorded; recovery is a no-op.</summary>
+    AlreadyRolledBack,
+
+    /// <summary>The rollback is durable; only the idempotent admission-fence release remains.</summary>
+    FenceReleaseOnly,
+
+    /// <summary>Re-apply and verify the prior pinned images; no schema change was committed.</summary>
+    ImageOnlyRollback,
+
+    /// <summary>Restore both database contexts and owned storage from the verified backup, then re-apply the prior images.</summary>
+    CoordinatedRestore,
+
+    /// <summary>No supported automatic path; an operator must resolve it.</summary>
+    NeedsOperator,
+}
+
+/// <summary>Side-effect-free recovery preview.</summary>
+public sealed record HostUpdateRecoveryPlan(
+    HostUpdateRecoveryPlanKind Kind,
+    string Detail,
+    IReadOnlyDictionary<string, string>? PriorServiceDigests,
+    string? BackupRunDirectory);
+
+/// <summary>Previews recovery using the coordinator's own decision logic without side effects.</summary>
+public interface IHostUpdateRecoveryPlanner
+{
+    Task<HostUpdateRecoveryPlan> PlanAsync(
+        HostUpdateExecutionRequest failedRequest,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken);
+}
+
 /// <summary>Durable record of one recovery attempt, persisted independently of the caller so a
 /// <see cref="HostUpdateRecoveryOutcome.NeedsOperator"/> outcome survives a process crash even if
 /// whatever invoked <see cref="IHostUpdateRecoveryCoordinator.RecoverAsync"/> never got to persist
@@ -135,7 +170,7 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateDigestVerifier digestVerifier,
     IHostUpdateRecoveryOutcomeStore outcomeStore,
     IHostUpdateFenceCoordinator? fenceCoordinator = null,
-    IHostUpdateExecutionLock? executionLock = null) : IHostUpdateRecoveryCoordinator
+    IHostUpdateExecutionLock? executionLock = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
 {
     private const string FenceReleaseFailureSeparator = "|";
 
@@ -266,45 +301,30 @@ public sealed class HostUpdateRecoveryCoordinator(
     {
         try
         {
-            InstalledHostState? priorState = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
-            bool completedInstallation = activities.Any(a =>
-                a.State == HostUpdateExecutionState.Completed &&
-                string.Equals(a.Phase, "installed-state:after", StringComparison.Ordinal));
-            if (completedInstallation)
+            RecoveryDecision decision = await DecideAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
+            InstalledHostState? priorState = decision.PriorState;
+            switch (decision.Kind)
             {
-                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "completed_installation_requires_fence_release");
+                case HostUpdateRecoveryPlanKind.ImageOnlyRollback:
+                    await digestApplier.ApplyByDigestsAsync(priorState!.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
+                    await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                    await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
+                    return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "image_only_rollback");
+
+                case HostUpdateRecoveryPlanKind.CoordinatedRestore:
+                    await restoreExecutor.RestoreAsync(decision.Backup!.Value.Manifest, decision.Backup.Value.RunDirectory, cancellationToken).ConfigureAwait(false);
+                    if (priorState is not null)
+                    {
+                        await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
+                        await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
+                        await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
+                    }
+
+                    return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "coordinated_restore");
+
+                default:
+                    return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, decision.Detail);
             }
-
-            if (priorState is null && ApplyMayHaveStarted(activities))
-            {
-                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "prior_image_state_missing_after_apply_started");
-            }
-
-            if (priorState is not null && compatibilityEvaluator.SupportsImageOnlyRollback(priorState, activities))
-            {
-                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
-                await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
-                await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
-                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "image_only_rollback");
-            }
-
-            (HostUpdateBackupManifest Manifest, string RunDirectory)? located =
-                await manifestLocator.FindLatestAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
-            if (located is null)
-            {
-                return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, "no_backup_available");
-            }
-
-            await restoreExecutor.RestoreAsync(located.Value.Manifest, located.Value.RunDirectory, cancellationToken).ConfigureAwait(false);
-
-            if (priorState is not null)
-            {
-                await digestApplier.ApplyByDigestsAsync(priorState.ServiceDigests, cancellationToken, priorState.ServicePlatforms).ConfigureAwait(false);
-                await digestVerifier.VerifyDigestsAsync(priorState.ServiceDigests, cancellationToken).ConfigureAwait(false);
-                await installedStateStore.WriteAsync(priorState with { RecordedAt = DateTimeOffset.UtcNow }, cancellationToken).ConfigureAwait(false);
-            }
-
-            return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.RolledBack, "coordinated_restore");
         }
         catch (Exception exception) when (exception is not OperationCanceledException)
         {
@@ -313,6 +333,86 @@ public sealed class HostUpdateRecoveryCoordinator(
             return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.NeedsOperator, exception.GetType().Name);
         }
     }
+
+    /// <summary>
+    /// Read-only preview of the path <see cref="RecoverAsync"/> would take. It uses the same
+    /// decision logic but never acquires the lock, writes an outcome, restores, or applies.
+    /// </summary>
+    public async Task<HostUpdateRecoveryPlan> PlanAsync(
+        HostUpdateExecutionRequest failedRequest,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(failedRequest);
+        ArgumentNullException.ThrowIfNull(activities);
+
+        if (!HostUpdateRequestFingerprint.Matches(activities, failedRequest, out string fingerprintError))
+        {
+            return new HostUpdateRecoveryPlan(HostUpdateRecoveryPlanKind.NeedsOperator, fingerprintError, null, null);
+        }
+
+        HostUpdateRecoveryOutcomeRecord? existingOutcome = await outcomeStore.ReadAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
+        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack })
+        {
+            return new HostUpdateRecoveryPlan(HostUpdateRecoveryPlanKind.AlreadyRolledBack, existingOutcome.Detail, null, null);
+        }
+
+        if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.FenceReleasePending })
+        {
+            return new HostUpdateRecoveryPlan(HostUpdateRecoveryPlanKind.FenceReleaseOnly, existingOutcome.Detail, null, null);
+        }
+
+        try
+        {
+            RecoveryDecision decision = await DecideAsync(failedRequest, activities, cancellationToken).ConfigureAwait(false);
+            return new HostUpdateRecoveryPlan(
+                decision.Kind,
+                decision.Detail,
+                decision.PriorState?.ServiceDigests,
+                decision.Backup?.RunDirectory);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return new HostUpdateRecoveryPlan(HostUpdateRecoveryPlanKind.NeedsOperator, exception.GetType().Name, null, null);
+        }
+    }
+
+    private async Task<RecoveryDecision> DecideAsync(
+        HostUpdateExecutionRequest failedRequest,
+        IReadOnlyList<HostUpdateExecutionActivity> activities,
+        CancellationToken cancellationToken)
+    {
+        InstalledHostState? priorState = await installedStateStore.ReadAsync(cancellationToken).ConfigureAwait(false);
+        bool completedInstallation = activities.Any(a =>
+            a.State == HostUpdateExecutionState.Completed &&
+            string.Equals(a.Phase, "installed-state:after", StringComparison.Ordinal));
+        if (completedInstallation)
+        {
+            return new(HostUpdateRecoveryPlanKind.NeedsOperator, "completed_installation_requires_fence_release", priorState, null);
+        }
+
+        if (priorState is null && ApplyMayHaveStarted(activities))
+        {
+            return new(HostUpdateRecoveryPlanKind.NeedsOperator, "prior_image_state_missing_after_apply_started", null, null);
+        }
+
+        if (priorState is not null && compatibilityEvaluator.SupportsImageOnlyRollback(priorState, activities))
+        {
+            return new(HostUpdateRecoveryPlanKind.ImageOnlyRollback, "image_only_rollback", priorState, null);
+        }
+
+        (HostUpdateBackupManifest Manifest, string RunDirectory)? located =
+            await manifestLocator.FindLatestAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
+        return located is null
+            ? new(HostUpdateRecoveryPlanKind.NeedsOperator, "no_backup_available", priorState, null)
+            : new(HostUpdateRecoveryPlanKind.CoordinatedRestore, "coordinated_restore", priorState, located);
+    }
+
+    private sealed record RecoveryDecision(
+        HostUpdateRecoveryPlanKind Kind,
+        string Detail,
+        InstalledHostState? PriorState,
+        (HostUpdateBackupManifest Manifest, string RunDirectory)? Backup);
 
     private static bool ApplyMayHaveStarted(IReadOnlyList<HostUpdateExecutionActivity> activities) =>
         activities.Any(a => a.State == HostUpdateExecutionState.Applying && a.Phase.StartsWith("apply:before", StringComparison.Ordinal));

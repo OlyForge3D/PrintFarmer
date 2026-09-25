@@ -15,7 +15,8 @@ post_date: "2026-09-24"
 
 This is the documentation slice of #2664, not proof of completed manual or
 offline recovery. **Do not enable managed installation on the strength of this
-guide.** The host-local recovery CLI, complete offline bundle and isolated
+guide.** The packaged host-local recovery CLI (only a first slice exists; see
+[Failure and recovery](#failure-and-recovery)), complete offline bundle and isolated
 restore evidence remain delivery gates. See the
 [offline recovery requirements](OFFLINE_UPDATE_RECOVERY.md).
 
@@ -194,12 +195,92 @@ endpoints exist.
 
 ## Failure and recovery
 
-**When the API/UI is unavailable there is not yet a supported packaged
-host-local status/recovery CLI.** That gap blocks a claim of complete recovery
-support. Retain protected host evidence for the deployment owner; do not invent
-a recovery command, edit journal JSON, delete locks, or run the installer
-against a possibly migrated database. Directly reading a file is not journal
-integrity verification or authorization to release a fence.
+**The packaged host-local status/recovery CLI is only partially delivered.** The
+first slice of #2980 (below) adds the API-independent engine entry point and
+wrappers, but packaging, host placement, the OS matrix, drift reapproval and
+provider/topology coverage are still open. That gap still blocks a claim of
+complete recovery support. Retain protected host evidence for the deployment
+owner; do not invent a recovery command, edit journal JSON, delete locks, or run
+the installer against a possibly migrated database. Directly reading a file is
+not journal integrity verification or authorization to release a fence.
+
+### Host-local status and recovery CLI (first slice, #2980)
+
+`Farm.HostUpdate.Cli` (`src/tools/Farm.HostUpdate.Cli`) runs the same
+journal, lock and recovery coordinator the API uses, without the API. It is
+**not rollout authorization**: it never starts a forward update, and does not
+close #2980 or #2664. Run it only through the fixed-operation wrappers, as the
+account that owns the protected root, with the same configuration the API host
+uses:
+
+```bash
+export PRINTFARMER_HOST_UPDATE_CLI_DIR=/opt/printfarmer/host-update-cli  # contains Farm.HostUpdate.Cli.dll
+scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json status --json
+scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json status --release stable:1.2.3
+scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --preview
+scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --confirm stable:1.2.3
+```
+
+```powershell
+$env:PRINTFARMER_HOST_UPDATE_CLI_DIR = 'C:\PrintFarmer\host-update-cli'
+scripts\printfarmer-host-update.ps1 -Config C:\PrintFarmer\host-update.json recover -Release stable:1.2.3 -Preview
+```
+
+The config file uses the API's `HostUpdateExecution`, `DB_PROVIDER` and
+connection-string keys; environment variables override it. The wrappers accept
+only absolute paths and validated release/request identifiers, and refuse
+anything else with exit 2 before the CLI runs. The PowerShell wrapper parses its
+own arguments (names case-insensitive, values case-sensitive) rather than using
+PowerShell parameter binding, so a usage error never prompts. `help` (or
+`--help`) prints usage without a config. A malformed or unreadable config file
+is reported by the CLI as exit 3 (`configuration_unreadable`), honouring
+`--json`. A missing config file is also exit 3, because the wrappers and CLI
+check only that `--config` is absolute and leave existence to the loader (an
+existence probe cannot tell an absent file from an access-denied one).
+`PRINTFARMER_DOTNET` may name an
+absolute `dotnet` host. `--request-id` is optional and must match the binding
+recorded in the journal.
+
+- `status` reads the lock-held journal. Without a release it lists releases
+  with their last state. With `--release` it shows the activity trail and any
+  `*:before` phase with no matching completion (uncertain side effects).
+- `recover --preview` resolves the recorded request binding and reports the
+  plan the coordinator would take (for example `FenceReleaseOnly` or
+  `NeedsOperator`) plus any namespace-proof failures. It writes no outcome,
+  journal or fence state.
+- `recover --confirm <release>` requires the release retyped exactly. It first
+  proves that the configured root, compose files, owned directories, database
+  and host tools are visible in this namespace (existence only; nothing is
+  executed), then runs the shared coordinator under the execution lock.
+
+| Exit | Meaning | Operator response |
+| --- | --- | --- |
+| 0 | Success (status read, preview plan, or `RolledBack`) | Complete the coordinated-restoration checks below before resuming anything. |
+| 2 | Usage error | Correct the command; nothing ran. |
+| 3 | Configuration invalid or namespace unproven | Stop. Run on the host/namespace that owns the state; do not create missing paths. |
+| 4 | State unreadable (corrupt journal, access denied, durable store unavailable) | Stop. Preserve the state directory for the deployment owner. |
+| 5 | No history for the release | Check the release id; do not recover a release that never executed. |
+| 6 | Refused (not in recovery, binding missing or mismatched) | Do not force; re-read status. |
+| 7 | Execution lock held | Another executor or recovery is active. Wait; never delete the lock. |
+| 10 | Needs operator (including no restorable backup, or canceled) | Follow the coordinated restoration procedure below. |
+| 11 | Fence release pending | Writers stay fenced. Re-run `recover --confirm` once the fence adapter is reachable. |
+
+Known limits of this slice:
+
+- `state/execution.lock` is a sentinel created by any lock acquisition, even
+  `status` and `--preview`. It carries no state; its presence does not mean an
+  update ran, and it must not be deleted by hand.
+- Recovery reads the journal under the lock, releases it, then the coordinator
+  re-acquires it (the API follows the same pattern). A concurrent executor
+  could append in that window, so run recovery only while execution is
+  otherwise idle.
+- .NET configuration binding **appends** configured `ComposeFiles` entries to
+  the built-in default rather than replacing it, so the default relative
+  compose path must also exist in the CLI's working directory or the namespace
+  proof fails. This matches the API's availability probe.
+- There is no drift reapproval, downtime preview, physical command
+  reconciliation gate, published package or PostgreSQL/SQL Server and
+  split-topology proof yet; those remain #2980 follow-up work under #2658.
 
 | Observation | Operator response |
 | --- | --- |
@@ -207,7 +288,7 @@ integrity verification or authorization to release a fence.
 | Drain/backup failure | Do not migrate or clear the fence. Prove whether any side effect occurred before resuming the old set. |
 | `migration:before` or `apply:before` without completion | Treat the side effect as uncertain. Use operation-specific schema/digest reconciliation; never blindly repeat a migration or apply. |
 | `RecoveryRequired` / `NeedsOperator` | Preserve diagnostics, prior artifacts and backup references. Keep writers fenced; choose a supported fix-forward or coordinated restore with the deployment owner. |
-| API disconnected, stale UI, status unavailable | Outcome unknown. Do not submit a new authorization as a connectivity probe. Escalate through host-local recovery support once supplied. |
+| API disconnected, stale UI, status unavailable | Outcome unknown. Do not submit a new authorization as a connectivity probe. Read host-local `status`, then escalate to the deployment owner. |
 | Missing replay continuity | Stop eligibility and execution. Use an explicitly trusted continuity-recovery procedure; do not recreate the store from the bundle or restored DB. |
 
 For coordinated restoration, the approved recovery procedure must:

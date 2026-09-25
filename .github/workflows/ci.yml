@@ -579,6 +579,21 @@ jobs:
           retention-days: 1
           if-no-files-found: error
 
+      - name: Upload Farm.HostUpdate.Cli.Tests build
+        if: >-
+          ${{
+            contains(
+              needs.select.outputs.matrix,
+              'Farm.HostUpdate.Cli.Tests.csproj'
+            )
+          }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: Farm.HostUpdate.Cli.Tests
+          path: src/tests/Farm.HostUpdate.Cli.Tests/bin/Debug/net10.0
+          retention-days: 1
+          if-no-files-found: error
+
       - name: Upload Farm.Slicer.ProfileParsing.Tests build
         if: >-
           ${{
