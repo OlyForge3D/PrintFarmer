@@ -5343,9 +5343,9 @@ public sealed class QueueProductionCallChainTests : IAsyncDisposable
             Mock.Of<IServiceScopeFactory>(), CreateHubContext(),
             NullLogger<QueueOutboxPublisherService>.Instance, timeProvider: clock);
         using var cancellation = new CancellationTokenSource();
-        Task<bool> WaitAsync() => reconciliation
-            ? reconciler.WaitForIntervalOrPauseAsync(cancellation.Token)
-            : publisher.WaitForIntervalOrPauseAsync(cancellation.Token);
+        async Task<bool> WaitAsync() => reconciliation
+            ? await reconciler.WaitForIntervalOrPauseAsync(cancellation.Token)
+            : await publisher.WaitForIntervalOrPauseAsync(cancellation.Token);
 
         Task<bool> interval = WaitAsync();
         interval.IsCompleted.Should().BeFalse();
