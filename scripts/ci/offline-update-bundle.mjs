@@ -298,15 +298,28 @@ function writeAll(fd, buffer) {
 }
 
 function openRegularFile(path, label) {
-  const stat = lstatSync(path, { throwIfNoEntry: false });
-  requireThat(stat?.isFile() && !stat.isSymbolicLink(), `${label} must be a regular file (not a link): ${path}`);
-  const fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0));
-  const opened = fstatSync(fd);
-  if (!opened.isFile() || opened.dev !== stat.dev || opened.ino !== stat.ino || opened.size !== stat.size) {
-    closeSync(fd);
-    throw new Error(`${label} changed while being opened: ${path}`);
+  const notRegular = `${label} must be a regular file (not a link): ${path}`;
+  // Open first, then prove the descriptor is the regular, unlinked file at this path.
+  let fd;
+  try {
+    // O_NONBLOCK keeps a FIFO planted at the path from blocking the open; it does not affect regular files.
+    fd = openSync(path, constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0));
+  } catch (error) {
+    if (['ENOENT', 'ELOOP', 'EISDIR', 'ENOTDIR', 'EMLINK'].includes(error.code)) throw new Error(notRegular);
+    throw error;
   }
-  return { fd, size: opened.size };
+  try {
+    const opened = fstatSync(fd);
+    requireThat(opened.isFile(), notRegular);
+    const link = lstatSync(path, { throwIfNoEntry: false });
+    requireThat(link?.isFile() && !link.isSymbolicLink(), notRegular);
+    requireThat(link.dev === opened.dev && link.ino === opened.ino && link.size === opened.size,
+      `${label} changed while being opened: ${path}`);
+    return { fd, size: opened.size };
+  } catch (error) {
+    closeSync(fd);
+    throw error;
+  }
 }
 
 function hashFile(path, label) {
