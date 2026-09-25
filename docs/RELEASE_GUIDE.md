@@ -27,8 +27,11 @@ post_date: "2026-09-16"
    its full 40-character ancestor SHA.
 3. Run it once. The summary identifies the pinned source, check results and
    release URL. A successful release contains generated GitHub release notes, pinned image
-   references, corresponding source, license notices, SBOMs, and a signed
-   `update-manifest.json` plus its `update-manifest.sigstore.json` bundle.
+   references, corresponding source, license notices, SBOMs, a signed
+   `update-manifest.json` plus its `update-manifest.sigstore.json` bundle, and the
+   self-contained host-update recovery CLI archives for `linux-x64`, `linux-arm64`
+   and `win-x64` with a signed `printfarmer-host-update-cli-v<version>-SHA256SUMS`
+   list (see [Host-update runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package)).
 
 There is no release ledger, reservation, signing ceremony, qualification receipt,
 counter recovery or abandonment step. The explicit version and permanent Git tag
@@ -76,7 +79,11 @@ artifacts are immutable and separate; publication binds them with a SHA-256
 check before upload. The sign job verifies the signature immediately after signing. The publish job
 binds the signature artifact to the exact manifest SHA-256, and
 `publish-release.mjs` verifies it before any permanent Git/image tag mutation
-and again immediately before the `gh release upload` call. Its `sequence` field is a collision-free,
+and again immediately before the `gh release upload` call. The host-update CLI
+checksum list is signed in the same job under the same workflow identity; the
+publisher re-checks that it names exactly the three supported archives, that
+their hashes match, and its Cosign bundle, at both of those points. The CLI
+archives are built before any image, so a CLI build failure publishes nothing. Its `sequence` field is a collision-free,
 stable-dominant encoding (see [installation readiness](DEPLOYMENT_UPDATE_STRATEGY.md)).
 
 The cross-language wire contract uses exactly these service IDs: `api`,

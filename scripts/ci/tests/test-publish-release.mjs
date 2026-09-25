@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readdirSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import test from 'node:test';
@@ -9,6 +9,8 @@ import { components, compareVersions, parseTag, validateVersion, verifyEnvironme
 import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
 import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
+import { formatSums, hostUpdateCliArchiveName, hostUpdateCliAssets, hostUpdateCliRuntimes, hostUpdateCliSumsBundleName,
+  hostUpdateCliSumsName, packageHostUpdateCli, parseSums, verifyHostUpdateCliSums } from '../host-update-cli-package.mjs';
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
 import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
   SEQUENCE_MAJOR_MAX, SEQUENCE_MINOR_MAX, SEQUENCE_PATCH_MAX, SEQUENCE_PRERELEASE_MAX,
@@ -452,12 +454,34 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   mkdirSync(join(source, 'src'), { recursive: true });
   writeFileSync(join(source, 'VERSION'), 'v1.2.3');
   for (const file of ['LICENSE', 'THIRD-PARTY-NOTICES.md']) writeFileSync(join(source, file), file);
+  mkdirSync(join(source, 'scripts'));
+  for (const file of ['printfarmer-host-update.sh', 'common-utils.sh', 'printfarmer-host-update.ps1']) {
+    writeFileSync(join(source, 'scripts', file), file);
+  }
   mkdirSync(join(source, '.release-assets'));
   writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
   const builds = [];
   const smokes = [];
+  const cliPublishes = [];
+  const cliArchives = [];
   const run = (name, args) => {
     if (name === 'git') return sha;
+    if (name === 'dotnet' && args[0] === 'publish') {
+      cliPublishes.push(args);
+      const output = args[args.indexOf('--output') + 1];
+      const rid = args[args.indexOf('--runtime') + 1];
+      mkdirSync(output, { recursive: true });
+      writeFileSync(join(output, rid.startsWith('win-') ? 'Farm.HostUpdate.Cli.exe' : 'Farm.HostUpdate.Cli'), rid);
+      return '';
+    }
+    if (name === 'tar' && args[0] === '--version') return 'tar (GNU tar) 1.35\n';
+    if (name === 'tar' && args[0] === '-czf') {
+      const stage = args[args.indexOf('-C') + 1];
+      cliArchives.push({ args, manifest: JSON.parse(readFileSync(join(stage, 'host-update-cli-package.json'), 'utf8')),
+        wrapper: existsSync(join(stage, 'printfarmer-host-update.sh')) });
+      writeFileSync(args[1], `archive ${args[1]}`);
+      return '';
+    }
     if (name === 'node' && args[0] === 'scripts/compliance/create-source-bundle.mjs') {
       const outputDirectory = args[args.indexOf('--output') + 1];
       assert.ok(!relative(source, outputDirectory).startsWith('..'));
@@ -494,6 +518,29 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   assert.equal(metadata.managedUpdateEligible, false);
   assert.equal(Object.keys(metadata.images).length, 6);
   assert.ok(!existsSync(join(assets, 'release-manifest.json')));
+  assert.deepEqual(cliPublishes.map(args => args[args.indexOf('--runtime') + 1]), ['linux-x64', 'linux-arm64', 'win-x64']);
+  for (const args of cliPublishes) {
+    assert.equal(args[1], 'src/tools/Farm.HostUpdate.Cli/Farm.HostUpdate.Cli.csproj');
+    assert.ok(args.includes('--self-contained') && args[args.indexOf('--self-contained') + 1] === 'true');
+    assert.ok(args.includes(`-p:Version=${release.version}`) && args.includes(`-p:SourceRevisionId=${sha}`));
+  }
+  assert.equal(cliArchives.length, 3);
+  for (const { args, manifest, wrapper } of cliArchives) {
+    assert.ok(args.includes('--owner=0') && args.includes('--group=0'), 'archive members must be root-owned');
+    assert.equal(manifest.rolloutAuthorization, false);
+    assert.equal(manifest.selfContained, true);
+    assert.equal(manifest.sourceCommit, sha);
+    assert.ok(wrapper);
+  }
+  const sums = readFileSync(join(assets, `printfarmer-host-update-cli-v${release.version}-SHA256SUMS`), 'utf8');
+  assert.equal(sums.trim().split('\n').length, 3);
+  assert.deepEqual(verifyHostUpdateCliSums(assets, release.version).size, 3);
+  const beforeCli = builds.length;
+  assert.throws(() => buildImages(release, source, assets, (name, args) => {
+    if (name === 'dotnet' && args[0] === 'publish' && args.includes('linux-arm64')) throw new Error('cli publish failed');
+    return run(name, args);
+  }, () => {}), /cli publish failed/);
+  assert.equal(builds.length, beforeCli, 'a CLI package failure must stop before any image build');
   const before = builds.length;
   assert.throws(() => buildImages(release, source, assets, (name, args) => {
     if (name === 'docker' && args.includes('frontend-runtime')) throw new Error('frontend build failed');
@@ -507,6 +554,17 @@ function publishFixture(t, channel = 'insider') {
   const chosen = channel === 'stable' ? { ...release, channel, version: '1.2.3', tag: 'v1.2.3', sourceBranch: 'main' } : release;
   const files = releaseAssets(chosen);
   for (const file of files) writeFileSync(join(assets, file), 'asset');
+  const cliSums = join(assets, hostUpdateCliSumsName(chosen.version));
+  writeFileSync(cliSums, formatSums(hostUpdateCliRuntimes.map(rid => {
+    const name = hostUpdateCliArchiveName(chosen.version, rid);
+    writeFileSync(join(assets, name), `archive ${rid}`);
+    return { name, sha256: createHash('sha256').update(`archive ${rid}`).digest('hex') };
+  })));
+  writeFileSync(join(assets, hostUpdateCliSumsBundleName(chosen.version)), JSON.stringify({
+    sha256: createHash('sha256').update(readFileSync(cliSums)).digest('hex'),
+    issuer: manifestIssuer,
+    identity: manifestIdentityFor(chosen.channel),
+  }));
   writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
     { ...chosen, sequence: deriveSequence(chosen.version) }, imageDetails));
   const signedManifestBytes = readFileSync(join(assets, 'update-manifest.json'));
@@ -587,6 +645,74 @@ test('the exact manifest bytes and its signature bundle are re-verified immediat
     'signature must be verified before permanent Git tag creation');
 });
 
+test('the host-update CLI checksum list is verified with the channel identity before tagging and before upload', async t => {
+  for (const channel of ['stable', 'insider']) {
+    const { chosen, assets, api, deps, calls, files } = publishFixture(t, channel);
+    for (const name of hostUpdateCliAssets(chosen.version)) assert.ok(files.includes(name), `${name} must be uploaded`);
+    await publishRelease(chosen, assets, api, deps);
+    const cliChecks = calls.flatMap((call, index) =>
+      call.command === 'cosign' && call.args[7].endsWith(hostUpdateCliSumsName(chosen.version)) ? [index] : []);
+    assert.equal(cliChecks.length, 2);
+    for (const index of cliChecks) {
+      assert.match(calls[index].args[2], /SHA256SUMS\.sigstore\.json$/);
+      assert.equal(calls[index].args[4], manifestIssuer);
+      assert.equal(calls[index].args[6], manifestIdentityFor(channel));
+    }
+    assert.ok(cliChecks[0] < calls.findIndex(call => call.endpoint === 'git/refs'));
+    assert.ok(cliChecks[1] > calls.findIndex(call => call.endpoint === 'releases'));
+    assert.ok(cliChecks[1] < calls.findIndex(call => call.command === 'gh'));
+  }
+});
+
+test('host-update CLI checksum list is canonical and names exactly the supported archives', t => {
+  assert.deepEqual([...hostUpdateCliRuntimes], ['linux-x64', 'linux-arm64', 'win-x64']);
+  assert.throws(() => hostUpdateCliArchiveName('1.2.3', 'osx-arm64'), /Unsupported host-update CLI runtime/);
+  assert.deepEqual(hostUpdateCliAssets('1.2.3'), [
+    'printfarmer-host-update-cli-v1.2.3-linux-x64.tar.gz',
+    'printfarmer-host-update-cli-v1.2.3-linux-arm64.tar.gz',
+    'printfarmer-host-update-cli-v1.2.3-win-x64.tar.gz',
+    'printfarmer-host-update-cli-v1.2.3-SHA256SUMS',
+    'printfarmer-host-update-cli-v1.2.3-SHA256SUMS.sigstore.json',
+  ]);
+  const hash = 'a'.repeat(64);
+  assert.equal(formatSums([{ name: 'b.tar.gz', sha256: hash }, { name: 'a.tar.gz', sha256: hash }]),
+    `${hash}  a.tar.gz\n${hash}  b.tar.gz\n`);
+  assert.throws(() => formatSums([{ name: 'a b', sha256: hash }]), /Invalid checksum entry name/);
+  assert.throws(() => formatSums([{ name: 'a', sha256: 'A'.repeat(64) }]), /Invalid SHA-256/);
+  for (const bad of ['', `${hash}  a`, `${hash} a\n`, `${hash}  ../a\n`, `${hash}  a\n${hash}  a\n`, `${hash}  a\r\n`]) {
+    assert.throws(() => parseSums(bad), /malformed|Duplicate/, JSON.stringify(bad));
+  }
+  const assets = workspace(t);
+  const version = '1.2.3';
+  const write = entries => writeFileSync(join(assets, hostUpdateCliSumsName(version)), formatSums(entries));
+  const entries = hostUpdateCliRuntimes.map(rid => {
+    const name = hostUpdateCliArchiveName(version, rid);
+    writeFileSync(join(assets, name), rid);
+    return { name, sha256: createHash('sha256').update(rid).digest('hex') };
+  });
+  write(entries);
+  assert.equal(verifyHostUpdateCliSums(assets, version).size, 3);
+  write(entries.slice(1));
+  assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives/);
+  write([...entries, { name: 'extra.tar.gz', sha256: hash }]);
+  assert.throws(() => verifyHostUpdateCliSums(assets, version), /exactly the supported archives/);
+  write(entries.map((entry, index) => index === 2 ? { ...entry, sha256: hash } : entry));
+  assert.throws(() => verifyHostUpdateCliSums(assets, version), /hash mismatch/);
+});
+
+test('host-update CLI packaging refuses a missing launcher or source commit and cleans its stage', t => {
+  const root = workspace(t);
+  const scratch = join(root, 'scratch');
+  mkdirSync(scratch);
+  const run = name => (name === 'tar' ? 'bsdtar 3.7.2' : '');
+  assert.throws(() => packageHostUpdateCli({ ...release, sourceCommit: undefined }, root, join(root, 'out'), { run, scratch }),
+    /source commit/);
+  assert.throws(() => packageHostUpdateCli(release, root, join(root, 'out'), { run, scratch, runtimes: ['linux-x64'] }),
+    /launcher missing for linux-x64/);
+  assert.deepEqual(readdirSync(scratch), []);
+  assert.ok(!existsSync(join(root, 'out', hostUpdateCliSumsName(release.version))));
+});
+
 test('missing, tampered or wrong-identity signing evidence blocks publication before upload', async t => {
   const corruptions = [
     ['missing manifest', (assets) => rmSync(join(assets, 'update-manifest.json'))],
@@ -605,6 +731,22 @@ test('missing, tampered or wrong-identity signing evidence blocks publication be
       const path = join(assets, 'update-manifest.sigstore.json');
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
         identity: manifestIdentity.replace('/PrintFarmer/', '/OtherRepository/') }));
+    }],
+    ['missing CLI checksum bundle', (assets) => rmSync(join(assets, hostUpdateCliSumsBundleName(release.version)))],
+    ['empty CLI checksum bundle', (assets) => writeFileSync(join(assets, hostUpdateCliSumsBundleName(release.version)), '')],
+    ['tampered CLI archive', (assets) => writeFileSync(join(assets, hostUpdateCliArchiveName(release.version, 'linux-x64')), 'evil')],
+    ['re-hashed CLI checksum list', (assets) => {
+      const archive = hostUpdateCliArchiveName(release.version, 'win-x64');
+      writeFileSync(join(assets, archive), 'evil');
+      const path = join(assets, hostUpdateCliSumsName(release.version));
+      const entries = parseSums(readFileSync(path, 'utf8'));
+      entries.set(archive, createHash('sha256').update('evil').digest('hex'));
+      writeFileSync(path, formatSums([...entries].map(([name, sha256]) => ({ name, sha256 }))));
+    }],
+    ['CLI checksum signed by another identity', (assets) => {
+      const path = join(assets, hostUpdateCliSumsBundleName(release.version));
+      writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
+        identity: manifestIdentity.replace('@refs/heads/development', '@refs/heads/feature') }));
     }],
   ];
   for (const [name, corrupt] of corruptions) {
