@@ -84,13 +84,12 @@ pattern, map it to its issue through `created_pr_number` and that PR's
 that changes non-markdown files under `mobile/` is `xcode` work even without
 the label.
 
-A running `autopilot` session you cannot map counts against every category when
-another session created it: its `creator_session_id` is your session, another
-`autopilot` session (such as an earlier Ralph), or a session missing from the
-list (such as Ralph on another host). One with no `creator_session_id`, or
-created by a non-`autopilot` session, was started by the owner and does not
-count. List every unmapped running session in your round report either way.
-Your own Ralph session and non-`autopilot` (owner-driven) sessions do not count.
+A running `autopilot` session you cannot map counts against every category if
+it has a `creator_session_id`, whatever that creator is: any session, including
+an interactive Ralph or Ralph on another host, may have started it. One with no
+`creator_session_id` was started directly by the owner and does not count.
+List every unmapped running session in your round report either way. Your own
+Ralph session and non-`autopilot` (owner-driven) sessions do not count.
 
 A **paused** session is an issue session on this host that is idle or interrupted
 before its issue is done (PR merged, blocked, or released). It keeps its GitHub
@@ -131,14 +130,16 @@ with more.
 
 ### Round Report
 
-A round is one pass over the board. End each round with a round report in your
-session output; under `squad watch --execute` it is the spawned session's final
-message. Use the "Ralph on the Board" block in `.github/ralph-reference.md` and
-add a **Host** line: `<machine>`, its limits, and the slots in use per
-category. Below it, list only the items that apply: an unreadable capabilities
-file; over-subscription and the sessions involved; unmapped running sessions;
-sessions paused or released this round; sessions awaiting owner input or plan
-approval; and stale claims (see "Issue Selection").
+A round is one pass over the board. Each round ends with a round report in
+your session output: a **Host** line (`<machine>`, its limits, and the slots in
+use per category) and, below it, only the items that apply: an unreadable
+capabilities file; over-subscription and the sessions involved; unmapped
+running sessions; sessions paused or released this round; sessions awaiting
+owner input or plan approval; and stale claims (see "Issue Selection"). In the
+in-session loop, add the full "Ralph on the Board" block from
+`.github/ralph-reference.md` at each periodic check-in and when Ralph stops.
+Under `squad watch --execute`, the spawned session's final message is the
+round report and always includes that block.
 
 ### Issue Selection
 
@@ -169,18 +170,20 @@ PrintFarmer rules:
   any issue that already has an assignee or an open PR linked by `Closes #N`.
   To claim, assign the issue to yourself (`gh issue edit N --add-assignee @me`)
   and comment "Claimed by <machine>". Re-read the issue, its comments and its
-  timeline (`gh api repos/{owner}/{repo}/issues/N/timeline`). Stop if it now
-  has a linked PR, or if the earliest "Claimed by" comment since its last
-  `unassigned` event names another machine. Do not unassign when you stop; the
-  assignee belongs to the winning host too.
+  full timeline (`gh api --paginate repos/{owner}/{repo}/issues/N/timeline`).
+  The winning claim is the "Claimed by" comment with the lowest comment ID
+  posted after the issue's last `unassigned` event, counting only comments by
+  the assignee's account. Start only if the issue is still assigned, has no
+  linked PR, and the winning claim names this machine. Otherwise stop, and do
+  not unassign: the assignee belongs to the winning host too. If you cannot
+  read the full history, stop and report it. This narrows but does not close
+  the race; GitHub has no atomic claim.
 - **Stale claims:** a claim is stale when the issue is assigned, has no open PR
-  linked by `Closes #N`, and no running or paused session maps to it. If its
-  latest "Claimed by" comment names this machine and the issue has had no
-  comment or branch push for an hour, release it: unassign the issue and
-  comment "Released by <machine>: stale claim; continue from branch
-  `<branch>`" (or "nothing pushed"). Report any other stale claim with no
-  comment or branch push for 24 hours in your round report; releasing another
-  host's claim, or one with no "Claimed by" comment, is the owner's call.
+  linked by `Closes #N`, and has had no comment or branch push for 24 hours.
+  Report it in your round report with the machine named by its winning claim,
+  or "no marker". Do not release it yourself: a quiet build, or a
+  `squad watch --execute` agent that `get_sessions_status` cannot see, looks
+  the same as a dead claim. Releasing it is the owner's call.
   `squad watch --execute` never sees assigned issues, so only an in-app
   "Ralph, go" runs this check.
 - Skip `needs:xcode` issues unless this machine's capabilities include `xcode`.

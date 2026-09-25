@@ -18,8 +18,9 @@ Per-host concurrency caps (PR #2976) and the claim, stale-claim and round-report
 
 - Unattended `squad watch --execute` recovers or merges PRs only in a round that also
   finds an eligible issue; otherwise an in-app "Ralph, go" is needed.
-- Claims do not expire. In-app Ralph releases its own host's stale claims and reports
-  the rest for the owner.
+- Claims do not expire and Ralph never releases a stale one; in-app Ralph reports them
+  and the owner releases them. The "Claimed by <machine>" comment narrows the
+  same-account multi-host race but is not an atomic claim.
 - Xcode serialization and host caps depend on Ralph following the instructions.
 
 # 2026-08-15: Reviewer-rejection revision ownership — canonical rule reinstated (reviewer-invoked lockout)

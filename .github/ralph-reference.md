@@ -18,16 +18,18 @@ state store or scheduled coordinator/consumer layer on top of it (see #2966).
   "Ralph, go". Issues with only a `squad:{member}` label are never fetched.
 - **Multiple machines** coordinate through GitHub only: an issue with an assignee
   or an open PR is claimed, so skip it. Every host uses the same GitHub account,
-  so Ralph also comments "Claimed by <machine>" when it claims an issue; the
-  earliest such comment since the issue was last unassigned wins. Declare each
+  so Ralph also comments "Claimed by <machine>" when it claims an issue. The
+  claim comment from the assignee's account with the lowest comment ID after
+  the issue was last unassigned wins. Declare each
   host's tooling in `~/.squad/machine-capabilities.json`; issues labelled
   `needs:xcode`, and PR work on them, run only on a host whose `capabilities`
   include `xcode` (the Mac).
-- **Stranded claims:** nothing expires a claim. In-app Ralph releases its own
-  host's stale claims and reports the rest (see "Stale claims" in
-  `.squad/ralph-instructions.md`). To sweep by hand, list claimed issues with no
-  linked PR, then release any with no live session and no recent activity by
-  unassigning it and commenting where its branch is:
+- **Stranded claims:** nothing expires a claim, and Ralph never releases one
+  itself. In-app Ralph reports claims with no linked PR and no activity for
+  24 hours (see "Stale claims" in `.squad/ralph-instructions.md`). To sweep by
+  hand, list claimed issues with no linked PR, then release any with no live
+  session or `squad watch` agent on its host by unassigning it and commenting
+  where its branch is:
 
   ```bash
   gh issue list --state open --label squad --search "assignee:@me -linked:pr" \
@@ -217,7 +219,9 @@ Do not replace a rejecting reviewer just to obtain an approval.
 
 **Step 4 — Periodic check-in** (every 3-5 rounds):
 
-After every 3-5 rounds, pause and report before continuing:
+Every round ends with the short round report from `.squad/ralph-instructions.md`
+("Round Report": the host line and any exceptions), without pausing. After
+every 3-5 rounds, also report this summary and the full board before continuing:
 
 ```
 🔄 Ralph: Round {N} complete.
@@ -276,9 +280,11 @@ When Ralph reports status, use this format:
 Next action: Triaging #42 — "Fix auth endpoint timeout"
 ```
 
-The round report in `.squad/ralph-instructions.md` ("Round Report") uses this
-block, adds a `🖥️ Host:` line with the machine name, its limits and slots in
-use per category, and lists any host-limit exceptions below it.
+The round report in `.squad/ralph-instructions.md` ("Round Report") adds a
+`🖥️ Host:` line with the machine name, its limits and slots in use per
+category, and lists any host-limit exceptions below it. It includes this block
+at each periodic check-in, when Ralph stops, and in the final message of every
+`squad watch --execute` round.
 
 ### Integration with Follow-Up Work
 
