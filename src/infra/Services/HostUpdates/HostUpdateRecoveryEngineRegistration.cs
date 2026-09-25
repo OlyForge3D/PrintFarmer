@@ -19,8 +19,10 @@ public static class HostUpdateRecoveryEngineRegistration
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
+        IConfigurationSection section = configuration.GetSection(HostUpdateExecutionOptions.SectionName);
         services.AddOptions<HostUpdateExecutionOptions>()
-            .Bind(configuration.GetSection(HostUpdateExecutionOptions.SectionName))
+            .Bind(section)
+            .Configure(options => ReplaceConfiguredComposeFiles(options, section))
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<HostUpdateExecutionOptions>, HostUpdateExecutionOptionsValidator>();
         services.AddSingleton(sp => sp.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value);
@@ -137,6 +139,21 @@ public static class HostUpdateRecoveryEngineRegistration
 
         services.AddScoped<IHostUpdateHealthVerifier>(sp => CreateHealthVerifier(sp));
         services.AddScoped<IHostUpdateDigestVerifier>(sp => (IHostUpdateDigestVerifier)sp.GetRequiredService<IHostUpdateHealthVerifier>());
+    }
+
+    /// <summary>
+    /// The configuration binder appends bound array entries to an initialised default instead of
+    /// replacing it, so a configured compose set would silently keep the built-in template path
+    /// too (issue #2997). A non-empty configured <c>ComposeFiles</c> list is authoritative; the
+    /// built-in default applies only when no entry is configured.
+    /// </summary>
+    private static void ReplaceConfiguredComposeFiles(HostUpdateExecutionOptions options, IConfiguration section)
+    {
+        string[]? configured = section.GetSection(nameof(HostUpdateExecutionOptions.ComposeFiles)).Get<string[]>();
+        if (configured is { Length: > 0 })
+        {
+            options.ComposeFiles = configured;
+        }
     }
 
     private static HostUpdateImageApplier CreateImageApplier(IServiceProvider sp, HostUpdateExecutionOptions options)

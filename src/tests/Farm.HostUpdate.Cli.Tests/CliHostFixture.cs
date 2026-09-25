@@ -17,16 +17,6 @@ internal sealed class CliHostFixture : IDisposable
 
     public CliHostFixture()
     {
-        // The options binder appends configured ComposeFiles to the code default instead of
-        // replacing it, so the default working-directory-relative template must also exist for
-        // the namespace proof (and the engine) to see a complete compose set.
-        string defaultCompose = Path.GetFullPath(new HostUpdateExecutionOptions().ComposeFiles[0]);
-        Directory.CreateDirectory(Path.GetDirectoryName(defaultCompose)!);
-        if (!File.Exists(defaultCompose))
-        {
-            File.WriteAllText(defaultCompose, "services: {}\n");
-        }
-
         string localData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
         if (string.IsNullOrWhiteSpace(localData))
         {
