@@ -601,7 +601,7 @@ public sealed class AutoDispatchBackgroundService(
             plan.JobId,
             plan.PrinterName,
             score.TotalScore);
-        db.DispatchLogs.Add(new DispatchLog
+        db.DispatchLogs.Add(new DispatchLog(_timeProvider.GetUtcNow())
         {
             Id = Guid.NewGuid(),
             PrintJobId = plan.JobId,
@@ -610,7 +610,6 @@ public sealed class AutoDispatchBackgroundService(
             Score = score.TotalScore,
             ScoreBreakdown = JsonSerializer.Serialize(score.ScoreBreakdown),
             Reason = "Auto-dispatch suggestion (Suggest mode)",
-            CreatedAtUtc = DateTime.UtcNow,
         });
         await db.SaveChangesAsync(ct);
         await hub.Clients.Group(AuthorizedHubGroups.Farm).SendAsync(
@@ -727,7 +726,7 @@ public sealed class AutoDispatchBackgroundService(
     {
         await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
         AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-        db.DispatchLogs.Add(new DispatchLog
+        db.DispatchLogs.Add(new DispatchLog(_timeProvider.GetUtcNow())
         {
             Id = Guid.NewGuid(),
             PrintJobId = plan.JobId,
@@ -735,7 +734,6 @@ public sealed class AutoDispatchBackgroundService(
             Action = DispatchAction.Failed,
             Score = score.TotalScore,
             Reason = $"Auto-dispatch failed: {exception.Message}",
-            CreatedAtUtc = DateTime.UtcNow,
         });
 
         try

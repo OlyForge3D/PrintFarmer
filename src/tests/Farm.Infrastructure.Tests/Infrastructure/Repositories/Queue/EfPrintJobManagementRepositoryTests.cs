@@ -7,11 +7,53 @@ using Farm.Infrastructure.Tests.Builders;
 using Microsoft.Data.Sqlite;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
+using Moq;
 
 namespace Farm.Infrastructure.Tests.Infrastructure.Repositories.Queue;
 
 public class EfPrintJobManagementRepositoryTests
 {
+    [Fact]
+    public async Task GetAverageWaitTimeMinutesAsync_FakeClock_PreservesCutoffAndFilters()
+    {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
+        var clock = new Mock<TimeProvider>();
+        clock.Setup(value => value.GetUtcNow()).Returns(() => now);
+        await using AppDbContext db = new(CreateInMemoryOptions(nameof(GetAverageWaitTimeMinutesAsync_FakeClock_PreservesCutoffAndFilters)));
+        var printer = new Printer { Id = Guid.NewGuid(), Name = "clock printer", ModelId = Guid.NewGuid() };
+        DateTime cutoff = now.UtcDateTime.AddDays(-30);
+        PrintJob Job(DateTime queuedAt, double? wait, PrintJobStatus status = PrintJobStatus.Completed)
+        {
+            PrintJob job = new PrintJobBuilder()
+                .WithAssignedPrinter(printer)
+                .WithStatus(status)
+                .WithQueuedAt(queuedAt)
+                .Build();
+            job.ActualStartTime = wait.HasValue ? queuedAt.AddMinutes(wait.Value) : null;
+            return job;
+        }
+
+        db.PrintJobs.AddRange(
+            Job(cutoff, 20),
+            Job(cutoff.AddTicks(-1), 1000),
+            Job(cutoff.AddDays(1), -10),
+            Job(cutoff.AddDays(1), null),
+            Job(cutoff.AddDays(1), 1000, PrintJobStatus.Printing));
+        PrintJob unassigned = Job(cutoff.AddDays(1), 40);
+        unassigned.AssignedPrinter = null;
+        unassigned.AssignedPrinterId = null;
+        db.PrintJobs.Add(unassigned);
+        await db.SaveChangesAsync();
+        db.ChangeTracker.Clear();
+        EfPrintJobManagementRepository repository = new(db, clock.Object);
+
+        Assert.Equal(10, await repository.GetAverageWaitTimeMinutesAsync(printer.ModelId));
+        Assert.Equal(20, await repository.GetAverageWaitTimeMinutesAsync());
+        Assert.Equal(0, await repository.GetAverageWaitTimeMinutesAsync(Guid.NewGuid()));
+        now = now.AddDays(32);
+        Assert.Equal(0, await repository.GetAverageWaitTimeMinutesAsync());
+    }
+
     [Fact]
     public async Task GetEnabledPrintersAsync_WhenServiceStateExists_LoadsServiceStateForWatermarkReads()
     {

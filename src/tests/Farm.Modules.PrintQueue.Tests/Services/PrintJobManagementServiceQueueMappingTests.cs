@@ -308,6 +308,7 @@ public class PrintJobManagementServiceQueueMappingTests
     [Fact]
     public async Task EnqueueJobAsync_AssignedJob_CapturesSnapshotAndDispatchLogBeforeSave()
     {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
         Guid printerId = Guid.NewGuid();
         var gcode = new GcodeFile
         {
@@ -332,10 +333,16 @@ public class PrintJobManagementServiceQueueMappingTests
         repository.Setup(value => value.AddDispatchLog(
             It.Is<DispatchLog>(log =>
                 log.PrinterId == printerId
+                && log.CreatedAtUtc == now.UtcDateTime
+                && log.CreatedDate == now
+                && log.UpdatedDate == now
+                && log.DispatchedAt == now
                 && log.Action == Farm.Infrastructure.Services.Queue.Dispatch.DispatchAction.Dispatched)));
         repository.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
-        PrintJobManagementService service = CreateService(repository, snapshots.Object);
+        PrintJobManagementService service = CreateService(
+            repository, snapshots.Object,
+            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
 
         _ = await service.EnqueueJobAsync(
             new EnqueueQueueJobRequest
@@ -710,7 +717,8 @@ public class PrintJobManagementServiceQueueMappingTests
         IStoragePathService? storage = null,
         AppDbContext? appDbContext = null,
         IDispatchClaimService? dispatchClaimService = null,
-        Mock<IStoredFileOperationsService>? fileOperations = null)
+        Mock<IStoredFileOperationsService>? fileOperations = null,
+        TimeProvider? timeProvider = null)
     {
         return new PrintJobManagementService(
             repository.Object,
@@ -729,6 +737,7 @@ public class PrintJobManagementServiceQueueMappingTests
             settingsService: null,
             partOutputSnapshotService: snapshots,
             appDbContext: appDbContext,
-            dispatchClaimService: dispatchClaimService);
+            dispatchClaimService: dispatchClaimService,
+            timeProvider: timeProvider);
     }
 }

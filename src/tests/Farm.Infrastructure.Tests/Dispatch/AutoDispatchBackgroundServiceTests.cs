@@ -883,12 +883,14 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Trait("Phase", "2")]
     public async Task OnPrinterIdle_SuggestMode_LogsSuggestionToDispatchLog()
     {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
         // Arrange
         SeedSettings(enabled: true, mode: AutoDispatchMode.Suggest, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = CreateService();
+        AutoDispatchBackgroundService svc = CreateService(
+            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
         PrintJob job = SeedQueuedJob("log-check");
 
         DispatchScore goodScore = new(
@@ -912,6 +914,9 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
             l.PrintJobId == job.Id
             && l.PrinterId == printerId
             && l.Action == DispatchAction.Suggested);
+        logs.Single().CreatedAtUtc.Should().Be(now.UtcDateTime);
+        logs.Single().CreatedDate.Should().Be(now);
+        logs.Single().UpdatedDate.Should().Be(now);
     }
 
     [Fact]
@@ -1080,12 +1085,14 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
     [Trait("Phase", "2")]
     public async Task OnPrinterIdle_DispatchThrowsException_LogsFailureAndSendsEvent()
     {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
         // Arrange: dispatch service throws an exception
         SeedSettings(enabled: true, mode: AutoDispatchMode.Auto, idleThresholdSeconds: 0);
         (Printer printer, Guid printerId) = SeedPrinter();
 
         using CancellationTokenSource cts = new(TimeSpan.FromSeconds(30));
-        AutoDispatchBackgroundService svc = CreateService();
+        AutoDispatchBackgroundService svc = CreateService(
+            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
         PrintJob job = SeedQueuedJob();
 
         DispatchScore goodScore = new(
@@ -1117,5 +1124,8 @@ public class AutoDispatchBackgroundServiceTests : IDisposable
         logs.Should().ContainSingle(l =>
             l.PrintJobId == job.Id
             && l.Action == DispatchAction.Failed);
+        logs.Single().CreatedAtUtc.Should().Be(now.UtcDateTime);
+        logs.Single().CreatedDate.Should().Be(now);
+        logs.Single().UpdatedDate.Should().Be(now);
     }
 }

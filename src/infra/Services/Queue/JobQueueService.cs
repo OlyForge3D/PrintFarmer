@@ -56,6 +56,7 @@ public class JobQueueService : IJobQueueService
     private readonly IQueueResourceAuthorizationService? _resourceAuthorization;
     private readonly IQueueSubscriptionMembershipNotifier? _membershipNotifier;
     private readonly Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? _hostUpdateAdmissionGate;
+    private readonly TimeProvider _timeProvider;
 
     /// <summary>
     /// Initializes a new instance of the JobQueueService with required dependencies.
@@ -85,6 +86,7 @@ public class JobQueueService : IJobQueueService
     /// a draining host update, <see cref="AddJobToQueueAsync"/> rejects new submissions rather
     /// than admitting work the update's drain step believes has already stopped.
     /// </param>
+    /// <param name="timeProvider">Clock used for dispatch audit creation.</param>
     /// <exception cref="ArgumentNullException">Thrown when any required dependency is null</exception>
     public JobQueueService(
         IQueueRepository repo,
@@ -102,8 +104,10 @@ public class JobQueueService : IJobQueueService
         IQueuePositionAllocator? positionAllocator = null,
         IQueueResourceAuthorizationService? resourceAuthorization = null,
         IQueueSubscriptionMembershipNotifier? membershipNotifier = null,
-        Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null)
+        Farm.Infrastructure.Services.HostUpdates.IHostUpdateAdmissionGate? hostUpdateAdmissionGate = null,
+        TimeProvider? timeProvider = null)
     {
+        _timeProvider = timeProvider ?? TimeProvider.System;
         ArgumentNullException.ThrowIfNull(repo);
         ArgumentNullException.ThrowIfNull(dataService);
         ArgumentNullException.ThrowIfNull(logger);
@@ -1313,11 +1317,11 @@ public class JobQueueService : IJobQueueService
             return;
         }
 
-        DateTime now = DateTime.UtcNow;
+        DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
         job.DispatchedAt ??= now;
         job.DispatchMode ??= (int)DispatchMode.Manual;
         _ = await _partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);
-        _repo.AddDispatchLog(new DispatchLog
+        _repo.AddDispatchLog(new DispatchLog(now)
         {
             Id = Guid.NewGuid(),
             PrintJobId = job.Id,
@@ -1327,7 +1331,6 @@ public class JobQueueService : IJobQueueService
             DispatchedAt = new DateTimeOffset(now, TimeSpan.Zero),
             DispatchedByUserId = userId,
             Reason = "Assigned during queue operation.",
-            CreatedAtUtc = now,
         });
     }
 

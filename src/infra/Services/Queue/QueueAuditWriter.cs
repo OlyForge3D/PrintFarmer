@@ -38,6 +38,7 @@ public static class QueueAuditWriter
     /// <param name="dispatchStateRowVersion">Dispatch-state revision observed at commit time.</param>
     /// <param name="idempotencyKey">Idempotency key associated with the operation.</param>
     /// <param name="detail">Redacted structured detail (identifiers and typed codes only).</param>
+    /// <param name="timeProvider">Owning service's clock; defaults to the system clock.</param>
     /// <returns>The audit row that was added to the change tracker.</returns>
     public static QueueOperationAudit Add(
         AppDbContext db,
@@ -53,14 +54,15 @@ public static class QueueAuditWriter
         byte[]? jobRowVersion = null,
         byte[]? dispatchStateRowVersion = null,
         string? idempotencyKey = null,
-        object? detail = null)
+        object? detail = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(db);
 
         var row = new QueueOperationAudit
         {
             Id = Guid.NewGuid(),
-            OccurredAtUtc = DateTime.UtcNow,
+            OccurredAtUtc = (timeProvider ?? TimeProvider.System).GetUtcNow().UtcDateTime,
             ActorSubject = Truncate(string.IsNullOrWhiteSpace(actorSubject) ? "system" : actorSubject, 256),
             Operation = Truncate(operation, 64),
             Outcome = Truncate(outcome, 32),
