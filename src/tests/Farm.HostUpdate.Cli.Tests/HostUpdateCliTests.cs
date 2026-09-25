@@ -9,11 +9,15 @@ namespace Farm.HostUpdate.Cli.Tests;
 /// End-to-end coverage for the host-local recovery CLI (issue #2980, first slice). Every test
 /// runs with no API process at all: the CLI reads and writes only the durable host-update root.
 /// </summary>
-public sealed class HostUpdateCliTests : IDisposable
+public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
 {
     private readonly CliHostFixture _host = new();
 
     public void Dispose() => _host.Dispose();
+
+    public Task InitializeAsync() => _host.ProvisionPolicyAsync();
+
+    public Task DisposeAsync() => Task.CompletedTask;
 
     [Theory]
     [InlineData(new string[0], "missing_command")]
@@ -416,11 +420,10 @@ public sealed class HostUpdateCliTests : IDisposable
 
         run.ExitCode.Should().Be(HostUpdateCliExitCodes.ConfigurationUnproven);
         Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("namespace_unproven");
-        _host.Snapshot().Should().BeEquivalentTo(before);
-        File.Exists(_host.LockPath).Should().BeFalse();
+        _host.Snapshot().Should().BeEquivalentTo(before, "the seeded lock sentinel is not rewritten either");
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_redrives_only_the_pending_fence_release_and_is_idempotent_across_restarts()
     {
         _host.SeedRecoveryRequired();
@@ -436,16 +439,18 @@ public sealed class HostUpdateCliTests : IDisposable
         recorded.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
         recorded.Detail.Should().Be("coordinated_restore");
 
-        // A new process against the same root (no shared memory) must be a durable no-op.
-        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+        // A new process against the same root (no shared memory) must be a durable no-op. The
+        // coordinator still takes (and so rewrites) the execution lock, which carries no state.
+        string lockKey = Path.GetRelativePath(_host.Root, _host.LockPath);
+        var before = _host.Snapshot().Where(pair => pair.Key != lockKey).ToDictionary(StringComparer.Ordinal);
         CliRun second = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId]);
 
         second.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
         second.Output.Should().Contain("outcome: RolledBack");
-        _host.Snapshot().Should().BeEquivalentTo(before);
+        _host.Snapshot().Where(pair => pair.Key != lockKey).Should().BeEquivalentTo(before);
     }
 
-    [Fact]
+    [HostStateFact]
     public async Task Confirm_without_backup_or_prior_state_records_needs_operator()
     {
         _host.SeedRecoveryRequired();
@@ -459,6 +464,378 @@ public sealed class HostUpdateCliTests : IDisposable
     }
 
     private Task<CliRun> RunAsync(string[] args) => RunAsync(args, _host.Configuration());
+
+    // --- Issue #2998: drift reapproval and downtime preview -------------------------------------
+
+    [Theory]
+    [InlineData(new[] { "recover", "--release", "stable:1.2.3", "--confirm", "stable:1.2.3", "--reapprove-drift" }, "missing_value:--reapprove-drift")]
+    [InlineData(new[] { "recover", "--release", "stable:1.2.3", "--preview", "--reapprove-drift", "drift-00000000000000000000000000000000" }, "reapprove_drift_requires_confirm")]
+    [InlineData(new[] { "recover", "--release", "stable:1.2.3", "--confirm", "stable:1.2.3", "--reapprove-drift", "drift-XYZ" }, "invalid_reapproval_token")]
+    [InlineData(new[] { "status", "--reapprove-drift", "drift-00000000000000000000000000000000" }, "unknown_option:--reapprove-drift")]
+    public async Task Invalid_reapproval_arguments_exit_with_usage_and_touch_nothing(string[] args, string expectedError)
+    {
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(args);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.Usage);
+        run.Error.Should().Contain(expectedError);
+        _host.Snapshot().Should().BeEquivalentTo(before);
+    }
+
+    [Fact]
+    public async Task Help_documents_the_drift_exit_code_and_option()
+    {
+        CliRun run = await RunAsync(["help"]);
+
+        run.Output.Should().Contain("12 drift not reapproved").And.Contain("--reapprove-drift <token>");
+    }
+
+    [HostStateFact]
+    public async Task Preview_without_drift_reports_no_reapproval()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        JsonElement drift = Envelope(run).GetProperty("result").GetProperty("drift");
+        drift.GetProperty("items").GetArrayLength().Should().Be(0);
+        drift.GetProperty("reapprovalRequired").GetBoolean().Should().BeFalse();
+        drift.TryGetProperty("reapprovalToken", out _).Should().BeFalse("a null token is omitted");
+        drift.GetProperty("configurationFingerprint").GetString().Should().MatchRegex("^sha256:[0-9a-f]{64}$");
+    }
+
+    [HostStateFact]
+    public async Task Policy_change_since_authorization_is_reported_as_drift()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        await _host.ChangePolicyAsync("insider");
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement drift = Envelope(run).GetProperty("result").GetProperty("drift");
+        DriftCodes(drift).Should().BeEquivalentTo("policy_revision_drift", "policy_fingerprint_drift", "channel_drift");
+        drift.GetProperty("reapprovalRequired").GetBoolean().Should().BeTrue();
+        drift.GetProperty("reapprovalToken").GetString().Should().MatchRegex("^drift-[0-9a-f]{32}$");
+        _host.Snapshot().Should().BeEquivalentTo(before);
+    }
+
+    [Fact]
+    public async Task Unverifiable_policy_is_drift()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+
+        CliRun run = await RunAsync(
+            ["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"],
+            _host.Configuration(v => v["HostUpdates:HostState:Enabled"] = "false"));
+
+        DriftCodes(Envelope(run).GetProperty("result").GetProperty("drift")).Should().Equal("policy_unverifiable");
+    }
+
+    [HostStateFact]
+    public async Task Host_platform_change_since_authorization_is_drift()
+    {
+        string other = CliHostFixture.CurrentPlatform == "linux-arm64" ? "linux-amd64" : "linux-arm64";
+        _host.SeedRecoveryRequired(CliHostFixture.Request(hostPlatform: other));
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement result = Envelope(run).GetProperty("result");
+        DriftCodes(result.GetProperty("drift")).Should().Equal("host_platform_drift");
+        result.GetProperty("identity").GetProperty("currentPlatform").GetString().Should().Be(CliHostFixture.CurrentPlatform);
+        result.GetProperty("identity").GetProperty("target").GetProperty("hostPlatform").GetString().Should().Be(other);
+    }
+
+    [HostStateFact]
+    public async Task Prior_state_rewritten_after_authorization_is_drift()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedInstalledState(recordedAt: DateTimeOffset.UtcNow.AddHours(1));
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        DriftCodes(Envelope(run).GetProperty("result").GetProperty("drift")).Should().Equal("prior_state_changed_since_authorization");
+    }
+
+    [HostStateFact]
+    public async Task Confirm_with_unapproved_drift_is_refused_with_exit_12_before_side_effects()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
+        await _host.ChangePolicyAsync();
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.DriftUnapproved).And.Be(12);
+        JsonElement result = Envelope(run).GetProperty("result");
+        result.GetProperty("code").GetString().Should().Be("drift_reapproval_required");
+        result.GetProperty("details").EnumerateArray().Select(e => e.GetString()).Should().Contain("policy_revision_drift");
+        run.Output.Should().NotContain("drift-", "the token must be read from --preview, never offered by the refusal");
+        _host.Snapshot().Should().BeEquivalentTo(before);
+        _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.FenceReleasePending);
+    }
+
+    [HostStateFact]
+    public async Task Confirm_with_a_stale_token_is_refused()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        await _host.ChangePolicyAsync();
+        string token = await PreviewTokenAsync();
+        await _host.ChangePolicyAsync("insider");
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", token, "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.DriftUnapproved);
+        Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("drift_reapproval_mismatch");
+        _host.Snapshot().Should().BeEquivalentTo(before);
+    }
+
+    [HostStateFact]
+    public async Task Confirm_with_a_token_when_nothing_drifted_is_refused()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(
+            ["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", "drift-" + new string('0', 32), "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.DriftUnapproved);
+        Envelope(run).GetProperty("result").GetProperty("code").GetString().Should().Be("drift_reapproval_unexpected");
+        _host.Snapshot().Should().BeEquivalentTo(before);
+    }
+
+    [HostStateFact]
+    public async Task Confirm_with_the_previewed_token_proceeds()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+        File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
+        await _host.ChangePolicyAsync();
+        string token = await PreviewTokenAsync();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--reapprove-drift", token, "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        _host.ReadOutcome()!.Outcome.Should().Be(HostUpdateRecoveryOutcome.RolledBack);
+        File.Exists(_host.AdmissionClosedPath).Should().BeFalse();
+    }
+
+    [HostStateFact]
+    public async Task Preview_reports_image_only_identity_downtime_and_writer_fence_without_writes()
+    {
+        _host.SeedRecoveryRequired();
+        _host.SeedInstalledState();
+        File.WriteAllText(_host.AdmissionClosedPath, string.Empty);
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        JsonElement result = Envelope(run).GetProperty("result");
+        result.GetProperty("plan").GetProperty("kind").GetString().Should().Be("ImageOnlyRollback");
+
+        JsonElement identity = result.GetProperty("identity");
+        identity.GetProperty("prior").GetProperty("releaseId").GetString().Should().Be("stable:1.2.2");
+        identity.GetProperty("target").GetProperty("releaseId").GetString().Should().Be(CliHostFixture.ReleaseId);
+        identity.GetProperty("target").GetProperty("manifestDigest").GetString().Should().Be(CliHostFixture.TargetManifestDigest);
+        identity.GetProperty("target").GetProperty("channel").GetString().Should().Be("stable");
+        identity.GetProperty("target").GetProperty("targets").GetArrayLength().Should().Be(6);
+
+        var options = new HostUpdateExecutionOptions();
+        JsonElement downtime = result.GetProperty("downtime");
+        downtime.GetProperty("impact").GetString().Should().Be("service_restart");
+        downtime.GetProperty("affectedServices").EnumerateArray().Select(e => e.GetString()).Should().Equal("api", "frontend", "monolith");
+        downtime.GetProperty("timeoutBudgetSeconds").GetInt32()
+            .Should().Be((4 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds, "three pulls plus one compose up, then verify");
+        downtime.GetProperty("unboundedSteps").EnumerateArray().Select(e => e.GetString()).Should().Equal("health_check_final_pass");
+        downtime.GetProperty("basis").GetString().Should().Be("sum_of_configured_timeouts_not_an_upper_bound");
+
+        JsonElement fence = result.GetProperty("writerFence");
+        fence.GetProperty("admissionClosed").GetBoolean().Should().BeTrue();
+        fence.GetProperty("fencedWriters").GetArrayLength().Should().BeGreaterThan(0);
+        fence.GetProperty("afterRecovery").GetString().Should().Be("writers_fenced_until_rollback_then_released");
+
+        JsonElement recovery = result.GetProperty("recoveryEvidence");
+        recovery.GetProperty("applyStarted").GetBoolean().Should().BeTrue();
+        recovery.GetProperty("migrationStarted").GetBoolean().Should().BeFalse();
+        result.GetProperty("backupEvidence").GetProperty("found").GetBoolean().Should().BeFalse();
+        result.GetProperty("drift").GetProperty("items").GetArrayLength().Should().Be(0);
+
+        _host.Snapshot().Should().BeEquivalentTo(before);
+        _host.ReadOutcome().Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Preview_reports_coordinated_restore_downtime_and_backup_evidence()
+    {
+        _host.SeedJournal(
+            CliHostFixture.Request(),
+            (HostUpdateExecutionState.Migrating, "migration:before"),
+            (HostUpdateExecutionState.RecoveryRequired, "failure"));
+        _host.SeedInstalledState();
+        _host.SeedBackup();
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        JsonElement result = Envelope(run).GetProperty("result");
+        result.GetProperty("plan").GetProperty("kind").GetString().Should().Be("CoordinatedRestore");
+
+        var options = new HostUpdateExecutionOptions();
+        JsonElement downtime = result.GetProperty("downtime");
+        downtime.GetProperty("impact").GetString().Should().Be("restore_and_service_restart");
+        downtime.GetProperty("restoredTargets").EnumerateArray().Select(e => e.GetString()).Should().Equal("app-data", "database");
+        int applyAndVerify = (4 * options.ApplyTimeoutSeconds) + options.VerifyTimeoutSeconds + options.VerifyPollIntervalSeconds;
+        downtime.GetProperty("timeoutBudgetSeconds").GetInt32()
+            .Should().Be(options.BackupTimeoutSeconds + applyAndVerify, "only the database target is a timed restore process");
+        downtime.GetProperty("unboundedSteps").EnumerateArray().Select(e => e.GetString())
+            .Should().Equal("backup_checksum_verification", "owned_directory_copy", "health_check_final_pass");
+
+        JsonElement backup = result.GetProperty("backupEvidence");
+        backup.GetProperty("found").GetBoolean().Should().BeTrue();
+        backup.GetProperty("releaseMatches").GetBoolean().Should().BeTrue();
+        backup.GetProperty("fileCount").GetInt32().Should().Be(2);
+        backup.GetProperty("totalBytes").GetInt64().Should().Be(6);
+        backup.GetProperty("filesPresentWithRecordedLength").GetInt32().Should().Be(1);
+        result.GetProperty("recoveryEvidence").GetProperty("migrationStarted").GetBoolean().Should().BeTrue();
+
+        _host.Snapshot().Should().BeEquivalentTo(before);
+    }
+
+    [Theory]
+    [InlineData(new[] { "database" }, false)]
+    [InlineData(new[] { "app-data" }, true)]
+    [InlineData(new[] { "app-data", "database" }, true)]
+    public void Coordinated_restore_reports_directory_copy_only_when_a_directory_is_restored(string[] targets, bool expectDirectoryCopy)
+    {
+        var options = new HostUpdateExecutionOptions();
+        options.OwnedDirectories["app-data"] = "/srv/app-data";
+        var plan = new HostUpdateRecoveryPlan(HostUpdateRecoveryPlanKind.CoordinatedRestore, "restore", null, "/backups/run");
+        var backup = new HostUpdateBackupManifest(CliHostFixture.ReleaseId, DateTimeOffset.UnixEpoch, targets, []);
+
+        HostUpdateDowntimePreview downtime = HostUpdateRecoveryPreview.Downtime(plan, installed: null, backup, options);
+
+        downtime.UnboundedSteps.Contains("owned_directory_copy").Should().Be(expectDirectoryCopy);
+        downtime.UnboundedSteps.Should().Contain("backup_checksum_verification");
+        downtime.TimeoutBudgetSeconds.Should().Be(targets.Count(t => t != "app-data") * options.BackupTimeoutSeconds);
+    }
+
+    [Fact]
+    public async Task Preview_of_an_operator_only_plan_has_no_automatic_downtime_bound()
+    {
+        _host.SeedRecoveryRequired();
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        JsonElement downtime = Envelope(run).GetProperty("result").GetProperty("downtime");
+        downtime.GetProperty("impact").GetString().Should().Be("operator_required");
+        downtime.TryGetProperty("timeoutBudgetSeconds", out _).Should().BeFalse("no automatic path has no budget");
+    }
+
+    [Fact]
+    public async Task Corrupt_installed_state_is_state_unreadable_for_preview_and_confirm()
+    {
+        _host.SeedRecoveryRequired();
+        File.WriteAllText(Path.Combine(_host.StateDirectory, "installed-state.json"), "{not json");
+        IReadOnlyDictionary<string, string> before = _host.Snapshot();
+
+        CliRun preview = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+        CliRun confirm = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--confirm", CliHostFixture.ReleaseId, "--json"]);
+
+        preview.ExitCode.Should().Be(HostUpdateCliExitCodes.StateUnreadable);
+        Envelope(preview).GetProperty("result").GetProperty("code").GetString().Should().Be("installed_state_corrupt:json_invalid");
+        confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.StateUnreadable);
+        _host.Snapshot().Should().BeEquivalentTo(before);
+        _host.ReadOutcome().Should().BeNull();
+    }
+
+    [Fact]
+    public async Task Preview_takes_the_execution_lock_without_rewriting_it()
+    {
+        _host.SeedRecoveryRequired();
+        string lockBefore = File.ReadAllText(_host.LockPath);
+        DateTime writtenBefore = File.GetLastWriteTimeUtc(_host.LockPath);
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.NeedsOperator);
+        File.ReadAllText(_host.LockPath).Should().Be(lockBefore);
+        File.GetLastWriteTimeUtc(_host.LockPath).Should().Be(writtenBefore);
+    }
+
+    [Fact]
+    public async Task Approval_bound_store_refuses_a_state_that_changed_after_evaluation()
+    {
+        var inner = new MutableInstalledStateStore(Installed("stable:1.2.2"));
+        var store = new ApprovalBoundInstalledHostStateStore(inner);
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(await inner.ReadAsync(CancellationToken.None)));
+        inner.State = Installed("stable:1.2.1");
+
+        Func<Task> read = () => store.ReadAsync(CancellationToken.None);
+
+        await read.Should().ThrowAsync<HostUpdateRecoveryApprovalStaleException>();
+        (await store.ReadAsync(CancellationToken.None))!.ReleaseId.Should().Be("stable:1.2.1", "the binding is consumed by the decision read");
+    }
+
+    [Fact]
+    public async Task Approval_bound_store_passes_the_evaluated_state_and_absence()
+    {
+        var inner = new MutableInstalledStateStore(Installed("stable:1.2.2"));
+        var store = new ApprovalBoundInstalledHostStateStore(inner);
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(await inner.ReadAsync(CancellationToken.None)));
+        (await store.ReadAsync(CancellationToken.None))!.ReleaseId.Should().Be("stable:1.2.2");
+
+        inner.State = null;
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(null));
+        (await store.ReadAsync(CancellationToken.None)).Should().BeNull();
+
+        inner.State = Installed("stable:1.2.2");
+        store.Bind(HostUpdateRecoveryDrift.InstalledStateHash(null));
+        Func<Task> appeared = () => store.ReadAsync(CancellationToken.None);
+        await appeared.Should().ThrowAsync<HostUpdateRecoveryApprovalStaleException>();
+    }
+
+    private static InstalledHostState Installed(string releaseId) =>
+        new(
+            releaseId,
+            "sha256:" + new string('9', 64),
+            new Dictionary<string, string>(StringComparer.Ordinal) { ["api"] = "sha256:" + new string('1', 64) },
+            "api",
+            new DateTimeOffset(2026, 9, 1, 0, 0, 0, TimeSpan.Zero));
+
+    private sealed class MutableInstalledStateStore(InstalledHostState? state) : IInstalledHostStateStore
+    {
+        public InstalledHostState? State { get; set; } = state;
+
+        public Task<InstalledHostState?> ReadAsync(CancellationToken cancellationToken) => Task.FromResult(State);
+
+        public Task WriteAsync(InstalledHostState state, CancellationToken cancellationToken)
+        {
+            State = state;
+            return Task.CompletedTask;
+        }
+    }
+
+    private async Task<string> PreviewTokenAsync()
+    {
+        CliRun preview = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+        return Envelope(preview).GetProperty("result").GetProperty("drift").GetProperty("reapprovalToken").GetString()!;
+    }
+
+    private static string?[] DriftCodes(JsonElement drift) =>
+        [.. drift.GetProperty("items").EnumerateArray().Select(item => item.GetProperty("code").GetString())];
 
     private static async Task<CliRun> RunAsync(string[] args, Microsoft.Extensions.Configuration.IConfiguration configuration)
     {

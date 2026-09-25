@@ -73,7 +73,7 @@ public static class HostUpdateRecoveryEngineRegistration
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return string.IsNullOrWhiteSpace(options.RootDirectory)
                 ? new UnavailableHostUpdateExecutionLock()
-                : new FileHostUpdateExecutionLock(Path.Join(options.StateDirectory, "execution.lock"));
+                : new FileHostUpdateExecutionLock(Path.Join(options.StateDirectory, FileHostUpdateExecutionLock.FileName));
         });
 
         services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();

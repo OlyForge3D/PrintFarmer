@@ -1,4 +1,4 @@
-using System.Runtime.InteropServices;
+﻿using System.Runtime.InteropServices;
 using Farm.Infrastructure.Dtos;
 
 namespace Farm.Infrastructure.Services.HostUpdates;
@@ -170,7 +170,13 @@ public static class VerifiedReleaseEvidenceMapper
         return version;
     }
 
-    private static string GetHostPlatform()
+    private static string GetHostPlatform() => HostUpdateHostPlatform.Current();
+}
+
+/// <summary>The canonical <c>os-arch</c> platform of this process, shared by release discovery and the recovery CLI.</summary>
+public static class HostUpdateHostPlatform
+{
+    public static string Current()
     {
         string operatingSystem = OperatingSystem.IsLinux() ? "linux"
             : OperatingSystem.IsWindows() ? "windows"

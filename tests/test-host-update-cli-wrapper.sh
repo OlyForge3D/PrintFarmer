@@ -86,7 +86,14 @@ expect_passthrough "recover preview passes through" \
 expect_passthrough "recover confirm passes through" \
     "$(printf '%s\n' "$dll" --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 --json)" \
     --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 --json
+expect_passthrough "recover confirm with drift reapproval passes through" \
+    "$(printf '%s\n' "$dll" --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 --reapprove-drift drift-0123456789abcdef0123456789abcdef)" \
+    --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 --reapprove-drift drift-0123456789abcdef0123456789abcdef
 
+expect_usage "malformed drift token refused" --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 --reapprove-drift 'drift-;rm'
+expect_usage "missing drift token refused" --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 --reapprove-drift
+expect_usage "duplicate drift token refused" --config "$CONFIG" recover --release stable:1.2.3 --confirm stable:1.2.3 \
+    --reapprove-drift drift-0123456789abcdef0123456789abcdef --reapprove-drift drift-0123456789abcdef0123456789abcdef
 expect_usage "missing --config refused" status
 expect_usage "relative --config refused" --config host-update.json status
 expect_passthrough "missing config file is left to the CLI (exit 3)" \

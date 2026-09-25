@@ -29,4 +29,10 @@ public static class HostUpdateCliExitCodes
 
     /// <summary>The rollback is durable but the admission fence release still has to be retried.</summary>
     public const int FenceReleasePending = 11;
+
+    /// <summary>
+    /// Drift since the recorded authorization was detected and not reapproved with the exact
+    /// token from <c>recover --preview</c> (issue #2998). Nothing was changed.
+    /// </summary>
+    public const int DriftUnapproved = 12;
 }

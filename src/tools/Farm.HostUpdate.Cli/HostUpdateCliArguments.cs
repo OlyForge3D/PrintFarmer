@@ -27,6 +27,8 @@ internal sealed partial class HostUpdateCliArguments
 
     public bool Json { get; private set; }
 
+    public string? ReapprovalToken { get; private set; }
+
     public static bool TryParse(IReadOnlyList<string> args, out HostUpdateCliArguments? parsed, out string? error)
     {
         parsed = null;
@@ -109,6 +111,15 @@ internal sealed partial class HostUpdateCliArguments
 
                     result.Confirm = true;
                     break;
+                case "--reapprove-drift" when command == HostUpdateCliCommand.Recover:
+                    if (!TryValue(args, ref i, out string? token))
+                    {
+                        error = "missing_value:--reapprove-drift";
+                        return false;
+                    }
+
+                    result.ReapprovalToken = token;
+                    break;
                 default:
                     error = "unknown_option:" + option;
                     return false;
@@ -148,6 +159,21 @@ internal sealed partial class HostUpdateCliArguments
                 error = "confirm_mismatch";
                 return false;
             }
+
+            if (result.ReapprovalToken is not null)
+            {
+                if (!result.Confirm)
+                {
+                    error = "reapprove_drift_requires_confirm";
+                    return false;
+                }
+
+                if (!ReapprovalTokenPattern().IsMatch(result.ReapprovalToken))
+                {
+                    error = "invalid_reapproval_token";
+                    return false;
+                }
+            }
         }
 
         parsed = result;
@@ -168,4 +194,7 @@ internal sealed partial class HostUpdateCliArguments
 
     [GeneratedRegex("^[A-Za-z0-9._:-]{1,128}$", RegexOptions.CultureInvariant)]
     private static partial Regex RequestIdPattern();
+
+    [GeneratedRegex("^drift-[0-9a-f]{32}$", RegexOptions.CultureInvariant)]
+    private static partial Regex ReapprovalTokenPattern();
 }

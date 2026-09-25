@@ -197,7 +197,8 @@ endpoints exist.
 
 **The packaged host-local status/recovery CLI is only partially delivered.** The
 first slice of #2980 (below) adds the API-independent engine entry point and
-wrappers, but packaging, host placement, the OS matrix, drift reapproval and
+wrappers, but packaging, host placement, the OS matrix, configuration/trust-root
+drift baselines (#3047) and
 provider/topology coverage are still open. That gap still blocks a claim of
 complete recovery support. Retain protected host evidence for the deployment
 owner; do not invent a recovery command, edit journal JSON, delete locks, or run
@@ -247,33 +248,92 @@ recorded in the journal.
 - `recover --preview` resolves the recorded request binding and reports the
   plan the coordinator would take (for example `FenceReleaseOnly` or
   `NeedsOperator`) plus any namespace-proof failures. It writes no outcome,
-  journal or fence state.
+  journal or fence state, and opens the host-state policy root read-only (no
+  write probe). It also reports (#2998):
+  - `identity`: the prior installed release (digests, platforms, recorded time)
+    and the recorded target authorization (release, manifest digest, source
+    commit, channel, host platform, trust root, policy revision/fingerprint,
+    per-service child digests), plus the current host platform.
+  - `downtime`: `impact` (`service_restart`, `restore_and_service_restart`,
+    `none` or `operator_required`), affected services, restored backup targets
+    and `timeoutBudgetSeconds`: one `ApplyTimeoutSeconds` per image pull plus
+    one for `compose up`, `VerifyTimeoutSeconds` plus one
+    `VerifyPollIntervalSeconds`, and one `BackupTimeoutSeconds` per restored
+    non-directory target (`basis: sum_of_configured_timeouts_not_an_upper_bound`).
+    It is an estimate, not an upper bound or a measurement: `unboundedSteps`
+    lists the steps with no configured timeout (`backup_checksum_verification`,
+    `owned_directory_copy`, `health_check_final_pass`). It is omitted when no
+    automatic path exists.
+  - `backupEvidence`: the latest backup manifest for the release, its targets,
+    file count and bytes, and how many recorded files are present at their
+    recorded length. Presence is not a checksum verification.
+  - `recoveryEvidence`: any recorded recovery outcome, uncertain phases, and
+    whether migration or apply started.
+  - `writerFence`: whether admission is closed, the fenceable writers, and what
+    recovery does to the fence.
+  - `drift`: the drift items since authorization, a configuration fingerprint,
+    and, when drift exists, the `reapprovalToken`.
 - `recover --confirm <release>` requires the release retyped exactly. It first
   proves that the configured root, compose files, owned directories, database
   and host tools are visible in this namespace (existence only; nothing is
-  executed), then runs the shared coordinator under the execution lock.
+  executed). It then refuses with exit 12 if the host drifted from the recorded
+  authorization and `--reapprove-drift <token>` does not carry the token the
+  current `--preview` printed. Only then does it run the shared coordinator under
+  the execution lock.
+
+Drift reapproval (#2998, first slice) compares the journaled authorization with
+the host now:
+
+| Drift code | Meaning |
+| --- | --- |
+| `host_platform_drift` | The current OS/architecture differs from the authorized host platform (or is unsupported). |
+| `policy_unverifiable` | The standing policy could not be read (host state disabled, root insecure, missing or corrupt). |
+| `policy_revision_drift` / `policy_fingerprint_drift` | The standing automatic-update policy changed since authorization. |
+| `channel_drift` | The policy channel no longer matches the authorized channel. |
+| `prior_state_changed_since_authorization` | The installed state's recorded time is later than the authorization. This is a timestamp heuristic, not content provenance: no authorization-time baseline of the prior state exists yet (#3047), so always review `identity.prior` before confirming. |
+| `prior_state_matches_target` | The installed state already reports the target release or manifest. |
+
+The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
+`WindowsSecurityAttested`, or `HostUpdates__HostState__*` environment
+variables), the same keys the API host uses. The token binds the recorded
+request, the drift items, the configuration fingerprint (root, compose files and
+their content hashes, service mappings, owned directories, host tool paths,
+provider and SQLite path, never connection-string secrets) and the installed
+state. Any further change invalidates it (`drift_reapproval_mismatch`); a token
+supplied when nothing drifted is refused (`drift_reapproval_unexpected`). The
+refusal lists the drift codes but never prints the token, so reapproval
+requires reading `--preview`. A release with a recorded `RolledBack` outcome has
+nothing to reapprove.
 
 | Exit | Meaning | Operator response |
 | --- | --- | --- |
 | 0 | Success (status read, preview plan, or `RolledBack`) | Complete the coordinated-restoration checks below before resuming anything. |
 | 2 | Usage error | Correct the command; nothing ran. |
 | 3 | Configuration invalid or namespace unproven | Stop. Run on the host/namespace that owns the state; do not create missing paths. |
-| 4 | State unreadable (corrupt journal, access denied, durable store unavailable) | Stop. Preserve the state directory for the deployment owner. |
+| 4 | State unreadable (corrupt journal or installed state, access denied, durable store unavailable) | Stop. Preserve the state directory for the deployment owner. |
 | 5 | No history for the release | Check the release id; do not recover a release that never executed. |
 | 6 | Refused (not in recovery, binding missing or mismatched) | Do not force; re-read status. |
 | 7 | Execution lock held | Another executor or recovery is active. Wait; never delete the lock. |
 | 10 | Needs operator (including no restorable backup, or canceled) | Follow the coordinated restoration procedure below. |
 | 11 | Fence release pending | Writers stay fenced. Re-run `recover --confirm` once the fence adapter is reachable. |
+| 12 | Drift not reapproved, or the installed state changed after evaluation (`drift_reapproval_stale`) | Run `--preview`, review every drift item with the deployment owner, then re-run `--confirm` with `--reapprove-drift <token>` only if recovery toward the recorded prior state is still correct. |
 
 Known limits of this slice:
 
-- `state/execution.lock` is a sentinel created by any lock acquisition, even
-  `status` and `--preview`. It carries no state; its presence does not mean an
-  update ran, and it must not be deleted by hand.
+- `status`, `--preview` and the CLI's own reads before `--confirm` take the
+  execution lock without rewriting an existing `state/execution.lock`. Only a
+  host that has never taken the lock gets the sentinel created. It carries no
+  state, and it must not be deleted by hand. The coordinator run by `--confirm`
+  rewrites it as any executor does.
 - Recovery reads the journal under the lock, releases it, then the coordinator
   re-acquires it (the API follows the same pattern). A concurrent executor
   could append in that window, so run recovery only while execution is
-  otherwise idle.
+  otherwise idle. The installed state is bound across that window: if the
+  coordinator's decision read (under its lock, before any restore or apply)
+  does not match the state the CLI evaluated, recovery fails closed with exit
+  12 `drift_reapproval_stale` and a durable `NeedsOperator` outcome; re-run
+  `--preview`. Policy and platform are not re-checked in that window because
+  the coordinator does not consume them.
 - A non-empty configured `ComposeFiles` list replaces the built-in
   `docker-compose.daily-registry.yml` default for both the API and the CLI
   (#2997); list every compose file the installation applies, in `-f` order.
@@ -285,8 +345,10 @@ Known limits of this slice:
   Windows runners against a stub CLI. This proves argument validation and
   exit-code pass-through only; it is not a supported-host declaration.
 - There is no published or signed package, installed host placement,
-  supported OS/distribution matrix, drift reapproval, downtime preview,
-  physical command reconciliation gate or PostgreSQL/SQL Server and
+  supported OS/distribution matrix, configuration/namespace, trust-root or
+  manifest-binding drift detection (#3047; those baselines are not journaled at
+  authorization, so today the reapproval token only binds the current
+  configuration), physical command reconciliation gate or PostgreSQL/SQL Server and
   split-topology proof yet; those remain follow-up work under #2658. Until the
   package exists, `PRINTFARMER_HOST_UPDATE_CLI_DIR` must point at a
   `dotnet publish` output of `src/tools/Farm.HostUpdate.Cli` built from the

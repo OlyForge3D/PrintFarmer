@@ -1,5 +1,6 @@
 ﻿using System.Text.Json;
 using Farm.Infrastructure.Services.HostUpdates;
+using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 
 namespace Farm.HostUpdate.Cli.Tests;
@@ -25,8 +26,18 @@ internal sealed class CliHostFixture : IDisposable
 
         Root = Path.Combine(localData, "pf-hostupdate-cli-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(StateDirectory);
+
+        // A host that has ever run the executor already has the lock sentinel; seeding it lets
+        // Snapshot() prove read-only commands never rewrite it.
+        File.WriteAllText(LockPath, "pid=0;started=seeded");
         Directory.CreateDirectory(Path.Combine(Root, "tools"));
         Directory.CreateDirectory(Path.Combine(Root, "owned"));
+        Directory.CreateDirectory(HostStateRoot);
+        if (OperatingSystem.IsLinux())
+        {
+            File.SetUnixFileMode(HostStateRoot, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute);
+        }
+
         File.WriteAllText(ComposeFile, "services: {}\n");
         File.WriteAllText(DockerPath, string.Empty);
         File.WriteAllText(Sqlite3Path, string.Empty);
@@ -37,9 +48,36 @@ internal sealed class CliHostFixture : IDisposable
         }
     }
 
+    /// <summary>
+    /// Provisions the default standing policy the journaled authorization records. Host-state
+    /// ownership validation supports only Windows and Linux; elsewhere nothing is provisioned, so
+    /// tests that need a readable policy report <c>policy_unverifiable</c> instead of the whole
+    /// suite failing to initialize.
+    /// </summary>
+    public async Task ProvisionPolicyAsync()
+    {
+        if (!HostStateSupported)
+        {
+            return;
+        }
+
+        using FileHostUpdateAutomationPolicyRepository policy = PolicyRepository();
+        await policy.ProvisionAsync(CancellationToken.None);
+    }
+
+    public static bool HostStateSupported => OperatingSystem.IsWindows() || OperatingSystem.IsLinux();
+
     public static readonly string[] OwnedDirectoryNames = ["app-data", "model-uploads", "gcode-storage", "slicer-profiles", "data-protection-keys"];
 
+    /// <summary>The policy identity recorded by <see cref="Request"/>: the provisioned default policy.</summary>
+    public static HostUpdateSchedulerSettings RecordedPolicy { get; } =
+        HostStateHostUpdateSchedulerSettings.ToSchedulerSettings(new HostUpdateAutomationPolicy());
+
+    public static string CurrentPlatform => HostUpdateHostPlatform.Current();
+
     public string Root { get; }
+
+    public string HostStateRoot => Path.Combine(Root, "host-state");
 
     public string StateDirectory => Path.Combine(Root, "state");
 
@@ -73,6 +111,9 @@ internal sealed class CliHostFixture : IDisposable
             ["HostUpdateExecution:HostExecutablePaths:sqlite3"] = Sqlite3Path,
             ["DB_PROVIDER"] = "sqlite",
             ["ConnectionStrings:Default"] = "Data Source=" + DatabasePath,
+            ["HostUpdates:HostState:Enabled"] = "true",
+            ["HostUpdates:HostState:RootPath"] = HostStateRoot,
+            ["HostUpdates:HostState:WindowsSecurityAttested"] = "true",
         };
         foreach (string name in OwnedDirectoryNames)
         {
@@ -83,16 +124,77 @@ internal sealed class CliHostFixture : IDisposable
         return new ConfigurationBuilder().AddInMemoryCollection(values).Build();
     }
 
-    public static HostUpdateExecutionRequest Request(string requestId = RequestId) =>
-        new(ReleaseId, 1, "sha256:" + new string('a', 64), new string('b', 40), HostUpdateExecutionChannel.Stable, Targets())
+    public static HostUpdateExecutionRequest Request(string requestId = RequestId, string? hostPlatform = null)
+    {
+        string platform = hostPlatform ?? CurrentPlatform;
+        return new(ReleaseId, 1, TargetManifestDigest, new string('b', 40), HostUpdateExecutionChannel.Stable, Targets(platform))
         {
             RequestId = requestId,
             TrustRoot = "trust-root",
-            PolicyRevision = 1,
-            PolicyFingerprint = "policy",
-            HostPlatform = "linux-amd64",
+            PolicyRevision = RecordedPolicy.PolicyRevision,
+            PolicyFingerprint = RecordedPolicy.Fingerprint,
+            HostPlatform = platform,
             AuthorizationKind = HostUpdateAuthorizationKind.Manual,
         };
+    }
+
+    public const string TargetManifestDigest = "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+
+    public FileHostUpdateAutomationPolicyRepository PolicyRepository() =>
+        new(HostStatePath.OpenReadOnly(new HostStateOptions { Enabled = true, RootPath = HostStateRoot, WindowsSecurityAttested = true }));
+
+    /// <summary>Changes the standing policy after authorization, advancing its revision and fingerprint.</summary>
+    public async Task ChangePolicyAsync(string channel = "stable")
+    {
+        using FileHostUpdateAutomationPolicyRepository repository = PolicyRepository();
+        HostUpdatePolicyReadResult current = repository.Read();
+        HostUpdatePolicyReadResult replaced = await repository.ReplaceAsync(
+            current.Policy with { Channel = channel, InsiderAcknowledged = channel == "insider" },
+            current.Policy.Revision,
+            CancellationToken.None);
+        replaced.Available.Should().BeTrue();
+    }
+
+    /// <summary>Records the prior verified installation; by default well before the journaled authorization.</summary>
+    public void SeedInstalledState(DateTimeOffset? recordedAt = null, string releaseId = "stable:1.2.2")
+    {
+        var digests = new Dictionary<string, string>(StringComparer.Ordinal)
+        {
+            ["api"] = "sha256:" + new string('1', 64),
+            ["frontend"] = "sha256:" + new string('2', 64),
+            ["monolith"] = "sha256:" + new string('3', 64),
+        };
+        var platforms = digests.Keys.ToDictionary(k => k, _ => CurrentPlatform, StringComparer.Ordinal);
+        var state = new InstalledHostState(
+            releaseId,
+            "sha256:" + new string('9', 64),
+            digests,
+            string.Join('+', digests.Keys.Order(StringComparer.Ordinal)),
+            recordedAt ?? DateTimeOffset.UtcNow.AddDays(-1),
+            platforms);
+        File.WriteAllText(Path.Combine(StateDirectory, "installed-state.json"), JsonSerializer.Serialize(state));
+    }
+
+    /// <summary>Writes a completed backup manifest (and its files) under the configured backup root.</summary>
+    public string SeedBackup(bool withFiles = true)
+    {
+        string releaseDirectory = new([.. ReleaseId.Select(c => Path.GetInvalidFileNameChars().Contains(c) ? '_' : c)]);
+        string run = Path.Combine(Root, "backups", releaseDirectory, "20260925000000000");
+        Directory.CreateDirectory(Path.Combine(run, "database"));
+        var files = new[]
+        {
+            new HostUpdateBackupManifestFile("database/farm.db", new string('0', 64), 4),
+            new HostUpdateBackupManifestFile("owned/app-data.tar", new string('0', 64), 2),
+        };
+        if (withFiles)
+        {
+            File.WriteAllText(Path.Combine(run, "database", "farm.db"), "abcd");
+        }
+
+        var manifest = new HostUpdateBackupManifest(ReleaseId, DateTimeOffset.UtcNow.AddMinutes(-30), ["database", "app-data"], files);
+        File.WriteAllText(Path.Combine(run, "manifest.json"), JsonSerializer.Serialize(manifest));
+        return run;
+    }
 
     public void SeedJournal(HostUpdateExecutionRequest request, params (HostUpdateExecutionState State, string Phase)[] entries)
     {
@@ -127,10 +229,9 @@ internal sealed class CliHostFixture : IDisposable
         File.Exists(OutcomePath) ? JsonSerializer.Deserialize<HostUpdateRecoveryOutcomeRecord>(File.ReadAllText(OutcomePath)) : null;
 
     /// <summary>Content hash of every file under the root, used to prove a command made no writes.</summary>
-    /// <remarks>The <c>execution.lock</c> sentinel is excluded: acquiring the lock creates it, and it carries no state.</remarks>
+    /// <remarks>The seeded <c>execution.lock</c> is included: read-only commands must not rewrite it.</remarks>
     public IReadOnlyDictionary<string, string> Snapshot() =>
         Directory.EnumerateFiles(Root, "*", SearchOption.AllDirectories)
-            .Where(path => !string.Equals(path, LockPath, StringComparison.Ordinal))
             .ToDictionary(
                 path => Path.GetRelativePath(Root, path),
                 path => Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(File.ReadAllBytes(path))),
@@ -152,13 +253,13 @@ internal sealed class CliHostFixture : IDisposable
         }
     }
 
-    private static HostUpdateExecutionTarget[] Targets() =>
+    private static HostUpdateExecutionTarget[] Targets(string platform) =>
     [
-        new("api", "linux-amd64", "sha256:" + new string('a', 64)),
-        new("frontend", "linux-amd64", "sha256:" + new string('b', 64)),
-        new("slicer-host", "linux-amd64", "sha256:" + new string('c', 64)),
-        new("printer-discovery", "linux-amd64", "sha256:" + new string('d', 64)),
-        new("orcaslicer-worker", "linux-amd64", "sha256:" + new string('e', 64)),
-        new("monolith", "linux-amd64", "sha256:" + new string('f', 64)),
+        new("api", platform, "sha256:" + new string('a', 64)),
+        new("frontend", platform, "sha256:" + new string('b', 64)),
+        new("slicer-host", platform, "sha256:" + new string('c', 64)),
+        new("printer-discovery", platform, "sha256:" + new string('d', 64)),
+        new("orcaslicer-worker", platform, "sha256:" + new string('e', 64)),
+        new("monolith", platform, "sha256:" + new string('f', 64)),
     ];
 }
