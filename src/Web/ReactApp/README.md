@@ -54,6 +54,16 @@ src/
 
 ## Development Guidelines
 
+### Typecheck gates
+
+Run `npm run ci:typecheck-app`, `npm run ci:typecheck-tests`, and
+`npm run ci:typecheck-src-coverage` before submitting changes. These commands
+exercise the gate harnesses and run their compiler or source-coverage checks.
+Both compiler gates require zero diagnostics; replacing one error with another
+cannot pass, and fixing all errors requires no diagnostic-baseline update.
+Keep the file-coverage floors and application `@ts-nocheck` guard intact.
+See [testing patterns](../../../docs/TESTING_PATTERNS.md) for the policy.
+
 ### Using Shared Components
 
 Always use shared components from `components/ui/` for consistency:

@@ -20,7 +20,6 @@ const scriptsDirectory = path.resolve(
 const projectDirectory = path.resolve(scriptsDirectory, "..");
 
 const baseline = {
-  applicationDiagnosticCount: 1,
   applicationNoCheckFileCount: 0,
   minimumAppFileCount: 1,
 };
@@ -30,17 +29,22 @@ const fileDiagnostic =
 function evaluateGate(overrides = {}) {
   return evaluate({
     baseline,
-    compilerResult: { status: 2, signal: null, error: undefined },
+    compilerResult: { status: 0, signal: null, error: undefined },
     listFilesResult: { status: 0, signal: null, error: undefined },
-    output: fileDiagnostic,
+    output: "",
     listFilesOutput: "src/services/example.ts",
     directory: projectDirectory,
     ...overrides,
   });
 }
 
-test("accepts an exact application diagnostic baseline", () => {
-  assert.equal(evaluateGate().ok, true);
+test("accepts zero diagnostics with the application-file and nocheck guards preserved", () => {
+  const result = evaluateGate();
+  assert.equal(result.ok, true);
+  assert.match(
+    result.message,
+    /0 diagnostic\(s\), 1 application file\(s\), and 0\/0 @ts-nocheck file\(s\)/,
+  );
 });
 
 test("fails compiler signal death and null status before another guard can match", () => {
@@ -80,37 +84,34 @@ test("fails nonzero compiler exits without file diagnostics", () => {
   assert.match(result.message, /without file diagnostics/);
 });
 
-test("fails statuses 1 and 3 despite otherwise-valid diagnostics", () => {
+test("fails statuses 1 and 3 before diagnostic checks", () => {
   for (const status of [1, 3]) {
     const result = evaluateGate({
       compilerResult: { status, signal: null, error: undefined },
+      output: fileDiagnostic,
     });
     assert.match(result.message, new RegExp(`status ${status}`));
   }
 });
 
-test("fails above and below the exact diagnostic baseline", () => {
-  const above = evaluateGate({
-    output: `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
-  });
-  const below = evaluateGate({ output: "" });
-  assert.match(
-    above.message,
-    /measured 2 diagnostic\(s\); expected exact count 1\. Fix the errors; do not raise the exact count/,
-  );
-  assert.match(
-    below.message,
-    /exited nonzero without file diagnostics/,
-  );
-
-  const staleBelow = evaluateGate({
-    output: "",
-    compilerResult: { status: 0, signal: null, error: undefined },
-  });
-  assert.match(
-    staleBelow.message,
-    /measured 0 diagnostic\(s\); expected exact count 1\. The exact count is stale; regenerate applicationDiagnosticCount in scripts\/app-typecheck-baseline\.json in the same commit/,
-  );
+test("fails every diagnostic even with a legacy allowance or compiler status zero (#2827)", () => {
+  for (const output of [
+    fileDiagnostic,
+    fileDiagnostic.replace("example.ts", "replacement.ts"),
+    fileDiagnostic.replace("TS2322", "TS2345"),
+    "node_modules/example/index.d.ts(1,1): error TS2322: Type error.",
+    `${fileDiagnostic}\n${fileDiagnostic.replace("(1,1)", "(2,1)")}`,
+  ]) {
+    for (const status of [0, 2]) {
+      const result = evaluateGate({
+        baseline: { ...baseline, applicationDiagnosticCount: 1 },
+        compilerResult: { status, signal: null, error: undefined },
+        output,
+      });
+      assert.equal(result.ok, false, `${status}: ${output}`);
+      assert.match(result.message, /expected zero diagnostics\. Fix the errors/);
+    }
+  }
 });
 
 test("fails an unsuccessful project-file listing before consuming its output (R2)", () => {
@@ -162,7 +163,10 @@ test("returns a boolean list-file output contract for every evaluation path", ()
       compilerResult: { status: 1, signal: null, error: undefined },
       output: "",
     },
-    { output: "" },
+    {
+      compilerResult: { status: 2, signal: null, error: undefined },
+      output: "",
+    },
     {
       listFilesResult: { status: 2, signal: null, error: undefined },
     },
@@ -196,7 +200,7 @@ test("fails when a counted application file is removed from the project", async 
       baseline: { ...baseline, minimumAppFileCount: 2 },
       compilerResult: { status: 0, signal: null, error: undefined },
       listFilesResult: { status: 0, signal: null, error: undefined },
-      output: fileDiagnostic,
+      output: "",
       directory: fixtureDirectory,
     };
 
@@ -238,17 +242,12 @@ test("fails above and below the exact @ts-nocheck file count (R2)", async () => 
       "// @ts-nocheck\nexport const b: number = 'not a number';\n",
     );
 
-    // A NEW file carrying the directive contributes zero diagnostics either
-    // way, so applicationDiagnosticCount alone cannot see it (the exploit
-    // this closes). The nocheck count must catch it. output carries exactly
-    // one diagnostic matching baseline.applicationDiagnosticCount so the
-    // diagnostic-count gate stays satisfied and only the nocheck gate fails,
-    // isolating the assertion below to the mechanism under test.
+    // The directive hides all diagnostics, so only the nocheck guard fails.
     const above = evaluate({
       baseline,
       compilerResult: { status: 0, signal: null, error: undefined },
       listFilesResult: { status: 0, signal: null, error: undefined },
-      output: fileDiagnostic,
+      output: "",
       listFilesOutput: "src/services/example.ts\nsrc/services/nocheck.ts",
       directory: fixtureDirectory,
     });
@@ -264,7 +263,7 @@ test("fails above and below the exact @ts-nocheck file count (R2)", async () => 
       baseline: { ...baseline, applicationNoCheckFileCount: 1 },
       compilerResult: { status: 0, signal: null, error: undefined },
       listFilesResult: { status: 0, signal: null, error: undefined },
-      output: fileDiagnostic,
+      output: "",
       listFilesOutput: "src/services/example.ts",
       directory: fixtureDirectory,
     });
@@ -325,7 +324,7 @@ test("reports the diagnostic-count and @ts-nocheck-count failures together, not 
     listFilesOutput: "src/services/example.ts\ndoes-not-exist.ts",
     baseline: { ...baseline, applicationNoCheckFileCount: 1 },
   });
-  assert.match(result.message, /measured 2 diagnostic\(s\); expected exact count 1/);
+  assert.match(result.message, /measured 2 diagnostic\(s\); expected zero diagnostics/);
   assert.match(
     result.message,
     /found 0 @ts-nocheck file\(s\) under src\/; expected exact count 1/,
@@ -333,41 +332,22 @@ test("reports the diagnostic-count and @ts-nocheck-count failures together, not 
 });
 
 test("fails missing, malformed, and non-object baselines", () => {
-  assert.match(
-    evaluateGate({ baseline: { applicationNoCheckFileCount: 0 } }).message,
-    /applicationDiagnosticCount/,
-  );
-  assert.match(
-    evaluateGate({ baseline: { applicationDiagnosticCount: 1 } }).message,
-    /applicationNoCheckFileCount/,
-  );
-  assert.match(
-    evaluateGate({
-      baseline: {
-        applicationDiagnosticCount: 1,
-        applicationNoCheckFileCount: 0,
-      },
-    }).message,
-    /minimumAppFileCount must be a positive integer\./,
-  );
-  for (const minimumAppFileCount of [0, -1]) {
+  for (const applicationNoCheckFileCount of [undefined, -1, 1.5, "0"]) {
     assert.equal(
       evaluateGate({
-        baseline: {
-          applicationDiagnosticCount: 1,
-          applicationNoCheckFileCount: 0,
-          minimumAppFileCount,
-        },
+        baseline: { ...baseline, applicationNoCheckFileCount },
+      }).message,
+      "Invalid application type-check baseline: applicationNoCheckFileCount must be a non-negative integer.",
+    );
+  }
+  for (const minimumAppFileCount of [undefined, 0, -1, 1.5, "1"]) {
+    assert.equal(
+      evaluateGate({
+        baseline: { ...baseline, minimumAppFileCount },
       }).message,
       "Invalid application type-check baseline: minimumAppFileCount must be a positive integer.",
     );
   }
-  assert.match(
-    evaluateGate({
-      baseline: { applicationDiagnosticCount: 1.5, applicationNoCheckFileCount: 0 },
-    }).message,
-    /applicationDiagnosticCount/,
-  );
   assert.match(
     evaluateGate({ baseline: null }).message,
     /baseline must be an object/,
@@ -513,8 +493,6 @@ test("CLI prints nonempty list-file output when the application file floor fails
         'const listedPath = "src/services/known.ts";',
         'if (process.argv.includes("--listFilesOnly")) {',
         "  process.stdout.write(`${listedPath}\\n`);",
-        "} else {",
-        '  process.stdout.write("src/services/example.ts(1,1): error TS2322: Type error.\\n");',
         "}",
       ].join("\n"),
     );
@@ -681,7 +659,7 @@ test("CLI fails closed with a nonzero exit on a malformed baseline JSON instead 
     // point, which is the only thing that can catch that regression.
     await writeFile(
       path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
-      "{ applicationDiagnosticCount: 1, ",
+      "{ minimumAppFileCount: 1, ",
     );
     // A tsc stub that exits cleanly with no output is intentional: with the
     // correct (unguarded) JSON.parse, it must never run at all, because the
@@ -740,3 +718,97 @@ test("typecheck-app-core.mjs imports its @ts-nocheck detection from typecheck-te
   assert.doesNotMatch(source, /const\s+\w*NO_?CHECK\w*\s*=\s*\//i);
   assert.doesNotMatch(source, /function\s+hasTsNoCheckDirective/);
 });
+
+// Obsolete count fields must never authorize diagnostics in either CLI.
+for (const gate of [
+  {
+    name: "application",
+    script: "typecheck-app.mjs",
+    baselineFile: "app-typecheck-baseline.json",
+    baseline: { ...baseline, applicationDiagnosticCount: 1 },
+    listedFile: "src/services/example.ts",
+  },
+  {
+    name: "test",
+    script: "typecheck-tests.mjs",
+    baselineFile: "test-typecheck-baseline.json",
+    baseline: { minimumTestFileCount: 1, testDiagnosticCount: 1 },
+    listedFile: "src/test/example.test.ts",
+  },
+]) {
+  test(`${gate.name} CLI rejects same-count diagnostic swaps and accepts complete removal without a baseline edit (#2827)`, async () => {
+    const fixtureDirectory = await mkdtemp(
+      path.join(tmpdir(), `typecheck-${gate.name}-zero-diagnostics-`),
+    );
+
+    try {
+      await mkdir(path.join(fixtureDirectory, "scripts"), { recursive: true });
+      await mkdir(path.join(fixtureDirectory, "node_modules/typescript/bin"), {
+        recursive: true,
+      });
+      for (const script of [
+        "typecheck-app.mjs",
+        "typecheck-app-core.mjs",
+        "typecheck-tests.mjs",
+        "typecheck-tests-core.mjs",
+      ]) {
+        await cp(
+          path.join(scriptsDirectory, script),
+          path.join(fixtureDirectory, "scripts", script),
+        );
+      }
+      const baselinePath = path.join(
+        fixtureDirectory, "scripts", gate.baselineFile,
+      );
+      const baselineJson = JSON.stringify(gate.baseline);
+      await writeFile(baselinePath, baselineJson);
+      const listedFile = path.join(fixtureDirectory, gate.listedFile);
+      await mkdir(path.dirname(listedFile), { recursive: true });
+      await writeFile(listedFile, "export const checked = 1;\n");
+      const diagnosticPath = path.join(fixtureDirectory, "diagnostic.json");
+      await writeFile(
+        path.join(fixtureDirectory, "node_modules/typescript/bin/tsc"),
+        [
+          'if (process.argv.includes("--listFilesOnly")) {',
+          `  process.stdout.write(${JSON.stringify(`${gate.listedFile}\n`)});`,
+          "} else {",
+          `  const diagnostic = JSON.parse(require("node:fs").readFileSync(${JSON.stringify(diagnosticPath)}, "utf8"));`,
+          "  process.stdout.write(diagnostic.output);",
+          "  process.exitCode = diagnostic.status;",
+          "}",
+        ].join("\n"),
+      );
+
+      const original = `${gate.listedFile}(1,1): error TS2322: Type error.\n`;
+      const outputs = [
+        original,
+        original.replace("example", "replacement"),
+        original.replace("TS2322", "TS2345"),
+        original.replace("Type error.", "Different error."),
+      ];
+      for (const output of [...outputs, ""]) {
+        for (const status of output ? [0, 2] : [0]) {
+          await writeFile(diagnosticPath, JSON.stringify({ output, status }));
+          const result = spawnSync(
+            process.execPath,
+            [path.join(fixtureDirectory, "scripts", gate.script)],
+            { encoding: "utf8", timeout: 10_000 },
+          );
+          assert.equal(result.error, undefined, result.error?.message);
+          assert.equal(result.stdout, output);
+          assert.equal(result.status, output ? 1 : 0, result.stderr);
+          if (output) {
+            assert.match(result.stderr, /expected zero diagnostics\. Fix the errors/);
+            assert.doesNotMatch(result.stderr, /type-check passed/);
+          } else {
+            assert.match(result.stderr, /type-check passed with 0/);
+            assert.doesNotMatch(result.stderr, /regenerate|stale/i);
+          }
+        }
+      }
+      assert.equal(await readFile(baselinePath, "utf8"), baselineJson);
+    } finally {
+      await rm(fixtureDirectory, { recursive: true, force: true });
+    }
+  });
+}

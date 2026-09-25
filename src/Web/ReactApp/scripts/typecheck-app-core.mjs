@@ -1,16 +1,5 @@
-// Ratchet for application source (src/, excluding test/fixture roots) type
-// errors, mirroring scripts/typecheck-tests-core.mjs. tsconfig.app.json
-// already excludes src/test/**, __tests__/**, and *.test.*/*.spec.* files,
-// so every diagnostic this module sees is genuine application source — there
-// is no test/application split to classify here, unlike the test ratchet.
-//
-// Known limitation (R6): applicationDiagnosticCount is an exact *count* of
-// diagnostics, not an exact *set*/fingerprint of them. Fixing one error while
-// introducing a different one can leave the count -- and therefore this gate
-// -- unchanged. Closing that gap would require per-diagnostic identity
-// (e.g. rule + location) tracking, which is a separate, larger change; see
-// the test ratchet in scripts/typecheck-tests-core.mjs, which has the same
-// count-based limitation by the same design.
+// Both compiler gates require zero diagnostics. Only coverage and @ts-nocheck
+// counts remain baselined; no diagnostic allowance can hide error swaps (#2827).
 import { isAbsolute, relative, resolve } from "node:path";
 import { hasTsNoCheckDirective, toRealPath } from "./typecheck-tests-core.mjs";
 
@@ -46,16 +35,9 @@ function isAppSourceFile(path, directory) {
   );
 }
 
-// Counts application source files carrying a `@ts-nocheck` directive (#2811
-// item 5 / R2). Reuses the exact same detector the test ratchet uses so the
-// two gates cannot silently drift apart. The exploit this closes: adding the
-// directive to an EXISTING file removes its diagnostics, which already trips
-// the `!==` diagnostic-count comparison below and fails loudly. But adding a
-// brand-NEW file that carries the directive from creation contributes zero
-// diagnostics either way -- applicationDiagnosticCount stays exactly at
-// baseline and the gate would otherwise pass silently, with no baseline edit
-// and no signal to reviewers. Gating this count separately closes that
-// silent path.
+// A file carrying @ts-nocheck contributes no diagnostics, so a zero-error gate
+// alone cannot detect that opt-out. Reuse the test gate's directive detector
+// to keep both gates consistent.
 //
 // Returns both the count and the matched, project-relative paths (deduped by
 // realpath, same as the count) so a gate failure can name the offending
@@ -119,13 +101,6 @@ export function formatSinkOutput(stdout, stderr) {
 export function validateBaseline(baseline) {
   if (!baseline || typeof baseline !== "object") {
     return "baseline must be an object.";
-  }
-
-  if (
-    !Number.isInteger(baseline.applicationDiagnosticCount) ||
-    baseline.applicationDiagnosticCount < 0
-  ) {
-    return "applicationDiagnosticCount must be a non-negative integer.";
   }
 
   if (
@@ -245,13 +220,9 @@ export function evaluate({
     showListFilesOutput = true;
   }
 
-  if (diagnostics.fileDiagnostics.length !== baseline.applicationDiagnosticCount) {
-    const direction =
-      diagnostics.fileDiagnostics.length > baseline.applicationDiagnosticCount
-        ? "Fix the errors; do not raise the exact count."
-        : "The exact count is stale; regenerate applicationDiagnosticCount in scripts/app-typecheck-baseline.json in the same commit.";
+  if (diagnostics.fileDiagnostics.length > 0) {
     failures.push(
-      `Application type-check measured ${diagnostics.fileDiagnostics.length} diagnostic(s); expected exact count ${baseline.applicationDiagnosticCount}. ${direction}`,
+      `Application type-check measured ${diagnostics.fileDiagnostics.length} diagnostic(s); expected zero diagnostics. Fix the errors.`,
     );
   }
 
@@ -281,7 +252,7 @@ export function evaluate({
 
   return {
     ok: true,
-    message: `Application type-check passed with ${diagnostics.fileDiagnostics.length}/${baseline.applicationDiagnosticCount} baseline diagnostic(s) (exact count, not diagnostic identity), ${applicationFileCount} application file(s), and ${noCheck.count}/${baseline.applicationNoCheckFileCount} @ts-nocheck file(s). See #2820 to drive the diagnostic count to zero.`,
+    message: `Application type-check passed with 0 diagnostic(s), ${applicationFileCount} application file(s), and ${noCheck.count}/${baseline.applicationNoCheckFileCount} @ts-nocheck file(s).`,
     showListFilesOutput: false,
   };
 }
