@@ -9,8 +9,9 @@
 // send an agent into work whose prerequisites have not landed, which is the
 // exact failure this gate exists to prevent.
 
-import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+
+import { readGhJson } from './gh-api.mjs';
 
 export const epicLabel = 'type:epic';
 export const flatGraphMarker = '<!-- epic-dependencies: flat -->';
@@ -406,23 +407,11 @@ function parseArgs(argv) {
 }
 
 function ghApi(path) {
-  const output = execFileSync('gh', ['api', path], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  return JSON.parse(output);
+  return readGhJson(['api', path]);
 }
 
 function ghApiPaginated(path) {
-  const output = execFileSync(
-    'gh',
-    ['api', '--paginate', '--slurp', path],
-    {
-      encoding: 'utf8',
-      stdio: ['ignore', 'pipe', 'inherit'],
-    },
-  );
-  const pages = JSON.parse(output);
+  const pages = readGhJson(['api', '--paginate', '--slurp', path]);
   return pages.flatMap((page) => Array.isArray(page) ? page : [page]);
 }
 
