@@ -7,7 +7,10 @@
 #
 #   printfarmer-host-update.sh --config /abs/host-update.json status [--release <id>] [--json]
 #   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --preview [--json]
-#   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--json]
+#   printfarmer-host-update.sh --config /abs/host-update.json recover --release <id> [--request-id <id>] --confirm <id> [--reapprove-drift <token>] [--json]
+#
+# --reapprove-drift takes the token printed by `recover --preview` when the host drifted since the
+# recorded authorization (CLI exit 12).
 #
 # Environment:
 #   PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing Farm.HostUpdate.Cli.dll (required)
@@ -23,6 +26,7 @@ source "$SCRIPT_DIR/common-utils.sh"
 
 readonly RELEASE_RE='^(stable|insider):[0-9A-Za-z.+-]{1,128}$'
 readonly REQUEST_RE='^[A-Za-z0-9._:-]{1,128}$'
+readonly DRIFT_TOKEN_RE='^drift-[0-9a-f]{32}$'
 
 usage() {
     sed -n '8,10p' "${BASH_SOURCE[0]}" | sed 's/^#   //' >&2
@@ -86,6 +90,11 @@ while [[ $# -gt 0 ]]; do
             ;;
         --request-id)
             [[ $# -ge 2 && "$2" =~ $REQUEST_RE ]] || fail_usage "--request-id requires [A-Za-z0-9._:-]{1,128}"
+            args+=("$1" "$2")
+            shift 2
+            ;;
+        --reapprove-drift)
+            [[ $# -ge 2 && "$2" =~ $DRIFT_TOKEN_RE ]] || fail_usage "--reapprove-drift requires the drift-<32 hex> token printed by --preview"
             args+=("$1" "$2")
             shift 2
             ;;

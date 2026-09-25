@@ -10,7 +10,7 @@
 
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
       printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
-      printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-Json]
+      printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-Json]
       printfarmer-host-update.ps1 help
 
     Environment:
@@ -28,11 +28,12 @@ $ErrorActionPreference = 'Stop'
 
 $ReleasePattern = '^(stable|insider):[0-9A-Za-z.+-]{1,128}$'
 $RequestPattern = '^[A-Za-z0-9._:-]{1,128}$'
+$DriftTokenPattern = '^drift-[0-9a-f]{32}$'
 $UsageText = @'
 usage:
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json status [-Release <id>] [-Json]
   printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Preview [-Json]
-  printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-Json]
+  printfarmer-host-update.ps1 -Config C:\abs\host-update.json recover -Release <id> [-RequestId <id>] -Confirm <id> [-ReapproveDrift <token>] [-Json]
   printfarmer-host-update.ps1 help
 '@
 
@@ -58,6 +59,7 @@ $command = $null
 $release = $null
 $requestId = $null
 $confirm = $null
+$reapproveDrift = $null
 $preview = $false
 $json = $false
 
@@ -86,6 +88,11 @@ while ($index -lt $rawArgs.Count) {
             if ($null -ne $confirm) { Exit-Usage '-Confirm may only be given once' }
             if (-not $hasValue -or $rawArgs[$index + 1] -cnotmatch $ReleasePattern) { Exit-Usage '-Confirm requires the release id retyped exactly' }
             $confirm = $rawArgs[$index + 1]; $index += 2; continue
+        }
+        '-reapprovedrift' {
+            if ($null -ne $reapproveDrift) { Exit-Usage '-ReapproveDrift may only be given once' }
+            if (-not $hasValue -or $rawArgs[$index + 1] -cnotmatch $DriftTokenPattern) { Exit-Usage '-ReapproveDrift requires the drift-<32 hex> token printed by -Preview' }
+            $reapproveDrift = $rawArgs[$index + 1]; $index += 2; continue
         }
         '-preview' {
             if ($preview) { Exit-Usage '-Preview may only be given once' }
@@ -141,6 +148,7 @@ if ($null -ne $release) { $cliArgs.Add('--release'); $cliArgs.Add($release) }
 if ($null -ne $requestId) { $cliArgs.Add('--request-id'); $cliArgs.Add($requestId) }
 if ($preview) { $cliArgs.Add('--preview') }
 if ($null -ne $confirm) { $cliArgs.Add('--confirm'); $cliArgs.Add($confirm) }
+if ($null -ne $reapproveDrift) { $cliArgs.Add('--reapprove-drift'); $cliArgs.Add($reapproveDrift) }
 if ($json) { $cliArgs.Add('--json') }
 
 & $dotnetHost $cliDll --config $config @cliArgs

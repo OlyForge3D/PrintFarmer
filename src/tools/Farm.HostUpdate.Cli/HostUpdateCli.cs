@@ -22,14 +22,19 @@ public static partial class HostUpdateCli
         Usage:
           printfarmer-host-update status [--release <releaseId>] [--json]
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --preview [--json]
-          printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--json]
+          printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--reapprove-drift <token>] [--json]
 
         Configuration comes from --config <absolute-json-path> and environment variables
-        (HostUpdateExecution__*, DB_PROVIDER, ConnectionStrings__Default). Credentials are never
-        accepted as arguments. This tool is not rollout authorization.
+        (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
+        Credentials are never accepted as arguments. This tool is not rollout authorization.
+
+        When the host has drifted from the recorded authorization (platform, standing policy,
+        prior installed state), --confirm is refused until it is reapproved with the exact
+        --reapprove-drift token printed by --preview.
 
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,
-        5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending.
+        5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending,
+        12 drift not reapproved.
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -206,6 +211,8 @@ public static partial class HostUpdateCli
         }
 
         IReadOnlyList<HostUpdateExecutionActivity> activities;
+        InstalledHostState? installed;
+        HostUpdateRecoveryOutcomeRecord? existingOutcome;
         IHostUpdateExecutionLease? lease = TryAcquireLock(provider);
         if (lease is null)
         {
@@ -217,6 +224,9 @@ public static partial class HostUpdateCli
             try
             {
                 activities = provider.GetRequiredService<IHostUpdateExecutionJournal>().Read(args.ReleaseId!);
+                installed = await provider.GetRequiredService<IInstalledHostStateStore>().ReadAsync(cancellationToken).ConfigureAwait(false);
+                existingOutcome = await provider.GetRequiredService<IHostUpdateRecoveryOutcomeStore>()
+                    .ReadAsync(args.ReleaseId!, cancellationToken).ConfigureAwait(false);
             }
             catch (Exception exception) when (IsStateFailure(exception))
             {
@@ -231,19 +241,61 @@ public static partial class HostUpdateCli
             return await EmitAsync(output, args.Json, code, new CliFailure(resolution.ErrorCode!, [])).ConfigureAwait(false);
         }
 
+        HostUpdateExecutionRequest request = resolution.Request!;
+        DatabaseProviderConfiguration database = DatabaseProviderConfiguration.FromConfiguration(configuration);
+        string configurationFingerprint = HostUpdateRecoveryDrift.ConfigurationFingerprint(options, database);
+        string? currentPlatform = HostUpdateRecoveryDrift.CurrentPlatform();
+
+        // A terminal RolledBack outcome makes confirm a durable no-op, so there is nothing to reapprove.
+        HostUpdateDriftReport drift = existingOutcome is { Outcome: HostUpdateRecoveryOutcome.RolledBack }
+            ? new HostUpdateDriftReport([], configurationFingerprint, null)
+            : HostUpdateRecoveryDrift.Detect(
+                request,
+                activities,
+                installed,
+                existingOutcome,
+                HostUpdateRecoveryDrift.ReadPolicy(configuration),
+                currentPlatform,
+                configurationFingerprint);
+
+        if (args.Confirm)
+        {
+            string? driftRefusal = DriftRefusal(drift, args.ReapprovalToken);
+            if (driftRefusal is not null)
+            {
+                // The token is deliberately withheld here: reapproval requires reading --preview.
+                return await EmitAsync(output, args.Json, HostUpdateCliExitCodes.DriftUnapproved, new CliFailure(driftRefusal, [.. drift.Items.Select(item => item.Code)])).ConfigureAwait(false);
+            }
+        }
+
         using IServiceScope scope = provider.CreateScope();
         try
         {
             if (!args.Confirm)
             {
                 HostUpdateRecoveryPlan plan = await scope.ServiceProvider.GetRequiredService<IHostUpdateRecoveryPlanner>()
-                    .PlanAsync(resolution.Request!, activities, cancellationToken).ConfigureAwait(false);
+                    .PlanAsync(request, activities, cancellationToken).ConfigureAwait(false);
+                (HostUpdateBackupManifest Manifest, string RunDirectory)? backup = await scope.ServiceProvider.GetRequiredService<IHostUpdateBackupManifestLocator>()
+                    .FindLatestAsync(request.ReleaseId, cancellationToken).ConfigureAwait(false);
+                bool admissionClosed = await provider.GetRequiredService<IHostUpdateAdmissionGate>().IsClosedAsync(cancellationToken).ConfigureAwait(false);
+                IEnumerable<string> writers = provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>().Select(writer => writer.Name);
                 int planCode = plan.Kind == HostUpdateRecoveryPlanKind.NeedsOperator ? HostUpdateCliExitCodes.NeedsOperator : HostUpdateCliExitCodes.Success;
-                return await EmitAsync(output, args.Json, planCode, new PreviewReport(args.ReleaseId!, resolution.Request!.RequestId, plan, proofFailures)).ConfigureAwait(false);
+                var preview = new PreviewReport(
+                    args.ReleaseId!,
+                    request.RequestId,
+                    plan,
+                    proofFailures,
+                    HostUpdateRecoveryPreview.Identity(request, installed, currentPlatform),
+                    HostUpdateRecoveryPreview.Downtime(plan, installed, backup?.Manifest, options),
+                    HostUpdateRecoveryPreview.Backup(request.ReleaseId, backup),
+                    HostUpdateRecoveryPreview.Recovery(activities, existingOutcome),
+                    HostUpdateRecoveryPreview.WriterFence(plan, admissionClosed, writers),
+                    HostUpdateRecoveryPreview.Drift(drift));
+                return await EmitAsync(output, args.Json, planCode, preview).ConfigureAwait(false);
             }
 
             HostUpdateRecoveryResult result = await scope.ServiceProvider.GetRequiredService<IHostUpdateRecoveryCoordinator>()
-                .RecoverAsync(resolution.Request!, activities, cancellationToken).ConfigureAwait(false);
+                .RecoverAsync(request, activities, cancellationToken).ConfigureAwait(false);
             int resultCode = HostUpdateAvailabilityCodes.IsDurableUnavailable(result.Detail)
                 ? HostUpdateCliExitCodes.StateUnreadable
                 : result.Outcome switch
@@ -267,6 +319,25 @@ public static partial class HostUpdateCli
         {
             return await EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable, new CliFailure(StateFailureCode(exception), [])).ConfigureAwait(false);
         }
+    }
+
+    private static string? DriftRefusal(HostUpdateDriftReport drift, string? token)
+    {
+        if (!drift.HasDrift)
+        {
+            return token is null ? null : "drift_reapproval_unexpected";
+        }
+
+        if (token is null)
+        {
+            return "drift_reapproval_required";
+        }
+
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(token),
+            System.Text.Encoding.UTF8.GetBytes(drift.ReapprovalToken!))
+            ? null
+            : "drift_reapproval_mismatch";
     }
 
     private static IHostUpdateExecutionLease? TryAcquireLock(IServiceProvider provider)
@@ -388,7 +459,17 @@ public static partial class HostUpdateCli
 
     private sealed record StatusReport(bool LockHeld, bool AdmissionClosed, ReleaseSummary[]? Releases, ReleaseDetail? Release);
 
-    private sealed record PreviewReport(string ReleaseId, string RequestId, HostUpdateRecoveryPlan Plan, IReadOnlyList<string> NamespaceProofFailures);
+    private sealed record PreviewReport(
+        string ReleaseId,
+        string RequestId,
+        HostUpdateRecoveryPlan Plan,
+        IReadOnlyList<string> NamespaceProofFailures,
+        HostUpdateRecoveryIdentity Identity,
+        HostUpdateDowntimePreview Downtime,
+        HostUpdateBackupEvidence BackupEvidence,
+        HostUpdateRecoveryEvidence RecoveryEvidence,
+        HostUpdateWriterFencePreview WriterFence,
+        HostUpdateDriftPreview Drift);
 
     private sealed record RecoveryReport(string ReleaseId, string RequestId, HostUpdateRecoveryOutcome Outcome, string Detail);
 }

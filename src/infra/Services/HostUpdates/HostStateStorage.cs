@@ -54,7 +54,13 @@ public sealed class HostStatePath
         Root = HostStateFileSecurity.PrepareAndValidateRoot(options.Value);
     }
 
+    private HostStatePath(string root) => Root = root;
+
     public string Root { get; }
+
+    /// <summary>Opens the root with full security validation but without the write probe.</summary>
+    public static HostStatePath OpenReadOnly(HostStateOptions options) =>
+        new(HostStateFileSecurity.PrepareAndValidateRoot(options, verifyWritable: false));
 
     public string Resolve(string relativeName)
     {
@@ -134,7 +140,14 @@ public static class HostStateFileSecurity
 {
     private const UnixFileMode UnsafeUnixWrite = UnixFileMode.GroupWrite | UnixFileMode.OtherWrite;
 
-    public static string PrepareAndValidateRoot(HostStateOptions options)
+    public static string PrepareAndValidateRoot(HostStateOptions options) => PrepareAndValidateRoot(options, verifyWritable: true);
+
+    /// <summary>
+    /// Validates the host-state root. <paramref name="verifyWritable"/> <c>false</c> performs every
+    /// ownership, permission and reparse check but skips the create/delete write probe, for
+    /// read-only consumers (issue #2998) that must not touch the directory at all.
+    /// </summary>
+    public static string PrepareAndValidateRoot(HostStateOptions options, bool verifyWritable)
     {
         ArgumentNullException.ThrowIfNull(options);
         if (string.IsNullOrWhiteSpace(options.RootPath) || !Path.IsPathFullyQualified(options.RootPath))
@@ -181,6 +194,11 @@ public static class HostStateFileSecurity
             {
                 throw new SecurityException("host_state_owner_validation_unavailable", ex);
             }
+        }
+
+        if (!verifyWritable)
+        {
+            return root;
         }
 
         string probe = Path.Combine(root, ".host-state-write-test-" + Guid.NewGuid().ToString("N"));

@@ -198,6 +198,32 @@ public sealed class HostStatePersistenceTests
         }
     }
 
+    [HostStateOwnerValidationFact]
+    public void HostStatePath_OpenReadOnly_ValidatesWithoutAWriteProbe()
+    {
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        try
+        {
+            Assert.Throws<DirectoryNotFoundException>(() => HostStatePath.OpenReadOnly(OptionsFor(root)));
+            Assert.False(Directory.Exists(root));
+
+            Directory.CreateDirectory(root);
+            DateTime writeTimeBefore = Directory.GetLastWriteTimeUtc(root);
+            HostStatePath paths = HostStatePath.OpenReadOnly(OptionsFor(root));
+
+            Assert.Equal(Path.Combine(paths.Root, "update-automation-policy.json"), paths.Resolve("update-automation-policy.json"));
+            Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+            Assert.Equal(writeTimeBefore, Directory.GetLastWriteTimeUtc(root));
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+            {
+                Directory.Delete(root, true);
+            }
+        }
+    }
+
     [Fact]
     public void HostStateOptionsValidator_DefaultDisabledAllowsEmptyRoot_AndEnabledMissingRootFails()
     {
