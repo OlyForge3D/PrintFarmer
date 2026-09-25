@@ -13,6 +13,10 @@ state store or scheduled coordinator/consumer layer on top of it (see #2966).
   or an open PR is claimed, so skip it. Declare each host's tooling in
   `~/.squad/machine-capabilities.json`; issues labelled `needs:xcode` run only on
   a host whose `capabilities` include `xcode` (the Mac).
+- **Per-host limits:** a host may cap concurrent issue sessions with
+  `"maxConcurrent": { "xcode": 1, "other": 1 }` in the same file. The Mac mini
+  uses exactly that; hosts without `maxConcurrent` are uncapped. See
+  `.squad/ralph-instructions.md` for how Ralph counts sessions.
 
 ## Ralph — Work Monitor
 
@@ -277,7 +281,7 @@ Never reconstruct or fabricate what the session might have shown.
 **Xcode/CoreSimulator concurrency is per-Mac.** One physical Mac runs only one
 `xcodebuild`/`simctl` invocation at a time; git worktrees do not isolate DerivedData,
 simulator state or CoreSimulator services. Run at most one `needs:xcode` issue per
-Mac at a time. Every mobile test run uses a run-unique result bundle path, log path
+Mac at a time, and never more than the host's `maxConcurrent` limits. Every mobile test run uses a run-unique result bundle path, log path
 and an explicit simulator UDID — see `mobile/scripts/run-tests.py` and
 `mobile/AGENTS.md`.
 

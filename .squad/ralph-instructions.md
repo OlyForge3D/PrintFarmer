@@ -45,7 +45,26 @@
 ## Ralph, Go!
 
 Read this file for your full instructions.  Follow ALL sections.
-MAXIMIZE PARALLELISM — spawn agents for ALL actionable issues simultaneously.
+MAXIMIZE PARALLELISM — spawn agents for ALL actionable issues simultaneously,
+up to this host's limits (see "Host Limits" below).
+
+### Host Limits
+
+Read `~/.squad/machine-capabilities.json` before starting or resuming any issue.
+If it has `maxConcurrent`, never exceed it:
+- `maxConcurrent.xcode` — issue sessions for `needs:xcode` issues.
+- `maxConcurrent.other` — issue sessions for every other issue.
+
+Count every issue session you started on this host that is running, idle with
+unmerged work, or interrupted, and that is not yet merged, blocked, or handed
+off. Review sub-agents run inside their issue session and do not count
+separately. When both slots are full, start nothing new: advance an existing
+session instead, and leave other issues unassigned so another host can take them.
+Resume interrupted sessions one slot at a time, highest priority first.
+
+The Mac mini sets `{ "xcode": 1, "other": 1 }` because it runs out of memory
+with more. When running `squad watch --execute` there, pass `--max-concurrent 2`.
+A host without `maxConcurrent` is uncapped.
 
 ### Issue Selection
 
