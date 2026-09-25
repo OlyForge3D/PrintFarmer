@@ -138,6 +138,13 @@ access-controlled and outside the redistributable bundle.
   `--prior-recovery-set <dir>`. Each local file must match its bound digest and
   is copied into the quarantine before authentication.
 
+The index is unsigned, so the reference it carries is only a claim. `verify`
+therefore requires the operator's own expected reference through
+`--protected-backup <reference.json>` whenever the bundle binds a prior set,
+and fails closed unless every field equals the index's reference; supplying one
+for a bundle without a prior set is also rejected. The operator's record of the
+backup, not the transported bundle, is the trust source for the reference.
+
 Both `assemble` and `verify` fail closed unless the prior set is on the same
 channel, strictly older than the target (by sequence and version), its signed
 CLI checksum list names exactly every supported archive and SBOM, and Cosign

@@ -618,7 +618,7 @@ function validateIndex(bytes, entries, limits) {
 }
 
 export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run, priorRecoverySet,
-  limits = offlineBundleLimits, now = () => new Date() }) {
+  protectedBackup, limits = offlineBundleLimits, now = () => new Date() }) {
   requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
   requireThat(typeof trustedRoot === 'string' && trustedRoot.length > 0,
@@ -658,6 +658,18 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       requireThat(priorRecoverySet === undefined, prior
         ? 'Offline bundle packages its prior recovery set; a local prior recovery set must not be supplied'
         : 'A local prior recovery set was supplied but the bundle carries no prior recovery set');
+    }
+    // The index is unsigned, so the backup reference it carries is only a claim; the operator's own
+    // expected reference is the trust source and must match it exactly.
+    if (prior) {
+      requireThat(protectedBackup !== undefined,
+        'Offline bundle binds a protected backup reference; supply the expected reference with --protected-backup');
+      const expected = validateProtectedBackupReference(protectedBackup, prior.release.version);
+      requireThat(protectedBackupFields.split(',').every(key => expected[key] === prior.protectedBackup[key]),
+        'Offline bundle protected backup reference does not match the expected reference');
+    } else {
+      requireThat(protectedBackup === undefined,
+        'A protected backup reference was supplied but the bundle carries no prior recovery set');
     }
     for (const file of index.files) {
       requireThat(roles.get(file.name) === file.role, `Offline bundle member is not part of this release: ${file.name}`);
@@ -776,14 +788,16 @@ const usage = `usage:
     --output <bundle.tar> [--version <v>] [--runtime <rid>]... [--trusted-root <trusted_root.json>] [--cosign <path>]
     [--prior-release-assets <dir> --protected-backup <reference.json> [--prior-mode <packaged|local-reference>]]
   node scripts/ci/offline-update-bundle.mjs verify --bundle <bundle.tar> --channel <stable|insider>
-    --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--prior-recovery-set <dir>] [--cosign <path>]`;
+    --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--prior-recovery-set <dir>]
+    [--protected-backup <reference.json>] [--cosign <path>]`;
 
 export function parseArguments(argv) {
   const [command, ...rest] = argv;
   const allowed = {
     assemble: ['release-assets', 'channel', 'output', 'version', 'runtime', 'trusted-root', 'cosign',
       'prior-release-assets', 'prior-mode', 'protected-backup'],
-    verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'prior-recovery-set', 'cosign'],
+    verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'prior-recovery-set', 'protected-backup',
+      'cosign'],
   };
   requireThat(Object.hasOwn(allowed, command ?? ''), usage);
   const options = {};
@@ -805,16 +819,16 @@ async function main(argv) {
   const cosign = options.cosign ?? 'cosign';
   const run = (name, args) => execFileSync(name === 'cosign' ? cosign : name, args,
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-  if (command === 'assemble') {
-    let protectedBackup;
-    if (options['protected-backup'] !== undefined) {
-      try {
-        protectedBackup = JSON.parse(readSmallFile(resolve(options['protected-backup']), 'Protected backup reference',
-          64 * 1024).toString('utf8'));
-      } catch (error) {
-        throw new Error(`Protected backup reference is unreadable: ${error.message}`);
-      }
+  let protectedBackup;
+  if (options['protected-backup'] !== undefined) {
+    try {
+      protectedBackup = JSON.parse(readSmallFile(resolve(options['protected-backup']), 'Protected backup reference',
+        64 * 1024).toString('utf8'));
+    } catch (error) {
+      throw new Error(`Protected backup reference is unreadable: ${error.message}`);
     }
+  }
+  if (command === 'assemble') {
     const { bundle, index } = assembleOfflineBundle({
       releaseAssets: options['release-assets'], channel: options.channel, version: options.version,
       runtimes: options.runtime ?? hostUpdateCliRuntimes, output: options.output, run,
@@ -826,7 +840,8 @@ async function main(argv) {
       installable: false }, undefined, 2));
   } else {
     const record = verifyOfflineBundle({ bundle: options.bundle, channel: options.channel, version: options.version,
-      trustedRoot: options['trusted-root'], staging: options.staging, priorRecoverySet: options['prior-recovery-set'], run });
+      trustedRoot: options['trusted-root'], staging: options.staging, priorRecoverySet: options['prior-recovery-set'],
+      protectedBackup, run });
     console.log(JSON.stringify(record, undefined, 2));
   }
 }

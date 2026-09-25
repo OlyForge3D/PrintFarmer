@@ -83,6 +83,8 @@ function fixture(channel = 'stable') {
 }
 
 function assemble(context, overrides = {}) {
+  // Verification needs the operator's expected backup reference; remember the one used to assemble.
+  context.expectedBackup = overrides.priorReleaseAssets ? overrides.protectedBackup : undefined;
   return assembleOfflineBundle({ releaseAssets: context.assets, channel: context.release.channel,
     output: context.bundle, run: cosign({ requireOffline: false }).run, ...overrides });
 }
@@ -90,7 +92,7 @@ function assemble(context, overrides = {}) {
 function verify(context, overrides = {}) {
   return verifyOfflineBundle({ bundle: context.bundle, channel: context.release.channel,
     trustedRoot: context.trustedRoot, staging: context.staging, run: cosign({ requireOffline: true }).run,
-    now: () => new Date('2026-09-25T20:00:00Z'), ...overrides });
+    protectedBackup: context.expectedBackup, now: () => new Date('2026-09-25T20:00:00Z'), ...overrides });
 }
 
 function rejectsWithoutStaging(context, pattern, overrides) {
@@ -440,6 +442,32 @@ test('a packaged prior set refuses a separately supplied local copy', () => {
   }
 });
 
+test('verification binds the protected backup reference to the operator expectation, not the unsigned index', () => {
+  const context = priorFixture('stable');
+  try {
+    assemble(context, context.withPrior());
+    rejectsWithoutStaging(context, /supply the expected reference with --protected-backup/, { protectedBackup: undefined });
+    for (const overrides of [{ id: 'pf-backup-attacker' }, { sha256: 'a'.repeat(64) }, { locationClass: 'external-storage' }]) {
+      rejectsWithoutStaging(context, /does not match the expected reference/,
+        { protectedBackup: backupFor(context.prior, overrides) });
+    }
+    rejectsWithoutStaging(context, /exactly id, sha256/,
+      { protectedBackup: { ...backupFor(context.prior), path: '/var/backups' } });
+  } finally {
+    context.cleanup();
+  }
+});
+
+test('a protected backup reference is refused for a bundle without a prior set', () => {
+  const context = priorFixture('stable');
+  try {
+    assemble(context);
+    rejectsWithoutStaging(context, /bundle carries no prior recovery set/, { protectedBackup: backupFor(context.prior) });
+  } finally {
+    context.cleanup();
+  }
+});
+
 test('the prior set is incomplete without a protected backup reference, and vice versa', () => {
   const context = priorFixture('stable');
   try {
@@ -548,6 +576,11 @@ test('index claims about the prior set cannot be forged or left incomplete', () 
     rejectsWithoutStaging(context, /exactly id, sha256, locationClass and releaseVersion/);
     rewrite(copy => { copy.priorRecoverySet.protectedBackup.releaseVersion = '1.4.0'; });
     rejectsWithoutStaging(context, /not taken for the prior release/);
+    // Every signed member is untouched; only the unsigned index names another well-formed backup.
+    for (const change of [{ id: 'pf-backup-attacker' }, { sha256: 'b'.repeat(64) }, { locationClass: 'external-storage' }]) {
+      rewrite(copy => { Object.assign(copy.priorRecoverySet.protectedBackup, change); });
+      rejectsWithoutStaging(context, /does not match the expected reference/);
+    }
     rewrite(copy => { copy.priorRecoverySet.release.buildId = '99'; });
     rejectsWithoutStaging(context, /prior recovery identity does not equal the signed prior manifest identity/);
     rewrite(copy => { copy.priorRecoverySet.manifestDigest = `sha256:${'0'.repeat(64)}`; });
@@ -589,7 +622,9 @@ test('the command line accepts prior recovery options without adding a bypass', 
   { 'release-assets': 'a', channel: 'stable', output: 'o', 'prior-release-assets': 'p', 'protected-backup': 'b.json',
     'prior-mode': 'local-reference' });
   assert.equal(parseArguments(['verify', '--bundle', 'b', '--prior-recovery-set', 'p']).options['prior-recovery-set'], 'p');
-  for (const argv of [['verify', '--protected-backup', 'b.json'], ['assemble', '--prior-recovery-set', 'p'],
+  assert.equal(parseArguments(['verify', '--bundle', 'b', '--protected-backup', 'b.json']).options['protected-backup'],
+    'b.json');
+  for (const argv of [['assemble', '--prior-recovery-set', 'p'],
     ['verify', '--skip-prior-verification', 'true']]) {
     assert.throws(() => parseArguments(argv), /usage/, argv.join(' '));
   }
