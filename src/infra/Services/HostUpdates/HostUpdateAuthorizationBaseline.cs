@@ -128,13 +128,14 @@ public static class HostUpdateBaselineHashes
                 // SqlClient builder's transport settings (and CodeQL's Encrypt check) do not apply.
                 // That builder keeps each alias as a separate key, so every supplied server and
                 // catalog alias is fingerprinted: changing any of them is drift, whichever one
-                // SqlClient would treat as effective.
+                // SqlClient would treat as effective. Server names are case-insensitive; catalog
+                // names are kept exact because a case-sensitive collation can distinguish them.
                 var builder = new System.Data.Common.DbConnectionStringBuilder { ConnectionString = database.ConnectionString };
                 return string.Join(
                     ";",
                     SqlServerIdentityKeys
                         .Where(builder.ContainsKey)
-                        .Select(key => $"{key}={builder[key]?.ToString()?.Trim().ToLowerInvariant()}"));
+                        .Select(key => $"{key}={SqlServerIdentityValue(key, builder[key]?.ToString())}"));
             }
         }
         catch (Exception exception) when (exception is ArgumentException or FormatException or KeyNotFoundException or InvalidOperationException)
@@ -147,6 +148,9 @@ public static class HostUpdateBaselineHashes
 
     private static readonly string[] SqlServerIdentityKeys =
         ["data source", "server", "address", "addr", "network address", "initial catalog", "database"];
+
+    private static string? SqlServerIdentityValue(string key, string? value) =>
+        key is "initial catalog" or "database" ? value : value?.Trim().ToLowerInvariant();
 
     internal static string Hash(object value) =>
         Convert.ToHexStringLower(SHA256.HashData(Encoding.UTF8.GetBytes(JsonSerializer.Serialize(value))));

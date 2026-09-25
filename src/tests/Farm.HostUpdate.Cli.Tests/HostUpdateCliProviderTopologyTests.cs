@@ -284,6 +284,8 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
     [InlineData("postgres-external", "ConnectionStrings:Default", "Host=db.customer.example;Port=6543;Database=farm_other;Username=pf;Password=" + PostgresPassword)]
     [InlineData("sqlserver-local", "ConnectionStrings:Default", "Server=sql.customer.example,1433;Database=printfarmer;User Id=pf;Password=" + SqlServerPassword)]
     [InlineData("sqlserver-external", "HostUpdateExecution:DatabaseExternallyOwned", "true")]
+    [InlineData("postgres-local", "ConnectionStrings:Default", "Host=localhost;Port=5432;Database=PrintFarmer;Username=pf;Password=" + PostgresPassword)]
+    [InlineData("sqlserver-local", "ConnectionStrings:Default", "Server=localhost,1433;Database=PrintFarmer;User Id=pf;Password=" + SqlServerPassword + ";TrustServerCertificate=True")]
     public async Task Database_retargeted_after_authorization_is_refused_before_any_process(string provider, string key, string value)
     {
         IConfiguration authorized = Config(provider, Split);

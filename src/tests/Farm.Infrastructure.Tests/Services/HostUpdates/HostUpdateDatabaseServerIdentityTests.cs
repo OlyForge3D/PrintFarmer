@@ -12,6 +12,9 @@ public sealed class HostUpdateDatabaseServerIdentityTests
     [InlineData("Server=target-a;Address=stable;Database=farm", "Server=target-a;Address=other;Database=farm")]
     [InlineData("Server=target-a;Initial Catalog=farm;Database=farm", "Server=target-a;Initial Catalog=farm;Database=other")]
     [InlineData("Server=target-a,1433;Database=farm", "Server=target-a,1444;Database=farm")]
+    [InlineData("Server=target-a;Database=Farm", "Server=target-a;Database=farm")]
+    [InlineData("Server=target-a;Initial Catalog=Farm", "Server=target-a;Initial Catalog=farm")]
+    [InlineData("Server=target-a;Database=\"farm\"", "Server=target-a;Database=\" farm\"")]
     public void SqlServer_change_to_any_server_or_catalog_alias_changes_the_identity(string authorized, string retargeted)
     {
         Identity("sqlserver", authorized).Should().NotBe(Identity("sqlserver", retargeted));
@@ -31,6 +34,7 @@ public sealed class HostUpdateDatabaseServerIdentityTests
     [InlineData("Host=a.example;Port=5432;Database=farm", "Host=b.example;Port=5432;Database=farm")]
     [InlineData("Host=a.example;Port=5432;Database=farm", "Host=a.example;Port=6543;Database=farm")]
     [InlineData("Host=a.example;Port=5432;Database=farm", "Host=a.example;Port=5432;Database=other")]
+    [InlineData("Host=a.example;Port=5432;Database=Farm", "Host=a.example;Port=5432;Database=farm")]
     public void Postgres_host_port_or_database_change_changes_the_identity(string authorized, string retargeted)
     {
         Identity("postgres", authorized).Should().NotBe(Identity("postgres", retargeted));
