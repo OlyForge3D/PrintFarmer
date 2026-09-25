@@ -249,7 +249,8 @@ internal static class HostUpdateRecoveryDrift
             items.Add(new(ManifestBindingDrift, ManifestBindingUnrecorded, unreadable));
         }
 
-        return Report(recorded, items, configurationFingerprint, installed, observedManifestBinding);
+        // Confirm is a durable no-op after rollback, so the drift is reported without a reapproval token.
+        return Report(recorded, items, configurationFingerprint, installed, observedManifestBinding) with { ReapprovalToken = null };
     }
 
     // Issue #3050: a missing baseline value, an unobserved or unreadable binding, or any

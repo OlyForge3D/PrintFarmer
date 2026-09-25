@@ -824,6 +824,8 @@ public sealed class HostUpdateCliTests : IDisposable, IAsyncLifetime
         JsonElement drift = Envelope(preview).GetProperty("result").GetProperty("drift");
         DriftCodes(drift).Should().Equal("manifest_binding_drift");
         drift.GetProperty("items")[0].GetProperty("observed").GetString().Should().StartWith("unreadable:");
+        drift.GetProperty("reapprovalRequired").GetBoolean().Should().BeFalse("confirm is a durable no-op after rollback");
+        (drift.TryGetProperty("reapprovalToken", out JsonElement token) && token.ValueKind != JsonValueKind.Null).Should().BeFalse("no token is issued after rollback");
         if (failure == "corrupt")
         {
             confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
