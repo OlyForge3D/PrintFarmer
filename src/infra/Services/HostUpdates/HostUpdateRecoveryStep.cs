@@ -170,7 +170,8 @@ public sealed class HostUpdateRecoveryCoordinator(
     IHostUpdateDigestVerifier digestVerifier,
     IHostUpdateRecoveryOutcomeStore outcomeStore,
     IHostUpdateFenceCoordinator? fenceCoordinator = null,
-    IHostUpdateExecutionLock? executionLock = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
+    IHostUpdateExecutionLock? executionLock = null,
+    IHostUpdatePhysicalReconciliationGate? physicalReconciliationGate = null) : IHostUpdateRecoveryCoordinator, IHostUpdateRecoveryPlanner
 {
     private const string FenceReleaseFailureSeparator = "|";
 
@@ -208,7 +209,7 @@ public sealed class HostUpdateRecoveryCoordinator(
         // release alone.
         if (existingOutcome is { Outcome: HostUpdateRecoveryOutcome.FenceReleasePending })
         {
-            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, existingOutcome.Detail).ConfigureAwait(false);
+            return await ReleaseFenceAfterRolledBackAsync(failedRequest, existingOutcome.Detail).ConfigureAwait(false);
         }
 
         HostUpdateRecoveryResult result;
@@ -238,7 +239,7 @@ public sealed class HostUpdateRecoveryCoordinator(
             await outcomeStore.WriteAsync(
                 new HostUpdateRecoveryOutcomeRecord(failedRequest.ReleaseId, HostUpdateRecoveryOutcome.FenceReleasePending, result.Detail, DateTimeOffset.UtcNow),
                 CancellationToken.None).ConfigureAwait(false);
-            return await ReleaseFenceAfterRolledBackAsync(failedRequest.ReleaseId, result.Detail).ConfigureAwait(false);
+            return await ReleaseFenceAfterRolledBackAsync(failedRequest, result.Detail).ConfigureAwait(false);
         }
 
         // Persisted unconditionally on every other completed outcome -- including NeedsOperator --
@@ -256,14 +257,30 @@ public sealed class HostUpdateRecoveryCoordinator(
     /// <summary>
     /// Drives the idempotent admission-fence release that must follow a completed rollback. Never
     /// performs (or re-performs) restore/apply work: by the time this runs the host payload is
-    /// already durably restored, and the only remaining obligation is reopening admission.
+    /// already durably restored, and the only remaining obligations are the physical printer
+    /// command reconciliation gate (issue #2999) and reopening admission.
     /// </summary>
-    private async Task<HostUpdateRecoveryResult> ReleaseFenceAfterRolledBackAsync(string releaseId, string pendingDetail)
+    private async Task<HostUpdateRecoveryResult> ReleaseFenceAfterRolledBackAsync(HostUpdateExecutionRequest failedRequest, string pendingDetail)
     {
+        string releaseId = failedRequest.ReleaseId;
+
         // Retries carry any previous failure diagnostic in the detail suffix; the rollback detail
         // itself is everything before it, so repeated failures cannot accumulate suffixes.
         int separator = pendingDetail.IndexOf(FenceReleaseFailureSeparator, StringComparison.Ordinal);
         string rollbackDetail = separator < 0 ? pendingDetail : pendingDetail[..separator];
+
+        // Writers stay fenced until an operator has recorded that every affected printer was
+        // physically reconciled. Nothing here replays, cancels or issues a printer command; the
+        // durable state stays fence-release-pending, so a retry re-checks this gate alone.
+        string? reconciliationBlock = await PhysicalReconciliationBlockAsync(failedRequest).ConfigureAwait(false);
+        if (reconciliationBlock is not null)
+        {
+            string blockedDetail = rollbackDetail + FenceReleaseFailureSeparator + reconciliationBlock;
+            await outcomeStore.WriteAsync(
+                new HostUpdateRecoveryOutcomeRecord(releaseId, HostUpdateRecoveryOutcome.FenceReleasePending, blockedDetail, DateTimeOffset.UtcNow),
+                CancellationToken.None).ConfigureAwait(false);
+            return new HostUpdateRecoveryResult(HostUpdateRecoveryOutcome.FenceReleasePending, blockedDetail);
+        }
 
         if (fenceCoordinator is not null)
         {
@@ -292,6 +309,26 @@ public sealed class HostUpdateRecoveryCoordinator(
             new HostUpdateRecoveryOutcomeRecord(releaseId, released.Outcome, released.Detail, DateTimeOffset.UtcNow),
             CancellationToken.None).ConfigureAwait(false);
         return released;
+    }
+
+    private async Task<string?> PhysicalReconciliationBlockAsync(HostUpdateExecutionRequest failedRequest)
+    {
+        if (physicalReconciliationGate is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            return await physicalReconciliationGate.IsRecordedAsync(failedRequest.ReleaseId, failedRequest.RequestId, CancellationToken.None).ConfigureAwait(false)
+                ? null
+                : HostUpdatePhysicalReconciliationCodes.Pending;
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            // An unreadable or tampered record is never treated as reconciliation.
+            return HostUpdatePhysicalReconciliationCodes.Unreadable + ":" + exception.GetType().Name;
+        }
     }
 
     private async Task<HostUpdateRecoveryResult> RecoverCoreAsync(

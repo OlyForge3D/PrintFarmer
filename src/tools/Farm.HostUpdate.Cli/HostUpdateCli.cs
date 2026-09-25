@@ -22,7 +22,7 @@ public static partial class HostUpdateCli
         Usage:
           printfarmer-host-update status [--release <releaseId>] [--json]
           printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --preview [--json]
-          printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--reapprove-drift <token>] [--json]
+          printfarmer-host-update recover --release <releaseId> [--request-id <requestId>] --confirm <releaseId> [--reapprove-drift <token>] [--printers-reconciled <token>] [--json]
 
         Configuration comes from --config <absolute-json-path> and environment variables
         (HostUpdateExecution__*, HostUpdates__HostState__*, DB_PROVIDER, ConnectionStrings__Default).
@@ -32,9 +32,13 @@ public static partial class HostUpdateCli
         prior installed state), --confirm is refused until it is reapproved with the exact
         --reapprove-drift token printed by --preview.
 
+        After a rollback, admission stays fenced until every printer has been physically checked
+        and that is recorded with the exact --printers-reconciled token printed by --preview.
+        Recovery never replays, cancels or issues a printer command.
+
         Exit codes: 0 ok, 2 usage, 3 configuration/namespace unproven, 4 state unreadable,
         5 no history, 6 refused, 7 lock held, 10 needs operator, 11 fence release pending,
-        12 drift not reapproved.
+        12 drift not reapproved, 13 physical printer reconciliation not recorded.
         """;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -127,9 +131,17 @@ public static partial class HostUpdateCli
         }
     }
 
-    internal static ServiceProvider BuildServices(IConfiguration configuration, TextWriter error)
+    internal static ServiceProvider BuildServices(IConfiguration configuration, TextWriter error) =>
+        ConfigureServices(new ServiceCollection(), configuration, error)
+            .BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+
+    /// <summary>
+    /// The CLI's complete service graph. It deliberately registers no printer backend client,
+    /// plugin, or dispatcher: recovery can read the command inventory but can never send a
+    /// printer command, so nothing is replayed and no real command is used as a smoke test.
+    /// </summary>
+    internal static IServiceCollection ConfigureServices(IServiceCollection services, IConfiguration configuration, TextWriter error)
     {
-        var services = new ServiceCollection();
         services.AddSingleton(configuration);
         services.AddLogging(builder => builder
             .SetMinimumLevel(LogLevel.Warning)
@@ -142,7 +154,9 @@ public static partial class HostUpdateCli
         services.AddSingleton(sp => new ApprovalBoundInstalledHostStateStore(
             (IInstalledHostStateStore)installedStore.ImplementationFactory!(sp)));
         services.AddSingleton<IInstalledHostStateStore>(sp => sp.GetRequiredService<ApprovalBoundInstalledHostStateStore>());
-        return services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = true });
+        services.AddSingleton<IHostUpdatePrinterCommandInventoryReader>(sp =>
+            new HostUpdateCliPrinterCommandInventoryReader(DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>())));
+        return services;
     }
 
     private static async Task<int> StatusAsync(IServiceProvider provider, HostUpdateCliArguments args, TextWriter output, CancellationToken cancellationToken)
@@ -273,6 +287,15 @@ public static partial class HostUpdateCli
                 // The token is deliberately withheld here: reapproval requires reading --preview.
                 return await EmitAsync(output, args.Json, HostUpdateCliExitCodes.DriftUnapproved, new CliFailure(driftRefusal, [.. drift.Items.Select(item => item.Code)])).ConfigureAwait(false);
             }
+
+            if (args.PhysicalReconciliationToken is not null)
+            {
+                (int Code, CliFailure Failure)? refusal = await RecordPhysicalReconciliationAsync(provider, request, existingOutcome, args.PhysicalReconciliationToken, cancellationToken).ConfigureAwait(false);
+                if (refusal is not null)
+                {
+                    return await EmitAsync(output, args.Json, refusal.Value.Code, refusal.Value.Failure).ConfigureAwait(false);
+                }
+            }
         }
 
         using IServiceScope scope = provider.CreateScope();
@@ -291,6 +314,12 @@ public static partial class HostUpdateCli
                     .FindLatestAsync(request.ReleaseId, cancellationToken).ConfigureAwait(false);
                 bool admissionClosed = await provider.GetRequiredService<IHostUpdateAdmissionGate>().IsClosedAsync(cancellationToken).ConfigureAwait(false);
                 IEnumerable<string> writers = provider.GetRequiredService<IReadOnlyList<IFenceableWriter>>().Select(writer => writer.Name);
+                HostUpdatePhysicalReconciliationPreview physical = await HostUpdatePhysicalReconciliationPreviewBuilder.BuildAsync(
+                    plan,
+                    request,
+                    provider.GetRequiredService<IHostUpdatePhysicalReconciliationStore>(),
+                    provider.GetRequiredService<IHostUpdatePrinterCommandInventoryReader>(),
+                    cancellationToken).ConfigureAwait(false);
                 int planCode = plan.Kind == HostUpdateRecoveryPlanKind.NeedsOperator ? HostUpdateCliExitCodes.NeedsOperator : HostUpdateCliExitCodes.Success;
                 var preview = new PreviewReport(
                     args.ReleaseId!,
@@ -302,7 +331,8 @@ public static partial class HostUpdateCli
                     HostUpdateRecoveryPreview.Backup(request.ReleaseId, backup),
                     HostUpdateRecoveryPreview.Recovery(activities, existingOutcome),
                     HostUpdateRecoveryPreview.WriterFence(plan, admissionClosed, writers),
-                    HostUpdateRecoveryPreview.Drift(drift));
+                    HostUpdateRecoveryPreview.Drift(drift),
+                    physical);
                 return await EmitAsync(output, args.Json, planCode, preview).ConfigureAwait(false);
             }
 
@@ -320,6 +350,8 @@ public static partial class HostUpdateCli
                 : result.Outcome switch
                 {
                     HostUpdateRecoveryOutcome.RolledBack => HostUpdateCliExitCodes.Success,
+                    HostUpdateRecoveryOutcome.FenceReleasePending when HostUpdatePhysicalReconciliationCodes.IsBlockedDetail(result.Detail)
+                        => HostUpdateCliExitCodes.PhysicalReconciliationPending,
                     HostUpdateRecoveryOutcome.FenceReleasePending => HostUpdateCliExitCodes.FenceReleasePending,
                     _ => HostUpdateCliExitCodes.NeedsOperator,
                 };
@@ -338,6 +370,57 @@ public static partial class HostUpdateCli
         {
             return await EmitAsync(output, args.Json, HostUpdateCliExitCodes.StateUnreadable, new CliFailure(StateFailureCode(exception), [])).ConfigureAwait(false);
         }
+    }
+
+    /// <summary>
+    /// Records the operator's physical reconciliation only when the rollback is already durable
+    /// and the token matches the inventory as it is right now. Returns a refusal, or null to
+    /// continue into the coordinator's fence release. Reads the database; never writes it.
+    /// </summary>
+    private static async Task<(int Code, CliFailure Failure)?> RecordPhysicalReconciliationAsync(
+        IServiceProvider provider,
+        HostUpdateExecutionRequest request,
+        HostUpdateRecoveryOutcomeRecord? existingOutcome,
+        string token,
+        CancellationToken cancellationToken)
+    {
+        if (existingOutcome is not { Outcome: HostUpdateRecoveryOutcome.FenceReleasePending })
+        {
+            // Nothing may be recorded before the rollback itself is durable.
+            return (HostUpdateCliExitCodes.Refused, new CliFailure("physical_reconciliation_not_ready", []));
+        }
+
+        HostUpdatePrinterCommandInventory inventory;
+        try
+        {
+            inventory = await provider.GetRequiredService<IHostUpdatePrinterCommandInventoryReader>().ReadAsync(cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (exception is not OperationCanceledException)
+        {
+            return (HostUpdateCliExitCodes.StateUnreadable, new CliFailure("physical_inventory_unavailable:" + exception.GetType().Name, []));
+        }
+
+        string expected = inventory.Token(request.ReleaseId, request.RequestId);
+        if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(token),
+            System.Text.Encoding.UTF8.GetBytes(expected)))
+        {
+            // The inventory changed since --preview (or the token is wrong); nothing is recorded.
+            return (HostUpdateCliExitCodes.PhysicalReconciliationPending, new CliFailure("physical_reconciliation_mismatch", []));
+        }
+
+        try
+        {
+            await provider.GetRequiredService<IHostUpdatePhysicalReconciliationStore>().WriteAsync(
+                HostUpdatePhysicalReconciliationRecord.Create(request.ReleaseId, request.RequestId, inventory, DateTimeOffset.UtcNow),
+                cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception exception) when (IsStateFailure(exception))
+        {
+            return (HostUpdateCliExitCodes.StateUnreadable, new CliFailure("physical_reconciliation_unwritable:" + exception.GetType().Name, []));
+        }
+
+        return null;
     }
 
     private static string? DriftRefusal(HostUpdateDriftReport drift, string? token)
@@ -496,7 +579,8 @@ public static partial class HostUpdateCli
         HostUpdateBackupEvidence BackupEvidence,
         HostUpdateRecoveryEvidence RecoveryEvidence,
         HostUpdateWriterFencePreview WriterFence,
-        HostUpdateDriftPreview Drift);
+        HostUpdateDriftPreview Drift,
+        HostUpdatePhysicalReconciliationPreview PhysicalReconciliation);
 
     private sealed record RecoveryReport(string ReleaseId, string RequestId, HostUpdateRecoveryOutcome Outcome, string Detail);
 }
