@@ -67,11 +67,12 @@ public static class HostUpdateExecutionStartup
         });
         services.AddScoped<IHostUpdateExecutionSteps, HostUpdateExecutionStepsAdapter>();
 
-        // Authorization-time drift baseline (issue #3047), journaled on the accepted activity.
+        // Authorization-time drift baseline (issues #3047, #3050), journaled on the accepted activity.
         services.AddScoped<IHostUpdateAuthorizationBaselineProvider>(sp => new HostUpdateAuthorizationBaselineProvider(
             sp.GetRequiredService<IInstalledHostStateStore>(),
             sp.GetRequiredService<HostUpdateExecutionOptions>(),
-            DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>())));
+            DatabaseProviderConfiguration.FromConfiguration(sp.GetRequiredService<IConfiguration>()),
+            sp.GetRequiredService<IHostUpdateManifestBindingReader>()));
         services.AddScoped<IHostUpdateExecutor>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();

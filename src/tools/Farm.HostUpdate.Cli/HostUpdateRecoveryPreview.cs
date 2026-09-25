@@ -186,7 +186,7 @@ internal static class HostUpdateRecoveryPreview
     }
 
     public static HostUpdateDriftPreview Drift(HostUpdateDriftReport report) =>
-        new([.. report.Items], report.ConfigurationFingerprint, report.HasDrift, report.ReapprovalToken);
+        new([.. report.Items], report.ConfigurationFingerprint, report.ReapprovalToken is not null, report.ReapprovalToken);
 
     private static bool IsPresentWithLength(string runDirectory, HostUpdateBackupManifestFile file)
     {

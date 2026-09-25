@@ -20,7 +20,6 @@ package; see [Failure and recovery](#failure-and-recovery). The following
 delivery gates are still open:
 
 - installer placement and generated host configuration (#3045)
-- manifest-binding drift detection (#3050)
 - the physical printer reconciliation gate (#2999)
 - provider and topology coverage (#3000)
 - complete offline bundles (#2981)
@@ -205,14 +204,14 @@ endpoints exist.
 
 **The host-local status/recovery CLI is delivered, but recovery support is
 not complete.** #2980 added the API-independent engine entry point and its
-fixed-operation wrappers. #2998 added drift reapproval and the downtime preview,
-and #3047 added journaled authorization baselines. #3041 publishes the CLI as a
-signed, self-contained package for a declared host matrix.
+fixed-operation wrappers. #2998 added drift reapproval and the downtime preview.
+#3047 and #3050 added journaled authorization and manifest-binding baselines.
+#3041 publishes the CLI as a signed, self-contained package for a declared host
+matrix.
 
 These gaps still block a claim of complete recovery support:
 
 - installer placement and configuration generation (#3045)
-- manifest-binding (database) drift detection (#3050)
 - a physical printer command reconciliation gate (#2999)
 - PostgreSQL/SQL Server and monolith/split topology coverage (#3000)
 
@@ -396,6 +395,15 @@ captured, the update refuses to start (`authorization_baseline_unavailable`).
 The baseline is captured only at first acceptance: a resumed release, including
 one authorized before #3047, is never re-baselined onto the host state at
 restart, and only the journal's hashed payload is trusted when it is read back.
+Since #3050 the baseline (schema 2) also records the release's database
+manifest binding: the signed manifest digest the API bound to the release ID in
+`AppSettingsEntities` (`none` when none was bound). The executor and the CLI read
+it with one parameterised `SELECT` over a provider-enforced read-only connection
+(SQLite `Mode=ReadOnly`, a PostgreSQL `READ ONLY` transaction, SQL Server
+`ApplicationIntent=ReadOnly` with the transaction rolled back); no EF model,
+migration or schema check runs, and credentials are never journaled, printed or
+fingerprinted. SQL Server's read-only intent is advisory on a primary replica, so
+its guarantee is that the reader issues only that `SELECT` and rolls back.
 
 | Drift code | Meaning |
 | --- | --- |
@@ -407,6 +415,7 @@ restart, and only the journal's hashed payload is trusted when it is read back.
 | `configuration_drift` | The configuration fingerprint differs from the one recorded at authorization (for example a changed compose file, service mapping, owned directory, tool path or database provider). The CLI and the API host must read the same configuration for this to be meaningful. |
 | `trust_root_drift` | The authorization named a trust root this build does not pin, or the pinned trust-root fingerprint changed since authorization (for example the CLI came from a different release). |
 | `prior_state_changed_since_authorization` | The installed state's content differs from the baseline recorded at authorization, including a deleted or backdated record (`observed` is `none` when it was deleted). For a journal without a baseline this falls back to the older timestamp heuristic and is always accompanied by `authorization_baseline_unrecorded`. |
+| `manifest_binding_drift` | The database manifest binding for the release differs from the one recorded at authorization, was deleted (`observed` is `none`), or could not be read or is not a canonical `sha256:<64 lowercase hex>` digest (`observed` is `unreadable:<ExceptionType>`; the message is withheld because provider errors can carry connection details). An unreadable binding is always drift, never `no drift`. A schema-1 baseline, written before #3050, reports `recorded` as `unrecorded`. |
 | `prior_state_matches_target` | The installed state already reports the target release or manifest. |
 
 The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
@@ -414,12 +423,13 @@ The CLI reads the policy from `HostUpdates:HostState` (`Enabled`, `RootPath`,
 variables), the same keys the API host uses. The token binds the recorded
 request, the drift items, the configuration fingerprint (root, compose files and
 their content hashes, service mappings, owned directories, host tool paths,
-provider and SQLite path, never connection-string secrets) and the installed
-state. Any further change invalidates it (`drift_reapproval_mismatch`); a token
+provider and SQLite path, never connection-string secrets), the installed
+state and the observed manifest binding. Any further change invalidates it (`drift_reapproval_mismatch`); a token
 supplied when nothing drifted is refused (`drift_reapproval_unexpected`). The
 refusal lists the drift codes but never prints the token, so reapproval
 requires reading `--preview`. A release with a recorded `RolledBack` outcome has
-nothing to reapprove.
+nothing to reapprove: `--confirm` stays a durable no-op, but `--preview` still
+reports `manifest_binding_drift` so an unreadable or changed binding is never hidden.
 
 | Exit | Meaning | Operator response |
 | --- | --- | --- |
@@ -480,9 +490,8 @@ Known limits of the current CLI:
   which builds the archive with the release packaging code, verifies it
   against its checksum list, extracts it and runs the CLI with `dotnet` poisoned
   on `PATH`.
-- Manifest-binding (database) drift detection is not implemented yet
-  (#3050). Neither is a physical command reconciliation gate (#2999), nor
-  PostgreSQL/SQL Server and monolith/split topology proof (#3000). The
+- There is no physical command reconciliation gate (#2999) or PostgreSQL/SQL
+  Server and monolith/split topology proof (#3000) yet. The
   installer does not yet place the package or generate its configuration
   (#3045), and macOS has no package (see
   [Install the signed CLI package](#install-the-signed-cli-package)).
@@ -530,7 +539,6 @@ script**. Remaining delivery is tracked by:
 - #2999: the physical printer reconciliation gate
 - #3000: provider and topology coverage
 - #3045: installer placement and host configuration
-- #3050: manifest-binding drift
 - #2981: complete bundles
 - #2982: isolated recovery and authorized rollout evidence
 

@@ -118,7 +118,6 @@ fences stay closed on uncertainty, and confirm safe post-restore reconciliation.
 The host-local CLI is delivered (#2980). Its open recovery gaps are:
 
 - installer placement and generated configuration (#3045)
-- manifest-binding drift (#3050)
 - physical printer reconciliation (#2999)
 - provider and topology coverage (#3000)
 
