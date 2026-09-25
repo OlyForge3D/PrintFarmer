@@ -910,9 +910,11 @@ test("CLI kills a hung compiler via the spawnSync timeout instead of hanging for
 const PRODUCTION_DEFAULT_MAX_BUFFER = 10 * 1024 * 1024;
 
 // Runs the real typecheck-app.mjs CLI against a stub `tsc` whose compile
-// (non --listFilesOnly) spawn writes exactly `payloadBytes` bytes to stdout:
-// one baseline-matching file diagnostic, then non-diagnostic padding. With a
-// large enough spawnSync maxBuffer the gate passes; once the payload exceeds
+// (non --listFilesOnly) spawn writes exactly `payloadBytes` bytes of
+// non-diagnostic padding to stdout and exits 0, like a clean compile. The
+// padding carries no diagnostic because both gates require zero diagnostics
+// (#2985, #3009). With a large enough spawnSync maxBuffer the gate passes;
+// once the payload exceeds
 // the maxBuffer that actually reached spawnSync, Node fails the spawn with
 // ENOBUFS and the gate reports a non-completing compiler. That makes the
 // CLI outcome a direct observation of the effective spawn option, not of
@@ -941,8 +943,7 @@ async function runMaxBufferFixture({ envMaxBuffer, payloadBytes }) {
       path.join(fixtureDirectory, "scripts/app-typecheck-baseline.json"),
       JSON.stringify(baseline),
     );
-    const diagnosticLine = `${fileDiagnostic}\n`;
-    assert.ok(payloadBytes > diagnosticLine.length);
+    assert.ok(Number.isInteger(payloadBytes) && payloadBytes > 0);
     // process.exitCode (not process.exit) so a large write to a pipe drains
     // fully before the stub exits on platforms where pipe writes are async.
     await writeFile(
@@ -951,8 +952,8 @@ async function runMaxBufferFixture({ envMaxBuffer, payloadBytes }) {
         'if (process.argv.includes("--listFilesOnly")) {',
         '  process.stdout.write("src/services/example.ts\\n");',
         "} else {",
-        `  process.stdout.write(${JSON.stringify(diagnosticLine)} + ".".repeat(${payloadBytes - diagnosticLine.length}));`,
-        "  process.exitCode = 2;",
+        `  process.stdout.write(".".repeat(${payloadBytes}));`,
+        "  process.exitCode = 0;",
         "}",
       ].join("\n"),
     );
@@ -986,9 +987,20 @@ async function runMaxBufferFixture({ envMaxBuffer, payloadBytes }) {
   }
 }
 
-function assertGatePassed(result, label) {
+function assertGatePassed(result, payloadBytes, label) {
   assert.equal(result.status, 0, `${label}: ${result.stderr}`);
-  assert.match(result.stderr, /Application type-check passed/, label);
+  assert.match(
+    result.stderr,
+    /Application type-check passed with 0 diagnostic\(s\)/,
+    label,
+  );
+  // The CLI echoes the compiler output, so the full padding must reach the
+  // gate. A stub that wrote less would pass without exercising the boundary.
+  assert.equal(
+    result.stdout.match(/^\.+/)?.[0].length,
+    payloadBytes,
+    `${label}: the full payload must reach the gate`,
+  );
 }
 
 function assertBufferExceeded(result, label) {
@@ -1010,12 +1022,14 @@ test("CLI applies a below-default TYPECHECK_APP_MAX_BUFFER to the actual spawnSy
       envMaxBuffer: String(override),
       payloadBytes: override - 512,
     }),
+    override - 512,
     "payload below the override must pass",
   );
   // Without the override, the default buffer accepts this payload, so the
   // failure below is attributable to the override alone.
   assertGatePassed(
     await runMaxBufferFixture({ payloadBytes: override + 512 }),
+    override + 512,
     "payload above the override must pass under the default buffer",
   );
   // Fails if the override never reaches spawnSync (e.g. maxBuffer hard-wired
@@ -1039,6 +1053,7 @@ test("CLI never lets an above-default TYPECHECK_APP_MAX_BUFFER enlarge the actua
       envMaxBuffer: oversized,
       payloadBytes: PRODUCTION_DEFAULT_MAX_BUFFER - 1024,
     }),
+    PRODUCTION_DEFAULT_MAX_BUFFER - 1024,
     "payload below the default must pass",
   );
   // Fails if clampedOverride is bypassed at the buffer call site (e.g.
