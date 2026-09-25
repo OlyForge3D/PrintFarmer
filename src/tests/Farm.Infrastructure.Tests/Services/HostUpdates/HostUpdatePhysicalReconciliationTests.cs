@@ -140,6 +140,28 @@ public sealed class HostUpdatePhysicalReconciliationTests : IDisposable
         await write.Should().ThrowAsync<InvalidOperationException>();
     }
 
+    [Theory]
+    [InlineData("stable:1.2.3")]
+    [InlineData("../../escaped")]
+    [InlineData("/etc/passwd")]
+    [InlineData(@"C:\Windows\System32\x")]
+    [InlineData(@"\\server\share\x")]
+    [InlineData("..")]
+    [InlineData("a\0b")]
+    public async Task Record_paths_stay_directly_under_the_root_for_any_release_id(string releaseId)
+    {
+        var store = new FileHostUpdatePhysicalReconciliationStore(_root);
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(_root));
+
+        string path = store.PathFor(releaseId);
+
+        Path.GetDirectoryName(path).Should().Be(root, "a rooted or parent-relative release id must not escape the store");
+        Path.GetFileName(path).Should().EndWith(".physical-reconciliation.json").And.NotContain(":");
+        await store.WriteAsync(HostUpdatePhysicalReconciliationRecord.Create(releaseId, Request.RequestId, Inventory(), DateTimeOffset.UtcNow), CancellationToken.None);
+        Directory.EnumerateFiles(_root).Should().ContainSingle().Which.Should().Be(path);
+        (await store.IsRecordedAsync(releaseId, Request.RequestId, CancellationToken.None)).Should().BeTrue();
+    }
+
     [Fact]
     public void Token_is_bound_to_release_request_and_inventory_but_not_ordering()
     {

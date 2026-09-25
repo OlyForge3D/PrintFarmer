@@ -182,7 +182,7 @@ public sealed class DbHostUpdatePrinterCommandInventoryReader(AppDbContext db) :
             Add(barrier.PrinterId, new(HostUpdatePhysicalReconciliationCodes.PhysicalControlBarrier, barrier.CommandId.ToString("D"), $"{barrier.Operation ?? "unknown"}:{retention}"));
         }
 
-        var names = printers.ToDictionary(printer => printer.Id, printer => (string?)printer.Name);
+        var names = printers.ToDictionary(printer => printer.Id, printer => printer.Name);
         IEnumerable<HostUpdatePrinterReconciliationItem> items = names.Keys
             .Union(outcomes.Keys)
             .Select(id => new HostUpdatePrinterReconciliationItem(
@@ -304,11 +304,27 @@ public sealed class FileHostUpdatePhysicalReconciliationStore(string rootDirecto
         await Task.Run(() => HostUpdateDurableFile.WriteAllTextAtomic(path, json), cancellationToken).ConfigureAwait(false);
     }
 
-    private string PathFor(string releaseId)
+    public const string PathOutsideRoot = "physical_reconciliation_path_outside_root";
+
+    /// <summary>
+    /// Maps a release id to a single file name inside <c>rootDirectory</c>. Every character outside
+    /// <c>[A-Za-z0-9.-]</c> (including directory separators, drive colons and NUL) becomes <c>_</c>, so
+    /// the segment can never be rooted or name a parent directory; the full path is then proven to
+    /// stay directly under the root. Two ids that sanitize alike fail the record's release-id check
+    /// on read, which keeps the fence closed rather than opening it.
+    /// </summary>
+    internal string PathFor(string releaseId)
     {
-        char[] invalid = Path.GetInvalidFileNameChars();
-        string safeReleaseId = new([.. releaseId.Select(c => invalid.Contains(c) ? '_' : c)]);
-        return Path.Combine(rootDirectory, $"{safeReleaseId}.physical-reconciliation.json");
+        ArgumentException.ThrowIfNullOrEmpty(releaseId);
+        string safeReleaseId = new([.. releaseId.Select(c => char.IsAsciiLetterOrDigit(c) || c is '.' or '-' ? c : '_')]);
+        string root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootDirectory));
+        string path = Path.GetFullPath(Path.Join(root, $"{safeReleaseId}.physical-reconciliation.json"));
+        if (!string.Equals(Path.GetDirectoryName(path), root, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(PathOutsideRoot);
+        }
+
+        return path;
     }
 }
 
