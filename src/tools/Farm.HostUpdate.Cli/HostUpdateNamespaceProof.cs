@@ -34,7 +34,7 @@ internal static class HostUpdateNamespaceProof
         {
             failures.Add("state_directory_missing");
         }
-        else if (!File.Exists(Path.Combine(options.StateDirectory, "journal.ndjson")))
+        else if (!File.Exists(Path.Join(options.StateDirectory, "journal.ndjson")))
         {
             failures.Add("journal_missing");
         }
@@ -44,22 +44,15 @@ internal static class HostUpdateNamespaceProof
             failures.Add("compose_files_not_configured");
         }
 
-        foreach (string composeFile in options.ComposeFiles)
-        {
-            if (string.IsNullOrWhiteSpace(composeFile) || !File.Exists(Path.GetFullPath(composeFile)))
-            {
-                failures.Add($"compose_file_missing:{composeFile}");
-            }
-        }
+        failures.AddRange(options.ComposeFiles
+            .Where(composeFile => string.IsNullOrWhiteSpace(composeFile) || !File.Exists(Path.GetFullPath(composeFile)))
+            .Select(composeFile => $"compose_file_missing:{composeFile}"));
 
         var optional = new HashSet<string>(options.OptionalOwnedDirectories, StringComparer.Ordinal);
-        foreach ((string name, string path) in options.OwnedDirectories)
-        {
-            if (!optional.Contains(name) && (string.IsNullOrWhiteSpace(path) || !Path.IsPathRooted(path) || !Directory.Exists(path)))
-            {
-                failures.Add($"owned_directory_missing:{name}");
-            }
-        }
+        failures.AddRange(options.OwnedDirectories
+            .Where(entry => !optional.Contains(entry.Key)
+                && (string.IsNullOrWhiteSpace(entry.Value) || !Path.IsPathRooted(entry.Value) || !Directory.Exists(entry.Value)))
+            .Select(entry => $"owned_directory_missing:{entry.Key}"));
 
         CheckExecutable(failures, () => resolver.Resolve("docker"), "docker");
         CheckExecutable(

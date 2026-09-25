@@ -57,21 +57,21 @@ public static class HostUpdateRecoveryEngineRegistration
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return string.IsNullOrWhiteSpace(options.RootDirectory)
                 ? new UnconfiguredInstalledHostStateStore()
-                : new FileInstalledHostStateStore(Path.Combine(options.StateDirectory, "installed-state.json"));
+                : new FileInstalledHostStateStore(Path.Join(options.StateDirectory, "installed-state.json"));
         });
         services.AddSingleton<IHostUpdateExecutionJournal>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return string.IsNullOrWhiteSpace(options.RootDirectory)
                 ? new UnavailableHostUpdateExecutionJournal()
-                : new FileHostUpdateExecutionJournal(Path.Combine(options.StateDirectory, "journal.ndjson"));
+                : new FileHostUpdateExecutionJournal(Path.Join(options.StateDirectory, "journal.ndjson"));
         });
         services.AddSingleton<IHostUpdateExecutionLock>(sp =>
         {
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return string.IsNullOrWhiteSpace(options.RootDirectory)
                 ? new UnavailableHostUpdateExecutionLock()
-                : new FileHostUpdateExecutionLock(Path.Combine(options.StateDirectory, "execution.lock"));
+                : new FileHostUpdateExecutionLock(Path.Join(options.StateDirectory, "execution.lock"));
         });
 
         services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();
@@ -229,7 +229,7 @@ public static class HostUpdateRecoveryEngineRegistration
             HostUpdateExecutionOptions options = sp.GetRequiredService<HostUpdateExecutionOptions>();
             return string.IsNullOrWhiteSpace(options.RootDirectory)
                 ? new UnconfiguredHostUpdateRecoveryOutcomeStore()
-                : new FileHostUpdateRecoveryOutcomeStore(Path.Combine(options.StateDirectory, "recovery-outcomes"));
+                : new FileHostUpdateRecoveryOutcomeStore(Path.Join(options.StateDirectory, "recovery-outcomes"));
         });
         services.AddScoped<IHostUpdateRecoveryCoordinator>(sp =>
         {
