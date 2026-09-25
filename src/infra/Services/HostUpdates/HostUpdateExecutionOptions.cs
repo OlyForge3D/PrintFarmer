@@ -107,8 +107,8 @@ public sealed class HostUpdateExecutionOptions
     /// <summary>
     /// Active compose services for this host topology. The resolver authenticates the full staged
     /// artifact set, but apply/verify only target services actually running in this topology.
-    /// A non-empty configured list replaces this split-topology default (issue #3042), so a
-    /// monolith host can narrow it to its actual services; blank entries fail startup validation.
+    /// A configured list replaces this split-topology default (issue #3042), so a monolith host
+    /// can narrow it to its actual services; an empty list or blank entry fails startup validation.
     /// </summary>
     public string[] ActiveServiceIds { get; set; } =
     [
@@ -162,8 +162,8 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>Compose files (in <c>-f</c> order) applied for the currently configured topology. Must
     /// define every compose service named in <see cref="ServiceMappings"/> that this deployment
-    /// actually runs; an unmapped or file-absent service fails the apply step closed. A non-empty
-    /// configured list replaces this default (issue #2997).
+    /// actually runs; an unmapped or file-absent service fails the apply step closed. A configured
+    /// list replaces this default (issue #2997); an empty list fails startup validation.
     /// </summary>
     public string[] ComposeFiles { get; set; } = ["scripts/docker/compose-templates/docker-compose.daily-registry.yml"];
 

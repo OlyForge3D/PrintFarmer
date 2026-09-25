@@ -279,10 +279,12 @@ Known limits of this slice:
   (#2997); list every compose file the installation applies, in `-f` order.
   The built-in default applies only when no `ComposeFiles` entry is configured;
   a blank entry fails startup validation.
-- `ActiveServiceIds` follows the same rule (#3042): a non-empty configured
-  list replaces the built-in split-topology service set for both the API and
-  the CLI, so a monolith host lists only its actual services. A blank entry
-  fails startup validation. The safety lists `SupportedProviderNames`,
+- `ActiveServiceIds` follows the same rule (#3042): a configured list replaces
+  the built-in split-topology service set for both the API and the CLI, so a
+  monolith host lists only its actual services. A blank entry, or an
+  explicitly empty list (`[]` or an empty environment variable) for either
+  `ActiveServiceIds` or `ComposeFiles`, fails startup validation instead of
+  restoring the default. The safety lists `SupportedProviderNames`,
   `RequiredAggregateHealthResultNames` and `RequiredFencedWriterNames` stay
   additive: configured entries extend the built-in set and can never drop a
   code-owned provider check, health result or fenced writer.

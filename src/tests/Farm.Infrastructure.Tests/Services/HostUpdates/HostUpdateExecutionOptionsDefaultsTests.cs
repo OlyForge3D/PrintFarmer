@@ -73,6 +73,27 @@ public class HostUpdateExecutionOptionsDefaultsTests
     }
 
     [Theory]
+    [InlineData("ActiveServiceIds", "ActiveServiceIds must list at least one active service")]
+    [InlineData("ComposeFiles", "ComposeFiles must list at least one compose file")]
+    public void ExplicitlyEmptyTopologyList_FailsValidatedOptionsResolution(string key, string expectedFailure)
+    {
+        // JSON "[]" and an empty environment variable both surface as a present, empty-string value.
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        IConfiguration configuration = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
+        {
+            ["HostUpdateExecution:RootDirectory"] = root,
+            [$"HostUpdateExecution:{key}"] = string.Empty,
+        }).Build();
+        var services = new ServiceCollection();
+        services.AddHostUpdateRecoveryEngine(configuration);
+        using ServiceProvider provider = services.BuildServiceProvider();
+
+        Action resolve = () => _ = provider.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value;
+
+        resolve.Should().Throw<OptionsValidationException>().WithMessage($"*{expectedFailure}*");
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("   ")]
     public void ConfiguredBlankActiveServiceId_FailsValidationThroughRegistration(string entry)
