@@ -317,8 +317,10 @@ public sealed class HostUpdateCliProviderTopologyTests : IDisposable, IAsyncLife
         CliRun confirm = await ConfirmAsync(configuration);
 
         Result(preview).GetProperty("namespaceProofFailures").GetArrayLength().Should().Be(0, "an owned-elsewhere database needs no host restore tool");
+        Result(preview).GetProperty("plan").GetProperty("kind").GetString().Should().Be("NeedsOperator");
+        Result(preview).GetProperty("plan").GetProperty("detail").GetString().Should().Be(HostUpdateRecoveryCoordinator.DatabaseExternallyOwnedStop);
         confirm.ExitCode.Should().Be(HostUpdateCliExitCodes.NeedsOperator, confirm.Output);
-        Result(confirm).GetProperty("detail").GetString().Should().Be(nameof(InvalidOperationException), "restore_target_unmapped fails closed");
+        Result(confirm).GetProperty("detail").GetString().Should().Be(HostUpdateRecoveryCoordinator.DatabaseExternallyOwnedStop);
         _processes.Calls.Should().BeEmpty("neither the external database nor any image is touched");
         File.Exists(_host.AdmissionClosedPath).Should().BeTrue();
     }

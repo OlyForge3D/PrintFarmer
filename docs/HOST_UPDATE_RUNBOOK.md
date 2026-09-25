@@ -500,10 +500,16 @@ or compose command, when:
 | Condition | Result | Operator response |
 | --- | --- | --- |
 | Database provider, server (host/port or data source), database name, or `DatabaseExternallyOwned` changed after authorization | Exit 12 `drift_reapproval_required` (`configuration_drift`) | Confirm with the deployment owner that the configured database is the one the backup came from. Never reapprove a retarget to a different server. |
-| `DatabaseExternallyOwned` is `true` and the manifest includes `database` | Exit 10 `NeedsOperator` (`restore_target_unmapped`); no restore tool is required or run | The database owner restores it with their own procedure; this host never restores an externally owned database. |
+| `DatabaseExternallyOwned` is `true` and the manifest includes `database` | Exit 10 `NeedsOperator` (`database_externally_owned`) in both `--preview` and `--confirm`; no restore tool is required or run. The executor also leaves the `database` target unmapped, so any other path fails closed with `restore_target_unmapped` | The database owner restores it with their own procedure; this host never restores an externally owned database. |
 | The recorded prior state's services differ from `ActiveServiceIds` (topology changed since the update) | Exit 10 `NeedsOperator` (`prior_state_topology_mismatch`), even after drift reapproval | Do not force a restore onto a different topology. Restore the matching compose configuration or recover manually. |
 | Aggregate `/health` unreachable or unhealthy after restore | Exit 10 `NeedsOperator`; admission stays closed | Diagnose the API; do not reopen writers by hand. |
 | Fence release fails after a successful restore | Exit 11; a repeat `--confirm` only redrives the release | Re-run `--confirm` once the fence adapter is reachable. It never repeats the restore. |
+
+A journal authorized by a build before #3000 fingerprinted only the provider
+and SQLite path. On an otherwise unchanged host, its first recovery with this
+build reports `configuration_drift` once. Before you reapprove, confirm that
+the configured database server, database name and `DatabaseExternallyOwned`
+match the host the release ran on.
 
 Connection-string credentials are never part of the fingerprint, a process
 argument or CLI output; PostgreSQL and SQL Server restores receive the password

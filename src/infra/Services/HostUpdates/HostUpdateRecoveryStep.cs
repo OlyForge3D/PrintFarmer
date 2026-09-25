@@ -178,6 +178,11 @@ public sealed class HostUpdateRecoveryCoordinator(
     /// <summary>The recorded prior services differ from the configured split/monolith topology.</summary>
     public const string PriorStateTopologyMismatch = "prior_state_topology_mismatch";
 
+    /// <summary>The backup includes the database but this host does not own it, so it is never restored here.</summary>
+    public const string DatabaseExternallyOwnedStop = "database_externally_owned";
+
+    private const string HostUpdateDatabaseTargetName = "database";
+
     public async Task<HostUpdateRecoveryResult> RecoverAsync(
         HostUpdateExecutionRequest failedRequest,
         IReadOnlyList<HostUpdateExecutionActivity> activities,
@@ -416,6 +421,14 @@ public sealed class HostUpdateRecoveryCoordinator(
 
         (HostUpdateBackupManifest Manifest, string RunDirectory)? located =
             await manifestLocator.FindLatestAsync(failedRequest.ReleaseId, cancellationToken).ConfigureAwait(false);
+        if (located is not null && executionOptions is { DatabaseExternallyOwned: true } &&
+            located.Value.Manifest.TargetNames.Contains(HostUpdateDatabaseTargetName, StringComparer.Ordinal))
+        {
+            // This host never restores a database it does not own, so preview and confirm both
+            // stop here rather than advertising a restore the executor would refuse.
+            return new(HostUpdateRecoveryPlanKind.NeedsOperator, DatabaseExternallyOwnedStop, priorState, null);
+        }
+
         return located is null
             ? new(HostUpdateRecoveryPlanKind.NeedsOperator, "no_backup_available", priorState, null)
             : new(HostUpdateRecoveryPlanKind.CoordinatedRestore, "coordinated_restore", priorState, located);
