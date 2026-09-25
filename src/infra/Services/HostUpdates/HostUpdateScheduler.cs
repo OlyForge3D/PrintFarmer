@@ -307,14 +307,16 @@ public enum HostUpdateReplayDisposition
 {
     Accepted,
     Rejected,
-    Superseded
+    Superseded,
+    Imported
 }
 
 public enum HostUpdateReplayIntent
 {
     Admit,
     Reject,
-    Reserve
+    Reserve,
+    Import
 }
 
 public sealed record HostUpdateReplayDecision(HostUpdateReplayDisposition Disposition, string CorrelationId, bool Reused);
@@ -368,8 +370,11 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
             string anchorStateHash = await ReadAnchorStateHashAsync(ct);
             HostUpdateReplayFileState state = await LoadAndRecoverAsync(anchorEpoch, anchorStateHash, ct);
             string ns = Namespace(candidate);
-            if (state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing))
+            if (state.Identities.TryGetValue(candidate.Identity, out HostUpdateReplayIdentityRecord? existing) &&
+                (existing.Disposition != HostUpdateReplayDisposition.Imported || intent == HostUpdateReplayIntent.Import))
             {
+                // An offline import stages a release without installing it; the online path may
+                // still reserve and admit that same identity once, so only Import reuses it here.
                 return new(existing.Disposition, existing.CorrelationId, true);
             }
 
@@ -388,10 +393,15 @@ public sealed class FileHostUpdateReplayStore(string rootPath, IHostUpdateReplay
                 return new(HostUpdateReplayDisposition.Accepted, correlationId, false);
             }
 
-            HostUpdateReplayDisposition disposition = intent == HostUpdateReplayIntent.Admit ? HostUpdateReplayDisposition.Accepted : HostUpdateReplayDisposition.Rejected;
+            HostUpdateReplayDisposition disposition = intent switch
+            {
+                HostUpdateReplayIntent.Admit => HostUpdateReplayDisposition.Accepted,
+                HostUpdateReplayIntent.Import => HostUpdateReplayDisposition.Imported,
+                _ => HostUpdateReplayDisposition.Rejected,
+            };
             if (highWater is not null && candidate.Sequence > highWater.Sequence &&
                 state.Identities.TryGetValue(highWater.Identity, out HostUpdateReplayIdentityRecord? previous) &&
-                previous.Disposition == HostUpdateReplayDisposition.Accepted)
+                previous.Disposition is HostUpdateReplayDisposition.Accepted or HostUpdateReplayDisposition.Imported)
             {
                 state.Identities[highWater.Identity] = previous with { Disposition = HostUpdateReplayDisposition.Superseded };
             }
