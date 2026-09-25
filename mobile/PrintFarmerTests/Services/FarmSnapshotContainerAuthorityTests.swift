@@ -141,6 +141,26 @@ private actor ArmedReplayProviderGate {
     }
 }
 
+/// #3004: an outbox store whose `loadAll()` parks on a barrier, so a test can
+/// interleave work while `OfflineWriteQueue.unbind` is suspended in its first load.
+private final class ParkingOfflineWriteQueueStore: OfflineWriteQueueStoring, @unchecked Sendable {
+    private let loadGate: AsyncBarrier
+    private let backing = InMemoryOfflineWriteQueueStore()
+
+    init(loadGate: AsyncBarrier) {
+        self.loadGate = loadGate
+    }
+
+    func loadAll() async -> [OfflineWriteItem] {
+        await loadGate.arriveAndWait()
+        return await backing.loadAll()
+    }
+
+    func saveAll(_ items: [OfflineWriteItem]) async {
+        await backing.saveAll(items)
+    }
+}
+
 /// Container-level authority proofs (issue #816, Gates A/B, blocker). Uses the
 /// real `ServiceContainer` + `ServerRegistry` with an injected snapshot trio.
 @MainActor
@@ -1453,6 +1473,84 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
 
         XCTAssertTrue(realService?.disconnectCalled ?? false, "displaced real signalR must be disconnected on demo")
         XCTAssertNil(container.apiClient, "demo composition preserved")
+    }
+
+    // MARK: #3004 — overlapping offline sync must not spuriously fence demo entry
+
+    private func makeDemoOverlapContainer(
+        recorder: SignalRFactoryRecorder,
+        store: any OfflineWriteQueueStoring
+    ) throws -> ServiceContainer {
+        let reg = registry()
+        _ = try reg.add(displayName: "A", baseURL: URL(string: "https://a.example.com")!)
+        try reg.setActive(id: reg.servers[0].id)
+        // No credentials: `syncOfflineWriteQueue()` takes its unbound path, which
+        // invalidates the replay authority without any server/demo transition.
+        return ServiceContainer(
+            serverRegistry: reg, userDefaultsBox: box(), observeRegistry: false,
+            farmSnapshotAuthority: FarmSnapshotFixtures.makeAuthority(tombstoneDefaults: UserDefaults(suiteName: trackedSuiteName("tomb"))!),
+            farmSnapshotStore: FarmSnapshotStore(authority: FarmSnapshotAuthority(tombstoneStore: FarmSnapshotFixtures.makeTombstoneStore(UserDefaults(suiteName: trackedSuiteName("t2"))!)), rootURL: newRoot()),
+            farmSnapshotOwnerStore: ownerStore(),
+            synchronizeOfflineQueueOnStartup: false,
+            offlineWriteQueueStore: store,
+            signalRServiceFactory: recorder.factory
+        )
+    }
+
+    func testSwitchToDemoCompletesWhenOverlappingOfflineSyncInvalidatesReplayAuthority() async throws {
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: false)
+        defer { recorder.close() }
+        let loadGate = AsyncBarrier()
+        defer { loadGate.close() }
+        let container = try makeDemoOverlapContainer(
+            recorder: recorder,
+            store: ParkingOfflineWriteQueueStore(loadGate: loadGate)
+        )
+        let realService = recorder.service(forHost: "a.example.com")
+        XCTAssertNotNil(realService)
+
+        // Park switchToDemo inside `offlineWriteQueue.unbind` (first outbox load).
+        let switchTask = Task { await container.switchToDemo() }
+        await loadGate.waitUntilArrived()
+
+        // A non-transition invalidation + unbind completes while demo is parked.
+        await container.syncOfflineWriteQueue()
+        XCTAssertNil(container.currentOfflineWriteReplayIdentity)
+        loadGate.release()
+
+        let switched = await switchTask.value
+        XCTAssertTrue(switched, "a non-transition replay-authority invalidation must not fence demo entry")
+        XCTAssertTrue(realService?.disconnectCalled ?? false, "displaced real signalR must be disconnected on demo")
+        XCTAssertNil(container.apiClient, "demo composition applied")
+        XCTAssertTrue(container.signalRService is DemoSignalRService, "demo signalR installed")
+        XCTAssertNil(container.currentOfflineWriteReplayIdentity, "outbox stays unbound under demo")
+    }
+
+    func testSwitchToDemoIsSupersededByCompetingRealTransitionDuringUnbind() async throws {
+        let recorder = SignalRFactoryRecorder(barrierOnFirst: false)
+        defer { recorder.close() }
+        let loadGate = AsyncBarrier()
+        defer { loadGate.close() }
+        let container = try makeDemoOverlapContainer(
+            recorder: recorder,
+            store: ParkingOfflineWriteQueueStore(loadGate: loadGate)
+        )
+
+        let switchTask = Task { await container.switchToDemo() }
+        await loadGate.waitUntilArrived()
+
+        // A genuine competing transition (demo -> real) lands while demo is parked;
+        // an overlapping offline sync also invalidates, so the tolerant retry path
+        // is exercised and must still observe the superseding transition.
+        container.switchToReal()
+        await container.syncOfflineWriteQueue()
+        loadGate.release()
+
+        let switched = await switchTask.value
+        XCTAssertFalse(switched, "a newer server/demo transition must supersede demo entry")
+        XCTAssertNotNil(container.apiClient, "the newer real composition stays current")
+        XCTAssertFalse(container.signalRService is DemoSignalRService, "demo composition must not be applied")
+        XCTAssertFalse(container.authService is DemoAuthService, "demo composition must not be applied")
     }
 
     // MARK: Structural helper — records factory-created services + a first-disconnect barrier
