@@ -36,9 +36,11 @@ public sealed class QueueRetentionPruneService(
     IServiceScopeFactory scopeFactory,
     IOptions<QueueRetentionSettings> options,
     ILogger<QueueRetentionPruneService> logger,
-    Farm.Infrastructure.Services.HostUpdates.QueueRetentionPruneFenceFlag? hostUpdateFence = null) : BackgroundService
+    Farm.Infrastructure.Services.HostUpdates.QueueRetentionPruneFenceFlag? hostUpdateFence = null,
+    TimeProvider? timeProvider = null) : BackgroundService
 {
     private readonly QueueRetentionSettings _settings = options.Value;
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
 
     /// <inheritdoc/>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -52,7 +54,7 @@ public sealed class QueueRetentionPruneService(
             if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken))
             {
                 await hostUpdateFence.AcknowledgePausedAsync(stoppingToken);
-                await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+                await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
             }
             else
             {
@@ -75,15 +77,15 @@ public sealed class QueueRetentionPruneService(
 
     private async Task<bool> WaitForIntervalOrPauseAsync(CancellationToken stoppingToken)
     {
-        DateTimeOffset until = DateTimeOffset.UtcNow + _settings.PruneInterval;
-        while (DateTimeOffset.UtcNow < until)
+        DateTimeOffset until = _timeProvider.GetUtcNow() + _settings.PruneInterval;
+        while (_timeProvider.GetUtcNow() < until)
         {
             if (hostUpdateFence is not null && await hostUpdateFence.IsPauseRequestedAsync(stoppingToken).ConfigureAwait(false))
             {
                 return true;
             }
 
-            await Task.Delay(TimeSpan.FromMilliseconds(250), stoppingToken).ConfigureAwait(false);
+            await Task.Delay(TimeSpan.FromMilliseconds(250), _timeProvider, stoppingToken).ConfigureAwait(false);
         }
 
         return false;
@@ -100,7 +102,7 @@ public sealed class QueueRetentionPruneService(
             await using AsyncServiceScope scope = scopeFactory.CreateAsyncScope();
             AppDbContext db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
 
-            DateTime now = DateTime.UtcNow;
+            DateTime now = _timeProvider.GetUtcNow().UtcDateTime;
 
             int outboxDeleted = await PruneOutboxAsync(db, now, ct);
             int attemptsDeleted = await PruneDispatchAttemptsAsync(db, now, ct);
