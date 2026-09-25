@@ -352,16 +352,48 @@ describe("FailureDetectionMonitoringBadge", () => {
     expect(updatedIcon?.classList.contains("text-pf-error")).toBe(true);
   });
 
-  it("remainsClickable_OpensModal", () => {
+  it("withoutStatus_ShowsUnknownCoverageAndOmitsOutcome", () => {
+    // No printer snapshot is available yet; reason/lastOutcome themselves are
+    // required strings on a reported DTO, not nullable wire fields.
+    render(
+      <FailureDetectionMonitoringBadge
+        enabled={true}
+        printerId="printer-1"
+        printerName="Test Printer"
+      />,
+    );
+
+    const button = screen.getByRole("button", {
+      name: /open spaghetti detection details for test printer/i,
+    });
+    expect(button).toHaveAttribute("title", expect.stringContaining("Checking"));
+    fireEvent.click(button);
+
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText(
+      "Checking whether the current print is actively being watched.",
+    )).toBeInTheDocument();
+    expect(screen.getByText(
+      "The monitoring runtime has not reported printer-specific detail yet.",
+    )).toBeInTheDocument();
+    expect(screen.getByText("Runtime is still checking")).toBeInTheDocument();
+    expect(screen.queryByText("Latest outcome")).not.toBeInTheDocument();
+    expect(screen.queryByText("No scans yet")).not.toBeInTheDocument();
+    expect(screen.queryByText("Last scan")).not.toBeInTheDocument();
+    expect(screen.queryByText("Auto-pause")).not.toBeInTheDocument();
+  });
+
+  it("beforeFirstScan_OmitsNullableWireFieldsAndShowsNoScansYet", () => {
+    // WhenWritingNull omits nullable analysis fields, but LastOutcome defaults
+    // to "none" and Reason is still populated by the monitoring service.
     const status: FailureDetectionPrinterStatusDto = {
       printerId: "printer-1",
       printerName: "Test Printer",
-      state: "checking",
-      reason: "Waiting for the monitoring service to begin scanning.",
+      state: "idle",
+      reason: "Printer is not actively printing.",
       isPrinting: false,
       detectionSource: "global",
       lastOutcome: "none",
-      lastAnalyzedAt: undefined,
     };
 
     render(<FailureDetectionMonitoringBadge enabled={true} status={status} />);
@@ -377,6 +409,13 @@ describe("FailureDetectionMonitoringBadge", () => {
 
     // Modal should open
     expect(screen.getByRole("dialog")).toBeInTheDocument();
+    expect(screen.getByText("Latest outcome")).toBeInTheDocument();
+    expect(screen.getByText("No scans yet")).toBeInTheDocument();
+    expect(screen.getAllByText("Printer is not actively printing.")).toHaveLength(2);
+    expect(screen.queryByText("Last scan")).not.toBeInTheDocument();
+    expect(screen.queryByText("Last failure detected")).not.toBeInTheDocument();
+    expect(screen.queryByText("Auto-pause")).not.toBeInTheDocument();
+    expect(screen.queryByRole("link", { name: /open latest snapshot/i })).not.toBeInTheDocument();
   });
 
   it("liveIsPrinting_OverridesStaleDto_WhenPrinterIsActivePrinting", () => {
