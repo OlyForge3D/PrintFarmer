@@ -1,5 +1,27 @@
 # Decisions
 
+# 2026-09-25: Ralph runs as stock Squad Ralph; GitHub is the only state
+
+**By:** Dallas (Lead), recording #2966 / PR #2967 and the follow-ups in #2974 and #3037.
+**Status:** Authoritative.
+
+## Decision
+
+PrintFarmer retired its native Ralph automation (private mailbox, ledger, claim fences,
+credits, ACKs, policy pins and the `ralph-loop` skill) in PR #2967 and runs stock Squad
+Ralph instead. Labels, assignees, comments and PRs on GitHub are the only coordination
+state. Do not rebuild a private state store or scheduled coordinator on top of it.
+
+Per-host concurrency caps (PR #2976) and the claim, stale-claim and round-report rules
+(#2974, #3037) are agent-followed prose in `.squad/ralph-instructions.md`, summarized in
+`.github/ralph-reference.md`. Nothing mechanical enforces them. Accepted consequences:
+
+- Unattended `squad watch --execute` recovers or merges PRs only in a round that also
+  finds an eligible issue; otherwise an in-app "Ralph, go" is needed.
+- Claims do not expire. In-app Ralph releases its own host's stale claims and reports
+  the rest for the owner.
+- Xcode serialization and host caps depend on Ralph following the instructions.
+
 # 2026-08-15: Reviewer-rejection revision ownership — canonical rule reinstated (reviewer-invoked lockout)
 
 **By:** Dallas (Lead), resolving GitHub issue #1622, per repo-owner-authored task instructions.
