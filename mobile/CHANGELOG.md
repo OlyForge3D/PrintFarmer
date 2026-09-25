@@ -14,6 +14,11 @@ All notable changes to PrintFarmer iOS will be documented in this file.
 
 ### Fixed
 
+- Stop the Attention and filament-coverage offline caches from silently
+  keeping an older snapshot when two refreshes land in the same millisecond or
+  the device clock steps backward. Cache writes are now ordered by a
+  launch-scoped logical sequence instead of the wall clock, and refused writes
+  are logged (#3007).
 - Keep full Overview/Controls titles readable at accessibility sizes using
   stacked choices when needed; bound scrolling identity metadata so the page
   retains usable space beneath the shared header.
