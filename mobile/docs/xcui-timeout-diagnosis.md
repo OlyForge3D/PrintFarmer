@@ -239,8 +239,11 @@ The base class now uses **synchronous** `setUp()` and `tearDown()`:
   so the deadlock cannot come back through a subclass. Subclasses override
   the synchronous methods, as `ShiftTasksFailedRefreshUITests` does.
 - Failures are still recorded where they happen. The #3013 heartbeat gate,
-  snapshot attribution and launch-window annotation are unchanged, and a
-  failing setUp still stops the test before its body runs.
+  snapshot attribution and launch-window annotation are unchanged. On
+  Xcode 27, a failing setUp stops the test before its body runs (the probes
+  below). Xcode 26.6 was not available locally. With the earlier async setUp
+  it ran the body after a setUp failure (#3015 shard 3), and whether it still
+  does with synchronous setUp is unverified.
 
 Deferring readiness failures to the test body was rejected. XCTest also
 records failures inside `app.launch()`, which the harness cannot defer. A
