@@ -207,7 +207,7 @@ describe('SettingsPage — per-group save', () => {
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(40));
-    expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument();
+    await waitFor(() => expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument());
     fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '50' } });
     fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
     await waitFor(() => expect(saveSettingsMock).toHaveBeenLastCalledWith(
