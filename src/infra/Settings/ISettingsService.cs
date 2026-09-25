@@ -35,6 +35,16 @@ public interface ISettingsService
     /// <returns>The settings object, or null if not found.</returns>
     object GetByKey(string key);
 
+    /// <summary>Gets a section with the concurrency token captured when its values were loaded.</summary>
+    SettingsSectionSnapshot GetSectionSnapshot(string key);
+
+    /// <summary>
+    /// Saves a section only if its persisted revision matches the supplied token.
+    /// Updates the local cache only after a successful commit.
+    /// </summary>
+    Task<SettingsSectionSnapshot> SaveWithConcurrencyCheckAsync(
+        IAppSetting settings, string expectedRowVersion, CancellationToken ct = default);
+
     /// <summary>
     /// Gets all registered settings instances.
     /// </summary>

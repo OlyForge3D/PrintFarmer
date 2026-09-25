@@ -812,28 +812,25 @@ public class DiscoveryProbeValidationTests
 
     private sealed class LoopbackServer : IDisposable
     {
-        private readonly HttpListener _listener;
+        private HttpListener? _listener;
         private Task? _worker;
 
-        public int Port { get; }
-
-        public LoopbackServer()
-        {
-            Port = GetFreePort();
-            _listener = new HttpListener();
-            _listener.Prefixes.Add($"http://127.0.0.1:{Port}/");
-        }
+        public int Port { get; private set; }
 
         public void Start()
         {
-            _listener.Start();
+            // The port is chosen and bound in one step, retrying on a failed bind, so no
+            // probe-then-release window exists (#3029).
+            (HttpListener listener, int port) = LoopbackHttpListener.Start();
+            _listener = listener;
+            Port = port;
             _worker = Task.Run(async () =>
             {
-                while (_listener.IsListening)
+                while (listener.IsListening)
                 {
                     try
                     {
-                        HttpListenerContext context = await _listener.GetContextAsync();
+                        HttpListenerContext context = await listener.GetContextAsync();
                         context.Response.StatusCode = (int)HttpStatusCode.OK;
                         await context.Response.OutputStream.FlushAsync();
                         context.Response.Close();
@@ -850,18 +847,9 @@ public class DiscoveryProbeValidationTests
             });
         }
 
-        private static int GetFreePort()
-        {
-            using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
-            listener.Start();
-            int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-            listener.Stop();
-            return port;
-        }
-
         public void Dispose()
         {
-            _listener.Close();
+            _listener?.Close();
             _worker?.Wait(TimeSpan.FromSeconds(1));
         }
     }

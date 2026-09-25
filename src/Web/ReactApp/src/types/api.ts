@@ -4462,6 +4462,7 @@ export interface MarkMultipleAsReadRequest {
 
 /** Settings that control how print job costs are calculated. */
 export interface CostTrackingSettings {
+  rowVersion?: string;
   enableAutomaticCostCalculation: boolean;
   electricityRatePerKwh: number;
   averagePrinterWattage: number;
@@ -4966,6 +4967,7 @@ export type InventoryEligibility = 'Blocked' | 'Eligible' | 'Unknown' | 'NotMana
 export type UpdateChannel = 'stable' | 'insider';
 
 export interface UpdateChannelSettings {
+  rowVersion?: string;
   channel: UpdateChannel;
   insiderAcknowledged: boolean;
 }

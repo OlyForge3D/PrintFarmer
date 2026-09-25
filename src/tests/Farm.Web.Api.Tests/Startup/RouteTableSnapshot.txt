@@ -735,7 +735,7 @@ POST /api/quotas/user/{userId:guid}/groups -> Farm.Modules.Identity::Farm.Module
 POST /api/retries/jobs/{jobId}/check-retry -> Farm.Modules.PrintQueue::Farm.Modules.PrintQueue.Controllers.RetriesController.CheckShouldRetryAsync [auth=policy=;roles=;schemes=|policy=;roles=;schemes=|permission=job_queue:admin]
 POST /api/settings -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.UnifiedSettingsController.UpdateAsync [auth=policy=;roles=;schemes=|policy=;roles=;schemes=|permission=system_settings:admin]
 POST /api/settings/{keyName} -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.UnifiedSettingsController.UpdateSettingsByKeyNameAsync [auth=policy=;roles=;schemes=|policy=;roles=;schemes=|permission=system_settings:admin]
-POST /api/settings/{keyName}/heartbeat -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.UnifiedSettingsController.SendHeartbeat [auth=anonymous:AllowAnonymousAttribute]
+POST /api/settings/{keyName}/heartbeat -> Farm.Modules.Administration::Farm.Modules.Administration.Controllers.UnifiedSettingsController.SendHeartbeatAsync [auth=anonymous:AllowAnonymousAttribute]
 POST /api/setup/initial-admin -> Farm.Web.Api::Farm.Web.Api.Controllers.SetupController.CreateInitialAdminAsync [auth=anonymous:AllowAnonymousAttribute]
 POST /api/signalr-test/send-test-message -> Farm.Modules.Observability::Farm.Modules.Observability.Controllers.SignalRTestController.SendTestMessageAsync [auth=policy=;roles=;schemes=|permission=diagnostics:admin]
 POST /api/signalr-test/test-discovery-group -> Farm.Modules.Observability::Farm.Modules.Observability.Controllers.SignalRTestController.TestDiscoveryGroupAsync [auth=policy=;roles=;schemes=|permission=diagnostics:admin]

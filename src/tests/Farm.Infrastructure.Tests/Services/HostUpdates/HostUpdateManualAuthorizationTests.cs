@@ -317,7 +317,7 @@ public sealed class HostUpdateManualAuthorizationTests
     {
         public ResolverHarness(TimeSpan? ttl = null, IHostUpdateAdmissionFence? fence = null)
         {
-            string root = Path.Combine(Path.GetTempPath(), "printfarmer-manual-auth-" + Guid.NewGuid().ToString("N"));
+            string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-manual-auth-" + Guid.NewGuid().ToString("N"));
             Directory.CreateDirectory(root);
             AuthorizationStore = new FileHostUpdateManualAuthorizationStore(root, ttl);
             Replay = new MemoryReplayStore();

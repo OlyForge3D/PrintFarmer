@@ -19,6 +19,22 @@ import XCTest
 @MainActor
 final class FeatureReadCacheVMTests: XCTestCase {
 
+    /// Explicitly-advanced clock for adapters whose seed and reconnect writes are
+    /// compared by the store's strict `lastUpdatedAtMillis` monotonic rule. With
+    /// wall-clock `Date()`, a warm full-suite run can land both writes in the same
+    /// millisecond, so the reconnect write is refused as `.notNewer` (#2986).
+    private final class MutableClock: @unchecked Sendable {
+        private let lock = NSLock()
+        private var millis: Int64
+        init(_ millis: Int64) { self.millis = millis }
+        func set(_ value: Int64) { lock.lock(); millis = value; lock.unlock() }
+        func now() -> Date {
+            lock.lock(); defer { lock.unlock() }
+            return Date(timeIntervalSince1970: Double(millis) / 1000.0)
+        }
+        var sendableNow: @Sendable () -> Date { { [self] in self.now() } }
+    }
+
     private func newRoot() -> URL {
         let root = FarmSnapshotFixtures.tempRoot()
         addTeardownBlock { try? FileManager.default.removeItem(at: root) }
@@ -40,7 +56,8 @@ final class FeatureReadCacheVMTests: XCTestCase {
 
     func testAttentionOfflineHydrateRefusesLoadMoreThenReconnectReplacesOnce() async throws {
         let (store, _, session) = try makeStore()
-        let adapter = AttentionReadCacheAdapter(store: store)
+        let clock = MutableClock(5_000)
+        let adapter = AttentionReadCacheAdapter(store: store, now: clock.sendableNow)
 
         // Pre-seed a canonical snapshot into the (serverID,userID) namespace with a
         // duplicate id (must be dropped, first-wins) and a non-nil cursor.
@@ -91,6 +108,7 @@ final class FeatureReadCacheVMTests: XCTestCase {
         XCTAssertEqual(vm.snapshot?.nextCursor, "cursor-1", "refused load-more must not mutate the cursor")
 
         // --- Reconnect (criterion 8): exactly one canonical request + replace ---
+        clock.set(6_000)
         let ok = await vm.refresh()
         XCTAssertTrue(ok)
         XCTAssertFalse(vm.isShowingStaleCache, "a confirmed-live snapshot is no longer stale")
@@ -274,7 +292,8 @@ final class FeatureReadCacheVMTests: XCTestCase {
 
     func testFleetCoverageOfflineHydratePreservesUnknownThenReconnectReplaces() async throws {
         let (store, _, session) = try makeStore()
-        let adapter = FilamentCoverageReadCacheAdapter(store: store)
+        let clock = MutableClock(5_000)
+        let adapter = FilamentCoverageReadCacheAdapter(store: store, now: clock.sendableNow)
 
         let unknownPrinterID = UUID()
         let coversPrinterID = UUID()
@@ -330,6 +349,7 @@ final class FeatureReadCacheVMTests: XCTestCase {
             evaluatedAtUtc: Date(timeIntervalSince1970: 6_000)
         )
         let liveFleet = FleetFilamentCoverage(printers: [livePrinter], evaluatedAtUtc: Date(timeIntervalSince1970: 6_000))
+        clock.set(6_000)
         async let load: Void = vm.load()
         await service.awaitPending(count: 1)
         await service.completeSuccess(index: 0, fleet: liveFleet)
@@ -345,6 +365,56 @@ final class FeatureReadCacheVMTests: XCTestCase {
             return XCTFail("expected fresh cached fleet after reconnect, got \(hydration)")
         }
         XCTAssertEqual(fleet.printers.map(\.printerId), [coversPrinterID])
+    }
+
+    /// #2986 root cause, pinned deterministically: the reconnect cache write is
+    /// ordered by the adapter clock, and the store refuses an equal
+    /// `lastUpdatedAtMillis` as `.notNewer`. When seed and reconnect share one
+    /// millisecond (what a warm full-suite run did with wall-clock `Date()`), the
+    /// VM shows the canonical fleet while the cache still holds the stale one —
+    /// exactly the full-suite failure. The test above advances its clock so the
+    /// reconnect write is strictly newer and never races wall time.
+    func testFleetCoverageSameMillisecondReconnectCacheWriteIsRefusedAsNotNewer() async throws {
+        let (store, _, session) = try makeStore()
+        let clock = MutableClock(5_000)
+        let adapter = FilamentCoverageReadCacheAdapter(store: store, now: clock.sendableNow)
+
+        let stalePrinterID = UUID()
+        let freshPrinterID = UUID()
+        let stale = FleetFilamentCoverage(
+            printers: [makeCoverage(printerID: stalePrinterID, name: "Stale", evaluatedAt: 5_000)],
+            evaluatedAtUtc: Date(timeIntervalSince1970: 5_000)
+        )
+        let seed = await adapter.recordFleet(stale, capturedSession: session)
+        XCTAssertEqual(seed, .committed)
+
+        let service = ControlledFilamentCoverageService()
+        let vm = FarmFilamentCoverageViewModel()
+        vm.configure(coverageService: service)
+        vm.configureCache(adapter)
+        await vm.hydrateFromCache()
+
+        // Clock NOT advanced: the reconnect write carries the seed's millisecond.
+        let live = FleetFilamentCoverage(
+            printers: [makeCoverage(printerID: freshPrinterID, name: "Fresh", evaluatedAt: 6_000)],
+            evaluatedAtUtc: Date(timeIntervalSince1970: 6_000)
+        )
+        async let load: Void = vm.load()
+        await service.awaitPending(count: 1)
+        await service.completeSuccess(index: 0, fleet: live)
+        _ = await load
+
+        XCTAssertEqual(vm.coverageByPrinter[freshPrinterID]?.status, .covers, "in-VM commit still applies")
+        XCTAssertNil(vm.coverageByPrinter[stalePrinterID])
+        let direct = await adapter.recordFleet(live, capturedSession: session)
+        XCTAssertEqual(direct, .notNewer, "equal millis must be refused by the monotonic store")
+
+        let hydration = await adapter.loadCachedFleet()
+        guard case let .snapshot(cached, millis) = hydration else {
+            return XCTFail("expected the seeded snapshot to remain, got \(hydration)")
+        }
+        XCTAssertEqual(millis, 5_000)
+        XCTAssertEqual(cached.printers.map(\.printerId), [stalePrinterID], "same-ms reconnect write never landed")
     }
 
     // MARK: - Coverage stale-banner reportability (open-screen flash regression)

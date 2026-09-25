@@ -7,58 +7,50 @@ import { MemoryRouter } from 'react-router';
 import { AutoDispatchDashboardPage } from '@/features/auto-dispatch/pages/AutoDispatchDashboardPage';
 import type {
   AutoDispatchGlobalStatus,
-  AutoDispatchReadyResult,
   AutoDispatchStatus,
 } from '@/types/api';
 
-type QueryResult = {
-  data: AutoDispatchGlobalStatus | undefined;
-  isLoading: boolean;
-  error: Error | null;
+type AutoDispatchModule = typeof import('@/features/printers/hooks/useAutoDispatch');
+type MutationHookName =
+  | 'useSkipNextJob'
+  | 'useCancelAutoDispatch'
+  | 'useSetAutoDispatchEnabled'
+  | 'useSetAllAutoDispatchEnabled'
+  | 'usePreClearBed';
+type ReadyFlow = ReturnType<AutoDispatchModule['useAutoDispatchReadyFlow']>;
+type ReadyFlowResult = Pick<
+  ReadyFlow,
+  'challenge' | 'confirmReady' | 'confirmFilamentOverride' | 'cancelFilamentOverride'
+> & {
+  confirmation: Pick<ReadyFlow['confirmation'], 'isPending'>;
+};
+type DashboardHookResults = {
+  useAutoDispatchGlobalStatus: Pick<
+    ReturnType<AutoDispatchModule['useAutoDispatchGlobalStatus']>,
+    'data' | 'isLoading' | 'error'
+  >;
+  useAutoDispatchReadyFlow: ReadyFlowResult;
+} & {
+  [Name in MutationHookName]: Pick<ReturnType<AutoDispatchModule[Name]>, 'mutate' | 'isPending'>;
+};
+type DashboardHooks = {
+  [Name in keyof DashboardHookResults]:
+    (...args: Parameters<AutoDispatchModule[Name]>) => DashboardHookResults[Name];
 };
 
-type MutationResult<TVariables> = {
-  mutate: (variables: TVariables) => void;
-  isPending: boolean;
-};
-
-type ReadyFlowResult = {
-  challenge: {
-    status: AutoDispatchStatus;
-    printerName: string;
-    result: AutoDispatchReadyResult;
-  } | null;
-  confirmation: { isPending: boolean };
-  confirmReady: (status: AutoDispatchStatus, printerName: string) => Promise<void>;
-  confirmFilamentOverride: () => Promise<void>;
-  cancelFilamentOverride: () => void;
-};
-
-type SetEnabledVariables = {
-  printerId: string;
-  enabled: boolean;
-  dispatchStateETag: string;
-  printerETag: string;
-};
-
-type SetGlobalEnabledVariables = {
-  enabled: boolean;
-  statuses: AutoDispatchStatus[];
-};
-
-// The dashboard consumes only these fields, so test doubles model that narrow contract
-// instead of asserting incomplete objects as full TanStack Query results.
+// Project the real module onto the fields consumed by the dashboard, without
+// asserting incomplete doubles as full TanStack Query results.
 const autoDispatchHooks = vi.hoisted(() => ({
-  useAutoDispatchGlobalStatus: vi.fn<() => QueryResult>(),
-  useAutoDispatchReadyFlow: vi.fn<() => ReadyFlowResult>(),
-  useSkipNextJob: vi.fn<() => MutationResult<AutoDispatchStatus>>(),
-  useCancelAutoDispatch: vi.fn<() => MutationResult<AutoDispatchStatus>>(),
-  useSetAutoDispatchEnabled: vi.fn<() => MutationResult<SetEnabledVariables>>(),
-  useSetAllAutoDispatchEnabled: vi.fn<() => MutationResult<SetGlobalEnabledVariables>>(),
-  usePreClearBed: vi.fn<() => MutationResult<AutoDispatchStatus>>(),
+  useAutoDispatchGlobalStatus: vi.fn<DashboardHooks['useAutoDispatchGlobalStatus']>(),
+  useAutoDispatchReadyFlow: vi.fn<DashboardHooks['useAutoDispatchReadyFlow']>(),
+  useSkipNextJob: vi.fn<DashboardHooks['useSkipNextJob']>(),
+  useCancelAutoDispatch: vi.fn<DashboardHooks['useCancelAutoDispatch']>(),
+  useSetAutoDispatchEnabled: vi.fn<DashboardHooks['useSetAutoDispatchEnabled']>(),
+  useSetAllAutoDispatchEnabled: vi.fn<DashboardHooks['useSetAllAutoDispatchEnabled']>(),
+  usePreClearBed: vi.fn<DashboardHooks['usePreClearBed']>(),
 }));
 
-vi.mock('@/features/printers/hooks/useAutoDispatch', () => autoDispatchHooks);
+vi.mock('@/features/printers/hooks/useAutoDispatch', (): DashboardHooks => autoDispatchHooks);
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -120,10 +112,10 @@ describe('AutoDispatchDashboardPage', () => {
     printers: [mockPrinterStatus],
   } satisfies AutoDispatchGlobalStatus;
 
-  const mockConfirmReady = vi.fn().mockResolvedValue(undefined);
-  const mockConfirmFilamentOverride = vi.fn().mockResolvedValue(undefined);
-  const mockCancelFilamentOverride = vi.fn();
-  const mockReadyFlow = {
+  const mockConfirmReady = vi.fn<ReadyFlowResult['confirmReady']>().mockResolvedValue(undefined);
+  const mockConfirmFilamentOverride = vi.fn<ReadyFlowResult['confirmFilamentOverride']>().mockResolvedValue(undefined);
+  const mockCancelFilamentOverride = vi.fn<ReadyFlowResult['cancelFilamentOverride']>();
+  const mockReadyFlow: ReadyFlowResult = {
     challenge: null,
     confirmation: { isPending: false },
     confirmReady: mockConfirmReady,
@@ -132,27 +124,27 @@ describe('AutoDispatchDashboardPage', () => {
   };
 
   const mockSkipMutation = {
-    mutate: vi.fn(),
+    mutate: vi.fn<DashboardHookResults['useSkipNextJob']['mutate']>(),
     isPending: false,
   };
 
   const mockCancelMutation = {
-    mutate: vi.fn(),
+    mutate: vi.fn<DashboardHookResults['useCancelAutoDispatch']['mutate']>(),
     isPending: false,
   };
 
   const mockSetEnabledMutation = {
-    mutate: vi.fn(),
+    mutate: vi.fn<DashboardHookResults['useSetAutoDispatchEnabled']['mutate']>(),
     isPending: false,
   };
 
   const mockSetGlobalEnabledMutation = {
-    mutate: vi.fn(),
+    mutate: vi.fn<DashboardHookResults['useSetAllAutoDispatchEnabled']['mutate']>(),
     isPending: false,
   };
 
   const mockPreClearMutation = {
-    mutate: vi.fn(),
+    mutate: vi.fn<DashboardHookResults['usePreClearBed']['mutate']>(),
     isPending: false,
   };
 
@@ -258,7 +250,10 @@ describe('AutoDispatchDashboardPage', () => {
     await user.click(globalToggle);
 
     await waitFor(() => {
-      expect(mockSetGlobalEnabledMutation.mutate).toHaveBeenCalled();
+      expect(mockSetGlobalEnabledMutation.mutate).toHaveBeenCalledWith({
+        enabled: false,
+        statuses: mockGlobalStatus.printers,
+      } satisfies Parameters<DashboardHookResults['useSetAllAutoDispatchEnabled']['mutate']>[0]);
     });
   });
 
@@ -285,7 +280,7 @@ describe('AutoDispatchDashboardPage', () => {
         enabled: false,
         dispatchStateETag: 'dispatch-v1',
         printerETag: 'printer-v1',
-      });
+      } satisfies Parameters<DashboardHookResults['useSetAutoDispatchEnabled']['mutate']>[0]);
     });
   });
 

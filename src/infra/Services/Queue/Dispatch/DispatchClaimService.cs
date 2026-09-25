@@ -507,7 +507,8 @@ public sealed class DispatchClaimService(
                 jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
                 backendCommandId = attempt.BackendCommandId,
                 acknowledgementConsumed = consumesAcknowledgement,
-            });
+            },
+            timeProvider: _timeProvider);
 
         if (request.FilamentOverride is { OverrideApproved: true } filamentOverride)
         {
@@ -533,7 +534,8 @@ public sealed class DispatchClaimService(
                    filamentOverride.RemainingWeightG,
                    filamentOverride.RequiredWeightG,
                    authoritativeGate = filamentGate?.ErrorCode,
-               });
+               },
+               timeProvider: _timeProvider);
         }
 
         try
@@ -698,7 +700,8 @@ public sealed class DispatchClaimService(
                 printerId: request.PrinterId,
                 reasonCode: printerGate.ErrorCode,
                 dispatchStateRowVersion: dispatchState.RowVersion,
-                detail: new { startPathKind = request.StartPathKind });
+                detail: new { startPathKind = request.StartPathKind },
+                timeProvider: _timeProvider);
             _ = await _db.SaveChangesAsync(ct);
             return printerGate;
         }
@@ -811,7 +814,8 @@ public sealed class DispatchClaimService(
             {
                 startPathKind = request.StartPathKind,
                 backendCommandId = attempt.BackendCommandId,
-            });
+            },
+            timeProvider: _timeProvider);
 
         try
         {
@@ -1073,7 +1077,8 @@ public sealed class DispatchClaimService(
             reasonCode: errorCode,
             jobRowVersion: attempt.PrintJob?.RowVersion,
             dispatchStateRowVersion: dispatchState?.RowVersion,
-            detail: new { startPathKind = attempt.StartPathKind });
+            detail: new { startPathKind = attempt.StartPathKind },
+            timeProvider: _timeProvider);
 
         // Emit a durable lifecycle event so the outbox publisher broadcasts the failure to
         // authorized groups. The event is committed in the SAME SaveChangesAsync call as
@@ -1240,7 +1245,8 @@ public sealed class DispatchClaimService(
                 startPathKind = attempt.StartPathKind,
                 backendCommandId = attempt.BackendCommandId,
                 hasBackendJobId = !string.IsNullOrWhiteSpace(attempt.BackendJobId),
-            });
+            },
+            timeProvider: _timeProvider);
 
         // Emit a durable lifecycle event for backend acceptance so the outbox publisher
         // broadcasts the Printing state transition to authorized groups.
@@ -1352,7 +1358,8 @@ public sealed class DispatchClaimService(
             {
                 startPathKind = attempt.StartPathKind,
                 backendCommandId = attempt.BackendCommandId,
-            });
+            },
+            timeProvider: _timeProvider);
 
         // Emit a durable lifecycle event for the uncertain outcome so operators can detect
         // that reconciliation is required via the event stream.
@@ -2030,7 +2037,8 @@ public sealed class DispatchClaimService(
             {
                 startPathKind = request.StartPathKind,
                 jobKind = job.JobKind?.ToString() ?? nameof(JobKind.Standard),
-            });
+            },
+            timeProvider: _timeProvider);
 
         try
         {

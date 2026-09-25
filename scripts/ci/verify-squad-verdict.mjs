@@ -10,8 +10,9 @@
 // `APPROVED` reflects a repository administrator authorising directly. See
 // .github/copilot-instructions.md § "Repository verdict evidence".
 
-import { execFileSync } from 'node:child_process';
 import { pathToFileURL } from 'node:url';
+
+import { readGhJson } from './gh-api.mjs';
 
 export const verdictContext = 'squad/pre-pr-verdict';
 export const verdictWorkflowPath = '.github/workflows/squad-review-verdict.yml';
@@ -490,11 +491,7 @@ export async function loadSquadVerdict({
 }
 
 function ghApi(path) {
-  const output = execFileSync('gh', ['api', path], {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-  });
-  return JSON.parse(output);
+  return readGhJson(['api', path]);
 }
 
 // Returns the git blob SHA of the gate workflow file at `ref`, or undefined

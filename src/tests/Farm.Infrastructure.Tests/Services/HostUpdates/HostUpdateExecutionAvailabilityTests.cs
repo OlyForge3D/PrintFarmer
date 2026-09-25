@@ -1314,7 +1314,7 @@ public class HostUpdateExecutionAvailabilityTests
     [Fact]
     public async Task CheckAsync_ReleaseCompletedByRealExecutor_DoesNotReFenceOrReportPending()
     {
-        string root = Directory.CreateTempSubdirectory("hu-avail-").FullName;
+        string root = HostStateTestPaths.CreateTempSubdirectory("hu-avail-").FullName;
         string composeFile = Path.Combine(root, "compose.yml");
         string journalPath = Path.Combine(root, "state", "journal.ndjson");
         await File.WriteAllTextAsync(composeFile, "services: {}");

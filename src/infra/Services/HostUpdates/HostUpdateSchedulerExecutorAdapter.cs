@@ -1,4 +1,4 @@
-using System.Collections.Concurrent;
+﻿using System.Collections.Concurrent;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
@@ -26,6 +26,9 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
     private readonly ConcurrentDictionary<string, string> _preArmed = new(StringComparer.Ordinal);
     private bool _preArmOverflowed;
     private int _disposed;
+
+    // Internal fault-injection seam after insertion, while the lifecycle lock is held.
+    internal Action<CancellationTokenSource, Task>? OnOperationRegisteredForTests { get; set; }
 
     public async Task<HostUpdateExecutorResponse> ExecuteAsync(HostUpdateExecutorRequest request, CancellationToken ct)
     {
@@ -55,39 +58,39 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
             return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, validationError);
         }
 
+        ActiveOperation? operation = null;
         CancellationTokenSource safeCancellation = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        ActiveOperation operation = new(request.OperationToken, safeCancellation, new(TaskCreationOptions.RunContinuationsAsynchronously));
-        lock (_lifecycleGate)
-        {
-            if (Volatile.Read(ref _disposed) != 0)
-            {
-                safeCancellation.Dispose();
-                return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
-            }
-
-            if (_preArmOverflowed)
-            {
-                safeCancellation.Dispose();
-                return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "prearmed_cancellation_capacity_exceeded");
-            }
-
-            if (!_activeRequests.TryAdd(request.RequestId, operation))
-            {
-                safeCancellation.Dispose();
-                return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
-            }
-
-            if (_preArmed.TryRemove(request.RequestId, out string? token) &&
-                string.Equals(token, request.OperationToken, StringComparison.Ordinal))
-            {
-#pragma warning disable CA1849 // Pre-arm runs under the lifecycle lock and must synchronously publish cancellation before execution starts.
-                safeCancellation.Cancel();
-#pragma warning restore CA1849
-            }
-        }
-
         try
         {
+            operation = new(request.OperationToken, safeCancellation, new(TaskCreationOptions.RunContinuationsAsynchronously));
+            lock (_lifecycleGate)
+            {
+                if (Volatile.Read(ref _disposed) != 0)
+                {
+                    return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "executor_disposed");
+                }
+
+                if (_preArmOverflowed)
+                {
+                    return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "prearmed_cancellation_capacity_exceeded");
+                }
+
+                if (!_activeRequests.TryAdd(request.RequestId, operation))
+                {
+                    return new HostUpdateExecutorResponse(HostUpdateExecutorResult.Refused, "request_already_running");
+                }
+
+                OnOperationRegisteredForTests?.Invoke(safeCancellation, operation.Completion.Task);
+
+                if (_preArmed.TryRemove(request.RequestId, out string? token) &&
+                    string.Equals(token, request.OperationToken, StringComparison.Ordinal))
+                {
+#pragma warning disable CA1849 // Pre-arm runs under the lifecycle lock and must synchronously publish cancellation before execution starts.
+                    safeCancellation.Cancel();
+#pragma warning restore CA1849
+                }
+            }
+
             HostUpdateExecutionResult result;
             try
             {
@@ -112,9 +115,14 @@ public sealed class HostUpdateSchedulerExecutorAdapter(
         }
         finally
         {
-            _activeRequests.TryRemove(new KeyValuePair<string, ActiveOperation>(request.RequestId, operation));
+            if (operation is not null)
+            {
+                // A refused duplicate must not remove the already-running generation.
+                _activeRequests.TryRemove(new KeyValuePair<string, ActiveOperation>(request.RequestId, operation));
+            }
+
             safeCancellation.Dispose();
-            operation.Completion.TrySetResult();
+            operation?.Completion.TrySetResult();
         }
     }
 

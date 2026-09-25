@@ -24,8 +24,11 @@ public class JobDispatchService(
     IFilamentCoverageBroadcaster coverageBroadcaster,
     IPartOutputSnapshotService partOutputSnapshotService,
     IQueueResourceAuthorizationService? resourceAuthorization = null,
-    IQueuePositionAllocator? positionAllocator = null) : IJobDispatchService
+    IQueuePositionAllocator? positionAllocator = null,
+    TimeProvider? timeProvider = null) : IJobDispatchService
 {
+    private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
+
     public async Task<List<DispatchCandidateDto>> FindCandidatesAsync(Guid jobId, CancellationToken ct = default)
     {
         List<DispatchScore> scores = await scorer.ScorePrintersForJobAsync(jobId, ct);
@@ -33,7 +36,7 @@ public class JobDispatchService(
         // Log candidates for audit trail
         foreach (DispatchScore score in scores.Where(s => !s.Eliminated))
         {
-            db.DispatchLogs.Add(new DispatchLog
+            db.DispatchLogs.Add(new DispatchLog(_timeProvider.GetUtcNow())
             {
                 Id = Guid.NewGuid(),
                 PrintJobId = jobId,
@@ -41,7 +44,6 @@ public class JobDispatchService(
                 Action = DispatchAction.Suggested,
                 Score = score.TotalScore,
                 ScoreBreakdown = JsonSerializer.Serialize(score.ScoreBreakdown),
-                CreatedAtUtc = DateTime.UtcNow,
             });
         }
 
@@ -307,7 +309,7 @@ public class JobDispatchService(
             }
         }
 
-        db.DispatchLogs.Add(new DispatchLog
+        db.DispatchLogs.Add(new DispatchLog(_timeProvider.GetUtcNow())
         {
             Id = Guid.NewGuid(),
             PrintJobId = jobId,
@@ -318,7 +320,6 @@ public class JobDispatchService(
                 ? JsonSerializer.Serialize(printerScore.ScoreBreakdown)
                 : null,
             Reason = $"Dispatched by {userId}",
-            CreatedAtUtc = DateTime.UtcNow,
         });
 
         _ = await partOutputSnapshotService.CaptureJobSnapshotIfAbsentAsync(job, ct);

@@ -161,6 +161,64 @@ data-router branch for free and would not have caught this.
 - **Partial Failure Handling**: If some sections fail validation or network save while others succeed, successful baselines advance, error messages remain pinned to failed sections, and in-flight user edits are strictly preserved.
 - **No Batch Saves**: Strictly no `saveAllSettings` or batch `POST /api/settings` calls.
 
+### Concurrent Settings Saves
+
+Each section returned by `GET /api/settings` or `GET /api/settings/{keyName}`
+includes an opaque `rowVersion` captured with its values. Keep this token with
+the draft and include it in the flat JSON body of `POST /api/settings/{keyName}`.
+The successful response contains the saved section and its new `rowVersion`;
+per-key reads and successful saves also return the quoted token as `ETag`.
+The write precondition is the JSON `rowVersion`, not an `If-Match` header.
+
+A missing token returns **428**, a malformed token **400**, and a stale token
+**409** with a section-scoped error. Reload the latest settings before trying
+again; never fetch a new token and attach it to an old draft automatically.
+Successful sections advance their own baseline/token; failed sections retain
+their edits. Clients targeting an older server may still receive responses
+without this additive property, but the new server does not accept unguarded
+per-key writes.
+
+The explicit conflict reload discards all drafts on the settings page, including
+other groups, only after the reload succeeds. Failed reloads preserve edits.
+
+Discovery heartbeats persist under the separate `NetworkDiscovery.Heartbeat`
+telemetry key in the existing settings table. Heartbeats never change the
+NetworkDiscovery editable revision, and a settings save cannot erase the
+separately stored liveness timestamp.
+
+Once the telemetry row exists it is the only source of `lastHeartbeat`; any
+timestamp embedded in the editable section is ignored. Liveness is never client
+input. Every settings save discards any submitted `lastHeartbeat`, never writes
+it into the section, and never creates the telemetry row. This covers the
+checked per-key save (`POST /api/settings/NetworkDiscovery`), the legacy batch
+`POST /api/settings`, and other callers of the unchecked `SettingsService.Save<T>`,
+such as `POST /api/network-discovery/settings/apply-env`. The saved value and the
+cache carry the telemetry row's timestamp instead. When there is no trusted
+heartbeat, `lastHeartbeat` is omitted from the JSON response rather than sent as
+`null`. Rows written before #2973 may still embed a legacy timestamp. Reads use
+it only as a fallback while no telemetry row exists, and apply the same
+five-minute future-skew check as telemetry. The first save of any kind deletes
+the legacy mirror, so until the next heartbeat creates the telemetry row, the
+section reports no heartbeat.
+
+If the telemetry row holds an unreadable timestamp (invalid JSON or value) or one
+more than five minutes in the future, settings load and every save log a
+warning and report no heartbeat (`lastHeartbeat` omitted) without falling back
+to the legacy value. A legacy fallback more than five minutes in the future is
+treated the same way. Unrelated settings still load. The background-service
+monitor widget reports discovery liveness as unknown until the next heartbeat
+overwrites the row; the settings API cannot distinguish this from a service
+that has never sent a heartbeat.
+
+The literal token `absent` represents an unpersisted configuration/default
+section. Its first save uses a unique-key-protected insert; concurrent first
+saves cannot overwrite each other. Existing sections use the portable
+`AppSettingsEntity.Revision` EF concurrency token, with a single commit and
+cache publication only after success. No schema migration is required.
+The legacy batch endpoint and specialized settings endpoints retain their
+existing contracts. The iOS app currently has no caller of this generic
+per-key settings endpoint and needs no change.
+
 ## URL Contract
 
 `SettingsShell` is entirely URL-driven. Deep-links, palette navigation, and the back

@@ -186,7 +186,7 @@ public class DispatchQueueStatusTests : IClassFixture<CustomWebApplicationFactor
     private static async Task SeedDispatchLogAsync(
         AppDbContext db, Guid printJobId, Guid printerId, DateTime? createdAt = null)
     {
-        db.Set<DispatchLog>().Add(new DispatchLog
+        db.Set<DispatchLog>().Add(new DispatchLog(createdAt ?? DateTime.UtcNow)
         {
             Id = Guid.NewGuid(),
             PrintJobId = printJobId,
@@ -194,7 +194,6 @@ public class DispatchQueueStatusTests : IClassFixture<CustomWebApplicationFactor
             Action = DispatchAction.Dispatched,
             Score = 85.0,
             Reason = "Auto-dispatched via test",
-            CreatedAtUtc = createdAt ?? DateTime.UtcNow,
         });
         await db.SaveChangesAsync();
     }

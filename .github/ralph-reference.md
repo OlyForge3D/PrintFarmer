@@ -7,12 +7,18 @@ PrintFarmer uses stock Squad Ralph. GitHub is the only state: `squad` /
 state store or scheduled coordinator/consumer layer on top of it (see #2966).
 
 - **In-session:** "Ralph, go" in a Squad session on any machine.
-- **Unattended:** `npx @bradygaster/squad-cli watch --execute --interval 10 --max-concurrent N`
+- **Unattended:** `npx @bradygaster/squad-cli watch --execute --interval 10`
   on each machine, started by a human. Repo rules live in `.squad/ralph-instructions.md`.
+  `--max-concurrent` does not limit `--execute` (squad-cli 0.13.1).
 - **Multiple machines** coordinate through GitHub only: an issue with an assignee
   or an open PR is claimed, so skip it. Declare each host's tooling in
   `~/.squad/machine-capabilities.json`; issues labelled `needs:xcode` run only on
   a host whose `capabilities` include `xcode` (the Mac).
+- **Per-host limits:** a host may cap concurrent issue sessions with
+  `"maxConcurrent": { "xcode": 1, "other": 1 }` in the same file. The Mac mini
+  uses exactly that; hosts without `maxConcurrent` are uncapped. Ralph, not the
+  CLI, enforces it (see "Host Limits" in `.squad/ralph-instructions.md`), so a
+  capped host should run in-app "Ralph, go" rather than `squad watch`.
 
 ## Ralph — Work Monitor
 
@@ -188,7 +194,7 @@ Do not replace a rejecting reviewer just to obtain an approval.
   Parent issue blocked/assigned state does not hide existing PR corrections.
 - Spawn agents as needed, collect results
 - **⚡ CRITICAL: After results are collected, DO NOT stop. DO NOT wait for user input. IMMEDIATELY go back to Step 1 and scan again.** This is a loop — Ralph keeps cycling until the board is clear or the user says "idle". Each cycle is one "round".
-- If multiple items exist in the same category, process them in parallel (spawn multiple agents)
+- If multiple items exist in the same category, process them in parallel (spawn multiple agents), within this host's `maxConcurrent` limits
 
 **Step 4 — Periodic check-in** (every 3-5 rounds):
 
@@ -277,9 +283,9 @@ Never reconstruct or fabricate what the session might have shown.
 **Xcode/CoreSimulator concurrency is per-Mac.** One physical Mac runs only one
 `xcodebuild`/`simctl` invocation at a time; git worktrees do not isolate DerivedData,
 simulator state or CoreSimulator services. Run at most one `needs:xcode` issue per
-Mac at a time. Every mobile test run uses a run-unique result bundle path, log path
-and an explicit simulator UDID — see `mobile/scripts/run-tests.py` and
-`mobile/AGENTS.md`.
+Mac at a time, and never more than the host's `maxConcurrent` limits. Every
+mobile test run uses a run-unique result bundle path, log path and an explicit
+simulator UDID — see `mobile/scripts/run-tests.py` and `mobile/AGENTS.md`.
 
 **Never fabricate, never destructively clean up.** Nothing here authorizes closing an
 issue, merging a PR, deleting a worktree/session, or inventing evidence.

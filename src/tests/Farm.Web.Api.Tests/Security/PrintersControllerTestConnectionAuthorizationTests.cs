@@ -294,21 +294,8 @@ public sealed class PrintersControllerTestConnectionAuthorizationTests : IAsyncL
 
         public static LoopbackRedirectServer Start(string redirectTarget)
         {
-            int port = GetFreeLoopbackPort();
-            string baseUrl = $"http://127.0.0.1:{port}/";
-            HttpListener listener = new();
-            listener.Prefixes.Add(baseUrl);
-            listener.Start();
-            return new LoopbackRedirectServer(listener, baseUrl.TrimEnd('/'), redirectTarget);
-        }
-
-        private static int GetFreeLoopbackPort()
-        {
-            using System.Net.Sockets.TcpListener probe = new(IPAddress.Loopback, 0);
-            probe.Start();
-            int port = ((IPEndPoint)probe.LocalEndpoint).Port;
-            probe.Stop();
-            return port;
+            (HttpListener listener, int port) = LoopbackHttpListener.Start();
+            return new LoopbackRedirectServer(listener, $"http://127.0.0.1:{port}", redirectTarget);
         }
 
         private async Task AcceptLoopAsync()

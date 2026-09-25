@@ -43,7 +43,7 @@ public sealed class HostStatePersistenceTests
     [Fact]
     public void InstallationIdentity_PersistsAcrossReadsOnValidatedRoot()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
         try
         {
             string first = HostUpdateInstallationIdentity.GetOrCreate(root);
@@ -64,7 +64,7 @@ public sealed class HostStatePersistenceTests
     [Fact]
     public void InstallationIdentity_IoFailureDegradesToEphemeralIdentity()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
         File.WriteAllText(root, "not a directory");
         try
         {
@@ -85,8 +85,8 @@ public sealed class HostStatePersistenceTests
     [Fact]
     public void InstallationIdentity_ReparseTargetIsRejectedWhenSymlinksAreAvailable()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
-        string outside = Path.Combine(Path.GetTempPath(), "printfarmer-installation-target-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-installation-" + Guid.NewGuid().ToString("N"));
+        string outside = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-installation-target-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         Directory.CreateDirectory(outside);
         string link = Path.Combine(root, "installation.id");
@@ -113,10 +113,10 @@ public sealed class HostStatePersistenceTests
         }
     }
 
-    [Fact]
+    [HostStateOwnerValidationFact]
     public async Task ReplayAnchor_RequiresProvisioning_AndRejectsRollback()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(root);
@@ -141,10 +141,10 @@ public sealed class HostStatePersistenceTests
         }
     }
 
-    [Fact]
+    [HostStateOwnerValidationFact]
     public async Task PolicyRepository_RequiresProvisioning_DefaultsOff_AndUsesRevisionCas()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(root);
@@ -173,10 +173,10 @@ public sealed class HostStatePersistenceTests
     }
 
 
-    [Fact]
+    [HostStateOwnerValidationFact]
     public async Task PolicyProvisioner_RefusesCorruptExistingState()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(root);
@@ -201,7 +201,7 @@ public sealed class HostStatePersistenceTests
     [Fact]
     public void HostStateOptionsValidator_DefaultDisabledAllowsEmptyRoot_AndEnabledMissingRootFails()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
             ValidateOptionsResult disabled = new HostStateOptionsValidator().Validate(null, new HostStateOptions());
@@ -223,7 +223,7 @@ public sealed class HostStatePersistenceTests
     [Fact]
     public void HostStateOptionsValidator_RejectsRootThatIsAFile()
     {
-        string file = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string file = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         File.WriteAllText(file, "not a directory");
         try
         {
@@ -238,14 +238,14 @@ public sealed class HostStatePersistenceTests
         }
     }
 
-    [Theory]
+    [HostStateOwnerValidationTheory]
     [InlineData("provision-replay-staged")]
     [InlineData("provision-anchor-journal-committed")]
     [InlineData("provision-anchor-snapshot-replaced")]
     [InlineData("provision-replay-committed")]
     public async Task ReplayProvisioner_recovers_interruption_at_every_boundary(string boundary)
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(root);
@@ -277,13 +277,13 @@ public sealed class HostStatePersistenceTests
         }
     }
 
-    [Theory]
+    [HostStateOwnerValidationTheory]
     [InlineData("stage-durable")]
     [InlineData("anchor-committed")]
     [InlineData("snapshot-replaced")]
     public async Task Replay_commit_recovers_forward_after_each_interruption_boundary(string boundary)
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(root);
@@ -318,8 +318,8 @@ public sealed class HostStatePersistenceTests
     [Fact]
     public void HostStateOptionsValidator_rejects_reparse_component()
     {
-        string parent = Path.Combine(Path.GetTempPath(), "printfarmer-host-parent-" + Guid.NewGuid().ToString("N"));
-        string target = Path.Combine(Path.GetTempPath(), "printfarmer-host-target-" + Guid.NewGuid().ToString("N"));
+        string parent = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-parent-" + Guid.NewGuid().ToString("N"));
+        string target = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-target-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(parent);
         Directory.CreateDirectory(target);
         string link = Path.Combine(parent, "linked");
@@ -349,7 +349,7 @@ public sealed class HostStatePersistenceTests
         }
     }
 
-    [Fact]
+    [HostStateOwnerValidationFact]
     public void HostStateOptionsValidator_rejects_insecure_unix_permissions()
     {
         if (OperatingSystem.IsWindows())
@@ -357,7 +357,7 @@ public sealed class HostStatePersistenceTests
             return;
         }
 
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(root);
         try
         {
@@ -369,6 +369,73 @@ public sealed class HostStatePersistenceTests
         finally
         {
             Directory.Delete(root, true);
+        }
+    }
+
+    [HostStateOwnerValidationUnavailableFact]
+    [System.Runtime.Versioning.UnsupportedOSPlatform("windows")]
+    public void HostStateRoot_FailsClosedWhereUnixOwnerValidationIsUnavailable()
+    {
+        string root = HostStateTestPaths.CreateTempSubdirectory("printfarmer-host-state-").FullName;
+        try
+        {
+            // An owner-only, symlink-free root is otherwise valid; only the missing owner proof rejects it.
+            AssertOwnerValidationUnavailable(root);
+
+            File.SetUnixFileMode(root, UnixFileMode.UserRead | UnixFileMode.UserWrite | UnixFileMode.UserExecute | UnixFileMode.GroupWrite);
+            AssertOwnerValidationUnavailable(root);
+
+            Assert.Empty(Directory.EnumerateFileSystemEntries(root));
+        }
+        finally
+        {
+            Directory.Delete(root, true);
+        }
+
+        static void AssertOwnerValidationUnavailable(string root)
+        {
+            ValidateOptionsResult result = new HostStateOptionsValidator().Validate(null, OptionsFor(root));
+            Assert.False(result.Succeeded);
+            Assert.Contains("host_state_unix_owner_validation_unavailable", result.FailureMessage, StringComparison.Ordinal);
+
+            SecurityException ex = Assert.Throws<SecurityException>(() => new HostStatePath(Options.Create(OptionsFor(root))));
+            Assert.Equal("host_state_unix_owner_validation_unavailable", ex.Message);
+        }
+    }
+
+    [Fact]
+    public void HostStateTestPaths_TempRootHasNoReparseComponents()
+    {
+        HostStateFileSecurity.ValidateExistingPathComponents(HostStateTestPaths.TempRoot);
+        Assert.True(Directory.Exists(HostStateTestPaths.TempRoot));
+    }
+
+    [Fact]
+    public void HostStateTestPaths_ResolvesSymlinkedComponentsWithoutRelaxingProductionRejection()
+    {
+        string target = HostStateTestPaths.CreateTempSubdirectory("printfarmer-host-target-").FullName;
+        string parent = HostStateTestPaths.CreateTempSubdirectory("printfarmer-host-parent-").FullName;
+        string link = Path.Combine(parent, "linked");
+        try
+        {
+            Directory.CreateDirectory(Path.Combine(target, "state"));
+            Directory.CreateSymbolicLink(link, target);
+            string linked = Path.Combine(link, "state");
+
+            Assert.Throws<SecurityException>(() => HostStateFileSecurity.ValidateExistingPathComponents(linked));
+            string physical = HostStateTestPaths.ResolvePhysicalPath(linked);
+            Assert.Equal(Path.Combine(target, "state"), physical);
+            HostStateFileSecurity.ValidateExistingPathComponents(physical);
+        }
+        finally
+        {
+            if (Directory.Exists(link))
+            {
+                Directory.Delete(link);
+            }
+
+            Directory.Delete(parent, true);
+            Directory.Delete(target, true);
         }
     }
 
@@ -412,10 +479,10 @@ public sealed class HostStatePersistenceTests
         return document.RootElement.GetProperty("Epoch").GetInt64();
     }
 
-    [Fact]
+    [HostStateOwnerValidationFact]
     public void PolicyRepository_ReportsCorruptionInsteadOfUsingStoredPolicy()
     {
-        string root = Path.Combine(Path.GetTempPath(), "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
+        string root = Path.Combine(HostStateTestPaths.TempRoot, "printfarmer-host-state-" + Guid.NewGuid().ToString("N"));
         try
         {
             Directory.CreateDirectory(root);

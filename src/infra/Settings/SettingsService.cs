@@ -41,6 +41,94 @@ public class SettingsService : ISettingsService
     private readonly IDbContextFactory<AppDbContext> _dbContextFactory;
     private readonly IMutationWatermarkReader? _watermarkReader;
     private Dictionary<string, long?> _settingsOriginWatermarks = [];
+    private Dictionary<string, string> _settingsRowVersions = [];
+
+    // Heartbeats are stamped with server UtcNow; allow modest skew between API instances.
+    private static readonly TimeSpan HeartbeatClockSkewTolerance = TimeSpan.FromMinutes(5);
+
+    /// <inheritdoc />
+    public SettingsSectionSnapshot GetSectionSnapshot(string key) =>
+        new(GetByKey(key), _settingsRowVersions[key]);
+
+    /// <inheritdoc />
+    public async Task<SettingsSectionSnapshot> SaveWithConcurrencyCheckAsync(
+        IAppSetting settings, string expectedRowVersion, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(settings);
+        Type type = settings.GetType();
+        AppSettingAttribute appAttr = type.GetCustomAttribute<AppSettingAttribute>()
+            ?? throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting].");
+        if (settings is IValidatableSetting validatable)
+        {
+            validatable.Validate();
+        }
+
+        long? originWatermark = CaptureOriginWatermark();
+        await using AppDbContext db = await _dbContextFactory.CreateDbContextAsync(ct);
+        AppSettingsEntity? entity = await db.AppSettingsEntities
+            .FirstOrDefaultAsync(e => e.Key == appAttr.Key, ct);
+        bool creating = expectedRowVersion == SettingsSectionSnapshot.AbsentRowVersion;
+        if (creating)
+        {
+            if (entity is not null)
+            {
+                throw new DbUpdateConcurrencyException("Settings were created by another request.");
+            }
+
+            entity = new AppSettingsEntity { Key = appAttr.Key };
+            db.AppSettingsEntities.Add(entity);
+        }
+        else
+        {
+            long expectedRevision = RevisionETag.Decode(Convert.FromBase64String(expectedRowVersion));
+            if (entity is null || expectedRevision < 1)
+            {
+                throw new DbUpdateConcurrencyException("Settings no longer match the supplied revision.");
+            }
+
+            db.Entry(entity).Property(e => e.Revision).OriginalValue = expectedRevision;
+        }
+
+        string? heartbeatJson = null;
+        NetworkDiscoverySettings? discovery = settings as NetworkDiscoverySettings;
+        if (discovery is not null)
+        {
+            ClearHeartbeatForPersistence(discovery);
+            heartbeatJson = await db.AppSettingsEntities.AsNoTracking()
+                .Where(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey)
+                .Select(e => e.SettingsJson).FirstOrDefaultAsync(ct);
+        }
+
+        entity.SettingsJson = JsonSerializer.Serialize(settings, type);
+        if (discovery is not null && heartbeatJson is not null)
+        {
+            ApplyHeartbeatTelemetry(discovery, heartbeatJson);
+        }
+
+        entity.UpdatedAt = DateTime.UtcNow;
+
+        // Even an identical payload must check and advance the revision.
+        if (!creating)
+        {
+            db.Entry(entity).Property(e => e.SettingsJson).IsModified = true;
+        }
+
+        try
+        {
+            await db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException ex) when (creating
+            && Farm.Infrastructure.Repositories.Settings.EfAppSettingsRepository.IsDuplicateKey(ex))
+        {
+            throw new DbUpdateConcurrencyException("Settings were created by another request.", ex);
+        }
+
+        string rowVersion = RevisionETag.Encode(entity.Revision);
+        _settings = new Dictionary<string, object>(_settings) { [appAttr.Key] = settings };
+        _settingsOriginWatermarks[appAttr.Key] = originWatermark;
+        _settingsRowVersions[appAttr.Key] = rowVersion;
+        return new SettingsSectionSnapshot(settings, rowVersion);
+    }
 
     public void Save<T>(T settings)
         where T : class, IAppSetting
@@ -48,17 +136,21 @@ public class SettingsService : ISettingsService
         ArgumentNullException.ThrowIfNull(settings);
         Type type = typeof(T);
         AppSettingAttribute? appAttr = type.GetCustomAttribute<AppSettingAttribute>() ?? throw new InvalidOperationException($"Type {type.FullName} is not marked with [AppSetting]. Only AppSettings can be persisted to DB.");
-        _settingsOriginWatermarks[appAttr.Key] = CaptureOriginWatermark();
-
-        // Atomic swap: replace the whole dictionary rather than mutating the existing
-        // instance, so a caller holding a reference to the previous _settings (e.g. a
-        // snapshot taken via reflection, or an in-flight enumeration of All) keeps
-        // seeing that instance unchanged instead of observing this update land inside
-        // it. Mirrors the pattern already used by LoadSettings/Reload.
-        _settings = new Dictionary<string, object>(_settings) { [appAttr.Key] = settings };
+        long? originWatermark = CaptureOriginWatermark();
+        string? heartbeatJson = null;
+        NetworkDiscoverySettings? discovery = settings as NetworkDiscoverySettings;
+        if (discovery is not null)
+        {
+            ClearHeartbeatForPersistence(discovery);
+            heartbeatJson = ReadHeartbeatTelemetry();
+        }
 
         // Persist to DB (AppSettings only)
         string json = JsonSerializer.Serialize(settings);
+        if (discovery is not null && heartbeatJson is not null)
+        {
+            ApplyHeartbeatTelemetry(discovery, heartbeatJson);
+        }
 
         // Use repository to persist settings
         // Note: This is called from non-async context, so we use sync over async as a workaround
@@ -68,7 +160,14 @@ public class SettingsService : ISettingsService
         setTask.Wait();
         Task saveTask = _settingsRepo.SaveChangesAsync();
         saveTask.Wait();
+
+        // Read the tracked entity that was committed, not a fresh revision from another writer.
+        AppSettingsEntity entity = _settingsRepo.GetAsync(appAttr.Key).GetAwaiter().GetResult()
+            ?? throw new InvalidOperationException($"Saved settings '{appAttr.Key}' could not be read.");
 #pragma warning restore VSTHRD002
+        _settings = new Dictionary<string, object>(_settings) { [appAttr.Key] = settings };
+        _settingsOriginWatermarks[appAttr.Key] = originWatermark;
+        _settingsRowVersions[appAttr.Key] = RevisionETag.Encode(entity.Revision);
     }
 
     private Dictionary<string, object> _settings = new();
@@ -130,6 +229,7 @@ public class SettingsService : ISettingsService
         long? originWatermark = CaptureOriginWatermark();
         Dictionary<string, object> newSettings = new Dictionary<string, object>();
         Dictionary<string, long?> newOriginWatermarks = [];
+        Dictionary<string, string> newRowVersions = [];
 
         // Collect the DB-backed [AppSetting] keys up front so the DB read below can be a
         // single query filtered to just those keys, rather than one FirstOrDefault query per
@@ -143,13 +243,13 @@ public class SettingsService : ISettingsService
             .ToList();
 
         using AppDbContext dbContext = _dbContextFactory.CreateDbContext();
-        Dictionary<string, string> settingsJsonByKey = new();
+        appSettingKeys.Add(NetworkDiscoverySettings.HeartbeatStorageKey);
+        Dictionary<string, AppSettingsEntity> settingsByKey = new();
         if (appSettingKeys.Count > 0)
         {
-            settingsJsonByKey = dbContext.AppSettingsEntities
+            settingsByKey = dbContext.AppSettingsEntities.AsNoTracking()
                 .Where(e => appSettingKeys.Contains(e.Key))
-                .Select(e => new { e.Key, e.SettingsJson })
-                .ToDictionary(e => e.Key, e => e.SettingsJson);
+                .ToDictionary(e => e.Key);
         }
 
         foreach (Type type in _settingTypes)
@@ -166,7 +266,11 @@ public class SettingsService : ISettingsService
             if (appAttr != null)
             {
                 // AppSettings: try DB first, fallback to config
-                string? settingsJson = settingsJsonByKey.TryGetValue(appAttr.Key, out string? json) ? json : null;
+                settingsByKey.TryGetValue(appAttr.Key, out AppSettingsEntity? entity);
+                string? settingsJson = entity?.SettingsJson;
+                newRowVersions[key] = entity is null
+                    ? SettingsSectionSnapshot.AbsentRowVersion
+                    : RevisionETag.Encode(entity.Revision);
                 if (!string.IsNullOrWhiteSpace(settingsJson))
                 {
                     try
@@ -199,12 +303,101 @@ public class SettingsService : ISettingsService
                 validatable.Validate();
             }
 
+            // Runtime telemetry has its own row so heartbeats cannot invalidate an editor's token.
+            if (instance is NetworkDiscoverySettings discovery)
+            {
+                if (settingsByKey.TryGetValue(NetworkDiscoverySettings.HeartbeatStorageKey, out AppSettingsEntity? heartbeat))
+                {
+                    ApplyHeartbeatTelemetry(discovery, heartbeat.SettingsJson);
+                }
+                else if (discovery.LastHeartbeat is DateTime legacyHeartbeat)
+                {
+                    // A pre-#2973 mirror is only a fallback, and it gets the same plausibility check.
+                    AcceptHeartbeat(discovery, legacyHeartbeat, NetworkDiscoverySettings.SectionName);
+                }
+            }
+
             newSettings[key] = instance;
             newOriginWatermarks[key] = originWatermark;
         }
 
         _settings = newSettings;
         _settingsOriginWatermarks = newOriginWatermarks;
+        _settingsRowVersions = newRowVersions;
+    }
+
+    /// <summary>
+    /// Applies the separately stored discovery heartbeat. Unreadable or implausible telemetry
+    /// is logged and reported as unknown liveness; it never yields a heartbeat timestamp or
+    /// falls back to the legacy value embedded in the editable section.
+    /// </summary>
+    private void ApplyHeartbeatTelemetry(NetworkDiscoverySettings discovery, string heartbeatJson)
+    {
+        DateTime heartbeat;
+        try
+        {
+            heartbeat = JsonSerializer.Deserialize<DateTime>(heartbeatJson);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(
+                ex,
+                "Discovery heartbeat telemetry '{TelemetryKey}' is not a valid timestamp; discovery liveness is unknown until the next heartbeat",
+                NetworkDiscoverySettings.HeartbeatStorageKey);
+            MarkHeartbeatUnreadable(discovery);
+            return;
+        }
+
+        AcceptHeartbeat(discovery, heartbeat, NetworkDiscoverySettings.HeartbeatStorageKey);
+    }
+
+    private void AcceptHeartbeat(NetworkDiscoverySettings discovery, DateTime heartbeat, string sourceKey)
+    {
+        heartbeat = heartbeat.Kind switch
+        {
+            DateTimeKind.Local => heartbeat.ToUniversalTime(),
+            DateTimeKind.Unspecified => DateTime.SpecifyKind(heartbeat, DateTimeKind.Utc),
+            _ => heartbeat,
+        };
+
+        // Heartbeats are written with the server's UtcNow, so a far-future value can only come
+        // from corruption or client input and would otherwise suppress staleness detection.
+        if (heartbeat > DateTime.UtcNow + HeartbeatClockSkewTolerance)
+        {
+            _logger.LogWarning(
+                "Discovery heartbeat from '{TelemetryKey}' is {AheadSeconds:F0}s in the future; discovery liveness is unknown until the next heartbeat",
+                sourceKey,
+                (heartbeat - DateTime.UtcNow).TotalSeconds);
+            MarkHeartbeatUnreadable(discovery);
+            return;
+        }
+
+        discovery.LastHeartbeat = heartbeat;
+        discovery.HeartbeatTelemetryUnreadable = false;
+    }
+
+    /// <summary>
+    /// Liveness is server telemetry, never client input: no save path may persist a
+    /// client-supplied timestamp, and every save retires the legacy in-section mirror.
+    /// </summary>
+    private static void ClearHeartbeatForPersistence(NetworkDiscoverySettings discovery)
+    {
+        discovery.LastHeartbeat = null;
+        discovery.HeartbeatTelemetryUnreadable = false;
+    }
+
+    private string? ReadHeartbeatTelemetry()
+    {
+        using AppDbContext db = _dbContextFactory.CreateDbContext();
+        return db.AppSettingsEntities.AsNoTracking()
+            .Where(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey)
+            .Select(e => e.SettingsJson).FirstOrDefault();
+    }
+
+    private static void MarkHeartbeatUnreadable(NetworkDiscoverySettings discovery)
+    {
+        discovery.LastHeartbeat = null;
+        discovery.HeartbeatTelemetryUnreadable = true;
     }
 
     /// <summary>

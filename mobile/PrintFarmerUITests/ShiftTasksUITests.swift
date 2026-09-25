@@ -31,6 +31,58 @@ class ShiftTasksUITestBase: PrintFarmerUITestCase {
         )
         tasks.tap()
     }
+
+    /// Scrolls the checklist toward its end until `target` is hittable (#3026).
+    ///
+    /// A single `swipeUp()` is a velocity flick whose travel depends on the
+    /// runner, so a lazily materialised row or header could stay off-screen.
+    /// Each step here is a slow drag across a fixed fraction of the list that
+    /// holds before release, so it moves a bounded distance without momentum.
+    /// The loop stops as soon as the target is hittable, and records one
+    /// diagnostic failure once `maxSteps` is exhausted.
+    @discardableResult
+    func scrollChecklist(
+        _ list: XCUIElement,
+        untilHittable target: XCUIElement,
+        named name: String,
+        maxSteps: Int = 6,
+        file: StaticString = #filePath,
+        line: UInt = #line
+    ) -> Bool {
+        for step in 0...maxSteps {
+            if target.waitForExistence(timeout: step == 0 ? 1 : 2), target.isHittable {
+                return true
+            }
+            guard step < maxSteps else { break }
+            guard list.exists else {
+                XCTFail(
+                    "\(list.identifier) disappeared after \(step) scroll steps while seeking \(name)",
+                    file: file,
+                    line: line
+                )
+                return false
+            }
+            let start = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.7))
+            let end = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.35))
+            start.press(
+                forDuration: 0.05,
+                thenDragTo: end,
+                withVelocity: .slow,
+                thenHoldForDuration: 0.2
+            )
+        }
+        let listTree = XCTAttachment(string: list.debugDescription)
+        listTree.name = "shiftTasks.list hierarchy after bounded scroll"
+        listTree.lifetime = .keepAlways
+        add(listTree)
+        XCTFail(
+            "\(name) was not hittable after \(maxSteps) bounded scroll steps "
+                + "(exists=\(target.exists), list frame=\(list.frame))",
+            file: file,
+            line: line
+        )
+        return false
+    }
 }
 
 @MainActor
@@ -232,18 +284,15 @@ final class ShiftTasksGroupedUITests: ShiftTasksUITestBase {
         XCTAssertLessThan(nowRow.frame.minY, timelineRow.frame.minY)
         XCTAssertLessThan(nowHeader.frame.minY, timelineHeader.frame.minY)
 
-        if !anytimeHeader.exists {
-            let list = app.collectionViews["shiftTasks.list"]
-            XCTAssertTrue(list.exists)
-            list.swipeUp()
-        }
+        let list = app.collectionViews["shiftTasks.list"]
+        XCTAssertTrue(list.exists)
+        let anytimeRow = app.otherElements["shiftTasks.row.info.\(anytimeTaskID)"]
+        scrollChecklist(list, untilHittable: anytimeRow, named: "The Anytime Today task row")
 
         XCTAssertTrue(
             anytimeHeader.waitForExistence(timeout: 5),
             "The Anytime Today anchor group header must render after scrolling the checklist"
         )
-
-        let anytimeRow = app.otherElements["shiftTasks.row.info.\(anytimeTaskID)"]
         XCTAssertTrue(anytimeRow.waitForExistence(timeout: 5))
         XCTAssertLessThan(
             timelineRow.frame.minY, anytimeRow.frame.minY,
@@ -278,9 +327,9 @@ final class ShiftTasksGroupedUITests: ShiftTasksUITestBase {
 final class ShiftTasksFailedRefreshUITests: ShiftTasksUITestBase {
     override var waitsForNavigationReadiness: Bool { true }
 
-    override func setUp() async throws {
+    override func setUp() {
         executionTimeAllowance = 60
-        try await super.setUp()
+        super.setUp()
     }
 
     override var shiftTaskScenarioLaunchArguments: [String] {

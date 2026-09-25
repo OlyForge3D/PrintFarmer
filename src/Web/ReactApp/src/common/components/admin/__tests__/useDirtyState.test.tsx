@@ -180,6 +180,19 @@ describe("useDirtyState — beforeunload guard", () => {
 });
 
 describe("acceptKeys — settling a partial save (Hicks #2)", () => {
+  it("adopts canonical baselines but preserves edits made while saving", () => {
+    const { result } = renderHook(() =>
+      useDirtyState({ a: "initial", b: "initial" }, { guardUnload: false }),
+    );
+    act(() => result.current.setValues({ a: "draft", b: "draft" }));
+    const acceptSaved = result.current.acceptKeys;
+    act(() => result.current.setValue("a", "newer edit"));
+    act(() => acceptSaved(["a", "b"], { a: "normalized", b: "normalized" }));
+    expect(result.current.original).toEqual({ a: "normalized", b: "normalized" });
+    expect(result.current.values).toEqual({ a: "newer edit", b: "normalized" });
+    expect(result.current.changedKeys).toEqual(["a"]);
+  });
+
   /**
    * A settings band can hold several cards, and each card is saved with its own
    * request. When one 400s and the others go through, `markPristine` is the

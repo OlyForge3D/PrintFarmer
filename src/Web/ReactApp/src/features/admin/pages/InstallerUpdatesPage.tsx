@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useQuery } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { isSettingsConflict } from "@/common/utils/apiErrors";
 import { Alert, Button } from "@/common/components/ui";
 import { InstallerUpdatesExperience } from "@/features/admin/components/InstallerUpdatesExperience";
 import { useAuth } from "@/features/auth/hooks/useAuth";
@@ -10,6 +11,7 @@ import type { SystemInfo, UpdateChannelSettings } from "@/types/api";
 type ConnectionObservation = "connected" | "unknown";
 
 export function InstallerUpdatesPage() {
+  const queryClient = useQueryClient();
   const [observation, setObservation] = useState<ConnectionObservation>(
     navigator.onLine ? "connected" : "unknown",
   );
@@ -150,13 +152,17 @@ export function InstallerUpdatesPage() {
         return result.data;
       }}
       onSaveUpdateChannel={async (settings) => {
-        // A POST rejection (including a timeout or lost response) is not by
-        // itself authoritative. Always attempt the refetch below so the UI
-        // reconciles to the server's real state instead of guessing from the
-        // POST outcome alone.
+        // A successful versioned response advances the draft directly. Only an
+        // uncertain transport outcome needs reconciliation, never a known conflict.
         try {
-          await apiClient.updateUpdateChannelSettings(settings);
-        } catch {
+          const saved = await apiClient.updateUpdateChannelSettings(settings);
+          if (saved?.rowVersion !== undefined) {
+            queryClient.setQueryData(["settings", "UpdateChannel"], saved);
+            void refetchInventory();
+            return saved;
+          }
+        } catch (error) {
+          if (isSettingsConflict(error)) throw error;
           // Fall through to the refetch below regardless of this rejection.
         }
         const result = await refetchUpdateChannel();

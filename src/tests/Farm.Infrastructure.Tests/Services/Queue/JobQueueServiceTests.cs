@@ -1758,6 +1758,7 @@ public class JobQueueServiceTests
     [Fact]
     public async Task AddJobToQueueAsync_AssignedJob_CapturesSnapshotAndDispatchLogInSingleSave()
     {
+        DateTimeOffset now = new(2031, 4, 5, 6, 7, 8, TimeSpan.Zero);
         Guid printerId = Guid.NewGuid();
         GcodeFile gcode = new() { Id = Guid.NewGuid(), Name = "part.gcode", FileName = "part.gcode" };
         QueuePrintJobDto request = new() { GcodeFileId = gcode.Id, AssignedPrinterId = printerId };
@@ -1781,6 +1782,10 @@ public class JobQueueServiceTests
             It.Is<DispatchLog>(log =>
                 log.PrintJobId != Guid.Empty
                 && log.PrinterId == printerId
+                && log.CreatedAtUtc == now.UtcDateTime
+                && log.CreatedDate == now
+                && log.UpdatedDate == now
+                && log.DispatchedAt == now
                 && log.Action == Farm.Infrastructure.Services.Queue.Dispatch.DispatchAction.Dispatched)));
         _mockRepo.Setup(value => value.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
@@ -1794,7 +1799,8 @@ public class JobQueueServiceTests
             _mockDataService.Object,
             _mockLogger.Object,
             coverageBroadcaster: broadcaster.Object,
-            partOutputSnapshotService: snapshots.Object);
+            partOutputSnapshotService: snapshots.Object,
+            timeProvider: Mock.Of<TimeProvider>(clock => clock.GetUtcNow() == now));
 
         _ = await service.AddJobToQueueAsync(request, Guid.NewGuid(), CancellationToken.None);
 

@@ -1,6 +1,7 @@
 import { Alert, Button, Card, Checkbox, FormField, Input, Select } from "@/common/components/ui";
 import { Modal } from "@/common/components/modals/Modal";
 import { UpdateChannelSaveRejectedError } from "@/features/admin/utils/updateChannelSaveErrors";
+import { isSettingsConflict } from "@/common/utils/apiErrors";
 import { getErrorMessage, isApiError } from "@/common/utils/apiErrors";
 import { isHostUpdateStatusResponse, type HostUpdateExecutionResult } from "@/services/api";
 import type {
@@ -318,6 +319,9 @@ export function InstallerUpdatesExperience({
   onRecoverHostUpdate,
 }: InstallerUpdatesExperienceProps) {
   const [channel, setChannel] = useState<UpdateChannel>(updateChannelSettings?.channel ?? "stable");
+  const [channelBaseline, setChannelBaseline] = useState(updateChannelSettings);
+  const channelDraftActive = useRef(false);
+  const [channelConflict, setChannelConflict] = useState(false);
   const [acknowledgementOpen, setAcknowledgementOpen] = useState(false);
   const [insiderAcknowledgementDraft, setInsiderAcknowledgementDraft] = useState(false);
   const [savingChannel, setSavingChannel] = useState(false);
@@ -380,6 +384,8 @@ export function InstallerUpdatesExperience({
       // that outcome's error/status text.
       return;
     }
+    if (channelDraftActive.current) return;
+    setChannelBaseline(updateChannelSettings);
     setChannel(updateChannelSettings.channel);
     // A genuinely new authoritative settings value (initial load, an
     // external change, or a GET-only retry not already handled explicitly)
@@ -431,8 +437,8 @@ export function InstallerUpdatesExperience({
   }, [onGetHostUpdateStatus]);
 
   const settingsLoaded = updateChannelSettings != null && !updateChannelIsLoading && !updateChannelIsError;
-  const channelControlDisabled = savingChannel || !settingsLoaded || !onSaveUpdateChannel || saveOutcomeUnknown || retryingUpdateChannel;
-  const persistedInsiderAcknowledged = updateChannelSettings?.insiderAcknowledged ?? false;
+  const channelControlDisabled = savingChannel || !settingsLoaded || !onSaveUpdateChannel || saveOutcomeUnknown || retryingUpdateChannel || channelConflict;
+  const persistedInsiderAcknowledged = channelBaseline?.insiderAcknowledged ?? false;
   const fieldError = channelError ?? (updateChannelIsError ? "Failed to load the authoritative UpdateChannel settings. Retry before changing the release channel." : null);
   const channelDescribedBy = fieldError ? "update-channel-help update-channel-error" : "update-channel-help";
 
@@ -453,7 +459,12 @@ export function InstallerUpdatesExperience({
       // same object reference (structural sharing) or a new one.
       const authoritative = await onRetryUpdateChannel();
       pendingLocalReconciliationRef.current = authoritative;
+      channelDraftActive.current = false;
+      setChannelBaseline(authoritative);
       setChannel(authoritative.channel);
+      setChannelConflict(false);
+      setAcknowledgementOpen(false);
+      setInsiderAcknowledgementDraft(false);
       setSaveOutcomeUnknown(false);
       setChannelError(null);
       setChannelStatus("");
@@ -470,18 +481,22 @@ export function InstallerUpdatesExperience({
     settings: UpdateChannelSettings,
     options: { closeAcknowledgementOnSuccess?: boolean } = {},
   ) => {
-    if (!onSaveUpdateChannel || channelDispatchLock.current) return;
+    if (!onSaveUpdateChannel || channelDispatchLock.current || channelConflict) return;
+    channelDraftActive.current = true;
     channelDispatchLock.current = true;
     setSavingChannel(true);
     setChannelError(null);
     setChannelStatus("");
     try {
-      // A resolved promise means an authoritative refetch confirmed the
-      // requested settings were actually applied; only then is success
-      // reported, regardless of whether the POST itself resolved or
-      // rejected.
-      const authoritativeSettings = await onSaveUpdateChannel(settings);
+      // The save response (or reconciliation after an uncertain outcome)
+      // supplies the next baseline. Never borrow a background GET's revision.
+      const authoritativeSettings = await onSaveUpdateChannel({
+        ...settings,
+        ...(channelBaseline?.rowVersion !== undefined ? { rowVersion: channelBaseline.rowVersion } : {}),
+      });
       pendingLocalReconciliationRef.current = authoritativeSettings;
+      channelDraftActive.current = false;
+      setChannelBaseline(authoritativeSettings);
       setChannel(authoritativeSettings.channel);
       setChannelStatus("Update channel saved.");
       setInsiderAcknowledgementDraft(false);
@@ -490,13 +505,20 @@ export function InstallerUpdatesExperience({
         setAcknowledgementOpen(false);
       }
     } catch (error) {
-      if (error instanceof UpdateChannelSaveRejectedError) {
+      if (isSettingsConflict(error)) {
+        setChannelConflict(true);
+        setSaveOutcomeUnknown(false);
+        setAcknowledgementOpen(false);
+        setChannelError("Update channel changed elsewhere. Your selection is preserved. Reload to discard it and review the latest settings before saving.");
+      } else if (error instanceof UpdateChannelSaveRejectedError) {
         // The authoritative refetch succeeded and disagrees with the
         // request: this is a confirmed rejection/unchanged state, not an
         // unknown one. Reconcile the UI to the real server value instead of
         // claiming success, and leave mutation controls enabled since the
         // state is known.
         pendingLocalReconciliationRef.current = error.authoritative;
+        channelDraftActive.current = false;
+        setChannelBaseline(error.authoritative);
         setChannel(error.authoritative.channel);
         const acknowledgementMismatch =
           error.authoritative.channel === settings.channel &&
@@ -1011,6 +1033,11 @@ export function InstallerUpdatesExperience({
               )}
             </Alert>
           )}
+          {channelConflict && onRetryUpdateChannel && (
+            <Button type="button" variant="secondary" disabled={retryingUpdateChannel} loading={retryingUpdateChannel} onClick={() => { void retryUpdateChannel(); }}>
+              Reload UpdateChannel settings
+            </Button>
+          )}
           <FormField
             label="Release channel"
             htmlFor="update-channel"
@@ -1026,6 +1053,7 @@ export function InstallerUpdatesExperience({
               invalid={fieldError != null}
               disabled={channelControlDisabled}
               onChange={(event) => {
+                channelDraftActive.current = true;
                 setChannel(event.target.value as UpdateChannel);
                 setChannelError(null);
                 setChannelStatus("");
@@ -1045,6 +1073,7 @@ export function InstallerUpdatesExperience({
             loading={savingChannel && !acknowledgementOpen}
             disabled={channelControlDisabled}
             onClick={() => {
+              channelDraftActive.current = true;
               setChannelError(null);
               setChannelStatus("");
               if (channel === "insider" && !persistedInsiderAcknowledged) {

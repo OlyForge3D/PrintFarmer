@@ -109,6 +109,9 @@ public sealed class DispatchPhaseIntegrityTests
         preAttempt.ClaimedAtUtc.Should().Be(expectedNow);
         backendAttempt.BackendCallStartedAtUtc.Should().Be(expectedNow);
         backendAttempt.UpdatedAtUtc.Should().Be(expectedNow);
+        List<QueueOperationAudit> audits = await db.QueueOperationAudits.ToListAsync();
+        audits.Should().HaveCount(6);
+        audits.Should().OnlyContain(audit => audit.OccurredAtUtc == expectedNow);
         new[]
         {
             preAttempt.ErrorDetail,

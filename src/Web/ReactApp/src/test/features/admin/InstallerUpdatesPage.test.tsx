@@ -124,6 +124,35 @@ describe('InstallerUpdatesPage reconnect reconciliation', () => {
     expect(installerPropsRef.current?.onRecoverHostUpdate).toBe(initialCallbacks.recover);
   });
 
+  it.each([409, 412])('does not reconcile a known %s conflict into success', async (statusCode) => {
+    setUpdateUpdateChannelSettingsImpl(() => Promise.reject({ statusCode, message: 'Changed elsewhere' }));
+    await renderPage();
+    await screen.findByTestId('installer-updates');
+    const initialGets = getUpdateChannelSettings.mock.calls.length;
+    // Even a matching GET could represent another tab's write, not this save.
+    setGetUpdateChannelSettingsImpl(() => Promise.resolve(insiderSettings));
+    await expect(installerPropsRef.current?.onSaveUpdateChannel?.({
+      ...insiderSettings, rowVersion: 'old-revision',
+    })).rejects.toMatchObject({ statusCode });
+    expect(getUpdateChannelSettings).toHaveBeenCalledTimes(initialGets);
+    expect(updateUpdateChannelSettings).toHaveBeenCalledWith({ ...insiderSettings, rowVersion: 'old-revision' });
+  });
+
+  it('uses a successful response revision without replacing it with a later GET', async () => {
+    const saved = { ...insiderSettings, rowVersion: 'saved-revision' };
+    setUpdateUpdateChannelSettingsImpl(() => Promise.resolve(saved));
+    await renderPage();
+    await screen.findByTestId('installer-updates');
+    const initialGets = getUpdateChannelSettings.mock.calls.length;
+    await act(async () => {
+      await expect(installerPropsRef.current?.onSaveUpdateChannel?.({
+        ...insiderSettings, rowVersion: 'reviewed-revision',
+      })).resolves.toEqual(saved);
+    });
+    expect(getUpdateChannelSettings).toHaveBeenCalledTimes(initialGets);
+    await waitFor(() => expect(installerPropsRef.current?.updateChannelSettings).toEqual(saved));
+  });
+
   it('shows an explicit unknown state for an initially offline paused query', async () => {
     Object.defineProperty(navigator, 'onLine', { configurable: true, value: false });
     await renderPage();
