@@ -18,6 +18,15 @@ import { releaseNotes } from './release-notes.mjs';
 import { buildManifest, deriveSequence, validateManifest } from './release-manifest.mjs';
 import { hostUpdateCliAssets, hostUpdateCliSumsBundleName, hostUpdateCliSumsName, packageHostUpdateCli,
   verifyHostUpdateCliSums } from './host-update-cli-package.mjs';
+import { infrastructureImagesDocument, infrastructureImagesName, infrastructureImagesSignatureName,
+  infrastructureLockPath, validateInfrastructureImages, validateInfrastructureLock,
+  verifyInfrastructureLockAgainstRegistry } from './offline-bundle-images.mjs';
+
+// Issue #3061: the identity the signed infrastructure image list is bound to; it matches the
+// release fields of update-manifest.json so an offline bundle can prove both belong together.
+const infrastructureIdentity = release => ({ tag: release.tag, version: release.version, channel: release.channel,
+  sourceBranch: release.sourceBranch, sourceCommit: release.sourceCommit, buildId: String(release.buildId),
+  sequence: deriveSequence(release.version) });
 
 export async function rejectExistingVersion(api, tag) {
   requireThat(!await api(`git/ref/tags/${tag}`, { allowMissing: true }), `Tag ${tag} already exists; choose a new version`);
@@ -52,6 +61,10 @@ export function buildImages(release, source, assets, run = command, rejectImages
     'Build checkout does not match selected source');
   validateVersion(release.version, release.channel, readFileSync(join(source, 'VERSION'), 'utf8'));
   rejectImages(release.version);
+  // Issue #3061: prove every pinned infrastructure digest against the registry before anything is
+  // built, so a moved or unavailable pin publishes nothing.
+  const infrastructureLock = validateInfrastructureLock(readFileSync(join(source, infrastructureLockPath)));
+  verifyInfrastructureLockAgainstRegistry(infrastructureLock, (name, args) => run(name, args, { cwd: source }));
   mkdirSync(assets, { recursive: true });
   const execute = (name, args) => run(name, args, { cwd: source, stdio: ['ignore', 'inherit', 'pipe'] });
   run('dotnet', ['restore', 'farm-web.sln'], { cwd: join(source, 'src'), stdio: ['ignore', 'inherit', 'pipe'] });
@@ -129,6 +142,8 @@ export function buildImages(release, source, assets, run = command, rejectImages
   }, undefined, 2)}\n`);
   writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
     { ...release, sequence: deriveSequence(release.version) }, imageDetails));
+  writeFileSync(join(assets, infrastructureImagesName),
+    infrastructureImagesDocument(infrastructureIdentity(release), infrastructureLock));
   writeFileSync(join(assets, 'digests.json'), JSON.stringify(digests));
   return digests;
 }
@@ -145,6 +160,7 @@ export function releaseAssets(release) {
     ...sourceBundleFiles(release),
     'LICENSE', 'THIRD-PARTY-NOTICES.md', 'license-inventory.json', 'container-images.json', 'release-notes.md',
     'update-manifest.json', 'update-manifest.sigstore.json',
+    infrastructureImagesName, infrastructureImagesSignatureName,
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
     ...hostUpdateCliAssets(release.version),
@@ -181,6 +197,19 @@ function verifyHostUpdateCliBeforeUpload(assets, run, release) {
     '--certificate-identity', manifestSignatureIdentity(release.channel), sumsPath]);
 }
 
+// Issue #3061: the infrastructure image list is signed by the same workflow identity and must
+// still be bound to exactly this release before it is uploaded.
+function verifyInfrastructureImagesBeforeUpload(assets, run, release) {
+  const listPath = join(assets, infrastructureImagesName);
+  const bundlePath = join(assets, infrastructureImagesSignatureName);
+  validateInfrastructureImages(readFileSync(listPath), infrastructureIdentity(release));
+  requireThat(readFileSync(bundlePath).length > 0,
+    'Missing infrastructure image list signature bundle immediately before upload');
+  run('cosign', ['verify-blob', '--bundle', bundlePath,
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    '--certificate-identity', manifestSignatureIdentity(release.channel), listPath]);
+}
+
 function verifyManifestSignatureBeforeUpload(assets, run, channel) {
   const manifestPath = join(assets, 'update-manifest.json');
   const bundlePath = join(assets, 'update-manifest.sigstore.json');
@@ -208,6 +237,7 @@ export async function publishRelease(release, assets, api, {
   // verification immediately before upload protects the exact bytes after any
   // fallible draft-release operations.
   verifyHostUpdateCliBeforeUpload(assets, run, release);
+  verifyInfrastructureImagesBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
@@ -224,6 +254,7 @@ export async function publishRelease(release, assets, api, {
   } });
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
   verifyHostUpdateCliBeforeUpload(assets, run, release);
+  verifyInfrastructureImagesBeforeUpload(assets, run, release);
   verifyManifestSignatureBeforeUpload(assets, run, release.channel);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);

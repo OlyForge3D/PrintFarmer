@@ -9,9 +9,14 @@
 // operator supplies from outside the bundle, so bundle-supplied signer material cannot enroll
 // itself. There is no skip-verification, force or reset option.
 //
-// This slice is deliberately NOT installable: it does not yet package application/infrastructure
-// images, the prior recovery set, recovery instructions or replay state, and it never enables
-// rollout. docs/OFFLINE_UPDATE_RECOVERY.md tracks the remaining delivery.
+// Issue #3061: a bundle may also carry every manifest-selected application image and every pinned
+// infrastructure image as nested OCI layout archives (offline-bundle-images.mjs). Images are all or
+// nothing, verified by digest and platform after the signatures, and loaded only by `load` from a
+// verified staging directory -- never pulled or built.
+//
+// Bundles are still NOT installable: they do not yet package the prior recovery set, recovery
+// instructions or replay state, and never enable rollout. docs/OFFLINE_UPDATE_RECOVERY.md tracks
+// the remaining delivery.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
@@ -21,9 +26,12 @@ import {
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { deriveSequence, manifestDigest, validateManifest } from './release-manifest.mjs';
-import { parseTag, repository, requireThat, workflow } from './release-policy.mjs';
+import { components, parseTag, repository, requireThat, workflow } from './release-policy.mjs';
 import { hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName, parseSums, validateHostUpdateCliSbom } from './host-update-cli-package.mjs';
+import { applicationImageMember, imageArchiveLimits, infrastructureImageArchivePattern, infrastructureImagesName,
+  infrastructureImagesSignatureName, requiredImages, validateInfrastructureImages, verifyImageArchive,
+  writeImageArchive } from './offline-bundle-images.mjs';
 
 export const offlineBundleIndexName = 'offline-bundle.json';
 export const offlineBundleVerificationName = 'offline-bundle-verification.json';
@@ -36,13 +44,14 @@ const block = 512;
 const chunk = 1024 * 1024;
 const MiB = 1024 * 1024;
 
-// Bounds are enforced from headers BEFORE any byte is written to disk. They are sized for this
-// metadata-and-CLI slice; image archives (follow-up) will need their own explicit limits.
+// Bounds are enforced from headers BEFORE any byte is written to disk. Image archives have their
+// own per-archive limit here and nested blob/count limits in offline-bundle-images.mjs.
 export const offlineBundleLimits = Object.freeze({
-  maxBundleBytes: 2048 * MiB,
-  maxMembers: 16,
+  maxBundleBytes: 64 * 1024 * MiB,
+  maxMembers: 64,
   maxMetadataBytes: 4 * MiB,
   maxArchiveBytes: 512 * MiB,
+  maxImageArchiveBytes: imageArchiveLimits.maxArchiveBytes,
 });
 
 const memberNamePattern = /^[A-Za-z0-9][A-Za-z0-9._+-]{0,99}$/;
@@ -77,11 +86,13 @@ function requireMemberName(name) {
 }
 
 function roleLimit(role, limits) {
+  if (isImageArchive(role)) return limits.maxImageArchiveBytes;
   return role === 'cli-archive' ? limits.maxArchiveBytes : limits.maxMetadataBytes;
 }
 
 // Every member name is fixed by the signed release version, so an index can never introduce an
-// unexpected file, role or runtime.
+// unexpected file, role or runtime. Infrastructure archive names follow a fixed pattern here and
+// must equal the signed infrastructure image list exactly once it is verified.
 export function expectedMembers(version) {
   const members = new Map([
     [manifestName, 'manifest'],
@@ -93,10 +104,20 @@ export function expectedMembers(version) {
     members.set(hostUpdateCliArchiveName(version, rid), 'cli-archive');
     members.set(hostUpdateCliSbomName(version, rid), 'cli-sbom');
   }
+  members.set(infrastructureImagesName, 'infrastructure-list');
+  members.set(infrastructureImagesSignatureName, 'infrastructure-list-signature');
+  for (const id of Object.keys(components)) members.set(applicationImageMember(id), 'application-image');
   return members;
 }
 
+function memberRole(roles, name) {
+  return roles.get(name) ?? (infrastructureImageArchivePattern.test(name) ? 'infrastructure-image' : undefined);
+}
+
 const isRuntimeMember = role => role === 'cli-archive' || role === 'cli-sbom';
+const isImageArchive = role => role === 'application-image' || role === 'infrastructure-image';
+const isImageMember = role => isImageArchive(role) || role === 'infrastructure-list' ||
+  role === 'infrastructure-list-signature';
 
 // ---------------------------------------------------------------------------------------------
 // Release identity: taken only from the signed manifest bytes, and cross-checked against the
@@ -166,10 +187,11 @@ function verifyCliSums(bytes, version, carried, readMember) {
 
 // Cosign authenticates the exact bytes and the channel's release workflow identity. When a trusted
 // root is given, verification is fully offline; there is no fallback to online verification.
-function verifySignatures(directory, identity, { run, trustedRoot, version }) {
+function verifySignatures(directory, identity, { run, trustedRoot, version, images = false }) {
   const offline = trustedRoot ? ['--trusted-root', trustedRoot] : [];
   for (const [file, bundle] of [[manifestName, manifestSignatureName],
-    [hostUpdateCliSumsName(version), hostUpdateCliSumsBundleName(version)]]) {
+    [hostUpdateCliSumsName(version), hostUpdateCliSumsBundleName(version)],
+    ...(images ? [[infrastructureImagesName, infrastructureImagesSignatureName]] : [])]) {
     try {
       run('cosign', ['verify-blob', ...offline, '--bundle', join(directory, bundle),
         '--certificate-oidc-issuer', oidcIssuer, '--certificate-identity', releaseSigningIdentity(identity.channel),
@@ -371,62 +393,95 @@ function indexBytes(index) {
 // Assembly (connected host): reads only local, already-downloaded release assets. Never fetches.
 // ---------------------------------------------------------------------------------------------
 export function assembleOfflineBundle({ releaseAssets, channel, version, runtimes = hostUpdateCliRuntimes, output,
-  run, trustedRoot, limits = offlineBundleLimits }) {
+  run, trustedRoot, images, limits = offlineBundleLimits, imageLimits = imageArchiveLimits }) {
   requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
   requireThat(typeof output === 'string' && output.length > 0, 'An output bundle path is required');
   requireThat(Array.isArray(runtimes) && runtimes.length > 0 && new Set(runtimes).size === runtimes.length &&
     runtimes.every(rid => hostUpdateCliRuntimes.includes(rid)), 'Offline bundle runtimes must be distinct supported runtimes');
+  requireThat(images === undefined || (typeof images === 'string' && images.length > 0),
+    'The image layout directory must be a path');
   const assets = resolve(releaseAssets);
   const manifestBytes = readSmallFile(join(assets, manifestName), 'Release manifest', limits.maxMetadataBytes);
   const identity = manifestIdentity(manifestBytes, channel, version);
   const selected = new Set(runtimes.flatMap(rid =>
     [hostUpdateCliArchiveName(identity.version, rid), hostUpdateCliSbomName(identity.version, rid)]));
+  if (images !== undefined) selected.add(infrastructureImagesName).add(infrastructureImagesSignatureName);
   const roles = expectedMembers(identity.version);
-  const files = [...roles].filter(([name, role]) => !isRuntimeMember(role) || selected.has(name)).map(([name, role]) => {
-    const { size, sha256 } = hashFile(join(assets, name), `Release asset ${name}`);
-    requireThat(size <= roleLimit(role, limits), `Release asset exceeds its size limit: ${name}`);
-    return { name, role, size, sha256 };
-  }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  const sources = new Map();
+  const files = [...roles].filter(([name, role]) => (!isRuntimeMember(role) && !isImageMember(role)) || selected.has(name))
+    .map(([name, role]) => {
+      const { size, sha256 } = hashFile(join(assets, name), `Release asset ${name}`);
+      requireThat(size <= roleLimit(role, limits), `Release asset exceeds its size limit: ${name}`);
+      sources.set(name, join(assets, name));
+      return { name, role, size, sha256 };
+    });
   verifyCliSums(readSmallFile(join(assets, hostUpdateCliSumsName(identity.version)), 'CLI checksum list',
     limits.maxMetadataBytes), identity.version, files.filter(file => isRuntimeMember(file.role)),
   name => readSmallFile(join(assets, name), `Release asset ${name}`, limits.maxMetadataBytes));
-  verifySignatures(assets, identity, { run, trustedRoot, version: identity.version });
-  const index = {
-    schema: 1,
-    kind: offlineBundleKind,
-    release: identity,
-    manifestDigest: manifestDigest(manifestBytes),
-    contents: {
-      cliRuntimes: hostUpdateCliRuntimes.filter(rid => runtimes.includes(rid)),
-      images: false, infrastructure: false, priorRecoverySet: false, recoveryInstructions: false,
-    },
-    installable: false,
-    rolloutAuthorization: false,
-    files,
-  };
+  verifySignatures(assets, identity, { run, trustedRoot, version: identity.version, images: images !== undefined });
   const target = resolve(output);
   requireThat(!lstatSync(target, { throwIfNoEntry: false }), `Offline bundle output already exists: ${target}`);
+  const imageStage = `${target}.images.partial`;
+  let staged = false;
+  let opened = false;
   const partial = `${target}.partial`;
-  const out = openSync(partial, 'wx', 0o644);
   try {
-    const head = indexBytes(index);
-    writeAll(out, tarHeader({ name: offlineBundleIndexName, size: head.length }));
-    writeAll(out, head);
-    writeAll(out, Buffer.alloc((block - (head.length % block)) % block));
-    for (const file of files) {
-      writeAll(out, tarHeader({ name: file.name, size: file.size }));
-      const { fd, size } = openRegularFile(join(assets, file.name), `Release asset ${file.name}`);
-      try {
-        requireThat(size === file.size && copyRange(fd, 0, size, out) === file.sha256,
-          `Release asset changed during assembly: ${file.name}`);
-      } finally {
-        closeSync(fd);
+    if (images !== undefined) {
+      // Only the signed manifest and the signed infrastructure list decide which images and digests
+      // are packaged; the layout directory supplies content-addressed bytes and nothing else.
+      const required = requiredImages(validateManifest(manifestBytes.toString('utf8')), validateInfrastructureImages(
+        readSmallFile(join(assets, infrastructureImagesName), 'Infrastructure image list', limits.maxMetadataBytes), identity));
+      mkdirSync(imageStage, { mode: 0o700 });
+      staged = true;
+      for (const expected of required) {
+        const path = join(imageStage, expected.member);
+        writeImageArchive({ layout: resolve(images), expected, output: path, limits: imageLimits });
+        const { size, sha256 } = hashFile(path, `Image archive ${expected.member}`);
+        requireThat(size <= roleLimit(roles.get(expected.member) ?? 'infrastructure-image', limits),
+          `Image archive exceeds its size limit: ${expected.member}`);
+        sources.set(expected.member, path);
+        files.push({ name: expected.member, role: expected.kind === 'application' ? 'application-image' : 'infrastructure-image',
+          size, sha256 });
       }
-      writeAll(out, Buffer.alloc((block - (file.size % block)) % block));
     }
-    writeAll(out, Buffer.alloc(block * 2));
-    closeSync(out);
+    files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    const index = {
+      schema: 1,
+      kind: offlineBundleKind,
+      release: identity,
+      manifestDigest: manifestDigest(manifestBytes),
+      contents: {
+        cliRuntimes: hostUpdateCliRuntimes.filter(rid => runtimes.includes(rid)),
+        images: images !== undefined, infrastructure: images !== undefined, priorRecoverySet: false,
+        recoveryInstructions: false,
+      },
+      installable: false,
+      rolloutAuthorization: false,
+      files,
+    };
+    const out = openSync(partial, 'wx', 0o644);
+    opened = true;
+    try {
+      const head = indexBytes(index);
+      writeAll(out, tarHeader({ name: offlineBundleIndexName, size: head.length }));
+      writeAll(out, head);
+      writeAll(out, Buffer.alloc((block - (head.length % block)) % block));
+      for (const file of files) {
+        writeAll(out, tarHeader({ name: file.name, size: file.size }));
+        const { fd, size } = openRegularFile(sources.get(file.name), `Release asset ${file.name}`);
+        try {
+          requireThat(size === file.size && copyRange(fd, 0, size, out) === file.sha256,
+            `Release asset changed during assembly: ${file.name}`);
+        } finally {
+          closeSync(fd);
+        }
+        writeAll(out, Buffer.alloc((block - (file.size % block)) % block));
+      }
+      writeAll(out, Buffer.alloc(block * 2));
+    } finally {
+      closeSync(out);
+    }
     // Re-read what was written with the importer's own bounded parser before publishing it.
     const { fd, size } = openRegularFile(partial, 'Offline bundle');
     try {
@@ -438,12 +493,13 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
     }
     requireThat(!lstatSync(target, { throwIfNoEntry: false }), `Offline bundle output already exists: ${target}`);
     renameSync(partial, target);
+    return { bundle: target, index };
   } catch (error) {
-    try { closeSync(out); } catch { /* already closed */ }
-    rmSync(partial, { force: true });
+    if (opened) rmSync(partial, { force: true });
     throw error;
+  } finally {
+    if (staged) rmSync(imageStage, { force: true, recursive: true });
   }
-  return { bundle: target, index };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -479,13 +535,14 @@ function validateIndex(bytes, entries) {
   const contents = index.contents;
   requireThat(contents && typeof contents === 'object' && Object.keys(contents).sort().join() ===
     'cliRuntimes,images,infrastructure,priorRecoverySet,recoveryInstructions' &&
-    ['images', 'infrastructure', 'priorRecoverySet', 'recoveryInstructions'].every(key => contents[key] === false) &&
+    ['priorRecoverySet', 'recoveryInstructions'].every(key => contents[key] === false) &&
+    typeof contents.images === 'boolean' && contents.infrastructure === contents.images &&
     Array.isArray(contents.cliRuntimes), 'Offline bundle index contents claim material this format does not carry');
   return index;
 }
 
 export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run,
-  limits = offlineBundleLimits, now = () => new Date() }) {
+  limits = offlineBundleLimits, imageLimits = imageArchiveLimits, now = () => new Date() }) {
   requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
   requireThat(typeof trustedRoot === 'string' && trustedRoot.length > 0,
@@ -509,12 +566,20 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     parseTag(`v${index.release.version}`);
     const roles = expectedMembers(index.release.version);
     for (const file of index.files) {
-      requireThat(roles.get(file.name) === file.role, `Offline bundle member is not part of this release: ${file.name}`);
+      requireThat(memberRole(roles, file.name) === file.role, `Offline bundle member is not part of this release: ${file.name}`);
       requireThat(file.size <= roleLimit(file.role, limits), `Offline bundle member exceeds its size limit: ${file.name}`);
     }
     for (const [name, role] of roles) {
-      if (!isRuntimeMember(role)) {
+      if (!isRuntimeMember(role) && !isImageMember(role)) {
         requireThat(index.files.some(file => file.name === name), `Offline bundle is missing required member: ${name}`);
+      }
+    }
+    const imageFiles = index.files.filter(file => isImageMember(file.role));
+    requireThat(index.contents.images === (imageFiles.length > 0),
+      'Offline bundle image members do not match its image contents flag');
+    if (index.contents.images) {
+      for (const name of [infrastructureImagesName, infrastructureImagesSignatureName]) {
+        requireThat(imageFiles.some(file => file.name === name), `Offline bundle is missing required member: ${name}`);
       }
     }
     mkdirSync(stagingPath, { mode: 0o700 });
@@ -549,7 +614,32 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     name => readSmallFile(join(quarantine, name), `Offline bundle member ${name}`, limits.maxMetadataBytes));
     requireThat(JSON.stringify(index.contents.cliRuntimes) === JSON.stringify(runtimes),
       'Offline bundle runtime list does not match its archives');
-    verifySignatures(quarantine, identity, { run, trustedRoot: root, version: identity.version });
+    verifySignatures(quarantine, identity, { run, trustedRoot: root, version: identity.version,
+      images: index.contents.images });
+    // Images are proven only after every signature: the signed manifest and signed infrastructure
+    // list are the sole source of the required set, digests and platforms.
+    const images = [];
+    if (index.contents.images) {
+      const required = requiredImages(validateManifest(manifestBytes.toString('utf8')), validateInfrastructureImages(
+        readSmallFile(join(quarantine, infrastructureImagesName), 'Offline bundle infrastructure image list',
+          limits.maxMetadataBytes), identity));
+      const archives = imageFiles.filter(file => isImageArchive(file.role)).map(file => file.name).sort();
+      requireThat(archives.join() === required.map(image => image.member).sort().join(),
+        'Offline bundle does not carry exactly the release-selected image set');
+      for (const expected of required) {
+        const image = openRegularFile(join(quarantine, expected.member), `Offline bundle member ${expected.member}`);
+        try {
+          const verified = verifyImageArchive(image.fd, 0, image.size, expected, imageLimits);
+          images.push({ member: expected.member, kind: expected.kind, id: expected.id, reference: expected.reference,
+            mediaType: verified.mediaType, digest: verified.digest, platforms: expected.platforms, size: image.size,
+            sha256: hashes.get(expected.member) });
+        } catch (error) {
+          throw new Error(`Offline bundle image ${expected.member} failed verification: ${error.message}`);
+        } finally {
+          closeSync(image.fd);
+        }
+      }
+    }
     const record = {
       schema: 1,
       decision: 'verified-not-installable',
@@ -557,6 +647,7 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       manifestDigest: index.manifestDigest,
       bundleSha256: copyRange(fd, 0, size),
       cliRuntimes: index.contents.cliRuntimes,
+      images,
       signatureIdentity: releaseSigningIdentity(identity.channel),
       installable: false,
       rolloutAuthorization: false,
@@ -584,19 +675,63 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
 }
 
 // ---------------------------------------------------------------------------------------------
+// Load (network-denied host): hands only verified image archives to the local engine. It reads
+// the verification record, re-hashes and re-verifies each archive on one open descriptor and
+// passes that same descriptor to `docker load` as stdin, so a path swapped after verification is
+// never read. Nothing is pulled, built or fetched.
+// ---------------------------------------------------------------------------------------------
+export function loadVerifiedImages({ staging, run, limits = offlineBundleLimits, imageLimits = imageArchiveLimits }) {
+  requireThat(typeof run === 'function', 'A command runner is required');
+  requireThat(typeof staging === 'string' && staging.length > 0, 'A verified staging directory is required');
+  const directory = realpathSync(resolve(staging));
+  let record;
+  try {
+    record = JSON.parse(readSmallFile(join(directory, offlineBundleVerificationName), 'Offline bundle verification record',
+      limits.maxMetadataBytes).toString('utf8'));
+  } catch (error) {
+    throw new Error(`Offline bundle verification record is unusable: ${error.message}`);
+  }
+  requireThat(record?.schema === 1 && record.decision === 'verified-not-installable' && Array.isArray(record.images) &&
+    record.images.length > 0, 'Staging directory holds no verified image set');
+  const loaded = [];
+  for (const image of record.images) {
+    requireThat(image && typeof image.member === 'string' && sha256Pattern.test(image.sha256 ?? '') &&
+      (image.member === applicationImageMember(image.id) || infrastructureImageArchivePattern.test(image.member)),
+    'Offline bundle verification record image entry is invalid');
+    requireMemberName(image.member);
+    const expected = { id: image.id, reference: image.reference, mediaTypes: [image.mediaType], digest: image.digest,
+      platforms: image.platforms };
+    const { fd, size } = openRegularFile(join(directory, image.member), `Verified image ${image.member}`);
+    try {
+      requireThat(size === image.size && copyRange(fd, 0, size) === image.sha256,
+        `Verified image changed after verification: ${image.member}`);
+      verifyImageArchive(fd, 0, size, expected, imageLimits);
+      run('docker', ['load'], { stdin: fd });
+    } finally {
+      closeSync(fd);
+    }
+    loaded.push({ member: image.member, reference: image.reference, digest: image.digest });
+  }
+  return { loaded };
+}
+
+// ---------------------------------------------------------------------------------------------
 // CLI
 // ---------------------------------------------------------------------------------------------
 const usage = `usage:
   node scripts/ci/offline-update-bundle.mjs assemble --release-assets <dir> --channel <stable|insider>
-    --output <bundle.tar> [--version <v>] [--runtime <rid>]... [--trusted-root <trusted_root.json>] [--cosign <path>]
+    --output <bundle.tar> [--version <v>] [--runtime <rid>]... [--images <oci-layout-dir>]
+    [--trusted-root <trusted_root.json>] [--cosign <path>]
   node scripts/ci/offline-update-bundle.mjs verify --bundle <bundle.tar> --channel <stable|insider>
-    --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--cosign <path>]`;
+    --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--cosign <path>]
+  node scripts/ci/offline-update-bundle.mjs load --staging <verified-dir> [--docker <path>]`;
 
 export function parseArguments(argv) {
   const [command, ...rest] = argv;
   const allowed = {
-    assemble: ['release-assets', 'channel', 'output', 'version', 'runtime', 'trusted-root', 'cosign'],
+    assemble: ['release-assets', 'channel', 'output', 'version', 'runtime', 'images', 'trusted-root', 'cosign'],
     verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'cosign'],
+    load: ['staging', 'docker'],
   };
   requireThat(Object.hasOwn(allowed, command ?? ''), usage);
   const options = {};
@@ -616,16 +751,19 @@ export function parseArguments(argv) {
 async function main(argv) {
   const { command, options } = parseArguments(argv);
   const cosign = options.cosign ?? 'cosign';
-  const run = (name, args) => execFileSync(name === 'cosign' ? cosign : name, args,
-    { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  const executables = { cosign, docker: options.docker ?? 'docker' };
+  const run = (name, args, { stdin } = {}) => execFileSync(executables[name] ?? name, args,
+    { encoding: 'utf8', stdio: [stdin ?? 'ignore', 'pipe', 'pipe'] });
   if (command === 'assemble') {
     const { bundle, index } = assembleOfflineBundle({
       releaseAssets: options['release-assets'], channel: options.channel, version: options.version,
-      runtimes: options.runtime ?? hostUpdateCliRuntimes, output: options.output, run,
+      runtimes: options.runtime ?? hostUpdateCliRuntimes, output: options.output, run, images: options.images,
       trustedRoot: options['trusted-root'] ? resolve(options['trusted-root']) : undefined,
     });
     console.log(JSON.stringify({ bundle, release: index.release, manifestDigest: index.manifestDigest,
-      cliRuntimes: index.contents.cliRuntimes, installable: false }, undefined, 2));
+      cliRuntimes: index.contents.cliRuntimes, images: index.contents.images, installable: false }, undefined, 2));
+  } else if (command === 'load') {
+    console.log(JSON.stringify(loadVerifiedImages({ staging: options.staging, run }), undefined, 2));
   } else {
     const record = verifyOfflineBundle({ bundle: options.bundle, channel: options.channel, version: options.version,
       trustedRoot: options['trusted-root'], staging: options.staging, run });

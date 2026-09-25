@@ -32,7 +32,10 @@ post_date: "2026-09-16"
    self-contained host-update recovery CLI archives for `linux-x64`, `linux-arm64`
    and `win-x64`, one `printfarmer-host-update-cli-v<version>-<runtime>.spdx.json`
    SBOM per archive, and a signed `printfarmer-host-update-cli-v<version>-SHA256SUMS`
-   list covering the archives and SBOMs (see [Host-update runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package)).
+   list covering the archives and SBOMs (see [Host-update runbook](HOST_UPDATE_RUNBOOK.md#install-the-signed-cli-package)),
+   and a signed `infrastructure-images.json` plus its `infrastructure-images.sigstore.json`
+   bundle naming the pinned infrastructure images for offline bundles (see
+   [Offline update recovery](OFFLINE_UPDATE_RECOVERY.md#application-and-infrastructure-images-3061)).
 
 There is no release ledger, reservation, signing ceremony, qualification receipt,
 counter recovery or abandonment step. The explicit version and permanent Git tag
