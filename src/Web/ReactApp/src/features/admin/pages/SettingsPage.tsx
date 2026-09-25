@@ -1,6 +1,7 @@
 import { type ReactNode, useEffect, useRef, useState, useCallback, useMemo, useContext } from 'react';
 import { createPortal } from 'react-dom';
 import { toast } from 'sonner';
+import { isSettingsConflict } from '@/common/utils/apiErrors';
 import { useSettingsFooterSlot } from '@/features/settings/components/settingsFooterSlotContext';
 import { useSearchParams } from 'react-router';
 import clsx from 'clsx';
@@ -168,6 +169,8 @@ function extractFieldErrors(
 }
 
 interface GroupSaveBlockProps {
+  onReload: () => void;
+  reloading: boolean;
   /** Stable group key. Used to address this block in the page's save registry. */
   group: string;
   groupDisplayName: string;
@@ -329,6 +332,8 @@ function cardFlowClass(cardCount: number): string {
  * up while the state stays down.
  */
 function GroupSaveBlock({
+  onReload,
+  reloading,
   group,
   groupDisplayName,
   metadataItems,
@@ -338,15 +343,13 @@ function GroupSaveBlock({
   searchQuery,
 }: GroupSaveBlockProps) {
   const state = useDirtyState<GroupValues>(initialValues);
-  // No re-baselining effect here, deliberately. The parent unmounts every block
-  // while `loading` is true, so a reload always produces a *fresh mount* with the
-  // correct baseline rather than a prop update on a live block. There is also no
-  // parent refetch after save (see the note beside `loadSettings`), so
-  // `initialValues` cannot change underneath a mounted block.
-  //
-  // If a refetch-while-mounted is ever introduced, re-baseline by changing the
-  // block's `key` so React remounts it — do NOT reintroduce a syncing effect,
-  // which trips `react-hooks/set-state-in-effect` and needs a suppression.
+  // Scoped to this mounted draft, never shared with another editor or refreshed GET.
+  const revisions = useRef(Object.fromEntries(
+    Object.entries(initialValues).map(([key, values]) => [key, values.rowVersion]),
+  ));
+  const conflicts = useRef(new Set<string>());
+  // A successful explicit reload changes this block's key. Keep drafts mounted
+  // until that succeeds; failed reloads must not discard edits or their token.
   const [fieldErrors, setFieldErrors] = useState<Record<string, Record<string, string>>>({});
   // Section-level errors — currently sourced only from a memberless backend
   // `ValidationException` where `errors[sectionKey]` carries the reason. Rendered
@@ -372,6 +375,7 @@ function GroupSaveBlock({
     // client, so unlike field errors we clear (not recompute) them as the user
     // edits — otherwise a stale server alert lingers while they fix the value.
     setSectionErrors((prev) => {
+      if (conflicts.current.has(sectionKey)) return prev;
       if (!(sectionKey in prev)) return prev;
       const next = { ...prev };
       delete next[sectionKey];
@@ -426,6 +430,7 @@ function GroupSaveBlock({
     const changedSectionKeys = state.changedKeys.map((k) => String(k));
     const failed: string[] = [];
     const saved: string[] = [];
+    const accepted: GroupValues = {};
     const perSectionErrors: Record<string, Record<string, string>> = {};
     const perSectionMessages: Record<string, string> = {};
     let firstMessage: string | undefined;
@@ -434,10 +439,29 @@ function GroupSaveBlock({
       const meta = metadataItems.find((m) => m.key === sectionKey);
       if (!meta) continue;
       try {
-        await saveSettingsValues(sectionKey, state.values[sectionKey] ?? {});
+        if (conflicts.current.has(sectionKey)) {
+          throw Object.assign(new Error('Reload required after settings conflict'), { statusCode: 409 });
+        }
+        const rowVersion = revisions.current[sectionKey];
+        const savedSection = await saveSettingsValues(sectionKey, {
+          ...(state.values[sectionKey] ?? {}),
+          ...(rowVersion !== undefined ? { rowVersion } : {}),
+        });
+        if (savedSection?.rowVersion !== undefined) {
+          revisions.current[sectionKey] = savedSection.rowVersion;
+          // Tokens live in revisions, not in the dirty-value comparison.
+          accepted[sectionKey] = { ...savedSection, rowVersion: state.values[sectionKey]?.rowVersion };
+        }
         saved.push(sectionKey);
       } catch (err) {
         failed.push(meta.displayName || meta.className);
+        if (isSettingsConflict(err)) {
+          conflicts.current.add(sectionKey);
+          const message = 'Settings changed elsewhere. Your edits are preserved. Reload to discard them and review the latest settings before saving.';
+          perSectionMessages[sectionKey] = message;
+          firstMessage ??= message;
+          continue;
+        }
         const extracted = extractFieldErrors(err, sectionKey);
         Object.assign(perSectionErrors, extracted.fieldErrors);
         Object.assign(perSectionMessages, extracted.sectionErrors);
@@ -450,7 +474,7 @@ function GroupSaveBlock({
       // partial failure is normal — leaving the successes dirty would show the
       // user unsaved work that is already on the server, and re-POST it on the
       // next attempt. Only the groups that actually failed stay dirty.
-      state.acceptKeys(saved);
+      state.acceptKeys(saved, accepted);
       // Only errors produced by *this* attempt may remain for the sections we
       // just tried. Dropping the attempted keys first (rather than spreading
       // over `prev`) means a section that succeeded this round clears its stale
@@ -483,7 +507,7 @@ function GroupSaveBlock({
     // an edit the user made while the request was in flight would be silently
     // overwritten. `acceptKeys` moves only the baseline, which leaves that edit
     // in place and correctly still dirty.
-    state.acceptKeys(saved);
+    state.acceptKeys(saved, accepted);
     setFieldErrors({});
     setSectionErrors({});
     return { ok: true, savedLabels: changedSectionKeys.map(labelFor) };
@@ -607,6 +631,11 @@ function GroupSaveBlock({
 
   return (
     <div className={CARD_FLOW_CONTAINER_CLASS}>
+      {Object.keys(sectionErrors).some((key) => conflicts.current.has(key)) && (
+        <Button variant="secondary" className="mb-3" onClick={onReload} disabled={reloading} loading={reloading}>
+          Reload settings (discard all page edits)
+        </Button>
+      )}
       <div className={cardFlowClass(visibleCardCount)} data-testid="settings-card-flow">
             {metadataItems.map((meta) => {
             // Filter the section's properties for display without touching the
@@ -727,6 +756,9 @@ export function SettingsPage({
   const [groupMetadata, setGroupMetadata] = useState<SettingGroupMetadata[]>([]);
   const [values, setValues] = useState<GroupValues>({});
   const [loading, setLoading] = useState(true);
+  const [reloading, setReloading] = useState(false);
+  const [loadVersion, setLoadVersion] = useState(0);
+  const reloadInFlight = useRef(false);
   const [error, setError] = useState<unknown>(null);
   const handledFieldActivationRef = useRef<string | null>(null);
 
@@ -806,8 +838,11 @@ export function SettingsPage({
   // an override without touching the user's persisted Essential preference.
   const effectiveMode = fieldParam ? 'everything' : mode;
 
-  const loadSettings = useCallback(async () => {
-    setLoading(true);
+  const loadSettings = useCallback(async (preserveDraftOnFailure = false) => {
+    if (reloadInFlight.current) return;
+    reloadInFlight.current = true;
+    if (preserveDraftOnFailure) setReloading(true);
+    else setLoading(true);
     setError(null);
     try {
       const [meta, groups] = await Promise.all([
@@ -825,10 +860,18 @@ export function SettingsPage({
       setMetadata(meta);
       setGroupMetadata(groups);
       setValues(valueMap);
+      setLoadVersion(version => version + 1);
+      setSaveAllError(null);
     } catch (err) {
-      setError(err);
+      if (preserveDraftOnFailure) {
+        adminToast.error('Could not reload settings. Your edits are preserved.');
+      } else {
+        setError(err);
+      }
     } finally {
       setLoading(false);
+      setReloading(false);
+      reloadInFlight.current = false;
     }
   }, []);
 
@@ -1457,7 +1500,11 @@ export function SettingsPage({
               }
             >
               <GroupSaveBlock
-                key={group}
+                onReload={() => {
+                  void loadSettings(true);
+                }}
+                reloading={reloading}
+                key={`${group}:${loadVersion}`}
                 group={group}
                 groupDisplayName={groupDisplay}
                 metadataItems={groupMeta}

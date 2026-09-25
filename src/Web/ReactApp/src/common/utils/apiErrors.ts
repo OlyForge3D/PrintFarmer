@@ -78,6 +78,15 @@ export function isApiError(error: unknown): error is ApiError {
   );
 }
 
+/** Supports both the shared client's ApiError and untransformed Axios errors. */
+export function isSettingsConflict(error: unknown): boolean {
+  if (typeof error !== 'object' || error === null) return false;
+  const status = isApiError(error)
+    ? error.statusCode
+    : (error as { response?: { status?: number } }).response?.status;
+  return status === 409 || status === 412;
+}
+
 /**
  * Extracts a human-readable message from an unknown thrown value. `apiClient` rejects with a
  * plain `ApiError` object (built by the Axios response interceptor), not an `Error` instance,

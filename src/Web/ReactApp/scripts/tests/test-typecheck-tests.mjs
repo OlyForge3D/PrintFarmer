@@ -420,15 +420,60 @@ test("countTestFiles dedups a symlink to an already-counted test file via realpa
     const linkPath = path.join(fixtureDirectory, "src/test/link.test.ts");
     await writeFile(targetPath, "export const a = 1;\n");
 
+    // On Windows, creating a symlink needs Developer Mode or an elevated
+    // shell; without either it throws EPERM and this real-filesystem variant
+    // skips. The injected-resolver test below keeps the dedup logic covered
+    // on every host (#2828).
     try {
       await symlink(targetPath, linkPath, "file");
     } catch (error) {
-      t.skip(`symlinks unavailable in this environment: ${error.message}`);
+      t.skip(
+        `symlinks unavailable in this environment (on Windows, enable Developer Mode or use an elevated shell): ${error.message}`,
+      );
       return;
     }
 
     const listing = "src/test/real.test.ts\nsrc/test/link.test.ts";
     assert.equal(countTestFiles(listing, fixtureDirectory), 1);
+  } finally {
+    await rm(fixtureDirectory, { recursive: true, force: true });
+  }
+});
+
+test("countTestFiles dedups two listed paths that an injected resolver maps to one real file, on every host (#2828)", async () => {
+  const fixtureDirectory = await mkdtemp(
+    path.join(tmpdir(), "typecheck-dedup-injected-"),
+  );
+
+  try {
+    await mkdir(path.join(fixtureDirectory, "src/test"), { recursive: true });
+    const targetPath = path.join(fixtureDirectory, "src/test/real.test.ts");
+    const aliasPath = path.join(fixtureDirectory, "src/test/alias.test.ts");
+    // Both files exist so hasTsNoCheckDirective reads real content; only the
+    // injected resolver decides that the alias points at the target.
+    await writeFile(targetPath, "export const a = 1;\n");
+    await writeFile(aliasPath, "export const a = 1;\n");
+    const listing = "src/test/real.test.ts\nsrc/test/alias.test.ts";
+
+    const resolved = [];
+    const aliasResolver = (absolutePath) => {
+      resolved.push(absolutePath);
+      return absolutePath === aliasPath ? targetPath : absolutePath;
+    };
+    assert.equal(
+      countTestFiles(listing, fixtureDirectory, { realpathImpl: aliasResolver }),
+      1,
+    );
+    assert.deepEqual(resolved, [targetPath, aliasPath]);
+
+    // Negative control: an identity resolver keeps the two paths distinct,
+    // so the dedup above comes from the resolver, not a string coincidence.
+    assert.equal(
+      countTestFiles(listing, fixtureDirectory, {
+        realpathImpl: (absolutePath) => absolutePath,
+      }),
+      2,
+    );
   } finally {
     await rm(fixtureDirectory, { recursive: true, force: true });
   }

@@ -38,7 +38,7 @@ describe("ApiClient", () => {
   describe("update channel settings", () => {
     it("round-trips the selected channel and acknowledgement state", async () => {
       const getMock = vi.fn().mockResolvedValue({
-        data: { channel: "insider", insiderAcknowledged: true },
+        data: { channel: "insider", insiderAcknowledged: true, rowVersion: "v1" },
       });
 
       (apiClient as unknown as { client: { get: typeof getMock } }).client.get = getMock;
@@ -46,17 +46,20 @@ describe("ApiClient", () => {
       await expect(apiClient.getUpdateChannelSettings()).resolves.toEqual({
         channel: "insider",
         insiderAcknowledged: true,
+        rowVersion: "v1",
       });
 
       expect(getMock).toHaveBeenCalledWith("/settings/UpdateChannel");
 
-      const postMock = vi.fn().mockResolvedValue({});
+      const saved = { channel: "stable", insiderAcknowledged: false, rowVersion: "v2" };
+      const postMock = vi.fn().mockResolvedValue({ data: saved });
       (apiClient as unknown as { client: { post: typeof postMock } }).client.post = postMock;
 
-      await apiClient.updateUpdateChannelSettings({ channel: "stable", insiderAcknowledged: false });
+      await expect(apiClient.updateUpdateChannelSettings({ channel: "stable", insiderAcknowledged: false, rowVersion: "v1" })).resolves.toEqual(saved);
       expect(postMock).toHaveBeenCalledWith("/settings/UpdateChannel", {
         channel: "stable",
         insiderAcknowledged: false,
+        rowVersion: "v1",
       });
 
     });

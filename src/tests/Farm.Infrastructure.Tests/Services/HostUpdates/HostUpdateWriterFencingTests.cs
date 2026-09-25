@@ -38,8 +38,15 @@ namespace Farm.Infrastructure.Tests.Services.HostUpdates;
 /// </summary>
 public class HostUpdateWriterFencingTests : IDisposable
 {
-    // A paused writer acknowledges once per ~250 ms loop iteration; two observations prove
-    // the loop is live and re-checking rather than latched after its first acknowledgement.
+    // The liveness observation threshold for a paused writer: two acknowledgements suffice to
+    // prove the loop is re-checking rather than latched after its first acknowledgement. The
+    // two loop shapes covered here reach this threshold differently — outbox-style writers
+    // (e.g. QueueOutboxPublisherService, PowerReadingPruneService, QueueRetentionPruneService)
+    // acknowledge twice per ~250 ms iteration (top-of-loop paused branch + interval-boundary
+    // wait — see the corrected cadence block on the paused-loop cycle rate test below), while
+    // continue-style consumers (e.g. BackendStartCommandConsumerService,
+    // BackendControlCommandConsumerService, BedClearAcknowledgementExpiryService) acknowledge
+    // once per iteration and reach the pair across two iterations.
     private const int AcknowledgementsPerPausedIteration = 2;
 
     private readonly SqliteConnection _connection;
@@ -894,13 +901,14 @@ public class HostUpdateWriterFencingTests : IDisposable
             scopeFactory.ScopesOpened.Should().Be(scopesBeforePause,
                 "the interval-boundary acknowledgement must stop the next work pass before it opens another scope");
 
-            // Both the top-of-loop paused branch and the interval-boundary wait re-check the
-            // fence every ~250 ms rather than busy-spinning. Sampling the acknowledgement count
-            // again after roughly 1 s (~4 iterations at the 250 ms cadence) and asserting it stays
-            // under a small, generous ceiling — not an exact count, which would be flaky under CI
-            // scheduling jitter — proves the paused loop is still throttled by its own delay and
-            // has not regressed into a tight spin that racks up acknowledgements far faster than
-            // the 250 ms cadence would allow.
+            // While the fence is paused, one loop iteration acknowledges twice — once at the
+            // top-of-loop paused branch (before its 250 ms delay) and again at the
+            // interval-boundary wait (which returns immediately while paused) — so a single
+            // ~250 ms cycle produces two acknowledgements, i.e. roughly 8/s over a 1 s sample.
+            // The `< 20` ceiling is a generous busy-spin guard, not an exact iteration count:
+            // it must clear the expected ~8/s comfortably to absorb CI scheduling jitter while
+            // still tripping if the paused loop regresses into a tight spin that racks up
+            // acknowledgements far faster than the 250 ms cadence would allow.
             int acknowledgementsAfterFirst = fence.AcknowledgementCount;
             await Task.Delay(TimeSpan.FromSeconds(1), CancellationToken.None);
             int additionalAcknowledgements = fence.AcknowledgementCount - acknowledgementsAfterFirst;

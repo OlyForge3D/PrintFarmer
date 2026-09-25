@@ -37,6 +37,7 @@ export async function fetchSettingsValues<T = Record<string, unknown>>(keyName: 
   return res.data;
 }
 
-export async function saveSettingsValues<T = Record<string, unknown>>(keyName: string, values: T): Promise<void> {
-  await client.post(`/settings/${keyName}`, values);
+export async function saveSettingsValues<T = Record<string, unknown>>(keyName: string, values: T): Promise<T & { rowVersion?: string }> {
+  const res = await client.post(`/settings/${keyName}`, values);
+  return res.data;
 }

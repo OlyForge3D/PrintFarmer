@@ -161,7 +161,7 @@ public class EfAppSettingsRepository(AppDbContext db) : IAppSettingsRepository
             ? AppSettingsCreateResult.Created
             : AppSettingsCreateResult.DuplicateKey;
 
-    private static bool IsDuplicateKey(DbUpdateException exception)
+    internal static bool IsDuplicateKey(DbUpdateException exception)
     {
         for (Exception? current = exception.InnerException; current is not null; current = current.InnerException)
         {

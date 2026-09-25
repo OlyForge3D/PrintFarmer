@@ -169,8 +169,8 @@
         },
         {
           "name": "dispatch",
-          "namespacePrefixes": ["Dispatch", "Services/AutoDispatch", "Services/Queue", "Services/FailureDetection"],
-          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Dispatch.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.AutoDispatch.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Queue.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.FailureDetection."
+          "namespacePrefixes": ["Dispatch", "Services/AutoDispatch", "Services/Queue", "Services/FailureDetection", "Services/Electricity"],
+          "filter": "FullyQualifiedName~Farm.Infrastructure.Tests.Dispatch.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.AutoDispatch.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Queue.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.FailureDetection.|FullyQualifiedName~Farm.Infrastructure.Tests.Services.Electricity."
         },
         {
           "name": "printers",

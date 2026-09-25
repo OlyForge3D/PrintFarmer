@@ -40,6 +40,29 @@ public sealed class ProductionHostUpdateAdaptersTests
     }
 
     [Fact]
+    public void Current_IncompleteExplicitTargetsWithCompleteInventory_RejectsInsteadOfFallingBack()
+    {
+        VerifiedReleaseEvidenceDto value = Evidence();
+        value = value with
+        {
+            ExecutionTargets = value.Services.Take(5).Select(service => new VerifiedReleaseExecutionTargetDto
+            {
+                ServiceId = service.ServiceId,
+                Platform = service.Platform,
+                PlatformDigest = service.PlatformDigest,
+            }).ToArray(),
+        };
+        VerifiedReleaseEvidenceCache evidence = new();
+        evidence.SetVerified(value, DateTimeOffset.UtcNow);
+        VerifiedReleaseEvidenceCandidateCache cache = new(
+            evidence, new Moq.Mock<IHostUpdateCandidateReadiness>(Moq.MockBehavior.Strict).Object,
+            Platform, TimeSpan.FromMinutes(10));
+
+        Assert.Null(cache.Current);
+        Assert.Equal("verified_release_target_set_invalid", cache.LastError);
+    }
+
+    [Fact]
     public void LastErrorRejectsLastKnownGoodEvidence()
     {
         VerifiedReleaseEvidenceCache evidence = new();

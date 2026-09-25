@@ -1446,8 +1446,9 @@ describe('InstallerUpdatesExperience', () => {
     const user = userEvent.setup();
     const save = vi.fn().mockRejectedValue(new Error('refetch failed'));
     const initialSettings = { channel: 'stable' as const, insiderAcknowledged: false };
-    const { rerender } = render(
-      <TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={initialSettings} onSaveUpdateChannel={save} />,
+    const retry = vi.fn().mockResolvedValue(initialSettings);
+    render(
+      <TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={initialSettings} onSaveUpdateChannel={save} onRetryUpdateChannel={retry} />,
     );
 
     expect(screen.getByRole('combobox', { name: 'Release channel' })).not.toBeDisabled();
@@ -1459,16 +1460,52 @@ describe('InstallerUpdatesExperience', () => {
     expect(screen.getByRole('combobox', { name: 'Release channel' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Save update channel' })).toBeDisabled();
 
-    // A fresh authoritative GET (e.g. the page's GET-only retry succeeding)
-    // delivers a new settings object; only then do mutation controls
-    // re-enable and the stale error clears.
-    rerender(
-      <TestInstallerUpdatesExperience inventory={inventory()} observation="connected" updateChannelSettings={{ ...initialSettings }} onSaveUpdateChannel={save} />,
-    );
+    await user.click(screen.getByRole('button', { name: 'Retry UpdateChannel settings' }));
+    expect(retry).toHaveBeenCalledOnce();
 
     await waitFor(() => expect(screen.getByRole('combobox', { name: 'Release channel' })).not.toBeDisabled());
     expect(screen.getByRole('button', { name: 'Save update channel' })).not.toBeDisabled();
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+  });
+
+  it('pins the draft revision through background refetch and advances it after save', async () => {
+    const user = userEvent.setup();
+    const initial = { channel: 'insider' as const, insiderAcknowledged: true, rowVersion: 'v1' };
+    const saved = { channel: 'stable' as const, insiderAcknowledged: false, rowVersion: 'v2' };
+    const save = vi.fn().mockResolvedValue(saved);
+    const props = { inventory: inventory(), observation: 'connected' as const, onSaveUpdateChannel: save };
+    const { rerender } = render(<TestInstallerUpdatesExperience {...props} updateChannelSettings={initial} />);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'stable');
+    rerender(<TestInstallerUpdatesExperience {...props} updateChannelSettings={{ ...initial, rowVersion: 'external' }} />);
+    expect(screen.getByRole('combobox', { name: 'Release channel' })).toHaveValue('stable');
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    await waitFor(() => expect(save).toHaveBeenCalledWith({ ...saved, rowVersion: 'v1' }));
+    await screen.findByText('Update channel saved.');
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    await waitFor(() => expect(save).toHaveBeenLastCalledWith(saved));
+  });
+
+  it.each([409, 412])('preserves the channel selection on %s until an explicit reload', async (statusCode) => {
+    const user = userEvent.setup();
+    const initial = { channel: 'insider' as const, insiderAcknowledged: true, rowVersion: 'v1' };
+    const remote = { ...initial, rowVersion: 'remote-v2' };
+    const save = vi.fn().mockRejectedValue({ statusCode });
+    const retry = vi.fn().mockResolvedValue(remote);
+    const props = { inventory: inventory(), observation: 'connected' as const, onSaveUpdateChannel: save, onRetryUpdateChannel: retry };
+    const { rerender } = render(<TestInstallerUpdatesExperience {...props} updateChannelSettings={initial} />);
+    await user.selectOptions(screen.getByRole('combobox', { name: 'Release channel' }), 'stable');
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    await screen.findByText(/Update channel changed elsewhere/);
+    rerender(<TestInstallerUpdatesExperience {...props} updateChannelSettings={remote} />);
+    expect(screen.getByRole('combobox', { name: 'Release channel' })).toHaveValue('stable');
+    expect(screen.getByRole('button', { name: 'Save update channel' })).toBeDisabled();
+    expect(retry).not.toHaveBeenCalled();
+    expect(screen.queryByText('Update channel saved.')).not.toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Reload UpdateChannel settings' }));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: 'Release channel' })).toHaveValue('insider'));
+    save.mockResolvedValue(remote);
+    await user.click(screen.getByRole('button', { name: 'Save update channel' }));
+    await waitFor(() => expect(save).toHaveBeenLastCalledWith(remote));
   });
 
   it('reconciles the selector to the authoritative channel and reports a truthful rejection, without claiming success, when the refetch disagrees with the request', async () => {

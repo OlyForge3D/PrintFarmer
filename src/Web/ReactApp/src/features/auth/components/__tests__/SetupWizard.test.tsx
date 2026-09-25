@@ -417,6 +417,7 @@ describe('SetupWizard network discovery limit validation (#2458)', () => {
     mockGetSetupStatus.mockResolvedValue({ needsSetup: true });
     mockGetSetupBootstrap.mockResolvedValue({ baseUrl: '' });
     mockGetSettings.mockResolvedValue({
+      rowVersion: 'network-v1',
       enableDiscovery: true,
       discoverySubnets: [],
       clientTimeoutMs: 200,
@@ -478,11 +479,49 @@ describe('SetupWizard network discovery limit validation (#2458)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Finish Setup' }));
 
     await waitFor(() => expect(mockSaveSettingsValues).toHaveBeenCalledWith('NetworkDiscovery', expect.objectContaining({
+      rowVersion: 'network-v1',
       clientTimeoutMs: 1,
       requestDelayMs: 1,
       maxConcurrentRequests: 1,
       maxRetries: 1,
     })));
+  });
+
+  it('advances the network revision when a later setup step fails and is retried', async () => {
+    await advanceToNetworkStep();
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Spoolman Integration', { selector: 'h2' });
+    fireEvent.click(screen.getByLabelText('Enable Spoolman'));
+    fireEvent.change(screen.getByPlaceholderText('http://spoolman:7912'), { target: { value: 'http://spoolman:7912' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Summary', { selector: 'h2' });
+    mockSaveSettingsValues.mockResolvedValueOnce({ rowVersion: 'network-v2' });
+    mockSaveSpoolmanConfig.mockRejectedValueOnce(new Error('Spoolman unavailable'));
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Setup' }));
+    await screen.findByText('Spoolman unavailable');
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Setup' }));
+    await waitFor(() => expect(mockSaveSettingsValues).toHaveBeenLastCalledWith('NetworkDiscovery', expect.objectContaining({ rowVersion: 'network-v2' })));
+    expect(mockGetSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it.each([409, 412])('preserves a network draft after %s and reloads only on request', async (statusCode) => {
+    await advanceToNetworkStep();
+    fireEvent.change(screen.getByLabelText('Client Timeout (ms)'), { target: { value: '450' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Spoolman Integration', { selector: 'h2' });
+    fireEvent.click(screen.getByRole('button', { name: 'Next' }));
+    await screen.findByText('Summary', { selector: 'h2' });
+    mockSaveSettingsValues.mockRejectedValueOnce({ statusCode });
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Setup' }));
+    await screen.findByText(/Network settings changed elsewhere/);
+    fireEvent.click(screen.getByRole('button', { name: 'Finish Setup' }));
+    expect(mockSaveSettingsValues).toHaveBeenCalledTimes(1);
+    expect(mockGetSettings).toHaveBeenCalledTimes(1);
+    expect(mockSaveSettingsValues).toHaveBeenCalledWith('NetworkDiscovery', expect.objectContaining({ clientTimeoutMs: 450, rowVersion: 'network-v1' }));
+    const initial = await mockGetSettings.mock.results[0].value;
+    mockGetSettings.mockResolvedValueOnce({ ...initial, clientTimeoutMs: 600, rowVersion: 'network-v3' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload network settings' }));
+    await waitFor(() => expect(screen.getByLabelText('Client Timeout (ms)')).toHaveValue(600));
   });
 });
 

@@ -2,6 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { toast } from 'sonner';
 import type { CostTrackingSettings } from '@/types/api';
 import { apiClient } from '@/services/api';
+import { isSettingsConflict } from '@/common/utils/apiErrors';
 import { PageTemplate } from '@/common/components/PageTemplate';
 import { ADMIN_HUB_PARENT } from '@/features/admin/registry/adminDestinations';
 import { Button, FormField, Input, Select, Toggle, Badge } from '@/common/components/ui';
@@ -46,15 +47,26 @@ export function PowerMonitorSettingsPage() {
 
   const [fallbackRate, setFallbackRate] = useState('');
   const [savingFallback, setSavingFallback] = useState(false);
+  const [fallbackError, setFallbackError] = useState<string | null>(null);
+  const [fallbackLoaded, setFallbackLoaded] = useState(false);
+  const [fallbackConflict, setFallbackConflict] = useState(false);
   const costSettingsRef = useRef<CostTrackingSettings | null>(null);
 
-  useEffect(() => {
-    apiClient.getCostTrackingSettings().then((settings) => {
+  const reloadFallback = async () => {
+    try {
+      const settings = await apiClient.getCostTrackingSettings();
       costSettingsRef.current = settings;
       setFallbackRate(settings.electricityRatePerKwh > 0 ? settings.electricityRatePerKwh.toString() : '');
-    }).catch(() => {
-      // Non-fatal: farm-wide rate section degrades gracefully
-    });
+      setFallbackLoaded(true);
+      setFallbackError(null);
+      setFallbackConflict(false);
+    } catch {
+      setFallbackError('Could not load farm-wide settings. Reload before editing.');
+    }
+  };
+
+  useEffect(() => {
+    void reloadFallback();
   }, []);
 
   const resetForm = () => {
@@ -155,6 +167,7 @@ export function PowerMonitorSettingsPage() {
   };
 
   const handleSaveFallbackRate = async () => {
+    if (savingFallback || fallbackConflict || !costSettingsRef.current) return;
     setSavingFallback(true);
     try {
       const rate = Number(fallbackRate);
@@ -162,11 +175,16 @@ export function PowerMonitorSettingsPage() {
         toast.error('Enter a valid rate');
         return;
       }
-      const current = costSettingsRef.current ?? await apiClient.getCostTrackingSettings();
-      costSettingsRef.current = current;
-      await apiClient.updateCostTrackingSettings({ ...current, electricityRatePerKwh: rate });
+      const payload = { ...costSettingsRef.current, electricityRatePerKwh: rate };
+      const saved = await apiClient.updateCostTrackingSettings(payload);
+      costSettingsRef.current = saved ?? payload;
+      setFallbackError(null);
       toast.success('Farm-wide fallback rate saved');
-    } catch {
+    } catch (error) {
+      if (isSettingsConflict(error)) {
+        setFallbackConflict(true);
+        setFallbackError('Farm-wide settings changed elsewhere. Your rate is preserved. Reload to discard it and review the latest settings.');
+      }
       toast.error('Failed to save farm-wide rate');
     } finally {
       setSavingFallback(false);
@@ -207,6 +225,7 @@ export function PowerMonitorSettingsPage() {
               step="0.01"
               min="0"
               value={fallbackRate}
+              disabled={!fallbackLoaded || savingFallback}
               onChange={(e) => setFallbackRate(e.target.value)}
               placeholder="0.12"
             />
@@ -214,11 +233,20 @@ export function PowerMonitorSettingsPage() {
           <Button
             variant="secondary"
             onClick={handleSaveFallbackRate}
-            disabled={savingFallback}
+            disabled={savingFallback || !fallbackLoaded || fallbackConflict}
           >
             {savingFallback ? 'Saving...' : 'Save'}
           </Button>
         </div>
+        {fallbackError && (
+          <div className="mt-2 space-y-2">
+            <p role="alert" className="text-sm text-pf-error">{fallbackError}</p>
+            <Button variant="secondary" disabled={savingFallback} onClick={async () => {
+              setSavingFallback(true);
+              try { await reloadFallback(); } finally { setSavingFallback(false); }
+            }}>Reload farm-wide settings</Button>
+          </div>
+        )}
       </div>
 
       {/* Monitor list */}

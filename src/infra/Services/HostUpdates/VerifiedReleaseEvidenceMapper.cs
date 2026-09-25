@@ -58,6 +58,7 @@ public static class VerifiedReleaseEvidenceMapper
         }
 
         List<ReleaseServiceRequirementDto> services = [];
+        List<VerifiedReleaseExecutionTargetDto> executionTargets = [];
         if (metadata.ComponentPlatforms is null
             || metadata.ComponentIndexDigests is null
             || metadata.ComponentPlatformDigests is null)
@@ -67,12 +68,7 @@ public static class VerifiedReleaseEvidenceMapper
 
         foreach ((string manifestServiceId, IReadOnlyList<string> platforms) in metadata.ComponentPlatforms)
         {
-            if (manifestServiceId == "monolith")
-            {
-                continue;
-            }
-
-            if (!InventoryServiceIds.TryGetValue(manifestServiceId, out string? inventoryServiceId)
+            if (!HostUpdateExecutionRequest.RequiredServiceIds.Contains(manifestServiceId)
                 || platforms is null
                 || platforms.Count == 0
                 || platforms.Distinct(StringComparer.Ordinal).Count() != platforms.Count
@@ -90,20 +86,31 @@ public static class VerifiedReleaseEvidenceMapper
             string key = SignedUpdateManifestValidator.PlatformKey(manifestServiceId, hostPlatform);
             if (!metadata.ComponentPlatformDigests.TryGetValue(key, out string? digest)
                 || !metadata.ComponentIndexDigests.TryGetValue(manifestServiceId, out string? indexDigest)
-                || !HostUpdateValidation.IsDigest(digest)
-                || !HostUpdateValidation.IsDigest(indexDigest))
+                || !HostUpdateValidation.IsCanonicalDigest(digest)
+                || !HostUpdateValidation.IsCanonicalDigest(indexDigest))
             {
                 throw new InvalidDataException(
                     $"Verified release service '{manifestServiceId}' is missing immutable digest evidence for '{hostPlatform}'.");
             }
 
-            services.Add(new ReleaseServiceRequirementDto
+            executionTargets.Add(new VerifiedReleaseExecutionTargetDto
             {
-                ServiceId = inventoryServiceId,
+                ServiceId = manifestServiceId,
                 Platform = hostPlatform,
                 PlatformDigest = digest,
-                IndexDigest = indexDigest,
             });
+
+            // Monolith is an execution target, not an independently observed inventory service.
+            if (InventoryServiceIds.TryGetValue(manifestServiceId, out string? inventoryServiceId))
+            {
+                services.Add(new ReleaseServiceRequirementDto
+                {
+                    ServiceId = inventoryServiceId,
+                    Platform = hostPlatform,
+                    PlatformDigest = digest,
+                    IndexDigest = indexDigest,
+                });
+            }
         }
 
         if (services.Count == 0)
@@ -145,6 +152,7 @@ public static class VerifiedReleaseEvidenceMapper
             Identity = identity,
             ManifestDigest = metadata.Identity.ManifestDigest,
             Services = services,
+            ExecutionTargets = executionTargets,
         };
     }
 

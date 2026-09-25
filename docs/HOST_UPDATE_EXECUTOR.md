@@ -12,6 +12,14 @@ failure. There is still no automatic/unattended execution path.
 
 ## Configuration: `HostUpdateExecutionOptions`
 
+For operator setup, current admin routes, policy opt-out and incident stop
+conditions, use the [installation update runbook](HOST_UPDATE_RUNBOOK.md).
+The sections below include historical implementation snapshots, not rollout
+authorization. Current DI includes target-image migration and a hosted scheduler
+when protected host state is enabled, but still registers unavailable candidate
+readiness and admission-fence adapters. A complete host-local/offline recovery
+path remains a delivery gate; see [offline recovery](OFFLINE_UPDATE_RECOVERY.md).
+
 Bound from the `HostUpdateExecution` configuration section (see
 `src/infra/Services/HostUpdates/HostUpdateExecutionOptions.cs`). Root and general executor
 settings are validated by `HostUpdateExecutionOptionsValidator`; executable mappings are
@@ -57,6 +65,21 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
 
 ## Concrete adapters (`src/infra/Services/HostUpdates/`)
 
+Signed release mapping keeps inventory requirements separate from execution
+targets. On `linux-amd64`, the mapper retains six canonical execution IDs,
+including `monolith`, with their authenticated platform child digests; inventory
+still contains five observed services and uses its `discovery` / `slicer-worker`
+aliases. Both child and index digests must use canonical lowercase SHA-256
+grammar; the mapper rejects rather than normalizes other forms.
+
+The candidate adapter validates explicit execution targets without replacing an
+incomplete set from inventory. The inventory fallback is used only when no
+explicit targets exist. Missing, duplicate, or unknown targets still report
+`verified_release_target_set_invalid`. Current `linux-arm64` signed manifests
+lack a worker child, so their five execution targets remain fail-closed; no
+worker digest is synthesized. Passing this target check does not bypass the
+separate readiness, admission, or authorization requirements.
+
 | Step | Adapter | Notes |
 |---|---|---|
 | Preflight | `HostUpdatePreflightCheck` | Revalidates installed version/digests, provider allowlist, disk free space, and every configured migration target's provider name before anything else runs. |
@@ -67,6 +90,17 @@ validated fail-closed by `ConfiguredHostUpdateExecutableResolver`. The executor 
 | Apply | `HostUpdateImageApplier` | Stages each immutable `repository@sha256` image first with `docker image pull` (`--platform` on forward execution), then applies via the existing compose templates and `docker compose up -d --no-build --pull never`, using an explicit process argument list — never shell interpolation, never a mutable tag. Production DI wraps this runner in `ConstrainedHostUpdateProcessRunner`, which permits only the audited tool names (with explicit `.exe` support) and accepts rooted paths only from trusted host tool directories; unrelated names and untrusted rooted paths are rejected before launch. If staging any image fails, compose mutation is not attempted. |
 | Verify | `HostUpdateHealthVerifier` + `AggregateHostUpdateHealthCheck` + `DigestHostUpdateHealthCheck` | Confirms exact running digests via a two-step `docker container inspect --format {{.Image}}` → `docker image inspect --format {{index .RepoDigests 0}}` probe (`.RepoDigests` exists only on image-inspect output, never on container-inspect output -- see "Known limitations" for the bug this replaced) plus the aggregated `/health` endpoint's JSON body has a top-level `Status`/`status` of exactly `"Healthy"` and every configured required result entry (default: `comprehensive`, `signalr`, `spoolman`) is present and healthy. Verification also fails before probing if the digest map is not the exact configured service set, so partial target mappings cannot reopen writers. |
 | Recovery | `HostUpdateRecoveryCoordinator` + `DefaultHostUpdateRecoveryCompatibilityEvaluator` + `ProcessHostUpdateRestoreExecutor` + `FileHostUpdateRecoveryOutcomeStore` | On any failure, decides image-only rollback vs. coordinated restore, restores both databases and owned storage/config together via the same provider-native restore tooling (structured process args/env only — no shell string, no password on argv), and durably persists the `RolledBack`/`NeedsOperator` outcome with the same write-through/atomic-replace primitive used by the journal. Restored payload files are flushed before the destination tree is synced; unmapped manifest targets fail closed. A duplicate/restarted `RolledBack` recovery does not replay restore/apply, but it does re-drive idempotent fence release if the previous process crashed before reopening. |
+
+The `auto-dispatch` loop checks the same fence on trigger arrivals and on its
+30 s durable scan tick, including when the trigger channel is empty or automatic
+dispatch is disabled. A scan tick acknowledges only after all tracked workers have
+finished; it neither cancels in-flight dispatches nor starts new ones while paused.
+Periodic reconciliation is skipped while paused and resumes after fence release,
+so queued jobs can be rediscovered without an external trigger. Trigger ownership
+is retired when a consumed event is suppressed by the fence or abandoned after
+a scan wins the wait; otherwise its in-flight marker would prevent rediscovery.
+Allow up to the next scan tick after worker drain for an otherwise idle loop to
+acknowledge.
 
 ## Availability contract
 

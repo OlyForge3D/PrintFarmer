@@ -34,6 +34,9 @@ public sealed class SettingsServiceProvenanceTests
         repository
             .Setup(repo => repo.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        repository
+            .Setup(repo => repo.GetAsync(SpoolCoverageSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AppSettingsEntity { Key = SpoolCoverageSettings.SectionName, Revision = 1 });
         Mock<IMutationWatermarkReader> watermarkReader = new(MockBehavior.Strict);
         watermarkReader
             .SetupSequence(reader => reader.GetCurrentAsync(It.IsAny<CancellationToken>()))
@@ -87,6 +90,9 @@ public sealed class SettingsServiceProvenanceTests
         repository
             .Setup(repo => repo.SaveChangesAsync(It.IsAny<CancellationToken>()))
             .Returns(Task.CompletedTask);
+        repository
+            .Setup(repo => repo.GetAsync(SpoolCoverageSettings.SectionName, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AppSettingsEntity { Key = SpoolCoverageSettings.SectionName, Revision = 1 });
         IConfiguration configuration = new ConfigurationBuilder().Build();
         var service = new SettingsService(
             configuration,
