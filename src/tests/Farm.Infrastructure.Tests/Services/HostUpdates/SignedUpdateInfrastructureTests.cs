@@ -257,7 +257,7 @@ public sealed class SignedUpdateInfrastructureTests
     }
 
     [Fact]
-    public async Task Current_VerifiedManifestThroughMapperAndCache_PreservesSixCanonicalChildTargets()
+    public async Task Current_VerifiedManifestThroughMapperAndCache_PreservesSixCanonicalChildTargetsAsync()
     {
         SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
         VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64");
@@ -270,9 +270,9 @@ public sealed class SignedUpdateInfrastructureTests
         Assert.Equal(
             ["api", "frontend", "slicer-host", "discovery", "slicer-worker"],
             mapped.Services.Select(service => service.ServiceId));
-        Assert.Equal(
-            ["api", "frontend", "slicer-host", "printer-discovery", "orcaslicer-worker", "monolith"],
-            mapped.ExecutionTargets.Select(target => target.ServiceId));
+        Assert.Equal(HostUpdateExecutionRequest.RequiredTargetCount, mapped.ExecutionTargets.Count);
+        Assert.True(HostUpdateExecutionRequest.RequiredServiceIds.SetEquals(
+            mapped.ExecutionTargets.Select(target => target.ServiceId)));
         Assert.All(mapped.ExecutionTargets, target =>
         {
             Assert.Equal("linux-amd64", target.Platform);
@@ -319,7 +319,7 @@ public sealed class SignedUpdateInfrastructureTests
     }
 
     [Fact]
-    public async Task Current_VerifiedArmManifestWithoutWorker_RejectsWithoutInventingTarget()
+    public async Task Current_VerifiedArmManifestWithoutWorker_RejectsWithoutInventingTargetAsync()
     {
         SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
         VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-arm64");
@@ -348,7 +348,7 @@ public sealed class SignedUpdateInfrastructureTests
     [InlineData("signature", "verified_release_evidence_untrusted")]
     [InlineData("stale", "verified_release_evidence_stale")]
     [InlineData("cache-error", "discovery_failed")]
-    public async Task Current_MappedEvidenceInvalidated_RejectsBeforeReadingReadiness(string field, string reason)
+    public async Task Current_MappedEvidenceInvalidated_RejectsBeforeReadingReadinessAsync(string field, string reason)
     {
         SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
         VerifiedReleaseEvidenceDto mapped = metadata.ToEvidenceDto("linux-amd64");
@@ -397,7 +397,7 @@ public sealed class SignedUpdateInfrastructureTests
     [Theory]
     [InlineData(false, "0.0.0")]
     [InlineData(true, "invalid")]
-    public async Task Current_MappedEvidenceWithoutReadinessOrMinimumVersion_DoesNotClaimCompatibility(
+    public async Task Current_MappedEvidenceWithoutReadinessOrMinimumVersion_DoesNotClaimCompatibilityAsync(
         bool ready, string minimumUpdaterVersion)
     {
         SignedReleaseMetadata metadata = await CreateVerifiedMetadataAsync();
