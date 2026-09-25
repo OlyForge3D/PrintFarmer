@@ -277,7 +277,8 @@ Known limits of this slice:
 - A non-empty configured `ComposeFiles` list replaces the built-in
   `docker-compose.daily-registry.yml` default for both the API and the CLI
   (#2997); list every compose file the installation applies, in `-f` order.
-  The built-in default applies only when no `ComposeFiles` entry is configured.
+  The built-in default applies only when no `ComposeFiles` entry is configured;
+  a blank entry fails startup validation.
 - Wrapper parity is regression-tested in CI (`deployment-tests.yml`,
   `host-update-wrapper-tests`): `tests/test-host-update-cli-wrapper.sh` and
   `tests/test-host-update-cli-wrapper.ps1` both run on Ubuntu, macOS and
