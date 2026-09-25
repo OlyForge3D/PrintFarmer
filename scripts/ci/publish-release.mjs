@@ -67,6 +67,12 @@ export function buildImages(release, source, assets, run = command, rejectImages
   execute('node', ['scripts/compliance/create-license-inventory.mjs', '--version', release.tag,
     '--revision', release.sourceCommit, '--output', join(assets, 'license-inventory.json')]);
   emitBuildMetadata(release, source);
+  // Package the host-local recovery CLI from the pinned source after the release identity is
+  // stamped, so its assemblies carry this version. The checksum file is signed by the sign job.
+  execute('bash', ['scripts/package-host-update-cli.sh', '--source', source, '--output', assets,
+    '--version', release.version, '--channel', release.channel, '--source-commit', release.sourceCommit,
+    '--require-release-identity', ...hostUpdateCliRids.flatMap(rid => ['--rid', rid])]);
+  verifyHostUpdateCliPackages(assets, release);
   const digests = {};
   const baseUrl = `https://github.com/${repository}/releases/download/${release.tag}`;
   for (const [name, { target, platforms }] of Object.entries(components)) {
@@ -129,6 +135,41 @@ export function sourceBundleFiles(release) {
   ];
 }
 
+// Supported host platforms for the packaged host-update CLI (docs/HOST_UPDATE_RUNBOOK.md).
+export const hostUpdateCliRids = Object.freeze(['linux-x64', 'linux-arm64', 'osx-arm64', 'win-x64']);
+
+export function hostUpdateCliArchives(release) {
+  return hostUpdateCliRids.map(rid =>
+    `printfarmer-host-update-cli-${release.tag}-${rid}.${rid.startsWith('win-') ? 'zip' : 'tar.gz'}`);
+}
+
+export function hostUpdateCliChecksums(release) {
+  return `printfarmer-host-update-cli-${release.tag}-SHA256SUMS`;
+}
+
+export function hostUpdateCliAssets(release) {
+  return [...hostUpdateCliArchives(release), hostUpdateCliChecksums(release),
+    `${hostUpdateCliChecksums(release)}.sigstore.json`];
+}
+
+// The checksum file must list exactly this release's archives, each matching its bytes, so the
+// one signed file authenticates every CLI package an operator or offline bundle may download.
+export function verifyHostUpdateCliPackages(assets, release) {
+  const lines = readFileSync(join(assets, hostUpdateCliChecksums(release)), 'utf8').split('\n').filter(Boolean);
+  const listed = new Map(lines.map(line => {
+    const match = /^([a-f0-9]{64}) {2}(\S+)$/.exec(line);
+    requireThat(match, 'Host-update CLI checksum file is malformed');
+    return [match[2], match[1]];
+  }));
+  const archives = hostUpdateCliArchives(release);
+  requireThat(listed.size === lines.length && listed.size === archives.length &&
+    archives.every(name => listed.has(name)), 'Host-update CLI checksum file does not list exactly the release archives');
+  for (const name of archives) {
+    requireThat(createHash('sha256').update(readFileSync(join(assets, name))).digest('hex') === listed.get(name),
+      `Host-update CLI archive does not match its checksum: ${name}`);
+  }
+}
+
 export function releaseAssets(release) {
   return [
     ...sourceBundleFiles(release),
@@ -136,11 +177,13 @@ export function releaseAssets(release) {
     'update-manifest.json', 'update-manifest.sigstore.json',
     `printfarmer-${release.tag}.spdx.json`,
     ...Object.keys(components).map(name => `printfarmer-${name}-${release.tag}.spdx.json`),
+    ...hostUpdateCliAssets(release),
   ];
 }
 
-// The workflow signs and verifies update-manifest.json in two prior steps
-// (sign, then re-verify) before this script even starts. Re-verify the exact
+// The workflow signs and verifies update-manifest.json (and the host-update
+// CLI checksum file) in two prior steps (sign, then re-verify) before this
+// script even starts. Re-verify the exact
 // bytes about to be uploaded here too, immediately before the upload call,
 // so nothing between those earlier steps and the actual upload (a rebuilt
 // asset, a manual edit, disk corruption) can present an unsigned or
@@ -156,15 +199,27 @@ function manifestSignatureIdentity(channel) {
   return `https://github.com/${repository}/${workflow}@refs/heads/${ref}`;
 }
 
-function verifyManifestSignatureBeforeUpload(assets, run, channel) {
+function verifySignedBlob(run, bundlePath, blobPath, channel) {
+  run('cosign', ['verify-blob', '--bundle', bundlePath,
+    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
+    '--certificate-identity', manifestSignatureIdentity(channel), blobPath]);
+}
+
+// The CLI checksum file is verified first and the manifest last, so the manifest verification
+// stays immediately before the upload call.
+function verifyManifestSignatureBeforeUpload(assets, run, release) {
+  const channel = release.channel;
+  const checksumsPath = join(assets, hostUpdateCliChecksums(release));
+  requireThat(readFileSync(`${checksumsPath}.sigstore.json`).length > 0,
+    'Missing host-update CLI checksum signature bundle immediately before upload');
+  verifySignedBlob(run, `${checksumsPath}.sigstore.json`, checksumsPath, channel);
+  verifyHostUpdateCliPackages(assets, release);
   const manifestPath = join(assets, 'update-manifest.json');
   const bundlePath = join(assets, 'update-manifest.sigstore.json');
   requireThat(readFileSync(manifestPath).length > 0, 'Missing update manifest immediately before upload');
   requireThat(readFileSync(bundlePath).length > 0,
     'Missing update manifest signature bundle immediately before upload');
-  run('cosign', ['verify-blob', '--bundle', bundlePath,
-    '--certificate-oidc-issuer', 'https://token.actions.githubusercontent.com',
-    '--certificate-identity', manifestSignatureIdentity(channel), manifestPath]);
+  verifySignedBlob(run, bundlePath, manifestPath, channel);
 }
 
 export async function publishRelease(release, assets, api, {
@@ -182,7 +237,7 @@ export async function publishRelease(release, assets, api, {
   // Verify before creating the permanent Git tag or draft release. The later
   // verification immediately before upload protects the exact bytes after any
   // fallible draft-release operations.
-  verifyManifestSignatureBeforeUpload(assets, run, release.channel);
+  verifyManifestSignatureBeforeUpload(assets, run, release);
   const notes = await releaseNotes(api, release, digests);
   writeFileSync(join(assets, 'release-notes.md'), notes);
   await rejectExistingVersion(api, release.tag);
@@ -197,7 +252,7 @@ export async function publishRelease(release, assets, api, {
     body: notes, draft: true, prerelease: release.channel === 'insider', make_latest: 'false',
   } });
   requireThat(Number.isSafeInteger(draft?.id), 'GitHub did not return a draft release ID');
-  verifyManifestSignatureBeforeUpload(assets, run, release.channel);
+  verifyManifestSignatureBeforeUpload(assets, run, release);
   run('gh', ['release', 'upload', release.tag, ...files.map(name => join(assets, name)), '--repo', repository]);
   const uploaded = await api(`releases/${draft.id}/assets?per_page=100`);
   requireThat(Array.isArray(uploaded) && uploaded.length === files.length &&

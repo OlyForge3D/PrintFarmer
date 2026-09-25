@@ -6,6 +6,9 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/fix-*.sh'
       - 'scripts/docker/**'
+      - 'scripts/printfarmer-host-update.sh'
+      - 'scripts/printfarmer-host-update.ps1'
+      - 'scripts/common-utils.sh'
       - 'docs/**'
       - 'tests/**'
       - 'deploy/nginx/**'
@@ -19,6 +22,9 @@ on:
       - 'scripts/deploy-docker.sh'
       - 'scripts/fix-*.sh'
       - 'scripts/docker/**'
+      - 'scripts/printfarmer-host-update.sh'
+      - 'scripts/printfarmer-host-update.ps1'
+      - 'scripts/common-utils.sh'
       - 'docs/**'
       - 'tests/**'
       - 'deploy/nginx/**'
@@ -137,6 +143,32 @@ jobs:
           test_postgres_runtime_secrets_not_baked
           test_postgres_compose_config_resolves_password_for_api_and_slicer_host
           test_postgres_passwordless_connection_string_fails_fast
+
+  host-update-wrapper-tests:
+    # Issue #2997: the fixed-operation host-update wrappers must keep one
+    # grammar across Bash and PowerShell on every supported host OS. Both
+    # suites use a fake CLI/dotnet, so no .NET SDK, Docker or network is needed.
+    name: Host-update wrapper tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7
+        with:
+          persist-credentials: false
+
+      - name: Run Bash wrapper tests
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash tests/test-host-update-cli-wrapper.sh
+
+      - name: Run PowerShell wrapper tests
+        shell: pwsh
+        run: ./tests/test-host-update-cli-wrapper.ps1
 
   split-topology-route-smoke:
     # Issue #2239: tests/test-compose-generator.sh (above) proves the

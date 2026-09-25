@@ -27,8 +27,9 @@ post_date: "2026-09-16"
    its full 40-character ancestor SHA.
 3. Run it once. The summary identifies the pinned source, check results and
    release URL. A successful release contains generated GitHub release notes, pinned image
-   references, corresponding source, license notices, SBOMs, and a signed
-   `update-manifest.json` plus its `update-manifest.sigstore.json` bundle.
+   references, corresponding source, license notices, SBOMs, a signed
+   `update-manifest.json` plus its `update-manifest.sigstore.json` bundle, and
+   the host-update recovery CLI archives (see below).
 
 There is no release ledger, reservation, signing ceremony, qualification receipt,
 counter recovery or abandonment step. The explicit version and permanent Git tag
@@ -63,6 +64,21 @@ following set:
 Repositories are `ghcr.io/olyforge3d/printfarmer-<suffix>`. Builds push by digest
 with BuildKit provenance and SBOMs. Every expected platform and its source/version
 labels are verified; ARM64 runtime smoke checks precede release creation.
+
+Before any image build, the build job also runs
+`scripts/package-host-update-cli.sh` against the pinned source to produce the
+self-contained host-update recovery CLI (#2997):
+`printfarmer-host-update-cli-v<version>-<rid>.tar.gz` for `linux-x64`,
+`linux-arm64` and `osx-arm64`, `printfarmer-host-update-cli-v<version>-win-x64.zip`,
+and `printfarmer-host-update-cli-v<version>-SHA256SUMS`. Each archive's
+`host-update-cli.json` records the tag, channel, source commit and per-file
+SHA-256, and states `authorizesRollout: false`; the CLI never starts an
+update. The signing job signs the checksum file with the same keyless identity
+as the manifest (`printfarmer-host-update-cli-v<version>-SHA256SUMS.sigstore.json`),
+and the publisher re-verifies that signature and every archive hash before
+upload. `.github/workflows/host-update-cli-package.yml` packages and
+smoke-tests every RID on its own OS for pull requests; installation commands
+are in the [host-update runbook](HOST_UPDATE_RUNBOOK.md#host-local-status-and-recovery-cli-2980-2997).
 
 Only after all builds and the isolated signing job succeed does the publisher create the permanent
 `v<version>` Git tag and a draft GitHub release, upload and check its asset

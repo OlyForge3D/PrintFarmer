@@ -197,34 +197,117 @@ endpoints exist.
 
 **The packaged host-local status/recovery CLI is only partially delivered.** The
 first slice of #2980 (below) adds the API-independent engine entry point and
-wrappers, but packaging, host placement, the OS matrix, drift reapproval and
-provider/topology coverage are still open. That gap still blocks a claim of
+wrappers, packaged per OS (#2997), but drift reapproval and provider/topology
+coverage are still open. That gap still blocks a claim of
 complete recovery support. Retain protected host evidence for the deployment
 owner; do not invent a recovery command, edit journal JSON, delete locks, or run
 the installer against a possibly migrated database. Directly reading a file is
 not journal integrity verification or authorization to release a fence.
 
-### Host-local status and recovery CLI (first slice, #2980)
+### Host-local status and recovery CLI (#2980, #2997)
 
 `Farm.HostUpdate.Cli` (`src/tools/Farm.HostUpdate.Cli`) runs the same
 journal, lock and recovery coordinator the API uses, without the API. It is
 **not rollout authorization**: it never starts a forward update, and does not
 close #2980 or #2664. Run it only through the fixed-operation wrappers, as the
 account that owns the protected root, with the same configuration the API host
-uses:
+uses.
+
+#### Supported hosts and placement
+
+Each release publishes one self-contained archive per supported runtime. No
+.NET SDK or runtime is needed on the host. Install the CLI on the machine (or
+in the host namespace) that owns the protected state root, the compose files
+and the owned directories; never inside an application container.
+
+| Host | Archive RID | Tested in CI | Install directory | Config file |
+| --- | --- | --- | --- | --- |
+| Linux x64 (glibc: Ubuntu 22.04/24.04, Debian 12, RHEL 9-compatible) | `linux-x64` | `ubuntu-latest` | `/opt/printfarmer/host-update-cli/<version>` | `/etc/printfarmer/host-update.json` |
+| Linux arm64 (glibc, same distributions, e.g. Raspberry Pi OS 64-bit bookworm) | `linux-arm64` | `ubuntu-24.04-arm` | `/opt/printfarmer/host-update-cli/<version>` | `/etc/printfarmer/host-update.json` |
+| macOS 14+ Apple silicon | `osx-arm64` | `macos-latest` | `/opt/printfarmer/host-update-cli/<version>` | `/etc/printfarmer/host-update.json` |
+| Windows Server 2022+ / Windows 11 x64 | `win-x64` | `windows-latest` | `C:\Program Files\PrintFarmer\HostUpdateCli\<version>` | `C:\ProgramData\PrintFarmer\host-update.json` |
+
+Unsupported: Alpine or any musl libc, 32-bit ARM, Intel macOS and Windows on
+ARM. Run the wrapper from the host, not from WSL against a Windows-owned root or
+the reverse; a path the CLI cannot prove in its own namespace fails with exit 3.
+Keep the config file owned by the protected-root account and readable only by
+that account and its administrators (`0640` on POSIX), because it holds database
+connection details. Every path in it must be an absolute host path.
+
+Each archive contains one `printfarmer-host-update-cli-<tag>-<rid>/` directory:
+both wrappers, `common-utils.sh`, `cli/` (the self-contained apphost),
+`host-update-cli.json` (tag, channel, source commit, RID,
+`authorizesRollout: false`, and a SHA-256 for every file), `LICENSE` and
+`THIRD-PARTY-NOTICES.md`. The wrapper uses the package's `cli/` directory
+automatically. Old versions stay side by side; switching versions means running
+the other directory's wrapper, so nothing is overwritten in place.
+
+#### Download, verify and install
+
+Download with `gh` or `curl` (not a browser, which adds macOS quarantine
+attributes), then verify the signed checksum list before extracting anything:
 
 ```bash
-export PRINTFARMER_HOST_UPDATE_CLI_DIR=/opt/printfarmer/host-update-cli  # contains Farm.HostUpdate.Cli.dll
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json status --json
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json status --release stable:1.2.3
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --preview
-scripts/printfarmer-host-update.sh --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --confirm stable:1.2.3
+tag=v1.2.3 rid=linux-x64 branch=main   # branch=development for insider releases
+sums="printfarmer-host-update-cli-${tag}-SHA256SUMS"
+gh release download "$tag" --repo OlyForge3D/PrintFarmer \
+  --pattern "printfarmer-host-update-cli-${tag}-${rid}.tar.gz" \
+  --pattern "$sums" --pattern "${sums}.sigstore.json"
+cosign verify-blob --bundle "${sums}.sigstore.json" \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+  --certificate-identity "https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/${branch}" \
+  "$sums"
+sha256sum --check --ignore-missing "$sums"   # macOS: shasum -a 256 --check --ignore-missing
+sudo install -d -m 0755 /opt/printfarmer/host-update-cli
+sudo tar -xzf "printfarmer-host-update-cli-${tag}-${rid}.tar.gz" -C /opt/printfarmer/host-update-cli
+sudo mv "/opt/printfarmer/host-update-cli/printfarmer-host-update-cli-${tag}-${rid}" \
+  "/opt/printfarmer/host-update-cli/${tag#v}"
 ```
 
 ```powershell
-$env:PRINTFARMER_HOST_UPDATE_CLI_DIR = 'C:\PrintFarmer\host-update-cli'
-scripts\printfarmer-host-update.ps1 -Config C:\PrintFarmer\host-update.json recover -Release stable:1.2.3 -Preview
+$tag = 'v1.2.3'; $sums = "printfarmer-host-update-cli-$tag-SHA256SUMS"
+gh release download $tag --repo OlyForge3D/PrintFarmer `
+  --pattern "printfarmer-host-update-cli-$tag-win-x64.zip" --pattern $sums --pattern "$sums.sigstore.json"
+cosign verify-blob --bundle "$sums.sigstore.json" `
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com `
+  --certificate-identity 'https://github.com/OlyForge3D/PrintFarmer/.github/workflows/consolidated-release.yml@refs/heads/main' `
+  $sums
+$zip = "printfarmer-host-update-cli-$tag-win-x64.zip"
+$expected = (Select-String -Path $sums -SimpleMatch "  $zip").Line.Split(' ')[0]
+if ((Get-FileHash -Algorithm SHA256 $zip).Hash -ne $expected.ToUpperInvariant()) { throw 'checksum mismatch' }
+Expand-Archive $zip -DestinationPath 'C:\Program Files\PrintFarmer\HostUpdateCli'
+Rename-Item "C:\Program Files\PrintFarmer\HostUpdateCli\printfarmer-host-update-cli-$tag-win-x64" $tag.TrimStart('v')
 ```
+
+A failed signature, identity or checksum check means the archive is not a
+PrintFarmer release artifact: delete it and stop. Offline bundles (#2981) carry
+the same archives and checksum bundle, and are verified the same way.
+
+#### Run
+
+```bash
+cli=/opt/printfarmer/host-update-cli/1.2.3
+sudo "$cli/printfarmer-host-update.sh" --config /etc/printfarmer/host-update.json status --json
+sudo "$cli/printfarmer-host-update.sh" --config /etc/printfarmer/host-update.json status --release stable:1.2.3
+sudo "$cli/printfarmer-host-update.sh" --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --preview
+sudo "$cli/printfarmer-host-update.sh" --config /etc/printfarmer/host-update.json recover --release stable:1.2.3 --confirm stable:1.2.3
+```
+
+```powershell
+$cli = 'C:\Program Files\PrintFarmer\HostUpdateCli\1.2.3'
+& "$cli\printfarmer-host-update.ps1" -Config C:\ProgramData\PrintFarmer\host-update.json status -Json
+& "$cli\printfarmer-host-update.ps1" -Config C:\ProgramData\PrintFarmer\host-update.json recover -Release stable:1.2.3 -Preview
+```
+
+Replace `sudo` with the account that owns the protected root when it is not
+root. From a source checkout instead of a package, run
+`scripts/printfarmer-host-update.sh` (or `.ps1`) with
+`PRINTFARMER_HOST_UPDATE_CLI_DIR` set to an absolute framework-dependent
+`dotnet publish` directory containing `Farm.HostUpdate.Cli.dll`. `PRINTFARMER_DOTNET`
+may then name an absolute `dotnet` host; it is refused for a self-contained
+package. The Bash and PowerShell wrappers accept the same operations, options,
+identifier grammar and exit codes (PowerShell spells options `-Config`,
+`-Release`, `-RequestId`, `-Preview`, `-Confirm`, `-Json`).
 
 The config file uses the API's `HostUpdateExecution`, `DB_PROVIDER` and
 connection-string keys; environment variables override it. The wrappers accept
@@ -237,8 +320,7 @@ is reported by the CLI as exit 3 (`configuration_unreadable`), honouring
 `--json`. A missing config file is also exit 3, because the wrappers and CLI
 check only that `--config` is absolute and leave existence to the loader (an
 existence probe cannot tell an absent file from an access-denied one).
-`PRINTFARMER_DOTNET` may name an
-absolute `dotnet` host. `--request-id` is optional and must match the binding
+`--request-id` is optional and must match the binding
 recorded in the journal.
 
 - `status` reads the lock-held journal. Without a release it lists releases
@@ -274,13 +356,16 @@ Known limits of this slice:
   re-acquires it (the API follows the same pattern). A concurrent executor
   could append in that window, so run recovery only while execution is
   otherwise idle.
-- .NET configuration binding **appends** configured `ComposeFiles` entries to
-  the built-in default rather than replacing it, so the default relative
-  compose path must also exist in the CLI's working directory or the namespace
-  proof fails. This matches the API's availability probe.
+- A configured, non-empty `HostUpdateExecution:ComposeFiles` list replaces the
+  built-in default (`docker-compose.yml`); it is never appended to it. Leave
+  the key unset only when the default relative path is correct for the API's
+  working directory; the CLI and API resolve it identically.
+- The installers do not yet place the CLI or its config on the host; install
+  it manually as above. Installer placement, a CLI SBOM and offline-bundle
+  inclusion (#2981) are follow-up work under #2658.
 - There is no drift reapproval, downtime preview, physical command
-  reconciliation gate, published package or PostgreSQL/SQL Server and
-  split-topology proof yet; those remain #2980 follow-up work under #2658.
+  reconciliation gate, or PostgreSQL/SQL Server and split-topology proof yet;
+  those remain #2980 follow-up work under #2658.
 
 | Observation | Operator response |
 | --- | --- |

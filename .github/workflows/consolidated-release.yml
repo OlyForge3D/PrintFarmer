@@ -125,7 +125,7 @@ jobs:
           retention-days: 30
 
   sign:
-    name: Sign immutable release manifest
+    name: Sign immutable release manifest and CLI checksums
     needs: [select, checks, build]
     runs-on: ubuntu-latest
     timeout-minutes: 15
@@ -162,6 +162,8 @@ jobs:
         env:
           MANIFEST: release-assets/update-manifest.json
           BUNDLE: signed-release/update-manifest.sigstore.json
+          CLI_CHECKSUMS: release-assets/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS
+          CLI_CHECKSUMS_BUNDLE: signed-release/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json
           EXPECTED_IDENTITY_REF: ${{ inputs.channel == 'stable' && 'main' || 'development' }}
           EXPECTED_IDENTITY: https://github.com/${{ github.repository }}/.github/workflows/consolidated-release.yml@refs/heads/${{ inputs.channel == 'stable' && 'main' || 'development' }}
         run: |
@@ -173,6 +175,12 @@ jobs:
           cosign verify-blob --bundle "$BUNDLE" \
             --certificate-oidc-issuer https://token.actions.githubusercontent.com \
             --certificate-identity "$EXPECTED_IDENTITY" "$MANIFEST"
+          # One signed checksum file authenticates every host-update CLI archive (#2997).
+          sha256sum "$CLI_CHECKSUMS" > signed-release/host-update-cli-checksums.sha256
+          cosign sign-blob --yes --bundle "$CLI_CHECKSUMS_BUNDLE" "$CLI_CHECKSUMS"
+          cosign verify-blob --bundle "$CLI_CHECKSUMS_BUNDLE" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com \
+            --certificate-identity "$EXPECTED_IDENTITY" "$CLI_CHECKSUMS"
       - name: Upload immutable signature evidence
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  # v7
         with:
@@ -216,6 +224,8 @@ jobs:
           set -euo pipefail
           sha256sum --check signed-release/update-manifest.sha256
           cp signed-release/update-manifest.sigstore.json release-assets/update-manifest.sigstore.json
+          sha256sum --check signed-release/host-update-cli-checksums.sha256
+          cp "signed-release/printfarmer-host-update-cli-v${RELEASE_VERSION}-SHA256SUMS.sigstore.json" release-assets/
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020  # v7
         with:
           node-version: 24

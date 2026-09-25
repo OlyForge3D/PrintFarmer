@@ -109,7 +109,7 @@
       "requiresProviders": [],
       "runIntegration": false,
       "leg": "Farm.HostUpdate.Cli.Tests",
-      "notes": "New in issue #2980 (host-local host-update status/recovery CLI, first slice). Registered but not yet wired into a narrow path-selection bucket: changes under src/tests/** reach it via the tests_other/full-safe fallback in select-dotnet-tests.sh, and src/tools/** changes select only the build. Narrow bucket wiring is tracked with the CI work in #2997. This entry does not change selection for any other path."
+      "notes": "New in issue #2980 (host-local host-update status/recovery CLI, first slice). Registered but not yet wired into a narrow path-selection bucket: changes under src/tests/** reach it via the tests_other/full-safe fallback in select-dotnet-tests.sh, and src/tools/** changes select only the build. Issue #2997 runs this project on every CLI, HostUpdates-infrastructure, wrapper, or packaging change through the dedicated .github/workflows/host-update-cli-package.yml (which also packages and smoke-tests every supported RID), so the shared selector buckets are intentionally unchanged. This entry does not change selection for any other path."
     },
     {
       "name": "Farm.Slicer.ProfileParsing.Tests",

@@ -6,7 +6,8 @@
     <Nullable>enable</Nullable>
     <RootNamespace>Farm.HostUpdate.Cli</RootNamespace>
     <AssemblyName>Farm.HostUpdate.Cli</AssemblyName>
-    <!-- Framework-dependent; invoked as `dotnet Farm.HostUpdate.Cli.dll` by the wrappers. -->
+    <!-- Framework-dependent for source checkouts (`dotnet Farm.HostUpdate.Cli.dll`). The installable
+         package (scripts/package-host-update-cli.sh) overrides this with a self-contained apphost publish. -->
     <UseAppHost>false</UseAppHost>
   </PropertyGroup>
 

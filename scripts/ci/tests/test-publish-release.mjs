@@ -8,7 +8,8 @@ import { load } from 'js-yaml';
 import { components, compareVersions, parseTag, validateVersion, verifyEnvironmentRestrictions } from '../release-policy.mjs';
 import { githubClient, verifyOwnerDispatch } from '../release-dispatch.mjs';
 import { buildMetadata } from '../release-metadata.mjs';
-import { buildImages, publishRelease, releaseAssets, rejectExistingVersion, selectRelease } from '../publish-release.mjs';
+import { buildImages, hostUpdateCliArchives, hostUpdateCliChecksums, hostUpdateCliRids, publishRelease, releaseAssets,
+  rejectExistingVersion, selectRelease } from '../publish-release.mjs';
 import { imageRepository, inspectTag, publishImageTags, rejectExistingImages, verifyImages } from '../release-set.mjs';
 import { buildManifest, deriveSequence, validateManifest, validateManifestInput,
   SEQUENCE_MAJOR_MAX, SEQUENCE_MINOR_MAX, SEQUENCE_PATCH_MAX, SEQUENCE_PRERELEASE_MAX,
@@ -86,6 +87,14 @@ function ownerApi(overrides = {}) {
     assert.ok(Object.hasOwn(values, endpoint), `Unexpected owner API endpoint ${endpoint}`);
     return structuredClone(values[endpoint]);
   };
+}
+
+function writeHostUpdateCliPackages(assets, chosen, archiveBytes = name => `archive ${name}`) {
+  const lines = hostUpdateCliArchives(chosen).map(name => {
+    writeFileSync(join(assets, name), archiveBytes(name));
+    return `${createHash('sha256').update(readFileSync(join(assets, name))).digest('hex')}  ${name}`;
+  });
+  writeFileSync(join(assets, hostUpdateCliChecksums(chosen)), `${lines.sort().join('\n')}\n`);
 }
 
 function workspace(t) {
@@ -456,8 +465,14 @@ test('actual build loop passes the six targets/platforms and source metadata, st
   writeFileSync(join(source, '.release-assets', 'preserved.txt'), 'preserve this source content');
   const builds = [];
   const smokes = [];
+  const packages = [];
   const run = (name, args) => {
     if (name === 'git') return sha;
+    if (name === 'bash' && args[0] === 'scripts/package-host-update-cli.sh') {
+      assert.ok(existsSync(join(source, 'src', 'ReleaseIdentity.props')), 'release identity must be stamped before packaging');
+      packages.push({ args, afterBuilds: builds.length });
+      writeHostUpdateCliPackages(args[args.indexOf('--output') + 1], release);
+    }
     if (name === 'node' && args[0] === 'scripts/compliance/create-source-bundle.mjs') {
       const outputDirectory = args[args.indexOf('--output') + 1];
       assert.ok(!relative(source, outputDirectory).startsWith('..'));
@@ -479,6 +494,19 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     assert.ok(existsSync(join(assets, file)));
   }
   assert.ok(existsSync(join(source, '.release-assets', 'preserved.txt')));
+  assert.equal(packages.length, 1);
+  assert.equal(packages[0].afterBuilds, 0, 'CLI packaging must run before the long image builds');
+  const packageArgs = packages[0].args;
+  for (const [flag, value] of [['--source', source], ['--output', assets], ['--version', release.version],
+    ['--channel', release.channel], ['--source-commit', sha]]) {
+    assert.equal(packageArgs[packageArgs.indexOf(flag) + 1], value);
+  }
+  assert.ok(packageArgs.includes('--require-release-identity'));
+  assert.deepEqual(packageArgs.flatMap((arg, index) => arg === '--rid' ? [packageArgs[index + 1]] : []),
+    [...hostUpdateCliRids]);
+  for (const file of [...hostUpdateCliArchives(release), hostUpdateCliChecksums(release)]) {
+    assert.ok(existsSync(join(assets, file)), `${file} must be a build asset`);
+  }
   assert.equal(builds.length, 6);
   assert.equal(smokes.length, 5);
   for (const [index, [, component]] of Object.entries(components).entries()) {
@@ -500,6 +528,20 @@ test('actual build loop passes the six targets/platforms and source metadata, st
     return run(name, args);
   }, () => {}), /frontend build failed/);
   assert.equal(builds.length - before, 1);
+  for (const [label, sabotage] of [
+    ['missing archive', output => rmSync(join(output, hostUpdateCliArchives(release)[0]))],
+    ['tampered archive', output => writeFileSync(join(output, hostUpdateCliArchives(release)[1]), 'tampered')],
+    ['extra checksum entry', output => writeFileSync(join(output, hostUpdateCliChecksums(release)),
+      `${readFileSync(join(output, hostUpdateCliChecksums(release)), 'utf8')}${'0'.repeat(64)}  extra.tar.gz\n`)],
+  ]) {
+    const buildsBefore = builds.length;
+    assert.throws(() => buildImages(release, source, join(root, `assets-${label.replaceAll(' ', '-')}`), (name, args) => {
+      const result = run(name, args);
+      if (name === 'bash') sabotage(args[args.indexOf('--output') + 1]);
+      return result;
+    }, () => {}), /Host-update CLI|ENOENT/, label);
+    assert.equal(builds.length, buildsBefore, `${label} must stop before any image build`);
+  }
 });
 
 function publishFixture(t, channel = 'insider') {
@@ -507,6 +549,13 @@ function publishFixture(t, channel = 'insider') {
   const chosen = channel === 'stable' ? { ...release, channel, version: '1.2.3', tag: 'v1.2.3', sourceBranch: 'main' } : release;
   const files = releaseAssets(chosen);
   for (const file of files) writeFileSync(join(assets, file), 'asset');
+  writeHostUpdateCliPackages(assets, chosen);
+  const checksumBytes = readFileSync(join(assets, hostUpdateCliChecksums(chosen)));
+  writeFileSync(join(assets, `${hostUpdateCliChecksums(chosen)}.sigstore.json`), JSON.stringify({
+    sha256: createHash('sha256').update(checksumBytes).digest('hex'),
+    issuer: manifestIssuer,
+    identity: manifestIdentityFor(chosen.channel),
+  }));
   writeFileSync(join(assets, 'update-manifest.json'), buildManifest(
     { ...chosen, sequence: deriveSequence(chosen.version) }, imageDetails));
   const signedManifestBytes = readFileSync(join(assets, 'update-manifest.json'));
@@ -585,6 +634,18 @@ test('the exact manifest bytes and its signature bundle are re-verified immediat
   assert.deepEqual(readFileSync(cosignArgs[7]), signedManifestBytes);
   assert.ok(cosignIndices[0] < calls.findIndex(call => call.endpoint === 'git/refs'),
     'signature must be verified before permanent Git tag creation');
+  const checksumVerifications = calls.filter(call => call.command === 'cosign' &&
+    call.args[7] === join(assets, hostUpdateCliChecksums(chosen)));
+  assert.equal(checksumVerifications.length, 2, 'CLI checksums are verified before tagging and before upload');
+  for (const { args } of checksumVerifications) {
+    assert.deepEqual(args.slice(0, 7), ['verify-blob', '--bundle', `${join(assets, hostUpdateCliChecksums(chosen))}.sigstore.json`,
+      '--certificate-oidc-issuer', manifestIssuer, '--certificate-identity', manifestIdentity]);
+  }
+  const upload = calls.find(call => call.command === 'gh').args;
+  for (const name of [...hostUpdateCliArchives(chosen), hostUpdateCliChecksums(chosen),
+    `${hostUpdateCliChecksums(chosen)}.sigstore.json`]) {
+    assert.ok(upload.includes(join(assets, name)), `${name} must be uploaded`);
+  }
 });
 
 test('missing, tampered or wrong-identity signing evidence blocks publication before upload', async t => {
@@ -606,6 +667,11 @@ test('missing, tampered or wrong-identity signing evidence blocks publication be
       writeFileSync(path, JSON.stringify({ ...JSON.parse(readFileSync(path, 'utf8')),
         identity: manifestIdentity.replace('/PrintFarmer/', '/OtherRepository/') }));
     }],
+    ['missing CLI checksum bundle', (assets) => rmSync(join(assets, `${hostUpdateCliChecksums(release)}.sigstore.json`))],
+    ['tampered CLI checksums', (assets) => writeFileSync(join(assets, hostUpdateCliChecksums(release)),
+      `${readFileSync(join(assets, hostUpdateCliChecksums(release)), 'utf8')}\n`)],
+    ['tampered CLI archive', (assets) => writeFileSync(join(assets, hostUpdateCliArchives(release)[0]), 'tampered')],
+    ['missing CLI archive', (assets) => rmSync(join(assets, hostUpdateCliArchives(release).at(-1)))],
   ];
   for (const [name, corrupt] of corruptions) {
     const fixture = publishFixture(t);
@@ -727,6 +793,17 @@ test('actual workflow connects inputs, pinned source checks, environment, build 
     /--certificate-oidc-issuer https:\/\/token\.actions\.githubusercontent\.com/);
   assert.equal(signSteps.find(step => step.name === 'Sign exact immutable manifest').env.EXPECTED_IDENTITY,
     manifestIdentityTemplate);
+  const signStep = signSteps.find(step => step.name === 'Sign exact immutable manifest');
+  assert.equal(signStep.env.CLI_CHECKSUMS,
+    'release-assets/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS');
+  assert.equal(signStep.env.CLI_CHECKSUMS_BUNDLE,
+    'signed-release/printfarmer-host-update-cli-v${{ inputs.version }}-SHA256SUMS.sigstore.json');
+  assert.match(signStep.run, /cosign sign-blob --yes --bundle "\$CLI_CHECKSUMS_BUNDLE" "\$CLI_CHECKSUMS"/);
+  assert.match(signStep.run, /--certificate-identity "\$EXPECTED_IDENTITY" "\$CLI_CHECKSUMS"/);
+  assert.match(publishSteps.find(step => step.name === 'Bind signature to exact manifest bytes').run,
+    /sha256sum --check signed-release\/host-update-cli-checksums\.sha256/);
+  assert.match(workflow.jobs.build.steps.find(step => step.uses?.startsWith('actions/setup-dotnet@')).with['dotnet-version'],
+    /^10\./);
   assert.equal(publishSteps.find(step => step.id === 'publisher').with['permission-workflows'], 'write');
   assert.equal(publishSteps.find(step => step.id === 'publisher').with.repositories, 'PrintFarmer');
   assert.equal(publishSteps.find(step => step.run === 'node scripts/ci/publish-release.mjs publish').env.GH_TOKEN,
