@@ -104,7 +104,8 @@ public sealed class VerifiedReleaseEvidenceCandidateCache(
             return null;
         }
 
-        IReadOnlyList<VerifiedReleaseExecutionTargetDto> executionTargets = current.ExecutionTargets.Count == HostUpdateExecutionRequest.RequiredTargetCount
+        // Explicit targets are authoritative, even when incomplete; do not repair them from inventory.
+        IReadOnlyList<VerifiedReleaseExecutionTargetDto> executionTargets = current.ExecutionTargets.Count > 0
             ? current.ExecutionTargets
             : current.Services.Select(service => new VerifiedReleaseExecutionTargetDto
             {
