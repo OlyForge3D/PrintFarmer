@@ -513,13 +513,12 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime, IDi
     private static async Task<(WebApplication App, string BaseUrl)>
         CreateSdcpEndpointAsync(bool silent)
     {
-        int port = GetFreeTcpPort();
         WebApplicationBuilder builder = WebApplication.CreateBuilder(
             new WebApplicationOptions
             {
                 EnvironmentName = Environments.Development,
             });
-        builder.WebHost.ConfigureKestrel(options => options.ListenLocalhost(port));
+        builder.ListenOnEphemeralLoopbackPort();
         WebApplication app = builder.Build();
         if (silent)
         {
@@ -547,17 +546,7 @@ public sealed class PrintersControllerHistoryContractTests : IAsyncLifetime, IDi
                 // The client timeout closes the test socket.
             }
         });
-        await app.StartAsync();
-        return (app, $"http://127.0.0.1:{port}");
-    }
-
-    private static int GetFreeTcpPort()
-    {
-        TcpListener listener = new(IPAddress.Loopback, 0);
-        listener.Start();
-        int port = ((IPEndPoint)listener.LocalEndpoint).Port;
-        listener.Stop();
-        return port;
+        return await app.StartOnLoopbackAsync(baseUrl => (app, baseUrl));
     }
 
     private static HttpClient CreateAuthenticatedClient(
