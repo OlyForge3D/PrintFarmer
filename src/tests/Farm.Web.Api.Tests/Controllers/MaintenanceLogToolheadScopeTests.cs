@@ -49,16 +49,19 @@ public class MaintenanceLogToolheadScopeTests : IAsyncLifetime
 
     private async Task<(Printer Printer, Toolhead T0, Toolhead Mmu)> SeedAsync()
     {
-        string suffix = Guid.NewGuid().ToString("N")[..8];
+        Guid printerId = Guid.NewGuid();
+        string suffix = printerId.ToString("N")[..8];
         Manufacturer mfg = new() { Id = Guid.NewGuid(), Name = $"Mfg-{suffix}" };
         PrinterModel model = new() { Id = Guid.NewGuid(), ManufacturerId = mfg.Id, Name = $"Model-{suffix}" };
         Printer printer = new()
         {
-            Id = Guid.NewGuid(),
+            Id = printerId,
             Name = $"Printer-{suffix}",
             ManufacturerId = mfg.Id,
             ModelId = model.Id,
-            ServerUrl = $"http://10.0.2.{(Math.Abs(suffix.GetHashCode(StringComparison.Ordinal)) % 240) + 2}",
+            // Printers.ServerUrl is unique and some tests seed twice; derive it from the full
+            // printer GUID so it can never collide (a hashed last octet collided ~1/240, #3057).
+            ServerUrl = $"http://printer-{printerId:N}.test",
             IsEnabled = true,
         };
         Toolhead t0 = new() { Id = Guid.NewGuid(), PrinterId = printer.Id, Index = 0, Name = "T0", ToolheadType = ToolheadType.Physical };
