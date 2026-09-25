@@ -1753,6 +1753,7 @@ test('decision reasons replace known and unknown host paths and stay bounded', (
   const reason = redactReason('Offline bundle must be a regular file (not a link): /srv/x/b.tar; root C:\\keys\\r.json and '
     + '/home/op/secret\u0007', { bundle: '/srv/x/b.tar' });
   assert.equal(reason, 'Offline bundle must be a regular file (not a link): <bundle>; root <path> and <path>');
+  assert.equal(redactReason('failed [C:\\tmp\\a.tar],/var/b <\\\\srv\\c>', {}), 'failed [<path>],<path> <<path>>');
   assert.equal(redactReason('x'.repeat(2000), {}).length, 512);
   assert.equal(redactReason('arm64 linux/arm64 stable:1.2.3 sha256:abc', {}), 'arm64 linux/arm64 stable:1.2.3 sha256:abc');
 });

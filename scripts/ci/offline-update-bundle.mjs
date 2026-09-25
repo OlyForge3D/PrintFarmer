@@ -1059,7 +1059,7 @@ export function redactReason(message, paths) {
     text = text.split(path).join(`<${placeholder}>`);
   }
   // Anything else that still looks like a host path is replaced too.
-  text = text.replace(/(^|[\s'"(=])(?:[A-Za-z]:[\\/]|\\\\|\/)[^\s'"()]*/g, '$1<path>');
+  text = text.replace(/(^|[\s'"(=[<,])(?:[A-Za-z]:[\\/]|\\\\|\/)[^\s'"()[\]<>,]*/g, '$1<path>');
   // eslint-disable-next-line no-control-regex
   text = text.replace(/[\u0000-\u001f\u007f]+/g, ' ').trim();
   return text.length > maxReasonLength ? `${text.slice(0, maxReasonLength - 3)}...` : text;
