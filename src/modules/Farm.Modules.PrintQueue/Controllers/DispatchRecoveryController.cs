@@ -18,7 +18,6 @@ namespace Farm.Modules.PrintQueue.Controllers;
 [Route("api/dispatch")]
 [Tags("Dispatch Recovery")]
 [Authorize]
-[RequirePermission(PrintFarmerPermissions.Queue.Read)]
 public class DispatchRecoveryController(
     IDispatchRecoveryService recoveryService,
     IQueueResourceAuthorizationService resourceAuthorization) : ControllerBase
@@ -28,6 +27,7 @@ public class DispatchRecoveryController(
 
     /// <summary>Returns the printer's reconciliation resource (claim, evidence, escalation, permission).</summary>
     [HttpGet("{printerId:guid}/reconciliation")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     public async Task<IActionResult> GetReconciliationAsync(Guid printerId, CancellationToken ct)
     {
         if (!await resourceAuthorization.CanAccessPrinterAsync(User, printerId, PrinterGroupAccessLevel.View, ct))
@@ -90,6 +90,7 @@ public class DispatchRecoveryController(
 
     /// <summary>Returns one redacted immutable recovery-evidence record.</summary>
     [HttpGet("{printerId:guid}/reconciliation/audit/{auditId:guid}")]
+    [RequirePermission(PrintFarmerPermissions.Queue.Read)]
     public async Task<IActionResult> GetAuditAsync(Guid printerId, Guid auditId, CancellationToken ct)
     {
         if (!PrintFarmerPermissions.HasPermission(User, PrintFarmerPermissions.Queue.Reconcile) ||
