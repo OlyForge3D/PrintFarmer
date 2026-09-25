@@ -85,8 +85,9 @@ enum FarmSnapshotHydration: Sendable, Equatable {
 /// Result of committing a canonical snapshot.
 enum FarmSnapshotCommitResult: Sendable, Equatable {
     case committed
-    /// The candidate was not strictly newer than the durable record — preserved.
-    /// `cleanupFailed` surfaces a secondary temp/candidate removal failure (H7).
+    /// The durable record was confirmed later in this launch (its `writeOrder` is
+    /// not superseded, #3074) — preserved. `cleanupFailed` surfaces a secondary
+    /// temp/candidate removal failure (H7).
     case notNewer(cleanupFailed: Bool)
     /// Authority changed (revoke / generation advance / tombstone / cancellation)
     /// before the durable promotion — prior bytes preserved, nothing written.
@@ -195,12 +196,12 @@ protocol FarmSnapshotStoring: Sendable {
 
     /// Commits a canonical snapshot for `capturedSession`. Applies only if the
     /// captured session is still authoritative at the durable boundary and the
-    /// record is strictly newer than what is on disk.
+    /// record's `writeOrder` supersedes what is on disk (#3074).
     func commit(_ envelope: FarmSnapshotEnvelope, capturedSession: FarmSnapshotSession) async -> FarmSnapshotCommitResult
 
     /// Commits through a pass permit that participates in the atomic durable
     /// promotion boundary. This additive path is used by live canonical owners;
-    /// legacy callers retain strict timestamp monotonicity through `commit`.
+    /// legacy callers retain strict write-order monotonicity through `commit`.
     func commit(
         _ envelope: FarmSnapshotEnvelope,
         capturedSession: FarmSnapshotSession,
