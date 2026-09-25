@@ -4,10 +4,17 @@ This document captures common patterns and best practices discovered during test
 
 ## React printer response contracts
 
-`npm run typecheck:test` rejects every direct test, helper, imported-source, or
-global diagnostic. `scripts/test-typecheck-baseline.json` retains only the
-minimum test-file coverage floor; there is no diagnostic allowance. Keep the
-application typecheck and source-coverage gate enabled alongside it.
+`npm run typecheck:app` and `npm run typecheck:test` reject every diagnostic,
+including direct test, helper, imported-source, and global errors. Neither gate
+has a diagnostic allowance: swapping errors while holding the count constant
+still fails, and removing all errors passes without a baseline edit (#2827).
+Diagnostic debt was removed by #2901 and #2932; fingerprint allowances are
+unnecessary under this strict-zero policy.
+
+`scripts/test-typecheck-baseline.json` retains only the minimum test-file
+coverage floor. `scripts/app-typecheck-baseline.json` retains the application
+file floor and exact `@ts-nocheck` count. Keep both compiler gates and
+`typecheck:src-coverage` enabled; diagnostic cleanup must not weaken coverage.
 
 Printer read fixtures must not invent required connection fields.
 `GET /api/printers` returns `CompletePrinterDto`; `GET /api/printers/{id}`
