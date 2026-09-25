@@ -144,22 +144,27 @@ public static class HostUpdateRecoveryEngineRegistration
     /// <summary>
     /// The configuration binder appends bound array entries to an initialised default instead of
     /// replacing it, so a configured topology would silently keep the built-in split-topology
-    /// entries too (issues #2997 and #3042). A configured <c>ComposeFiles</c> or
-    /// <c>ActiveServiceIds</c> list is authoritative; the built-in default applies only when the
-    /// key is absent, and an explicitly empty list fails validation. Safety allowlists/requirements (<c>SupportedProviderNames</c>,
+    /// entries too (issues #2997, #3042 and #3051). A configured <c>ComposeFiles</c>,
+    /// <c>ActiveServiceIds</c> or <c>ServiceMappings</c> list is authoritative; the built-in default
+    /// applies only when the key is absent, and an explicitly empty list fails validation. Safety allowlists/requirements (<c>SupportedProviderNames</c>,
     /// <c>RequiredAggregateHealthResultNames</c>, <c>RequiredFencedWriterNames</c>) deliberately
     /// stay additive so configuration can never drop a code-owned requirement.
     /// </summary>
     private static void ReplaceConfiguredTopologyLists(HostUpdateExecutionOptions options, IConfiguration section)
     {
-        if (ConfiguredList(section, nameof(HostUpdateExecutionOptions.ComposeFiles)) is { } composeFiles)
+        if (ConfiguredList<string>(section, nameof(HostUpdateExecutionOptions.ComposeFiles)) is { } composeFiles)
         {
             options.ComposeFiles = composeFiles;
         }
 
-        if (ConfiguredList(section, nameof(HostUpdateExecutionOptions.ActiveServiceIds)) is { } activeServiceIds)
+        if (ConfiguredList<string>(section, nameof(HostUpdateExecutionOptions.ActiveServiceIds)) is { } activeServiceIds)
         {
             options.ActiveServiceIds = activeServiceIds;
+        }
+
+        if (ConfiguredList<HostUpdateServiceMappingOptions>(section, nameof(HostUpdateExecutionOptions.ServiceMappings)) is { } serviceMappings)
+        {
+            options.ServiceMappings = serviceMappings;
         }
     }
 
@@ -169,12 +174,12 @@ public static class HostUpdateRecoveryEngineRegistration
     /// environment variable) returns an empty list so validation fails closed instead of silently
     /// restoring the built-in default.
     /// </summary>
-    private static string[]? ConfiguredList(IConfiguration section, string key)
+    private static T[]? ConfiguredList<T>(IConfiguration section, string key)
     {
         IConfigurationSection list = section.GetSection(key);
         if (list.GetChildren().Any())
         {
-            return list.Get<string[]>() ?? [];
+            return list.Get<T[]>() ?? [];
         }
 
         return list.Value is null ? null : [];

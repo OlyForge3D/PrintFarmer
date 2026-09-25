@@ -380,6 +380,23 @@ public class HostUpdateExecutionOptionsValidatorTests
     }
 
     [Fact]
+    public void Validate_DuplicateServiceMappingServiceId_Fails()
+    {
+        string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
+        HostUpdateExecutionOptions options = ValidOptions(root);
+        options.ServiceMappings =
+        [
+            new("api", "api", "PRINTFARMER_API_IMAGE", "ghcr.io/olyforge3d/printfarmer-api"),
+            new("api", "api-2", "PRINTFARMER_API_IMAGE_2", "ghcr.io/olyforge3d/printfarmer-api"),
+        ];
+
+        ValidateOptionsResult result = Validator.Validate(null, options);
+
+        result.Failed.Should().BeTrue();
+        result.FailureMessage.Should().Contain("duplicate ServiceId: api");
+    }
+
+    [Fact]
     public void Validate_ServiceMappingMissingField_Fails()
     {
         string root = Path.Combine(Path.GetPathRoot(Path.GetTempPath()) ?? "C:\\", "printfarmer-host-updates-test-root");
