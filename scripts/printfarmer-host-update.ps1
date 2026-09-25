@@ -1,10 +1,10 @@
 #Requires -Version 7.0
 <#
 .SYNOPSIS
-    Host-local PrintFarmer host-update status/recovery wrapper (issue #2980, first slice).
+    Host-local PrintFarmer host-update status/recovery wrapper (issues #2980, #2997).
 
 .DESCRIPTION
-    Runs the packaged Farm.HostUpdate.Cli without the API. Only three fixed operations are
+    Runs Farm.HostUpdate.Cli without the API. Only three fixed operations are
     exposed; no arbitrary shell text, compose files, or credentials are accepted. This is NOT
     rollout authorization: it never starts a forward update.
 
@@ -14,8 +14,13 @@
       printfarmer-host-update.ps1 help
 
     Environment:
-      PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute directory containing Farm.HostUpdate.Cli.dll (required)
-      PRINTFARMER_DOTNET               absolute path to the dotnet host (optional; default: dotnet on PATH)
+      PRINTFARMER_HOST_UPDATE_CLI_DIR  absolute CLI directory. Optional in a release package, where it
+                                       defaults to the package's cli directory beside this script.
+      PRINTFARMER_DOTNET               absolute dotnet host; only for a framework-dependent CLI
+                                       directory (no Farm.HostUpdate.Cli apphost). Default: dotnet on PATH.
+
+    Grammar and validation match scripts/printfarmer-host-update.sh (option names differ only in
+    spelling).
 
     Exit codes are the CLI's (see docs/HOST_UPDATE_RUNBOOK.md); the wrapper itself only returns 2
     for a usage or setup error, before the CLI runs. Arguments are parsed by the wrapper rather
@@ -116,22 +121,44 @@ if (-not (Test-FullyQualified $config)) {
 }
 
 $cliDir = $env:PRINTFARMER_HOST_UPDATE_CLI_DIR
+$packagedCliDir = Join-Path $PSScriptRoot 'cli'
+if ([string]::IsNullOrEmpty($cliDir) -and (Test-Path -LiteralPath $packagedCliDir -PathType Container)) {
+    # Release package layout: the wrapper sits beside the self-contained cli directory.
+    $cliDir = $packagedCliDir
+}
+
 if (-not (Test-FullyQualified $cliDir)) {
     Exit-Usage 'PRINTFARMER_HOST_UPDATE_CLI_DIR must be an absolute directory'
 }
 
-$cliDll = Join-Path $cliDir 'Farm.HostUpdate.Cli.dll'
-if (-not (Test-Path -LiteralPath $cliDll -PathType Leaf)) {
-    Exit-Usage 'Farm.HostUpdate.Cli.dll not found in PRINTFARMER_HOST_UPDATE_CLI_DIR'
-}
-
-$dotnetHost = 'dotnet'
-if ($env:PRINTFARMER_DOTNET) {
-    if (-not (Test-FullyQualified $env:PRINTFARMER_DOTNET) -or -not (Test-Path -LiteralPath $env:PRINTFARMER_DOTNET -PathType Leaf)) {
-        Exit-Usage 'PRINTFARMER_DOTNET must be an absolute executable path'
+$cliName = 'Farm.HostUpdate.Cli'
+$appHost = Join-Path $cliDir ($IsWindows ? "$cliName.exe" : $cliName)
+$launcher = [System.Collections.Generic.List[string]]::new()
+if (Test-Path -LiteralPath $appHost -PathType Leaf) {
+    # Self-contained package: run the apphost directly; no dotnet install is required.
+    if ($env:PRINTFARMER_DOTNET) {
+        Exit-Usage 'PRINTFARMER_DOTNET applies only to a framework-dependent CLI directory'
     }
 
-    $dotnetHost = $env:PRINTFARMER_DOTNET
+    $launcher.Add($appHost)
+}
+else {
+    $cliDll = Join-Path $cliDir "$cliName.dll"
+    if (-not (Test-Path -LiteralPath $cliDll -PathType Leaf)) {
+        Exit-Usage "$cliName not found in the CLI directory"
+    }
+
+    $dotnetHost = 'dotnet'
+    if ($env:PRINTFARMER_DOTNET) {
+        if (-not (Test-FullyQualified $env:PRINTFARMER_DOTNET) -or -not (Test-Path -LiteralPath $env:PRINTFARMER_DOTNET -PathType Leaf)) {
+            Exit-Usage 'PRINTFARMER_DOTNET must be an absolute executable path'
+        }
+
+        $dotnetHost = $env:PRINTFARMER_DOTNET
+    }
+
+    $launcher.Add($dotnetHost)
+    $launcher.Add($cliDll)
 }
 
 # The CLI re-validates everything, including the canonical release grammar and option combinations.
@@ -143,5 +170,6 @@ if ($preview) { $cliArgs.Add('--preview') }
 if ($null -ne $confirm) { $cliArgs.Add('--confirm'); $cliArgs.Add($confirm) }
 if ($json) { $cliArgs.Add('--json') }
 
-& $dotnetHost $cliDll --config $config @cliArgs
+$launcherArgs = @($launcher | Select-Object -Skip 1)
+& $launcher[0] @launcherArgs --config $config @cliArgs
 exit $LASTEXITCODE

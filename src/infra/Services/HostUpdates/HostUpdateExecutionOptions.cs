@@ -1,4 +1,6 @@
-﻿namespace Farm.Infrastructure.Services.HostUpdates;
+﻿using Microsoft.Extensions.Configuration;
+
+namespace Farm.Infrastructure.Services.HostUpdates;
 
 /// <summary>
 /// Production configuration for the concrete host-update executor step adapters (issue
@@ -157,9 +159,33 @@ public sealed class HostUpdateExecutionOptions
 
     /// <summary>Compose files (in <c>-f</c> order) applied for the currently configured topology. Must
     /// define every compose service named in <see cref="ServiceMappings"/> that this deployment
-    /// actually runs; an unmapped or file-absent service fails the apply step closed.
+    /// actually runs; an unmapped or file-absent service fails the apply step closed. A configured
+    /// list <b>replaces</b> this default (see <see cref="Bind"/>) rather than being appended to it.
     /// </summary>
-    public string[] ComposeFiles { get; set; } = ["scripts/docker/compose-templates/docker-compose.daily-registry.yml"];
+    public string[] ComposeFiles { get; set; } = [.. DefaultComposeFiles];
+
+    /// <summary>Code default for <see cref="ComposeFiles"/> when no compose file is configured.</summary>
+    public static IReadOnlyList<string> DefaultComposeFiles { get; } = ["scripts/docker/compose-templates/docker-compose.daily-registry.yml"];
+
+    /// <summary>
+    /// Binds <paramref name="section"/> onto <paramref name="options"/> with replace semantics for
+    /// <see cref="ComposeFiles"/>. The configuration binder appends configured array elements to a
+    /// non-empty default, which would silently keep the working-directory-relative default template
+    /// in the compose set of every deployment that configures its own files. Every binding of this
+    /// section (API, host-local CLI, slicer-host admission gate) must go through here.
+    /// </summary>
+    public static void Bind(IConfiguration section, HostUpdateExecutionOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(section);
+        ArgumentNullException.ThrowIfNull(options);
+
+        section.Bind(options);
+        string[]? configured = section.GetSection(nameof(ComposeFiles)).Get<string[]>();
+        if (configured is { Length: > 0 })
+        {
+            options.ComposeFiles = configured;
+        }
+    }
 
     public string ComposeProjectName { get; set; } = "printfarmer";
 

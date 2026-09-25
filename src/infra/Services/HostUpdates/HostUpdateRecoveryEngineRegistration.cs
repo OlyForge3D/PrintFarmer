@@ -19,8 +19,9 @@ public static class HostUpdateRecoveryEngineRegistration
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
+        IConfigurationSection section = configuration.GetSection(HostUpdateExecutionOptions.SectionName);
         services.AddOptions<HostUpdateExecutionOptions>()
-            .Bind(configuration.GetSection(HostUpdateExecutionOptions.SectionName))
+            .Configure(options => HostUpdateExecutionOptions.Bind(section, options))
             .ValidateOnStart();
         services.AddSingleton<IValidateOptions<HostUpdateExecutionOptions>, HostUpdateExecutionOptionsValidator>();
         services.AddSingleton(sp => sp.GetRequiredService<IOptions<HostUpdateExecutionOptions>>().Value);

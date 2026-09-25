@@ -1,5 +1,5 @@
 #Requires -Version 7.0
-# Focused coverage for scripts/printfarmer-host-update.ps1 (issue #2980): every usage error must
+# Focused coverage for scripts/printfarmer-host-update.ps1 (issues #2980, #2997): every usage error must
 # exit 2 without prompting and without invoking the CLI; accepted arguments pass through verbatim
 # and the CLI's exit code is preserved. Each case runs the wrapper in a child
 # `pwsh -NonInteractive -File` so a parameter-binding prompt would surface as a failure.
@@ -68,6 +68,11 @@ exit [int](`$env:FAKE_EXIT ?? '0')
     Expect-Passthrough 'recover preview passes through' @($dll, '--config', $config, 'recover', '--release', 'insider:1.2.3-rc.1', '--request-id', 'req-1', '--preview') @('-Config', $config, 'recover', '-Release', 'insider:1.2.3-rc.1', '-RequestId', 'req-1', '-Preview')
     Expect-Passthrough 'recover confirm passes through' @($dll, '--config', $config, 'recover', '--release', 'stable:1.2.3', '--confirm', 'stable:1.2.3', '--json') @('-Config', $config, 'recover', '-Release', 'stable:1.2.3', '-Confirm', 'stable:1.2.3', '-Json')
     Expect-Passthrough 'parameter names are case-insensitive' @($dll, '--config', $config, 'status', '--json') @('-config', $config, 'status', '-JSON')
+    Expect-Passthrough 'options may precede -Config and the command' @($dll, '--config', $config, 'status', '--json') @('-Json', 'status', '-Config', $config)
+    Expect-Passthrough 'arguments are passed in canonical order' @($dll, '--config', $config, 'recover', '--release', 'stable:1.2.3', '--request-id', 'req-1', '--preview', '--json') @('-Config', $config, 'recover', '-Json', '-Preview', '-RequestId', 'req-1', '-Release', 'stable:1.2.3')
+
+    Expect-Usage 'duplicate -Config refused' @('-Config', $config, '-Config', $config, 'status')
+    Expect-Usage 'second command refused' @('-Config', $config, 'status', 'recover')
 
     Expect-Usage 'missing -Config refused without prompting' @('status')
     Expect-Usage 'no arguments refused without prompting' @()
@@ -95,6 +100,49 @@ exit [int](`$env:FAKE_EXIT ?? '0')
 
     $exitRun = Invoke-Wrapper @('-Config', $config, 'recover', '-Release', 'stable:1.2.3', '-Confirm', 'stable:1.2.3') @{ FAKE_EXIT = '11' }
     if ($exitRun.ExitCode -eq 11) { Pass 'CLI exit code preserved' } else { Fail "CLI exit code preserved (exit $($exitRun.ExitCode))" }
+
+    # Release-package layout: the wrapper defaults to the cli directory beside itself.
+    $packageDir = Join-Path $testRoot 'package'
+    $packageCli = Join-Path $packageDir 'cli'
+    New-Item -ItemType Directory -Path $packageCli -Force | Out-Null
+    Copy-Item -LiteralPath $wrapper -Destination $packageDir
+    $packageDll = Join-Path $packageCli 'Farm.HostUpdate.Cli.dll'
+    Set-Content -LiteralPath $packageDll -Value '' -NoNewline
+    $packageWrapper = Join-Path $packageDir 'printfarmer-host-update.ps1'
+    Remove-Item -LiteralPath $argsLog -ErrorAction SilentlyContinue
+    $saved = @{ CLI = $env:PRINTFARMER_HOST_UPDATE_CLI_DIR; DOTNET = $env:PRINTFARMER_DOTNET }
+    try {
+        $env:PRINTFARMER_HOST_UPDATE_CLI_DIR = $null
+        $env:PRINTFARMER_DOTNET = $fakeDotnet
+        & $pwshPath -NoProfile -NonInteractive -File $packageWrapper -Config $config status 2>$null | Out-Null
+        $packageExit = $LASTEXITCODE
+    }
+    finally {
+        $env:PRINTFARMER_HOST_UPDATE_CLI_DIR = $saved.CLI
+        $env:PRINTFARMER_DOTNET = $saved.DOTNET
+    }
+
+    $packageArgs = if (Test-Path -LiteralPath $argsLog) { Get-Content -LiteralPath $argsLog -Raw } else { '' }
+    if ($packageExit -eq 0 -and $packageArgs -ceq (@($packageDll, '--config', $config, 'status') -join "`n")) { Pass 'package layout defaults to the bundled cli directory' }
+    else { Fail "package layout defaults to the bundled cli directory (exit $packageExit, args: $packageArgs)" }
+
+    # A self-contained apphost is preferred over dotnet. Windows needs a real PE apphost, so that
+    # path is proven there by the packaged-CLI smoke test (tests/test-host-update-cli-package.ps1).
+    if (-not $IsWindows) {
+        $appHostDir = Join-Path $testRoot 'apphost-cli'
+        New-Item -ItemType Directory -Path $appHostDir | Out-Null
+        Set-Content -LiteralPath (Join-Path $appHostDir 'Farm.HostUpdate.Cli.dll') -Value '' -NoNewline
+        $appHost = Join-Path $appHostDir 'Farm.HostUpdate.Cli'
+        Set-Content -LiteralPath $appHost -Value "#!/bin/sh`nprintf '%s\n' `"`$@`" > '$argsLog'`nexit `${FAKE_EXIT:-0}`n" -NoNewline
+        & chmod +x $appHost
+
+        $run = Invoke-Wrapper @('-Config', $config, 'status', '-Json') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $appHostDir; PRINTFARMER_DOTNET = $null }
+        $actual = if ($run.Invoked) { (Get-Content -LiteralPath $argsLog -Raw).TrimEnd("`n") } else { '' }
+        if ($run.ExitCode -eq 0 -and $actual -ceq (@('--config', $config, 'status', '--json') -join "`n")) { Pass 'self-contained apphost preferred over dotnet' }
+        else { Fail "self-contained apphost preferred over dotnet (exit $($run.ExitCode), args: $actual)" }
+
+        Expect-Usage 'PRINTFARMER_DOTNET refused for a self-contained CLI' @('-Config', $config, 'status') @{ PRINTFARMER_HOST_UPDATE_CLI_DIR = $appHostDir }
+    }
 
     if ($script:failures -gt 0) {
         Write-Host "$($script:failures) PowerShell wrapper test(s) failed"

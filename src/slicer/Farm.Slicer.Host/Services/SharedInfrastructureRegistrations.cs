@@ -64,7 +64,7 @@ public static class SharedInfrastructureRegistrations
     private static void AddHostUpdateAdmissionGate(IServiceCollection services, IConfiguration configuration)
     {
         HostUpdateExecutionOptions options = new();
-        configuration.GetSection(HostUpdateExecutionOptions.SectionName).Bind(options);
+        HostUpdateExecutionOptions.Bind(configuration.GetSection(HostUpdateExecutionOptions.SectionName), options);
         services.AddSingleton(options);
         services.AddSingleton<IHostUpdateAdmissionGate, FileHostUpdateAdmissionGate>();
     }

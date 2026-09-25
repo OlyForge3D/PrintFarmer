@@ -376,6 +376,28 @@ public sealed class HostUpdateCliTests : IDisposable
         result.GetProperty("namespaceProofFailures")[0].GetString().Should().Be("executable_missing:docker");
     }
 
+    [Fact]
+    public async Task Namespace_proof_needs_only_the_configured_compose_files()
+    {
+        // Issue #2997: configured ComposeFiles replace the code default rather than being appended
+        // to it, so the working-directory-relative default template is never part of the proof.
+        // Earlier fixture revisions created that template beside the test binaries; remove any
+        // leftover so this test observes the real behaviour.
+        string defaultTemplate = Path.GetFullPath(HostUpdateExecutionOptions.DefaultComposeFiles[0]);
+        if (File.Exists(defaultTemplate))
+        {
+            File.Delete(defaultTemplate);
+        }
+
+        _host.SeedRecoveryRequired();
+        _host.SeedOutcome(HostUpdateRecoveryOutcome.FenceReleasePending, "coordinated_restore");
+
+        CliRun run = await RunAsync(["recover", "--release", CliHostFixture.ReleaseId, "--preview", "--json"]);
+
+        run.ExitCode.Should().Be(HostUpdateCliExitCodes.Success);
+        Envelope(run).GetProperty("result").GetProperty("namespaceProofFailures").GetArrayLength().Should().Be(0);
+    }
+
     [Theory]
     [InlineData("docker")]
     [InlineData("sqlite3")]
