@@ -50,7 +50,7 @@ const autoDispatchHooks = vi.hoisted(() => ({
   usePreClearBed: vi.fn<DashboardHooks['usePreClearBed']>(),
 }));
 
-vi.mock<DashboardHooks>('@/features/printers/hooks/useAutoDispatch', () => autoDispatchHooks);
+vi.mock('@/features/printers/hooks/useAutoDispatch', (): DashboardHooks => autoDispatchHooks);
 
 function TestWrapper({ children }: { children: React.ReactNode }) {
   const queryClient = new QueryClient({
@@ -254,7 +254,7 @@ describe('AutoDispatchDashboardPage', () => {
         enabled: false,
         statuses: mockGlobalStatus.printers,
       } satisfies Parameters<DashboardHookResults['useSetAllAutoDispatchEnabled']['mutate']>[0]);
-    } satisfies Parameters<DashboardHookResults['useSetAutoDispatchEnabled']['mutate']>[0]);
+    });
   });
 
   it('per-printer auto-dispatch toggle works', async () => {
@@ -280,7 +280,7 @@ describe('AutoDispatchDashboardPage', () => {
         enabled: false,
         dispatchStateETag: 'dispatch-v1',
         printerETag: 'printer-v1',
-      });
+      } satisfies Parameters<DashboardHookResults['useSetAutoDispatchEnabled']['mutate']>[0]);
     });
   });
 
