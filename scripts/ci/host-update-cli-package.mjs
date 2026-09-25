@@ -31,6 +31,12 @@ export function hostUpdateCliArchiveName(version, rid) {
   return `printfarmer-host-update-cli-v${version}-${rid}.tar.gz`;
 }
 
+// Issue #3045: one SPDX SBOM per archive, bound by the same signed checksum list.
+export function hostUpdateCliSbomName(version, rid) {
+  requireThat(hostUpdateCliRuntimes.includes(rid), `Unsupported host-update CLI runtime: ${rid}`);
+  return `printfarmer-host-update-cli-v${version}-${rid}.spdx.json`;
+}
+
 export function hostUpdateCliSumsName(version) {
   return `printfarmer-host-update-cli-v${version}-SHA256SUMS`;
 }
@@ -42,6 +48,7 @@ export function hostUpdateCliSumsBundleName(version) {
 export function hostUpdateCliAssets(version) {
   return [
     ...hostUpdateCliRuntimes.map(rid => hostUpdateCliArchiveName(version, rid)),
+    ...hostUpdateCliRuntimes.map(rid => hostUpdateCliSbomName(version, rid)),
     hostUpdateCliSumsName(version),
     hostUpdateCliSumsBundleName(version),
   ];
@@ -73,15 +80,32 @@ export function parseSums(text) {
   return entries;
 }
 
-// Proves the checksum list names exactly the supported archives and matches their bytes.
+// Minimal structural proof that an SBOM is an SPDX 2.x document with at least one package, so
+// an empty or truncated scanner output can never be signed as this archive's inventory.
+export function validateHostUpdateCliSbom(text, name) {
+  let document;
+  try {
+    document = JSON.parse(text);
+  } catch {
+    throw new Error(`Host-update CLI SBOM is not JSON: ${name}`);
+  }
+  requireThat(document && typeof document === 'object' && /^SPDX-2\./.test(document.spdxVersion ?? '') &&
+    document.SPDXID === 'SPDXRef-DOCUMENT' && Array.isArray(document.packages) && document.packages.length > 0,
+  `Host-update CLI SBOM is not an SPDX 2.x document with packages: ${name}`);
+  return document;
+}
+
+// Proves the checksum list names exactly the supported archives and their SBOMs, and matches their bytes.
 export function verifyHostUpdateCliSums(assets, version) {
   const entries = parseSums(readFileSync(join(assets, hostUpdateCliSumsName(version)), 'utf8'));
-  const expected = hostUpdateCliRuntimes.map(rid => hostUpdateCliArchiveName(version, rid));
+  const sboms = hostUpdateCliRuntimes.map(rid => hostUpdateCliSbomName(version, rid));
+  const expected = [...hostUpdateCliRuntimes.map(rid => hostUpdateCliArchiveName(version, rid)), ...sboms];
   requireThat(entries.size === expected.length && expected.every(name => entries.has(name)),
-    'Host-update CLI checksum list does not name exactly the supported archives');
+    'Host-update CLI checksum list does not name exactly the supported archives and SBOMs');
   for (const name of expected) {
-    requireThat(sha256File(join(assets, name)) === entries.get(name), `Host-update CLI archive hash mismatch: ${name}`);
+    requireThat(sha256File(join(assets, name)) === entries.get(name), `Host-update CLI asset hash mismatch: ${name}`);
   }
+  for (const name of sboms) validateHostUpdateCliSbom(readFileSync(join(assets, name), 'utf8'), name);
   return entries;
 }
 
@@ -114,12 +138,13 @@ function tarOwnership(run) {
 }
 
 export function packageHostUpdateCli(release, source, output, {
-  run, runtimes = hostUpdateCliRuntimes, scratch = tmpdir(),
+  run, runtimes = hostUpdateCliRuntimes, scratch = tmpdir(), sbom,
 } = {}) {
   requireThat(typeof run === 'function', 'A command runner is required');
+  requireThat(sbom === undefined || typeof sbom === 'function', 'The SBOM generator must be a function');
   requireThat(/^[a-f0-9]{40}$/.test(release.sourceCommit ?? ''), 'Host-update CLI package needs the source commit');
   mkdirSync(output, { recursive: true });
-  const archives = [];
+  const entries = [];
   const ownership = tarOwnership(run);
   for (const rid of runtimes) {
     const archive = hostUpdateCliArchiveName(release.version, rid);
@@ -145,20 +170,29 @@ export function packageHostUpdateCli(release, source, output, {
         rolloutAuthorization: false,
       }, undefined, 2)}\n`);
       normalizeModes(stage, executables);
+      if (sbom) {
+        // Scanned from the exact staged tree that is archived next, so the SBOM describes these bytes.
+        const sbomName = hostUpdateCliSbomName(release.version, rid);
+        const sbomPath = join(resolve(output), sbomName);
+        sbom({ stage, sbomPath, rid });
+        validateHostUpdateCliSbom(readFileSync(sbomPath, 'utf8'), sbomName);
+        entries.push({ name: sbomName, sha256: sha256File(sbomPath) });
+      }
       // Members sit at the archive root; operators extract into the versioned placement directory.
       run('tar', ['-czf', join(resolve(output), archive), ...ownership, '-C', stage, '.'],
         { stdio: ['ignore', 'inherit', 'pipe'] });
-      archives.push({ name: archive, sha256: sha256File(join(output, archive)) });
+      entries.push({ name: archive, sha256: sha256File(join(output, archive)) });
     } finally {
       rmSync(stage, { force: true, recursive: true });
     }
   }
-  writeFileSync(join(output, hostUpdateCliSumsName(release.version)), formatSums(archives));
-  return archives;
+  writeFileSync(join(output, hostUpdateCliSumsName(release.version)), formatSums(entries));
+  return entries;
 }
 
 // Local/CI entry point: builds the archives for one or more runtimes from a checkout. This
-// package is unsigned; only the release workflow's signed checksum list is installable evidence.
+// package is unsigned and carries no SBOM; only the release workflow's signed checksum list,
+// which also binds each archive's SBOM, is installable evidence.
 async function main(argv) {
   const { execFileSync } = await import('node:child_process');
   const options = {};
