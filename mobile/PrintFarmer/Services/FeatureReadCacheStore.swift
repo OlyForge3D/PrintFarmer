@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 // MARK: - Feature Read-Cache Store (F10-C2, #789)
 //
@@ -25,13 +26,72 @@ import Foundation
 // identical namespace.
 //
 // Durable invariants preserved from #785:
-//   * Only a strictly-newer (`lastUpdatedAtMillis`) complete record replaces the
-//     live record; an older/equal success, error, or disabled completion cannot
-//     overwrite newer state (monotonic, re-checked inside the promotion).
+//   * Only a record whose `writeOrder` supersedes the live record replaces it; a
+//     completion confirmed EARLIER in this launch cannot overwrite one confirmed
+//     later (monotonic, re-checked inside the promotion). Ordering is logical,
+//     never wall-clock, so a same-millisecond or backward-stepped clock cannot
+//     drop a confirmed-live write (#3007). `lastUpdatedAtMillis` is display-only.
 //   * The destructive promotion runs INSIDE `authority.withPromotion` so a
 //     concurrent revoke / switch / tombstone has happens-before with the install.
 //   * A corrupt / wrong-schema / wrong-namespace record is quarantined via an
 //     authority-validated compare-and-move; the live path is left clear.
+
+// MARK: Write order (#3007)
+
+/// Clock-independent ordering key for a feature record.
+///
+/// The wall clock is not a safe ordering key: two canonical successes can land in
+/// the same millisecond, and an NTP step or manual change can move it backward,
+/// either of which previously made the store refuse a confirmed-live write as
+/// `.notNewer` while the VM displayed the newer data (#3007).
+///
+/// Instead, every write is stamped at its confirmation point with
+/// `(launchID, sequence)` from a process-wide monotonic source:
+///   * Within one launch, `sequence` strictly increases in confirmation order, so
+///     a completion confirmed earlier but arriving at the store later is still
+///     refused — without consulting any clock.
+///   * Across launches (relaunch or reboot), a record stamped by a different
+///     launch — or a legacy record with no stamp — was necessarily written before
+///     this process started: the cache root lives in the app's own sandbox and
+///     only the app process writes it. Any write confirmed in this launch
+///     therefore supersedes it. This survives reboot, unlike an uptime clock.
+struct FeatureReadCacheWriteOrder: Codable, Sendable, Equatable {
+    let launchID: UUID
+    let sequence: UInt64
+
+    /// Mint the next order from the process-wide source. Call at the point the
+    /// caller confirms the result as its newest canonical state.
+    static func next() -> FeatureReadCacheWriteOrder {
+        FeatureReadCacheWriteOrderSource.shared.next()
+    }
+
+    /// Whether a record stamped `self` may replace a record stamped `existing`.
+    func supersedes(_ existing: FeatureReadCacheWriteOrder?) -> Bool {
+        guard let existing, existing.launchID == launchID else { return true }
+        return sequence > existing.sequence
+    }
+}
+
+/// Process-wide monotonic `FeatureReadCacheWriteOrder` source. Tests may create
+/// an independent instance to simulate a different launch.
+final class FeatureReadCacheWriteOrderSource: Sendable {
+    static let shared = FeatureReadCacheWriteOrderSource()
+
+    let launchID: UUID
+    private let counter = OSAllocatedUnfairLock<UInt64>(initialState: 0)
+
+    init(launchID: UUID = UUID()) {
+        self.launchID = launchID
+    }
+
+    func next() -> FeatureReadCacheWriteOrder {
+        let sequence = counter.withLock { value -> UInt64 in
+            value += 1
+            return value
+        }
+        return FeatureReadCacheWriteOrder(launchID: launchID, sequence: sequence)
+    }
+}
 
 // MARK: Envelope
 
@@ -57,9 +117,13 @@ struct FeatureReadCacheEnvelope<Payload: Codable & Sendable & Equatable>: Codabl
     /// Stable per-feature record key (e.g. `attention-feed`, `coverage-fleet`).
     let featureKey: String
     let namespace: FarmSnapshotNamespace
-    /// Immutable UTC instant (epoch-millis) of the successful/authoritative
-    /// completion. The monotonic ordering key; integer-exact across restarts.
+    /// Wall-clock UTC instant (epoch-millis) of the successful/authoritative
+    /// completion, shown as "last updated". Display-only — never an ordering key.
     let lastUpdatedAtMillis: Int64
+    /// Clock-independent ordering key (#3007). `nil` only on records written
+    /// before #3007, which any stamped write supersedes. Optional so the on-disk
+    /// layout stays schema-compatible in both directions.
+    let writeOrder: FeatureReadCacheWriteOrder?
     let kind: Kind
     /// Present iff `kind == .snapshot`.
     let payload: Payload?
@@ -69,6 +133,7 @@ struct FeatureReadCacheEnvelope<Payload: Codable & Sendable & Equatable>: Codabl
         featureKey: String,
         namespace: FarmSnapshotNamespace,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder?,
         kind: Kind,
         payload: Payload?
     ) {
@@ -76,6 +141,7 @@ struct FeatureReadCacheEnvelope<Payload: Codable & Sendable & Equatable>: Codabl
         self.featureKey = featureKey
         self.namespace = namespace
         self.lastUpdatedAtMillis = lastUpdatedAtMillis
+        self.writeOrder = writeOrder
         self.kind = kind
         self.payload = payload
     }
@@ -84,12 +150,14 @@ struct FeatureReadCacheEnvelope<Payload: Codable & Sendable & Equatable>: Codabl
         featureKey: String,
         namespace: FarmSnapshotNamespace,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         payload: Payload
     ) -> FeatureReadCacheEnvelope {
         FeatureReadCacheEnvelope(
             featureKey: featureKey,
             namespace: namespace,
             lastUpdatedAtMillis: lastUpdatedAtMillis,
+            writeOrder: writeOrder,
             kind: .snapshot,
             payload: payload
         )
@@ -98,15 +166,23 @@ struct FeatureReadCacheEnvelope<Payload: Codable & Sendable & Equatable>: Codabl
     static func disabled(
         featureKey: String,
         namespace: FarmSnapshotNamespace,
-        lastUpdatedAtMillis: Int64
+        lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder
     ) -> FeatureReadCacheEnvelope {
         FeatureReadCacheEnvelope(
             featureKey: featureKey,
             namespace: namespace,
             lastUpdatedAtMillis: lastUpdatedAtMillis,
+            writeOrder: writeOrder,
             kind: .disabled,
             payload: nil
         )
+    }
+
+    /// Whether this candidate may replace `existing` under the #3007 ordering.
+    func supersedes<Other>(_ existing: FeatureReadCacheEnvelope<Other>) -> Bool {
+        guard let writeOrder else { return false }
+        return writeOrder.supersedes(existing.writeOrder)
     }
 
     var isSupportedSchema: Bool { schemaVersion == FeatureReadCacheEnvelope.currentSchemaVersion }
@@ -152,7 +228,8 @@ enum FeatureReadCacheHydration<Payload: Sendable & Equatable>: Sendable, Equatab
 /// Outcome of committing one feature record. Mirrors `FarmSnapshotCommitResult`.
 enum FeatureReadCacheCommitResult: Sendable, Equatable {
     case committed
-    /// Not strictly newer than the durable record — preserved.
+    /// The durable record was confirmed later in this launch (its `writeOrder`
+    /// is not superseded) — preserved.
     case notNewer
     /// Authority changed (revoke / generation advance / tombstone / cancellation)
     /// before the durable promotion — prior bytes preserved.
@@ -181,12 +258,14 @@ protocol FeatureReadCacheStoring: Sendable {
         _ payload: Payload,
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult
 
     func commitDisabled(
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult
 }
@@ -345,12 +424,14 @@ actor FeatureReadCacheStore: FeatureReadCacheStoring {
         _ payload: Payload,
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         let envelope = FeatureReadCacheEnvelope<Payload>.snapshot(
             featureKey: Self.sanitize(recordKey),
             namespace: capturedSession.namespace,
             lastUpdatedAtMillis: lastUpdatedAtMillis,
+            writeOrder: writeOrder,
             payload: payload
         )
         return await commit(envelope, recordKey: recordKey, capturedSession: capturedSession)
@@ -359,6 +440,7 @@ actor FeatureReadCacheStore: FeatureReadCacheStoring {
     func commitDisabled(
         recordKey: String,
         lastUpdatedAtMillis: Int64,
+        writeOrder: FeatureReadCacheWriteOrder,
         capturedSession: FarmSnapshotSession
     ) async -> FeatureReadCacheCommitResult {
         // The disabled tombstone carries an empty payload type; encode against a
@@ -366,7 +448,8 @@ actor FeatureReadCacheStore: FeatureReadCacheStoring {
         let envelope = FeatureReadCacheEnvelope<DisabledTombstonePayload>.disabled(
             featureKey: Self.sanitize(recordKey),
             namespace: capturedSession.namespace,
-            lastUpdatedAtMillis: lastUpdatedAtMillis
+            lastUpdatedAtMillis: lastUpdatedAtMillis,
+            writeOrder: writeOrder
         )
         return await commit(envelope, recordKey: recordKey, capturedSession: capturedSession)
     }
@@ -395,7 +478,7 @@ actor FeatureReadCacheStore: FeatureReadCacheStoring {
                       decoded.namespace == capturedSession.namespace else {
                     return .integrityFailure
                 }
-                if decoded.lastUpdatedAtMillis >= envelope.lastUpdatedAtMillis {
+                if !envelope.supersedes(decoded) {
                     return .notNewer
                 }
             }
@@ -429,7 +512,7 @@ actor FeatureReadCacheStore: FeatureReadCacheStoring {
                           decoded.namespace == capturedSession.namespace else {
                         return .integrityFailure
                     }
-                    if decoded.lastUpdatedAtMillis >= envelope.lastUpdatedAtMillis {
+                    if !envelope.supersedes(decoded) {
                         return .notNewer
                     }
                 }
