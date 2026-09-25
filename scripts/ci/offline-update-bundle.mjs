@@ -9,9 +9,15 @@
 // operator supplies from outside the bundle, so bundle-supplied signer material cannot enroll
 // itself. There is no skip-verification, force or reset option.
 //
+// A bundle may also carry the prior recovery set (#3062): the previously verified release's
+// original signed manifest and CLI checksum list with their Cosign bundles -- packaged, or bound by
+// digest to an operator-supplied local copy -- plus an identity/checksum/location-class reference to
+// the protected backup taken before the change. The prior set must be signature-valid for the same
+// channel and strictly older than the target. Backup contents and secrets are never carried.
+//
 // This slice is deliberately NOT installable: it does not yet package application/infrastructure
-// images, the prior recovery set, recovery instructions or replay state, and it never enables
-// rollout. docs/OFFLINE_UPDATE_RECOVERY.md tracks the remaining delivery.
+// images, recovery instructions or replay state, and it never enables rollout.
+// docs/OFFLINE_UPDATE_RECOVERY.md tracks the remaining delivery.
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import {
@@ -21,7 +27,7 @@ import {
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { deriveSequence, manifestDigest, validateManifest } from './release-manifest.mjs';
-import { parseTag, repository, requireThat, workflow } from './release-policy.mjs';
+import { compareVersions, parseTag, repository, requireThat, workflow } from './release-policy.mjs';
 import { hostUpdateCliArchiveName, hostUpdateCliRuntimes, hostUpdateCliSbomName, hostUpdateCliSumsBundleName,
   hostUpdateCliSumsName, parseSums, validateHostUpdateCliSbom } from './host-update-cli-package.mjs';
 
@@ -97,6 +103,102 @@ export function expectedMembers(version) {
 }
 
 const isRuntimeMember = role => role === 'cli-archive' || role === 'cli-sbom';
+
+// ---------------------------------------------------------------------------------------------
+// Prior recovery set and protected-backup reference (#3062).
+// ---------------------------------------------------------------------------------------------
+export const priorRecoveryModes = Object.freeze(['packaged', 'local-reference']);
+export const protectedBackupLocationClasses = Object.freeze(['host-local', 'attached-volume', 'external-storage']);
+const priorMemberPrefix = 'prior-';
+const protectedBackupFields = 'id,locationClass,releaseVersion,sha256';
+const backupIdPattern = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
+
+export const priorMemberName = name => `${priorMemberPrefix}${name}`;
+
+// The prior set is the prior release's original signed metadata; its names are fixed by its version.
+export function priorRecoveryFiles(version) {
+  return new Map([
+    [manifestName, 'prior-manifest'],
+    [manifestSignatureName, 'prior-manifest-signature'],
+    [hostUpdateCliSumsName(version), 'prior-cli-sums'],
+    [hostUpdateCliSumsBundleName(version), 'prior-cli-sums-signature'],
+  ]);
+}
+
+// Identity, checksum and location class only: a closed field set leaves no place for backup
+// contents, credentials, connection strings or paths.
+export function validateProtectedBackupReference(value, priorVersion) {
+  requireThat(value && typeof value === 'object' && !Array.isArray(value) &&
+    Object.keys(value).sort().join() === protectedBackupFields,
+  'Protected backup reference must contain exactly id, sha256, locationClass and releaseVersion (no contents, secrets or paths)');
+  requireThat(typeof value.id === 'string' && backupIdPattern.test(value.id), 'Protected backup reference id is invalid');
+  requireThat(typeof value.sha256 === 'string' && sha256Pattern.test(value.sha256),
+    'Protected backup reference checksum must be a lowercase SHA-256');
+  requireThat(protectedBackupLocationClasses.includes(value.locationClass),
+    'Protected backup reference location class is not supported');
+  requireThat(value.releaseVersion === priorVersion,
+    `Protected backup reference was not taken for the prior release ${priorVersion}`);
+  return { id: value.id, sha256: value.sha256, locationClass: value.locationClass, releaseVersion: value.releaseVersion };
+}
+
+// Authenticates a prior set found through `pathOf(originalName)`: same channel, strictly older than
+// the target, the signed CLI checksum list names exactly the supported assets, and both Cosign
+// bundles verify for the channel's release workflow identity.
+function verifyPriorRecoverySet({ pathOf, target, channel, run, trustedRoot, limits }) {
+  const manifestBytes = readSmallFile(pathOf(manifestName), 'Prior recovery manifest', limits.maxMetadataBytes);
+  let identity;
+  try {
+    identity = manifestIdentity(manifestBytes, channel);
+  } catch (error) {
+    throw new Error(`Prior recovery set: ${error.message}`);
+  }
+  requireThat(identity.sequence < target.sequence && compareVersions(identity.version, target.version) < 0,
+    `Prior recovery set ${identity.version} is not strictly older than the target ${target.version}`);
+  const sumsBytes = readSmallFile(pathOf(hostUpdateCliSumsName(identity.version)), 'Prior recovery CLI checksum list',
+    limits.maxMetadataBytes);
+  let entries;
+  try {
+    entries = parseSums(sumsBytes.toString('utf8'));
+  } catch (error) {
+    throw new Error(`Prior recovery set CLI checksum list is invalid: ${error.message}`);
+  }
+  const expected = hostUpdateCliRuntimes.flatMap(rid =>
+    [hostUpdateCliArchiveName(identity.version, rid), hostUpdateCliSbomName(identity.version, rid)]);
+  requireThat(entries.size === expected.length && expected.every(name => entries.has(name)),
+    'Prior recovery set CLI checksum list does not name exactly the supported archives and SBOMs');
+  const offline = trustedRoot ? ['--trusted-root', trustedRoot] : [];
+  for (const [file, bundle] of [[manifestName, manifestSignatureName],
+    [hostUpdateCliSumsName(identity.version), hostUpdateCliSumsBundleName(identity.version)]]) {
+    try {
+      run('cosign', ['verify-blob', ...offline, '--bundle', pathOf(bundle),
+        '--certificate-oidc-issuer', oidcIssuer, '--certificate-identity', releaseSigningIdentity(identity.channel),
+        pathOf(file)]);
+    } catch (error) {
+      throw new Error(`Prior recovery set signature verification failed for ${file}: ${error.message}`);
+    }
+  }
+  return { identity, manifestDigest: manifestDigest(manifestBytes) };
+}
+
+function validatePriorIndex(prior, limits) {
+  requireThat(prior && typeof prior === 'object' && !Array.isArray(prior) &&
+    Object.keys(prior).sort().join() === 'files,manifestDigest,mode,protectedBackup,release',
+  'Offline bundle prior recovery set fields are invalid');
+  requireThat(priorRecoveryModes.includes(prior.mode), 'Offline bundle prior recovery mode is not supported');
+  requireThat(prior.release && typeof prior.release.version === 'string', 'Offline bundle prior recovery release is invalid');
+  parseTag(`v${prior.release.version}`);
+  requireThat(typeof prior.manifestDigest === 'string' && /^sha256:[a-f0-9]{64}$/.test(prior.manifestDigest),
+    'Offline bundle prior recovery manifest digest is invalid');
+  const roles = priorRecoveryFiles(prior.release.version);
+  requireThat(Array.isArray(prior.files) && prior.files.length === roles.size &&
+    prior.files.every(file => file && Object.keys(file).sort().join() === 'name,role,sha256,size' &&
+      roles.get(file.name) === file.role && sha256Pattern.test(file.sha256 ?? '') &&
+      Number.isSafeInteger(file.size) && file.size >= 0 && file.size <= limits.maxMetadataBytes) &&
+    new Set(prior.files.map(file => file.name)).size === roles.size,
+  'Offline bundle prior recovery set does not list exactly the prior signed metadata');
+  validateProtectedBackupReference(prior.protectedBackup, prior.release.version);
+  return prior;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Release identity: taken only from the signed manifest bytes, and cross-checked against the
@@ -371,27 +473,50 @@ function indexBytes(index) {
 // Assembly (connected host): reads only local, already-downloaded release assets. Never fetches.
 // ---------------------------------------------------------------------------------------------
 export function assembleOfflineBundle({ releaseAssets, channel, version, runtimes = hostUpdateCliRuntimes, output,
-  run, trustedRoot, limits = offlineBundleLimits }) {
+  run, trustedRoot, priorReleaseAssets, priorMode = 'packaged', protectedBackup, limits = offlineBundleLimits }) {
   requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
   requireThat(typeof output === 'string' && output.length > 0, 'An output bundle path is required');
   requireThat(Array.isArray(runtimes) && runtimes.length > 0 && new Set(runtimes).size === runtimes.length &&
     runtimes.every(rid => hostUpdateCliRuntimes.includes(rid)), 'Offline bundle runtimes must be distinct supported runtimes');
+  requireThat((priorReleaseAssets === undefined) === (protectedBackup === undefined),
+    'A prior recovery set and a protected backup reference must be supplied together; neither is complete alone');
   const assets = resolve(releaseAssets);
   const manifestBytes = readSmallFile(join(assets, manifestName), 'Release manifest', limits.maxMetadataBytes);
   const identity = manifestIdentity(manifestBytes, channel, version);
   const selected = new Set(runtimes.flatMap(rid =>
     [hostUpdateCliArchiveName(identity.version, rid), hostUpdateCliSbomName(identity.version, rid)]));
   const roles = expectedMembers(identity.version);
+  const sources = new Map();
   const files = [...roles].filter(([name, role]) => !isRuntimeMember(role) || selected.has(name)).map(([name, role]) => {
     const { size, sha256 } = hashFile(join(assets, name), `Release asset ${name}`);
     requireThat(size <= roleLimit(role, limits), `Release asset exceeds its size limit: ${name}`);
+    sources.set(name, join(assets, name));
     return { name, role, size, sha256 };
-  }).sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+  });
   verifyCliSums(readSmallFile(join(assets, hostUpdateCliSumsName(identity.version)), 'CLI checksum list',
     limits.maxMetadataBytes), identity.version, files.filter(file => isRuntimeMember(file.role)),
   name => readSmallFile(join(assets, name), `Release asset ${name}`, limits.maxMetadataBytes));
   verifySignatures(assets, identity, { run, trustedRoot, version: identity.version });
+  let prior;
+  if (priorReleaseAssets !== undefined) {
+    requireThat(priorRecoveryModes.includes(priorMode), 'Prior recovery mode must be packaged or local-reference');
+    const priorAssets = resolve(priorReleaseAssets);
+    const verified = verifyPriorRecoverySet({ pathOf: name => join(priorAssets, name), target: identity, channel, run,
+      trustedRoot, limits });
+    const priorFiles = [...priorRecoveryFiles(verified.identity.version)].map(([name, role]) => {
+      const { size, sha256 } = hashFile(join(priorAssets, name), `Prior release asset ${name}`);
+      requireThat(size <= limits.maxMetadataBytes, `Prior release asset exceeds its size limit: ${name}`);
+      if (priorMode === 'packaged') {
+        files.push({ name: priorMemberName(name), role, size, sha256 });
+        sources.set(priorMemberName(name), join(priorAssets, name));
+      }
+      return { name, role, size, sha256 };
+    });
+    prior = { mode: priorMode, release: verified.identity, manifestDigest: verified.manifestDigest, files: priorFiles,
+      protectedBackup: validateProtectedBackupReference(protectedBackup, verified.identity.version) };
+  }
+  files.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
   const index = {
     schema: 1,
     kind: offlineBundleKind,
@@ -399,11 +524,12 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
     manifestDigest: manifestDigest(manifestBytes),
     contents: {
       cliRuntimes: hostUpdateCliRuntimes.filter(rid => runtimes.includes(rid)),
-      images: false, infrastructure: false, priorRecoverySet: false, recoveryInstructions: false,
+      images: false, infrastructure: false, priorRecoverySet: prior !== undefined, recoveryInstructions: false,
     },
     installable: false,
     rolloutAuthorization: false,
     files,
+    ...(prior ? { priorRecoverySet: prior } : {}),
   };
   const target = resolve(output);
   requireThat(!lstatSync(target, { throwIfNoEntry: false }), `Offline bundle output already exists: ${target}`);
@@ -416,7 +542,7 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
     writeAll(out, Buffer.alloc((block - (head.length % block)) % block));
     for (const file of files) {
       writeAll(out, tarHeader({ name: file.name, size: file.size }));
-      const { fd, size } = openRegularFile(join(assets, file.name), `Release asset ${file.name}`);
+      const { fd, size } = openRegularFile(sources.get(file.name), `Release asset ${file.name}`);
       try {
         requireThat(size === file.size && copyRange(fd, 0, size, out) === file.sha256,
           `Release asset changed during assembly: ${file.name}`);
@@ -451,16 +577,19 @@ export function assembleOfflineBundle({ releaseAssets, channel, version, runtime
 // directory, member hashes, offline signatures, identity/channel binding. Any failure removes the
 // staging directory so no success-shaped import remains.
 // ---------------------------------------------------------------------------------------------
-function validateIndex(bytes, entries) {
+function validateIndex(bytes, entries, limits) {
   let index;
   try {
     index = JSON.parse(bytes.toString('utf8'));
   } catch {
     throw new Error('Offline bundle index is not valid JSON');
   }
+  const baseFields = ['contents', 'files', 'installable', 'kind', 'manifestDigest', 'release', 'rolloutAuthorization',
+    'schema'];
+  const hasPrior = index && typeof index === 'object' && Object.hasOwn(index, 'priorRecoverySet');
   requireThat(index && typeof index === 'object' && !Array.isArray(index) &&
-    Object.keys(index).sort().join() === ['contents', 'files', 'installable', 'kind', 'manifestDigest', 'release',
-      'rolloutAuthorization', 'schema'].join(), 'Offline bundle index fields are invalid');
+    Object.keys(index).sort().join() === [...baseFields, ...(hasPrior ? ['priorRecoverySet'] : [])].sort().join(),
+  'Offline bundle index fields are invalid');
   requireThat(index.schema === 1 && index.kind === offlineBundleKind, 'Offline bundle index schema is not supported');
   requireThat(index.installable === false && index.rolloutAuthorization === false,
     'Offline bundle index claims installation or rollout authority this format cannot grant');
@@ -479,13 +608,17 @@ function validateIndex(bytes, entries) {
   const contents = index.contents;
   requireThat(contents && typeof contents === 'object' && Object.keys(contents).sort().join() ===
     'cliRuntimes,images,infrastructure,priorRecoverySet,recoveryInstructions' &&
-    ['images', 'infrastructure', 'priorRecoverySet', 'recoveryInstructions'].every(key => contents[key] === false) &&
+    ['images', 'infrastructure', 'recoveryInstructions'].every(key => contents[key] === false) &&
     Array.isArray(contents.cliRuntimes), 'Offline bundle index contents claim material this format does not carry');
+  // contents.priorRecoverySet is true only when the complete prior set and backup reference are present.
+  requireThat(contents.priorRecoverySet === hasPrior,
+    'Offline bundle index prior recovery claim does not match its prior recovery set');
+  if (hasPrior) validatePriorIndex(index.priorRecoverySet, limits);
   return index;
 }
 
-export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run,
-  limits = offlineBundleLimits, now = () => new Date() }) {
+export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, staging, run, priorRecoverySet,
+  protectedBackup, limits = offlineBundleLimits, now = () => new Date() }) {
   requireChannel(channel);
   requireThat(typeof run === 'function', 'A command runner is required');
   requireThat(typeof trustedRoot === 'string' && trustedRoot.length > 0,
@@ -504,10 +637,40 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     const entries = readOfflineBundleEntries(fd, size, limits);
     requireThat(entries[0].name === offlineBundleIndexName, 'Offline bundle index must be the first member');
     requireThat(entries[0].size <= limits.maxMetadataBytes, 'Offline bundle index exceeds its size limit');
-    const index = validateIndex(readExactly(fd, entries[0].size, entries[0].offset), entries);
+    const index = validateIndex(readExactly(fd, entries[0].size, entries[0].offset), entries, limits);
     requireThat(typeof index.release?.version === 'string', 'Offline bundle index release is invalid');
     parseTag(`v${index.release.version}`);
     const roles = expectedMembers(index.release.version);
+    const prior = index.priorRecoverySet;
+    const packagedPrior = prior?.mode === 'packaged';
+    if (packagedPrior) {
+      for (const file of prior.files) {
+        roles.set(priorMemberName(file.name), file.role);
+        const carried = index.files.find(candidate => candidate.name === priorMemberName(file.name));
+        requireThat(carried && carried.size === file.size && carried.sha256 === file.sha256,
+          `Offline bundle is missing or mismatches its packaged prior recovery member: ${file.name}`);
+      }
+    }
+    if (prior?.mode === 'local-reference') {
+      requireThat(typeof priorRecoverySet === 'string' && priorRecoverySet.length > 0,
+        'Offline bundle binds a local prior recovery set; supply it with --prior-recovery-set');
+    } else {
+      requireThat(priorRecoverySet === undefined, prior
+        ? 'Offline bundle packages its prior recovery set; a local prior recovery set must not be supplied'
+        : 'A local prior recovery set was supplied but the bundle carries no prior recovery set');
+    }
+    // The index is unsigned, so the backup reference it carries is only a claim; the operator's own
+    // expected reference is the trust source and must match it exactly.
+    if (prior) {
+      requireThat(protectedBackup !== undefined,
+        'Offline bundle binds a protected backup reference; supply the expected reference with --protected-backup');
+      const expected = validateProtectedBackupReference(protectedBackup, prior.release.version);
+      requireThat(protectedBackupFields.split(',').every(key => expected[key] === prior.protectedBackup[key]),
+        'Offline bundle protected backup reference does not match the expected reference');
+    } else {
+      requireThat(protectedBackup === undefined,
+        'A protected backup reference was supplied but the bundle carries no prior recovery set');
+    }
     for (const file of index.files) {
       requireThat(roles.get(file.name) === file.role, `Offline bundle member is not part of this release: ${file.name}`);
       requireThat(file.size <= roleLimit(file.role, limits), `Offline bundle member exceeds its size limit: ${file.name}`);
@@ -550,6 +713,39 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
     requireThat(JSON.stringify(index.contents.cliRuntimes) === JSON.stringify(runtimes),
       'Offline bundle runtime list does not match its archives');
     verifySignatures(quarantine, identity, { run, trustedRoot: root, version: identity.version });
+    const imported = entries.slice(1).map(entry => entry.name);
+    let priorRecord = false;
+    if (prior) {
+      if (!packagedPrior) {
+        // Bind the operator's local copy by the digests recorded at assembly, copying it into quarantine
+        // so the staged prior set is exactly the bytes that were authenticated.
+        const local = resolve(priorRecoverySet);
+        for (const file of prior.files) {
+          const source = openRegularFile(join(local, file.name), `Local prior recovery file ${file.name}`);
+          try {
+            requireThat(source.size === file.size && source.size <= limits.maxMetadataBytes,
+              `Local prior recovery file does not match the bundle's bound digest: ${file.name}`);
+            const out = openSync(join(quarantine, priorMemberName(file.name)), 'wx', 0o644);
+            try {
+              requireThat(copyRange(source.fd, 0, source.size, out) === file.sha256,
+                `Local prior recovery file does not match the bundle's bound digest: ${file.name}`);
+            } finally {
+              closeSync(out);
+            }
+          } finally {
+            closeSync(source.fd);
+          }
+          imported.push(priorMemberName(file.name));
+        }
+      }
+      const verified = verifyPriorRecoverySet({ pathOf: name => join(quarantine, priorMemberName(name)), target: identity,
+        channel, run, trustedRoot: root, limits });
+      requireThat(JSON.stringify(prior.release) === JSON.stringify(verified.identity),
+        'Offline bundle prior recovery identity does not equal the signed prior manifest identity');
+      requireThat(prior.manifestDigest === verified.manifestDigest, 'Offline bundle prior recovery manifest digest mismatch');
+      priorRecord = { mode: prior.mode, release: verified.identity, manifestDigest: verified.manifestDigest,
+        protectedBackup: validateProtectedBackupReference(prior.protectedBackup, verified.identity.version) };
+    }
     const record = {
       schema: 1,
       decision: 'verified-not-installable',
@@ -557,15 +753,16 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
       manifestDigest: index.manifestDigest,
       bundleSha256: copyRange(fd, 0, size),
       cliRuntimes: index.contents.cliRuntimes,
+      priorRecoverySet: priorRecord,
       signatureIdentity: releaseSigningIdentity(identity.channel),
       installable: false,
       rolloutAuthorization: false,
       verifiedAt: now().toISOString(),
     };
-    for (const entry of entries.slice(1)) {
-      requireThat(!lstatSync(join(stagingReal, entry.name), { throwIfNoEntry: false }),
-        `Staging directory was modified during verification: ${entry.name}`);
-      renameSync(join(quarantine, entry.name), join(stagingReal, entry.name));
+    for (const name of imported) {
+      requireThat(!lstatSync(join(stagingReal, name), { throwIfNoEntry: false }),
+        `Staging directory was modified during verification: ${name}`);
+      renameSync(join(quarantine, name), join(stagingReal, name));
     }
     rmdirSync(quarantine);
     const recordFd = openSync(join(stagingReal, offlineBundleVerificationName), 'wx', 0o644);
@@ -589,14 +786,18 @@ export function verifyOfflineBundle({ bundle, channel, version, trustedRoot, sta
 const usage = `usage:
   node scripts/ci/offline-update-bundle.mjs assemble --release-assets <dir> --channel <stable|insider>
     --output <bundle.tar> [--version <v>] [--runtime <rid>]... [--trusted-root <trusted_root.json>] [--cosign <path>]
+    [--prior-release-assets <dir> --protected-backup <reference.json> [--prior-mode <packaged|local-reference>]]
   node scripts/ci/offline-update-bundle.mjs verify --bundle <bundle.tar> --channel <stable|insider>
-    --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--cosign <path>]`;
+    --trusted-root <trusted_root.json> --staging <new-dir> [--version <v>] [--prior-recovery-set <dir>]
+    [--protected-backup <reference.json>] [--cosign <path>]`;
 
 export function parseArguments(argv) {
   const [command, ...rest] = argv;
   const allowed = {
-    assemble: ['release-assets', 'channel', 'output', 'version', 'runtime', 'trusted-root', 'cosign'],
-    verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'cosign'],
+    assemble: ['release-assets', 'channel', 'output', 'version', 'runtime', 'trusted-root', 'cosign',
+      'prior-release-assets', 'prior-mode', 'protected-backup'],
+    verify: ['bundle', 'channel', 'trusted-root', 'staging', 'version', 'prior-recovery-set', 'protected-backup',
+      'cosign'],
   };
   requireThat(Object.hasOwn(allowed, command ?? ''), usage);
   const options = {};
@@ -618,17 +819,29 @@ async function main(argv) {
   const cosign = options.cosign ?? 'cosign';
   const run = (name, args) => execFileSync(name === 'cosign' ? cosign : name, args,
     { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+  let protectedBackup;
+  if (options['protected-backup'] !== undefined) {
+    try {
+      protectedBackup = JSON.parse(readSmallFile(resolve(options['protected-backup']), 'Protected backup reference',
+        64 * 1024).toString('utf8'));
+    } catch (error) {
+      throw new Error(`Protected backup reference is unreadable: ${error.message}`);
+    }
+  }
   if (command === 'assemble') {
     const { bundle, index } = assembleOfflineBundle({
       releaseAssets: options['release-assets'], channel: options.channel, version: options.version,
       runtimes: options.runtime ?? hostUpdateCliRuntimes, output: options.output, run,
       trustedRoot: options['trusted-root'] ? resolve(options['trusted-root']) : undefined,
+      priorReleaseAssets: options['prior-release-assets'], priorMode: options['prior-mode'], protectedBackup,
     });
     console.log(JSON.stringify({ bundle, release: index.release, manifestDigest: index.manifestDigest,
-      cliRuntimes: index.contents.cliRuntimes, installable: false }, undefined, 2));
+      cliRuntimes: index.contents.cliRuntimes, priorRecoverySet: index.priorRecoverySet?.release ?? false,
+      installable: false }, undefined, 2));
   } else {
     const record = verifyOfflineBundle({ bundle: options.bundle, channel: options.channel, version: options.version,
-      trustedRoot: options['trusted-root'], staging: options.staging, run });
+      trustedRoot: options['trusted-root'], staging: options.staging, priorRecoverySet: options['prior-recovery-set'],
+      protectedBackup, run });
     console.log(JSON.stringify(record, undefined, 2));
   }
 }
