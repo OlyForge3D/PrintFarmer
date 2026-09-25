@@ -1602,9 +1602,23 @@ class PrintFarmerUITestCase: XCTestCase {
     var navigationAlertDismissals: [String: String] { [:] }
     var retryUnchangedNavigationAlertDismissal: Bool { false }
 
-    override func setUp() async throws {
-        try await super.setUp()
+    /// Synchronous on purpose (#3021). Xcode 27 interrupts a failing test by
+    /// running tear-down inside the call that recorded the failure. From an
+    /// async `@MainActor` setUp, that nested wait holds the main queue, so an
+    /// async tearDown can never start and the runner idles.
+    ///
+    /// The synchronous overrides inherit XCTest's nonisolated signature, but
+    /// XCTest calls them on the main thread; `assumeIsolated` traps otherwise.
+    /// The unchecked `test` reference only satisfies the static region check
+    /// for handing `self` to that main-actor closure.
+    override func setUp() {
+        super.setUp()
         continueAfterFailure = false
+        nonisolated(unsafe) let test = self
+        MainActor.assumeIsolated { test.launchForTest() }
+    }
+
+    private func launchForTest() {
         testBudget = UIWaitBudget(timeout: executionTimeAllowance)
         app = XCUIApplication()
         app.launchEnvironment["PFARM_UI_TESTING"] = "1"
@@ -1619,11 +1633,24 @@ class PrintFarmerUITestCase: XCTestCase {
         }
     }
 
-    override func tearDown() async throws {
-        app = nil
-        testBudget = nil
-        appHeartbeat = nil
+    override func tearDown() {
+        nonisolated(unsafe) let test = self
+        MainActor.assumeIsolated {
+            test.app = nil
+            test.testBudget = nil
+            test.appHeartbeat = nil
+        }
         launchWindow.end()
+        super.tearDown()
+    }
+
+    /// Sealed off the main actor so no subclass can reintroduce an async
+    /// `@MainActor` setUp or tearDown and with it the #3021 deadlock.
+    nonisolated override final func setUp() async throws {
+        try await super.setUp()
+    }
+
+    nonisolated override final func tearDown() async throws {
         try await super.tearDown()
     }
 

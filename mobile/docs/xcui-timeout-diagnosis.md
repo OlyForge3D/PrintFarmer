@@ -219,6 +219,53 @@ harness therefore makes the next occurrence fail fast and name its cause.
   `setUp()` launch is bracketed; relaunches inside a test body keep XCTest's
   unannotated failure.
 
+### Synchronous setUp and tearDown (#3021)
+
+Under Xcode 27, a failure recorded in `setUp()` with
+`continueAfterFailure = false` makes XCTest run the tear-down sequence inside
+the failing call, from a nested run loop on the main thread. When
+`PrintFarmerUITestCase` used an async `@MainActor` setUp, that nested wait ran
+inside the setUp job on the main queue. The async `@MainActor` tearDown could
+never start, and the runner idled at 0% CPU until the invocation ceiling.
+Xcode 26.6 kept executing after the failure, so CI did not show the hang.
+
+The base class now uses **synchronous** `setUp()` and `tearDown()`:
+
+- XCTest calls them on the main thread. They inherit its nonisolated
+  signature, so the main-actor work runs inside `MainActor.assumeIsolated`,
+  which traps if that ever changes.
+- The async `setUp()` and `tearDown()` are `nonisolated override final` and
+  only call `super`. A subclass that adds an async override fails to compile,
+  so the deadlock cannot come back through a subclass. Subclasses override
+  the synchronous methods, as `ShiftTasksFailedRefreshUITests` does.
+- Failures are still recorded where they happen. The #3013 heartbeat gate,
+  snapshot attribution and launch-window annotation are unchanged. On
+  Xcode 27, a failing setUp stops the test before its body runs (the probes
+  below). Xcode 26.6 was not available locally. With the earlier async setUp
+  it ran the body after a setUp failure (#3015 shard 3), and whether it still
+  does with synchronous setUp is unverified.
+
+Deferring readiness failures to the test body was rejected. XCTest also
+records failures inside `app.launch()`, which the harness cannot defer. A
+deferred failure would also let setUp continue against an app that is not
+ready, which defeats fail-fast.
+
+Evidence on Xcode 27.0 (27A266a), iOS 26.5 (23F77), iPhone 17. The probes
+were temporary and are not committed:
+
+| Scenario | Before | After |
+|---|---|---|
+| Readiness assertion fails in setUp (zero navigation budget) | Failed at 3.56s, then hung after `Tear Down` until the 240s invocation ceiling (exit 124) | Failed at 1.99s; tearDown finished; test ended at 2.00s |
+| App main thread blocked 45s from +2s (#3013 path) | Hang reported in #3021 | Failed at 23.07s with `app main thread was blocked or the app exited`; tearDown finished |
+| `XCTFail` inside the launch window | n/a | Annotated with the heartbeat; tearDown finished at 0.05s |
+| Failure in a test body | Tear-down completed | Tear-down completed |
+
+Pass path: `HarvestUITests`, `LoginFlowUITests`,
+`ShiftTasksFailedRefreshUITests` and `UIWaitBudgetTests` passed 69/69 on
+iPhone 17. `JobDetailIPadNavigationUITests` passed 3/3 on iPad Pro 13-inch
+(M5); the iPad `ShiftTasksFailedRefreshUITests` skip is the existing #2624
+quarantine.
+
 ### After-correction evidence
 
 `diagnostic-after-2573.xcresult` again records the deliberately stalled test
