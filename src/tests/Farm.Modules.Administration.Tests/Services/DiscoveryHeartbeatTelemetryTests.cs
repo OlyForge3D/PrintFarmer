@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Services.Background;
@@ -83,7 +83,7 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
     [Theory]
     [InlineData("\"not-a-timestamp\"")]
     [InlineData("{not json")]
-    public async Task CheckedSave_CorruptHeartbeat_SavesSectionAndLeavesTelemetryAndCasIntact(string payload)
+    public async Task CheckedSave_CorruptHeartbeat_SavesSectionAndLeavesTelemetryAndCasIntactAsync(string payload)
     {
         SettingsService seeder = CreateService();
         SettingsSectionSnapshot seeded = await seeder.SaveWithConcurrencyCheckAsync(
@@ -91,6 +91,8 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
         SeedTelemetry(payload);
         Mock<ILogger<SettingsService>> logger = new();
         SettingsService service = CreateService(logger.Object);
+        VerifyTelemetryWarning(logger);
+        logger.Invocations.Clear();
         SettingsService stale = CreateService();
         SettingsSectionSnapshot staleSnapshot = stale.GetSectionSnapshot(NetworkDiscoverySettings.SectionName);
         staleSnapshot.RowVersion.Should().Be(seeded.RowVersion);
@@ -121,7 +123,7 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
     }
 
     [Fact]
-    public async Task HeartbeatAfterCorruption_RestoresLivenessWithoutChangingEditableRevision()
+    public async Task HeartbeatAfterCorruption_RestoresLivenessWithoutChangingEditableRevisionAsync()
     {
         SettingsService seeder = CreateService();
         SettingsSectionSnapshot seeded = await seeder.SaveWithConcurrencyCheckAsync(
@@ -146,7 +148,7 @@ public sealed class DiscoveryHeartbeatTelemetryTests : IDisposable
     }
 
     [Fact]
-    public async Task Monitor_UnreadableTelemetry_ReportsUnknownLivenessError()
+    public async Task Monitor_UnreadableTelemetry_ReportsUnknownLivenessErrorAsync()
     {
         NetworkDiscoverySettings settings = new() { EnableDiscovery = true, HeartbeatTelemetryUnreadable = true };
         Mock<ISettingsService> settingsService = new();
