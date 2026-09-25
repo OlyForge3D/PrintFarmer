@@ -1,4 +1,4 @@
-using System.Text.Json;
+﻿using System.Text.Json;
 using Farm.Infrastructure.Data;
 using Farm.Infrastructure.Repositories.Settings;
 using Farm.Infrastructure.Settings;
@@ -41,6 +41,7 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
             new UpdateChannelSettings { Channel = "stable" }, old.RowVersion);
         await staleSave.Should().ThrowAsync<DbUpdateConcurrencyException>();
         second.GetSectionSnapshot("UpdateChannel").Should().BeEquivalentTo(old);
+
         // A long-lived reader must not attach a freshly queried token to its old cached values.
         old.RowVersion.Should().NotBe(saved.RowVersion);
         ((UpdateChannelSettings)old.Value).Channel.Should().Be("stable");
@@ -129,6 +130,7 @@ public sealed class UnifiedSettingsPersistenceConcurrencyTests : IDisposable
         factory.Setup(f => f.CreateDbContext()).Returns(() => new AppDbContext(options));
         factory.Setup(f => f.CreateDbContextAsync(It.IsAny<CancellationToken>()))
             .ReturnsAsync(() => new AppDbContext(options));
+
         // The checked save must never call the old unchecked repository save path.
         Mock<IAppSettingsRepository> repository = new(MockBehavior.Strict);
         return new SettingsService(new ConfigurationBuilder().Build(), factory.Object,

@@ -608,6 +608,54 @@ describe('Admin workspace integrated flow (#2507)', () => {
     expect(screen.getByText(/No operational tools available/i)).toBeInTheDocument();
   });
 
+  it('saves farm-wide rates with their draft revision and renews it for another save', async () => {
+    const initial = { electricityRatePerKwh: 0.12, rowVersion: 'cost-v1' };
+    apiClientMock.getCostTrackingSettings.mockResolvedValue(initial);
+    apiClientMock.updateCostTrackingSettings.mockResolvedValue({ ...initial, electricityRatePerKwh: 0.25, rowVersion: 'cost-v2' });
+    renderWorkspace('/admin/power-monitors');
+    const rate = await screen.findByRole('spinbutton');
+    await waitFor(() => expect(rate).toHaveValue(0.12));
+    fireEvent.change(rate, { target: { value: '0.25' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiClientMock.updateCostTrackingSettings).toHaveBeenCalledWith({ electricityRatePerKwh: 0.25, rowVersion: 'cost-v1' }));
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled());
+    fireEvent.change(rate, { target: { value: '0.30' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiClientMock.updateCostTrackingSettings).toHaveBeenLastCalledWith({ electricityRatePerKwh: 0.30, rowVersion: 'cost-v2' }));
+    expect(apiClientMock.getCostTrackingSettings).toHaveBeenCalledTimes(1);
+  });
+
+  it('exposes conflict recovery when the shell owns the save action', async () => {
+    settingsState.values.SystemLog.rowVersion = 'v1';
+    settingsApi.saveSettingsValues.mockRejectedValue({ statusCode: 409 });
+    renderWorkspace('/admin/settings?scope=system&tab=general&sub=system');
+    fireEvent.change(await screen.findByLabelText('Retention Days'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    const reload = await screen.findByRole('button', { name: 'Reload settings (discard edits)' });
+    expect(screen.getByLabelText('Retention Days')).toHaveValue(45);
+    settingsState.values.SystemLog = { ...settingsState.values.SystemLog, retentionDays: 80, rowVersion: 'v2' };
+    fireEvent.click(reload);
+    await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(80));
+  });
+
+  it.each([409, 412])('preserves a farm-wide rate on %s until explicit reload', async (statusCode) => {
+    apiClientMock.getCostTrackingSettings.mockResolvedValue({ electricityRatePerKwh: 0.12, rowVersion: 'cost-v1' });
+    apiClientMock.updateCostTrackingSettings.mockRejectedValue({ statusCode });
+    renderWorkspace('/admin/power-monitors');
+    const rate = await screen.findByRole('spinbutton');
+    await waitFor(() => expect(rate).toHaveValue(0.12));
+    fireEvent.change(rate, { target: { value: '0.25' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await screen.findByText(/Farm-wide settings changed elsewhere/);
+    expect(rate).toHaveValue(0.25);
+    expect(apiClientMock.getCostTrackingSettings).toHaveBeenCalledTimes(1);
+    expect(screen.getByRole('button', { name: 'Save' })).toBeDisabled();
+    apiClientMock.getCostTrackingSettings.mockResolvedValue({ electricityRatePerKwh: 0.18, rowVersion: 'cost-v3' });
+    fireEvent.click(screen.getByRole('button', { name: 'Reload farm-wide settings' }));
+    await waitFor(() => expect(rate).toHaveValue(0.18));
+    expect(screen.getByRole('button', { name: 'Save' })).toBeEnabled();
+  });
+
   it('preserves personal settings separation and blocks dirty workspace search navigation until the user discards', async () => {
     const personalView = renderWorkspace('/settings?scope=system&tab=general&sub=system');
     expect(screen.queryByRole('combobox', { name: 'Search all settings' })).not.toBeInTheDocument();

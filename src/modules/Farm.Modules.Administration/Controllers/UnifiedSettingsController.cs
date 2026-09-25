@@ -12,9 +12,9 @@ using Farm.Web.Api.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using Microsoft.EntityFrameworkCore;
 
 namespace Farm.Modules.Administration.Controllers;
 
@@ -107,6 +107,8 @@ public class UnifiedSettingsController(
     [HttpGet]
     public ActionResult<IDictionary<string, object>> Get()
     {
+        Response.Headers.CacheControl = "no-store";
+
         // Return all settings as a dictionary with SectionName (Key) as top-level keys
         IEnumerable<SettingMetadata> allMetadata = _modularSettingsService.GetAllMetadata();
         Dictionary<string, object> result = new();
@@ -377,6 +379,7 @@ public class UnifiedSettingsController(
             }
 
             SettingsSectionSnapshot snapshot = _modularSettingsService.GetSectionSnapshot(keyName);
+            Response.Headers.CacheControl = "no-store";
             Response.Headers.ETag = $"\"{snapshot.RowVersion}\"";
             return Ok(ToSectionResponse(snapshot));
         }
@@ -482,7 +485,8 @@ public class UnifiedSettingsController(
 
             if (string.IsNullOrWhiteSpace(rowVersion))
             {
-                return StatusCode(StatusCodes.Status428PreconditionRequired,
+                return StatusCode(
+                    StatusCodes.Status428PreconditionRequired,
                     new { message = "Reload settings and include their rowVersion before saving." });
             }
 
@@ -521,9 +525,21 @@ public class UnifiedSettingsController(
             _logger.LogError(vex, "Settings POST: Validation failed for section '{Key}': {Error}", LogSanitizer.Sanitize(keyName), LogSanitizer.Sanitize(vex.Message));
             return BuildValidationErrorResponse(vex, keyName);
         }
+        catch (Exception ex) when (ex is JsonException or ArgumentException)
+        {
+            _logger.LogWarning(ex, "Invalid settings payload for section '{Key}'", LogSanitizer.Sanitize(keyName));
+            return BadRequest(new { message = $"Failed to save settings for class '{keyName}': {ex.Message}" });
+        }
+        catch (OperationCanceledException) when (HttpContext.RequestAborted.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
-            return BadRequest(new { message = $"Failed to save settings for class '{keyName}': {ex.Message}" });
+            _logger.LogError(ex, "Failed to save settings section '{Key}'", LogSanitizer.Sanitize(keyName));
+            return StatusCode(
+                StatusCodes.Status500InternalServerError,
+                new { message = "Settings could not be saved. Reload to confirm their current values before retrying." });
         }
     }
 

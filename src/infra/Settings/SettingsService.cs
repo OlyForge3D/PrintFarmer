@@ -89,6 +89,7 @@ public class SettingsService : ISettingsService
 
         entity.SettingsJson = json;
         entity.UpdatedAt = DateTime.UtcNow;
+
         // Even an identical payload must check and advance the revision.
         if (!creating)
         {

@@ -112,6 +112,7 @@ vi.mock('@/features/admin/components/FailureDetectionStatusCard', () => ({
 }));
 
 import { SettingsPage } from '@/features/admin/pages/SettingsPage';
+import { fetchSettingsUnified } from '@/services/settingsApi';
 
 async function renderPage() {
   const result = render(
@@ -135,6 +136,10 @@ describe('SettingsPage — per-group save', () => {
     toastSuccessMock.mockReset();
     toastErrorMock.mockReset();
     saveSettingsMock.mockResolvedValue(undefined);
+    vi.mocked(fetchSettingsUnified).mockReset().mockResolvedValue({
+      SystemLogSettings: { retentionDays: 30 },
+      NotificationSettings: { emailEnabled: false },
+    });
   });
 
   afterEach(() => {
@@ -149,6 +154,50 @@ describe('SettingsPage — per-group save', () => {
     expect(screen.queryByRole('button', { name: /save all settings/i })).not.toBeInTheDocument();
   });
 
+  it('keeps in-flight edits and advances only the successful save revision', async () => {
+    vi.mocked(fetchSettingsUnified).mockResolvedValueOnce({
+      SystemLogSettings: { retentionDays: 30, rowVersion: 'absent' },
+      NotificationSettings: { emailEnabled: false, rowVersion: 'other-v1' },
+    });
+    let finish!: (value: unknown) => void;
+    saveSettingsMock.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await renderPage();
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenCalledWith('SystemLogSettings', { retentionDays: 45, rowVersion: 'absent' }));
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '60' } });
+    await act(async () => finish({ retentionDays: 45, rowVersion: 'v2' }));
+    expect(screen.getByLabelText('Retention Days')).toHaveValue(60);
+    expect(screen.getByTestId('admin-save-bar')).toBeInTheDocument();
+    saveSettingsMock.mockResolvedValueOnce({ retentionDays: 60, rowVersion: 'v3' });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenLastCalledWith('SystemLogSettings', { retentionDays: 60, rowVersion: 'v2' }));
+    await waitFor(() => expect(screen.queryByTestId('admin-save-bar')).not.toBeInTheDocument());
+  });
+
+  it.each([409, 412])('preserves a conflicted draft on %s until explicit reload', async (statusCode) => {
+    vi.mocked(fetchSettingsUnified).mockResolvedValueOnce({
+      SystemLogSettings: { retentionDays: 30, rowVersion: 'v1' },
+    }).mockResolvedValueOnce({
+      SystemLogSettings: { retentionDays: 80, rowVersion: 'remote-v2' },
+    });
+    saveSettingsMock.mockRejectedValueOnce({ statusCode, message: 'Concurrent change' });
+    await renderPage();
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await screen.findByRole('button', { name: 'Reload settings (discard edits)' });
+    expect(screen.getByLabelText('Retention Days')).toHaveValue(45);
+    expect(toastSuccessMock).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await waitFor(() => expect(screen.getByRole('button', { name: /save changes/i })).toBeEnabled());
+    expect(saveSettingsMock).toHaveBeenCalledTimes(1);
+    fireEvent.click(await screen.findByRole('button', { name: 'Reload settings (discard edits)' }));
+    await waitFor(() => expect(screen.getByLabelText('Retention Days')).toHaveValue(80));
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '90' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    await waitFor(() => expect(saveSettingsMock).toHaveBeenLastCalledWith('SystemLogSettings', { retentionDays: 90, rowVersion: 'remote-v2' }));
+  });
+
   it('shows the save bar once a single field is edited', async () => {
     await renderPage();
     const retentionInput = screen.getByLabelText('Retention Days');
@@ -156,6 +205,21 @@ describe('SettingsPage — per-group save', () => {
     expect(await screen.findByTestId('admin-save-bar')).toBeInTheDocument();
     // The bar names the section the change lives in, not just a bare count.
     expect(screen.getByText('1 change in System Log')).toBeInTheDocument();
+  });
+
+  it('keeps a conflicted draft and recovery control when reload fails', async () => {
+    vi.mocked(fetchSettingsUnified).mockResolvedValueOnce({
+      SystemLogSettings: { retentionDays: 30, rowVersion: 'v1' },
+    }).mockRejectedValueOnce(new Error('offline'));
+    saveSettingsMock.mockRejectedValueOnce({ statusCode: 409 });
+    await renderPage();
+    fireEvent.change(screen.getByLabelText('Retention Days'), { target: { value: '45' } });
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Reload settings (discard edits)' }));
+    await waitFor(() => expect(toastErrorMock).toHaveBeenCalledWith('Could not reload settings. Your edits are preserved.'));
+    expect(screen.getByLabelText('Retention Days')).toHaveValue(45);
+    expect(screen.getByRole('button', { name: 'Reload settings (discard edits)' })).toBeEnabled();
+    expect(saveSettingsMock).toHaveBeenCalledTimes(1);
   });
 
   it('saves only the changed section via the per-section endpoint', async () => {

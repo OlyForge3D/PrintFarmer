@@ -7,7 +7,7 @@ import { Button } from '@/common/components/ui';
 import { useHealthStatus } from '@/common/hooks/useHealthStatus';
 import { useSpoolmanNetworkScan } from '@/common/hooks/useSpoolmanNetworkScan';
 import { isValidCidr, normalizeUrl, normalizeSpoolmanBaseUrl } from '@/common/utils/validation';
-import { isApiError } from '@/common/utils/apiErrors';
+import { getErrorMessage, isApiError, isSettingsConflict } from '@/common/utils/apiErrors';
 import { getSetupBootstrap, getSetupStatus, createInitialAdmin, testSpoolmanConnection, saveSpoolmanConfig } from '@/services/api/setupApi';
 import { fetchSettingsValues, saveSettingsValues } from '@/services/settingsApi';
 import { PrintFarmerLogoIcon } from '@/common/components/icons/PrintFarmerLogoIcon';
@@ -96,25 +96,13 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
   // Step: Network
   // Network Discovery Settings state (migrated from DTO to settings class)
   const [networkDiscoverySettings, setNetworkDiscoverySettings] = useState<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings | null>(null);
-  // Fetch network discovery settings from backend on mount
-  useEffect(() => {
-    // The unified settings API expects the AppSetting "key" (AppSettingAttribute.Key),
-    // which for NetworkDiscovery is "NetworkDiscovery" (not the class name).
-    fetchSettingsValues<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings>('NetworkDiscovery')
-      .then(settings => setNetworkDiscoverySettings(settings))
-      .catch(() => {
-        // fallback to server canonical defaults if fetch fails
-        setNetworkDiscoverySettings({
-          enableDiscovery: true,
-          discoverySubnets: ["10.0.0.0/24","10.0.5.0/24"],
-          clientTimeoutMs: 200,
-          requestDelayMs: 100,
-          maxConcurrentRequests: 20,
-          maxRetries: 2,
-          ports: [80],
-        });
-      });
-  }, []);
+  const [networkConflict, setNetworkConflict] = useState(false);
+  const reloadNetworkSettings = async () => {
+    const settings = await fetchSettingsValues<import("@/types/NetworkDiscoverySettings").NetworkDiscoverySettings>('NetworkDiscovery');
+    setNetworkDiscoverySettings(settings);
+    setNetworkConflict(false);
+    setGlobalError(null);
+  };
   // Additional UI state for advanced fields (if needed)
   // (Removed unused discoveryTimeout, maxConcurrentScans, scanPorts)
   const [networkErrors, setNetworkErrors] = useState<string | null>(null);
@@ -320,9 +308,11 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
     setGlobalError(null);
     try {
       await ensureAdminAuthenticated();
+      // Establish the values and revision after login, before the user edits.
+      if (!networkDiscoverySettings) await reloadNetworkSettings();
       setStep(1);
     } catch (error) {
-      setGlobalError(error instanceof Error ? error.message : 'Admin creation failed');
+      setGlobalError(getErrorMessage(error, 'Could not load setup settings. Try again.'));
     } finally {
       setSubmitting(false);
     }
@@ -444,7 +434,7 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
   // Final submission orchestrating all steps
   const finalizeSetup = async () => {
-    if (submitting) return;
+    if (submitting || networkConflict) return;
     if (!validateNetwork()) {
       setStep(1);
       return;
@@ -461,7 +451,10 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
         ...networkDiscoverySettings,
         discoverySubnets: networkDiscoverySettings.discoverySubnets.filter((r: string) => r.trim()).map((r: string) => r.trim()),
       };
-  await saveSettingsValues('NetworkDiscovery', netPayload);
+      const saved = await saveSettingsValues('NetworkDiscovery', netPayload);
+      if (saved?.rowVersion !== undefined) {
+        setNetworkDiscoverySettings(current => current ? { ...current, rowVersion: saved.rowVersion } : current);
+      }
 
       // 3. Spoolman config (optional)
         if (spoolmanEnabled && spoolmanUrl) {
@@ -478,7 +471,12 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
 
       onComplete();
     } catch (e) {
-      setGlobalError(e instanceof Error ? e.message : 'Setup failed');
+      if (isSettingsConflict(e)) {
+        setNetworkConflict(true);
+        setGlobalError('Network settings changed elsewhere. Your edits are preserved. Reload to discard them and review the latest settings.');
+      } else {
+        setGlobalError(getErrorMessage(e, 'Setup failed'));
+      }
     } finally { setSubmitting(false); }
   };
 
@@ -861,6 +859,19 @@ export function SetupWizard({ onComplete }: SetupWizardProps) {
           ) : 'Not configured'}</div>
         </div>
         {globalError && <div className="text-sm text-pf-error" role="alert">{globalError}</div>}
+        {networkConflict && (
+          <Button variant="secondary" disabled={submitting} onClick={async () => {
+            setSubmitting(true);
+            try {
+              await reloadNetworkSettings();
+              setStep(1);
+            } catch (error) {
+              setGlobalError(getErrorMessage(error, 'Could not reload network settings. Your edits are preserved.'));
+            } finally {
+              setSubmitting(false);
+            }
+          }}>Reload network settings</Button>
+        )}
         <div className="flex justify-between">
           <Button
             type="button"

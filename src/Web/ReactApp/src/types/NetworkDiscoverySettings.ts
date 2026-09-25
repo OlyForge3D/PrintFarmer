@@ -1,5 +1,6 @@
 // Network discovery settings type matching backend NetworkDiscoverySettings
 export interface NetworkDiscoverySettings {
+  rowVersion?: string;
   enableDiscovery: boolean;
   discoverySubnets: string[];
   ports: number[];
