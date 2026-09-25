@@ -43,7 +43,7 @@ internal sealed class CliHostFixture : IDisposable
         File.WriteAllText(ComposeFile, "services: {}\n");
         File.WriteAllText(DockerPath, string.Empty);
         File.WriteAllText(Sqlite3Path, string.Empty);
-        File.WriteAllText(DatabasePath, string.Empty);
+        File.WriteAllBytes(DatabasePath, CliHostDatabase.TemplateBytes);
         foreach (string name in OwnedDirectoryNames)
         {
             Directory.CreateDirectory(Path.Combine(Root, "owned", name));
