@@ -19,6 +19,7 @@ import QueueDateRangeBar, { defaultDateRange } from "../components/QueueDateRang
 import type { DateRange } from "../components/QueueDateRangeBar";
 import { SpoolValidationModal } from "../components/SpoolValidationModal";
 import { AutoDispatchGlobalToggle } from "../components/AutoDispatchGlobalToggle";
+import { DispatchRecoveryQueueSection } from "@/features/dispatch-recovery/components/DispatchRecoveryQueueSection";
 import { validateSpoolForDispatch } from "../utils/spoolValidation";
 import type { SpoolValidationContext } from "../utils/spoolValidation";
 import {
@@ -716,6 +717,7 @@ export function PrintQueueDashboardPage() {
 
               {/* Queue Jobs */}
               <div data-tour="queue-jobs-table" className="flex-1 overflow-auto bg-pf-bg-1 p-4 min-h-0">
+                <DispatchRecoveryQueueSection jobs={jobs} />
                 {queueViewMode === "table" ? (
                   <QueueJobsTable
                     jobs={jobs}

@@ -34,6 +34,7 @@ import { FilamentControlSection } from '@/features/printers/components/FilamentC
 import type { ZOffsetCalibrationWizardProps } from '@/features/printers/components/ZOffsetCalibrationWizard';
 import { PrinterActionBar } from '@/features/printers/components/PrinterActionBar';
 import { BedClearBanner } from '@/features/printers/components/BedClearBanner';
+import { DispatchReconciliationBanner } from '@/features/dispatch-recovery/components/DispatchReconciliationBanner';
 import { PrintProgressBar } from '@/features/printers/components/PrintProgressBar';
 import { EstimatedCompletionBadge } from '@/features/printers/components/EstimatedCompletionBadge';
 import { useAutoDispatchStatus, useSetAutoDispatchEnabled } from '@/features/printers/hooks/useAutoDispatch';
@@ -811,6 +812,13 @@ export const DetailedPrinterCard = React.memo(function DetailedPrinterCard({ pri
           />
         )}
       </div>
+
+      {/* Indeterminate dispatch claim warning (issue #2993) */}
+      <DispatchReconciliationBanner
+        printerId={printer.id}
+        printerName={printer.name ?? 'Printer'}
+        className="mb-3"
+      />
 
       {/* Bed clear confirmation banner */}
       {autoDispatchStatus && isPendingReady && (

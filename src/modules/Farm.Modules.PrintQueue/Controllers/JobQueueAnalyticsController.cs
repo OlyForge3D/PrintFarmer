@@ -40,6 +40,12 @@ public class JobQueueAnalyticsController(
     private readonly ILogger<JobQueueAnalyticsController> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
 
     /// <summary>
+    /// Response header on <see cref="GetAllQueueAsync"/>: <c>true</c> when the unscoped page
+    /// filled <c>limit</c> (a later page may exist), <c>false</c> when it proves the end.
+    /// </summary>
+    public const string HasMoreHeader = "X-Has-More";
+
+    /// <summary>
     /// Get all queued and printing jobs with file metadata
     /// </summary>
     /// <param name="filterStatus">Filter by job status (Queued, Printing, Paused, etc.)</param>
@@ -86,6 +92,14 @@ public class JobQueueAnalyticsController(
 
             List<QueuedPrintJobWithFileMetaDto> jobs = await _printJobManagementService.GetAllQueuedJobsAsync(
                 filterStatus, filterModel, filterMaterial, deadlineStart, deadlineEnd, sortBy, limit, offset, queuedFrom, queuedTo, cancellationToken);
+
+            // Pagination is applied before authorization filtering, so a scoped caller can
+            // receive a short page while later pages still hold accessible jobs. Report
+            // whether the unscoped page was full so clients know whether to keep paging.
+            if (HttpContext is not null)
+            {
+                Response.Headers[HasMoreHeader] = jobs.Count >= limit ? "true" : "false";
+            }
 
             if (resourceAuthorization is null)
             {

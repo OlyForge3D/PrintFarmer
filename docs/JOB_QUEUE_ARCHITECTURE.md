@@ -419,6 +419,46 @@ resolves the open points of the contract above as follows:
 - **Authorization scope.** Reads require printer `View` scope; recover requires
   printer `Manage` scope and clear requires job `Manage` scope. Out-of-scope
   resources return `404`.
+- **Queue read model.** `QueuedPrintJobDto` (used by `/api/job-queue` and
+  `/api/job-queue-analytics`) carries the string-enum `blockedReasonCode`, so
+  queue surfaces can identify `OperatorRecoveryRequired` jobs without a
+  per-job reconciliation read. It is `null` (omitted) for unblocked jobs.
+
+#### Operator recovery UI (#2993)
+
+The React UI lives in `src/Web/ReactApp/src/features/dispatch-recovery/` and
+calls the four routes through `services/api/dispatchRecoveryApi.ts`.
+
+- **Warning.** `DispatchReconciliationBanner` renders on the printer card, and
+  on the queue dashboard for each printer with an `Unknown` dispatch result
+  that requires reconciliation. It shows the job, attempt, claim age,
+  escalation level, sender state, and last redacted evidence phase. It offers
+  no cancel or retry action. The resource polls every 30 seconds only while a
+  claim is indeterminate; queue SignalR events invalidate it otherwise.
+  Queue-dashboard candidates come from an unfiltered, fully paged queue read,
+  so filters and pagination cannot hide a warning. Because
+  `GET /api/job-queue-analytics` applies authorization after pagination, a
+  scoped caller can get a short page before the end; the endpoint returns
+  `X-Has-More` (`true` when the unscoped page filled `limit`) and the UI keeps
+  paging while it is `true`. A banner stays mounted
+  until the reconciliation read reports the claim closed, and a recorded
+  recovery notice (with its audit link) stays until the operator dismisses it.
+  Queue views hide Start Print and Cancel while a job's dispatch outcome is
+  `Unknown` and still requires reconciliation.
+- **Recovery.** The Recover action appears only when the server reports
+  `recoveryPermission`. The modal requires the physical-check confirmation, and
+  also sender isolation when `senderSettled` is not `true` or the server
+  returned `rejected_sender_isolation_required`. It sends the reviewed
+  reconciliation ETag as `If-Match` and a client-generated `Idempotency-Key`.
+  The same key is reused only to retry an identical body after a transport
+  failure. Any definitive response retires it. A `412` or a claim revision
+  change clears the confirmations and refetches the resource. Nothing is
+  updated optimistically; every settled mutation invalidates the
+  reconciliation and queue queries.
+- **Clear.** The queue dashboard lists `OperatorRecoveryRequired` jobs and
+  hides Start Print for them. Holders of `queue:reconcile` can confirm
+  **Allow dispatch**, which sends the job `rowVersion` as `If-Match`. The UI
+  fails closed when no auth context is mounted.
 
 The minimum validation matrix covers authorization denial, wrong-printer and
 stale-revision conflicts, duplicate/replayed assertions, concurrent

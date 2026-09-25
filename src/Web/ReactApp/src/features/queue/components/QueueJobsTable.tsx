@@ -16,6 +16,7 @@ import clsx from "clsx";
 import { useFleetFilamentCoverage } from "@/features/filament-coverage/hooks";
 import { FilamentCoverageBadge } from "@/features/filament-coverage/components/FilamentCoverageBadge";
 import type { PrinterFilamentCoverage } from "@/features/filament-coverage/types";
+import { dispatchOutcomeLabel, isDispatchIndeterminate, isRecoveryBlocked } from "@/features/dispatch-recovery/utils";
 
 /**
  * Job counts at or under this threshold render every row directly. Above it,
@@ -293,6 +294,21 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
               >
                 {status}
               </span>
+              {isRecoveryBlocked(job) ? (
+                <span
+                  className="inline-block px-2 py-0.5 rounded-xs text-[10px] font-semibold whitespace-nowrap bg-pf-warning/20 text-pf-warning-text"
+                  title="Held after an operator recovered an unknown dispatch; an operator must allow dispatch."
+                >
+                  Recovery hold
+                </span>
+              ) : isDispatchIndeterminate(job) ? (
+                <span
+                  className="inline-block px-2 py-0.5 rounded-xs text-[10px] font-semibold whitespace-nowrap bg-pf-warning/20 text-pf-warning-text"
+                  title="The dispatch outcome is unknown; the print may have started. Check the printer."
+                >
+                  {dispatchOutcomeLabel("Unknown")}
+                </span>
+              ) : null}
               {showLiveProgress && (
                 <div className="w-full" title={`${liveProgressRounded}% complete`}>
                   <ProgressBar
@@ -404,7 +420,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
           {/* Actions */}
           <td className="px-2 py-1 align-middle" onClick={(e) => e.stopPropagation()}>
             <div className="flex gap-1.5 flex-wrap">
-              {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && (
+              {(status === "Queued" || status === "Assigned") && jobWrapper.assignedPrinter && !isRecoveryBlocked(job) && !isDispatchIndeterminate(job) && (
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();
@@ -479,7 +495,7 @@ const QueueJobRowGroup = forwardRef<HTMLTableSectionElement, QueueJobRowGroupPro
                   Abort
                 </Button>
               )}
-              {status !== "Completed" && status !== "Cancelled" && (
+              {status !== "Completed" && status !== "Cancelled" && !isDispatchIndeterminate(job) && (
                 <Button
                   onClick={(e) => {
                     e.stopPropagation();

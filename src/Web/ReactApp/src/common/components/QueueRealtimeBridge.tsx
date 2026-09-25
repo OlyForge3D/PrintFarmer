@@ -201,6 +201,9 @@ export function QueueRealtimeBridge() {
         queryClient.invalidateQueries({ queryKey: queryKeys.printers }),
         queryClient.invalidateQueries({ queryKey: queryKeys.scheduledJobs }),
         queryClient.invalidateQueries({ queryKey: ['auto-dispatch'] }),
+        // Dispatch recovery (#2993): indeterminate claims, recoveries, and
+        // recovery-block clears all arrive as queue events.
+        queryClient.invalidateQueries({ queryKey: ['dispatch-reconciliation'] }),
       ]);
     };
 
@@ -261,6 +264,9 @@ export function QueueRealtimeBridge() {
       if (event.printerId) {
         void queryClient.invalidateQueries({
           queryKey: queryKeys.printer(event.printerId),
+        });
+        void queryClient.invalidateQueries({
+          queryKey: ['dispatch-reconciliation', event.printerId],
         });
       }
       if (event.jobId) {

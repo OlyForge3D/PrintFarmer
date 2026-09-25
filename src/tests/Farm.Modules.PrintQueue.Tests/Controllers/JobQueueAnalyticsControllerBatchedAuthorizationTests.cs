@@ -148,6 +148,47 @@ public class JobQueueAnalyticsControllerBatchedAuthorizationTests
             Times.Never);
     }
 
+    [Fact]
+    public async Task GetAllQueueAsync_NonAdmin_ReportsHasMoreFromUnscopedPageNotFilteredCountAsync()
+    {
+        // The raw page is full (limit 2) but authorization hides one job: the response is short,
+        // yet X-Has-More must still say "true" so clients keep paging (#2993 / R3044-H01).
+        Guid visibleJobId = Guid.NewGuid();
+        Guid hiddenJobId = Guid.NewGuid();
+        _printJobManagementServiceMock
+            .Setup(s => s.GetAllQueuedJobsAsync(
+                null, null, null, null, null, "priority", 2, 0, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([MakeJob(visibleJobId), MakeJob(hiddenJobId)]);
+        _printJobManagementServiceMock
+            .Setup(s => s.GetAllQueuedJobsAsync(
+                null, null, null, null, null, "priority", 2, 2, null, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync([MakeJob(hiddenJobId)]);
+
+        Guid userId = Guid.NewGuid();
+        var resourceAuthorization = new Mock<IQueueResourceAuthorizationService>();
+        resourceAuthorization
+            .Setup(r => r.FilterActorAccessibleJobIdsAsync(
+                userId.ToString(),
+                It.IsAny<IReadOnlyCollection<Guid>>(),
+                PrinterGroupAccessLevel.View,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new HashSet<Guid> { visibleJobId });
+
+        JobQueueAnalyticsController fullPage = CreateController(resourceAuthorization.Object, CreatePrincipal(userId));
+        IActionResult first = await fullPage.GetAllQueueAsync(
+            null, null, null, null, null, null, null, "priority", 2, 0, CancellationToken.None);
+        Assert.Single(Assert.IsAssignableFrom<IEnumerable<QueuedPrintJobWithFileMetaDto>>(
+            Assert.IsType<OkObjectResult>(first).Value));
+        Assert.Equal("true", fullPage.Response.Headers[JobQueueAnalyticsController.HasMoreHeader].ToString());
+
+        JobQueueAnalyticsController lastPage = CreateController(resourceAuthorization.Object, CreatePrincipal(userId));
+        IActionResult second = await lastPage.GetAllQueueAsync(
+            null, null, null, null, null, null, null, "priority", 2, 2, CancellationToken.None);
+        Assert.Empty(Assert.IsAssignableFrom<IEnumerable<QueuedPrintJobWithFileMetaDto>>(
+            Assert.IsType<OkObjectResult>(second).Value));
+        Assert.Equal("false", lastPage.Response.Headers[JobQueueAnalyticsController.HasMoreHeader].ToString());
+    }
+
     /// <summary>
     /// Correctness gate for the refactor: for three principals (farm admin, a partial-access
     /// operator, and a no-access user) the authorized job set produced by the new batched
