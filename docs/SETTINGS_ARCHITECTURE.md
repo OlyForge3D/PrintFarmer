@@ -182,10 +182,19 @@ The explicit conflict reload discards all drafts on the settings page, including
 other groups, only after the reload succeeds. Failed reloads preserve edits.
 
 Discovery heartbeats persist under the separate `NetworkDiscovery.Heartbeat`
-telemetry key in the existing settings table. Reads still expose `lastHeartbeat`
-on NetworkDiscovery (with the legacy stored timestamp as a fallback until the
-first new heartbeat), but heartbeats never change its editable revision. A
-settings save cannot erase the separately stored liveness timestamp.
+telemetry key in the existing settings table. Heartbeats never change the
+NetworkDiscovery editable revision, and a settings save cannot erase the
+separately stored liveness timestamp.
+
+Once the telemetry row exists it is the only source of `lastHeartbeat`; any
+timestamp embedded in the editable section is ignored. Liveness is never client
+input: a checked save (`POST /api/settings/NetworkDiscovery`) discards any
+submitted `lastHeartbeat`, returns the value from the telemetry row (or `null`
+when the row is absent), and does not write `lastHeartbeat` into the section.
+Rows written before #2973 may still embed a legacy timestamp. Reads use it only
+as a fallback while no telemetry row exists. The first checked save deletes
+the legacy mirror, so until the next heartbeat creates the telemetry row, the
+section reports no heartbeat.
 
 If the telemetry row holds an unreadable timestamp (invalid JSON or value) or one
 more than five minutes in the future, settings load and checked save log a

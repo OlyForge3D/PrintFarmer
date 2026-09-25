@@ -89,18 +89,25 @@ public class SettingsService : ISettingsService
             db.Entry(entity).Property(e => e.Revision).OriginalValue = expectedRevision;
         }
 
-        if (settings is NetworkDiscoverySettings discovery)
+        string? heartbeatJson = null;
+        NetworkDiscoverySettings? discovery = settings as NetworkDiscoverySettings;
+        if (discovery is not null)
         {
-            string? heartbeatJson = await db.AppSettingsEntities.AsNoTracking()
+            // Liveness is server telemetry, never client input: a checked save must not write a
+            // client-supplied timestamp, and it retires the legacy in-section mirror.
+            discovery.LastHeartbeat = null;
+            discovery.HeartbeatTelemetryUnreadable = false;
+            heartbeatJson = await db.AppSettingsEntities.AsNoTracking()
                 .Where(e => e.Key == NetworkDiscoverySettings.HeartbeatStorageKey)
                 .Select(e => e.SettingsJson).FirstOrDefaultAsync(ct);
-            if (heartbeatJson is not null)
-            {
-                ApplyHeartbeatTelemetry(discovery, heartbeatJson);
-            }
         }
 
         entity.SettingsJson = JsonSerializer.Serialize(settings, type);
+        if (discovery is not null && heartbeatJson is not null)
+        {
+            ApplyHeartbeatTelemetry(discovery, heartbeatJson);
+        }
+
         entity.UpdatedAt = DateTime.UtcNow;
 
         // Even an identical payload must check and advance the revision.
