@@ -1686,6 +1686,10 @@ final class FarmSnapshotContainerAuthorityTests: XCTestCase {
         // The superseded teardown must stop at the epoch fence: no re-invalidation
         // retry, and never a no-active-server rebuild (`serverID == nil`).
         XCTAssertFalse(apiClientServerIDs.serverIDs.contains(where: { $0 == nil }), "a superseded no-active teardown must never rebuild the no-server composition")
+        // initial + switchToReal + the worker's A reconciliation. A teardown that
+        // retried past the epoch fence would disconnect the newer A signalR and
+        // replace it (`replaceSignalRAfterSupersededSwitch`), creating a fourth.
+        XCTAssertEqual(recorder.createdBaseURLs.count, 3, "a superseded no-active teardown must not tear down the newer composition")
         XCTAssertEqual(apiClientServerIDs.serverIDs.last, serverID, "the newer server composition is current")
         XCTAssertNotNil(container.apiClient)
         XCTAssertEqual(container.printerControlsComposition?.identity.serverID, serverID, "the newer server composition settles")
